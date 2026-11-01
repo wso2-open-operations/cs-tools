@@ -863,6 +863,28 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		return fmt.Errorf("dispatch: decode case.created payload: %w", err)
 	}
 
+	// Registered before anything is claimed: a concurrent call for the same
+	// record (a rebalance redelivery) must count this one as in flight, or it
+	// could release the keys -- the SRE room card's among them -- while this
+	// call is still sending.
+	baseKey := recordBaseKey(record)
+	chatKey := baseKey + "/chat"
+	sreRoomKey := baseKey + "/sre-room"
+	endRecord := d.beginRecord(baseKey)
+
+	// The S0 SRE room card runs beside everything below and is waited for only
+	// at the end (startCaseSRERoomCard), so it reaches the room about as fast as
+	// an incident's card, ahead of the SRE ladder's first rung, and the SLA
+	// clocks, emails and Incident Monitor card are neither delayed nor changed.
+	sreDone := closedDone
+	if isCustomerCase(p.CaseType) {
+		if rooms := d.caseSRERooms(ctx, events.TypeCaseCreated, p.CaseID, p.Priority, p.SRETeamName); len(rooms) > 0 && d.claim(sreRoomKey) {
+			card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.Priority, p.CaseTitle, p.Product, p.ProjectName, d.links.CSMLink(p.CaseID))
+			card.ThreadKey = notifications.CaseS0ThreadKey(p.CaseID, record.Value)
+			sreDone = d.startCaseSRERoomCard(ctx, events.TypeCaseCreated, p.CaseID, rooms, card)
+		}
+	}
+
 	// Independent of, and does not block, every reaction below — see
 	// slaEngineService's own doc comment. CreatedAt is RFC3339 on every
 	// real publisher (see events.CaseCreatedPayload.CreatedAt); a value
@@ -876,10 +898,6 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.Product, p.Team)
 		}
 	}
-
-	baseKey := recordBaseKey(record)
-	chatKey := baseKey + "/chat"
-	endRecord := d.beginRecord(baseKey)
 
 	var errs []error
 
@@ -1005,9 +1023,13 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// refcount — so it's called unconditionally here rather than only
 	// inside the else-if, even though its result is ignored on the
 	// NoMoreRetries branch.
+	// The SRE room card's own key is released below with the rest, so it must
+	// be done first: a retry then never races the card it is about to re-claim.
+	<-sreDone
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
 		d.forget(chatKey)
+		d.forget(sreRoomKey)
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
 	}
 
@@ -1462,9 +1484,19 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 		return fmt.Errorf("dispatch: decode case.severity_changed payload: %w", err)
 	}
 
+	// Registered before anything is claimed (see handleCaseCreated).
 	baseKey := recordBaseKey(record)
 	chatKey := baseKey + "/chat"
+	sreRoomKey := baseKey + "/sre-room"
 	endRecord := d.beginRecord(baseKey)
+
+	// The S0 SRE room card runs beside everything below (see handleCaseCreated).
+	sreDone := closedDone
+	if rooms := d.caseSRERooms(ctx, events.TypeSeverityChanged, p.CaseID, p.NewSeverity, p.SRETeamName); len(rooms) > 0 && d.claim(sreRoomKey) {
+		card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.NewSeverity, p.CaseTitle, p.Product, "", d.links.CSMLink(p.CaseID))
+		card.ThreadKey = notifications.CaseS0ThreadKey(p.CaseID, record.Value)
+		sreDone = d.startCaseSRERoomCard(ctx, events.TypeSeverityChanged, p.CaseID, rooms, card)
+	}
 
 	var errs []error
 
@@ -1523,9 +1555,11 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// Same release reasoning as handleCaseCreated's own matching comment —
 	// see its doc comment for the full explanation of endRecord/
 	// record.NoMoreRetries.
+	<-sreDone
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
 		d.forget(chatKey)
+		d.forget(sreRoomKey)
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
 	}
 
@@ -2096,7 +2130,7 @@ func (d *Dispatcher) sendToEachIncidentSpace(ctx context.Context, t events.Type,
 		errs = append(errs, err)
 		if len(audiences) > 1 {
 			slog.WarnContext(ctx, "dispatch: an incident Chat space did not take the card",
-				"type", string(t), "incidentId", incidentID, "audience", audience, "err", err)
+				"type", string(t), "incidentId", incidentID, "audience", audience, "errSummary", chatErrSummary(err))
 		}
 	}
 	if len(errs) < len(audiences) {

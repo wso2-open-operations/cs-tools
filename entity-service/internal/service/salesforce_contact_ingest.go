@@ -203,9 +203,6 @@ func (s *salesforceEventService) adminRoleBasis(ctx context.Context, contactSfID
 	}
 	isIntegration := contact.IsCsIntegrationUser != nil && *contact.IsCsIntegrationUser
 	roles := mapGlobalRoles(contact.Account, isIntegration)
-	if roles.AdminRole == "" {
-		return repository.AdminRoleBasis{}, false
-	}
 	return repository.AdminRoleBasis{
 		AdminRole: roles.AdminRole,
 		Managed:   roles.ManagedAdmin,

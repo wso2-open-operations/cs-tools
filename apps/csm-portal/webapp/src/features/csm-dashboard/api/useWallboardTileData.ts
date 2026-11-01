@@ -113,7 +113,11 @@ export function useWallboardTileData({
   // The widget's own id and name, so a tile whose filters its list page cannot
   // hold can still link to the preview page that applies all of them.
   const href = config
-    ? config.buildHref(resolvedFilters, { widgetId, displayName: resolvedDisplayName })
+    ? config.buildHref(resolvedFilters, {
+        widgetId,
+        displayName: resolvedDisplayName,
+        distinctByField: distinctBy?.field,
+      })
     : undefined;
 
   const state: WallboardTileState =

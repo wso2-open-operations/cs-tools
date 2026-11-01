@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -539,6 +540,117 @@ func TestTimeCardService_UpdateTimeCard_RejectsSelfApprover(t *testing.T) {
 	}
 	if got := err.Error(); got != "you cannot be your own time card approver" {
 		t.Errorf("error = %q, want the self-approval message", got)
+	}
+}
+
+// TestTimeCardService_CreateTimeCard_PerCardLimit: the limit is 480 minutes
+// per card (sum of the five duration fields). 481 is rejected before the
+// repository is called, 480 is accepted, and a second card on the same
+// case/day is judged on its own, not against a cumulative total.
+func TestTimeCardService_CreateTimeCard_PerCardLimit(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+
+	t.Run("481 minutes in one field is rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing = 481
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("481 minutes summed across fields is rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing, req.TimeSettingUp, req.TimeReproducingDebugging, req.TimeProvidingSolution, req.TimePatching = 100, 100, 100, 100, 81
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("values whose sum would overflow are rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing, req.TimeSettingUp = math.MaxInt64, 1
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("480 then 30 on the same case and day are both accepted", func(t *testing.T) {
+		calls := 0
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				calls++
+				return domain.TimeCardView{ID: testUUID}, nil
+			},
+		}
+		svc := NewTimeCardService(repo, userRepo)
+		for _, minutes := range []int{480, 30} {
+			req := validCreateTimeCardRequest()
+			req.TimeAnalyzing = minutes
+			if _, err := svc.CreateTimeCard(ctx, req); err != nil {
+				t.Fatalf("CreateTimeCard(%d) error = %v, want success", minutes, err)
+			}
+		}
+		if calls != 2 {
+			t.Errorf("repository.CreateTimeCard calls = %d, want 2", calls)
+		}
+	})
+}
+
+// TestTimeCardService_UpdateTimeCard_PerCardLimit: an edit supplying
+// over-limit minutes is rejected before the repository is called; the
+// merged-total check against stored values is the repository's own (see its
+// integration tests).
+func TestTimeCardService_UpdateTimeCard_PerCardLimit(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+	over, ok := 481, 480
+
+	repo := &stubTimeCardRepo{
+		updateTimeCardFields: func(_ context.Context, req domain.UpdateTimeCardRequest, _ string) (domain.TimeCardView, error) {
+			if req.TimeAnalyzing != nil && *req.TimeAnalyzing > domain.MaxTimeCardMinutes {
+				t.Fatal("repository.UpdateTimeCardFields must not be called for an over-limit card")
+			}
+			return domain.TimeCardView{ID: testUUID}, nil
+		},
+	}
+	svc := NewTimeCardService(repo, userRepo)
+
+	_, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, TimeAnalyzing: &over})
+	if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+		t.Fatalf("UpdateTimeCard(481) error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+	}
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, TimeAnalyzing: &ok}); err != nil {
+		t.Fatalf("UpdateTimeCard(480) error = %v, want success", err)
 	}
 }
 

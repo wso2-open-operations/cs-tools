@@ -37,8 +37,10 @@ const (
 // records the last write.
 type fakeRotaAccessRepo struct {
 	internal     bool
+	portalAdmin  bool              // the caller holds the global admin role
 	teamFamily   map[string]string // rostered team -> family
 	listedFamily []string
+	listedTeams  []string
 	listed       bool
 	wrote        string // "grant-admin:sre_rota_admin", "revoke-marker:lyra", ...
 	actor        string
@@ -57,10 +59,14 @@ func (f *fakeRotaAccessRepo) ListRotaAdmins(context.Context) ([]domain.RotaAdmin
 	return []domain.RotaAdminGrant{{Family: "SRE", UserID: someoneID}}, nil
 }
 
-func (f *fakeRotaAccessRepo) ListRotaMarkers(_ context.Context, families []string) ([]domain.RotaMarkerGrant, error) {
+func (f *fakeRotaAccessRepo) ListRotaMarkers(_ context.Context, families, teams []string) ([]domain.RotaMarkerGrant, error) {
 	f.listed = true
-	f.listedFamily = families
+	f.listedFamily, f.listedTeams = families, teams
 	return []domain.RotaMarkerGrant{}, nil
+}
+
+func (f *fakeRotaAccessRepo) IsPortalAdmin(context.Context, string) (bool, error) {
+	return f.portalAdmin, nil
 }
 
 func (f *fakeRotaAccessRepo) GrantRotaAdmin(_ context.Context, _, role, actor string) (bool, error) {
@@ -132,7 +138,15 @@ func (f *fakeRotaAccessRepo) RosteredTeamFamily(_ context.Context, team string) 
 type rotaAdminOf struct {
 	fakeScheduleRepo
 	families []string
+	led      []string // teams the caller leads
 	member   bool
+}
+
+func (r *rotaAdminOf) LeadTeamsFor(context.Context, string) ([]string, error) {
+	if r.led == nil {
+		return []string{}, nil
+	}
+	return r.led, nil
 }
 
 func (r *rotaAdminOf) RotaAdminFamilies(context.Context, string) ([]string, error) {

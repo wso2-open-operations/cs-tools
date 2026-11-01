@@ -19,10 +19,12 @@ import {
   CSM_NAV_ITEMS,
   flattenNavNodes,
   navNodeById,
+  navNodeHref,
   navNodeMatchForPath,
   navNodePath,
   navNodeRoutes,
   navSectionForPath,
+  navViewForSearch,
 } from "@config/csmNavItems";
 
 describe("nav tree invariants", () => {
@@ -52,8 +54,9 @@ describe("top-level nav order", () => {
     expect(ids.indexOf(lower)).toBe(ids.indexOf(upper) + 1);
   };
 
-  it("puts Announcements directly below Engagements", () => {
-    below("engagements", "announcements");
+  it("puts Allocations directly below Engagements, and Announcements directly below Allocations", () => {
+    below("engagements", "allocations");
+    below("allocations", "announcements");
   });
 
   it("puts Customers directly below Security Center, and Knowledge directly below Customers", () => {
@@ -65,12 +68,17 @@ describe("top-level nav order", () => {
     below("time-cards", "team-schedule");
   });
 
+  it("puts Skills directly below Team Schedule", () => {
+    below("team-schedule", "skills");
+  });
+
   it("keeps the remaining sections in their existing relative order", () => {
     expect(ids).toEqual([
       "dashboard",
       "support",
       "operations",
       "engagements",
+      "allocations",
       "announcements",
       "security-center",
       "customers",
@@ -79,9 +87,9 @@ describe("top-level nav order", () => {
       "updates",
       "time-cards",
       "team-schedule",
+      "skills",
       "customer-health",
       "usage-metrics",
-      "user-scan",
       "admin",
       "help",
     ]);
@@ -136,6 +144,35 @@ describe("navNodeMatchForPath", () => {
     });
   });
 
+  it("puts standard changes under Change requests, not in a tab of their own", () => {
+    // Standard changes are templated change requests: their catalogue and
+    // proposals are sub-views of the Change requests tab, and the template and
+    // proposal pages highlight it.
+    expect(navNodeById("operations.standard-changes")).toBeUndefined();
+    expect(
+      navNodeById("operations")!.children!.map((child) => child.label),
+    ).not.toContain("Standard changes");
+    const changeRequests = navNodeById("operations.change-requests")!;
+    expect(navNodeRoutes(changeRequests)).toEqual([
+      "/operations/change-requests",
+      "/operations/standard-changes",
+      "/operations/standard-change-proposals",
+    ]);
+    // Its own destination is still the change request list.
+    expect(navNodeHref(changeRequests)).toBe("/operations/change-requests");
+    expect(navNodeMatchForPath("/operations/standard-changes/tpl-1")).toMatchObject({
+      node: { id: "operations.change-requests" },
+      prefix: "/operations/standard-changes",
+    });
+    expect(navNodeMatchForPath("/operations/standard-change-proposals/scp-1")).toMatchObject({
+      node: { id: "operations.change-requests" },
+      prefix: "/operations/standard-change-proposals",
+    });
+    expect(navNodeMatchForPath("/operations/change-requests/chg-1")?.node.id).toBe(
+      "operations.change-requests",
+    );
+  });
+
   it("does not match a path that merely shares a prefix string", () => {
     expect(navNodeMatchForPath("/operations-archive")).toBeUndefined();
   });
@@ -149,6 +186,61 @@ describe("navNodeMatchForPath", () => {
       node: { id: "plg.dashboard" },
       prefix: "/plg/dashboard",
     });
+  });
+});
+
+describe("navViewForSearch", () => {
+  const changeRequests = navNodeById("operations.change-requests")!;
+
+  it("names Standard changes inside Change requests, and its proposals inside it", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard")).toEqual({
+      params: [["view", "standard"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
+    });
+    expect(navViewForSearch(changeRequests, "?view=standard&show=proposals&scope=awaiting")).toEqual({
+      params: [
+        ["view", "standard"],
+        ["show", "proposals"],
+      ],
+      label: "Standard change proposals",
+      ignoreParamPrefix: "cr",
+    });
+  });
+
+  it("is not changed by the list's own cr* filters kept in the URL", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard&crQ=gateway&crStates=new")).toEqual(
+      navViewForSearch(changeRequests, "?view=standard"),
+    );
+  });
+
+  it("still names the two old sub-view values, which land in the same places", () => {
+    expect(navViewForSearch(changeRequests, "?view=catalogue")?.label).toBe("Standard changes");
+    expect(navViewForSearch(changeRequests, "?crQ=x&view=proposals")?.label).toBe(
+      "Standard change proposals",
+    );
+  });
+
+  it("is the outer place when the inner parameter is absent, unknown, or under another value", () => {
+    expect(navViewForSearch(changeRequests, "?view=standard&show=nonsense")).toEqual({
+      params: [["view", "standard"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
+    });
+    // `show` narrows only Standard changes, not the old catalogue value.
+    expect(navViewForSearch(changeRequests, "?view=catalogue&show=proposals")).toEqual({
+      params: [["view", "catalogue"]],
+      label: "Standard changes",
+      ignoreParamPrefix: "cr",
+    });
+  });
+
+  it("is undefined without the parameter, for a value it does not name, and on a node with no views", () => {
+    expect(navViewForSearch(changeRequests, "")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?show=proposals")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?view=nonsense")).toBeUndefined();
+    expect(navViewForSearch(changeRequests, "?view=toString")).toBeUndefined();
+    expect(navViewForSearch(navNodeById("operations.incidents")!, "?view=standard")).toBeUndefined();
   });
 });
 

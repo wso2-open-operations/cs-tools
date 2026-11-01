@@ -14,7 +14,7 @@ info:
     | `view_operations` | the same reads under `/incidents`, `/change-requests`, `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` | cs-engineer, admin |
     | `time_cards_and_updates` | every `/time-cards` route and `GET /updates/product-update-levels`, `POST /updates/levels/search` | cs-engineer, time-card-approver, admin |
     | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state` (approve/reject) | time-card-approver, admin |
-    | `escalate` | `POST /cases/{id}/escalations` | cs_engineer, escalator, admin (de-escalating also requires being one of the case's ABT team leads) |
+    | `escalate` | `POST /cases/{id}/escalations` with `action=ESCALATE` (the route itself needs only `view`) | cs_engineer, escalator, admin. De-escalating does not use this permission: it requires being one of the case's ABT team leads, with no other role beyond `view`, and holding `escalate` does not substitute |
     | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` | attachment-downloader, cs-engineer, admin |
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
@@ -1046,6 +1046,11 @@ paths:
         Raises or lowers a case's escalation level by one step. A work note
         recording the change is added to the case automatically as a side
         effect. Supported by the ServiceNow data source only.
+
+        Authorization depends on the action. `ESCALATE` requires the
+        `escalate` permission. `DEESCALATE` requires the caller to be one of
+        the case's ABT team leads; no escalation role is needed, but holding
+        one does not substitute for being the lead.
       operationId: postCasesIdEscalations
       parameters:
         - name: id
@@ -1082,7 +1087,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "403":
-          description: Forbidden
+          description: Forbidden — escalating without the `escalate` permission, or de-escalating without being one of the case's team leads.
           content:
             application/json:
               schema:
@@ -1851,6 +1856,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /users/{id}/roles:
+    post:
+      summary: Grant one or more portal permission roles to an existing user.
+      description: >
+        Admin-only. The post-creation counterpart to POST /users' own grantRoles
+        field — grants a portal permission role (see GET /roles/grantable for the
+        exact set this deployment can grant) to a user who already exists via
+        SCIM, rather than only at the moment a new one is created. Every
+        requested role is attempted even if an earlier one fails to grant, so
+        one bad role never blocks the rest; the response reports exactly which
+        roles were granted and which were not.
+      operationId: grantUserRoles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantUserRolesPayload'
+      responses:
+        "200":
+          description: Every requested role was granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
+        "207":
+          description: Some, but not all, requested roles were granted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
+        "400":
+          description: Bad request (malformed id, empty roles, or an unknown role key).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden (admin only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: None of the requested roles could be granted (a SCIM failure).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUserRolesResponse'
         "500":
           description: Internal server error.
           content:
@@ -4619,6 +4699,74 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /deployments/{id}/air-gapped:
+    put:
+      summary: Mark a deployment air-gapped, or clear the mark.
+      description: |
+        An air-gapped deployment's products cannot reach WSO2: the licences issued for it
+        tell its products not to publish usage online, and its usage arrives as uploaded
+        reports instead. Requires write access (cs_engineer or admin). Only `airGapped` is
+        forwarded to the entity service; any other field is ignored. The entity service
+        stores this in Postgres only, so it returns 404 when it runs on ServiceNow.
+      operationId: putDeploymentAirGapped
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the deployment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentAirGappedPayload'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeploymentAirGappedResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: RequestEntityTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /deployments/search:
     post:
       summary: Search deployments.
@@ -5755,7 +5903,12 @@ paths:
             contact other than the requester): register a contact for the project first"
             (Request Approval, or a box turned on after it, on a project nobody can be asked
             on; likewise "customer review is ..." / "customer approval and customer review
-            are ...").
+            are ..."), and the deviation from the implementation plan's, each with its
+            `errorCode`: a change of `implementationDeviation` before implementation has
+            started (`change_request_deviation_not_yet`) or once the change request is
+            closed, canceled or rolled back (`change_request_deviation_final`), and Request
+            Approval while a deviation carried over by a clone is not yet folded into the
+            implementation plan and cleared (`change_request_deviation_not_incorporated`).
           content:
             application/json:
               schema:
@@ -5798,6 +5951,15 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: >-
+            Service unavailable: the entity service, or a gateway in front of it, answered 502,
+            503 or 504 (on the data source that talks to the previous system directly, for
+            example, that system is unavailable).
           content:
             application/json:
               schema:
@@ -5985,7 +6147,7 @@ paths:
 
   /change-requests:
     post:
-      summary: Create a change request (ServiceNow data source only).
+      summary: Create a change request.
       description: >-
         The body must carry `type`: one of `standard`, `normal` or `emergency`
         (400 with an explanatory message otherwise). The type decides the approval
@@ -5995,6 +6157,10 @@ paths:
         `customerApprovalRequired` / `customerReviewRequired` cannot be true on
         one: such a create is a 400 ("Emergency changes proceed without customer
         consent, so customer approval and customer review cannot be required").
+        A change request raised from a standard change template
+        (`standardChangeTemplateId`) needs `projectId`, a project of the template's
+        customer: otherwise the entity service's 400 is returned with its message and
+        errorCode `standard_change_template_other_customer`.
       operationId: createChangeRequest
       security:
         - bearerAuth: []
@@ -6004,11 +6170,102 @@ paths:
           application/json:
             schema:
               type: object
-              required: [type]
+              required: [subject, type]
               properties:
+                subject:
+                  type: string
+                  description: >-
+                    The change request's title. Read back as `subject`; PATCH changes it
+                    as `title`.
                 type:
                   type: string
                   enum: [standard, normal, emergency]
+                description:
+                  type: string
+                justification:
+                  type: string
+                priority:
+                  type: string
+                  enum: [critical, high, moderate, low]
+                  description: >-
+                    Any other value is a 400, planning included (a change request migrated
+                    from the previous system can read back planning, but it is not a value
+                    this API sets): on the PostgreSQL data sources `priority must be one of
+                    critical, high, moderate or low`, as on PATCH, before anything is
+                    written.
+                impact:
+                  type: string
+                  enum: [high, medium, low]
+                  description: >-
+                    Any other value is a 400 (on the PostgreSQL data sources `impact must be
+                    one of high, medium or low`), before anything is written.
+                risk:
+                  type: string
+                  enum: [high, moderate, low]
+                  description: >-
+                    Any other value is a 400 (on the PostgreSQL data sources `risk must be
+                    one of high, moderate or low`), before anything is written.
+                state:
+                  type: string
+                  enum: [new]
+                  description: >-
+                    Optional. A change request is always created in new. Any other value is
+                    a 400 when the change request is written to the previous system (on its
+                    own, or before PostgreSQL); when it is created in PostgreSQL only, the
+                    field is ignored.
+                groupId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The assignment group, as POST /groups/search lists it. When the change
+                    request is stored in PostgreSQL, a group the entity service does not
+                    hold is a 400 that says which field to change. Read back as
+                    `assignedTeam`; PATCH changes it as `assignedTeamId`.
+                assignedEngineerId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The person the change request is assigned to, as POST /users/search
+                    lists them. When the change request is written to the previous system
+                    and then to PostgreSQL, the person must have an account there (one whose
+                    id is not that system's is looked up by email); a person with none is a
+                    400 that names the field. The same holds for `requestedById`.
+                requestedById:
+                  type: string
+                  format: uuid
+                  description: The requester, as POST /users/search lists them (see `assignedEngineerId`).
+                serviceId:
+                  type: string
+                  format: uuid
+                  description: The service, as POST /services/search lists it.
+                serviceOfferingId:
+                  type: string
+                  format: uuid
+                  description: The service offering, as POST /service-offerings/search lists it.
+                configurationItemId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    Not stored by the PostgreSQL data source; forwarded only when the change
+                    request is written to the previous system.
+                plannedStartDate:
+                  type: string
+                  description: >-
+                    Planned start date and time, YYYY-MM-DD HH:MM:SS in UTC or RFC 3339 with
+                    a zone designator, in the years 2000 to 2100; anything else is a 400 that
+                    names the field. Read back as `plannedStartOn`.
+                plannedEndDate:
+                  type: string
+                  description: Planned end date and time, as plannedStartDate. Read back as `plannedEndOn`.
+                durationInput:
+                  type: integer
+                  minimum: 0
+                  description: >-
+                    Calendar duration in whole seconds. Not stored by the PostgreSQL data
+                    source, and ignored when the change request is created there only. When
+                    the change request is written to the previous system, plannedStartDate
+                    and plannedEndDate are required with it and it must equal the seconds
+                    between them, else a 400.
                 customerApprovalRequired:
                   type: boolean
                   description: >-
@@ -6031,6 +6288,11 @@ paths:
                     non-boolean value is a 400. As the Customer Approval box for
                     Request Approval. Cannot be true when `type` is `emergency`
                     (the same 400).
+                isPlanningVisibleToCustomers:
+                  type: boolean
+                  description: >-
+                    The "Implementation Plan visible to customers" checkbox, stored and
+                    returned as sent.
                 projectId:
                   type: string
                   format: uuid
@@ -6039,14 +6301,15 @@ paths:
                     with POST /projects/search.
                 deploymentIds:
                   type: array
+                  maxItems: 100
                   items:
                     type: string
                     format: uuid
                   description: >-
                     The project's deployments the change touches. Not an array
-                    of UUID strings is a 400. Each must belong to `projectId`
-                    (400 otherwise, with the entity service's message). Get the
-                    choices from POST /change-requests/link-options.
+                    of UUID strings, or more than 100 of them, is a 400. Each must
+                    belong to `projectId` (400 otherwise, with the entity service's
+                    message). Get the choices from POST /change-requests/link-options.
                 environmentIds:
                   type: array
                   deprecated: true
@@ -6059,12 +6322,14 @@ paths:
                     deployment's type is its environment role).
                 deploymentProductIds:
                   type: array
+                  maxItems: 100
                   items:
                     type: string
                     format: uuid
                   description: >-
                     READ-ONLY, derived from `deploymentIds`; optional, and when
-                    sent it must be exactly the derived set (400 otherwise).
+                    sent it must be exactly the derived set (400 otherwise). Not an
+                    array of UUID strings, or more than 100 of them, is a 400.
                 customerGroupId:
                   type: string
                   format: uuid
@@ -6079,6 +6344,41 @@ paths:
                 category:
                   type: string
                   enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing]
+                implementationPlan:
+                  type: string
+                implementationDeviation:
+                  type: string
+                  description: >-
+                    The deviation from the implementation plan (rich text), sent
+                    by a clone of a change request that has one. A blank value
+                    (no text once its markup is removed, such as an emptied
+                    editor's "<p><br></p>", "<p>&nbsp;</p>" or markup that is
+                    only images) is not stored. The new change request has to
+                    fold it into its implementation plan and clear it before
+                    Request Approval (PATCH: 400
+                    `change_request_deviation_not_incorporated` until it is
+                    cleared). Staff only, never shown to customers. Refused with
+                    a 400 by a data source that cannot store it (a non-blank
+                    one only); never mirrored to the previous system.
+                riskImpactAnalysis:
+                  type: string
+                  description: >-
+                    The risk and impact analysis. On the PostgreSQL data source it is read
+                    back as `impactDescription`, the name PATCH changes it by.
+                backoutPlan:
+                  type: string
+                  description: >-
+                    The rollback plan. On the PostgreSQL data source it is read back as
+                    `rollbackPlan`, the name PATCH changes it by.
+                testPlan:
+                  type: string
+                affectedServicesText:
+                  type: string
+                affectedComponentsText:
+                  type: string
+                rollbackDurationText:
+                  type: string
+                  description: Raw, unvalidated free text (e.g. "2 hours").
                 comment:
                   type: string
                   description: >-
@@ -6114,6 +6414,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: >-
+            The entity service's 404, passed through with a fixed message: on the PostgreSQL data
+            sources only when its row-level policy refuses the insert, which an internal caller
+            such as this backend does not meet; on the data source that talks to the previous
+            system directly, when that system does not know a record the request refers to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: >-
+            The entity service's 409, its reason echoed: on the data source that writes the
+            previous system first, that system refused the create as a conflict or answered with
+            an id or number a change request already has (nothing was written to PostgreSQL),
+            or, on the data source that talks to the previous system directly, that system's 409.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "413":
           description: Request entity too large.
           content:
@@ -6122,6 +6442,14 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: >-
+            Service unavailable: the entity service, or a gateway in front of it, answered 502,
+            503 or 504 (for example, the previous system it calls is unavailable).
           content:
             application/json:
               schema:
@@ -7570,7 +7898,7 @@ paths:
 
   /incidents/search:
     post:
-      summary: Search incidents (ServiceNow data source only).
+      summary: Search incidents.
       operationId: postIncidentsSearch
       requestBody:
         description: Incident search payload
@@ -7735,7 +8063,7 @@ paths:
 
   /incidents/{id}:
     get:
-      summary: Get an incident by ID (ServiceNow data source only).
+      summary: Get an incident by ID.
       operationId: getIncidentById
       parameters:
         - name: id
@@ -7783,7 +8111,26 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
     patch:
-      summary: Partially update an incident (ServiceNow data source only).
+      summary: Partially update an incident.
+      description: >-
+        The body is forwarded to the entity service unchanged. On the PostgreSQL
+        data source, moving an incident into RESOLVED also resolves, in the same
+        transaction, every open child incident (parentIncidentId pointing at it,
+        state not RESOLVED, CLOSED or CANCELLED, NEW and ON_HOLD included), and
+        their children in turn, as ServiceNow's "Update Child Incidents" rule
+        does: each child gets the parent's resolvedBy, keeps its own
+        resolutionCode and resolutionNotes (taking the parent's when it has
+        none), has resolvedWithParent set, and gets the note "Resolved based on
+        resolution of Parent Incident." as an additional comment. A
+        failure on any child rolls back the whole update, and a chain of child
+        incidents nested more than 10 levels below the incident being resolved
+        is rejected with 400 (resolve the ones further down first). CLOSED,
+        CANCELLED and re-opening a resolved incident do not cascade to children.
+        The response carries only the patched incident. Also on PostgreSQL only,
+        setting parentIncidentId to the incident itself, or to one of its own
+        descendants, is rejected with 400. On the ServiceNow data source none
+        of this runs here: ServiceNow's own rule resolves the children, and
+        resolvedWithParent is always false.
       operationId: patchIncidentById
       parameters:
         - name: id
@@ -10317,9 +10664,9 @@ paths:
   # /spl/accounts, /spl/projects, /spl/cases) are gone entirely --
   # consolidated onto the shared /accounts, /projects, and /cases
   # search/detail routes above. Always registered, and every route is served
-  # from entity-service; only Google Drive (/files) and the Scan User entity
-  # service (/scan-user) are separate, independently optional upstreams -- an
-  # endpoint needing one that isn't configured in a given deployment fails at
+  # from entity-service; only Google Drive (/files) is a separate,
+  # independently optional upstream -- an endpoint needing one that isn't
+  # configured in a given deployment fails at
   # call time instead of the route not existing (see cmd/server/main.go's
   # loadViewerConfig). Identifiers here are the ones the ported viewer
   # frontend already sends: entity-service ids, or a project key for the
@@ -12065,69 +12412,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /scan-user:
-    post:
-      summary: >-
-        Diagnostic tool cross-referencing the sales-side (Salesforce) and
-        CS-side (ServiceNow) entity services for a given email/subscription
-        key, surfacing why a user might not have portal access.
-      operationId: scanUser
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UserScanRequest'
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ScanResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: >-
-            InternalServerError — also returned (with a lookup-specific
-            message in the same {"message": "..."} shape as ErrorPayload)
-            when the sales-side or CS-side entity service lookup itself
-            fails, distinct from an ordinary internal error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /projects/{id}/metadata:
     get:
       summary: Get a project's reference/feature metadata.
@@ -12505,9 +12789,9 @@ paths:
       operationId: getTeamScheduleRotaAccess
       description: >
         The Rota access tab. The entity service's payload, forwarded unchanged: `canManage`
-        (`rotaAdmins` for a CSM admin, `markerFamilies` for the families whose rota managers the caller
-        may change, `memberFamilies` for the families whose teams' members they may add and remove),
-        `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
+        (`rotaAdmins` for a CSM or portal admin, `markerFamilies` for the families whose rota managers the
+        caller may change, `markerTeams` for the teams they lead, `memberFamilies` for the families whose
+        teams' members they may add and remove), `rotaAdmins[]` and `markers[]`. A caller who may change nothing gets empty
         lists, which is how the page decides not to show the tab.
       responses:
         "200":
@@ -12541,7 +12825,7 @@ paths:
       summary: Make somebody a family's rota admin.
       operationId: putTeamScheduleRotaAdmin
       description: >
-        CSM admin only (PermAdmin here, and checked again by the entity service). The person must be
+        CSM or portal admin only (PermWrite here; the entity service decides who is an admin). The person must be
         active internal staff. Audited by the entity service.
       parameters:
         - name: family
@@ -12593,7 +12877,7 @@ paths:
       summary: Take a family's rota admin role away.
       operationId: deleteTeamScheduleRotaAdmin
       description: >
-        CSM admin only (PermAdmin here, and checked again by the entity service).
+        CSM or portal admin only (PermWrite here; the entity service decides who is an admin).
       parameters:
         - name: family
           in: path
@@ -13252,6 +13536,760 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
 
 
+  /standard-change-templates/search:
+    post:
+      summary: Search the standard change catalogue (Operations > Change requests > Standard changes).
+      operationId: searchStandardChangeTemplates
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+        The body passes through as it is (entity-service's SearchStandardChangeTemplatesRequest):
+        `accountId` narrows the list to one customer's templates. Each template carries
+        `customer` {id, name}, the account it belongs to: a template is used only for that
+        customer's projects, and its name is unique among that customer's live templates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-templates/{id}:
+    get:
+      summary: A standard change template with its current version and version history.
+      operationId: getStandardChangeTemplate
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+        The template carries `customer` {id, name}.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-templates/{id}/versions/{versionId}:
+    get:
+      summary: One CAB-approved version of a template.
+      operationId: getStandardChangeTemplateVersion
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: versionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-templates/{id}/suspend:
+    post:
+      summary: Suspend a template (its owner or a CAB member; checked by the entity service).
+      operationId: suspendStandardChangeTemplate
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode. The body
+        is optional: an empty one suspends without a reason. A body that is not a JSON
+        object is a 400 and one over 1 MiB a 413, before the entity service is called.
+        The template then carries suspendedReason, suspendedOn and suspendedBy until it
+        is resumed or retired.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  maxLength: 1000
+                  description: Why the template is suspended. Optional; blank means none. Longer than 1000 characters is a 400 from the entity service.
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: The body is over 1 MiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-templates/{id}/resume:
+    post:
+      summary: Resume a suspended template (its owner or a CAB member).
+      operationId: resumeStandardChangeTemplate
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-templates/{id}/clear-review:
+    post:
+      summary: Clear the review flag a failed change raised (its owner or a CAB member).
+      operationId: clearStandardChangeTemplateReview
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals:
+    post:
+      summary: Propose a new standard change, or a revision or retirement of one.
+      operationId: createStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+        `accountId` is the customer a new proposal is for. One started from a closed change request
+        takes that change request's project's customer, one copied from a proposal takes that
+        proposal's, and a modification or retirement its template's (a different accountId is a 400).
+        A new proposal cannot be submitted without a customer, and its evidence must be closed
+        change requests of that customer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/search:
+    post:
+      summary: Search standard change proposals, newest first.
+      operationId: searchStandardChangeProposals
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+        The body passes through as it is: `accountId` narrows the list to the proposals for one
+        customer; each row carries `customer` {id, name} (null on a new draft that names none yet).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/{id}:
+    get:
+      summary: A proposal with its evidence, CAB approvers and what the caller may do.
+      operationId: getStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a draft proposal (its proposer).
+      operationId: updateStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+        `accountId` names or changes the customer of a new draft that did not start from a change
+        request; its evidence must then be that customer's (400 naming the others otherwise).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/{id}/submit:
+    post:
+      summary: Send a complete proposal to the CAB (its proposer).
+      operationId: submitStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/{id}/withdraw:
+    post:
+      summary: Withdraw a proposal (its proposer); it is kept as a record.
+      operationId: withdrawStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-proposals/{id}/decision:
+    post:
+      summary: Approve or reject a proposal in CAB review (a CAB member other than the proposer; a rejection needs a comment).
+      operationId: decideStandardChangeProposal
+      description: >
+        Forwarded to the entity service, which decides who may do it; its refusal
+        (400, 403, 404, 409) is returned with its own message and errorCode.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /runbooks:
     get:
       summary: The runbook catalog (Operations > Runbooks).
@@ -14550,7 +15588,7 @@ paths:
                   minItems: 1
                   maxItems: 500
                   items: { type: string, format: uuid }
-                from: { type: string, format: date, description: First day of the window, inclusive. }
+                from: { type: string, format: date, description: "First day of the window, inclusive." }
                 to: { type: string, format: date, description: "Last day of the window, inclusive; at most 70 days after `from`." }
       responses:
         "200":
@@ -14579,6 +15617,213 @@ paths:
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
                   count: { type: integer }
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/search:
+    post:
+      summary: Search customer engagement allocations.
+      operationId: searchEngagementAllocations
+      description: >
+        One page of customer engagement allocations with their engagement,
+        account and engineer, filtered, sorted (default newest `startDate`
+        first) and counted. Internal staff only. The body is validated by the
+        entity service and forwarded unchanged; the response is returned as
+        sent. `limit` defaults to 20, at most 50.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchEngagementAllocationsRequest'
+      responses:
+        "200":
+          description: One page of allocations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchEngagementAllocationsResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/{id}:
+    get:
+      summary: One customer engagement allocation.
+      operationId: getEngagementAllocation
+      description: Internal staff only.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationView'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /engagement-allocations/{id}/updates:
+    get:
+      summary: The status updates written against an allocation, newest first.
+      operationId: listEngagementAllocationUpdates
+      description: "Internal staff only. `limit` defaults to 20, at most 50."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: One page of updates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEngagementAllocationUpdatesResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Post a status update on an allocation.
+      operationId: createEngagementAllocationUpdate
+      description: >
+        Only the engineer the allocation is for may post; the entity service
+        decides that from the caller's identity and the portal does not check
+        it. A 403 or 400 carries the entity service's own reason in `message`.
+        `subject` is required, at most 512 characters; `content` is required,
+        at most 8000.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEngagementAllocationUpdateRequest'
+      responses:
+        "201":
+          description: The stored update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationUpdate'
         "400":
           description: Bad request.
           content:
@@ -16217,6 +17462,631 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /skills/levels:
+    get:
+      summary: The skill level scales and their levels.
+      operationId: getSkillLevels
+      description: >
+        Every level scale with its levels in value order. A skill is rated on one scale and a person may
+        only hold a level of that skill's scale. Forwarded from the entity service unchanged.
+      responses:
+        "200":
+          description: The scales.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillLevelTypesResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/categories:
+    get:
+      summary: The skill category tree, flat.
+      operationId: getSkillCategories
+      description: >
+        Every category with its parent, so a client can build the tree. Skills are filed under lowest-level categories.
+      responses:
+        "200":
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillCategoriesResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/search:
+    post:
+      summary: Search the skill catalogue.
+      operationId: searchSkills
+      description: >
+        The read-only catalogue (All Skills), paged and filtered by the entity service. Inactive skills are
+        left out unless `includeInactive` is true.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchSkillsRequest'
+      responses:
+        "200":
+          description: A page of skills.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchSkillsResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills:
+    post:
+      summary: Create a skill.
+      operationId: createSkill
+      description: >
+        Requires the write permission here; the entity service then allows only a portal admin and refuses
+        anyone else with 403. A skill needs a level scale and may be filed under categories.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSkillRequest'
+      responses:
+        "201":
+          description: The new skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/{id}:
+    get:
+      summary: Read one skill.
+      operationId: getSkill
+      description: >
+        One skill with its categories.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The skill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit or deactivate a skill.
+      operationId: updateSkill
+      description: >
+        Requires the write permission here; the entity service then allows only a portal admin. Fields left
+        out are unchanged. `categoryIds` replaces the category links as a whole. `active: false` deactivates.
+        Changing the level scale is refused with 409 while anybody holds a level of the skill.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSkillRequest'
+      responses:
+        "200":
+          description: The skill as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me:
+    get:
+      summary: The caller's own skills profile.
+      operationId: getMySkills
+      description: >
+        The active skills of the caller's own user, resolved by the entity service from the token and never
+        from the request.
+      responses:
+        "200":
+          description: The caller's skills.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MySkillsResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a skill to the caller's profile.
+      operationId: addMySkill
+      description: >
+        Adds the skill at the given level. The level must belong to the skill's scale (400). The skill must
+        be active and not already on the profile (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMySkillRequest'
+      responses:
+        "201":
+          description: The profile entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me/history:
+    get:
+      summary: The caller's skill level history.
+      operationId: getMySkillHistory
+      description: >
+        Level changes on the caller's own profile. `limit` and `offset` are validated by the
+        entity service.
+      parameters:
+        - name: skillId
+          in: query
+          required: false
+          description: Only this skill.
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: A page of history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillHistoryResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/me/{skillId}:
+    put:
+      summary: Change the level of a skill on the caller's profile.
+      operationId: setMySkillLevel
+      description: >
+        The level must belong to the skill's scale (400). A row inherited from a group cannot be changed (409).
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMySkillLevelRequest'
+      responses:
+        "200":
+          description: The profile entry as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSkill'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Remove a skill from the caller's profile.
+      operationId: removeMySkill
+      description: >
+        A row inherited from a group cannot be removed (409).
+      parameters:
+        - name: skillId
+          in: path
+          required: true
+          description: The skill id.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Removed.
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict with the current state. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /skills/users/search:
+    post:
+      summary: Everybody's skills (Skill Manager).
+      operationId: searchUserSkills
+      description: >
+        Requires the view permission here; the entity service allows only a skill manager and refuses anyone
+        else with 403. Paged and filtered by the entity service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchUserSkillsRequest'
+      responses:
+        "200":
+          description: A page of person-skill rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchUserSkillsResponse'
+        "400":
+          description: Bad request. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found. The entity service's reason is kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -16430,6 +18300,118 @@ components:
           type: string
           nullable: true
           enum: [T1, T2, T3, null]
+    SearchEngagementAllocationsRequest:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            limit: { type: integer, description: Defaults to 20; at most 50. }
+            offset: { type: integer }
+        filters:
+          type: object
+          properties:
+            searchQuery: { type: string, description: "Matches the allocation reference, engagement name and engagement display id." }
+            accountId: { type: string, format: uuid }
+            accountName: { type: string, description: Substring match. }
+            engineerId: { type: string, format: uuid, description: Platform user id of the allocated engineer. }
+            engagementId: { type: string, format: uuid }
+            states:
+              type: array
+              items: { type: string, description: An allocation state such as CONFIRMED. }
+            from: { type: string, format: date, description: Keep allocations ending on or after this date. }
+            to: { type: string, format: date, description: Keep allocations starting on or before this date. }
+        sortBy:
+          type: object
+          properties:
+            field: { type: string, enum: [startDate, endDate, state, allocationId, accountName, engineerName, utilization] }
+            order: { type: string, enum: [asc, desc] }
+    EngagementAllocationPerson:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+    EngagementAllocationView:
+      type: object
+      required: [id, engagement]
+      properties:
+        id: { type: string, format: uuid }
+        allocationId: { type: string, description: Human-readable reference. }
+        state: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        startTime: { type: string, description: "Wall-clock time in `timezone`, e.g. 09:00:00." }
+        endTime: { type: string }
+        timezone: { type: string }
+        utilization: { type: number }
+        engagement:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+            displayId: { type: string }
+            name: { type: string }
+            type: { type: string }
+            modeOfDelivery: { type: string }
+            state: { type: string }
+            businessUnit: { type: string }
+            isPaid: { type: boolean }
+            projectId: { type: string, format: uuid }
+            plannedStartDate: { type: string, format: date }
+            plannedEndDate: { type: string, format: date }
+            actualStartDate: { type: string, format: date }
+            actualEndDate: { type: string, format: date }
+        account:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+        engineer: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+        latestUpdateDate: { type: string, format: date-time }
+    SearchEngagementAllocationsResponse:
+      type: object
+      required: [allocations, total, limit, offset, hasMore]
+      properties:
+        allocations:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationView' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    EngagementAllocationUpdate:
+      type: object
+      required: [id, createdOn]
+      properties:
+        id: { type: string, format: uuid }
+        subject: { type: string }
+        content: { type: string }
+        state: { type: string, enum: [DRAFT, PUBLISHED, CANCELLED] }
+        visibility: { type: string, enum: [INTERNAL, CUSTOMER] }
+        cycleStartDate: { type: string, format: date }
+        publishedDate: { type: string, format: date-time }
+        createdOn: { type: string, format: date-time }
+        author: { $ref: '#/components/schemas/EngagementAllocationPerson' }
+    ListEngagementAllocationUpdatesResponse:
+      type: object
+      required: [updates, total, limit, offset, hasMore]
+      properties:
+        updates:
+          type: array
+          items: { $ref: '#/components/schemas/EngagementAllocationUpdate' }
+        total: { type: integer }
+        limit: { type: integer }
+        offset: { type: integer }
+        hasMore: { type: boolean }
+    CreateEngagementAllocationUpdateRequest:
+      type: object
+      required: [subject, content]
+      properties:
+        subject: { type: string, maxLength: 512 }
+        content: { type: string, maxLength: 8000 }
     ErrorPayload:
       type: object
       description: >-
@@ -16458,7 +18440,14 @@ components:
             is recorded as having proposed), `change_request_not_asked`
             (403: not asked on the customer group's stage) and `change_request_forbidden`
             (403: the change request's creator, or a user who may not decide an internal
-            stage); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
+            stage); the deviation from the implementation plan's refusals on PATCH
+            /change-requests/{id}: `change_request_deviation_not_yet` (400: a change of
+            implementationDeviation before implementation has started; nothing written),
+            `change_request_deviation_final` (400: a change of it once the change request is
+            closed, canceled or rolled back; nothing written) and
+            `change_request_deviation_not_incorporated` (400: Request Approval while a
+            deviation a clone carried over is not yet folded into the implementation plan
+            and cleared; nothing written); and, on POST /incidents, `incident_assignment_group_not_allowed` (400:
             the assignmentGroupId sent is not the active support group of any service).
             Every other create-incident failure keeps the generic message and carries no
             code. The list grows, so this is deliberately not a closed enum.
@@ -16496,7 +18485,13 @@ components:
       additionalProperties: false
       description: >
         Any combination of fields may be supplied; at least one is required.
-        Omitted fields are left unchanged. isCustomerApproved and isCustomerReviewed
+        Omitted fields are left unchanged. An explicit null clears implementationPlan,
+        priority, category, requestedById, affectedServicesText, affectedComponentsText and
+        rollbackDurationText, and counts as a field on its own; a null durationInput is
+        refused by the PostgreSQL data sources (see durationInput). On every other field a
+        null is refused (see each) or read as omitted, changing nothing and not counting as a
+        field; none of those fields is declared nullable, so send a value or leave the field
+        out. isCustomerApproved and isCustomerReviewed
         are the customer's own answer, not an edit: any value but null is refused (a
         400, no upstream call), see each. The schema still declares that at most one of
         isCustomerApproved, isCustomerReviewed and requestApproval may be set.
@@ -16524,44 +18519,99 @@ components:
         deployedProductId:
           type: string
           format: uuid
+        serviceId:
+          type: string
+          format: uuid
+          description: >-
+            The IT service (an id from `POST /services/search`). One that does not exist is a
+            400 (`serviceId does not refer to an existing record`). It cannot be cleared. It is a
+            field on its own: a request that carries only `serviceId` is a valid request. Stored
+            by the PostgreSQL data sources only, and not mirrored to the previous system; on the
+            data source that talks to the previous system directly a request that carries it is a
+            400 naming it, whatever else the request carries.
+        serviceOfferingId:
+          type: string
+          format: uuid
+          description: >-
+            The service offering (an id from `POST /service-offerings/search`); not checked
+            against `serviceId`. Otherwise as `serviceId`.
+        affectedServicesText:
+          type: string
+          nullable: true
+          description: Free text. An empty string empties it; an explicit null clears it.
+        affectedComponentsText:
+          type: string
+          nullable: true
+          description: Free text. An empty string empties it; an explicit null clears it.
         assignedEngineerId:
           type: string
           format: uuid
         assignedTeamId:
           type: string
           format: uuid
+        requestedById:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            The requester (a user id). An explicit null clears it. Once the change request has
+            left new, a different requester is a 400 when a
+            customer approval or review still ahead would then have nobody on the project to ask
+            (the requester never approves their own change).
         plannedStartOn:
           type: string
-          description: Planned start date and time (format YYYY-MM-DD HH:MM:SS).
-          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+          description: >-
+            Planned start date and time: `YYYY-MM-DD HH:MM:SS` (UTC), or RFC 3339 with a zone
+            designator (`2030-03-01T09:00:00Z`), in the years 2000 to 2100. Anything else (a date
+            alone, a zone name, `now`, `infinity`) is a 400.
         plannedEndOn:
           type: string
-          description: Planned end date and time (format YYYY-MM-DD HH:MM:SS).
-          pattern: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$'
+          description: Planned end date and time, in the same formats as `plannedStartOn`.
         impact:
           type: string
           enum: [high, medium, low]
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low, null]
+          description: >-
+            Any other value is a 400 (on the PostgreSQL data sources `priority must be one of
+            critical, high, moderate or low`, as on create), planning included (a change request
+            migrated from the previous system can read back planning, but it is not a value this
+            API sets). An explicit null clears it.
         state:
           type: string
           description: >-
-            The next state, from the change request's own legalNextStates: the entity
-            service accepts exactly those (or the state the change request is already in),
-            trimmed and case-insensitive, and refuses every other with a 400 that changes
-            nothing -- a closed, canceled or rolled-back change request cannot be moved, and
-            no request skips a step or a gate (new -> implement, assess -> scheduled, ...).
-            "scheduled"
-            is never accepted (a 400, from every state): it is reached by the approval
-            flow or, out of customer_approval, by the customer's own approval in the
-            Customer Portal. Out of customer_approval / customer_review only canceled,
-            authorize (Re-schedule / Propose a different time, customer_approval: the
-            state does not move, the customers are asked again, nothing goes through CAB
-            again) and rollback (customer_review) are accepted; anything else, "closed"
-            included, is a 400 saying that the customer's approval / review can only be
-            given by the customer in the Customer Portal and what to do instead.
+            The next state, from the change request's own legalNextStates. The entity service
+            accepts exactly those, or the state the change request is already in (a no-op) except
+            scheduled, customer_approval, authorize outside customer_approval and rollback outside
+            review / customer_review. The value must be spelled exactly as listed below, in lower
+            case; anything else is a 400. Every other request is a 400 that changes nothing -- a
+            closed, canceled or rolled-back change request cannot be moved, and no request skips a
+            step or a gate (new -> implement, assess -> scheduled, ...). "scheduled" is never
+            accepted (a 400, from every state): it is reached by the approval flow or, out of
+            customer_approval, by the customer's own approval in the Customer Portal. Out of
+            customer_approval / customer_review only canceled, authorize (Re-schedule / Propose a
+            different time, customer_approval: the state does not move, the customers are asked
+            again, nothing goes through CAB again) and rollback (customer_review, while nobody is
+            being asked) are accepted; anything else, "closed" included, is a 400 saying that the
+            customer's approval / review can only be given by the customer in the Customer Portal
+            and what to do instead. While the change request is on hold, a request that carries
+            `state` (the state it is already in included) is a 400 unless it also sends
+            `onHold: false`.
           enum: [new, assess, authorize, customer_approval, scheduled, implement, review, customer_review, rollback, closed, canceled]
         type:
           type: string
-          enum: [standard, normal, emergency, model, site_reliability_ops, azure]
+          enum: [standard, normal, emergency, model, site_reliability_ops, azure, change_registration, cloud_infrastructure, infra, unauthorized_change]
+          description: >-
+            The change type. The PostgreSQL data sources accept standard, normal, emergency,
+            azure, change_registration, cloud_infrastructure, infra and unauthorized_change
+            (model and site_reliability_ops are a 400); the data source that talks to the
+            previous system directly accepts standard, normal, emergency, model,
+            site_reliability_ops and azure. On the PostgreSQL data sources it is changeable only
+            while the change request is new: a different type afterwards is a 400, the stored type
+            resent is accepted. Changing to emergency while a customer box stays true is a 400;
+            send the ticked box(es) as false in the same request.
         justification:
           type: string
         impactDescription:
@@ -16572,8 +18622,39 @@ components:
           type: string
         rollbackPlan:
           type: string
+        rollbackDurationText:
+          type: string
+          nullable: true
+          description: >-
+            Raw, unvalidated free text. An empty string empties it; an explicit null clears it.
         testPlan:
           type: string
+        implementationPlan:
+          type: string
+          nullable: true
+          description: >-
+            The implementation plan (rich text, stored as sent). An empty string empties it; an
+            explicit null clears it.
+        isPlanningVisibleToCustomers:
+          type: boolean
+          description: The "Implementation Plan visible to customers" checkbox, stored and returned as sent.
+        implementationDeviation:
+          type: string
+          description: >-
+            The deviation from the implementation plan (rich text): what the implementation
+            or the review actually did differently from the approved plan. A blank value
+            clears it: blank is no text once the markup is removed, so "<p><br></p>",
+            "<p>&nbsp;</p>" and markup that is only images are blank too. Not under the
+            approved-content lock, but judged on the change request's stored state (before
+            this PATCH is applied): editable in implement, review and customer_review; in new
+            only clearing one a clone carried over is accepted, and in assess, authorize,
+            customer_approval and scheduled no change is (400 `change_request_deviation_not_yet`);
+            in closed, canceled and rollback none is (400 `change_request_deviation_final`).
+            Resending the stored value is always accepted. Request Approval (`state: "assess"`
+            on a new change request) is refused while one is in effect unless the same request
+            clears it (400 `change_request_deviation_not_incorporated`). A refused PATCH writes
+            nothing. Staff only, never shown to customers; refused with a 400 by a data source
+            that cannot store it, and never mirrored to the previous system.
         customerApprovalRequired:
           type: boolean
           description: >-
@@ -16591,29 +18672,34 @@ components:
           type: boolean
           description: >-
             The "Customer Review" checkbox. Free while the change request is new; from
-            Request Approval on it can only be turned on, and only until the change leaves
-            review (any state up to and including review): turning it off is a 400
-            ("customerReviewRequired can no longer be turned off ..."), and changing it from
-            customer_review onwards is a 400 ("customerReviewRequired can no longer be
-            changed ..."). Turning it on needs a Customer Project that has somebody who can
-            be asked (400 "customer review is required but nobody on this project can be
-            asked ..."). It cannot be turned on for an Emergency change in any state (the same
-            400 as the Customer Approval box). A non-boolean value is a 400.
+            Request Approval on it can only be turned on, and only while the state is assess or
+            authorize: turning it off is a 400 ("customerReviewRequired can no longer be turned
+            off ..."), turning it on in customer_approval, scheduled, implement or review is a
+            400 (the change request has been approved, `errorCode:
+            change_request_approved_read_only`), and changing it in customer_review, rollback,
+            closed or canceled is a 400 ("customerReviewRequired can no longer be changed ...").
+            Turning it on needs a Customer Project that has somebody who can be asked (400
+            "customer review is required but nobody on this project can be asked ..."). Resending
+            the stored value is always accepted. It cannot be turned on for an Emergency change in
+            any state (the same 400 as the Customer Approval box). A non-boolean value is a 400.
         deploymentIds:
           type: array
+          maxItems: 100
           items:
             type: string
             format: uuid
           description: >-
             Replaces the list of the project's deployments the change touches
             (empty array clears it, and with it the deployment
-            products). Not an array of UUID strings is a 400. Each must belong
-            to the change request's project (`projectId` here, else the stored
-            one); changing `projectId` while deployments are stored requires
-            `deploymentIds` too. Editable only before the change request reaches
-            `implement` (states new..scheduled); afterwards a change of
-            `projectId`, `deploymentIds` is a 400 (resending
-            the stored value is accepted).
+            products). Not an array of UUID strings (null included) is a 400. Each
+            must belong to the change request's project (`projectId` here, else the
+            stored one); changing `projectId` while deployments are stored requires
+            `deploymentIds` too. Cannot be combined with `deploymentId` /
+            `deployedProductId`. Editable only until the change request is
+            approved (states new, assess, authorize; `projectId` only in new);
+            afterwards a change of `deploymentIds` is a 400 (resending the
+            stored value is accepted). PostgreSQL data sources only: the data
+            source that talks to the previous system directly refuses it (400).
         environmentIds:
           type: array
           deprecated: true
@@ -16625,34 +18711,44 @@ components:
             supported: deployments carry the environment`.
         deploymentProductIds:
           type: array
+          maxItems: 100
           items:
             type: string
             format: uuid
           description: >-
             READ-ONLY, derived from the deployments; accepted only when exactly
-            the derived set.
+            the derived set. Not an array of UUID strings (null included) is a 400.
         customerGroupId:
           type: string
           format: uuid
-          nullable: true
           deprecated: true
           description: >-
-            NO LONGER ACCEPTED (any value, null included, is a 400
-            `customerGroupId is no longer accepted: the customer group is derived
-            from the customer project's registered contacts`). The Customer Group
-            is read-only and follows `projectId`: changing the project re-derives
-            it, and a live Customer Approval / Customer Review stage is replaced
-            by one for the new project's contacts.
+            NO LONGER ACCEPTED: any value, null included, is a 400 (`customerGroupId is no longer
+            accepted: the customer group is derived from the customer project's registered
+            contacts`). The Customer Group is read-only: it is the registered contacts of the
+            change request's project (`customerContacts` on the detail).
         category:
           type: string
+          enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing, null]
           nullable: true
-          enum: [hardware, software, service, system_software, applications_software, network, telecom, documentation, other, regular_release_cloud, hotfix_release_cloud, devops, cloud_computing]
+          description: >-
+            A value that is neither a string nor null is a 400. An explicit null clears the
+            category.
         comment:
           type: string
           description: Appends a customer-visible "Additional comments" entry. Not empty.
         workNote:
           type: string
           description: Appends an internal "Work notes" entry. Not empty.
+        durationInput:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: >-
+            Calendar duration in whole seconds. The PostgreSQL data sources refuse any value, null
+            included (400 `durationInput is not supported on this data source`). The data source
+            that talks to the previous system directly forwards it as sent, without checking it
+            against the planned window, and forwards a null as a null; a negative value is a 400.
         isCustomerApproved:
           type: boolean
           description: >-
@@ -16673,9 +18769,29 @@ components:
         requestApproval:
           type: boolean
           description: >-
-            Transitions the change request from New to Assess and requests
-            approval. Not combinable with isCustomerApproved or isCustomerReviewed
+            true records that approval has been requested (the change request's approval is set
+            to requested); false leaves it as it is. It does not move the state: Request Approval
+            is `state: "assess"`. Not combinable with isCustomerApproved or isCustomerReviewed
             (the customer's own answer, refused for every caller of this API).
+        onHold:
+          type: boolean
+          description: >-
+            Puts the change request on hold (true) or takes it off hold (false). true sets the
+            hold reason to `onHoldReason` from the same request, or clears it; false always
+            clears it. While the change request is on hold, a request that carries `state` (the
+            state it is already in included) is a 400 (`change request is on hold; take it off
+            hold (onHold: false) before changing its state`) unless it also sends
+            `onHold: false`, and so is `confirmCustomerUpdatedDate`. Other requests are not
+            affected, and it can be sent in any state. Stored by the PostgreSQL data sources only,
+            and not mirrored to the previous system; on the data source that talks to the
+            previous system directly a request that carries it (or `onHoldReason`, `serviceId`,
+            `serviceOfferingId`) is a 400 naming them, whatever else the request carries.
+        onHoldReason:
+          type: string
+          description: >-
+            Why the change request is on hold. With `onHold: true` it becomes the reason; with
+            `onHold: false` it is ignored. Sent alone it replaces the stored reason. Stored by the
+            PostgreSQL data sources only, as `onHold`.
         confirmCustomerUpdatedDate:
           type: string
           enum: [agree]
@@ -19541,6 +21657,38 @@ components:
             A stable portal role key (e.g. "cs_engineer", "escalator") — pass this
             value, not a display name, in CreateUserPayload.grantRoles.
 
+    GrantUserRolesPayload:
+      type: object
+      required: [roles]
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: >-
+            Portal role keys to grant via SCIM to the user named in the path —
+            see GET /roles/grantable for the exact set this deployment can
+            grant. At least one is required; an unknown key is a 400.
+
+    GrantUserRolesResponse:
+      type: object
+      required: [granted]
+      properties:
+        granted:
+          type: array
+          items:
+            type: string
+          description: Portal role keys that were successfully granted.
+        failed:
+          type: array
+          items:
+            type: string
+          description: >-
+            Portal role keys that were requested but could not be granted (a
+            SCIM failure). Omitted entirely when every requested role was
+            granted.
+
     CreateUserPayload:
       type: object
       required: [email]
@@ -20627,6 +22775,35 @@ components:
         updatedOn:
           type: string
           format: date-time
+        airGapped:
+          type: boolean
+          nullable: true
+          description: Whether the deployment's products cannot reach WSO2. Null when the entity service runs on ServiceNow, which has no such field.
+
+    DeploymentAirGappedPayload:
+      type: object
+      required: [airGapped]
+      properties:
+        airGapped:
+          type: boolean
+
+    DeploymentAirGappedResponse:
+      type: object
+      required: [id, airGapped, updatedOn, updatedBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        airGapped:
+          type: boolean
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
 
     ProductSearchPayload:
       type: object
@@ -21762,7 +23939,16 @@ components:
           type: string
           nullable: true
         project:
-          $ref: '#/components/schemas/EntityRef'
+          type: object
+          description: >-
+            The change request's Customer Project. Never null: a change request with no
+            project carries an empty id and name.
+          properties:
+            id:
+              type: string
+              description: The project's id (a UUID), or an empty string when there is no project.
+            name:
+              type: string
         case:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -21775,6 +23961,20 @@ components:
         product:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
+        service:
+          nullable: true
+          description: >-
+            The service the change request is for, set by serviceId on create or PATCH. Null
+            when none is set, and always null on the data source that talks to the previous system directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
+        serviceOffering:
+          nullable: true
+          description: >-
+            The service offering, set by serviceOfferingId on create or PATCH. Null when none
+            is set, and always null on the data source that talks to the previous system directly.
+          allOf:
+            - $ref: '#/components/schemas/EntityRef'
         assignedEngineer:
           $ref: '#/components/schemas/EntityRef'
           nullable: true
@@ -21784,9 +23984,16 @@ components:
         plannedStartOn:
           type: string
           nullable: true
+          description: >-
+            The planned start, RFC 3339 in UTC, printed with the fractional seconds the stored
+            value has (none when it holds whole seconds), so that what is read goes back unchanged
+            as expectedPlannedStartOn: those compare the instants exactly. On the data source that
+            talks to the previous system directly the value is passed through as that system
+            sends it.
         plannedEndOn:
           type: string
           nullable: true
+          description: The planned end, printed like plannedStartOn.
         duration:
           type: string
           nullable: true
@@ -21802,6 +24009,23 @@ components:
           type: string
           nullable: true
           description: Change request type (e.g. "standard", "normal")
+        onHold:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the change request is on hold, set by PATCH onHold. While it is true, a PATCH
+            that sets state (unless the same PATCH sends onHold false) and the acceptance of a
+            customer's proposed time (confirmCustomerUpdatedDate) are refused (400), and a new
+            time proposed by the customer is refused (409, errorCode change_request_on_hold); the
+            customer's answer is not refused. Null when no value is stored, and always null on
+            the data source that talks to the previous system directly.
+        onHoldReason:
+          type: string
+          nullable: true
+          description: >-
+            Why the change request is on hold; display only. PATCH onHold true writes the
+            onHoldReason sent with it, or clears it when none is sent; onHold false clears it;
+            onHoldReason sent alone replaces it. Always null on the data source that talks to the previous system directly.
         createdOn:
           type: string
         updatedOn:
@@ -21842,12 +24066,19 @@ components:
             a default is applied when omitted.
 
     ChangeRequestDetail:
+      description: >-
+        The entity service's change request detail, passed through. Its `customerCanAnswer`
+        is not declared here: the entity service sends it only to a customer (an external
+        caller), and the CSM portal's callers are staff.
       allOf:
         - $ref: '#/components/schemas/ChangeRequestSearchView'
         - type: object
           properties:
             createdBy:
               type: string
+            requestedBy:
+              $ref: '#/components/schemas/EntityRef'
+              nullable: true
             justification:
               type: string
               nullable: true
@@ -21866,6 +24097,31 @@ components:
             testPlan:
               type: string
               nullable: true
+            implementationPlan:
+              type: string
+              nullable: true
+            implementationDeviation:
+              type: string
+              nullable: true
+              description: >-
+                "Deviation from the implementation plan" (rich text): what the implementation
+                or the review actually did differently from the implementation plan. Written
+                after the approval: recorded in implement, review and customer_review, final
+                once the change request is closed, canceled or rolled back (see
+                PatchChangeRequestPayload.implementationDeviation). A clone copies it, and the
+                clone must fold it into its implementation plan and clear it before Request
+                Approval. Passed through from the entity service: null when none is recorded,
+                for a customer caller, and when the backing data source has no such field.
+            affectedServicesText:
+              type: string
+              nullable: true
+            affectedComponentsText:
+              type: string
+              nullable: true
+            rollbackDurationText:
+              type: string
+              nullable: true
+              description: Raw, unvalidated free text (e.g. "10 mins").
             hasCustomerApproved:
               type: boolean
               description: >-
@@ -21886,26 +24142,59 @@ components:
               description: >-
                 The "Customer Review" checkbox: the change needs the
                 customer's review before it is closed.
+            isPlanningVisibleToCustomers:
+              type: boolean
+              description: >-
+                The "Implementation Plan visible to customers" setting as stored. False
+                when it was never set.
             customerProposal:
               $ref: '#/components/schemas/ChangeRequestCustomerProposal'
+            confirmCustomerUpdatedDate:
+              type: string
+              nullable: true
+              description: >-
+                WSO2's answer to the proposed start in customerUpdatedOn. On the PostgreSQL
+                data source "agree" (written by Accept proposed time: PATCH
+                confirmCustomerUpdatedDate "agree") or "disagree" (written by Propose a
+                different time, or a decline, while a proposal waits: PATCH state
+                "authorize"); null while nothing has been answered, and cleared when a new
+                time is proposed.
+            customerUpdatedOn:
+              type: string
+              nullable: true
+              description: >-
+                Read-only. The proposed plan start stored on the change request; on the
+                PostgreSQL data source RFC 3339 in UTC, with the fractional seconds it has;
+                null when none is stored. `customerProposal` describes the conversation
+                about it.
             deployments:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
-              description: The project's deployments the change touches (`project` is the Customer Project).
+              description: >-
+                The project's deployments the change touches (`project` is the Customer Project).
+                Always an array on the PostgreSQL data source (empty when none); null on the
+                data source that talks to the previous system directly when there are none.
             deploymentProducts:
               type: array
+              nullable: true
               items:
                 $ref: '#/components/schemas/EntityRef'
-              description: Read-only, derived from `deployments`; names read "<product> <version>".
+              description: >-
+                Read-only, derived from `deployments`; names read "<product> <version>".
+                Always an array on the PostgreSQL data source (empty when none); null on the
+                data source that talks to the previous system directly when there are none.
             customerContacts:
               type: array
+              nullable: true
               description: >-
                 The change request's Customer Group, READ-ONLY, derived live from
                 its Customer Project and never stored: the project's registered
-                portal-user contacts, name order. Always an array (empty without a
-                project or without registered contacts). They are the customer's
-                approvers at Customer Approval / Customer Review.
+                portal-user contacts, name order. Always an array on the PostgreSQL
+                data source (empty without a project or without registered contacts);
+                null on the data source that talks to the previous system directly, which does not derive it. They are
+                the customer's approvers at Customer Approval / Customer Review.
               items:
                 $ref: '#/components/schemas/ChangeRequestCustomerContact'
             tags:
@@ -21922,9 +24211,40 @@ components:
                 work item id and accept a change request's, under the same PermWrite; the
                 vocabulary is searched with POST /tags/search. Never mirrored to the previous
                 system, and never shown to customers.
+            labels:
+              type: array
+              nullable: true
+              items:
+                type: string
+              description: >-
+                Read-only. Null on the PostgreSQL data source, which stores no labels;
+                passed through from the data source that talks to the previous system directly.
             category:
               type: string
               nullable: true
+            priority:
+              type: string
+              nullable: true
+              description: >-
+                On the PostgreSQL data source the stored value in lower case: critical,
+                high, moderate, low or planning (planning only on rows migrated from the
+                previous system: a create or a PATCH refuses it). On the data source that
+                talks to the previous system directly critical, high, moderate or low, or the
+                raw label of any other choice.
+            changeRequestType:
+              type: string
+              nullable: true
+              description: >-
+                Read-through only; no write path is exposed for this field. A separate
+                classification from `type`. On the PostgreSQL data source infra or
+                general; on the data source that talks to the previous system directly the raw label.
+            likelihood:
+              type: string
+              nullable: true
+              description: >-
+                Read-through only; no write path is exposed for this field. On the
+                PostgreSQL data source low, medium or high; on the data source that talks to
+                the previous system directly the raw label.
             approvedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
@@ -21933,6 +24253,7 @@ components:
               nullable: true
             legalNextStates:
               type: array
+              nullable: true
               items:
                 type: string
               description: >-
@@ -21942,11 +24263,11 @@ components:
                 value is stored (it is acted on without the customer's consent).
                 new: [assess, canceled] ("assess" is the "Request Approval"
                 action for every type; the state it lands in depends on the
-                type and on customerApprovalRequired, never for an Emergency change). assess: [canceled] (the
+                type and on customerApprovalRequired). assess: [canceled] (the
                 peer approval moves the change on by itself). authorize:
                 [canceled] (CAB approval moves the change on by itself: to
-                scheduled, or to customer_approval when customerApprovalRequired, never for an
-                Emergency change, which CAB approval always schedules). customer_approval: [authorize,
+                scheduled, or to customer_approval when customerApprovalRequired; an
+                Emergency change's CAB approval always schedules it). customer_approval: [authorize,
                 canceled] -- never "scheduled": only the CUSTOMER's own approval
                 (Customer Portal) schedules the change, and no staff action
                 records it for them; "authorize" here is Re-schedule / Propose a
@@ -21957,7 +24278,25 @@ components:
                 change). customer_review: [rollback,
                 canceled] -- never "closed": only the CUSTOMER's own review closes
                 the change -- or [canceled] while the customer group's review
-                request is pending. Terminal states: none.
+                request is pending. closed, canceled and rollback offer nothing, and
+                neither does a change request with no state: on the PostgreSQL data
+                source the field is null in both cases, not an empty array. On the data
+                source that talks to the previous system directly the list is what that system
+                returns, without
+                "scheduled" and without "closed" from customer_review; null when it
+                sends no list.
+            workStart:
+              type: string
+              nullable: true
+              description: System-maintained, read-only. RFC 3339 in UTC on the PostgreSQL data source.
+            workEnd:
+              type: string
+              nullable: true
+              description: System-maintained, read-only. RFC 3339 in UTC on the PostgreSQL data source.
+            gitReference:
+              type: string
+              nullable: true
+              description: System-maintained, read-only.
 
     ChangeRequestCustomerProposal:
       type: object
@@ -21965,10 +24304,13 @@ components:
       description: >-
         The conversation about a time the customer proposed, derived from two columns of the change
         request (customer_updated_on, the customer's proposed plan START, and
-        customer_updated_date_confirmation, WSO2's answer); present when customer_updated_on is
+        customer_updated_date_confirmation, WSO2's answer), the approver rows and the record of who
+        proposed the time (entity-service migration 0249); present when customer_updated_on is
         set. Pass-through of the entity service's detail. While `answer` is "pending" the
         planned window is still the one WSO2 planned: a proposal changes nothing until WSO2
-        answers (Accept proposed time / Propose a different time, PATCH above).
+        answers (Accept proposed time / Propose a different time, PATCH above). Its
+        `proposedByViewer` is not declared here: the entity service sends it only to a
+        customer (an external caller), and the CSM portal's callers are staff.
       properties:
         startOn:
           type: string
@@ -21988,13 +24330,23 @@ components:
         proposerRecorded:
           type: boolean
           description: >-
-            While pending: true when the last writer of the change request (work_item.updated_by)
-            is a registered contact of its project, who is then recorded as having proposed the time.
-            Nothing else names a proposer: no comment, audit or other log is read, and nothing is added
-            to record one. False when nobody is recorded -- a date a WSO2 user wrote in the previous
-            system, one left from an older cycle, or a genuine proposal that a later write to the change
-            request replaced as last writer -- and the page must say the proposer is not recorded. Then
-            canAccept is false: Accept proposed time is refused with a 409
+            While pending: true when the customer's proposal recorded its proposer (the proposal writes
+            who proposed it, for which start and when, with the start itself), the record is about the
+            stored time, and that person is still a registered contact of the change request's project.
+            A later write by anybody else (a work note, an additional comment, the hold, a whole-form
+            resend, another writer's write to the work item) does not change it; only
+            a new round does: entering customer_approval, or a plain re-schedule, voids it. A change
+            request with no record (a time stored before the record existed, entity-service migration
+            0249, or one written later by another writer on a change request that has had no proposal
+            since it entered customer_approval) is read by the rule that held before the record
+            existed: the change request's last writer (work_item.updated_by) when that is a
+            registered contact of the project; a write that replaces that writer records them as
+            the proposer first when they have a user record (entity-service migration 0250), so
+            such a proposal stays recorded whoever writes after it. No comment, audit or other
+            log is read. False
+            when nobody is recorded -- a date a WSO2 user wrote in the previous system, one left from an
+            older cycle, one whose contact has left the project -- and the page must say the proposer is
+            not recorded. Then canAccept is false: Accept proposed time is refused with a 409
             (change_request_proposer_not_recorded) and Propose a different time is a plain
             re-schedule that writes no answer, which the customers then approve.
         proposedByName:
@@ -23716,6 +26068,20 @@ components:
               items:
                 type: string
                 format: uuid
+              description: >-
+                Matches the generic parent record (the response's `parent`),
+                not the parent incident link; use parentIncidentIds for that.
+            parentIncidentIds:
+              type: array
+              items:
+                type: string
+                format: uuid
+              description: >-
+                Matches the dedicated parent incident link (the response's
+                `parentIncident`, set through parentIncidentId), so
+                `[<incident id>]` lists that incident's direct child incidents.
+                Each entry must be a UUID, otherwise 400. PostgreSQL data source
+                only; the ServiceNow data source answers 400 to a non-empty list.
             number:
               type: string
               description: >-
@@ -23864,10 +26230,14 @@ components:
           enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
         parent:
           nullable: true
+          description: The generic parent record (not the parent incident; see parentIncident).
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         parentIncident:
           nullable: true
+          description: >-
+            The parent incident this incident is a child of (`name` is the
+            parent's number), or null. Set through parentIncidentId.
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
@@ -23959,6 +26329,9 @@ components:
         parentIncidentId:
           type: string
           format: uuid
+          description: >-
+            Creates the incident as a child of the given incident (returned as
+            parentIncident). Not the same link as parentId.
         changeRequestId:
           type: string
           format: uuid
@@ -24036,10 +26409,14 @@ components:
           enum: [DHCP, ORACLE, CPU, KEYBOARD, DOS_DDOS, PRIVILEGE_ESCALATIONS, THREAT_INTELLIGENCE, SCANS_AND_PROBES, APPLICATION_SECURITY, CONFIG_CHANGE_REQUEST, IP_ADDRESS, FULL_OUTAGE, SQL_SERVER, SLOWNESS, MEMORY, MOUSE, PRIVACY, DATA_BREACH, SYSTEM_COMPROMISES, DNS, OS, DISK, VPN, MALWARE, VULNERABILITY, UNAUTHORIZED_ACCESS, IDENTITY_PROTECTION, PHISHING, IMPROPER_CONFIGURATION, INFORMATION_REQUEST, DB2, PARTIAL_OUTAGE, EMAIL, MONITOR, WIRELESS]
         parent:
           nullable: true
+          description: The generic parent record (not the parent incident; see parentIncident).
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         parentIncident:
           nullable: true
+          description: >-
+            The parent incident this incident is a child of (`name` is the
+            parent's number), or null. Set through parentIncidentId.
           allOf:
             - $ref: '#/components/schemas/EntityRef'
         assignmentGroup:
@@ -24112,23 +26489,34 @@ components:
         resolutionCode:
           type: string
           nullable: true
-          description: Resolution code label. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Resolution code label. Populated for resolved/closed incidents; null otherwise.
         resolutionNotes:
           type: string
           nullable: true
-          description: Free-text resolution notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Free-text resolution notes. Populated for resolved/closed incidents; null otherwise.
         resolvedBy:
           type: string
           nullable: true
-          description: Email of the user who resolved the incident. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Email of the user who resolved the incident. Populated for resolved/closed incidents; null otherwise.
         resolvedOn:
           type: string
           nullable: true
-          description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Timestamp when the incident was resolved. Populated for resolved/closed incidents; null otherwise.
+        resolvedWithParent:
+          type: boolean
+          readOnly: true
+          description: >-
+            True when the incident was resolved by its parent incident's
+            resolution (see PATCH /incidents/{id}) rather than by its own
+            update; false otherwise, including when it was later resolved on
+            its own. Post-resolution follow-ups (the workaround problem and
+            alert tasks) run for the parent only, not for such a child.
+            PostgreSQL data source only; always false on the ServiceNow data
+            source, where ServiceNow's own rule resolves the children.
         incidentReport:
           type: string
           nullable: true
-          description: Root-cause/incident report notes. Populated for resolved/closed ServiceNow incidents; null otherwise.
+          description: Root-cause/incident report notes. Populated for resolved/closed incidents; null otherwise.
         linkedServiceRequests:
           type: array
           nullable: true
@@ -24159,6 +26547,11 @@ components:
         state:
           type: string
           enum: [NEW, IN_PROGRESS, ON_HOLD, RESOLVED, CLOSED, CANCELLED]
+          description: >-
+            On the PostgreSQL data source, moving to RESOLVED also resolves
+            this incident's open child incidents, and theirs, with this
+            incident's resolutionCode (see PATCH /incidents/{id}); on the
+            ServiceNow data source, ServiceNow's own rule does that.
         category:
           type: string
           enum: [INQUIRY, SERVICE_INTERRUPTION, SECURITY]
@@ -24195,6 +26588,12 @@ components:
           type: string
           format: uuid
           nullable: true
+          description: >-
+            Makes this incident a child of the given incident (returned as
+            parentIncident). Not the same link as parentId. On the PostgreSQL
+            data source, 400 when it names the incident itself or one of its
+            own descendants. An explicit null unlinks it from its parent;
+            omitting the field leaves the link as it is.
         assignmentGroupId:
           type: string
           format: uuid
@@ -27141,39 +29540,6 @@ components:
         lastName:
           type: string
 
-    UserScanRequest:
-      type: object
-      required: [email, subscriptionKey, isPartner]
-      properties:
-        email:
-          type: string
-        subscriptionKey:
-          type: string
-        isPartner:
-          type: boolean
-
-    SplScanInformation:
-      type: object
-      properties:
-        issue:
-          type: string
-        solution:
-          type: string
-        documentation:
-          type: string
-
-    ScanResult:
-      type: object
-      properties:
-        order:
-          type: integer
-        label:
-          type: string
-        state:
-          type: boolean
-        information:
-          $ref: '#/components/schemas/SplScanInformation'
-
     PortalBanner:
       type: object
       required: [id, status, sortOrder, visibleInCustomerPortal, visibleInCsmPortal, html, startsAt, expiresAt, createdOn, createdBy, updatedOn, updatedBy]
@@ -27273,14 +29639,228 @@ components:
           format: date-time
           nullable: true
 
-    ScanResponse:
+    SkillLevel:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        value: {type: integer, nullable: true, description: "Orders the levels of a scale (for example 20, 50, 100)."}
+        description: {type: string, nullable: true}
+        color: {type: string, nullable: true}
+    SkillLevelType:
+      type: object
+      required: [id, name, levels]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        levels:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevel'}
+    SkillLevelTypesResponse:
+      type: object
+      required: [levelTypes]
+      properties:
+        levelTypes:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevelType'}
+    SkillCategory:
+      type: object
+      required: [id, name, isLowestCategory]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        code: {type: string, nullable: true}
+        categoryPath: {type: string, nullable: true}
+        isLowestCategory: {type: boolean}
+        parentId: {type: string, format: uuid, nullable: true}
+    SkillCategoriesResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategory'}
+    SkillCategoryRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        categoryPath: {type: string, nullable: true}
+    Skill:
+      type: object
+      required: [id, name, active, categories, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        keywords: {type: string, nullable: true}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    SearchSkillsRequest:
       type: object
       properties:
-        system:
-          type: string
-          enum: [Salesforce, Servicenow]
-        systemResult:
+        searchQuery: {type: string, description: "Matches the name or keywords, ignoring case."}
+        categoryIds:
           type: array
-          items:
-            $ref: '#/components/schemas/ScanResult'
-
+          items: {type: string, format: uuid}
+          description: Skills filed under any of these categories or their descendants.
+        levelTypeId: {type: string, format: uuid}
+        includeInactive: {type: boolean, description: "Include deactivated skills. Default false."}
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    SkillPagination:
+      type: object
+      properties:
+        limit: {type: integer, description: "Page size. Defaults to the endpoint's default; above its maximum is a 400."}
+        offset: {type: integer, description: "Zero-based offset."}
+    SearchSkillsResponse:
+      type: object
+      required: [skills, total, limit, offset]
+      properties:
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/Skill'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    CreateSkillRequest:
+      type: object
+      required: [name, levelTypeId]
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, nullable: true, maxLength: 4000}
+        keywords: {type: string, nullable: true, maxLength: 500}
+        levelTypeId: {type: string, format: uuid}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+        active: {type: boolean, description: "Defaults to true."}
+    UpdateSkillRequest:
+      type: object
+      description: Fields left out are unchanged. At least one is required.
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, maxLength: 4000, description: "An empty string clears it."}
+        keywords: {type: string, maxLength: 500, description: "An empty string clears it."}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, description: "Refused (409) while anybody holds a level of the skill."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Replaces the category links as a whole; an empty list removes them all.
+    UserSkill:
+      type: object
+      required: [skillId, skillName, skillActive, categories, inherited, updatedOn]
+      properties:
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        skillActive: {type: boolean}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean, description: "True when the row comes from a group; the person cannot change it."}
+        inheritedFromGroupId: {type: string, format: uuid, nullable: true}
+        updatedOn: {type: string, format: date-time}
+    MySkillsResponse:
+      type: object
+      required: [userId, skills]
+      properties:
+        userId: {type: string, format: uuid, description: "The caller's own user id."}
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkill'}
+    AddMySkillRequest:
+      type: object
+      required: [skillId, levelId]
+      properties:
+        skillId: {type: string, format: uuid}
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SetMySkillLevelRequest:
+      type: object
+      required: [levelId]
+      properties:
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SkillHistoryEntry:
+      type: object
+      required: [id, skillId, skillName, changedOn]
+      properties:
+        id: {type: string, format: uuid}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        levelFrom:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null the first time the skill was set.
+        levelTo:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null when the skill was removed.
+        changedBy: {type: string, nullable: true, description: "Who made the change."}
+        changedOn: {type: string, format: date-time}
+    SkillHistoryResponse:
+      type: object
+      required: [history, total, limit, offset]
+      properties:
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/SkillHistoryEntry'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    SearchUserSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the person's name or email, ignoring case."}
+        userIds:
+          type: array
+          items: {type: string, format: uuid}
+        skillIds:
+          type: array
+          items: {type: string, format: uuid}
+        levelIds:
+          type: array
+          items: {type: string, format: uuid}
+        minLevelValue: {type: integer, nullable: true, description: "Rows whose level value is at least this."}
+        teamKeys:
+          type: array
+          items: {type: string}
+          description: People on any of these teams (registry keys).
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    UserSkillRow:
+      type: object
+      required: [userId, teamKeys, skillId, skillName, inherited, updatedOn]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys:
+          type: array
+          items: {type: string}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean}
+        updatedOn: {type: string, format: date-time}
+    SearchUserSkillsResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkillRow'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}

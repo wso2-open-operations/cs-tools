@@ -360,8 +360,12 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
     });
 
     it("is enabled with no project when no customer part is required (a Standard change too)", () => {
-      renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], customerApprovalRequired: false });
+      renderBar({ state: "new", legalNextStates: ["assess"], customerApprovalRequired: false });
       expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+      cleanup();
+      // A Standard change with no customer approval reads "Schedule" (see the describe below).
+      renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], customerApprovalRequired: false });
+      expect(screen.getByRole("button", { name: "Schedule" })).toBeEnabled();
     });
 
     it("names the missing team first, when both are missing", () => {
@@ -374,6 +378,56 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
 
     it("leaves Cancel change usable behind the menu", () => {
       const { onAction } = renderBar({ state: "new", legalNextStates: ["assess", "canceled"], customerReviewRequired: true });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+      openMenu();
+      fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
+      expect(onAction).toHaveBeenCalledWith("canceled");
+    });
+  });
+
+  // The backend refuses Request Approval (400 change_request_deviation_not_incorporated) while a
+  // deviation from the implementation plan is stored: one a clone carried over, which has to be
+  // folded into the plan and cleared first (the Edit form's "Clear deviation").
+  describe("Request Approval needs the deviation a clone carried over cleared", () => {
+    const REASON = "Fold the carried-over deviation into the implementation plan and clear it before requesting approval";
+    const CARRIED = "<p>Rolled out to one region first.</p>";
+
+    it.each(["new", undefined])("is disabled, with a focusable labelled reason, in %s while one is stored", (state) => {
+      const { onAction } = renderBar({ state, legalNextStates: ["assess"], implementationDeviation: CARRIED });
+      const button = screen.getByRole("button", { name: /request approval/i });
+      expect(button).toBeDisabled();
+      expect(button.closest('[tabindex="0"]')).toHaveAttribute("aria-label", `Request Approval: ${REASON}`);
+      fireEvent.click(button);
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it.each(["normal", "standard", "emergency"])("blocks every type (%s)", (type) => {
+      renderBar({ state: "new", type, legalNextStates: ["assess"], implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
+    });
+
+    it("is enabled once it is cleared", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess"], implementationDeviation: null });
+      fireEvent.click(screen.getByRole("button", { name: /request approval/i }));
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it("names the missing team and the missing project first", () => {
+      renderBar({ state: "new", legalNextStates: ["assess"], assignedTeam: null, implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Set an assigned team before requesting approval",
+      );
+      cleanup();
+      renderBar({ state: "new", legalNextStates: ["assess"], customerApprovalRequired: true, implementationDeviation: CARRIED });
+      expect(screen.getByRole("button", { name: /request approval/i }).closest('[tabindex="0"]')).toHaveAttribute(
+        "aria-label",
+        "Request Approval: Select a Customer Project before requesting approval",
+      );
+    });
+
+    it("leaves Cancel change usable behind the menu", () => {
+      const { onAction } = renderBar({ state: "new", legalNextStates: ["assess", "canceled"], implementationDeviation: CARRIED });
       expect(screen.getByRole("button", { name: /request approval/i })).toBeDisabled();
       openMenu();
       fireEvent.click(screen.getByRole("menuitem", { name: /cancel change/i }));
@@ -1127,5 +1181,46 @@ describe("ChangeRequestActionBar — the Change state button", () => {
     expect(menuId).toBeTruthy();
     expect(document.getElementById(menuId!)).toBe(screen.getByRole("menu"));
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  });
+});
+
+describe("ChangeRequestActionBar — a Standard change's Request Approval reads Schedule", () => {
+  // A standard change is pre-authorised: with no customer approval to ask for,
+  // Request Approval schedules it outright. The label says so; the request is the
+  // same `{state: "assess"}` (the backend schedules it).
+  it("labels it Schedule for a Standard change with no customer approval, and still dispatches assess", () => {
+    const { onAction } = renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], customerApprovalRequired: false });
+    expect(screen.queryByRole("button", { name: /request approval/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(onAction).toHaveBeenCalledWith("assess");
+  });
+
+  it("keeps Request Approval when the Standard change asks the customer's approval", () => {
+    renderBar({
+      state: "new",
+      type: "standard",
+      legalNextStates: ["assess"],
+      customerApprovalRequired: true,
+      project: { id: "proj-a", name: "Acme Project" },
+    });
+    expect(screen.getByRole("button", { name: /request approval/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["a Normal change", { type: "normal", customerApprovalRequired: false }],
+    ["an Emergency change", { type: "emergency", customerApprovalRequired: false }],
+    ["a Standard change whose customer approval is not known", { type: "standard", customerApprovalRequired: undefined }],
+  ])("keeps Request Approval for %s", (_name, fields) => {
+    renderBar({ state: "new", legalNextStates: ["assess"], ...fields });
+    expect(screen.getByRole("button", { name: /request approval/i })).toBeInTheDocument();
+  });
+
+  it("names the blocked reason under the Schedule label", () => {
+    renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], customerApprovalRequired: false, assignedTeam: null });
+    expect(screen.getByRole("button", { name: "Schedule" }).closest('[tabindex="0"]')).toHaveAttribute(
+      "aria-label",
+      "Schedule: Set an assigned team before requesting approval",
+    );
   });
 });

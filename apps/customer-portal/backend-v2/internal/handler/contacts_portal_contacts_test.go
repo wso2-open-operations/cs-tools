@@ -502,9 +502,16 @@ func TestPortalContacts_RefuseCallerWhoIsNotProjectAdmin(t *testing.T) {
 		contacts []entity.ProjectContact
 	}{
 		{"member without an account admin role", []string{"external", "customer"}, member},
-		// A project ADMIN role alone does not count: admin is the account role.
-		{"project ADMIN but no account role", []string{"external", "customer"},
-			[]entity.ProjectContact{{Email: testCaller, RegistrationState: "REGISTERED", Roles: []string{"ADMIN"}}}},
+		// A project ADMIN role on someone else's row is not credited to the caller.
+		{"project ADMIN belongs to another email", []string{"external", "customer"},
+			[]entity.ProjectContact{
+				{Email: testCaller, RegistrationState: "REGISTERED", Roles: []string{"PORTAL_USER"}},
+				{Email: "someone@acme.com", RegistrationState: "REGISTERED", Roles: []string{"ADMIN"}},
+			}},
+		{"project ADMIN on a deactivated membership", []string{"external", "customer"},
+			[]entity.ProjectContact{{Email: testCaller, RegistrationState: "DEACTIVATED", Roles: []string{"ADMIN"}}}},
+		{"global admin role on a deactivated membership", []string{"customer_admin"},
+			[]entity.ProjectContact{{Email: testCaller, RegistrationState: "DEACTIVATED", Roles: []string{"ADMIN"}}}},
 		{"account admin not on the project", []string{"customer_admin"},
 			[]entity.ProjectContact{{Email: "someone@acme.com", RegistrationState: "REGISTERED"}}},
 		{"account admin with a deactivated membership", []string{"customer_admin"},
@@ -541,6 +548,42 @@ func TestPortalContacts_AllowAccountAdminWhoIsAMember(t *testing.T) {
 			t.Run(role+"/"+rq.name, func(t *testing.T) {
 				mux, f := newContactMux(true, true)
 				f.memberships.roles = []string{"external", role}
+
+				rec := serveContact(mux, rq.method, rq.path, rq.body)
+
+				if rec.Code != http.StatusOK {
+					t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body)
+				}
+				if len(f.memberships.calls) != 1 {
+					t.Errorf("entity writes = %v, want exactly one", f.memberships.calls)
+				}
+			})
+		}
+	}
+}
+
+// TestPortalContacts_AllowProjectAdminWithoutAccountRole: the project's own
+// ADMIN role, on the caller's own active membership, is enough without any
+// account admin role. Email and role matching ignore case and whitespace.
+func TestPortalContacts_AllowProjectAdminWithoutAccountRole(t *testing.T) {
+	callers := []struct {
+		name  string
+		roles []string
+		row   entity.ProjectContact
+	}{
+		{"project ADMIN only", []string{"external", "customer"},
+			entity.ProjectContact{Email: testCaller, RegistrationState: "REGISTERED", Roles: []string{"PORTAL_USER", "ADMIN"}}},
+		{"no account roles at all", nil,
+			entity.ProjectContact{Email: testCaller, RegistrationState: "REGISTERED", Roles: []string{"ADMIN"}}},
+		{"mixed case and whitespace", []string{"external"},
+			entity.ProjectContact{Email: "  ADMIN@Acme.com ", RegistrationState: "registered", Roles: []string{" admin "}}},
+	}
+	for _, caller := range callers {
+		for _, rq := range portalWriteRequests {
+			t.Run(caller.name+"/"+rq.name, func(t *testing.T) {
+				mux, f := newContactMux(true, true)
+				f.memberships.roles = caller.roles
+				f.memberships.contacts = []entity.ProjectContact{caller.row}
 
 				rec := serveContact(mux, rq.method, rq.path, rq.body)
 

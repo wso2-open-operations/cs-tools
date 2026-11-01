@@ -28,17 +28,19 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import {
   POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
   type EncodedAttachment,
 } from "@components/attachments/encodeAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useNewCaseDraft } from "@context/new-case-draft/NewCaseDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { isCloudSupportSubscription } from "@features/csm-projects/utils/subscriptionType";
@@ -119,18 +121,36 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const relatedCaseId = relatedCaseState?.relatedCaseId;
   const relatedCaseNumber = relatedCaseState?.relatedCaseNumber;
 
-  const [projectId, setProjectId] = useState(lockedProjectId);
-  const [deploymentId, setDeploymentId] = useState(relatedCaseState?.deploymentId ?? "");
+  // The draft outlives this page (it lives above the routes), so switching to
+  // an open case tab and back does not lose what was typed. It is restored only
+  // into a form opened the same way it was started (same locked project and
+  // related case); a different entry starts fresh rather than inheriting a
+  // stale draft. Cleared on a successful submit.
+  const draftStore = useNewCaseDraft();
+  const entryKey = `${lockedProjectId}|${relatedCaseId ?? ""}`;
+  const [restored] = useState(() => {
+    const draft = draftStore.get();
+    return draft?.entryKey === entryKey ? draft : undefined;
+  });
+
+  const [projectId, setProjectId] = useState(restored?.projectId ?? lockedProjectId);
+  const [deploymentId, setDeploymentId] = useState(
+    restored?.deploymentId ?? relatedCaseState?.deploymentId ?? "",
+  );
   const [deployedProductId, setDeployedProductId] = useState(
-    relatedCaseState?.deployedProductId ?? "",
+    restored?.deployedProductId ?? relatedCaseState?.deployedProductId ?? "",
   );
-  const [severity, setSeverity] = useState<Severity | "">(relatedCaseState?.severity ?? "");
+  const [severity, setSeverity] = useState<Severity | "">(
+    restored?.severity ?? relatedCaseState?.severity ?? "",
+  );
   const [issueType, setIssueType] = useState<BeCaseIssueType | "">(
-    relatedCaseState?.issueType ?? "",
+    restored?.issueType ?? relatedCaseState?.issueType ?? "",
   );
-  const [subject, setSubject] = useState(relatedCaseState?.subject ?? "");
-  const [description, setDescription] = useState("");
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+  const [subject, setSubject] = useState(restored?.subject ?? relatedCaseState?.subject ?? "");
+  const [description, setDescription] = useState(restored?.description ?? "");
+  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
+    restored?.attachments ?? [],
+  );
 
   const deployments = useSearchDeployments(projectId || undefined);
 
@@ -139,7 +159,9 @@ export default function CsmCaseCreatePage(): JSX.Element {
   // contacts that load late still pre-fill and nothing the engineer removed or
   // added is ever overwritten. Edits belong to one project and reset with it.
   const projectContacts = useSearchProjectContacts(projectId || undefined);
-  const [watchEdits, setWatchEdits] = useState<WatchListEdits>(NO_WATCH_LIST_EDITS);
+  const [watchEdits, setWatchEdits] = useState<WatchListEdits>(
+    restored?.watchEdits ?? NO_WATCH_LIST_EDITS,
+  );
   const watchPrefill = useMemo(
     () => eligibleContactWatchers(projectContacts.data),
     [projectContacts.data],
@@ -199,6 +221,37 @@ export default function CsmCaseCreatePage(): JSX.Element {
   const uploadedBy = useEngineerDisplayName();
   // Spans the whole submit (create + post-create attachment uploads).
   const [submitting, setSubmitting] = useState(false);
+
+  // Mirror the form into the draft store on every change. `submitted` stops it
+  // writing the draft back after a successful create has cleared it.
+  const submitted = useRef(false);
+  useEffect(() => {
+    if (submitted.current) return;
+    draftStore.set({
+      entryKey,
+      projectId,
+      deploymentId,
+      deployedProductId,
+      severity,
+      issueType,
+      subject,
+      description,
+      attachments,
+      watchEdits,
+    });
+  }, [
+    draftStore,
+    entryKey,
+    projectId,
+    deploymentId,
+    deployedProductId,
+    severity,
+    issueType,
+    subject,
+    description,
+    attachments,
+    watchEdits,
+  ]);
 
   // When a selector query fails the form becomes non-completable, so surface it
   // with an explicit retry rather than leaving an empty dropdown. (Projects are
@@ -283,6 +336,8 @@ export default function CsmCaseCreatePage(): JSX.Element {
         relatedCaseId,
         ...(watchers.length > 0 && { watchList: watchers.map((w) => w.email) }),
       });
+      submitted.current = true;
+      draftStore.clear();
       // The create endpoint doesn't attach files for standard cases, so upload
       // them to the new case afterwards. A partial failure still lands the case.
       const failed = await uploadAttachmentsToCase(
@@ -537,6 +592,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
               sx={{ display: "block", mb: 0.5 }}
             >
               Description
+              <RequiredMark />
             </Typography>
             {/* Editor doesn't accept an `id`, so associate the label by wrapping
                 the editor in a labelled group for assistive tech. */}
@@ -549,6 +605,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 maxHeight={420}
                 toolbarVariant="full"
                 disabled={submitting}
+                ariaRequired
               />
             </Box>
             {descriptionError && (
@@ -596,7 +653,17 @@ export default function CsmCaseCreatePage(): JSX.Element {
         </Grid>
 
         <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
-          <Button variant="outlined" onClick={() => navigate(backTarget)}>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              // An explicit discard: drop the draft too (flag first, so the
+              // mirroring effect cannot write it back) or it would reappear
+              // the next time the form opens.
+              submitted.current = true;
+              draftStore.clear();
+              navigate(backTarget);
+            }}
+          >
             Cancel
           </Button>
           <Button

@@ -40,6 +40,7 @@ import (
 
 	"github.com/adhocore/gronx"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
@@ -324,15 +325,17 @@ func main() {
 	}
 
 	// Rota reminders: emails to the people rostered on a rotation shift in the
-	// Team Schedule. *** OFF UNLESS ROTA_REMINDERS_ENABLED=true. *** They
-	// email real staff from the real rota, so an environment that holds the
-	// rota but must not mail people turns them on only with
-	// ROTA_REMINDER_REDIRECT_TO set. Registered only when enabled, like
-	// cloud_status_webhooks, so the ledger shows no run for a task that is off.
-	rotaRemindersEnabled := envBool("ROTA_REMINDERS_ENABLED", false)
+	// Team Schedule. They are turned on and off only on the Team Schedule's
+	// Rota Access tab ("CRE rota reminders"): nothing in this component's
+	// configuration switches them on, and a family that has never saved the
+	// card gets no scheduled reminder (rotareminder.withSettings). The tasks
+	// are registered whenever there is an email service to send through, so
+	// Send now and "Send a test to me" work without a redeploy; with no
+	// EMAIL_BASE_URL nothing could be sent and they are left out.
+	rotaRemindersAvailable := strings.TrimSpace(os.Getenv("EMAIL_BASE_URL")) != ""
 	var teamScheduleClient *teamschedule.Client
 	rotaZone := time.UTC
-	if rotaRemindersEnabled {
+	if rotaRemindersAvailable {
 		teamScheduleClient, err = teamschedule.NewClient(teamschedule.Config{
 			BaseURL:      entityServiceBaseURL,
 			TokenURL:     oauthTokenURL,
@@ -349,8 +352,29 @@ func main() {
 			slog.Error("ROTA_REMINDER_TIME_ZONE is not a known time zone", "err", err)
 			os.Exit(1)
 		}
-		if u := os.Getenv("ROTA_REMINDER_SCHEDULE_URL"); u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-			slog.Error("ROTA_REMINDER_SCHEDULE_URL must be an http(s) URL", "value", u)
+	} else {
+		slog.Info("rota reminders are not registered: EMAIL_BASE_URL is not set, so no reminder could be sent")
+	}
+
+	// Case auto-closure: reminders and automatic closure of tickets that sit in
+	// Awaiting Info or Solution Proposed with no activity -- see
+	// internal/autoclosure's package doc and entity-service's CLAUDE.md, "Case
+	// auto-closure". OFF unless AUTOCLOSURE_ENABLED=true: it comments on and
+	// closes customers' tickets, so it is never on by accident. this component's client id must be in
+	// entity-service's M2M_CLIENT_IDS. entity-service's AUTOCLOSURE_SYSTEM_USER_EMAIL
+	// is optional: empty acts as "System user".
+	autoclosureEnabled := envBool("AUTOCLOSURE_ENABLED", false)
+	var autoclosureClient *autoclosure.Client
+	if autoclosureEnabled {
+		autoclosureClient, err = autoclosure.NewClient(autoclosure.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service auto-closure client", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -572,6 +596,9 @@ func main() {
 
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
+
+	const autoclosureTaskName = "case_autoclosure"
+	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -853,14 +880,15 @@ func main() {
 	//     summary again, the invitations as updates, and cancellations.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
-	if rotaRemindersEnabled {
+	if rotaRemindersAvailable {
 		family := envString("ROTA_REMINDER_FAMILY", "CRE")
 		copyTaskRecipients := envBool("ROTA_REMINDER_COPY_TASK_RECIPIENTS", false)
-		// Invitations need an organizer: the address the emails come from.
-		organizer := strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS"))
+		// Invitations need an organizer: the address the emails come from,
+		// without the display name a "Name <address>" sender carries.
+		organizer, organizerOK := rotareminder.InviteOrganizer(os.Getenv("EMAIL_FROM_ADDRESS"))
 		invites := envBool("ROTA_REMINDER_INVITES_ENABLED", true)
-		if invites && !rotareminder.ValidInviteAddress(organizer) {
-			slog.Warn("rota reminder calendar invitations are off: EMAIL_FROM_ADDRESS is not set or is not a plain email address, and an invitation needs an organizer")
+		if invites && !organizerOK {
+			slog.Warn("rota reminder calendar invitations are off: EMAIL_FROM_ADDRESS is not set or holds no email address, and an invitation needs an organizer")
 			invites = false
 		}
 		scheduleURL := strings.TrimSpace(os.Getenv("ROTA_REMINDER_SCHEDULE_URL"))
@@ -955,6 +983,46 @@ func main() {
 		)
 	}
 
+	// Daily at 08:00 (TZ=UTC-dependent, like every schedule here), the time the
+	// ServiceNow flow this replaces ran. The limit is per UTC day and enforced by
+	// entity-service from its audit table, so the engine retrying a failed run
+	// the same day cannot exceed it. A partial failure is retried the next tick:
+	// tickets already advanced are no longer due, so only what is left is done.
+	if autoclosureEnabled {
+		autoclosureCfg := autoclosure.RunConfig{
+			IntervalDays: envInt("AUTOCLOSURE_INTERVAL_DAYS", 7),
+			DailyLimit:   envInt("AUTOCLOSURE_DAILY_LIMIT", 500),
+			// Solution Proposed on its own first, then Awaiting Info: set
+			// AUTOCLOSURE_STATES=solution_proposed until the first has been watched.
+			States:    splitComma(os.Getenv("AUTOCLOSURE_STATES")),
+			Templates: autoclosureTemplates(),
+			// AUTOCLOSURE_DRY_RUN=true: decide and log, change nothing. Use it to see
+			// what the first real run would do to a large backlog.
+			DryRun: envBool("AUTOCLOSURE_DRY_RUN", false),
+		}
+		// A value entity-service would reject on every call must stop startup, not
+		// fail and alert every day while no ticket is processed.
+		if err := autoclosureCfg.Validate(); err != nil {
+			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		// A tryout runs the handler once, outside the ledger, against the real
+		// entity-service: here that would comment on and close real tickets. Only the
+		// debug recipients are protected from the alert email, not the tickets, so a
+		// tryout of this task is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == autoclosureTaskName && !autoclosureCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is case_autoclosure: running as a dry run, nothing will be changed; set AUTOCLOSURE_DRY_RUN=true explicitly to silence this")
+			autoclosureCfg.DryRun = true
+		}
+		tasks = append(tasks, registry.Task{
+			Name:     autoclosureTaskName,
+			Schedule: scheduleFor(scheduleOverrides, autoclosureTaskName, "0 8 * * *"),
+			Handler:  autoclosure.Run(autoclosureClient, autoclosureCfg),
+			To:       autoclosureTo,
+			Cc:       autoclosureCc,
+		})
+	}
+
 	var tasksWithRecipients []string
 	for _, t := range tasks {
 		if !gronx.IsValid(t.Schedule) {
@@ -974,12 +1042,6 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// Rota reminders always have recipients (the people on the shift), so
-	// turning them on with email unconfigured is the same misconfiguration.
-	if alertsEnabled && emailBaseURL == "" && rotaRemindersEnabled {
-		slog.Error("ROTA_REMINDERS_ENABLED is true but EMAIL_BASE_URL is not set; refusing to start since no reminder could be sent")
-		os.Exit(1)
-	}
 	// The product regression reports keep their audience out of task.To (see
 	// their registration above), so it is checked here by name instead.
 	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
@@ -1037,6 +1099,22 @@ func parseStringMap(name, raw string) map[string]string {
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		slog.Error("ignoring malformed configuration value; treating it as unset", "key", name, "err", err)
 		return nil
+	}
+	return out
+}
+
+// autoclosureTemplates reads AUTOCLOSURE_TEMPLATES. Unlike the other maps here,
+// a malformed value stops startup: treating it as unset would silently post the
+// built-in wording to customers instead of the wording the operator meant.
+func autoclosureTemplates() map[string]string {
+	raw := os.Getenv("AUTOCLOSURE_TEMPLATES")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		slog.Error("AUTOCLOSURE_TEMPLATES is not a JSON object of strings; refusing to start", "err", err)
+		os.Exit(1)
 	}
 	return out
 }
@@ -1309,6 +1387,22 @@ func envDays(key string, defDays int) time.Duration {
 		return def
 	}
 	return time.Duration(n) * 24 * time.Hour
+}
+
+// envInt returns the given environment variable parsed as a non-negative
+// integer, or def if unset or malformed (logged, not fatal: a typo in a tuning
+// knob must not stop every other task in this component from running).
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		slog.Warn("environment variable is not a valid non-negative integer; using default", "key", key, "value", v, "default", def)
+		return def
+	}
+	return n
 }
 
 func splitComma(s string) []string {

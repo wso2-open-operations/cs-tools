@@ -30,9 +30,11 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
@@ -184,5 +186,31 @@ func TestKBArticleNullColumnsUpdateContent(t *testing.T) {
 	}
 	if got.KnowledgeBaseID != "" || got.AuthorID != "" || got.Latest {
 		t.Errorf("knowledgeBaseId/authorId/latest = %q/%q/%v, want empty/empty/false", got.KnowledgeBaseID, got.AuthorID, got.Latest)
+	}
+}
+
+// TestKBArticleGetByIDMissingAndMalformed: a well-formed id with no row is a
+// NotFoundError (404) and a non-UUID id a ValidationError (400); neither may
+// surface as an unmapped error (500).
+func TestKBArticleGetByIDMissingAndMalformed(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedKBArticleNullFixture(t, pool)
+
+	repo := repository.NewKBArticleRepository(pool)
+	ctx := context.Background()
+
+	var nfe *apierror.NotFoundError
+	if _, err := repo.GetKBArticleByID(ctx, "3a999999-0000-0000-0000-000000000009"); !errors.As(err, &nfe) {
+		t.Errorf("missing id: err = %#v, want NotFoundError", err)
+	}
+
+	var ve *apierror.ValidationError
+	if _, err := repo.GetKBArticleByID(ctx, "not-a-uuid"); !errors.As(err, &ve) {
+		t.Errorf("malformed id: err = %#v, want ValidationError", err)
+	}
+
+	got, err := repo.GetKBArticleByID(ctx, kbNullFullID)
+	if err != nil || got.ID != kbNullFullID || got.Title != "Full article" {
+		t.Errorf("existing article: got %+v, err %v", got, err)
 	}
 }

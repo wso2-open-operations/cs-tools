@@ -22,6 +22,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeIncidentDetail } from "@api/backend/types";
+import type { ChildIncidentRow } from "@features/csm-operations/api/useSearchChildIncidents";
 import { CaseTabsProvider, useCaseTabsController } from "@context/case-tabs/CaseTabsContext";
 import { CaseTabsBehaviorProvider } from "@context/case-tabs/CaseTabsBehaviorContext";
 import { useCaseTabCloseConfirm } from "@features/case-tabs/hooks/useCaseTabCloseConfirm";
@@ -154,6 +155,22 @@ vi.mock("@features/csm-sla/components/WorkItemSlaTable", () => ({
   ),
 }));
 
+// The child incidents of the incident on the page: read by the page (the
+// resolve dialog's count) and by the Related tab's ChildIncidentsWidget.
+// Reset to none after each test.
+let childIncidentRows: ChildIncidentRow[] = [];
+vi.mock("@features/csm-operations/api/useSearchChildIncidents", () => ({
+  CHILD_INCIDENTS_QUERY_KEY: ["incidents", "child-incidents"],
+  useSearchChildIncidents: () => ({
+    data: { incidents: childIncidentRows, total: childIncidentRows.length },
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    dataUpdatedAt: 0,
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock("@api/useSearchUsersByName", () => ({
   useSearchUsersByName: () => ({ data: [], isFetching: false, isError: false }),
   useSearchInternalUsersByName: () => ({ data: [], isFetching: false, isError: false }),
@@ -176,7 +193,8 @@ const BASE_INCIDENT: BeIncidentDetail = {
   priority: null,
   state: "IN_PROGRESS" as BeIncidentDetail["state"],
   category: null,
-  parent: { id: "inc-parent", name: "INC0011111" },
+  parentIncident: { id: "inc-parent", name: "INC0011111" },
+  parent: { id: "cs-parent", name: "CS0007777" },
   changeRequest: { id: "chg-1", name: "CHG0009988" },
   problem: { id: "prb-1", name: "PRB0040157" },
   causedBy: { id: "obscure-1", name: "Some obscure record" },
@@ -301,6 +319,7 @@ function renderPageWithOpenTab(
 // call instead of its own.
 afterEach(() => {
   vi.clearAllMocks();
+  childIncidentRows = [];
 });
 
 describe("CsmIncidentDetailPage — description", () => {
@@ -450,14 +469,49 @@ describe("CsmIncidentDetailPage — tabs", () => {
     renderPage();
     goToTab(/related/i);
 
-    clickChip("INC0011111");
-    expect(navigateMock).toHaveBeenCalledWith("/operations/incidents/inc-parent");
+    // The parent incident (`parentIncident`), not the generic parent; Back on
+    // it returns to this child. The Overview shows the same chip, so scope to
+    // the Related tab's card.
+    const linked = screen.getByText("Linked records").closest(".MuiCard-root") as HTMLElement;
+    within(linked)
+      .getByText("INC0011111")
+      .closest('[role="button"]')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/incidents/inc-parent", {
+      state: { from: "/operations/incidents/inc-1" },
+    });
 
     clickChip("CHG0009988");
     expect(navigateMock).toHaveBeenCalledWith("/operations/change-requests/chg-1");
 
     clickChip("PRB0040157");
     expect(navigateMock).toHaveBeenCalledWith("/operations/problems/prb-1");
+  });
+
+  it("shows the generic parent as a Parent record, as text: the ref does not say what it is", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+    goToTab(/related/i);
+
+    const parentRecord = screen.getByText("CS0007777");
+    expect(parentRecord.closest('[role="button"]')).toBeNull();
+    expect(screen.getByText("Parent record")).toBeInTheDocument();
+  });
+
+  it("lists the incident's child incidents on the Related tab, after its tasks", () => {
+    childIncidentRows = [
+      { id: "inc-child", number: "INC0022222", subject: "Child of the outage", state: "IN_PROGRESS" },
+    ];
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+    goToTab(/related/i);
+
+    const tasksTitle = screen.getByText(/^Incident tasks/);
+    const childrenTitle = screen.getByText("Child incidents (1)");
+    expect(tasksTitle.compareDocumentPosition(childrenTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "INC0022222 — Child of the outage" }),
+    ).toHaveAttribute("href", "/operations/incidents/inc-child");
   });
 
   it("renders 'Caused by' as plain, non-navigable text since its target type is unconfirmed", () => {
@@ -909,5 +963,110 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
       expect(patch).not.toHaveProperty("contactType");
       expect(patch).not.toHaveProperty("subcategory");
     }
+  });
+});
+
+describe("CsmIncidentDetailPage — parent and child incidents", () => {
+  function openResolveDialog(): void {
+    fireEvent.click(screen.getByRole("button", { name: /change state/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /resolved/i }));
+  }
+
+  it("shows a child's parent incident in the Overview, linking to it with Back returning here", () => {
+    mockQueryResult({ data: BASE_INCIDENT });
+    renderPage();
+
+    const label = screen.getByText("Parent incident");
+    const cell = label.parentElement as HTMLElement;
+    within(cell)
+      .getByText("INC0011111")
+      .closest('[role="button"]')
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/incidents/inc-parent", {
+      state: { from: "/operations/incidents/inc-1" },
+    });
+  });
+
+  it("has no Parent incident cell in the Overview for an incident without one", () => {
+    mockQueryResult({ data: { ...BASE_INCIDENT, parentIncident: null } });
+    renderPage();
+    expect(screen.queryByText("Parent incident")).not.toBeInTheDocument();
+  });
+
+  it("says how many open child incidents resolving will also resolve, not counting finished ones", () => {
+    childIncidentRows = [
+      { id: "c1", subject: "New one", state: "NEW" },
+      { id: "c2", subject: "On hold one", state: "ON_HOLD" },
+      { id: "c3", subject: "Working one", state: "IN_PROGRESS" },
+      { id: "c4", subject: "Resolved one", state: "RESOLVED" },
+      { id: "c5", subject: "Closed one", state: "CLOSED" },
+      { id: "c6", subject: "Cancelled one", state: "CANCELLED" },
+    ];
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openResolveDialog();
+
+    expect(
+      within(screen.getByRole("dialog")).getByText(/this will also resolve 3 open child incidents/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not mention child incidents when every child is already finished", () => {
+    childIncidentRows = [{ id: "c4", subject: "Resolved one", state: "RESOLVED" }];
+    mockQueryResult({ data: { ...BASE_INCIDENT, state: "IN_PROGRESS" } });
+    renderPage();
+    openResolveDialog();
+
+    expect(within(screen.getByRole("dialog")).queryByText(/child incident/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("CsmIncidentDetailPage — resolution", () => {
+  const RESOLVED: BeIncidentDetail = {
+    ...BASE_INCIDENT,
+    state: "RESOLVED",
+    resolutionCode: "SOLVED_PERMANENTLY",
+    resolutionNotes: "Rolled back the bad config.\nVerified the gateway.",
+    resolvedBy: "Jane Doe",
+    resolvedOn: "2026-02-03T04:05:06Z",
+    resolvedWithParent: false,
+  };
+
+  it("shows the code's label, the notes, who resolved it and when", () => {
+    mockQueryResult({ data: RESOLVED });
+    renderPage();
+
+    const card = screen.getByTestId("incident-resolution");
+    expect(within(card).getByText("Solved (Permanently)")).toBeInTheDocument();
+    expect(within(card).getByText(/Rolled back the bad config\./)).toBeInTheDocument();
+    expect(within(card).getByText("Jane Doe")).toBeInTheDocument();
+    expect(within(card).getByText("Resolved on").parentElement).not.toHaveTextContent(/—$/);
+    expect(within(card).queryByText("Resolved with parent incident")).not.toBeInTheDocument();
+  });
+
+  it("names the parent incident for a child resolved with it", () => {
+    mockQueryResult({ data: { ...RESOLVED, resolvedWithParent: true } });
+    renderPage();
+
+    const card = screen.getByTestId("incident-resolution");
+    const cell = within(card).getByText("Resolved with parent incident").parentElement as HTMLElement;
+    expect(within(cell).getByText("INC0011111")).toBeInTheDocument();
+  });
+
+  it("shows a code it has no label for as stored", () => {
+    mockQueryResult({ data: { ...RESOLVED, resolutionCode: "SOME_NEW_CODE" } });
+    renderPage();
+    expect(within(screen.getByTestId("incident-resolution")).getByText("SOME_NEW_CODE")).toBeInTheDocument();
+  });
+
+  it("is shown for a Closed incident and hidden once it is re-opened", () => {
+    mockQueryResult({ data: { ...RESOLVED, state: "CLOSED" } });
+    const closed = renderPage();
+    expect(screen.getByTestId("incident-resolution")).toBeInTheDocument();
+    closed.unmount();
+
+    mockQueryResult({ data: { ...RESOLVED, state: "IN_PROGRESS" } });
+    renderPage();
+    expect(screen.queryByTestId("incident-resolution")).not.toBeInTheDocument();
   });
 });

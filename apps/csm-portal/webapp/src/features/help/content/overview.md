@@ -14,7 +14,7 @@ The left sidebar is personalized: it only ever lists the sections your account h
 in the same order for everyone. **Dashboard** and **Support** (the core case list and case
 detail) are there for every signed-in user; which of the others also appear — Operations,
 Engagements, Announcements, Security Center, Customers, Knowledge, PLG, Updates, Time cards,
-Team Schedule, Usage Metrics, Customer Health, User Scan, and Settings — depends on your role.
+Team Schedule, Usage Metrics, Customer Health, and Settings — depends on your role.
 Whatever you see in your own sidebar is what you have; several of the topics further down this
 page cover one specific section in more detail, and are themselves only listed here when that
 section is one you can open.

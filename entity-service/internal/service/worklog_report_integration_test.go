@@ -1131,3 +1131,91 @@ func TestWorklogWeekendDailyTakesWeekendShiftsOnly(t *testing.T) {
 			report.Totals.Members)
 	}
 }
+
+// Being allocated takes somebody out of the report, whether the
+// allocation is internal or external. ALLO_INT and ALLO_EXT are a pair --
+// "Allocated — internal" and "Allocated — external" (migration 0154) --
+// and ENG is the customer engagement from 0215.
+//
+// Listing EXT without INT inflated every team's member count and its
+// average's divisor, which is what the CS leads reported against the
+// 27 October mail: 95 members where ServiceNow showed 80.
+//
+// MIGRATION is checked too, from the other direction: it must NOT
+// exclude. The delivered mail lists the CS Migrations Team with real
+// approved hours, so treating their own allocation as an absence would
+// empty the team that logged the most time.
+func TestWorklogAllocationsRemoveMembers(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	seedWorklogDailyFixture(ctx, t, pool)
+	ctx = repository.WithSystemIdentity(ctx)
+
+	const sunday = "2026-10-18"
+	absence := func(userID, teamKey, code string) {
+		var kindID string
+		if err := pool.QueryRow(ctx,
+			`SELECT id::text FROM team_schedule_absence_kind WHERE code = $1`, code).Scan(&kindID); err != nil {
+			t.Fatalf("kind %s: %v", code, err)
+		}
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO team_schedule_absence (user_id, team_key, starts_on, ends_on, kind_id)
+			 VALUES ($1, $2, $3::date, $3::date, $4)`,
+			userID, teamKey, sunday, kindID); err != nil {
+			t.Fatalf("seed absence %s: %v", code, err)
+		}
+	}
+	// Three of the six fixture members, one per allocation kind.
+	absence("00000000-0000-0000-0000-000000000001", "americas", "ALLO_INT") // asha@
+	absence("00000000-0000-0000-0000-000000000003", "atlas", "ALLO_EXT")
+	absence("00000000-0000-0000-0000-000000000004", "castor", "MIGRATION")
+
+	svc := service.NewWorklogReportService(
+		repository.NewWorklogReportRepository(repository.NewScoped(pool)), nil, nil)
+	day := time.Date(2026, 10, 18, 0, 0, 0, 0, time.UTC)
+	got, err := svc.BuildReport(ctx, domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: day, To: day})
+	if err != nil {
+		t.Fatalf("report: %v", err)
+	}
+
+	present := map[string]bool{}
+	for _, team := range got.Teams {
+		for _, d := range team.Developers {
+			present[d.Email] = true
+		}
+	}
+	for _, c := range []struct {
+		email string
+		code  string
+		want  bool
+	}{
+		{"asha@example.com", "ALLO_INT", false},
+		{"chen@example.com", "ALLO_EXT", false},
+		{"dara@example.com", "MIGRATION", true},
+	} {
+		if present[c.email] != c.want {
+			verb := "must not appear"
+			if c.want {
+				verb = "must still appear"
+			}
+			t.Errorf("%s is on %s and %s; present=%v", c.email, c.code, verb, present[c.email])
+		}
+	}
+
+	// Four of the six remain: the two allocated are gone, the MIGRATION
+	// one stays. The divisor follows the same count, so an allocation
+	// that fails to exclude also inflates every average.
+	if got.Totals.Members != 4 {
+		t.Errorf("Members = %d, want 4 (six less the two allocated)", got.Totals.Members)
+	}
+}

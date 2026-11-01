@@ -847,31 +847,29 @@ func syncGlobalRoles(ctx context.Context, tx querier, userID string, wanted, man
 // accounts for the change being made and for every project not involved in
 // it. Do not narrow it to the membership in hand.
 //
-// adminRole empty (an integration user) means the whole admin question does
-// not apply: nothing is granted and nothing is revoked. The bool returned is
+// adminRole empty (an integration user) means no admin role applies: nothing
+// is granted and any managed one still held is revoked. The bool returned is
 // whether the user ends up holding adminRole.
 func syncDerivedAdminRole(ctx context.Context, tx querier, userID, adminRole string, managed []string, isCsAdmin bool, actor string) (bool, error) {
-	if adminRole == "" {
-		return false, nil
-	}
-
 	var adminMembership bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM "user" u
-			JOIN account_contact ac ON LOWER(ac.user_name) = LOWER(u.user_name)
-			JOIN project_contact pc ON pc.account_contact_id = ac.id
-			JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
-			JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
-			JOIN project_role pr ON pr.id = pgr.project_role_id
-			WHERE u.id = $1
-			  AND pr.role = 'ADMIN'::project_role_enum
-			  AND (pc.state IS NULL OR pc.state <> 'DEACTIVATED'::project_contact_state_enum))`,
-		userID).Scan(&adminMembership); err != nil {
-		return false, fmt.Errorf("upsert membership: derive account admin role: %w", err)
+	if adminRole != "" {
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM "user" u
+				JOIN account_contact ac ON LOWER(ac.user_name) = LOWER(u.user_name)
+				JOIN project_contact pc ON pc.account_contact_id = ac.id
+				JOIN project_contact_group pcg ON pcg.project_contact_id = pc.id
+				JOIN project_group_role pgr ON pgr.project_group_id = pcg.project_group_id
+				JOIN project_role pr ON pr.id = pgr.project_role_id
+				WHERE u.id = $1
+				  AND pr.role = 'ADMIN'::project_role_enum
+				  AND (pc.state IS NULL OR pc.state <> 'DEACTIVATED'::project_contact_state_enum))`,
+			userID).Scan(&adminMembership); err != nil {
+			return false, fmt.Errorf("upsert membership: derive account admin role: %w", err)
+		}
 	}
-	isAdmin := adminMembership || isCsAdmin
+	isAdmin := adminRole != "" && (adminMembership || isCsAdmin)
 
 	var revoke []string
 	for _, m := range managed {

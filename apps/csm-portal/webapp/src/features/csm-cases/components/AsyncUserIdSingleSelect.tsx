@@ -53,6 +53,9 @@ interface AsyncUserIdSingleSelectProps {
    * `AsyncUserIdMultiSelect`'s own `onNamesResolved`. */
   onNameResolved?: (id: string, name: string) => void;
   placeholder?: string;
+  /** Marks the field required (asterisk + `aria-required`). Display only:
+   * the caller still owns validation. */
+  required?: boolean;
 }
 
 /**
@@ -72,6 +75,7 @@ export default function AsyncUserIdSingleSelect({
   active,
   onNameResolved,
   placeholder,
+  required,
 }: AsyncUserIdSingleSelectProps): JSX.Element {
   const [input, setInput] = useState("");
   const [open, setOpen] = useState(false);
@@ -158,7 +162,12 @@ export default function AsyncUserIdSingleSelect({
             : "No approvers found"
       }
       renderInput={(params) => (
-        <TextField {...params} label={label} placeholder={value ? undefined : placeholder} />
+        <TextField
+          {...params}
+          label={label}
+          placeholder={value ? undefined : placeholder}
+          required={required}
+        />
       )}
     />
   );

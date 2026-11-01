@@ -150,6 +150,26 @@ type RunbookService interface {
 	Import(ctx context.Context, req domain.ImportRunbooksRequest) (domain.ImportRunbooksResponse, error)
 }
 
+// StandardChangeService serves the standard change catalogue (templates and their
+// CAB-approved versions) and the proposals that create, modify or retire them.
+// Internal (WSO2) callers only.
+type StandardChangeService interface {
+	SearchTemplates(ctx context.Context, req domain.SearchStandardChangeTemplatesRequest) (domain.SearchStandardChangeTemplatesResponse, error)
+	GetTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	GetTemplateVersion(ctx context.Context, templateID, versionID string) (domain.StandardChangeTemplateVersion, error)
+	// SuspendTemplate suspends an active template, recording the optional reason.
+	SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error)
+	ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	GetProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	SearchProposals(ctx context.Context, req domain.SearchStandardChangeProposalsRequest) (domain.SearchStandardChangeProposalsResponse, error)
+	UpdateProposal(ctx context.Context, id string, req domain.UpdateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	SubmitProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	WithdrawProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+}
+
 // SNUserService defines the user operations backed by the ServiceNow data source.
 type SNUserService interface {
 	// SearchUsers returns a paginated list of ServiceNow users that match the
@@ -289,8 +309,8 @@ type SLAStatusService interface {
 // SLADurationPolicyService backs GET /sla-duration-policy — see
 // domain.SLADurationPolicyItem's own doc comment for what it's for.
 type SLADurationPolicyService interface {
-	// ListSLADurationPolicy returns every row of sla_duration_policy,
-	// unpaginated.
+	// ListSLADurationPolicy returns the computed (severity, clockType)
+	// duration list, unpaginated.
 	ListSLADurationPolicy(ctx context.Context) (domain.SLADurationPolicyResponse, error)
 }
 

@@ -65,7 +65,17 @@ import type { BeTaskState } from "@api/backend/types";
 import {
   appendWidgetTitleParam,
   buildWidgetPreviewHref,
+  GROUPABLE_FIELD_ACCOUNT,
 } from "@features/csm-dashboard/utils/widgetPreviewUrl";
+
+/** The owning widget, handed to a resourceType's `buildHref`. */
+export interface WidgetHrefContext {
+  widgetId: string;
+  displayName: string;
+  /** The widget's `distinctBy.field`, when it is a count of distinct values.
+   * `"account"` makes a case tile open the grouped-by-account preview. */
+  distinctByField?: string;
+}
 
 /** A resolved search-result row, typed loosely since its real shape depends
  * on `resourceType` — the label extractors below narrow what they read. */
@@ -98,10 +108,7 @@ export interface WidgetResourceConfig {
    * through the generic dashboard-widget preview page instead, which is the
    * only destination that can render this exact widget's own filtered
    * result set — every other resourceType ignores it. */
-  buildHref: (
-    filters: Record<string, unknown>,
-    ctx?: { widgetId: string; displayName: string },
-  ) => string;
+  buildHref: (filters: Record<string, unknown>, ctx?: WidgetHrefContext) => string;
   /** Icon shown on the tile, one per resource type (not per individual
    * widget — the backend registry doesn't carry per-widget icon metadata). */
   icon: LucideIcon;
@@ -549,7 +556,7 @@ function widgetPreviewFallbackHref(
   previewSlug: string,
   resourceType: BeWidgetResourceType,
   filters: Record<string, unknown>,
-  ctx: { widgetId: string; displayName: string } | undefined,
+  ctx: WidgetHrefContext | undefined,
 ): string {
   return buildWidgetPreviewHref({
     previewSlug,
@@ -557,6 +564,7 @@ function widgetPreviewFallbackHref(
     displayName: ctx?.displayName || "Dashboard widget",
     filters,
     resourceType,
+    groupBy: ctx?.distinctByField === GROUPABLE_FIELD_ACCOUNT ? GROUPABLE_FIELD_ACCOUNT : undefined,
   });
 }
 
@@ -576,10 +584,14 @@ function widgetPreviewFallbackHref(
 function caseFamilyBuildHref(
   previewSlug: string,
   filters: Record<string, unknown>,
-  ctx: { widgetId: string; displayName: string } | undefined,
+  ctx: WidgetHrefContext | undefined,
   fallback: () => string,
 ): string {
-  if (!translateCaseDashboardFiltersChecked(filters).lossless) {
+  // A count tile configured to count distinct accounts must open the
+  // grouped-by-account view whatever its filters, since the flat list pages
+  // cannot show "one row per account".
+  const groupsByAccount = ctx?.distinctByField === GROUPABLE_FIELD_ACCOUNT;
+  if (groupsByAccount || !translateCaseDashboardFiltersChecked(filters).lossless) {
     // Only ever called for the case-family resourceTypes; any one of them
     // picks the same case-DSL encoding, so the literal here doesn't need to
     // match the caller's own exact resourceType.

@@ -24,6 +24,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
@@ -36,6 +37,8 @@ import { ArrowLeft, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import { useParams } from "react-router";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 import QueryErrorState from "@components/QueryErrorState";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -93,7 +96,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
   const { data: article, isLoading, isError, error } = useGetKBArticle(id);
   const { data: history } = useGetKBArticleHistory(id);
-  const { data: kbList, isLoading: kbListLoading } = useListKnowledgeBases();
+  const { data: kbList, isSuccess: kbListLoaded, isError: kbListFailed } = useListKnowledgeBases();
   const { data: teams } = useSearchTeams();
   const createArticle = useCreateKBArticle();
   const patchContent = usePatchKBArticleContent(id);
@@ -105,6 +108,9 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
   const [teamKey, setTeamKey] = useState("");
   const [titleError, setTitleError] = useState<string | null>(null);
+  // Set by a Save draft on create with no body; the message shows while the
+  // body is still empty.
+  const [bodyRequiredShown, setBodyRequiredShown] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [isEditingPublished, setIsEditingPublished] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -122,6 +128,10 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   // this just keeps a deactivated one from ever being offered as a choice.
   const activeKnowledgeBases = (kbList?.knowledgeBases ?? []).filter((kb) => kb.active);
 
+  // Marked required only once there is one to pick; with none (or the list
+  // failed), the select is disabled and says why, and Save draft waits.
+  const kbPickable = activeKnowledgeBases.length > 0;
+
   const [kbDefaulted, setKbDefaulted] = useState(false);
   if (isCreateMode && !kbDefaulted && activeKnowledgeBases.length) {
     setKnowledgeBaseId(activeKnowledgeBases[0].id);
@@ -138,6 +148,12 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
   const versionCount = history?.history.filter((h) => h.state === "published").length ?? 0;
   const hasAnyHistory = (history?.history.length ?? 0) > 0;
   const isDeletable = article?.state === "draft" || article?.state === "pending_review";
+  // Creating an article needs a body (the create endpoint refuses an empty
+  // one); a later content save does not. An editor that was typed in and
+  // emptied again still emits markup such as "<p><br></p>", so blank is
+  // judged on the visible content, while an image-only body counts as one.
+  const bodyMissing = isCreateMode && !hasVisibleContent(body);
+  const showBodyError = bodyRequiredShown && bodyMissing;
 
   const handleKbChange = (e: SelectChangeEvent): void => {
     setKnowledgeBaseId(e.target.value);
@@ -183,12 +199,14 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
   const handleSaveDraft = (): void => {
     const trimmedTitle = title.trim();
+    setBodyRequiredShown(bodyMissing);
     if (!trimmedTitle) {
       setTitleError("Title is required.");
       return;
     }
-    if (!knowledgeBaseId) return;
     setTitleError(null);
+    if (bodyMissing) return;
+    if (!knowledgeBaseId) return;
     setSequenceError(null);
 
     if (isCreateMode) {
@@ -385,7 +403,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 3, maxWidth: 1400, mx: "auto", width: "95%" }}>
           {isCreateMode && (
-            <FormControl size="small" fullWidth disabled={kbListLoading || savePending}>
+            <FormControl size="small" fullWidth required={kbPickable} disabled={!kbPickable || savePending}>
               <InputLabel id="kb-select-label">Knowledge base</InputLabel>
               <Select labelId="kb-select-label" label="Knowledge base" value={knowledgeBaseId} onChange={handleKbChange}>
                 {activeKnowledgeBases.map((kb) => (
@@ -394,6 +412,14 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                   </MenuItem>
                 ))}
               </Select>
+              {/* isSuccess, not !isLoading: a query paused offline is neither loading nor failed. */}
+              {!kbPickable && (kbListLoaded || kbListFailed) && (
+                <FormHelperText>
+                  {kbListFailed
+                    ? "Couldn't load the knowledge bases, so the article can't be saved yet. Try again later."
+                    : "No knowledge base is taking new articles, so the article can't be saved."}
+                </FormHelperText>
+              )}
             </FormControl>
           )}
 
@@ -420,6 +446,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
 
           <TextField
             label="Title"
+            required={!isReadOnly}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             error={Boolean(titleError)}
@@ -433,13 +460,15 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
               id="kb-article-body-label"
               component="label"
               variant="caption"
-              color="text.secondary"
+              color={showBodyError ? "error" : "text.secondary"}
               sx={{ display: "block", mb: 0.5 }}
             >
               Body
+              {isCreateMode && <RequiredMark />}
             </Typography>
             <Box role="group" aria-labelledby="kb-article-body-label">
               <Editor
+                ariaRequired={isCreateMode}
                 value={body}
                 onChange={setBody}
                 placeholder="Write the article…"
@@ -449,6 +478,11 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                 disabled={isReadOnly || savePending}
               />
             </Box>
+            {showBodyError && (
+              <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
+                Body is required.
+              </Typography>
+            )}
           </Box>
 
           {!isReadOnly && (
@@ -459,7 +493,12 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
                     Cancel
                   </Button>
                 )}
-                <Button variant="outlined" onClick={handleSaveDraft} disabled={savePending}>
+                <Button
+                  variant="outlined"
+                  onClick={handleSaveDraft}
+                  // Creating needs a knowledge base; the first one is picked as soon as the list loads.
+                  disabled={savePending || (isCreateMode && !knowledgeBaseId)}
+                >
                   {isCreateMode ? "Save draft" : "Save changes"}
                 </Button>
                 {!isCreateMode && (

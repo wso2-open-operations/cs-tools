@@ -57,9 +57,9 @@ type TimeCardRepository interface {
 	// non-empty it must match the case's own project (work_item.project_id);
 	// an empty req.ProjectID leaves customer_project_id NULL. Returns a
 	// ValidationError if req.CaseID does not exist, req.ProjectID does not
-	// match the case's project, any approver id does not exist, or this
-	// would bring userID's own total minutes for req.CaseID on req.Date over
-	// maxUserTicketDailyMinutes (see that constant's own doc comment).
+	// match the case's project, or any approver id does not exist. The
+	// card's own total minutes are limited to domain.MaxTimeCardMinutes by
+	// the service layer; there is no cumulative per-case/per-day cap.
 	CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest, userID string) (domain.TimeCardView, error)
 	// UpdateTimeCardFields applies req's non-nil editable fields (everything
 	// except State/LeadComment, which go through TransitionTimeCardState
@@ -72,9 +72,9 @@ type TimeCardRepository interface {
 	// actorID, or is not in the "submitted" state (deliberately not
 	// distinguished, the same as DeleteTimeCard below, so the response
 	// can't be used to enumerate other users' card ids/states). Returns a
-	// ValidationError if changing the date and/or any of its five minute
-	// fields would bring actorID's own total for this card's case on the
-	// resolved date over maxUserTicketDailyMinutes.
+	// ValidationError if changing any of its five minute fields would
+	// bring this card's own resulting total over domain.MaxTimeCardMinutes
+	// (per card, not a cumulative daily total).
 	UpdateTimeCardFields(ctx context.Context, req domain.UpdateTimeCardRequest, actorID string) (domain.TimeCardView, error)
 	// TransitionTimeCardState sets the time card identified by id to state
 	// ("approved" or "rejected", validated by the caller), recording
@@ -578,82 +578,6 @@ func issueComplexityFromEnum(stored string) string {
 	}
 }
 
-// maxUserTicketDailyMinutes mirrors the old SN Portal's "no more than 8
-// hours per ticket per day" rule (digiops-cs#3270), missing from this data
-// source until now. Enforced per submitter per case per day -- two different
-// engineers logging time against the same case on the same day are each
-// judged against their own total, not a combined one. The webapp's
-// LogTimeCardDialog form carries the identical 480-minute client-side check
-// (MAX_MINUTES_PER_TICKET_PER_DAY, timeCardConstants.ts) for fast feedback,
-// but that check alone is trivially bypassable by calling this API directly
-// -- this is the real enforcement boundary.
-const maxUserTicketDailyMinutes = 480
-
-// lockUserTimeCardWrites takes a transaction-scoped advisory lock keyed on
-// userID alone (not the finer (case, user, date) tuple the cap itself is
-// judged against) -- the cap check needs to read a case's id before it can
-// form that finer key for an edit (case_id isn't on UpdateTimeCardRequest),
-// and locking on userID first avoids that chicken-and-egg ordering while
-// still closing the real race: two of this same user's create/edit calls
-// landing concurrently, each reading the other's not-yet-committed sibling
-// total and both passing. Different users never share a lock key, which is
-// fine -- the cap itself is per-submitter, so their writes never interact.
-// Must be the first statement in the transaction, before any read this
-// method's caller goes on to use for the cap check.
-func lockUserTimeCardWrites(ctx context.Context, tx pgx.Tx, userID string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, userID); err != nil {
-		return fmt.Errorf("lock user time card writes: %w", err)
-	}
-	return nil
-}
-
-// ticketDailyCapExceeded sums every OTHER non-REJECTED time_card minute-total
-// userID has already logged against caseID on date (excludeID, when set,
-// omits one time_card id -- the row being edited -- from that sum) and
-// reports whether adding newCardTotal to it would exceed
-// maxUserTicketDailyMinutes. The caller must already hold userID's
-// lockUserTimeCardWrites lock, or two concurrent writes could each read a
-// stale sibling sum and both pass.
-func ticketDailyCapExceeded(ctx context.Context, tx pgx.Tx, caseID, userID, date string, excludeID *string, newCardTotal int) (siblingTotal int, exceeded bool, err error) {
-	// work_date = $3::text::date, not a direct ::date cast: pgx v5's date
-	// codec has no encode plan for a raw Go string once the server infers
-	// the parameter's OID as `date` -- casting through text first keeps the
-	// parameter bound as text, with the date conversion happening
-	// server-side. Same fix as this file's own filter/insert date casts
-	// above.
-	// Each column is individually COALESCEd, not just the outer SUM: a row
-	// with even one NULL duration column (a real, possible shape -- see
-	// TestTimeCardIntegration_SearchTimeCardsToleratesNullDurationColumns)
-	// makes the bare "a + b + ..." arithmetic NULL for that whole row, which
-	// SUM() then silently drops instead of counting that row's other,
-	// non-NULL minutes -- undercounting a sibling and letting the cap be
-	// bypassed.
-	err = tx.QueryRow(ctx, `
-		SELECT COALESCE(SUM(
-			COALESCE(analyzing_minutes, 0) + COALESCE(setting_up_minutes, 0) +
-			COALESCE(reproducing_debugging_minutes, 0) + COALESCE(providing_solution_minutes, 0) +
-			COALESCE(patching_minutes, 0)
-		), 0)
-		FROM time_card
-		WHERE case_id = $1::uuid AND user_id = $2::uuid AND work_date = $3::text::date AND state <> 'REJECTED'
-		  AND ($4::uuid IS NULL OR id <> $4::uuid)`,
-		caseID, userID, date, excludeID,
-	).Scan(&siblingTotal)
-	if err != nil {
-		return 0, false, fmt.Errorf("sum ticket daily minutes: %w", err)
-	}
-	return siblingTotal, siblingTotal+newCardTotal > maxUserTicketDailyMinutes, nil
-}
-
-// ticketDailyCapError is the ValidationError returned when
-// ticketDailyCapExceeded reports true.
-func ticketDailyCapError(date string, total int) error {
-	return &apierror.ValidationError{Msg: fmt.Sprintf(
-		"logging this time would bring your total for this ticket on %s to %d minutes, over the %d-hour (%d minute) per-ticket daily limit",
-		date, total, maxUserTicketDailyMinutes/60, maxUserTicketDailyMinutes,
-	)}
-}
-
 // CreateTimeCard implements TimeCardRepository.
 func (r *timeCardRepo) CreateTimeCard(ctx context.Context, req domain.CreateTimeCardRequest, userID string) (domain.TimeCardView, error) {
 	id, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (string, error) {
@@ -670,10 +594,6 @@ func (r *timeCardRepo) CreateTimeCard(ctx context.Context, req domain.CreateTime
 // stay plain `return "", err` instead of needing a second err-only variable
 // alongside the id this method must also hand back to its caller.
 func createTimeCardTx(ctx context.Context, tx pgx.Tx, req domain.CreateTimeCardRequest, userID string) (string, error) {
-	if err := lockUserTimeCardWrites(ctx, tx, userID); err != nil {
-		return "", err
-	}
-
 	// The case's own project is work_item.project_id -- case_id now
 	// references work_item(id) generically (migration 0041's most recent
 	// revision), not "case"(id) specifically, so this looks up work_item
@@ -700,15 +620,6 @@ func createTimeCardTx(ctx context.Context, tx pgx.Tx, req domain.CreateTimeCardR
 	}
 	if req.ProjectID != "" && (caseProjectID == nil || *caseProjectID != req.ProjectID) {
 		return "", &apierror.ValidationError{Msg: "projectId must match the case's own project"}
-	}
-
-	newTotal := req.TimeAnalyzing + req.TimeSettingUp + req.TimeReproducingDebugging + req.TimeProvidingSolution + req.TimePatching
-	siblingTotal, exceeded, err := ticketDailyCapExceeded(ctx, tx, req.CaseID, userID, req.Date, nil, newTotal)
-	if err != nil {
-		return "", err
-	}
-	if exceeded {
-		return "", ticketDailyCapError(req.Date, siblingTotal+newTotal)
 	}
 
 	// 'SUBMITTED' (not 'submitted') and issue_complexity's ::text::enum cast:
@@ -840,69 +751,48 @@ func (r *timeCardRepo) UpdateTimeCardFields(ctx context.Context, req domain.Upda
 	// ownership guard below.
 	query := fmt.Sprintf(`UPDATE time_card SET %s WHERE id = $%d AND user_id = $%d AND state = 'SUBMITTED' RETURNING id`, strings.Join(sets, ", "), argIdx, actorArg)
 
-	// Only a field this cap is actually computed from changing is worth the
-	// extra read+lock below -- an edit touching just e.g. workLogComment or
-	// approvers can never move a card's own total, so it's skipped entirely.
-	affectsDailyCap := req.Date != nil || req.TimeAnalyzing != nil || req.TimeSettingUp != nil ||
+	// Only a change to one of the five minute fields can move the card's own
+	// total, so an edit touching just e.g. workLogComment, date or approvers
+	// skips the read below entirely.
+	affectsTotal := req.TimeAnalyzing != nil || req.TimeSettingUp != nil ||
 		req.TimeReproducingDebugging != nil || req.TimeProvidingSolution != nil || req.TimePatching != nil
 
 	var id string
 	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
-		if err := lockUserTimeCardWrites(ctx, tx, actorID); err != nil {
-			return err
-		}
-
-		if affectsDailyCap {
-			var caseID string
-			var currentDate *string
+		if affectsTotal {
 			var analyzing, settingUp, reproducing, providing, patching int
-			// Every one of the five duration columns, and work_date itself,
-			// is nullable on a real row (see
+			// Every one of the five duration columns is nullable on a real
+			// row (see
 			// TestTimeCardIntegration_SearchTimeCardsToleratesNullDurationColumns's
 			// own regression history above) -- COALESCE the minutes the same
-			// way scanTimeCardView's own select list does, and scan the date
-			// into a *string so a NULL one doesn't crash this read.
+			// way scanTimeCardView's own select list does. FOR UPDATE so a
+			// concurrent edit of this same card can't slip a different
+			// stored value in between this read and the UPDATE below.
 			err := tx.QueryRow(ctx, `
-				SELECT case_id, work_date::text,
-				       COALESCE(analyzing_minutes, 0), COALESCE(setting_up_minutes, 0),
+				SELECT COALESCE(analyzing_minutes, 0), COALESCE(setting_up_minutes, 0),
 				       COALESCE(reproducing_debugging_minutes, 0), COALESCE(providing_solution_minutes, 0),
 				       COALESCE(patching_minutes, 0)
-				FROM time_card WHERE id = $1 AND user_id = $2 AND state = 'SUBMITTED'`,
+				FROM time_card WHERE id = $1 AND user_id = $2 AND state = 'SUBMITTED'
+				FOR UPDATE`,
 				req.ID, actorID,
-			).Scan(&caseID, &currentDate, &analyzing, &settingUp, &reproducing, &providing, &patching)
+			).Scan(&analyzing, &settingUp, &reproducing, &providing, &patching)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return &apierror.ConflictError{Msg: "time card is not editable (it may not exist, may not belong to you, or is no longer in the submitted state)"}
 			}
 			if err != nil {
-				return fmt.Errorf("read time card for daily cap check: %w", err)
+				return fmt.Errorf("read time card for total minutes check: %w", err)
 			}
-			var resolvedDate string
-			if req.Date != nil {
-				resolvedDate = *req.Date
-			} else if currentDate != nil {
-				resolvedDate = *currentDate
+			merge := func(reqVal *int, current int) int {
+				if reqVal != nil {
+					return *reqVal
+				}
+				return current
 			}
-			// No date to key the check on at all (req.Date absent AND the
-			// stored work_date is NULL, a pre-existing data anomaly): skip
-			// rather than send an empty string into a ::date cast below.
-			if resolvedDate != "" {
-				merge := func(reqVal *int, current int) int {
-					if reqVal != nil {
-						return *reqVal
-					}
-					return current
-				}
-				newCardTotal := merge(req.TimeAnalyzing, analyzing) + merge(req.TimeSettingUp, settingUp) +
-					merge(req.TimeReproducingDebugging, reproducing) + merge(req.TimeProvidingSolution, providing) +
-					merge(req.TimePatching, patching)
-				excludeID := req.ID
-				siblingTotal, exceeded, err := ticketDailyCapExceeded(ctx, tx, caseID, actorID, resolvedDate, &excludeID, newCardTotal)
-				if err != nil {
-					return err
-				}
-				if exceeded {
-					return ticketDailyCapError(resolvedDate, siblingTotal+newCardTotal)
-				}
+			newCardTotal := merge(req.TimeAnalyzing, analyzing) + merge(req.TimeSettingUp, settingUp) +
+				merge(req.TimeReproducingDebugging, reproducing) + merge(req.TimeProvidingSolution, providing) +
+				merge(req.TimePatching, patching)
+			if newCardTotal > domain.MaxTimeCardMinutes {
+				return &apierror.ValidationError{Msg: domain.MaxTimeCardMinutesMessage}
 			}
 		}
 

@@ -206,6 +206,10 @@ type ProjectContact struct {
 	// Roles are the project roles the membership's groups grant:
 	// PORTAL_USER, SECURITY_CONTACT, LEAD_USER, ADMIN, BUSINESS_CONTACT.
 	Roles []string `json:"roles"`
+	// AccountRoles are the contact's account-level roles, restricted by
+	// entity-service to external, customer, partner, customer_admin and
+	// partner_admin.
+	AccountRoles []string `json:"accountRoles,omitempty"`
 
 	IsCsIntegrationUser bool `json:"isCsIntegrationUser"`
 }

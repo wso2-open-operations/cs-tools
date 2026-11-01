@@ -746,6 +746,16 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "creating an external-type user is not available at this time")
 		return
 	}
+	// A portal (Asgardeo) role only ever resolves for a wso2.com account (see
+	// withPortalRoles' own isWso2Email gate on the read side) -- granting one
+	// to a non-wso2.com target via grantRoles would add them to a SCIM role in
+	// the wrong org with no way for this portal to ever display or act on it
+	// again. Checked up front, before anything is created, so the mistake is
+	// caught with a clear 400 instead of a silent no-op grant.
+	if len(req.GrantRoles) > 0 && !isWso2Email(req.Email) {
+		writeError(w, http.StatusBadRequest, "grantRoles can only be granted to a "+wso2EmailDomain+" account")
+		return
+	}
 
 	// Resolved up front, before anything is created, so an unknown grantRoles
 	// key fails fast with a 400 rather than after the entity service user
@@ -830,6 +840,144 @@ func (h *UsersHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, result)
+}
+
+// grantUserRolesRequest is the POST /users/{id}/roles request shape -- the
+// post-creation counterpart to createUserRequest's own GrantRoles field, for
+// granting one or more portal permission roles (cs_engineer, escalator, ...)
+// to a user who already exists, rather than only at the moment a new one is
+// created. Each entry is a GrantableRole.Key, the same vocabulary GET
+// /roles/grantable reports and POST /users' own grantRoles field accepts.
+type grantUserRolesRequest struct {
+	Roles []string `json:"roles"`
+}
+
+// grantUserRolesResponse reports which of the requested roles were actually
+// granted via SCIM, and which were not -- a role can fail independently of
+// the others (e.g. one SCIM role write times out while the rest succeed), so
+// a single boolean success/failure would hide a partial result. Failed is
+// omitted entirely on full success.
+type grantUserRolesResponse struct {
+	Granted []string `json:"granted"`
+	Failed  []string `json:"failed,omitempty"`
+}
+
+// GrantUserRoles handles POST /users/{id}/roles: grants one or more portal
+// permission roles (the same vocabulary GET /roles/grantable reports) to an
+// existing platform user via SCIM. Restricted to admin via the route's
+// PermAdmin permission (cmd/server/main.go) -- the same gate POST /users'
+// own grantRoles field sits behind, since granting a role is exactly as
+// sensitive whether it happens at creation time or afterward.
+//
+// Refused with a 400 when the target's email isn't a wso2.com address (see
+// the isWso2Email check below) -- same guard CreateUser's own grantRoles
+// field has, for the same reason: a portal role is meaningless for an
+// account outside the wso2.com SCIM org, so granting one there would be a
+// silent no-op the admin would have no way to notice.
+//
+// Unlike CreateUser's own grant step, a SCIM failure here is never swallowed
+// as best-effort: granting the role is this endpoint's entire purpose, so a
+// caller that asked for it must be told whether it actually happened rather
+// than seeing a 200 that silently granted nothing. Every requested role is
+// still attempted even if an earlier one fails, so one bad role never blocks
+// the rest -- the response reports exactly which succeeded and which didn't
+// (200 if all granted, 502 if none did, 207 Multi-Status for a mixed result).
+func (h *UsersHandler) GrantUserRoles(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	id := r.PathValue("id")
+	if id == "" || !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	body, ok := readJSONBody(w, r)
+	if !ok {
+		return
+	}
+
+	var req grantUserRolesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	if len(req.Roles) == 0 {
+		writeError(w, http.StatusBadRequest, "roles must name at least one role")
+		return
+	}
+
+	// Resolved up front, before the target user is even looked up, so an
+	// unknown key fails fast with a 400 -- same precedent as CreateUser's own
+	// grantRoles resolution. RoleIDForKey (not the plural RoleIDsForKey),
+	// also matching CreateUser: granting "the escalator role" means one
+	// specific real role, not every real role configured for that key.
+	roleIDs := make(map[string]string, len(req.Roles))
+	for _, key := range req.Roles {
+		roleID, ok := RoleIDForKey(h.grantableRoles, key)
+		if !ok {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("roles contains invalid value: %s", key))
+			return
+		}
+		roleIDs[key] = roleID
+	}
+
+	// SCIM grants by email, not platform user id, so the target's email has
+	// to be resolved first -- entity-service's own GetUser response already
+	// carries it (UserDetail.Email), the same field entityUserMeResponse
+	// already decodes for GetMe/CreateUser.
+	target, err := h.entity.GetUser(r.Context(), id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "GrantUserRoles: entity GetUser failed", "userID", user.UserID, "targetID", id, "err", err)
+		mapUpstreamErrorGeneric(w, err, "Failed to look up the user.")
+		return
+	}
+	var targetUser entityUserMeResponse
+	if err := json.Unmarshal(target, &targetUser); err != nil || targetUser.Email == "" {
+		slog.ErrorContext(r.Context(), "GrantUserRoles: parse target user failed", "userID", user.UserID, "targetID", id, "err", err)
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	// Same guard as CreateUser's own grantRoles field: a portal role only
+	// ever resolves for a wso2.com account (withPortalRoles' isWso2Email
+	// gate), so granting one to a non-wso2.com target would add them to a
+	// SCIM role in the wrong org with no way for this portal to ever display
+	// or act on it again.
+	if !isWso2Email(targetUser.Email) {
+		writeError(w, http.StatusBadRequest, "portal roles can only be granted to a "+wso2EmailDomain+" account")
+		return
+	}
+
+	// granted starts as a non-nil empty slice (not var granted []string) so
+	// json.Marshal writes "granted":[] rather than "granted":null on a total
+	// failure -- openapi.yaml declares it a required array with no "nullable",
+	// and a client that iterates it on a 502 would otherwise get null. failed
+	// stays nil on purpose: its own omitempty tag then drops it entirely on a
+	// full success, matching the schema's "omitted on full success" contract.
+	granted := []string{}
+	var failed []string
+	for _, key := range req.Roles {
+		if err := h.scim.AddRoleMembers(r.Context(), roleIDs[key], []string{targetUser.Email}); err != nil {
+			slog.ErrorContext(r.Context(), "GrantUserRoles: scim AddRoleMembers failed", "userID", user.UserID, "targetID", id, "role", key, "err", err)
+			failed = append(failed, key)
+			continue
+		}
+		granted = append(granted, key)
+	}
+
+	resp := grantUserRolesResponse{Granted: granted, Failed: failed}
+	switch {
+	case len(failed) == 0:
+		writeJSONValue(w, http.StatusOK, resp)
+	case len(granted) == 0:
+		writeJSONValue(w, http.StatusBadGateway, resp)
+	default:
+		writeJSONValue(w, http.StatusMultiStatus, resp)
+	}
 }
 
 // timeCardApproversResponse is the GET /users/time-card-approvers response shape.

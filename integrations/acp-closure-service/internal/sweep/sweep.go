@@ -119,7 +119,12 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 		cascades = append(cascades, *subCascade)
 	}
 
-	invoiceCascade, invoiceErr := buildInvoiceCascade(ctx, reader, updater, ntf, proj, now)
+	subRenewed, err := subscriptionRenewed(proj, now)
+	if err != nil {
+		return err
+	}
+
+	invoiceCascade, invoiceRenewed, invoiceErr := buildInvoiceCascade(ctx, reader, updater, ntf, proj, now)
 	if invoiceErr != nil {
 		slog.ErrorContext(ctx, "invoice cascade evaluation failed; still running the subscription cascade",
 			"projectID", proj.ID, "err", invoiceErr)
@@ -147,7 +152,72 @@ func processProject(ctx context.Context, reader entityReader, updater projectUpd
 		}
 	}
 
+	if subRenewed {
+		if err := resetToOpen(ctx, updater, proj.ID, &history, "end date", suspensionstate.WithSubscriptionEndDateOpen); err != nil {
+			return err
+		}
+	}
+	if invoiceRenewed {
+		if err := resetToOpen(ctx, updater, proj.ID, &history, "invoice", suspensionstate.WithDueInvoicesOpen); err != nil {
+			return err
+		}
+	}
+
 	return invoiceErr
+}
+
+// newTerm reports whether a track's date is more than 90 days away: legacy's
+// "open" event, outside every notice window.
+func newTerm(daysRemaining int) bool {
+	return daysRemaining > int(closure.NoticeWindow90)
+}
+
+// dimensionOpen reports whether a per-dimension closure state is Open; unset
+// counts as Open, as in suspend and suspendInvoice.
+func dimensionOpen(state *string) bool {
+	return state == nil || *state == "Open"
+}
+
+// subscriptionRenewed reports whether the end-date track's saved state should
+// go back to "open" (see resetToOpen): a notice is recorded, the dimension is
+// Open, and the end date is more than 90 days away again.
+func subscriptionRenewed(proj project, now time.Time) (bool, error) {
+	if proj.EndDate == nil || !dimensionOpen(proj.EndDateClosureState) {
+		return false, nil
+	}
+	lastWindow, err := suspensionstate.LastNoticeWindow(proj.SuspensionProcessState)
+	if err != nil {
+		return false, fmt.Errorf("sweep: parse suspensionProcessState for project %s: %w", proj.ID, err)
+	}
+	return lastWindow != nil && newTerm(closure.Decide(now, *proj.EndDate, nil).DaysRemaining), nil
+}
+
+// resetToOpen saves one track's suspensionProcessState section as "open",
+// building on history like the notice records do. Legacy recomputed the event
+// from the date on every run and saved it, so once a customer renewed (or
+// paid) the track went back to "open" and the next term's reminders started
+// over. Without this, a renewed project keeps its old "30_days_notice" and its
+// next 90, 60 and 30-day reminders are skipped. Only a track whose own closure
+// state is still Open is reset, even if the other track suspended the project,
+// as in legacy. No closure state changes: reopening a suspended project is a
+// separate, manual step.
+func resetToOpen(ctx context.Context, updater projectUpdater, projectID string, history *json.RawMessage, track string, reset func(json.RawMessage) (json.RawMessage, error)) error {
+	newState, err := reset(*history)
+	if err != nil {
+		return fmt.Errorf("sweep: build %s suspensionProcessState for project %s: %w", track, projectID, err)
+	}
+
+	body, err := json.Marshal(map[string]json.RawMessage{"suspensionProcessState": newState})
+	if err != nil {
+		return fmt.Errorf("sweep: marshal update request: %w", err)
+	}
+
+	if _, err := updater.UpdateProject(ctx, projectID, body); err != nil {
+		return fmt.Errorf("sweep: reset %s state for project %s: %w", track, projectID, err)
+	}
+	*history = newState
+	slog.InfoContext(ctx, "state reset to open", "projectID", projectID, "track", track)
+	return nil
 }
 
 // buildSubscriptionCascade evaluates the subscription end-date closure

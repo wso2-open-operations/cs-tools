@@ -70,6 +70,7 @@ export default function EditorWithSourceToggle({
   disabled = false,
   id,
   keepStyledHtmlAsSource = false,
+  ariaRequired = false,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -81,6 +82,10 @@ export default function EditorWithSourceToggle({
   id?: string;
   /** Keep HTML the rich editor would flatten in source mode, and warn before switching away. */
   keepStyledHtmlAsSource?: boolean;
+  /** Tells assistive tech the field is mandatory, in either mode (`aria-required`
+   * on the rich editor's editable area or on the source box). The caller draws
+   * the visible asterisk on its own caption. */
+  ariaRequired?: boolean;
 }): JSX.Element {
   // null until the user flips the switch themselves; after that their choice wins.
   const [userSourceChoice, setUserSourceChoice] = useState<boolean | null>(null);
@@ -163,6 +168,7 @@ export default function EditorWithSourceToggle({
               lineHeight: 1.45,
             },
             spellCheck: false,
+            "aria-required": ariaRequired || undefined,
           }}
           fullWidth
           variant="outlined"
@@ -178,6 +184,7 @@ export default function EditorWithSourceToggle({
           maxHeight={maxHeight}
           toolbarVariant={toolbarVariant}
           disabled={disabled}
+          ariaRequired={ariaRequired}
         />
       )}
       {sourceMode && (

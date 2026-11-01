@@ -38,13 +38,14 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Ban, Eye, MoreVertical, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
+import { Ban, Eye, MoreVertical, Pencil, Plus, Wifi, WifiOff } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useUpdateDeployment } from "@features/csm-projects/api/useUpdateDeployment";
 import { useCreateDeployment } from "@features/csm-projects/api/useCreateDeployment";
+import { useSetDeploymentAirGapped } from "@features/csm-projects/api/useSetDeploymentAirGapped";
 import {
   deploymentTypeLabel,
   formatDeploymentDate,
@@ -72,20 +73,25 @@ interface Feedback {
 
 /**
  * Lists a project's deployments (`POST /deployments/search`) and lets engineers
- * create, edit, or deactivate deployments. Type is editable via a select
- * (string enum per PR #957; `typeKey` integer is gone).
+ * create, edit, or deactivate deployments, and mark one air-gapped (or clear
+ * the mark). Type is editable via a select (string enum per PR #957; `typeKey`
+ * integer is gone). The air-gapped action only appears when the deployment
+ * carries a boolean `airGapped`: it is `null` when the entity service runs on
+ * ServiceNow, where the flag cannot be set.
  */
 export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.Element {
   const { canWrite } = usePortalAccess();
   const { data, isLoading, isError, error, isFetching } = useSearchDeployments(projectId);
   const updateDeployment = useUpdateDeployment(projectId);
   const createDeployment = useCreateDeployment(projectId);
+  const setAirGapped = useSetDeploymentAirGapped(projectId);
 
   // Row-action menu anchored to the deployment whose "⋮" was clicked.
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuTarget, setMenuTarget] = useState<BeDeployment | null>(null);
   const [editing, setEditing] = useState<BeDeployment | null>(null);
   const [deactivating, setDeactivating] = useState<BeDeployment | null>(null);
+  const [togglingAirGap, setTogglingAirGap] = useState<BeDeployment | null>(null);
   const [viewing, setViewing] = useState<BeDeployment | null>(null);
   const [creating, setCreating] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -141,6 +147,34 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           setDeactivating(null);
           setFeedback({
             message: `Could not deactivate ${name}: ${err.message}`,
+            severity: "error",
+          });
+        },
+      },
+    );
+  };
+
+  const handleToggleAirGap = (): void => {
+    if (!togglingAirGap) return;
+    const target = togglingAirGap;
+    const name = target.name ?? "this deployment";
+    const airGapped = !target.airGapped;
+    setAirGapped.mutate(
+      { deploymentId: target.id, airGapped },
+      {
+        onSuccess: () => {
+          setTogglingAirGap(null);
+          setFeedback({
+            message: airGapped ? `Marked ${name} air-gapped.` : `Cleared the air-gapped mark on ${name}.`,
+            severity: "success",
+          });
+        },
+        onError: (err) => {
+          // Close the dialog first so the page-level alert is not hidden
+          // behind the modal backdrop.
+          setTogglingAirGap(null);
+          setFeedback({
+            message: `Could not update ${name}: ${err.message}`,
             severity: "error",
           });
         },
@@ -235,7 +269,14 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
                     onClick={() => setViewing(d)}
                     sx={{ cursor: "pointer" }}
                   >
-                    <TableCell>{d.name || "—"}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        {d.name || "—"}
+                        {d.airGapped === true && (
+                          <Chip size="small" color="warning" variant="outlined" label="Air-gapped" />
+                        )}
+                      </Box>
+                    </TableCell>
                     <TableCell>
                       <Chip size="small" variant="outlined" label={deploymentTypeLabel(d.type)} />
                     </TableCell>
@@ -294,6 +335,21 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
           >
             <Pencil size={16} style={{ marginRight: 8 }} />
             Edit details
+          </MenuItem>
+        )}
+        {canWrite && typeof menuTarget?.airGapped === "boolean" && (
+          <MenuItem
+            onClick={() => {
+              setTogglingAirGap(menuTarget);
+              closeMenu();
+            }}
+          >
+            {menuTarget.airGapped ? (
+              <Wifi size={16} style={{ marginRight: 8 }} />
+            ) : (
+              <WifiOff size={16} style={{ marginRight: 8 }} />
+            )}
+            {menuTarget.airGapped ? "Clear air-gapped mark" : "Mark air-gapped"}
           </MenuItem>
         )}
         {canWrite && (
@@ -359,6 +415,37 @@ export default function DeploymentsTab({ projectId }: DeploymentsTabProps): JSX.
             disabled={updateDeployment.isPending}
           >
             Deactivate
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!togglingAirGap}
+        onClose={() => setTogglingAirGap(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {togglingAirGap?.airGapped ? "Clear air-gapped mark" : "Mark deployment air-gapped"}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {togglingAirGap?.airGapped ? "Clear the air-gapped mark on " : "Mark "}
+            <Box component="span" sx={{ fontWeight: 600, color: "text.primary" }}>
+              {togglingAirGap?.name || "this deployment"}
+            </Box>
+            {togglingAirGap?.airGapped
+              ? "? Licences issued for it from now on let its products publish usage online again."
+              : " air-gapped? Licences issued for it from now on tell its products not to publish usage online; its usage has to be uploaded as reports instead."}{" "}
+            Licences already downloaded are not affected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTogglingAirGap(null)} disabled={setAirGapped.isPending}>
+            Cancel
+          </Button>
+          <Button variant="contained" onClick={handleToggleAirGap} disabled={setAirGapped.isPending}>
+            {togglingAirGap?.airGapped ? "Clear mark" : "Mark air-gapped"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -15,6 +15,7 @@ cs-tools/
 │   ├── customer-portal/                   # Customer Portal — Ballerina backend (v1, deprecated) +
 │   │                                       #   Go backend-v2 (in progress) + React webapp + React microapp
 │   ├── git-internals-dashboard/           # SLA monitor for GitHub issues — Go backend + React webapp
+│   ├── knowledge-portal/                  # Public knowledge base — Go backend + React webapp
 │   ├── mttr-application/                  # MTTR analytics for ServiceNow homepage widgets — Node.js
 │   ├── security-advisory-patches-portal/  # Gated advisory-PDF portal — Ballerina backend + React webapp
 │   └── today-i-learned/                   # Today I Learned (Go backend for the feed in One WSO2)
@@ -76,6 +77,17 @@ An open-source SLA monitor for GitHub issues. Ingests issues from GitHub's Graph
 | `webapp` | React SPA visualizing issue volume, SLA breach risk, and compliance trends |
 
 See the [Git Internals Dashboard README](./apps/git-internals-dashboard/README.md) for full setup and usage documentation.
+
+### Knowledge Portal (`apps/knowledge-portal/`)
+
+A public, read-only knowledge base. It serves published articles from active knowledge bases through unauthenticated routes, with search, browse and related articles. It reads from this repo's `entity-service`.
+
+| Component | Description |
+|-----------|-------------|
+| `backend` | Go service that reads published articles from `entity-service` and serves them on public routes |
+| `webapp` | React SPA with search, browse and article views |
+
+See the [Knowledge Portal README](./apps/knowledge-portal/README.md) for full setup and usage documentation.
 
 ### MTTR Application (`apps/mttr-application/`)
 

@@ -196,7 +196,7 @@ func TestWeekdayReminder_OneEmailPerWindow(t *testing.T) {
 	if strings.Join(morning.to, ",") != "ann@example.com,ben@example.com" || len(morning.cc) != 0 {
 		t.Errorf("Morning to %v cc %v, want Ann and Ben only", morning.to, morning.cc)
 	}
-	if want := "[CRE Rota] Morning Rotation – Monday, 19 October 2026 (06:00–09:00 IST)"; morning.subject != want {
+	if want := "[CRE Operations] Morning Rotation – Monday, 19 October 2026 (06:00–09:00 IST)"; morning.subject != want {
 		t.Errorf("Morning subject = %q, want %q", morning.subject, want)
 	}
 	for _, s := range []string{
@@ -214,7 +214,7 @@ func TestWeekdayReminder_OneEmailPerWindow(t *testing.T) {
 	}
 	evening := mail.sent[1]
 	if strings.Join(evening.to, ",") != "dee@example.com" ||
-		evening.subject != "[CRE Rota] Evening Rotation – Monday, 19 October 2026 (18:00–21:00 IST)" ||
+		evening.subject != "[CRE Operations] Evening Rotation – Monday, 19 October 2026 (18:00–21:00 IST)" ||
 		!strings.Contains(evening.body, "<p>Dear Dee,</p>") {
 		t.Errorf("Evening = %+v", evening)
 	}

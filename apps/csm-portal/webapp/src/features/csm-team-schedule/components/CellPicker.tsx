@@ -26,6 +26,7 @@ import {
   useState,
   type JSX,
 } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type { CellAbsence, ScheduleAbsenceKind, ScheduleShift, ScheduleTier } from "../types";
 import { escalationGrid } from "../utils/rota";
 import { useTeamName } from "../utils/teamColourContext";
@@ -202,10 +203,11 @@ function prefersReducedMotion(): boolean {
  * click, and the header says who and what the day holds now, which is the
  * part of the grid it covers that the decision needs.
  *
- * Two columns: the rota on the left, leave and allocations on the right with
- * the date range at their head. Leave is almost always marked over days, a
+ * Two rows: the rota on top (rotations beside standing hours), then leave and
+ * allocations with the date range at their head (leave beside moves to another
+ * team and allocations). Leave and moves are almost always marked over days, a
  * rotation mostly for the one that was clicked; the range still applies to
- * both, and the rota side says which days it will set.
+ * both, and the rota row says which days it will set.
  *
  * The caller keys it on the cell, so a new cell is a new decision: the range
  * starts closed again rather than carrying the last one over onto somebody
@@ -405,6 +407,9 @@ export default function CellPicker({
         .filter((g) => g.kinds.length > 0),
     [awayKinds],
   );
+  const leaveGroups = awayGroups.filter((g) => g.bucket === "LEAVE");
+  const allocationGroups = awayGroups.filter((g) => g.bucket === "ALLOCATION");
+  const hasMoves = moves.length > 0 || windowMoves.length > 0;
 
   /** Grow out of the cell that was clicked. Measured before the first paint,
    *  from the dialog's own untransformed place in the backdrop, so the
@@ -444,6 +449,93 @@ export default function CellPicker({
           month: "short",
         })
       : `${shortDate(firstDay)} – ${shortDate(lastDay)} · ${span} days`;
+
+  /** One leave or allocation group: its heading and its tags. */
+  const renderAwayGroup = (group: (typeof awayGroups)[number]): JSX.Element => (
+    <Fragment key={group.bucket}>
+      <div className="pk-sec">{group.heading}</div>
+      {group.bucket === "ALLOCATION" ? (
+        // Who the time is for, so a new customer is a value rather than
+        // a new kind. Optional: "on RnD" is a complete answer when the
+        // product team is not known yet.
+        <label className="pk-for">
+          <span>For</span>
+          <input
+            type="text"
+            value={allocatedTo}
+            maxLength={100}
+            placeholder="Customer or product team (optional)"
+            onChange={(e) => setAllocatedTo(e.target.value)}
+            aria-label="Allocated to"
+          />
+        </label>
+      ) : null}
+      {group.kinds.map((kind) => {
+        // No leave or allocation from a weekend: both are working-day
+        // time. A span that starts on a weekday may still run across one;
+        // the roster leaves the weekend inside it blank.
+        const blocked = onWeekend && (kind.bucket === "LEAVE" || kind.bucket === "ALLOCATION");
+        const mark = (
+          <button
+            key={kind.code}
+            type="button"
+            className={`pk-c ${kind.code === target.absenceKindCode ? "on" : ""}${blocked ? " bad" : ""}`}
+            disabled={busy || blocked}
+            // No weekday rule inside the span, unlike a rotation. It is
+            // stored as a span rather than a day at a time, so a weekend
+            // inside it is covered too -- somebody away Friday to Monday
+            // is away for the weekend, and skipping it would say they
+            // were back for two days in the middle of it.
+            title={blocked ? `${kind.label} — working days only: start on a weekday` : `${kind.label} — working days in the span`}
+            onClick={() =>
+              onMarkAway(
+                kind.code,
+                firstDay,
+                lastDay,
+                kind.bucket === "ALLOCATION" && allocatedTo.trim() ? allocatedTo.trim() : undefined,
+              )
+            }
+          >
+            <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
+            <span className="pk-l">{kind.label}</span>
+          </button>
+        );
+        if (!kind.custom || !onDeleteKind) return mark;
+        // A tag a lead added can be deleted from where it is used. Two
+        // clicks, because it is shared: the tag goes for every team.
+        const asking = confirmDelete === kind.code;
+        return (
+          <div className="pk-cw" key={kind.code}>
+            {mark}
+            <button
+              type="button"
+              className={`pk-del${asking ? " ask" : ""}`}
+              aria-label={asking ? `Confirm deleting the ${kind.label} tag` : `Delete the ${kind.label} tag`}
+              title={asking ? "Click again to delete it for every team" : "Delete this tag"}
+              disabled={busy}
+              onClick={() => {
+                if (!asking) {
+                  setConfirmDelete(kind.code);
+                  setDeleteError("");
+                  return;
+                }
+                onDeleteKind(kind.code)
+                  .then(() => setConfirmDelete(null))
+                  .catch((err: unknown) =>
+                    setDeleteError(err instanceof Error && err.message ? err.message : "The tag was not deleted."),
+                  );
+              }}
+            >
+              {asking ? "Delete?" : "×"}
+            </button>
+          </div>
+        );
+      })}
+      {deleteError && group.kinds.some((k) => k.code === confirmDelete) ? (
+        <div className="tf-err pk-delerr" role="alert">{deleteError}</div>
+      ) : null}
+    </Fragment>
+  );
 
   return (
     <div
@@ -570,9 +662,11 @@ export default function CellPicker({
                 L1–L3 turn can be set here. Leave and allocations can still be marked.
               </p>
             ) : null}
-            <div className="pk-grid">
+            {/* Rotations and standing hours side by side, so the whole rota
+                reads across one row. */}
+            <div className="pk-cols">
             {groups.map((group) => (
-              <Fragment key={group.heading}>
+              <div className="pk-grid" key={group.heading}>
                 <div className="pk-sec">{group.heading}</div>
                 {group.items.map(({ shift, ok }) => (
                   <button
@@ -595,11 +689,12 @@ export default function CellPicker({
                     </span>
                   </button>
                 ))}
-              </Fragment>
+              </div>
             ))}
+            </div>
 
             {grid.length > 0 ? (
-              <>
+              <div className="pk-grid">
                 <div className="pk-sec">Escalation</div>
                 {/* Every zone, not only the column that was clicked: a lead
                     rostering L3 for TZ2 from a TZ1 cell should not have to find
@@ -635,53 +730,8 @@ export default function CellPicker({
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             ) : null}
-
-            {moves.length > 0 || windowMoves.length > 0 ? (
-              <>
-                <div className="pk-sec">Move to another team</div>
-                {windowMoves.map(({ kind, shift }) => {
-                  const ok = allowedOn(shift, firstDay);
-                  const to = asTeam(kind.movesToTeamKey ?? "");
-                  return (
-                    <button
-                      key={`window:${shift.code}`}
-                      type="button"
-                      className={`pk-c ${shift.code === target.shiftCode || kind.code === target.absenceKindCode ? "on" : ""} ${ok ? "" : "bad"}`}
-                      disabled={!ok || busy}
-                      // The same pick as the window itself: the span above, worked
-                      // as that team's hours, and back with "Back to ...".
-                      title={ok ? `${to}: works ${shift.label} for the span` : `${to} — ${notWorked(shift)}`}
-                      onClick={() => onApply(shift.code, firstDay, lastDay)}
-                    >
-                      <span className={`chip sm ${shift.colourToken}`}>{shift.shortCode}</span>
-                      <span className="pk-l">
-                        Move to {to}
-                        {ok ? null : <small className="pk-n">{notWorked(shift)}</small>}
-                      </span>
-                    </button>
-                  );
-                })}
-                {moves.map((kind) => (
-                  <button
-                    key={kind.code}
-                    type="button"
-                    className={`pk-c ${kind.code === target.absenceKindCode ? "on" : ""}`}
-                    disabled={busy}
-                    // A span like any other: from and to above. They show under
-                    // that team for those days, and come back with "Back to ...".
-                    title={`${kind.label}: on the ${teamNameOf(kind.movesToTeamKey ?? "")} team for the span`}
-                    onClick={() => onMarkAway(kind.code, firstDay, lastDay)}
-                  >
-                    <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
-                    <span className="pk-l">Move to {asTeam(kind.movesToTeamKey ?? "")}</span>
-                  </button>
-                ))}
-              </>
-            ) : null}
-
-            </div>
           </section>
 
           {/* The range heads this column: leave and allocations are almost
@@ -769,93 +819,68 @@ export default function CellPicker({
               </span>
             </div>
 
+            {/* Leave on one side; moving to another team and allocations on
+                the other. Both take the From / To dates above, so a move or an
+                allocation is marked over a period like leave is. */}
+            <div className="pk-cols">
+              {leaveGroups.length > 0 ? (
+                <div className="pk-grid">{leaveGroups.map(renderAwayGroup)}</div>
+              ) : null}
+              {hasMoves || allocationGroups.length > 0 ? (
+                <div className="pk-grid">
+                  {hasMoves ? (
+                    <>
+                      <div className="pk-sec">Move to another team</div>
+                      {/* A move is a rotation period, not a day: say so where
+                          it is picked, with the dates it will cover. */}
+                      <p className="pk-note pk-movenote">
+                        For the dates above: {span === 1 ? spanLabel : `${shortDate(firstDay)} – ${shortDate(lastDay)} · ${span} days`}
+                      </p>
+                      {windowMoves.map(({ kind, shift }) => {
+                        const ok = allowedOn(shift, firstDay);
+                        const to = asTeam(kind.movesToTeamKey ?? "");
+                        return (
+                          <button
+                            key={`window:${shift.code}`}
+                            type="button"
+                            className={`pk-c ${shift.code === target.shiftCode || kind.code === target.absenceKindCode ? "on" : ""} ${ok ? "" : "bad"}`}
+                            disabled={!ok || busy}
+                            // The same pick as the window itself: the span above, worked
+                            // as that team's hours, and back with "Back to ...".
+                            title={ok ? `${to}: works ${shift.label} for the span` : `${to} — ${notWorked(shift)}`}
+                            onClick={() => onApply(shift.code, firstDay, lastDay)}
+                          >
+                            <span className={`chip sm ${shift.colourToken}`}>{shift.shortCode}</span>
+                            <span className="pk-l">
+                              Move to {to}
+                              {ok ? null : <small className="pk-n">{notWorked(shift)}</small>}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {moves.map((kind) => (
+                        <button
+                          key={kind.code}
+                          type="button"
+                          className={`pk-c ${kind.code === target.absenceKindCode ? "on" : ""}`}
+                          disabled={busy}
+                          // A span like any other: from and to above. They show under
+                          // that team for those days, and come back with "Back to ...".
+                          title={`${kind.label}: on the ${teamNameOf(kind.movesToTeamKey ?? "")} team for the span`}
+                          onClick={() => onMarkAway(kind.code, firstDay, lastDay)}
+                        >
+                          <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
+                          <span className="pk-l">Move to {asTeam(kind.movesToTeamKey ?? "")}</span>
+                        </button>
+                      ))}
+                    </>
+                  ) : null}
+                  {allocationGroups.map(renderAwayGroup)}
+                </div>
+              ) : null}
+            </div>
+
             <div className="pk-grid">
-            {awayGroups.map((group) => (
-              <Fragment key={group.bucket}>
-                <div className="pk-sec">{group.heading}</div>
-                {group.bucket === "ALLOCATION" ? (
-                  // Who the time is for, so a new customer is a value rather than
-                  // a new kind. Optional: "on RnD" is a complete answer when the
-                  // product team is not known yet.
-                  <label className="pk-for">
-                    <span>For</span>
-                    <input
-                      type="text"
-                      value={allocatedTo}
-                      maxLength={100}
-                      placeholder="Customer or product team (optional)"
-                      onChange={(e) => setAllocatedTo(e.target.value)}
-                      aria-label="Allocated to"
-                    />
-                  </label>
-                ) : null}
-                {group.kinds.map((kind) => {
-                  // No leave from a weekend: nobody is rostered to be away from a
-                  // Saturday. A span that starts on a weekday may still run across
-                  // one. An allocation has no such rule -- the time is given to
-                  // someone else whichever day it starts.
-                  const blocked = onWeekend && kind.bucket === "LEAVE";
-                  const mark = (
-                    <button
-                      key={kind.code}
-                      type="button"
-                      className={`pk-c ${kind.code === target.absenceKindCode ? "on" : ""}${blocked ? " bad" : ""}`}
-                      disabled={busy || blocked}
-                      // No weekday rule inside the span, unlike a rotation. It is
-                      // stored as a span rather than a day at a time, so a weekend
-                      // inside it is covered too -- somebody away Friday to Monday
-                      // is away for the weekend, and skipping it would say they
-                      // were back for two days in the middle of it.
-                      title={`${kind.label} — the whole span, weekends included`}
-                      onClick={() =>
-                        onMarkAway(
-                          kind.code,
-                          firstDay,
-                          lastDay,
-                          kind.bucket === "ALLOCATION" && allocatedTo.trim() ? allocatedTo.trim() : undefined,
-                        )
-                      }
-                    >
-                      <span className={`chip sm ${kind.colourToken}`}>{kind.shortCode}</span>
-                      <span className="pk-l">{kind.label}</span>
-                    </button>
-                  );
-                  if (!kind.custom || !onDeleteKind) return mark;
-                  // A tag a lead added can be deleted from where it is used. Two
-                  // clicks, because it is shared: the tag goes for every team.
-                  const asking = confirmDelete === kind.code;
-                  return (
-                    <div className="pk-cw" key={kind.code}>
-                      {mark}
-                      <button
-                        type="button"
-                        className={`pk-del${asking ? " ask" : ""}`}
-                        aria-label={asking ? `Confirm deleting the ${kind.label} tag` : `Delete the ${kind.label} tag`}
-                        title={asking ? "Click again to delete it for every team" : "Delete this tag"}
-                        disabled={busy}
-                        onClick={() => {
-                          if (!asking) {
-                            setConfirmDelete(kind.code);
-                            setDeleteError("");
-                            return;
-                          }
-                          onDeleteKind(kind.code)
-                            .then(() => setConfirmDelete(null))
-                            .catch((err: unknown) =>
-                              setDeleteError(err instanceof Error && err.message ? err.message : "The tag was not deleted."),
-                            );
-                        }}
-                      >
-                        {asking ? "Delete?" : "×"}
-                      </button>
-                    </div>
-                  );
-                })}
-                {deleteError && group.kinds.some((k) => k.code === confirmDelete) ? (
-                  <div className="tf-err pk-delerr" role="alert">{deleteError}</div>
-                ) : null}
-              </Fragment>
-            ))}
 
             {onCreateKind ? (
               tagOpen ? (
@@ -888,23 +913,31 @@ export default function CellPicker({
                 >
                   <div className="pk-sec">New tag</div>
                   <label>
-                    <span>Short code</span>
+                    <span>
+                      Short code
+                      <RequiredMark />
+                    </span>
                     <input
                       value={tag.shortCode}
                       maxLength={12}
                       placeholder="e.g. Trn"
                       onChange={(e) => setTag({ ...tag, shortCode: e.target.value })}
                       aria-label="Tag short code"
+                      aria-required="true"
                     />
                   </label>
                   <label>
-                    <span>Name</span>
+                    <span>
+                      Name
+                      <RequiredMark />
+                    </span>
                     <input
                       value={tag.label}
                       maxLength={100}
                       placeholder="e.g. External training"
                       onChange={(e) => setTag({ ...tag, label: e.target.value })}
                       aria-label="Tag name"
+                      aria-required="true"
                     />
                   </label>
                   <div className="pk-codes" role="radiogroup" aria-label="Tag type">

@@ -128,6 +128,11 @@ const useGroupDetailMock = vi.fn();
 vi.mock("@features/csm-operations/api/useGroupDetail", () => ({
   useGroupDetail: (id: string | undefined) => useGroupDetailMock(id),
 }));
+// "Propose as standard change" (a closed change request): starts a proposal.
+const proposeStandardMutateMock = vi.fn();
+vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
+  useCreateStandardChangeProposal: () => ({ mutate: proposeStandardMutateMock, isPending: false }),
+}));
 const decideApprovalMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useDecideChangeRequestApproval", () => ({
   useDecideChangeRequestApproval: () => ({ mutate: decideApprovalMutateMock, isPending: false }),
@@ -408,7 +413,7 @@ describe("CsmChangeRequestDetailPage — tags (the case page's widget, hooks and
 
     fireEvent.click(within(tagsCard()).getByRole("button", { name: /^tag$/i }));
     const dialog = screen.getByRole("dialog", { name: /add tag/i });
-    fireEvent.change(within(dialog).getByLabelText(/^tag$/i), { target: { value: "maint" } });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: /^tag$/i }), { target: { value: "maint" } });
     fireEvent.click(screen.getByText("maintenance-window"));
     fireEvent.click(within(dialog).getByRole("button", { name: /add tag/i }));
 
@@ -526,6 +531,36 @@ describe("CsmChangeRequestDetailPage — project, deployments, deployment produc
     expect(screen.getAllByText("Customer group")).toHaveLength(1);
     expect(screen.getAllByText("Deployments")).toHaveLength(1);
     expect(screen.getAllByText("Deployment products")).toHaveLength(1);
+  });
+});
+
+describe("CsmChangeRequestDetailPage — SRE details: priority, change request type, likelihood", () => {
+  const cell = (label: string): HTMLElement => screen.getByText(label).parentElement!;
+  const openPlan = (cr: BeChangeRequestDetail): void => {
+    mockQueryResult({ data: cr });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /plan/i }));
+  };
+
+  it("shows the values the PostgreSQL data source sends, planning on a migrated change request included", () => {
+    openPlan({ ...BASE_CR, priority: "planning", changeRequestType: "infra", likelihood: "medium" });
+    expect(within(cell("Priority")).getByText("Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Infra")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("Medium")).toBeInTheDocument();
+  });
+
+  it("shows a label of the previous system as sent", () => {
+    openPlan({ ...BASE_CR, priority: "5 - Planning", changeRequestType: "Normal", likelihood: "High" });
+    expect(within(cell("Priority")).getByText("5 - Planning")).toBeInTheDocument();
+    expect(within(cell("Change request type")).getByText("Normal")).toBeInTheDocument();
+    expect(within(cell("Likelihood")).getByText("High")).toBeInTheDocument();
+  });
+
+  it("shows a dash for each when the change request has none", () => {
+    openPlan({ ...BASE_CR, priority: null, changeRequestType: null, likelihood: undefined });
+    for (const label of ["Priority", "Change request type", "Likelihood"]) {
+      expect(within(cell(label)).getByText("—")).toBeInTheDocument();
+    }
   });
 });
 
@@ -730,6 +765,82 @@ describe("CsmChangeRequestDetailPage — Clone", () => {
     expect(keys).not.toContain("deployment");
     expect(keys).not.toContain("state");
     expect(keys).not.toContain("hasCustomerApproved");
+  });
+});
+
+describe("CsmChangeRequestDetailPage — deviation from the implementation plan", () => {
+  const WITH_DEVIATION = {
+    ...BASE_CR,
+    state: "implement",
+    implementationPlan: "<p>Upgrade every node together.</p>",
+    implementationDeviation: "<p>Upgraded the nodes one at a time instead.</p>",
+    affectedServicesText: "<p>Gateway</p>",
+  };
+
+  it("flags the Plan tab, and shows the deviation right under the implementation plan", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" });
+    expect(within(tab).getByTestId("cr-plan-tab-deviation-marker")).toBeInTheDocument();
+    fireEvent.click(tab);
+    const section = screen.getByRole("region", { name: "Deviation from the implementation plan" });
+    expect(section).toHaveTextContent("Upgraded the nodes one at a time instead.");
+    const plan = screen.getByText("Implementation plan");
+    const affected = screen.getByText("Affected services");
+    expect(plan.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(section.compareDocumentPosition(affected) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the Plan card for a deviation alone", () => {
+    mockQueryResult({ data: { ...BASE_CR, implementationDeviation: "<p>Skipped the dry run.</p>" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /^plan/i }));
+    expect(screen.queryByText("No plan has been recorded for this change request.")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toBeInTheDocument();
+  });
+
+  it("neither flags the tab nor shows a section when there is no deviation", () => {
+    mockQueryResult({ data: { ...WITH_DEVIATION, implementationDeviation: "<p><br></p>" } });
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Plan" });
+    expect(within(tab).queryByTestId("cr-plan-tab-deviation-marker")).not.toBeInTheDocument();
+    fireEvent.click(tab);
+    expect(screen.queryByRole("region", { name: "Deviation from the implementation plan" })).not.toBeInTheDocument();
+  });
+
+  // A clone carries the deviation into New; it has to be folded into the plan and cleared before
+  // Request Approval (the backend refuses it otherwise). The Plan tab shows what is stored, as ever.
+  it("blocks Request Approval on a New change carrying a clone's deviation, and still shows it on the Plan tab", () => {
+    mockQueryResult({
+      data: { ...BASE_CR, legalNextStates: ["assess", "canceled"], implementationDeviation: "<p>Rolled out to one region first.</p>" },
+    });
+    renderPage();
+    const button = screen.getByRole("button", { name: /request approval/i });
+    expect(button).toBeDisabled();
+    expect(button.closest('[tabindex="0"]')).toHaveAttribute(
+      "aria-label",
+      "Request Approval: Fold the carried-over deviation into the implementation plan and clear it before requesting approval",
+    );
+    fireEvent.click(button);
+    expect(patchMutateMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Plan, has a deviation from the implementation plan" }));
+    expect(screen.getByRole("region", { name: "Deviation from the implementation plan" })).toHaveTextContent(
+      "Rolled out to one region first.",
+    );
+  });
+
+  it("is carried by Clone", () => {
+    mockQueryResult({ data: WITH_DEVIATION });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /clone/i }));
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/operations/change-requests/new",
+      expect.objectContaining({
+        state: expect.objectContaining({
+          implementationDeviation: expect.stringContaining("Upgraded the nodes one at a time instead."),
+        }),
+      }),
+    );
   });
 });
 
@@ -1576,7 +1687,8 @@ interface LcFake {
   /**
    * The previous system's own proposal pair, as the backend holds it (`customer_updated_on` as an RFC 3339 instant, and WSO2's
    * answer): the customer's proposed START and the Agree / Disagree. `proposer` is who the backend could still name
-   * (the change's last writer, a registered contact); null = not recorded.
+   * (the registered contact the proposal recorded; no staff PATCH of the fake clears it but a plain Re-schedule, which
+   * starts a new round, as in the backend); null = not recorded.
    */
   customerUpdatedOn: string | null;
   confirmation: "agree" | "disagree" | null;
@@ -2046,6 +2158,8 @@ function lcRescheduleOrCounter(patch: Record<string, unknown>): void {
     lcAskCustomersAgain();
   }
   if (pending) lc.confirmation = "disagree";
+  // A plain Re-schedule answers nothing and starts a new round: the stored time is nobody's proposal in it.
+  else if (changed) lc.proposer = null;
 }
 
 function lcSeed(
@@ -3982,7 +4096,10 @@ describe("CsmChangeRequestDetailPage — lifecycle: Standard (Request Approval -
 
     const view = lcOpenAs(LC_CREATOR);
     expect(currentStep()).toBe("New");
-    fireEvent.click(screen.getByRole("button", { name: "Request Approval" }));
+    // Pre-authorised and with no customer approval to ask for, its Request
+    // Approval reads "Schedule"; it is the same `{state: "assess"}`.
+    expect(screen.queryByRole("button", { name: "Request Approval" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
 
     expect(currentStep()).toBe("Scheduled");
     expect(screen.getByText(/no approval stages recorded/i)).toBeInTheDocument();
@@ -4734,5 +4851,135 @@ describe("CsmChangeRequestDetailPage — opening an Assignment group on the Appr
     expect(within(dialog).getByRole("heading", { name: "Group Members (2)" })).toBeInTheDocument();
     expect(within(dialog).getByText("max.member@acme.example")).toBeInTheDocument();
     expect(useGroupDetailMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("CsmChangeRequestDetailPage — standard changes", () => {
+  const STANDARD_CR: BeChangeRequestDetail = {
+    ...BASE_CR,
+    type: "standard",
+    customerApprovalRequired: false,
+    standardChange: {
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      customer: { id: "acct-1", name: "Acme Corp" },
+      versionId: "ver-2",
+      version: 2,
+      parameters: [
+        { key: "host", label: "Host", type: "text", required: true, value: "gw-1.example.com" },
+        { key: "notes", label: "Notes", type: "textarea", required: false, value: null },
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    proposeStandardMutateMock.mockReset();
+  });
+
+  it("says which template and version it was raised from, links to the template and lists the change specifics", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveTextContent(/raised from standard change template STD0000001 Rotate a TLS certificate \(version 2\)/i);
+    expect(within(banner).getByText("Host")).toBeInTheDocument();
+    expect(within(banner).getByText("gw-1.example.com")).toBeInTheDocument();
+    expect(within(banner).getByText("Notes").nextElementSibling).toHaveTextContent("—");
+    fireEvent.click(within(banner).getByRole("button", { name: /STD0000001/ }));
+    expect(navigateMock).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
+      state: { from: "/operations/change-requests/chg-1" },
+    });
+  });
+
+  it("says whose template it is: the customer of the change request's project", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveTextContent("Customer: Acme Corp. The template is used only for this customer's projects.");
+  });
+
+  it("warns when the project is no longer the template's customer's", () => {
+    mockQueryResult({ data: STANDARD_CR });
+    renderPage();
+    expect(screen.queryByTestId("standard-change-customer-mismatch")).not.toBeInTheDocument();
+    cleanup();
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customerMismatch: true } } });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveClass("MuiAlert-standardWarning");
+    expect(within(banner).getByTestId("standard-change-customer-mismatch")).toHaveTextContent(
+      "This change request's Customer Project is no longer one of Acme Corp's projects: it has moved to another customer since the change was raised.",
+    );
+    expect(banner).toHaveTextContent(/approval cannot be requested/i);
+  });
+
+  it("names no customer when the response carries none", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customer: null } } });
+    renderPage();
+    expect(screen.getByRole("region", { name: "Standard change template" })).not.toHaveTextContent(/customer:/i);
+  });
+
+  it("shows no template banner for a change request not raised from one", () => {
+    mockQueryResult({ data: BASE_CR });
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Standard change template" })).not.toBeInTheDocument();
+  });
+
+  it("clones a templated change with its template and values, not what the template specifies", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, subject: "Rotate the TLS certificate on gw-1.example.com", implementationPlan: "<p>Steps</p>" } });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^clone$/i }));
+    const [path, options] = navigateMock.mock.calls.at(-1)!;
+    expect(path).toBe("/operations/change-requests/new");
+    expect(options.state).toMatchObject({
+      type: "standard",
+      standardChangeTemplateId: "tpl-1",
+      standardChangeParameters: { host: "gw-1.example.com" },
+    });
+    expect(options.state).not.toHaveProperty("subject");
+    expect(options.state).not.toHaveProperty("implementationPlan");
+  });
+
+  describe("Propose as standard change", () => {
+    const CLOSED: BeChangeRequestDetail = { ...BASE_CR, state: "closed", legalNextStates: [] };
+
+    it("starts a new proposal from a closed change request and opens it", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /propose as standard change/i }));
+      expect(proposeStandardMutateMock).toHaveBeenCalledWith(
+        { kind: "new", sourceChangeRequestId: "chg-1" },
+        expect.anything(),
+      );
+      const [, options] = proposeStandardMutateMock.mock.calls[0]!;
+      options.onSuccess({ id: "scp-1" });
+      expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
+        state: { from: "/operations/change-requests/chg-1" },
+      });
+    });
+
+    it("shows a refusal in the error banner", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /propose as standard change/i }));
+      const [, options] = proposeStandardMutateMock.mock.calls[0]!;
+      const err = new BackendApiError(400, "only a closed change request can start a proposal");
+      options.onError(err);
+      expect(showErrorMock).toHaveBeenCalledWith("only a closed change request can start a proposal", err);
+    });
+
+    it.each(["new", "implement", "review", "canceled", "rollback"])("is not offered in %s", (state) => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({ data: { ...BASE_CR, state } });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+    });
+
+    it("is not offered without write access", () => {
+      mockQueryResult({ data: CLOSED });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+    });
   });
 });

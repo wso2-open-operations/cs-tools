@@ -16,6 +16,7 @@
  * under the License.
  */
 import { useId, useState, type FormEvent, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import { useRotaReminderSettings, useSaveRotaReminderSettings } from "../api/useRotaReminderSettings";
 import type { ReminderWindow, RotaFamily, RotaReminderSettings, SaveRotaReminderSettings } from "../types";
 import RotaReminderSendNow from "./RotaReminderSendNow";
@@ -42,10 +43,14 @@ const TIME_ZONES = [
 
 const DEFAULT_WINDOW: ReminderWindow = { start: "08:00", end: "18:00", timeZone: "America/Los_Angeles" };
 
-/** What the reminders use until something is saved: the built-in settings. */
+/**
+ * What the card shows until something is saved. The automatic reminders are
+ * off until somebody turns them on here: nothing in the deployment's
+ * configuration switches them on.
+ */
 const DEFAULTS: SaveRotaReminderSettings = {
-  weekdayEnabled: true,
-  weekendEnabled: true,
+  weekdayEnabled: false,
+  weekendEnabled: false,
   invitesEnabled: true,
   weekendRequired: { [LK_WEEKEND]: 3, [AMERICAS_WEEKEND]: 1 },
   windows: { [WINDOW_CODES[0]]: DEFAULT_WINDOW, [WINDOW_CODES[1]]: DEFAULT_WINDOW },
@@ -270,7 +275,7 @@ export default function RotaReminderSettings(): JSX.Element {
         </span>
       </div>
       {loaded === null ? (
-        <p className="cp-help rrs-meta">Not saved yet: the reminders use the deployment&apos;s settings, and the values below are the defaults. Only what you change here is saved.</p>
+        <p className="cp-help rrs-meta">Not saved yet: no automatic reminder is sent until one is turned on here and saved. The other values below are the deployment&apos;s defaults; only what you change here is saved.</p>
       ) : (
         <p className="cp-help rrs-meta">
           Last changed by {loaded.updatedBy}
@@ -284,6 +289,9 @@ export default function RotaReminderSettings(): JSX.Element {
           <form className="rrs" noValidate onSubmit={submit}>
             <fieldset className="rrs-group">
               <legend>Automatic reminders</legend>
+              <p className="cp-help" id={id("automatic-help")}>
+                The only on/off for the automatic reminders in this environment. A change applies from the next run.
+              </p>
               <div className="rrs-checks">
                 <div>
                   <label className="cas-check" htmlFor={id("weekday")}>
@@ -339,10 +347,14 @@ export default function RotaReminderSettings(): JSX.Element {
               <div>
                 <div className="rrs-grid">
                   <div className="rrs-field">
-                    <label htmlFor={id("lk")}>People needed on LK Weekend each day</label>
+                    <label htmlFor={id("lk")}>
+                      People needed on LK Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("lk")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -353,10 +365,14 @@ export default function RotaReminderSettings(): JSX.Element {
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("americas")}>People needed on Americas Weekend each day</label>
+                    <label htmlFor={id("americas")}>
+                      People needed on Americas Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("americas")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -377,27 +393,39 @@ export default function RotaReminderSettings(): JSX.Element {
                 <legend>Americas Weekend and LK On-call hours</legend>
                 <div className="rrs-times">
                   <div className="rrs-field">
-                    <label htmlFor={id("start")}>Start</label>
+                    <label htmlFor={id("start")}>
+                      Start
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("start")}
                       type="time"
+                      required
                       value={form.start}
                       onChange={(e) => edit({ start: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("end")}>End</label>
+                    <label htmlFor={id("end")}>
+                      End
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("end")}
                       type="time"
+                      required
                       value={form.end}
                       onChange={(e) => edit({ end: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("zone")}>Time zone</label>
+                    <label htmlFor={id("zone")}>
+                      Time zone
+                      <RequiredMark />
+                    </label>
                     <select
                       id={id("zone")}
+                      required
                       value={form.timeZone}
                       onChange={(e) => edit({ timeZone: e.target.value })}
                     >

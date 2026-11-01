@@ -33,6 +33,12 @@ vi.mock("@context/error-banner/ErrorBannerContext", () => ({
 vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: postCaseMutateAsyncMock }),
 }));
+// AttachmentsField reads only this constant from the module, whose hooks pull
+// in the current-user context and, through it, the runtime API config that
+// is absent under vitest (same stub as CreateServiceRequestPage.test.tsx).
+vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
+}));
 // The project/deployment/product cascade is exercised elsewhere
 // (CsmCaseCreatePage) — stub them here to fixed, already-loaded options so
 // this file can focus on the attachment-required submit path.
@@ -68,8 +74,21 @@ vi.mock("@features/csm-cases/components/ProjectSelectionField", () => ({
   ),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="editor"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 // CreateSecurityReportPage imports BackendApiError from the real API client
@@ -135,8 +154,16 @@ describe("CreateSecurityReportPage — attachment required at create time", () =
 
   it("shows the Attachments field as required, not optional", () => {
     render(<CreateSecurityReportPage />);
-    expect(screen.getByText(/attachments \*/i)).toBeInTheDocument();
+    const caption = screen.getByText("Attachments");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
     expect(screen.getByText(/at least one required/i)).toBeInTheDocument();
+  });
+
+  it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
+    render(<CreateSecurityReportPage />);
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
   });
 
   it("enables Create once an attachment is added, and sends it inside the POST /cases payload", async () => {

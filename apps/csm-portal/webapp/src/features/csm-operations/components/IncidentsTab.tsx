@@ -74,7 +74,7 @@ import {
   bulkWatchListNeedsCurrent,
   type BulkIncidentPlan,
 } from "@features/csm-operations/utils/bulkIncidentEdit";
-import { refreshIncidentRecord } from "@features/csm-operations/api/usePatchIncident";
+import { refreshIncidentRecords } from "@features/csm-operations/api/usePatchIncident";
 import { incidentDetailQuery } from "@features/csm-operations/api/useGetIncident";
 import { useRowSelection } from "@features/csm-operations/hooks/useRowSelection";
 import BulkSelectionBar from "@features/csm-operations/components/BulkSelectionBar";
@@ -225,8 +225,9 @@ export default function IncidentsTab(): JSX.Element {
    * closed or cancelled since it was picked is skipped with the reason. Adding
    * people to (or removing them from) the watch list needs each incident's own
    * list, so its detail is read first (`readWatchers`). After the run the dialog
-   * is closed first, then each incident is refreshed the way a single edit
-   * refreshes it (detail, tasks, the flows' follow-up).
+   * is closed first, then the run's incidents are refreshed together the way a
+   * single edit refreshes one (detail, tasks, the flows' follow-up), so a bulk
+   * resolve refreshes every incident's records once, not once per incident.
    */
   const runBulk = async (
     planFor: (incident: BeIncident, currentWatchers?: string[]) => BulkIncidentPlan,
@@ -264,7 +265,7 @@ export default function IncidentsTab(): JSX.Element {
       });
       removeFromSelection(rows.map((r) => r.id!));
       void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENTS] });
-      for (const t of toSend) refreshIncidentRecord(queryClient, t.id, t.patch);
+      refreshIncidentRecords(queryClient, toSend);
     } finally {
       setBulkBusy(false);
     }

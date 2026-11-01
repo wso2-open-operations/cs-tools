@@ -281,12 +281,38 @@ describe("ProblemDetailPage", () => {
     );
   });
 
-  it("opens the optional fix-notes dialog instead of PATCHing directly for the fix transition", () => {
+  it("opens the fix-notes dialog instead of PATCHing directly for the fix transition", () => {
     mockQueryResult({ data: { ...BASE_PROBLEM, state: "ROOT_CAUSE_ANALYSIS" } });
     render(<ProblemDetailPage />);
     fireEvent.click(screen.getByRole("button", { name: /Move to Fix In Progress/i }));
     expect(patchMutateMock).not.toHaveBeenCalled();
     expect(problemFixNotesDialogMock).toHaveBeenCalled();
+  });
+
+  it("sends the trimmed cause and fix notes with the fix transition", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "ROOT_CAUSE_ANALYSIS" } });
+    render(<ProblemDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Move to Fix In Progress/i }));
+    const { onConfirm } = problemFixNotesDialogMock.mock.calls.at(-1)![0] as {
+      onConfirm: (f: { causeNotes: string; fixNotes: string }) => void;
+    };
+    onConfirm({ causeNotes: "  bad push ", fixNotes: " rolled back  " });
+    expect(patchMutateMock).toHaveBeenCalledWith(
+      { id: "prb-1", patch: { transition: "fix", causeNotes: "bad push", fixNotes: "rolled back" } },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("never sends a bare fix transition when a note is blank", () => {
+    mockQueryResult({ data: { ...BASE_PROBLEM, state: "ROOT_CAUSE_ANALYSIS" } });
+    render(<ProblemDetailPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Move to Fix In Progress/i }));
+    const { onConfirm } = problemFixNotesDialogMock.mock.calls.at(-1)![0] as {
+      onConfirm: (f: { causeNotes: string; fixNotes: string }) => void;
+    };
+    onConfirm({ causeNotes: "bad push", fixNotes: "   " });
+    onConfirm({ causeNotes: "", fixNotes: "rolled back" });
+    expect(patchMutateMock).not.toHaveBeenCalled();
   });
 
   it("renders no transition action button for a Closed (terminal) problem", () => {

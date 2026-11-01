@@ -81,11 +81,50 @@ type ScheduleService interface {
 type scheduleService struct {
 	repo   repository.ScheduleRepository
 	access AccessService
+	// adminRoles is AUTH_ADMIN_ROLES: a caller whose token holds one is a CSM
+	// admin and may edit every team's rota. Empty: nobody is, by token.
+	adminRoles []string
 }
 
 // NewScheduleService constructs a ScheduleService over the given repository.
 func NewScheduleService(repo repository.ScheduleRepository, access AccessService) ScheduleService {
 	return &scheduleService{repo: repo, access: access}
+}
+
+// WithScheduleAdminRoles makes a CSM admin -- a caller whose token's roles
+// hold one of adminRoles (AUTH_ADMIN_ROLES) -- a writer of every team's rota.
+// A portal admin (the global admin role in the database) already is one, through
+// RotaAdminTeamsFor. Applied after construction so the constructor's callers
+// keep compiling; a service it does not recognise is returned unchanged.
+func WithScheduleAdminRoles(svc ScheduleService, adminRoles []string) ScheduleService {
+	if s, ok := svc.(*scheduleService); ok {
+		s.adminRoles = adminRoles
+	}
+	return svc
+}
+
+// isCSMAdmin is whether the caller's token holds an AUTH_ADMIN_ROLES role.
+func (s *scheduleService) isCSMAdmin(ctx context.Context) bool {
+	return holdsAnyRole(auth.IdentityFromContext(ctx).Roles, s.adminRoles)
+}
+
+// csmAdminTeams is every team on the schedule for a CSM admin, and nil for
+// anybody else.
+func (s *scheduleService) csmAdminTeams(ctx context.Context) ([]string, error) {
+	if !s.isCSMAdmin(ctx) {
+		return nil, nil
+	}
+	cat, err := s.repo.Catalogue(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(cat.Teams))
+	for _, t := range cat.Teams {
+		if t.Key != "" {
+			keys = append(keys, t.Key)
+		}
+	}
+	return keys, nil
 }
 
 // requireInternalCaller rejects anyone whose AccessScope is not Unrestricted.
@@ -232,6 +271,11 @@ func (s *scheduleService) requireRotaWriter(ctx context.Context, teamKey string)
 	if id.UserEmail == "" {
 		return &apierror.ForbiddenError{Msg: "editing the rota needs a user token, not a service credential"}
 	}
+	// A CSM admin edits every team's rota; their token says so, so there is
+	// nothing to look up. (A portal admin is found by RotaAdminTeamsFor.)
+	if s.isCSMAdmin(ctx) {
+		return nil
+	}
 	ok, err := s.repo.LeadsTeam(ctx, id.UserEmail, teamKey)
 	if err != nil {
 		return err
@@ -252,7 +296,7 @@ func (s *scheduleService) requireRotaWriter(ctx context.Context, teamKey string)
 	}
 	if !ok {
 		return &apierror.ForbiddenError{
-			Msg: fmt.Sprintf("changing %s's rota needs a lead of that team, its rota manager, or a rota admin for its family", teamKey),
+			Msg: fmt.Sprintf("changing %s's rota needs a lead of that team, its rota manager, a rota admin for its family, or an admin", teamKey),
 		}
 	}
 	return nil
@@ -473,7 +517,11 @@ func (s *scheduleService) MyLeadTeams(ctx context.Context) (domain.RotaEditTeams
 	if err != nil {
 		return domain.RotaEditTeams{}, err
 	}
-	full := mergeTeamKeys(led, admin)
+	csmAdmin, err := s.csmAdminTeams(ctx)
+	if err != nil {
+		return domain.RotaEditTeams{}, err
+	}
+	full := mergeTeamKeys(mergeTeamKeys(led, admin), csmAdmin)
 	out := none
 	out.TeamKeys = mergeTeamKeys(full, marker)
 	for _, k := range marker {
@@ -617,6 +665,9 @@ func (s *scheduleService) requireAnyTeamLead(ctx context.Context, doing string) 
 	email := auth.IdentityFromContext(ctx).UserEmail
 	if email == "" {
 		return "", &apierror.ForbiddenError{Msg: doing + " needs a user token, not a service credential"}
+	}
+	if s.isCSMAdmin(ctx) {
+		return email, nil
 	}
 	teams, err := s.repo.LeadTeamsFor(ctx, email)
 	if err != nil {

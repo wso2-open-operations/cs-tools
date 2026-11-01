@@ -194,11 +194,11 @@ describe("CellPicker: choosing the start as well as the end", () => {
     expect(screen.getByText("1 day")).toBeInTheDocument();
   });
 
-  it("blocks leave from a weekend start, but not an allocation", () => {
+  it("blocks leave and allocations from a weekend start", () => {
     renderPicker();
     fireEvent.change(screen.getByLabelText("Mark from"), { target: { value: "2026-09-26" } });
     expect(screen.getByRole("button", { name: /Annual leave/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: new RegExp(RND.label) })).toBeEnabled();
+    expect(screen.getByRole("button", { name: new RegExp(RND.label) })).toBeDisabled();
   });
 });
 
@@ -335,6 +335,21 @@ describe("CellPicker: adding a tag", () => {
       colourToken: "MIG",
     });
     expect(await screen.findByRole("button", { name: "+ New tag" })).toBeInTheDocument();
+  });
+
+  it("marks the short code and the name required, and refuses a tag without both", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    for (const name of ["Tag short code", "Tag name"]) {
+      const field = screen.getByRole("textbox", { name });
+      expect(field).toBeRequired();
+      expect(field.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    fireEvent.change(screen.getByLabelText("Tag short code"), { target: { value: "Trn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("A short code and a name are both needed.");
   });
 
   it("refuses a short code another tag already draws, without asking the server", () => {
@@ -730,6 +745,16 @@ describe("CellPicker: moving somebody to another team", () => {
     expect(onApply).toHaveBeenCalledWith("CRE_AMERICAS", "2026-09-23", "2026-12-22");
     fireEvent.click(screen.getByRole("button", { name: "6 months" }));
     expect(screen.getByLabelText("Mark until")).toHaveValue("2027-03-22");
+  });
+
+  it("puts both moves with leave and allocations, under the dates, not on the rota", () => {
+    renderMoves("draco");
+    const away = screen.getByRole("region", { name: "Leave & allocations" });
+    expect(within(away).getByRole("button", { name: /Move to Americas Team/ })).toBeInTheDocument();
+    expect(within(away).getByRole("button", { name: /Move to Migration Team/ })).toBeInTheDocument();
+    expect(within(away).getByText(/For the dates above/)).toBeInTheDocument();
+    const rota = screen.getByRole("region", { name: /^Rota/ });
+    expect(within(rota).queryByRole("button", { name: /Move to/ })).not.toBeInTheDocument();
   });
 
   it("names the Migration move as a team too", () => {

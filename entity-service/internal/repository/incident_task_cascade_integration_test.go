@@ -68,7 +68,7 @@ func resolvedIncident(t *testing.T, pool *pgxpool.Pool) string {
 		t.Fatalf("CreateIncident: %v", err)
 	}
 	state, code, notes := "RESOLVED", "SOLVED_PERMANENTLY", "fixed the gateway config"
-	if err := repo.UpdateIncidentLifecycle(ctx, resp.Incident.ID, repository.IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(ctx, resp.Incident.ID, repository.IncidentLifecycleUpdate{
 		State: &state, ResolutionCode: &code, ResolutionNotes: &notes,
 	}, "jane.doe@test.local"); err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -100,7 +100,7 @@ func addTask(t *testing.T, pool *pgxpool.Pool, incidentID string, state *string)
 // moveIncident sets the incident's state as the ic-engineer fixture user.
 func moveIncident(t *testing.T, pool *pgxpool.Pool, id, state string) {
 	t.Helper()
-	if err := repository.NewIncidentRepository(repository.NewScoped(pool)).UpdateIncidentLifecycle(
+	if _, err := repository.NewIncidentRepository(repository.NewScoped(pool)).UpdateIncidentLifecycle(
 		repository.WithSystemIdentity(context.Background()), id,
 		repository.IncidentLifecycleUpdate{State: &state}, "ic-engineer@test.local"); err != nil {
 		t.Fatalf("move incident to %s: %v", state, err)

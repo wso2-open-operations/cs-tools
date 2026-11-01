@@ -37,10 +37,14 @@ type RotaAccessRights struct {
 	// MarkerFamilies are the families whose teams' markers the caller may
 	// change: every family for a CSM admin, their own for a rota admin.
 	MarkerFamilies []string `json:"markerFamilies"`
+	// MarkerTeams are the teams whose markers the caller may change as their
+	// lead (lead or Americas team lead), whatever MarkerFamilies says.
+	MarkerTeams []string `json:"markerTeams"`
 	// MemberFamilies are the families whose teams' members the caller may
 	// add and remove: the same rule as MarkerFamilies (every family for a
 	// CSM admin, their own for a rota admin), named apart so the two can
-	// diverge without a client reading one for the other.
+	// diverge without a client reading one for the other. A team's lead
+	// gets no member rights from MarkerTeams.
 	MemberFamilies []string `json:"memberFamilies"`
 }
 

@@ -92,18 +92,21 @@ export interface InfiniteProjectSearch {
 export function useInfiniteProjectSearch(
   query: string,
   enabled: boolean,
+  /** Narrows the search to one customer's (account's) projects, server-side. */
+  accountId?: string,
 ): InfiniteProjectSearch {
   const api = useBackendApi();
   const q = query.trim();
 
   const result = useInfiniteQuery<BeProjectSearchResponse, Error>({
-    queryKey: [ApiQueryKeys.CSM_PROJECTS, "search-paged", q],
+    queryKey: accountId
+      ? [ApiQueryKeys.CSM_PROJECTS, "search-paged", q, { accountId }]
+      : [ApiQueryKeys.CSM_PROJECTS, "search-paged", q],
     queryFn: ({ pageParam }) => {
       const pagination = { offset: pageParam as number, limit: PROJECT_PAGE_SIZE };
-      return api.post<BeProjectSearchPayload, BeProjectSearchResponse>(
-        "/projects/search",
-        q.length > 0 ? { searchQuery: q, pagination } : { pagination },
-      );
+      const body: BeProjectSearchPayload = q.length > 0 ? { searchQuery: q, pagination } : { pagination };
+      if (accountId) body.accountId = accountId;
+      return api.post<BeProjectSearchPayload, BeProjectSearchResponse>("/projects/search", body);
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {

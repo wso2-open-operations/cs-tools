@@ -231,41 +231,49 @@ type Config struct {
 	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
 	// own doc comment.
 	AttachmentDataSource AttachmentDataSource
-	// CSMSLAEngineEnabled gates the CSM-native SLA clock engine
-	// (internal/service/sla_engine_service.go, source='CSM' "sla" rows) --
-	// independently of DataSource/SLADataSource, and independently of
-	// whether an external SLA engine is also tracking the same case.
-	// Defaults to true: this engine is meant to run on every deployment
-	// regardless of data source, not just the ones that already involve the
-	// external system, which is how it used to be gated in practice
-	// (routes.go only ever wired its one real trigger -- registering a new
-	// case's clocks -- into the external-system-backed CreateCase path; the
-	// plain-Postgres CreateCase never called it at all, so a case created
-	// under a plain-Postgres data source got no SLA tracking from creation
-	// onward unless its severity happened to change later). Was previously
-	// an implicit "db != nil" check with no name of its own; now an
-	// explicit, independently-documented toggle an operator can use to turn
-	// this engine off on purpose (CSM_SLA_ENGINE_ENABLED=false) -- e.g. a
-	// deployment that wants the external system's own synced
-	// source='SERVICENOW' rows as the only SLA truth, with this engine's
-	// own source='CSM' rows never created at all. Left on, both sets of
-	// rows coexist in the same "sla" table side by side, distinguished by
-	// source -- this is already what happens today on any data source that
-	// involves the external system, just without a named switch
-	// controlling it.
+	// CSMSLAEngineEnabled gates this service's own in-process SLA clock
+	// engine (internal/service/sla_engine_service.go, source='CSM' "sla"
+	// rows -- see repository.SLAEngineRepository's own doc comment for why
+	// this engine's clocks must never carry the 'SERVICENOW' tag instead, a
+	// real external sync job's own ownership tag) -- independently of
+	// DataSource/SLADataSource, and
+	// independently of whether an external SLA engine is also tracking the
+	// same case. Defaults to true: this engine is meant to run on every
+	// deployment regardless of data source, not just the ones that already
+	// involve the external system, which is how it used to be gated in
+	// practice (routes.go only ever wired its one real trigger --
+	// registering a new case's clocks -- into the external-system-backed
+	// CreateCase path; the plain-Postgres CreateCase never called it at
+	// all, so a case created under a plain-Postgres data source got no SLA
+	// tracking from creation onward unless its severity happened to change
+	// later). Was previously an implicit "db != nil" check with no name of
+	// its own; now an explicit, independently-documented toggle an operator
+	// can use to turn this engine off on purpose
+	// (CSM_SLA_ENGINE_ENABLED=false) -- e.g. a deployment that wants the
+	// external system's own synced rows as the only SLA truth, with this
+	// engine never writing a row of its own at all.
+	//
+	// This engine's own clocks (source='CSM') and the external sync job's
+	// own rows (source='SERVICENOW', confirmed real and continuously
+	// running -- the external sync job that populates sla_policy/sla maps
+	// the previous system's task SLA records straight into this database's
+	// "sla" table) are kept apart by that tag precisely so the two can
+	// never collide on the same (work_item_id, target) pair -- a
+	// dual-write-mode case can genuinely have both.
 	//
 	// Known limitation: flipping this to false only stops NEW writes --
-	// any source='CSM' row already IN_PROGRESS/BREACHED at that moment is
-	// left exactly as it was (still is_active, still returned by every
-	// unscoped read: sla_live, GetClockState, SearchActiveSLAStatuses),
-	// since nothing retires or excludes it. It will simply never be
-	// updated again. This is intentional scope: deciding whether such a
-	// clock should be force-completed, cancelled, or left visible as a
-	// frozen record is a product decision, not something this flag's
-	// on/off switch should make unilaterally. An operator disabling this
-	// engine should do so only once they've confirmed they're fine with
-	// whatever in-flight source='CSM' clocks exist at that moment going
-	// stale, or has a separate plan (e.g. a one-off migration) for them.
+	// any row this engine already registered and left IN_PROGRESS/BREACHED
+	// at that moment is left exactly as it was (still is_active, still
+	// returned by every unscoped read: sla_live, GetClockState,
+	// SearchActiveSLAStatuses), since nothing retires or excludes it. It
+	// will simply never be updated again. This is intentional scope:
+	// deciding whether such a clock should be force-completed, cancelled,
+	// or left visible as a frozen record is a product decision, not
+	// something this flag's on/off switch should make unilaterally. An
+	// operator disabling this engine should do so only once they've
+	// confirmed they're fine with whatever in-flight clocks this engine
+	// registered going stale, or has a separate plan (e.g. a one-off
+	// migration) for them.
 	CSMSLAEngineEnabled bool
 	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
 	// Required when DataSource is "servicenow" (or SLADataSource is "servicenow" -- see Validate).
@@ -724,6 +732,13 @@ type Config struct {
 	// Alerts tab shows (e.g. "staging", "production") so an admin knows which
 	// environment's rooms they are changing. Optional.
 	CaseAlertsEnvironment string
+	// AutoclosureSystemUserEmail is AUTOCLOSURE_SYSTEM_USER_EMAIL: optionally, the
+	// "user" row (type SYSTEM) the auto-closure workflow comments and closes
+	// tickets as (the reminder comments' author, and closed_by on a ticket it
+	// closes). Empty is fine and the normal case: the workflow then acts as the
+	// system itself, shown as "System user", with no user row and no closed_by.
+	// What switches the feature on is the scheduler's AUTOCLOSURE_ENABLED.
+	AutoclosureSystemUserEmail string
 	// M2MClientIDsRaw is the M2M_CLIENT_IDS value, a comma-separated list of
 	// Asgardeo application client ids for pure machine-to-machine callers --
 	// no human in the loop at all (the GitHub webhook delivery/service-
@@ -982,6 +997,7 @@ func Load() *Config {
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
 		CaseAlertsEnvironment:                         strings.TrimSpace(os.Getenv("CASE_ALERTS_ENVIRONMENT")),
+		AutoclosureSystemUserEmail:                    strings.TrimSpace(os.Getenv("AUTOCLOSURE_SYSTEM_USER_EMAIL")),
 		M2MClientIDsRaw:                               os.Getenv("M2M_CLIENT_IDS"),
 		CSMPortalBackendClientID:                      os.Getenv("CSM_PORTAL_BACKEND_CLIENT_ID"),
 		CSMPortalUserDomain:                           strings.TrimPrefix(os.Getenv("CSM_PORTAL_USER_DOMAIN"), "@"),

@@ -59,11 +59,16 @@ const LOADED: Settings = {
   updatedOn: "2026-10-01T09:30:00Z",
 };
 
-const lkField = () => screen.getByLabelText("People needed on LK Weekend each day");
-const americasField = () => screen.getByLabelText("People needed on Americas Weekend each day");
-const startField = () => screen.getByLabelText("Start");
-const endField = () => screen.getByLabelText("End");
-const zoneField = () => screen.getByLabelText("Time zone");
+// The required fields' labels end in an aria-hidden asterisk: role queries
+// (which use the accessible name) are unaffected, and a time input, which has
+// no role, is found by its label from the start.
+const LK = "People needed on LK Weekend each day";
+const AMERICAS = "People needed on Americas Weekend each day";
+const lkField = () => screen.getByRole("spinbutton", { name: LK });
+const americasField = () => screen.getByRole("spinbutton", { name: AMERICAS });
+const startField = () => screen.getByLabelText(/^Start\b/);
+const endField = () => screen.getByLabelText(/^End\b/);
+const zoneField = () => screen.getByRole("combobox", { name: "Time zone" });
 const copyField = () => screen.getByLabelText("Also copy every reminder to");
 const saveButton = () => screen.getByRole("button", { name: /^(Save reminder settings|Saving…)$/ });
 const discardButton = () => screen.getByRole("button", { name: "Discard changes" });
@@ -81,16 +86,18 @@ beforeEach(() => {
 });
 
 describe("RotaReminderSettings", () => {
-  it("shows the built-in settings, and says nothing is saved yet, when nothing was saved", () => {
+  it("shows the built-in settings with the automatic reminders off, and says nothing is saved yet, when nothing was saved", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("heading", { name: "CRE rota reminders" })).toBeInTheDocument();
     expect(screen.getByText("Built-in settings")).toBeInTheDocument();
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
-    expect(screen.getByText(/^Not saved yet: the reminders use the deployment.s settings/)).toBeInTheDocument();
+    expect(screen.getByText(/^Not saved yet: no automatic reminder is sent until one is turned on here and saved/)).toBeInTheDocument();
+    expect(screen.getByText(/^The only on\/off for the automatic reminders in this environment/)).toBeInTheDocument();
     expect(screen.queryByText(/^Last changed by/)).not.toBeInTheDocument();
 
-    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).toBeChecked();
+    // Nothing saved means nothing scheduled: the card must not show them as on.
+    expect(screen.getByRole("checkbox", { name: "Send weekday reminders" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Attach calendar invitations" })).toBeChecked();
     expect(lkField()).toHaveValue(3);
     expect(americasField()).toHaveValue(1);
@@ -123,16 +130,28 @@ describe("RotaReminderSettings", () => {
     expect(automatic.getByRole("checkbox", { name: "Attach calendar invitations" })).toBeInTheDocument();
 
     const weekend = within(screen.getByRole("group", { name: "Weekend rota" }));
-    expect(weekend.getByLabelText("People needed on LK Weekend each day")).toBeInTheDocument();
-    expect(weekend.getByLabelText("People needed on Americas Weekend each day")).toBeInTheDocument();
+    expect(weekend.getByRole("spinbutton", { name: LK })).toBeInTheDocument();
+    expect(weekend.getByRole("spinbutton", { name: AMERICAS })).toBeInTheDocument();
     const hours = within(weekend.getByRole("group", { name: "Americas Weekend and LK On-call hours" }));
-    expect(hours.getByLabelText("Start")).toBeInTheDocument();
-    expect(hours.getByLabelText("End")).toBeInTheDocument();
-    expect(hours.getByLabelText("Time zone")).toBeInTheDocument();
+    expect(hours.getByLabelText(/^Start\b/)).toBeInTheDocument();
+    expect(hours.getByLabelText(/^End\b/)).toBeInTheDocument();
+    expect(hours.getByRole("combobox", { name: "Time zone" })).toBeInTheDocument();
 
     const copies = within(screen.getByRole("group", { name: "Copies" }));
     expect(copies.getByLabelText("Also copy every reminder to")).toBeInTheDocument();
     expect(copyField()).toHaveAttribute("rows", "3");
+  });
+
+  it("marks the head counts, the hours and the time zone required, and the copies optional", () => {
+    render(<RotaReminderSettings />);
+    for (const field of [lkField(), americasField(), startField(), endField(), zoneField()]) {
+      expect(field).toBeRequired();
+      const label = document.querySelector(`label[for="${field.id}"]`);
+      expect(label?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    const copy = copyField();
+    expect(copy).not.toBeRequired();
+    expect(document.querySelector(`label[for="${copy.id}"] .MuiFormLabel-asterisk`)).toBeNull();
   });
 
   it("saves the whole body: both windows set, other saved codes kept, addresses trimmed and deduped", () => {
@@ -170,8 +189,8 @@ describe("RotaReminderSettings", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Attach calendar invitations" }));
     fireEvent.click(saveButton());
     expect(lastBody()).toEqual({
-      weekdayEnabled: true,
-      weekendEnabled: true,
+      weekdayEnabled: false,
+      weekendEnabled: false,
       invitesEnabled: false,
       weekendRequired: {},
       windows: {},
@@ -179,9 +198,16 @@ describe("RotaReminderSettings", () => {
     });
   });
 
+  it("turning the weekday reminders on is a first save that sends weekday on and weekend off", () => {
+    render(<RotaReminderSettings />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Send weekday reminders" }));
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ weekdayEnabled: true, weekendEnabled: false });
+  });
+
   it("a first save sends only the minimum that was changed", () => {
     render(<RotaReminderSettings />);
-    fireEvent.change(screen.getByLabelText("People needed on LK Weekend each day"), { target: { value: "4" } });
+    fireEvent.change(lkField(), { target: { value: "4" } });
     fireEvent.click(saveButton());
     expect(lastBody()).toMatchObject({ weekendRequired: { CRE_WEEKEND: 4 }, windows: {} });
   });

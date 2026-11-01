@@ -101,8 +101,22 @@ type ClockMeta struct {
 	// entity-service's freshly-reported total against this baseline on
 	// every resume, so a clock paused and resumed several times is only
 	// ever shifted by each new segment, never the whole running total
-	// again. See Store.SetShiftedPauseSeconds/ShiftWake.
+	// again. See Store.SetShiftedPauseSeconds/ShiftWake. For a
+	// 'WSO2 Business days' clock (see Schedule below) this instead holds
+	// the business-hours-aware pause total last baked into the wake
+	// schedule — resumeShift recomputes absolute wake times from scratch
+	// for those, rather than diffing and incrementing, so this field means
+	// "the total already reflected," not "the amount already shifted by,"
+	// for that schedule; see resumeShift's own doc comment.
 	ShiftedPauseSeconds int64
+	// Schedule mirrors entity-service's own domain.SLAClockState.Schedule
+	// (e.g. "WSO2 Business days", "24 x 7", or "") — set once at
+	// RegisterClocks time and never refreshed (a clock's schedule is a
+	// property of its bound policy, which never changes without the whole
+	// clock being replaced by a new incarnation). Engine.resumeShift reads
+	// this to decide whether a resume needs flat wall-clock math or
+	// business-day-aware recomputation.
+	Schedule string
 }
 
 // Store wraps every Redis operation this engine needs — first Redis
@@ -198,7 +212,7 @@ end
 redis.call('HSET', KEYS[1],
 	'caseNumber', ARGV[1], 'wso2CaseId', ARGV[2], 'caseTitle', ARGV[3],
 	'caseType', ARGV[4], 'product', ARGV[5], 'team', ARGV[6], 'priority', ARGV[7],
-	'startedAt', ARGV[8])
+	'startedAt', ARGV[8], 'schedule', ARGV[11])
 redis.call('HSETNX', KEYS[1], 'state', ARGV[9])
 redis.call('HSETNX', KEYS[1], 'paused', '0')
 redis.call('HSETNX', KEYS[1], 'alertedTier', '0')
@@ -228,7 +242,7 @@ func (s *Store) SetClock(ctx context.Context, caseID, clockType string, meta Clo
 	return setClockScript.Run(ctx, s.rdb, []string{key},
 		meta.CaseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType,
 		meta.Product, meta.Team, meta.Priority, meta.StartedAt.UnixNano(),
-		meta.State, int(clockTTL.Seconds()),
+		meta.State, int(clockTTL.Seconds()), meta.Schedule,
 	).Err()
 }
 
@@ -255,6 +269,7 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 		Priority:   res["priority"],
 		State:      res["state"],
 		Paused:     res["paused"] == "1",
+		Schedule:   res["schedule"],
 	}
 	if v, err := strconv.ParseInt(res["startedAt"], 10, 64); err == nil {
 		meta.StartedAt = time.Unix(0, v)
@@ -346,6 +361,52 @@ func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSe
 		args = append(args, wakeMember(caseID, clockType, tier))
 	}
 	return shiftWakeScript.Run(ctx, s.rdb, []string{wakeKey, key}, args...).Err()
+}
+
+// setWakeAbsoluteScript writes an absolute score for each given wake member
+// -- but, like shiftWakeScript, only for a member that currently EXISTS in
+// the index. A bare ZADD on an absent member creates it (at the given
+// score), which would wrongly resurrect a tier processDueMember already
+// alerted on and removed; checking ZSCORE first is what keeps an
+// already-handled tier untouched. The clock hash's own shiftedPauseSeconds
+// is updated in the same script for the identical reason
+// shiftWakeScript's own doc comment gives: a crash between the two writes
+// must never leave the wake entries recomputed but the baseline stale.
+var setWakeAbsoluteScript = redis.NewScript(`
+local baseline = ARGV[1]
+local ttl = ARGV[2]
+for i = 3, #ARGV, 2 do
+	local member = ARGV[i]
+	local score = ARGV[i + 1]
+	if redis.call('ZSCORE', KEYS[1], member) then
+		redis.call('ZADD', KEYS[1], score, member)
+	end
+end
+redis.call('HSET', KEYS[2], 'shiftedPauseSeconds', baseline)
+redis.call('EXPIRE', KEYS[2], ttl)
+return 1
+`)
+
+// SetWakeAbsolute overwrites the due-at score of every (tier, at) pair in
+// wakes for one (caseID, clockType) clock to an absolute instant, for tiers
+// that still have a pending wake entry -- used by Engine.resumeShift's
+// business-day branch, which recomputes each remaining tier's true due
+// instant from scratch (via businessdays.AddBusinessDuration) rather than
+// incrementing a flat delta the way ShiftWake does for a 24x7 clock.
+// newBaselineSeconds is recorded as the clock's new
+// ClockMeta.ShiftedPauseSeconds in the same Redis operation, same reasoning
+// as ShiftWake's own baseline write.
+func (s *Store) SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error {
+	if len(wakes) == 0 {
+		return nil
+	}
+	key := clockKey(caseID, clockType)
+	args := make([]any, 0, 2+2*len(wakes))
+	args = append(args, strconv.FormatInt(newBaselineSeconds, 10), int64(clockTTL.Seconds()))
+	for tier, at := range wakes {
+		args = append(args, wakeMember(caseID, clockType, tier), float64(at.Unix()))
+	}
+	return setWakeAbsoluteScript.Run(ctx, s.rdb, []string{wakeKey, key}, args...).Err()
 }
 
 // SetState refreshes one clock's own display State field — called from

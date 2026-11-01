@@ -957,3 +957,120 @@ describe("DashboardWidgetPreviewPage — case-family widgets get the real, edita
     });
   });
 });
+
+/**
+ * A widget that counts distinct accounts (`distinctBy: account`) links here
+ * with `gb=account`: one expandable row per account, most cases first.
+ */
+describe("DashboardWidgetPreviewPage — grouped by account", () => {
+  const filters = [
+    { field: "accountEscalationActive", op: "eq", values: ["true"] },
+    { field: "state", op: "in", values: ["open"] },
+  ];
+  const caseRow = (n: number, account?: { id: string; name: string }) => ({
+    id: `c${n}`,
+    number: `CS-${n}`,
+    subject: `Subject ${n}`,
+    state: "open",
+    ...(account ? { account } : {}),
+  });
+  const href = buildWidgetPreviewHref({
+    previewSlug: "cases",
+    resourceType: "case",
+    widgetId: "cre_escalations",
+    displayName: "Escalated Accounts",
+    filters: { filters },
+    groupBy: "account",
+  });
+  const acme = { id: "a1", name: "Acme" };
+  const beta = { id: "a2", name: "Beta" };
+
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it("lists one row per account with its case count, most cases first, collapsed", async () => {
+    mockPost({
+      cases: {
+        cases: [caseRow(1, acme), caseRow(2, beta), caseRow(3, beta), caseRow(4, beta)],
+        total: 4,
+        limit: 50,
+        offset: 0,
+      },
+    });
+    renderAt(href);
+
+    const buttons = await screen.findAllByRole("button", { name: /\d+ cases?$/ });
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Beta, 3 cases", "Acme, 1 case"]);
+    expect(buttons[0]).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("CS-2")).not.toBeInTheDocument();
+    // The widget's own raw filters (the one the list cannot hold included) are posted.
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/search",
+      { filters: { filters }, pagination: { offset: 0, limit: 50 } },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(screen.queryByRole("combobox", { name: "Severity" })).not.toBeInTheDocument();
+  });
+
+  it("expands an account to show its cases and collapses again", async () => {
+    mockPost({
+      cases: { cases: [caseRow(1, acme), caseRow(2, beta)], total: 2, limit: 50, offset: 0 },
+    });
+    renderAt(href);
+
+    const acmeButton = await screen.findByRole("button", { name: "Acme, 1 case" });
+    fireEvent.click(acmeButton);
+    expect(acmeButton).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(screen.getByText("CS-1")).toBeInTheDocument());
+    expect(screen.queryByText("CS-2")).not.toBeInTheDocument();
+
+    fireEvent.click(acmeButton);
+    expect(acmeButton).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("pages through every case, not just the first page", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, i) => caseRow(i, acme));
+    postMock.mockImplementation((url: string, body: { pagination?: { offset: number } }) => {
+      if (url !== "/cases/search") return Promise.resolve({});
+      return Promise.resolve(
+        body.pagination?.offset === 0
+          ? { cases: firstPage, total: 51, limit: 50, offset: 0 }
+          : { cases: [caseRow(99, beta)], total: 51, limit: 50, offset: 50 },
+      );
+    });
+    renderAt(href);
+
+    expect(await screen.findByRole("button", { name: "Acme, 50 cases" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Beta, 1 case" })).toBeInTheDocument();
+  });
+
+  it("shows an empty state when nothing matches", async () => {
+    mockPost({ cases: { cases: [], total: 0, limit: 50, offset: 0 } });
+    renderAt(href);
+    expect(await screen.findByText("No accounts match this widget.")).toBeInTheDocument();
+  });
+
+  it("shows an error state when the search fails", async () => {
+    postMock.mockRejectedValue(new Error("boom"));
+    renderAt(href);
+    expect(await screen.findByText("Could not load this widget.")).toBeInTheDocument();
+  });
+
+  it("without gb=account, the same widget keeps the flat preview", async () => {
+    mockPost({
+      cases: { cases: [caseRow(1, acme)], total: 1, limit: 10, offset: 0 },
+    });
+    renderAt(
+      buildWidgetPreviewHref({
+        previewSlug: "cases",
+        resourceType: "case",
+        widgetId: "cre_escalations",
+        displayName: "Escalated Cases",
+        filters: { filters },
+      }),
+    );
+    await waitFor(() => expect(screen.getByText("CS-1")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /Acme/ })).not.toBeInTheDocument();
+  });
+});

@@ -80,6 +80,11 @@ type stubCaseService struct {
 	createCaseCommentAsActor  string
 	createCaseCommentAsResp   domain.CreateCaseCommentResponse
 	createCaseCommentAsErr    error
+
+	updateCaseCalled bool
+	updateCaseReq    domain.UpdateCaseRequest
+	updateCaseResp   domain.UpdateCaseResponse
+	updateCaseErr    error
 }
 
 func (s *stubCaseService) AddCaseTag(_ context.Context, caseID, label string) (domain.Tag, error) {
@@ -108,6 +113,12 @@ func (s *stubCaseService) CreateCaseCommentAs(_ context.Context, req domain.Crea
 	s.createCaseCommentAsReq = req
 	s.createCaseCommentAsActor = actorEmail
 	return s.createCaseCommentAsResp, s.createCaseCommentAsErr
+}
+
+func (s *stubCaseService) UpdateCase(_ context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error) {
+	s.updateCaseCalled = true
+	s.updateCaseReq = req
+	return s.updateCaseResp, s.updateCaseErr
 }
 
 func (s *stubCaseService) CreateCase(_ context.Context, _ domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
@@ -708,6 +719,137 @@ func TestAddCaseTag_NeitherActorEmailNorToken_UnchangedBehavior(t *testing.T) {
 	}
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+const testPatchCaseCaseID = "22222222-2222-2222-2222-222222222222"
+
+// patchCaseRequest builds a PATCH /cases/{id} request carrying the given raw
+// JSON body, optionally with a real x-user-id-token header and/or a caller
+// client id on the request context -- the same shape addCaseTagRequest uses,
+// since PatchCase's own ActorEmail trust gate mirrors AddCaseTag's.
+func patchCaseRequest(caseID, rawBody, userIDToken, clientID string) *http.Request {
+	req := httptest.NewRequest(http.MethodPatch, "/cases/"+caseID, strings.NewReader(rawBody))
+	req.SetPathValue("id", caseID)
+	if userIDToken != "" {
+		req.Header.Set("x-user-id-token", userIDToken)
+	}
+	if clientID != "" {
+		req = req.WithContext(auth.WithIdentity(req.Context(), auth.Identity{ClientID: clientID}))
+	}
+	return req
+}
+
+func runPatchCase(h *CaseHandler, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	middleware.UserIDToken(http.HandlerFunc(h.PatchCase)).ServeHTTP(rec, req)
+	return rec
+}
+
+// TestPatchCase_TrustedM2MClient_MarkFixIssued_ActorEmail covers the path
+// this field was added for: a trusted M2M caller's markFixIssued update
+// reaches CaseService.UpdateCase with the claimed actorEmail, trimmed but
+// with its case preserved exactly -- unlike AddCaseTag/CreateCaseComment's
+// own actorEmail, this value is not necessarily a real email address (a
+// configured display label like "WSO2 Updates" is an intended use), so
+// lowercasing it would corrupt it.
+func TestPatchCase_TrustedM2MClient_MarkFixIssued_ActorEmail(t *testing.T) {
+	stub := &stubCaseService{updateCaseResp: domain.UpdateCaseResponse{Message: "Case updated successfully"}}
+	h := NewCaseHandler(stub, map[string]bool{testTrustedM2MClientID: true})
+
+	req := patchCaseRequest(testPatchCaseCaseID, `{"markFixIssued":true,"actorEmail":"  WSO2 Updates  "}`, "", testTrustedM2MClientID)
+	rec := runPatchCase(h, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !stub.updateCaseCalled {
+		t.Fatalf("expected UpdateCase to be called")
+	}
+	if stub.updateCaseReq.ActorEmail == nil || *stub.updateCaseReq.ActorEmail != "WSO2 Updates" {
+		t.Fatalf("expected actorEmail %q (trimmed, case preserved), got %v", "WSO2 Updates", stub.updateCaseReq.ActorEmail)
+	}
+}
+
+// TestPatchCase_BlankActorEmail_Rejected covers a trusted M2M caller whose
+// actorEmail is blank, or becomes blank once trimmed (whitespace-only) --
+// rejected with 400 before ever reaching the service layer, rather than
+// silently forwarding an empty, effectively-unattributed value.
+func TestPatchCase_BlankActorEmail_Rejected(t *testing.T) {
+	for _, actorEmail := range []string{"", "   "} {
+		t.Run("actorEmail="+actorEmail, func(t *testing.T) {
+			stub := &stubCaseService{}
+			h := NewCaseHandler(stub, map[string]bool{testTrustedM2MClientID: true})
+
+			req := patchCaseRequest(testPatchCaseCaseID, `{"markFixIssued":true,"actorEmail":"`+actorEmail+`"}`, "", testTrustedM2MClientID)
+			rec := runPatchCase(h, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if stub.updateCaseCalled {
+				t.Fatalf("expected the request to be rejected before the service layer")
+			}
+		})
+	}
+}
+
+// TestPatchCase_UntrustedClientID_Rejected mirrors
+// TestAddCaseTag_UntrustedClientID_Rejected for PatchCase's own ActorEmail
+// gate: an untrusted client id is a 403, regardless of what actorEmail it
+// claims.
+func TestPatchCase_UntrustedClientID_Rejected(t *testing.T) {
+	stub := &stubCaseService{}
+	h := NewCaseHandler(stub, map[string]bool{testTrustedM2MClientID: true})
+
+	req := patchCaseRequest(testPatchCaseCaseID, `{"markFixIssued":true,"actorEmail":"someone@example.com"}`, "", "some-other-client-id")
+	rec := runPatchCase(h, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stub.updateCaseCalled {
+		t.Fatalf("expected the request to be rejected before the service layer")
+	}
+}
+
+// TestPatchCase_ActorEmailAndToken_Rejected mirrors
+// TestAddCaseTag_ActorEmailAndToken_Rejected: actorEmail alongside a real
+// x-user-id-token is a 400, even from an otherwise-trusted M2M client id.
+func TestPatchCase_ActorEmailAndToken_Rejected(t *testing.T) {
+	stub := &stubCaseService{}
+	h := NewCaseHandler(stub, map[string]bool{testTrustedM2MClientID: true})
+
+	req := patchCaseRequest(testPatchCaseCaseID, `{"markFixIssued":true,"actorEmail":"someone@example.com"}`, "a-real-token", testTrustedM2MClientID)
+	rec := runPatchCase(h, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stub.updateCaseCalled {
+		t.Fatalf("expected the request to be rejected before the service layer")
+	}
+}
+
+// TestPatchCase_NoActorEmail_UnchangedBehavior pins that an ordinary
+// PatchCase request with no actorEmail at all reaches CaseService.UpdateCase
+// completely unaffected by this field's existence -- the normal CS-engineer/
+// portal/automation flow.
+func TestPatchCase_NoActorEmail_UnchangedBehavior(t *testing.T) {
+	stub := &stubCaseService{updateCaseResp: domain.UpdateCaseResponse{Message: "Case updated successfully"}}
+	h := NewCaseHandler(stub, map[string]bool{testTrustedM2MClientID: true})
+
+	req := patchCaseRequest(testPatchCaseCaseID, `{"state":"closed"}`, "", "")
+	rec := runPatchCase(h, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !stub.updateCaseCalled {
+		t.Fatalf("expected UpdateCase to be called")
+	}
+	if stub.updateCaseReq.ActorEmail != nil {
+		t.Fatalf("expected ActorEmail to stay nil, got %v", stub.updateCaseReq.ActorEmail)
 	}
 }
 

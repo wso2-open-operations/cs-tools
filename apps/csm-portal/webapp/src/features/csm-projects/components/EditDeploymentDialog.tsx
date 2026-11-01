@@ -117,7 +117,10 @@ export default function EditDeploymentDialog({
             slotProps={{ htmlInput: { maxLength: NAME_MAX } }}
           />
 
-          <FormControl size="small" fullWidth required>
+          {/* A type is required only to create a deployment; an edit never
+              has to send one. It is required here only when one is stored,
+              because the select offers no way back to "no type". */}
+          <FormControl size="small" fullWidth required={originalType !== ""}>
             <InputLabel
               id="edit-deployment-type-label"
               shrink={type !== ""}

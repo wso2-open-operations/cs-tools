@@ -413,6 +413,41 @@ describe("translateCaseDashboardFiltersChecked — `lossless`", () => {
   });
 });
 
+describe("a case widget that counts distinct accounts", () => {
+  const filters = { filters: [entry("state", "in", "open")] };
+
+  it("opens the preview page grouped by account, even when its filters fit the case list", () => {
+    const href = WIDGET_RESOURCE_CONFIG.case.buildHref(filters, {
+      ...ctx,
+      distinctByField: "account",
+    });
+    const params = hrefParams(href);
+
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
+    expect(params.get("gb")).toBe("account");
+    expect(params.get("w")).toBe(ctx.widgetId);
+    // `gb` is a view option, never read back as a filter.
+    expect(JSON.stringify(parseWidgetPreviewFilters(params).filters)).not.toContain("gb");
+  });
+
+  it("keeps every filter, including the ones the case list cannot hold", () => {
+    const escalated = {
+      filters: [entry("accountEscalationActive", "eq", "true"), entry("state", "in", "open")],
+    };
+    const params = hrefParams(
+      WIDGET_RESOURCE_CONFIG.case.buildHref(escalated, { ...ctx, distinctByField: "account" }),
+    );
+    expect(params.get("gb")).toBe("account");
+    expect(parseWidgetPreviewFilters(params).filters).toEqual(escalated);
+  });
+
+  it("is unchanged for a widget with no distinctBy, or one on another field", () => {
+    expect(WIDGET_RESOURCE_CONFIG.case.buildHref(filters, ctx).startsWith("/cases?")).toBe(true);
+    const other = WIDGET_RESOURCE_CONFIG.case.buildHref(filters, { ...ctx, distinctByField: "state" });
+    expect(other.startsWith("/cases?")).toBe(true);
+  });
+});
+
 describe("incident, change request and problem click-throughs", () => {
   it("incidents filtered by priority alone still open the incidents list", () => {
     const href = WIDGET_RESOURCE_CONFIG.incident.buildHref({ priorities: ["CRITICAL"] }, ctx);

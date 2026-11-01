@@ -98,16 +98,16 @@ func TestSRECards_AssignedPostsIncidentAcknowledged(t *testing.T) {
 	}
 }
 
-// Any other SRE stop keeps the stopped reply under the card.
-func TestSRECards_OtherStopsAreStoppedReplies(t *testing.T) {
+// An SRE incident acknowledged by leaving NEW posts no stopped reply: the "Incident Acknowledged." card ends its thread.
+func TestSRECards_AcknowledgedPostsNoStoppedReply(t *testing.T) {
 	chat, store := &fakeChat{}, newMemStore()
 	e := ladderEngine(LadderSRE, chat, store)
 
 	stoppedRun(t, e, store, created(t, "Apollo", "HIGH"),
 		record(t, events.TypeIncidentAcknowledged, events.IncidentAcknowledgedPayload{PreviousState: "NEW", NewState: "IN_PROGRESS"}))
 
-	if len(chat.acks) != 0 || len(chat.stopped) != 1 || !chat.stopped[0].Reply {
-		t.Errorf("acknowledged %d, stopped %+v; want one stopped reply", len(chat.acks), chat.stopped)
+	if len(chat.acks) != 0 || len(chat.stopped) != 0 {
+		t.Errorf("acknowledged %d, stopped %+v; want nothing", len(chat.acks), chat.stopped)
 	}
 }
 

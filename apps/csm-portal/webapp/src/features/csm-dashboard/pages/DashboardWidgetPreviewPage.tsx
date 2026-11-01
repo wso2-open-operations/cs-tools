@@ -42,6 +42,8 @@ import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
 import { useTeams } from "@features/csm-dashboard/api/useTeams";
 import ColumnCustomizerButton from "@components/column-customizer/ColumnCustomizerButton";
 import RefreshButton from "@components/RefreshButton";
+import AccountGroupedCasesList from "@features/csm-dashboard/components/AccountGroupedCasesList";
+import { useAllWidgetCases } from "@features/csm-dashboard/api/useAllWidgetCases";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import {
   CASE_OPTIONAL_COLUMNS,
@@ -58,6 +60,8 @@ import {
 } from "@features/csm-dashboard/config/widgetResourceConfig";
 import {
   describeWidgetFilters,
+  GROUP_BY_PARAM,
+  GROUPABLE_FIELD_ACCOUNT,
   parseWidgetPreviewFilters,
   resolveCurrentUserSentinels,
 } from "@features/csm-dashboard/utils/widgetPreviewUrl";
@@ -191,6 +195,24 @@ export default function DashboardWidgetPreviewPage(): JSX.Element {
 
   const filters = resolveCurrentUserSentinels(rawFilters, user?.id);
 
+  // "Escalated Accounts"-style widgets count distinct accounts, so their
+  // click-through shows one row per account (see `buildHref`'s `distinctByField`).
+  // Checked before the editable-filter path: that view lists cases flat.
+  if (
+    searchParams.get(GROUP_BY_PARAM) === GROUPABLE_FIELD_ACCOUNT &&
+    CASE_FAMILY_RESOURCE_TYPES.has(resourceType)
+  ) {
+    return (
+      <AccountGroupedWidgetPreview
+        widgetId={widgetId}
+        displayName={displayName}
+        resourceType={resourceType}
+        filters={filters}
+        backButton={backButton}
+      />
+    );
+  }
+
   if (
     CASE_FAMILY_RESOURCE_TYPES.has(resourceType) &&
     translateCaseDashboardFiltersChecked(filters).lossless
@@ -235,6 +257,59 @@ export default function DashboardWidgetPreviewPage(): JSX.Element {
       filters={filters}
       backButton={backButton}
     />
+  );
+}
+
+interface AccountGroupedWidgetPreviewProps {
+  widgetId: string;
+  displayName: string;
+  resourceType: BeWidgetResourceType;
+  filters: Record<string, unknown>;
+  backButton: JSX.Element;
+}
+
+/**
+ * Case-family "View more" landing for a widget that counts distinct accounts:
+ * loads every case the widget matches (the widget's own raw filters, posted
+ * to the search endpoint verbatim like `DashboardWidgetPreviewContent`, so
+ * the number of account rows equals what the tile showed) and groups them
+ * client-side into expandable per-account rows. No search box or filter bar:
+ * the group list is the whole point and is bounded by the widget's own query.
+ */
+function AccountGroupedWidgetPreview({
+  widgetId,
+  displayName,
+  resourceType,
+  filters,
+  backButton,
+}: AccountGroupedWidgetPreviewProps): JSX.Element {
+  const { data, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useAllWidgetCases({
+    widgetId,
+    resourceType,
+    filters,
+  });
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {backButton}
+      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Typography variant="h5">{displayName}</Typography>
+        <RefreshButton
+          onRefresh={() => void refetch()}
+          isFetching={isFetching}
+          updatedAt={dataUpdatedAt}
+          label={`Refresh ${displayName}`}
+        />
+      </Box>
+      <AccountGroupedCasesList
+        items={data?.items ?? []}
+        isLoading={isLoading}
+        isError={isError}
+        resourceType={resourceType}
+        truncated={data?.truncated}
+        total={data?.total}
+      />
+    </Box>
   );
 }
 

@@ -135,7 +135,8 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
-	if strings.Join(summary.to, ",") != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com" ||
+	if summary.subject != "[CRE Operations] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
+		strings.Join(summary.to, ",") != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com" ||
 		len(summary.attachments) != 0 ||
 		!strings.Contains(summary.body, "A calendar invitation for your team&#39;s rotation follows in a separate email") {
 		t.Errorf("summary = %+v", summary)
@@ -165,7 +166,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := emailWith(t, mail.sent, c.subject)
-		if strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
+		if !strings.HasPrefix(m.subject, "[CRE Operations] "+c.subject) || strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
 			t.Errorf("%q to %v with %d attachments", c.subject, m.to, len(m.attachments))
 			continue
 		}
@@ -220,7 +221,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	}
 	m := mail.sent[0]
 	if strings.Join(m.to, ",") != "zoe@example.com" ||
-		m.subject != "[CRE Rota] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
+		m.subject != "[CRE Operations] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
 		!strings.Contains(m.body, "<p>Dear Zoe Admin,</p>") ||
 		!strings.Contains(m.body, row("Saturday, 24 October", "LK Weekend Rotation", "2", "3")) ||
 		!strings.Contains(m.body, row("Sunday, 25 October", "Americas Weekend Rotation", "0", "1")) ||
@@ -439,6 +440,32 @@ func TestValidInviteAddressAndScheduleURL(t *testing.T) {
 		if got := ValidInviteAddress(s); got != want {
 			t.Errorf("ValidInviteAddress(%q) = %v", s, got)
 		}
+	}
+	// The organizer is the sender's address, with or without its display name.
+	for s, want := range map[string]string{"rota@example.com": "rota@example.com", " rota@example.com ": "rota@example.com",
+		"WSO2 Customer Service <no-reply@example.com>": "no-reply@example.com", `"Rota, CSM" <rota@example.com>`: "rota@example.com",
+		"": "", "rota": "", "Rota <rota>": "", "Rota <rota@example.com>\r\nX: y": "", "Rota\n <rota@example.com>": "",
+		"a <b@example.com>, c <d@example.com>": "",
+		// A control character at either end is refused too, not trimmed away.
+		"Rota <rota@example.com>\r\n": "", "rota@example.com\n": "", "\trota@example.com": "", "\x00Rota <rota@example.com>": ""} {
+		got, ok := InviteOrganizer(s)
+		if got != want || ok != (want != "") {
+			t.Errorf("InviteOrganizer(%q) = %q, %v; want %q", s, got, ok, want)
+		}
+	}
+	// An address goes into an invitation as a mailto URI, a character a URI
+	// cannot hold percent-encoded; an everyday address is unchanged.
+	for s, want := range map[string]string{"rota@example.com": "mailto:rota@example.com",
+		"first.last+tag@example.com": "mailto:first.last+tag@example.com", "ops?tag@example.com": "mailto:ops%3Ftag@example.com",
+		"a#b@example.com": "mailto:a%23b@example.com", "a%b@example.com": "mailto:a%25b@example.com", "a/b=c@example.com": "mailto:a%2Fb%3Dc@example.com"} {
+		if got := mailtoURI(s); got != want {
+			t.Errorf("mailtoURI(%q) = %q; want %q", s, got, want)
+		}
+	}
+	ics := string(Invite{UID: "u@x", OrganizerName: "CSM", OrganizerEmail: "ops?tag@example.com",
+		Attendees: []Attendee{{Name: "Ann", Email: "ann#1@example.com"}}}.ICS())
+	if !strings.Contains(ics, "ORGANIZER;CN=CSM:mailto:ops%3Ftag@example.com\r\n") || !strings.Contains(unfolded([]byte(ics)), ":mailto:ann%231@example.com\r\n") {
+		t.Errorf("invite addresses are not encoded:\n%s", ics)
 	}
 	for s, want := range map[string]bool{"https://portal.example.com/x": true, "http://localhost:3000": true, "": false,
 		"javascript:alert(1)": false, "https://": false, "https://a.example.com/x\ny": false, "/team-schedule": false} {

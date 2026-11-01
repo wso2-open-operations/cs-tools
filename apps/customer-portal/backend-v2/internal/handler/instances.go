@@ -37,6 +37,10 @@ import (
 // entityInstanceClient abstracts the entity-service instance operations used
 // by InstanceHandler.
 type entityInstanceClient interface {
+	// GetProject is the project-access gate for the project-scoped routes —
+	// see requireProjectAccess. Its result is discarded; only the error
+	// (entity-service returns one for a project the caller cannot see) matters.
+	GetProject(ctx context.Context, id string) (entity.ProjectDetailsView, error)
 	SearchInstances(ctx context.Context, req entity.SearchInstancesRequest) (entity.SearchInstancesResponse, error)
 	SearchInstanceMetrics(ctx context.Context, req entity.InstanceMetricsRequest) (entity.InstanceMetricsResponse, error)
 	SearchInstanceUsage(ctx context.Context, req entity.InstanceUsageRequest) (entity.InstanceUsageResponse, error)
@@ -57,18 +61,47 @@ func NewInstanceHandler(entityClient entityInstanceClient) *InstanceHandler {
 // instanceIDFilters is exactly one non-empty ID slice — the other two are
 // always nil, since project/deployment/deployedProduct scoping is mutually
 // exclusive by construction (each portal route only ever sets one).
+//
+// accessProjectID, when non-empty, is the project whose access is verified
+// before the search runs (see requireProjectAccess). Only the project-scoped
+// routes set it, matching the access check the other project-scoped routes in
+// this backend make. The deployment-/deployed-product-scoped routes leave it
+// empty; entity-service scopes those reads itself.
 type instanceIDFilters struct {
 	projectIDs         []string
 	deploymentIDs      []string
 	deployedProductIDs []string
+	accessProjectID    string
 }
 
-func projectScope(id string) instanceIDFilters { return instanceIDFilters{projectIDs: []string{id}} }
+func projectScope(id string) instanceIDFilters {
+	return instanceIDFilters{projectIDs: []string{id}, accessProjectID: id}
+}
 func deploymentScope(id string) instanceIDFilters {
 	return instanceIDFilters{deploymentIDs: []string{id}}
 }
 func deployedProductScope(id string) instanceIDFilters {
 	return instanceIDFilters{deployedProductIDs: []string{id}}
+}
+
+// requireProjectAccess verifies the caller may see scope.accessProjectID before
+// a project-scoped instance read runs, mirroring the license route's gate: a
+// GetProject that entity-service refuses for a project the caller cannot access
+// is mapped straight to the client, and the handler must not proceed. It is a
+// no-op (returns true) for the deployment-/deployed-product-scoped routes, which
+// set no accessProjectID. The returned bool reports whether the caller may
+// proceed; on false the response has already been written.
+func (h *InstanceHandler) requireProjectAccess(w http.ResponseWriter, r *http.Request, userID, scopeProjectID string) bool {
+	if scopeProjectID == "" {
+		return true
+	}
+	if _, err := h.entity.GetProject(r.Context(), scopeProjectID); err != nil {
+		slog.ErrorContext(r.Context(), "entity GetProject access check failed",
+			"userID", userID, "projectID", scopeProjectID, "err", summarizeErr(err))
+		mapUpstreamError(w, err, "Failed to verify project access.")
+		return false
+	}
+	return true
 }
 
 // --- POST .../instances/search ---
@@ -81,6 +114,9 @@ func (h *InstanceHandler) searchInstances(w http.ResponseWriter, r *http.Request
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.requireProjectAccess(w, r, user.UserID, scope.accessProjectID) {
 		return
 	}
 
@@ -150,6 +186,9 @@ func (h *InstanceHandler) searchInstanceMetrics(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+	if !h.requireProjectAccess(w, r, user.UserID, scope.accessProjectID) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -208,6 +247,9 @@ func (h *InstanceHandler) searchInstanceUsage(w http.ResponseWriter, r *http.Req
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.requireProjectAccess(w, r, user.UserID, scope.accessProjectID) {
 		return
 	}
 
@@ -275,6 +317,9 @@ func (h *InstanceHandler) searchInstanceMetricsStats(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
 		return
 	}
+	if !h.requireProjectAccess(w, r, user.UserID, scope.accessProjectID) {
+		return
+	}
 
 	body, ok := readJSONBody(w, r)
 	if !ok {
@@ -333,6 +378,9 @@ func (h *InstanceHandler) searchInstanceUsageStats(w http.ResponseWriter, r *htt
 	}
 	if !uuidRe.MatchString(pathID) {
 		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	if !h.requireProjectAccess(w, r, user.UserID, scope.accessProjectID) {
 		return
 	}
 

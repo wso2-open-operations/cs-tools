@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/dto"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -50,13 +51,38 @@ type entityCaseClient interface {
 }
 
 // CaseHandler handles HTTP requests for case operations.
+// notifyAgentTimeout bounds the detached case_created notification. The agent's
+// own read deadline is shorter (sideChannelTimeout), so this is the backstop
+// for a connection that neither answers nor closes, not the usual limit.
+const notifyAgentTimeout = 45 * time.Second
+
+// agentNotifier delivers a one-way message to the AI chat agent. Satisfied by
+// aichatagent.WSClient.
+type agentNotifier interface {
+	NotifyAgent(ctx context.Context, sessionID, payload string) error
+}
+
 type CaseHandler struct {
 	entity entityCaseClient
+	// agent is nil when the AI chat agent is not configured, and on every
+	// handler built by NewCaseHandler. Every call site must check it.
+	agent agentNotifier
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
+//
+// The resulting handler does not notify the AI chat agent when a case is raised
+// from a conversation; use NewCaseHandlerWithAgent for that. Kept as-is so the
+// two dozen tests that construct a handler do not all have to pass a notifier
+// they do not exercise.
 func NewCaseHandler(entity entityCaseClient) *CaseHandler {
 	return &CaseHandler{entity: entity}
+}
+
+// NewCaseHandlerWithAgent creates a CaseHandler that also tells the AI chat
+// agent when a case has been raised from one of its conversations.
+func NewCaseHandlerWithAgent(entity entityCaseClient, agent agentNotifier) *CaseHandler {
+	return &CaseHandler{entity: entity, agent: agent}
 }
 
 // resolveWatchListUserIDs translates a caller-supplied watch list — email
@@ -342,9 +368,71 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.entity.UpdateConversation(r.Context(), req.ConversationID, entity.UpdateConversationRequest{State: conversationStateConverted}); err != nil {
 			slog.ErrorContext(r.Context(), "entity UpdateConversation failed to mark the source conversation converted", "userID", user.UserID, "conversationID", req.ConversationID, "err", summarizeErr(err))
 		}
+		// The agent identifies a customer by account, and the chat path sends
+		// project.Account.ID with the project id only as a fallback. Sending the
+		// project id here instead would file the escalation under a different
+		// identity than the conversation it belongs to.
+		accountID := project.Account.ID
+		if accountID == "" {
+			accountID = req.ProjectID
+		}
+		h.notifyAgentCaseCreated(r.Context(), accountID, req.ProjectID, req.ConversationID)
 	}
 
 	writeJSONValue(w, http.StatusCreated, dto.MapCaseCreate(result))
+}
+
+// notifyAgentCaseCreated tells the AI chat agent that a case was raised from one
+// of its conversations.
+//
+// The agent cannot observe this on its own: it marks a conversation escalated
+// only when it ran a case tool itself, so a case raised from the portal left no
+// trace and its effectiveness reporting read 0% escalation while cases were
+// being opened. The conversation state written just above is the authoritative
+// record; this is what makes it visible to the agent without it having to read
+// conversation state back.
+//
+// Best-effort, like the conversion above: the case already exists, so a failure
+// to report it must not turn a successful creation into an error. Logged at
+// error so the gap is findable.
+//
+// Detached rather than run inline. NotifyAgent waits for an acknowledgement,
+// and an agent that accepts the message but never answers would hold the
+// successful 201 for up to sideChannelTimeout — during which the case exists
+// and a client that gives up may retry a creation that already succeeded. The
+// response must not depend on a statistic being recorded.
+//
+// The detached context keeps the request's values — correlation id, user token
+// — without its cancellation, since the request is finished by the time this
+// runs. Same idiom as entityWriteContext in contacts.go.
+//
+// Idempotent upstream — the agent records an escalation once per conversation
+// and answers `recorded: false` for a repeat, so a retry or a second case on
+// the same conversation does not inflate the count.
+func (h *CaseHandler) notifyAgentCaseCreated(ctx context.Context, accountID, projectID, conversationID string) {
+	if h.agent == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]string{
+		"type":           "case_created",
+		"accountId":      accountID,
+		"conversationId": conversationID,
+	})
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to encode case_created notification", "conversationID", conversationID, "err", summarizeErr(err))
+		return
+	}
+	// The agent keys a session on "{project}:{conversation}", the same
+	// composite the chat socket uses — the project id, not the account id.
+	sessionID := projectID + ":" + conversationID
+	detached := context.WithoutCancel(ctx)
+	go func() {
+		nctx, cancel := context.WithTimeout(detached, notifyAgentTimeout)
+		defer cancel()
+		if err := h.agent.NotifyAgent(nctx, sessionID, string(payload)); err != nil {
+			slog.ErrorContext(nctx, "aichatagent NotifyAgent failed for case_created", "conversationID", conversationID, "err", summarizeErr(err))
+		}
+	}()
 }
 
 // PatchCase handles PATCH /cases/{id}.

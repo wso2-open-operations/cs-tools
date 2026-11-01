@@ -33,8 +33,11 @@ import {
   isDestructiveChangeRequestTransition,
   pendingCustomerProposal,
   requestApprovalNeedsContactReason,
+  requestApprovalNeedsDeviationClearedReason,
   requestApprovalNeedsProjectReason,
   rollbackPendingReviewReason,
+  requestApprovalSchedulesDirectly,
+  SCHEDULE_STANDARD_CHANGE_LABEL,
   type PendingCustomerReview,
   isOfferedChangeRequestTarget,
 } from "@features/csm-operations/utils/changeRequests";
@@ -157,7 +160,10 @@ interface BlockedReasonContext {
  * (`requestApprovalNeedsContactReason`, only where the page knows the project has
  * none: a requester-only project is the backend's refusal, shown in the error banner).
  * Neither applies to an Emergency change: the backend ignores its customer boxes, so a
- * stored tick there asks nobody and blocks nothing.
+ * stored tick there asks nobody and blocks nothing. And it needs the deviation from the
+ * implementation plan a clone carried over folded into the plan and cleared
+ * (`requestApprovalNeedsDeviationClearedReason`, every type): the backend refuses
+ * Request Approval while one is stored.
  *
  * `rollback` is blocked out of Customer Review only (out of Review it is never
  * blocked): while the customer group's review is pending the backend refuses
@@ -170,7 +176,9 @@ const TARGET_BLOCKED_REASON: Record<
 > = {
   assess: (cr) =>
     cr.assignedTeam
-      ? (requestApprovalNeedsProjectReason(cr) ?? requestApprovalNeedsContactReason(cr))
+      ? (requestApprovalNeedsProjectReason(cr) ??
+        requestApprovalNeedsContactReason(cr) ??
+        requestApprovalNeedsDeviationClearedReason(cr))
       : "Set an assigned team before requesting approval",
   rollback: (cr, { pendingCustomerReview }) =>
     cr.state === "customer_review" ? rollbackPendingReviewReason(pendingCustomerReview) : null,
@@ -274,13 +282,22 @@ export default function ChangeRequestActionBar({
   // With the customer's proposed time waiting for WSO2, the one `authorize` button reads
   // "Propose a different time" (the counter) instead of "Re-schedule"; the banner carries Accept.
   const proposalPending = !!pendingCustomerProposal(cr);
+  // A Standard change with no customer approval to ask for is pre-authorised:
+  // Request Approval schedules it outright, so it reads "Schedule" (it still sends
+  // `{state: "assess"}`; the backend schedules it). With customer approval it is
+  // still a request, the customer's.
+  const schedulesDirectly = requestApprovalSchedulesDirectly(cr);
+  const labelFor = (target: string): string =>
+    target === "assess" && schedulesDirectly
+      ? SCHEDULE_STANDARD_CHANGE_LABEL
+      : changeRequestTransitionLabel(target, cr.state, proposalPending);
 
   const blockedReason = (target: string): string | null =>
     lockedReason ?? TARGET_BLOCKED_REASON[target]?.(cr, { pendingCustomerReview }) ?? null;
 
   const renderPrimary = (target: string): JSX.Element => {
     const { color, icon } = configFor(target);
-    const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+    const label = labelFor(target);
     const reason = blockedReason(target);
     if (reason) {
       return (
@@ -328,7 +345,7 @@ export default function ChangeRequestActionBar({
       {primaryTarget && renderPrimary(primaryTarget)}
       {secondaryTargets.map((target) => {
         const { color, icon } = configFor(target);
-        const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+        const label = labelFor(target);
         const button = (
           <Button
             key={target}
@@ -383,7 +400,7 @@ export default function ChangeRequestActionBar({
           >
             {menuTargets.map((target) => {
               const { color, icon } = configFor(target);
-              const label = changeRequestTransitionLabel(target, cr.state, proposalPending);
+              const label = labelFor(target);
               const reason = blockedReason(target);
               const destructive = isDestructiveChangeRequestTransition(target);
               const disabled = isPending || !!reason;

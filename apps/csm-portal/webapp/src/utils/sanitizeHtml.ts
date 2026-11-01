@@ -318,6 +318,17 @@ export function isBlankHtml(html: string): boolean {
 }
 
 /**
+ * True when rich-text HTML has something to show: text, or an inline image.
+ * {@link isBlankHtml} judges the text alone, so an image-only body reads as
+ * blank there; this is the check for whether an editor's value may be saved
+ * or sent, where a cleared editor's `<p><br></p>` must not pass but a pasted
+ * image must.
+ */
+export function hasVisibleContent(html: string): boolean {
+  return /<img\b/i.test(html) || !isBlankHtml(html);
+}
+
+/**
  * Strip HTML tags from free text that's meant to be rendered as plain text
  * (e.g. a case subject stored for later display), not treated as HTML.
  * Unlike {@link sanitizeRichTextHtml} (which sanitizes-but-keeps safe HTML

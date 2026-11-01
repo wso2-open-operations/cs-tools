@@ -141,6 +141,11 @@ knowing before trusting a sibling service's source or docs at face value:
   blob (`based_on_subscription_end_date` / `based_on_due_invoices` /
   `based_on_compliance`, each with `event_type` + action results) — see
   `internal/suspensionstate`'s package doc.
+- After a renewal (date more than 90 days away again) or a paid invoice, ACP
+  saves that track's `event_type` back to `open`, as legacy did, so the next
+  term's reminders start over. It only does this while that track's own
+  closure state is Open, and never changes a closure state; reopening a
+  suspended project stays manual.
 
 ## Open dependencies
 

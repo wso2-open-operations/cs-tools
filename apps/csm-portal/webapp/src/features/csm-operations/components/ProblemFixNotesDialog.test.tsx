@@ -20,20 +20,39 @@ import "@testing-library/jest-dom/vitest";
 import ProblemFixNotesDialog from "@features/csm-operations/components/ProblemFixNotesDialog";
 
 describe("ProblemFixNotesDialog", () => {
-  it("confirms with empty causeNotes/fixNotes when the engineer skips them", () => {
+  it("blocks submit and flags both fields when they are empty", () => {
     const onConfirm = vi.fn();
     render(<ProblemFixNotesDialog isSubmitting={false} onClose={vi.fn()} onConfirm={onConfirm} />);
     fireEvent.click(screen.getByRole("button", { name: "Move to Fix In Progress" }));
-    expect(onConfirm).toHaveBeenCalledWith({ causeNotes: "", fixNotes: "" });
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByText("Cause notes are required.")).toBeInTheDocument();
+    expect(screen.getByText("Fix notes are required.")).toBeInTheDocument();
+  });
+
+  it("treats whitespace-only notes as empty and flags only the empty field", () => {
+    const onConfirm = vi.fn();
+    render(<ProblemFixNotesDialog isSubmitting={false} onClose={vi.fn()} onConfirm={onConfirm} />);
+    fireEvent.change(screen.getByLabelText(/Cause notes/), { target: { value: "bad config push" } });
+    fireEvent.change(screen.getByLabelText(/Fix notes/), { target: { value: "   \n " } });
+    fireEvent.click(screen.getByRole("button", { name: "Move to Fix In Progress" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.queryByText("Cause notes are required.")).not.toBeInTheDocument();
+    expect(screen.getByText("Fix notes are required.")).toBeInTheDocument();
+  });
+
+  it("does not show validation messages before the first submit attempt", () => {
+    render(<ProblemFixNotesDialog isSubmitting={false} onClose={vi.fn()} onConfirm={vi.fn()} />);
+    expect(screen.queryByText("Cause notes are required.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fix notes are required.")).not.toBeInTheDocument();
   });
 
   it("confirms with the filled-in notes, trimmed", () => {
     const onConfirm = vi.fn();
     render(<ProblemFixNotesDialog isSubmitting={false} onClose={vi.fn()} onConfirm={onConfirm} />);
-    fireEvent.change(screen.getByLabelText("Cause notes"), {
+    fireEvent.change(screen.getByLabelText(/Cause notes/), {
       target: { value: "  bad config push  " },
     });
-    fireEvent.change(screen.getByLabelText("Fix notes"), {
+    fireEvent.change(screen.getByLabelText(/Fix notes/), {
       target: { value: "rolled back" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Move to Fix In Progress" }));

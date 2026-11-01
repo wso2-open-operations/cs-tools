@@ -22,129 +22,153 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
-// fakePolicyLookupRepo answers FindPolicyByName from a fixed in-memory set
-// of "name|target" -> policy, named the same deterministic way migration
-// 0203 seeds them ("<severity> - <target> (CSM)").
-type fakePolicyLookupRepo struct {
-	policies map[string]repository.SLAPolicyRef
+// fakeCandidatePolicyRepo answers ListCandidatePolicies from a fixed
+// in-memory set keyed by target -- real policy shapes (condition text and
+// all), not the old deterministic CSM-seeded names.
+type fakeCandidatePolicyRepo struct {
+	byTarget map[string][]repository.SLAPolicyRef
 	calls    []string
-	// errOnName, if set, makes FindPolicyByName fail with a real (non-
-	// NotFoundError) error for that exact name -- used to simulate a
-	// transient lookup failure (as opposed to a genuinely absent policy).
-	errOnName string
+	// errOnTarget, if set, makes ListCandidatePolicies fail for that target
+	// -- simulates a transient lookup failure (as opposed to "no policy
+	// configured").
+	errOnTarget string
 }
 
-func (f *fakePolicyLookupRepo) FindPolicyByName(_ context.Context, name, target string) (repository.SLAPolicyRef, error) {
-	f.calls = append(f.calls, name+"|"+target)
-	if f.errOnName != "" && name == f.errOnName {
-		return repository.SLAPolicyRef{}, errors.New("db unavailable")
+func (f *fakeCandidatePolicyRepo) ListCandidatePolicies(_ context.Context, target string) ([]repository.SLAPolicyRef, error) {
+	f.calls = append(f.calls, target)
+	if f.errOnTarget != "" && target == f.errOnTarget {
+		return nil, errors.New("db unavailable")
 	}
-	ref, ok := f.policies[name+"|"+target]
-	if !ok {
-		return repository.SLAPolicyRef{}, &apierror.NotFoundError{Msg: "no sla_policy found named " + name}
-	}
-	return ref, nil
+	return f.byTarget[target], nil
 }
 
-func (f *fakePolicyLookupRepo) RegisterClock(context.Context, string, repository.SLAPolicyRef) (bool, error) {
+func (f *fakeCandidatePolicyRepo) FindPolicyByName(context.Context, string, string) (repository.SLAPolicyRef, error) {
 	panic("not implemented")
 }
-func (f *fakePolicyLookupRepo) CompleteClock(context.Context, string, string) (bool, error) {
+func (f *fakeCandidatePolicyRepo) GetCaseFacts(context.Context, string) (repository.CaseFacts, error) {
 	panic("not implemented")
 }
-func (f *fakePolicyLookupRepo) SetPaused(context.Context, string, string, bool) (bool, error) {
+func (f *fakeCandidatePolicyRepo) RegisterClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
 	panic("not implemented")
 }
-func (f *fakePolicyLookupRepo) RecomputeActive(context.Context) (int, error) {
+func (f *fakeCandidatePolicyRepo) CompleteClock(context.Context, string, string) (bool, error) {
 	panic("not implemented")
 }
-func (f *fakePolicyLookupRepo) ReviseClocks(context.Context, string, []repository.SLAPolicyRef) (int, error) {
+func (f *fakeCandidatePolicyRepo) CompleteClockByPolicy(context.Context, string, string, string) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) SetPaused(context.Context, string, string, bool) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) SetPausedByPolicy(context.Context, string, string, string, bool) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) CancelClock(context.Context, string, string) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) CancelClockByPolicy(context.Context, string, string, string) (bool, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) ActiveClockPolicies(context.Context, string, string) ([]repository.SLAPolicyRef, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) ReviseClocks(context.Context, string, []repository.SLAPolicyRef) (int, error) {
 	panic("not implemented")
 }
 
-func newFakePolicyLookupRepo() *fakePolicyLookupRepo {
-	return &fakePolicyLookupRepo{
-		policies: map[string]repository.SLAPolicyRef{
-			"S0 - RESPONSE (CSM)|RESPONSE":     {ID: "s0-r", Target: "RESPONSE", Duration: 15 * time.Minute},
-			"S0 - WORKAROUND (CSM)|WORKAROUND": {ID: "s0-w", Target: "WORKAROUND", Duration: 4 * time.Hour},
-			"S0 - RESOLUTION (CSM)|RESOLUTION": {ID: "s0-res", Target: "RESOLUTION", Duration: 48 * time.Hour},
-			"S1 - RESPONSE (CSM)|RESPONSE":     {ID: "s1-r", Target: "RESPONSE", Duration: time.Hour},
-			"S2 - WORKAROUND (CSM)|WORKAROUND": {ID: "s2-w", Target: "WORKAROUND", Duration: 48 * time.Hour},
-			"S3 - RESOLUTION (CSM)|RESOLUTION": {ID: "s3-res", Target: "RESOLUTION", Duration: 72 * time.Hour},
-			"S4 - RESPONSE (CSM)|RESPONSE":     {ID: "s4-r", Target: "RESPONSE", Duration: 24 * time.Hour},
+// newFakeCandidatePolicyRepo seeds a small, realistic slice of the real
+// table's own shapes (same names/conditions as the live data, trimmed to
+// what these tests need).
+func newFakeCandidatePolicyRepo() *fakeCandidatePolicyRepo {
+	return &fakeCandidatePolicyRepo{
+		byTarget: map[string][]repository.SLAPolicyRef{
+			"RESPONSE": {
+				{ID: "p1-r-ms", Name: "P1 - Response (Managed Services)", Target: "RESPONSE", Duration: 15 * time.Minute,
+					StartCondition: "state=OPEN^case_type=case^priority=S0^cs_engineer_response_comment=false"},
+				{ID: "p1-r-os", Name: "P1 - Response (Open Source)", Target: "RESPONSE", Duration: time.Hour,
+					StartCondition: "state=OPEN^priority=S1^case_type=case^cs_engineer_response_comment=false^NQstate=OPEN^case_type=security_report_analysis^cs_engineer_response_comment=false"},
+				{ID: "svc-request", Name: "ServiceRequest SLA", Target: "RESPONSE", Duration: 24 * time.Hour, Schedule: "WSO2 Business days",
+					StartCondition: "case_type=service_request^state=OPEN^case_typeISNOTEMPTY"},
+				{ID: "incident-escalation", Name: "Escalated case response - 4 hours", Target: "RESPONSE", Duration: 4 * time.Hour,
+					StartCondition: "active_escalation.escalation_severity=abc^active_escalation.state=101"},
+			},
+			"WORKAROUND": {
+				{ID: "p1-w-os", Name: "P1 - Workaround (Open Source)", Target: "WORKAROUND", Duration: 24 * time.Hour,
+					StartCondition: "project_type=Subscription^ORproject_type=Managed Cloud Subscription^case_type=case^priority=S1"},
+			},
+			"RESOLUTION": {
+				{ID: "p0-res-os", Name: "P0 - Resolution (Open Source)", Target: "RESOLUTION", Duration: 48 * time.Hour,
+					StartCondition: "priority=S0^case_type=case"},
+			},
 		},
 	}
 }
 
-func TestSLAPolicyResolver_Resolve_MatchesDeterministicName(t *testing.T) {
-	tests := []struct {
-		name       string
-		severity   domain.CaseSeverity
-		clockType  string
-		wantID     string
-		wantTarget string
-		wantName   string
-	}{
-		{"S1 response", domain.CaseSeverityCritical, slaClockTypeResponse, "s1-r", "RESPONSE", "S1 - RESPONSE (CSM)"},
-		{"S2 workaround", domain.CaseSeverityHigh, slaClockTypeWorkaround, "s2-w", "WORKAROUND", "S2 - WORKAROUND (CSM)"},
-		{"S3 resolution", domain.CaseSeverityMedium, slaClockTypeResolution, "s3-res", "RESOLUTION", "S3 - RESOLUTION (CSM)"},
-		{"S4/LOW response -- the case that used to silently fail", domain.CaseSeverityLow, slaClockTypeResponse, "s4-r", "RESPONSE", "S4 - RESPONSE (CSM)"},
-		{"S0/Catastrophic response", domain.CaseSeverityCatastrophic, slaClockTypeResponse, "s0-r", "RESPONSE", "S0 - RESPONSE (CSM)"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			repo := newFakePolicyLookupRepo()
-			r := newSLAPolicyResolver(repo)
-			got, ok, err := r.resolve(context.Background(), tt.severity, tt.clockType)
-			if err != nil {
-				t.Fatalf("resolve() error = %v, want nil", err)
-			}
-			if !ok {
-				t.Fatalf("resolve() ok = false, want true")
-			}
-			if got.ID != tt.wantID || got.Target != tt.wantTarget {
-				t.Errorf("resolve() = %+v, want ID=%s Target=%s", got, tt.wantID, tt.wantTarget)
-			}
-			if len(repo.calls) != 1 || repo.calls[0] != tt.wantName+"|"+tt.wantTarget {
-				t.Errorf("FindPolicyByName calls = %v, want exactly one lookup for %q -- no pattern/plan guessing", repo.calls, tt.wantName)
-			}
-		})
-	}
-}
-
-func TestSLAPolicyResolver_Resolve_NoPolicySeeded(t *testing.T) {
-	repo := newFakePolicyLookupRepo()
+func TestSLAPolicyResolver_Resolve_MatchesRealCondition(t *testing.T) {
+	repo := newFakeCandidatePolicyRepo()
 	r := newSLAPolicyResolver(repo)
 
-	// S4/LOW has no workaround policy seeded at all (migration 0203 mirrors
-	// sla_duration_policy, which has none for low/workaround either).
-	_, ok, err := r.resolve(context.Background(), domain.CaseSeverityLow, slaClockTypeWorkaround)
-	if err != nil {
-		t.Fatalf("resolve() error = %v, want nil -- a genuinely absent policy is not a lookup failure", err)
-	}
-	if ok {
-		t.Fatalf("resolve() ok = true, want false: no S4/WORKAROUND policy is seeded/faked at all")
-	}
-}
-
-func TestSLAPolicyResolver_Resolve_UnknownClockType(t *testing.T) {
-	repo := newFakePolicyLookupRepo()
-	r := newSLAPolicyResolver(repo)
-
-	_, ok, err := r.resolve(context.Background(), domain.CaseSeverityCritical, "bogus")
+	facts := repository.CaseFacts{State: "OPEN", Severity: "S0", CaseType: "case", CSEngineerResponseComment: false}
+	got, err := r.resolve(context.Background(), "RESPONSE", facts)
 	if err != nil {
 		t.Fatalf("resolve() error = %v, want nil", err)
 	}
-	if ok {
-		t.Fatalf("resolve() ok = true, want false for an unrecognized clock type")
+	if len(got) != 1 || got[0].ID != "p1-r-ms" {
+		t.Errorf("resolve() = %+v, want exactly [P1 - Response (Managed Services)]", got)
 	}
-	if len(repo.calls) != 0 {
-		t.Errorf("FindPolicyByName calls = %v, want none -- an unknown clock type never reaches the repository", repo.calls)
+}
+
+// TestSLAPolicyResolver_Resolve_NQGroupMatches confirms a case whose facts
+// only satisfy the SECOND NQ-separated group of a policy's start_condition
+// (P1 - Response (Open Source)'s own security_report_analysis branch)
+// still resolves.
+func TestSLAPolicyResolver_Resolve_NQGroupMatches(t *testing.T) {
+	repo := newFakeCandidatePolicyRepo()
+	r := newSLAPolicyResolver(repo)
+
+	facts := repository.CaseFacts{State: "OPEN", CaseType: "security_report_analysis", CSEngineerResponseComment: false}
+	got, err := r.resolve(context.Background(), "RESPONSE", facts)
+	if err != nil {
+		t.Fatalf("resolve() error = %v, want nil", err)
+	}
+	if len(got) != 1 || got[0].ID != "p1-r-os" {
+		t.Fatalf("resolve() = %+v, want exactly [P1 - Response (Open Source)] via its second NQ group", got)
+	}
+}
+
+// TestSLAPolicyResolver_Resolve_SkipsNonCasePolicy confirms a case's facts
+// never accidentally match an incident/escalation-style candidate (which
+// carries fields this engine never builds evaluation support for).
+func TestSLAPolicyResolver_Resolve_SkipsNonCasePolicy(t *testing.T) {
+	repo := newFakeCandidatePolicyRepo()
+	r := newSLAPolicyResolver(repo)
+
+	// No case in these tests' facts ever has state=101 (that's an
+	// escalation-table-only code), so this also exercises "zero matches".
+	facts := repository.CaseFacts{State: "CLOSED", CaseType: "case"}
+	got, err := r.resolve(context.Background(), "RESPONSE", facts)
+	if err != nil {
+		t.Fatalf("resolve() error = %v, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("resolve() = %+v, want none: nothing should match a closed case with no response comment yet", got)
+	}
+}
+
+func TestSLAPolicyResolver_Resolve_NoMatch(t *testing.T) {
+	repo := newFakeCandidatePolicyRepo()
+	r := newSLAPolicyResolver(repo)
+
+	facts := repository.CaseFacts{State: "OPEN", Severity: "S4", CaseType: "announcement"}
+	got, err := r.resolve(context.Background(), "WORKAROUND", facts)
+	if err != nil {
+		t.Fatalf("resolve() error = %v, want nil -- a genuinely absent policy is not a lookup failure", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("resolve() = %+v, want none: no WORKAROUND policy matches an announcement", got)
 	}
 }
 
@@ -154,15 +178,50 @@ func TestSLAPolicyResolver_Resolve_UnknownClockType(t *testing.T) {
 // resolveApplicablePolicies must be able to tell the two apart (see that
 // function's own doc comment).
 func TestSLAPolicyResolver_Resolve_InfrastructureErrorPropagates(t *testing.T) {
-	repo := newFakePolicyLookupRepo()
-	repo.errOnName = "S1 - RESPONSE (CSM)"
+	repo := newFakeCandidatePolicyRepo()
+	repo.errOnTarget = "RESPONSE"
 	r := newSLAPolicyResolver(repo)
 
-	_, ok, err := r.resolve(context.Background(), domain.CaseSeverityCritical, slaClockTypeResponse)
+	got, err := r.resolve(context.Background(), "RESPONSE", repository.CaseFacts{State: "OPEN"})
 	if err == nil {
 		t.Fatalf("resolve() error = nil, want the repository's error propagated")
 	}
-	if ok {
-		t.Fatalf("resolve() ok = true, want false when the repository call itself fails")
+	if len(got) != 0 {
+		t.Fatalf("resolve() = %+v, want none when the repository call itself fails", got)
+	}
+}
+
+// TestSLAPolicyResolver_Resolve_BothMatchesReturned covers the real, live
+// overlap between "Hosting Q/T - Response (Managed Service)" and
+// "Query - Response (Open Source)" (both can match a hosting_query case) --
+// the resolver must return BOTH, so each registers its own independent
+// clock, and must do so deterministically (same order every call), not
+// silently pick one and drop the other the way an earlier version did.
+func TestSLAPolicyResolver_Resolve_BothMatchesReturned(t *testing.T) {
+	repo := &fakeCandidatePolicyRepo{byTarget: map[string][]repository.SLAPolicyRef{
+		"RESPONSE": {
+			{ID: "a-hosting-qt", Name: "Hosting Q/T - Response (Managed Service)", Target: "RESPONSE", Duration: 24 * time.Hour,
+				StartCondition: "case_type=hosting_query^ORcase_type=hosting_task"},
+			{ID: "b-query-open-source", Name: "Query - Response (Open Source)", Target: "RESPONSE", Duration: 24 * time.Hour,
+				StartCondition: "case_type!=case^case_type!=hosting^state=OPEN^case_type!=announcement^case_typeISNOTEMPTY^case_type!=engagement^case_type!=security_report_analysis^case_type!=service_request"},
+		},
+	}}
+	r := newSLAPolicyResolver(repo)
+
+	facts := repository.CaseFacts{State: "OPEN", CaseType: "hosting_query"}
+	got1, err := r.resolve(context.Background(), "RESPONSE", facts)
+	if err != nil || len(got1) != 2 {
+		t.Fatalf("resolve() = %+v err=%v, want both policies matched", got1, err)
+	}
+	got2, err2 := r.resolve(context.Background(), "RESPONSE", facts)
+	if err2 != nil || len(got2) != 2 {
+		t.Fatalf("second resolve() = %+v err=%v, want both policies matched", got2, err2)
+	}
+	if got1[0].ID != got2[0].ID || got1[1].ID != got2[1].ID {
+		t.Fatalf("resolve() returned a different order across calls (%q,%q then %q,%q) -- must be deterministic",
+			got1[0].ID, got1[1].ID, got2[0].ID, got2[1].ID)
+	}
+	if got1[0].ID != "a-hosting-qt" || got1[1].ID != "b-query-open-source" {
+		t.Errorf("resolve() = [%q, %q], want [a-hosting-qt, b-query-open-source] (ListCandidatePolicies' own id order)", got1[0].ID, got1[1].ID)
 	}
 }

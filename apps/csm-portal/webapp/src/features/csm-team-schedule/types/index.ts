@@ -121,6 +121,10 @@ export interface ScheduleTeam {
   rotaCode?: string;
   /** Everyone on the team, with their role. Older servers do not send it. */
   members?: ScheduleTeamMember[];
+  /** Who heads the team from above (the Americas team lead): not in members,
+   *  since they hold no rota. Absent when the team has none, and from older
+   *  servers. */
+  heads?: ScheduleTeamMember[];
   /** The standing window a member's ordinary weekday is (Americas cover for
    *  the Americas team). Absent means Regular hours. */
   defaultShiftCode?: string;
@@ -450,6 +454,9 @@ export interface RotaAccess {
   canManage: {
     rotaAdmins: boolean;
     markerFamilies: RotaFamily[];
+    /** The teams whose Rota Managers the reader may change as their lead.
+     *  Absent from an older server. */
+    markerTeams?: string[];
     /** The families whose teams' members the reader may add and remove (the
      *  same rule as markerFamilies). Absent from an older server. */
     memberFamilies?: RotaFamily[];

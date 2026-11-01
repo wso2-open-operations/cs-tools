@@ -244,14 +244,18 @@ func (r *deployedProductRepo) SearchDeployedProductMetrics(ctx context.Context, 
 	//   - Where snapshots overlap on a day, the one first reported later wins (it
 	//     replaced the other). If that one carries no core count the node has no
 	//     reading that day, rather than falling back to an older value.
+	// A node-day with both a live (API_CALL) and an uploaded (FILE_UPLOAD) CORES row
+	// counts once, the live one -- see dailyUsageSourcePreference.
 	rows, err := r.db.Query(ctx, `
 		WITH daily AS (
-			SELECT dus.summary_date AS day, dus.deployment_node_id AS node_id, SUM(dus.value)::int AS cores
+			SELECT DISTINCT ON (dus.deployment_node_id, dus.summary_date)
+			       dus.summary_date AS day, dus.deployment_node_id AS node_id, dus.value AS cores
 			FROM daily_usage_summary dus
 			WHERE dus.deployment_node_id = ANY($1::uuid[])
 			AND dus.count_type = 'CORES'
+			AND dus.value IS NOT NULL
 			AND dus.summary_date BETWEEN $2::date AND $3::date
-			GROUP BY dus.summary_date, dus.deployment_node_id
+			ORDER BY dus.deployment_node_id, dus.summary_date, `+dailyUsageSourcePreference+`
 		), snapshot AS (
 			SELECT day, node_id, cores FROM (
 				SELECT DISTINCT ON (dn.id, g.day)
@@ -383,13 +387,19 @@ func (r *deployedProductRepo) SearchDeployedProductUsageCounts(ctx context.Conte
 		nodeNameByID[n.ID] = n.Name
 	}
 
+	// One row per node, count type and day, the live one when there is both a live
+	// and an uploaded row (dailyUsageSourcePreference).
 	rows, err := r.db.Query(ctx, `
-		SELECT dus.summary_date, dus.count_type, dus.deployment_node_id, SUM(dus.value)::int
-		FROM daily_usage_summary dus
-		WHERE dus.deployment_node_id = ANY($1::uuid[])
-		AND dus.summary_date BETWEEN $2::date AND $3::date
-		GROUP BY dus.summary_date, dus.count_type, dus.deployment_node_id
-		ORDER BY dus.summary_date, dus.count_type`,
+		SELECT summary_date, count_type, deployment_node_id, value FROM (
+			SELECT DISTINCT ON (dus.deployment_node_id, dus.count_type, dus.summary_date)
+			       dus.summary_date, dus.count_type, dus.deployment_node_id, dus.value
+			FROM daily_usage_summary dus
+			WHERE dus.deployment_node_id = ANY($1::uuid[])
+			AND dus.value IS NOT NULL
+			AND dus.summary_date BETWEEN $2::date AND $3::date
+			ORDER BY dus.deployment_node_id, dus.count_type, dus.summary_date, `+dailyUsageSourcePreference+`
+		) picked
+		ORDER BY summary_date, count_type`,
 		nodeIDs, startDate, endDate,
 	)
 	if err != nil {

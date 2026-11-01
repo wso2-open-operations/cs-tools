@@ -469,6 +469,14 @@ func (c *CustomerEntityClient) PatchDeployment(ctx context.Context, deploymentID
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/deployments/%s", url.PathEscape(deploymentID)), body)
 }
 
+// SetDeploymentAirGapped calls PUT /deployments/{id}/air-gapped on the entity service.
+// The route is internal-only and Postgres-only there (absent under DATA_SOURCE=servicenow,
+// so a 404 means either an unknown deployment or a ServiceNow-backed entity service).
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) SetDeploymentAirGapped(ctx context.Context, deploymentID string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPut, fmt.Sprintf("/deployments/%s/air-gapped", url.PathEscape(deploymentID)), body)
+}
+
 // SearchDeployments calls POST /deployments/search on the entity service.
 // Response is returned as raw JSON; field filtering to the portal shape is deferred.
 func (c *CustomerEntityClient) SearchDeployments(ctx context.Context, body []byte) ([]byte, error) {
@@ -1327,6 +1335,13 @@ func (c *CustomerEntityClient) DeleteCaseAlertValue(ctx context.Context, valueID
 	return c.do(ctx, http.MethodDelete, "/team-schedule/case-alerts/settings/values/"+url.PathEscape(valueID), nil)
 }
 
+// StandardChangeCall calls one of entity-service's standard change catalogue routes
+// (/standard-change-templates/..., /standard-change-proposals/...) with the
+// caller's identity. path is built by the handler from validated ids only.
+func (c *CustomerEntityClient) StandardChangeCall(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, method, path, body)
+}
+
 // ListRunbooks calls GET /runbooks: the alert-name to runbook catalog.
 func (c *CustomerEntityClient) ListRunbooks(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, "/runbooks", nil)
@@ -1397,4 +1412,40 @@ func (c *CustomerEntityClient) GetScheduleEditMarkers(ctx context.Context, from,
 	return c.do(ctx, http.MethodGet,
 		fmt.Sprintf("/team-schedule/edit-markers?from=%s&to=%s",
 			url.QueryEscape(from), url.QueryEscape(to)), nil)
+}
+
+// SearchEngagementAllocations calls POST /customer-engagements/allocations/search
+// on the entity service: one page of customer engagement allocations, filtered
+// and sorted. Response is returned as raw JSON.
+func (c *CustomerEntityClient) SearchEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/customer-engagements/allocations/search", body)
+}
+
+// GetEngagementAllocation calls GET /customer-engagements/allocations/{id}.
+func (c *CustomerEntityClient) GetEngagementAllocation(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/customer-engagements/allocations/"+url.PathEscape(id), nil)
+}
+
+// ListEngagementAllocationUpdates calls GET /customer-engagements/allocations/{id}/updates,
+// passing the optional paging parameters through unchanged.
+func (c *CustomerEntityClient) ListEngagementAllocationUpdates(ctx context.Context, id, limit, offset string) ([]byte, error) {
+	q := url.Values{}
+	if limit != "" {
+		q.Set("limit", limit)
+	}
+	if offset != "" {
+		q.Set("offset", offset)
+	}
+	path := "/customer-engagements/allocations/" + url.PathEscape(id) + "/updates"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
+
+// CreateEngagementAllocationUpdate calls POST /customer-engagements/allocations/{id}/updates.
+// The entity service decides whether the caller may post; the user token is
+// forwarded so it can tell who is asking.
+func (c *CustomerEntityClient) CreateEngagementAllocationUpdate(ctx context.Context, id string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/customer-engagements/allocations/"+url.PathEscape(id)+"/updates", body)
 }

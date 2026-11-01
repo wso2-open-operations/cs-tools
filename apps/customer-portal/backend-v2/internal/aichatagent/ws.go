@@ -44,6 +44,10 @@ const (
 	// and never sends a "final" — see SendSideChannel.
 	eventFeedbackAck     = "feedback_ack"
 	eventTokenRequestAck = "token_request_ack"
+	// eventEscalationAck terminates the notification sent when a case has been
+	// raised from a conversation. The agent answers `recorded: false` when it
+	// had already recorded that escalation, which is a success, not a retry.
+	eventEscalationAck = "escalation_ack"
 )
 
 // sideChannelTimeout bounds how long SendSideChannel waits for an
@@ -280,6 +284,76 @@ func (c *WSClient) SendSideChannel(ctx context.Context, sessionID, payload strin
 			_ = json.Unmarshal(raw, &evtType)
 		}
 		if evtType == eventFeedbackAck || evtType == eventTokenRequestAck || evtType == eventError {
+			acknowledged = true
+			break
+		}
+	}
+
+	if acknowledged {
+		_ = conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "acknowledged"),
+			time.Now().Add(2*time.Second))
+	}
+	return nil
+}
+
+// NotifyAgent delivers a one-way side-channel message and waits only long
+// enough to see it acknowledged.
+//
+// The sibling of SendSideChannel for callers with no browser connection to
+// forward the acknowledgement to — a case raised over REST, where the chat
+// socket is long gone. SendSideChannel writes every upstream frame to its
+// caller and would panic on a nil one, so this exists rather than a nil check
+// that quietly changes what that function means.
+//
+// Errors when the message could not be delivered, or when the agent answers
+// with an error event. A read timeout is not an error: the write succeeded, so
+// the agent most likely recorded it, and the caller is a best-effort
+// notification that must not fail the operation it reports on.
+func (c *WSClient) NotifyAgent(ctx context.Context, sessionID, payload string) error {
+	conn, err := c.dial(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	conn.SetReadLimit(maxMessageBytes)
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
+		return fmt.Errorf("aichatagent: write notification: %w", err)
+	}
+
+	// One deadline for the whole exchange, set before the loop rather than
+	// inside it. Refreshing it per frame would let an upstream sending
+	// non-terminal frames faster than sideChannelTimeout keep this waiting
+	// indefinitely — and the caller is on a request path.
+	deadline := time.Now().Add(sideChannelTimeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	_ = conn.SetReadDeadline(deadline)
+
+	acknowledged := false
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			// Includes the read timeout and a normal upstream close.
+			break
+		}
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			continue
+		}
+		var evtType string
+		if raw, ok := parsed[eventTypeKey]; ok {
+			_ = json.Unmarshal(raw, &evtType)
+		}
+		if evtType == eventError {
+			// The agent received the message and refused it. Distinct from
+			// silence, and the only way the caller learns the notification was
+			// rejected rather than merely unacknowledged.
+			return fmt.Errorf("aichatagent: agent returned an error for the notification")
+		}
+		if evtType == eventEscalationAck {
 			acknowledged = true
 			break
 		}

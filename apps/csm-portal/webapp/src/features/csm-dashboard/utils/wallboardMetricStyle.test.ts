@@ -107,6 +107,7 @@ describe("resolveDisplayNameAlias", () => {
     expect(resolveDisplayNameAlias("Service Request - In-Progress")).toBe("In-Progress SR");
     expect(resolveDisplayNameAlias("Escalated")).toBe("Escalations");
     expect(resolveDisplayNameAlias("Escalated Cases")).toBe("Escalations");
+    expect(resolveDisplayNameAlias("Escalated Accounts")).toBe("Escalations");
     expect(resolveDisplayNameAlias("SRE - SLA Violations")).toBe("SLA Violations");
     expect(resolveDisplayNameAlias("30+ Days")).toBe("30+ Days Cases");
   });
@@ -124,6 +125,7 @@ describe("resolveDisplayNameAlias", () => {
     const order: readonly string[] = CRE_PRIMARY_ORDER;
     expect(order.indexOf(resolveDisplayNameAlias("Escalated"))).toBe(order.indexOf("Escalations"));
     expect(order.indexOf(resolveDisplayNameAlias("Escalated Cases"))).toBe(order.indexOf("Escalations"));
+    expect(order.indexOf(resolveDisplayNameAlias("Escalated Accounts"))).toBe(order.indexOf("Escalations"));
     expect(order.indexOf("Escalations")).toBe(order.indexOf("SLA Violations") + 1);
   });
 

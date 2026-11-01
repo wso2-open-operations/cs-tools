@@ -22,6 +22,7 @@ import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useAddTagToCase } from "@features/csm-cases/api/useCaseTags";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { SECURITY_ANNOUNCEMENT_TAG_LABEL } from "@features/csm-announcements/components/CreateCustomerAnnouncementForm";
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 
 /**
  * Fixed tag attached to every dry-run case, regardless of which flow ran it,
@@ -34,11 +35,6 @@ import { SECURITY_ANNOUNCEMENT_TAG_LABEL } from "@features/csm-announcements/com
  * engineers already associate with this step.
  */
 export const DRY_RUN_TAG_LABEL = "Dry Run";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 export interface DryRunResult {
   caseId: string;
@@ -110,7 +106,8 @@ export function useAnnouncementDryRun({
   const canRunDryRun = useMemo(
     () =>
       subject.trim().length > 0 &&
-      !isEmptyHtml(description) &&
+      // Text or an inline image; a cleared editor's `<p></p>` is neither.
+      hasVisibleContent(description) &&
       extraCanRun &&
       !runningDryRun,
     [subject, description, extraCanRun, runningDryRun],

@@ -95,7 +95,7 @@ export default function CloseOutageDialog({
                     : "",
                 )
               }
-              slotProps={{ textField: { size: "small", fullWidth: true } }}
+              slotProps={{ textField: { size: "small", fullWidth: true, required: true } }}
             />
           </LocalizationProvider>
         </Box>

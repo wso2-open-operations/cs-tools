@@ -110,6 +110,17 @@ const instanceRefJoins = `
 	LEFT JOIN deployment dep ON dep.number = dn.deployment_number AND dep.project_id = proj.id
 	LEFT JOIN deployed_product dprod ON dprod.deployment_id = dep.id AND dprod.version_id = dn.product_version_id`
 
+// dailyUsageSourcePreference orders daily_usage_summary rows of one node, count
+// type and day so the first is the one to count: a
+// row with a value, then the live (API_CALL) row over an uploaded (FILE_UPLOAD)
+// one, then the most recently updated. A connected customer may also upload a
+// report covering days the product already published; adding the two rows would
+// double counters and levels alike. data_source is nullable, and a NULL comparison
+// would sort ahead of TRUE under DESC, so the live check is IS TRUE: a row with no
+// source ranks with the uploaded ones. rollup_monthly_usage (migration 0250) makes
+// the same choice, so the daily views and the monthly table agree.
+const dailyUsageSourcePreference = `(dus.value IS NOT NULL) DESC, ((dus.data_source = 'API_CALL') IS TRUE) DESC, dus.updated_on DESC, dus.id`
+
 const instanceRefColumns = `proj.id, proj.name, dep.id, dep.name, p.id, p.name, dprod.id, dprod.name`
 
 func buildOptionalRef(id, name *string) *domain.ReferenceTableItem {
@@ -566,12 +577,17 @@ func (r *instanceRepo) SearchInstanceUsageStats(ctx context.Context, filters dom
 		// this was first written (migration 0054 was edited in place
 		// post-merge) -- matching hourly_usage_summary.count_type's own column name
 		// for the same open-ended count-type concept.
-		`SELECT dus.summary_date, dn.id, dus.count_type, SUM(dus.value)
+		//
+		// One row per node, count type and day: the live one when there is both a
+		// live and an uploaded row (dailyUsageSourcePreference). Rows without a value
+		// are kept, sorted last, so a node that has only those still counts in Total.
+		`SELECT DISTINCT ON (dn.id, dus.count_type, dus.summary_date)
+		        dus.summary_date, dn.id, dus.count_type, dus.value
 		 FROM deployment_node dn
 		 JOIN daily_usage_summary dus ON dus.deployment_node_id = dn.id
 		 %s %s
-		 GROUP BY dus.summary_date, dn.id, dus.count_type`,
-		instanceRefJoins, where,
+		 ORDER BY dn.id, dus.count_type, dus.summary_date, %s`,
+		instanceRefJoins, where, dailyUsageSourcePreference,
 	)
 
 	rows, err := r.db.Query(ctx, query, args...)

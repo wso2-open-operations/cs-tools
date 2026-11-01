@@ -31,6 +31,7 @@ import {
   TZ1_WE,
   TZ2,
   TZ2_WE,
+  WEEKEND,
   TZ3,
   RND,
   TZ1_L1,
@@ -152,15 +153,25 @@ describe("MonthRoster: what the grid says", () => {
     expect(container.querySelector("tbody td.clash")).toBeNull();
   });
 
-  it("shows leave on the weekend inside it, as it is stored", () => {
-    // Friday to Monday is four days away, not two with a weekend back at
-    // work in the middle.
+  it("leaves the weekend inside a leave span blank", () => {
+    // Leave is not taken on a weekend: Friday to Monday reads as two days.
     const { container } = renderRoster({
       assignments: [],
       absences: [absence({ name: "Asela", startsOn: "2026-09-25", endsOn: "2026-09-28" })],
     });
     const grid = container.querySelector("table") as HTMLElement;
-    expect(within(grid).getAllByText("AL")).toHaveLength(4);
+    expect(within(grid).getAllByText("AL")).toHaveLength(2);
+  });
+
+  it("leaves the weekend inside an allocation blank too", () => {
+    // Allocations are working-day time, like leave: Friday to Monday is two days.
+    const { container } = renderRoster({
+      assignments: [],
+      absences: [absence({ name: "Asela", startsOn: "2026-09-25", endsOn: "2026-09-28", kindCode: RND.code })],
+      absenceKinds: [ANNUAL_LEAVE, RND],
+    });
+    const grid = container.querySelector("table") as HTMLElement;
+    expect(within(grid).getAllByText(RND.shortCode)).toHaveLength(2);
   });
 
   it("marks the week the reader is in, its two ends included", () => {
@@ -643,6 +654,134 @@ describe("MonthRoster: every team member has a row", () => {
     });
     const names = [...container.querySelectorAll("tbody tr .who")].map((n) => n.textContent);
     expect(names).toEqual(["Asela", "Chen Cleared"]);
+  });
+
+  it("draws leave filed under a team the person is not on, on their own team's row", () => {
+    // A Castor-style member whose lieu leave was filed under another team
+    // (Migration) used to get a second row there, on leave in one team and
+    // on the rota in the other the same day.
+    const LIEU = { ...ANNUAL_LEAVE, id: "k-ll", code: "LIEU_LEAVE", shortCode: "LL", label: "Lieu leave", colourToken: "LL" };
+    const { container } = renderRoster({
+      teamKey: "",
+      teams: ["alpha", "bravo"],
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: EVENING.code, teamKey: "alpha" })],
+      absences: [absence({ name: "Asela", startsOn: "2026-09-22", endsOn: "2026-09-22", kindCode: "LIEU_LEAVE", teamKey: "bravo" })],
+      absenceKinds: [ANNUAL_LEAVE, LIEU],
+      teamMembers: { alpha: [member("u-Asela", "Asela", "engineer")], bravo: [] },
+      ownTeams: new Map([["u-Asela", ["alpha"]]]),
+    });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector(".team")?.textContent).toBe("Alpha");
+    expect(within(rows[0] as HTMLElement).getByText("LL")).toBeInTheDocument();
+  });
+
+  it("leaves such leave off a view that does not show the person's own team", () => {
+    const LIEU = { ...ANNUAL_LEAVE, id: "k-ll", code: "LIEU_LEAVE", shortCode: "LL", label: "Lieu leave", colourToken: "LL" };
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      assignments: [],
+      absences: [absence({ name: "Asela", startsOn: "2026-09-22", endsOn: "2026-09-22", kindCode: "LIEU_LEAVE", teamKey: "bravo" })],
+      absenceKinds: [ANNUAL_LEAVE, LIEU],
+      teamMembers: { bravo: [] },
+      ownTeams: new Map([["u-Asela", ["alpha"]]]),
+    });
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(0);
+  });
+
+  it("draws turns left on a team the person has left on their own row, and edits them where they are filed", () => {
+    // Somebody moved from Bravo to Alpha with Bravo turns still on the rota:
+    // one row, under Alpha, the Bravo turn on it -- and clicking it acts on
+    // that Bravo turn, so clearing it removes it rather than an Alpha turn.
+    const onEditCell = vi.fn();
+    const { container } = renderRoster({
+      teamKey: "",
+      teams: ["alpha", "bravo"],
+      leadTeams: ["alpha", "bravo"],
+      editing: true,
+      onEditCell,
+      assignments: [
+        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: REGULAR.code, teamKey: "alpha" }),
+        assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" }),
+      ],
+      teamMembers: { alpha: [member("u-Asela", "Asela", "engineer")], bravo: [] },
+      ownTeams: new Map([["u-Asela", ["alpha"]]]),
+    });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].querySelector(".team")?.textContent).toBe("Alpha");
+    const turn = within(rows[0] as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    expect(turn.getAttribute("title")).toContain("filed under Bravo");
+    fireEvent.click(turn);
+    expect(onEditCell.mock.calls[0][0]).toMatchObject({ teamKey: "bravo", shiftCode: EVENING.code });
+  });
+
+  it.each([
+    ["own entry first", true],
+    ["stale turn first", false],
+  ])("keeps both a stale turn and the person's own entry on the same day (%s)", (_label, ownFirst) => {
+    const own = assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: REGULAR.code, teamKey: "alpha" });
+    const stale = assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" });
+    const { container } = renderRoster({
+      teamKey: "",
+      teams: ["alpha", "bravo"],
+      assignments: ownFirst ? [own, stale] : [stale, own],
+      teamMembers: { alpha: [member("u-Asela", "Asela", "engineer")], bravo: [] },
+      ownTeams: new Map([["u-Asela", ["alpha"]]]),
+    });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows).toHaveLength(1);
+    const cell = within(rows[0] as HTMLElement).getByText(EVENING.shortCode).closest("td")!;
+    expect(within(cell).getByText(REGULAR.shortCode)).toBeInTheDocument();
+    expect(cell.getAttribute("title")).toContain("filed under Bravo");
+  });
+
+  it("leaves a turn on a team the person has left off a view of that team alone", () => {
+    const { container } = renderRoster({
+      teamKey: "bravo",
+      assignments: [assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" })],
+      teamMembers: { bravo: [] },
+      ownTeams: new Map([["u-Asela", ["alpha"]]]),
+    });
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(0);
+  });
+
+  it("shows somebody moved to the Americas team, and on its weekend rota, under that team only", () => {
+    // A Brazil-rotation move from Alpha to Bravo (the Americas team) with a
+    // weekend turn on Bravo's rota: one row, under Bravo, the turn on it.
+    const BRAZIL = {
+      id: "k-br", code: "ALLO_BR", shortCode: "BR", label: "Brazil rotation", bucket: "ALLOCATION" as const,
+      colourToken: "BR", sortOrder: 70, movesToTeamKey: "bravo", worksRotaThere: true,
+    };
+    const { container } = renderRoster({
+      teamKey: "",
+      teams: ["alpha", "bravo"],
+      shifts: shiftMap(REGULAR, EVENING, WEEKEND),
+      assignments: [assignment({ name: "Bruna", rotaDate: "2026-09-26", shiftCode: WEEKEND.code, teamKey: "bravo" })],
+      absences: [{ ...absence({ name: "Bruna", startsOn: "2026-09-01", endsOn: "2026-12-31", kindCode: "ALLO_BR", teamKey: "bravo" }), homeTeamKey: "alpha" }],
+      absenceKinds: [ANNUAL_LEAVE, BRAZIL],
+      teamMembers: { alpha: [member("u-Bruna", "Bruna", "engineer")], bravo: [] },
+      ownTeams: new Map([["u-Bruna", ["alpha"]]]),
+    });
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows.map((r) => r.querySelector(".team")?.textContent)).toEqual(["Bravo"]);
+    const turn = within(rows[0] as HTMLElement).getByText(WEEKEND.shortCode).closest("td")!;
+    expect(turn.getAttribute("title")).not.toContain("filed under");
+  });
+
+  it("keeps a turn on another team where the person is still a member of it", () => {
+    // A member of two teams (the shared SaaS SRE crew) keeps a row on each.
+    const { container } = renderRoster({
+      teamKey: "",
+      teams: ["alpha", "bravo"],
+      assignments: [
+        assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: EVENING.code, teamKey: "alpha" }),
+        assignment({ name: "Asela", rotaDate: "2026-09-22", shiftCode: EVENING.code, teamKey: "bravo" }),
+      ],
+      teamMembers: { alpha: [member("u-Asela", "Asela", "engineer")], bravo: [member("u-Asela", "Asela", "engineer")] },
+      ownTeams: new Map([["u-Asela", ["alpha", "bravo"]]]),
+    });
+    expect([...container.querySelectorAll("tbody tr .team")].map((t) => t.textContent)).toEqual(["Alpha", "Bravo"]);
   });
 
   it("does not add an empty home-team row for somebody shown under the team they moved to", () => {

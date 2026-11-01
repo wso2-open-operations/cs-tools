@@ -29,6 +29,7 @@ export function CSUserSelect({
   extraOptions,
   selected,
   disabled,
+  required = false,
   size = "small",
   sx,
 }: {
@@ -53,6 +54,9 @@ export function CSUserSelect({
    */
   selected?: UserRef | null;
   disabled?: boolean;
+  /** Marks the field required (asterisk and aria-required). Display only: the
+   *  caller still holds back a save without a value. */
+  required?: boolean;
   size?: "small" | "medium";
   sx?: object;
 }): JSX.Element {
@@ -96,7 +100,7 @@ export function CSUserSelect({
       }}
       noOptionsText={search ? "No engineer matches that" : "No engineers found"}
       renderInput={(params) => (
-        <TextField {...params} label={label} placeholder="Search by name/email" />
+        <TextField {...params} label={label} required={required} placeholder="Search by name/email" />
       )}
     />
   );

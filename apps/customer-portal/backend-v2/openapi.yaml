@@ -4459,9 +4459,10 @@ paths:
     post:
       summary: Search instances belonging to a project.
       description: >
-        filters.projectIds is always forced to [id] server-side. One of 3
-        scope variants (project/deployment/deployed-product) fanned out from
-        entity-service's single POST /instances/search — see
+        filters.projectIds is always forced to [id] server-side, and the
+        caller's access to that project is verified first (403/404 otherwise).
+        One of 3 scope variants (project/deployment/deployed-product) fanned out
+        from entity-service's single POST /instances/search — see
         InstanceSearchRequest.
       operationId: postProjectsIdInstancesSearch
       parameters:
@@ -4525,7 +4526,8 @@ paths:
     post:
       summary: Get core-count metric time series for instances belonging to a project.
       description: >
-        filters.projectIds is always forced to [id] server-side. One of 3
+        filters.projectIds is always forced to [id] server-side. The caller's
+        access to that project is verified first (403/404 otherwise). One of 3
         scope variants fanned out from entity-service's single
         POST /instances/metrics/search.
       operationId: postProjectsIdInstancesMetricsSearch
@@ -4590,7 +4592,8 @@ paths:
     post:
       summary: Get usage-count time series for instances belonging to a project.
       description: >
-        filters.projectIds is always forced to [id] server-side. One of 3
+        filters.projectIds is always forced to [id] server-side. The caller's
+        access to that project is verified first (403/404 otherwise). One of 3
         scope variants fanned out from entity-service's single
         POST /instances/usages/search.
       operationId: postProjectsIdInstancesUsagesSearch
@@ -4655,9 +4658,10 @@ paths:
     post:
       summary: Get core-count metric statistics for instances belonging to a project.
       description: >
-        filters.projectIds is always forced to [id] server-side. Note:
-        dataSource is NOT forwarded to entity-service for this project-scoped
-        metrics-stats variant — a deliberate asymmetry versus the
+        filters.projectIds is always forced to [id] server-side, and the
+        caller's access to that project is verified first (403/404 otherwise).
+        Note: dataSource is NOT forwarded to entity-service for this
+        project-scoped metrics-stats variant — a deliberate asymmetry versus the
         stats/usages/search family (see InstanceStatsRequest's doc comment).
         One of 3 scope variants fanned out from entity-service's single
         POST /instances/stats/metrics/search.
@@ -4723,7 +4727,8 @@ paths:
     post:
       summary: Get usage-count statistics for instances belonging to a project.
       description: >
-        filters.projectIds is always forced to [id] server-side. One of 3
+        filters.projectIds is always forced to [id] server-side. The caller's
+        access to that project is verified first (403/404 otherwise). One of 3
         scope variants fanned out from entity-service's single
         POST /instances/stats/usages/search.
       operationId: postProjectsIdInstancesStatsUsagesSearch
@@ -10650,6 +10655,11 @@ components:
           type: string
         isCsAdmin:
           type: boolean
+          description: The project-level Admin role. This is the editable flag.
+        isAccountAdmin:
+          type: boolean
+          readOnly: true
+          description: Read-only. True when the contact holds an account-level admin role. Never read on the write path.
         isLead:
           type: boolean
         isCsIntegrationUser:

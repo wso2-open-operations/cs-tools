@@ -28,6 +28,10 @@ service never creates incidents and never touches alert-core's own tables.
   from `sns.<region>.amazonaws.com`) and answers `200` without storing an alert. An
   `UnsubscribeConfirmation` is logged and answered `200`, never stored; any other SNS message type
   except `Notification` is rejected with `400`.
+- **AWS alert types.** The AWS webhook maps CloudWatch alarms (metric or composite) and AWS
+  Budgets alerts. A Budgets alert is named `AWS Budgets: <budget name>` and identified by
+  `<account>/<budget name>`, so its actual and forecast alerts share one incident; its severity is
+  the configured one. Any other plain-text SNS message is stored as `SNS Message Parse Error`.
 - **Backpressure.** Accepted-but-unfinished work is capped by both a queue size and a memory
   budget; past either limit, new webhooks get `503` immediately rather than queuing indefinitely.
 - **Wake-up call.** After writing a batch, the service posts once to alert-core's `POST /alertz`

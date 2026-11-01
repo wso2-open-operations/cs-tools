@@ -47,13 +47,14 @@ import NextRotation from "../components/NextRotation";
 import RecentChanges from "../components/RecentChanges";
 import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
-import WeekTable from "../components/WeekTable";
 import { useEngagementAllocations } from "../api/useEngagementAllocations";
 import { distinctUserIds } from "../utils/engagementAllocations";
+import { weekClear } from "../utils/weekEdit";
+import WeekTable, { type WeekEditControls, type WeekPerson, type WeekTurn } from "../components/WeekTable";
 import CasePagingTab, { type PagingRotaTarget } from "../components/CasePagingTab";
 import { caseAlertChainsFor, caseAlertChainsReady, caseAlertsOffered } from "../utils/pagingChains";
 import RotaAccessTab from "../components/RotaAccessTab";
-import { canManageRotaAccess, useRotaAccess } from "../api/useRotaAccess";
+import { canManageRotaAccess, mayEditWeekOf, useRotaAccess } from "../api/useRotaAccess";
 import { canViewCaseAlertSettings, useCaseAlertSettings } from "../api/useCaseAlertSettings";
 import { useGetPagingChain } from "../api/usePagingChain";
 import GenerateRotaDialog from "../components/GenerateRotaDialog";
@@ -989,7 +990,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
 
   /** Mark a saved change on the roster, and offer it back. */
   const recordChange = (
-    target: CellPickerTarget,
+    target: Pick<CellPickerTarget, "userId" | "name">,
     from: string,
     to: string,
     what: string,
@@ -998,6 +999,71 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     const change: RotaChange = { userId: target.userId, name: target.name, from, to, what };
     setChanges((cs) => [...cs, change]);
     setUndoOffer({ id: Date.now(), message: `${target.name}: ${what}, ${fmtRange(from, to)}`, undo, change });
+  };
+
+  /** Put one person on a turn from This week: the same write the roster's
+   *  picker makes for that day, Americas cover for somebody of another team
+   *  included (it moves them there for the day). */
+  const addToWeekCell = (turn: WeekTurn, rotaDate: string, person: WeekPerson): void => {
+    const who = { userId: person.userId, name: person.name };
+    const move = moveKindFor(catalogue.data?.absenceKinds ?? [], turn.shiftCode, person.teamKey);
+    if (move) {
+      const revert = awayRevert(person.userId, person.teamKey, move.code, rotaDate, rotaDate);
+      applyAbsence.mutate(
+        { userId: person.userId, teamKey: person.teamKey, kindCode: move.code, from: rotaDate, to: rotaDate, note: "marked from the week" },
+        {
+          onSuccess: () => recordChange(who, rotaDate, rotaDate, kindLabel(move.code), revert),
+          onError: (err) => showError(notSaved("That change to the rota was not saved.", err), err),
+        },
+      );
+      return;
+    }
+    const revert = turn.tier ? undefined : rotaRevert(person.userId, person.teamKey, rotaDate, rotaDate, turn.shiftCode);
+    applyRange.mutate(
+      {
+        userId: person.userId,
+        teamKey: person.teamKey,
+        shiftCode: turn.shiftCode,
+        from: rotaDate,
+        to: rotaDate,
+        note: "set from the week",
+        ...(turn.tier ? { tier: turn.tier } : {}),
+      },
+      {
+        onSuccess: () => recordChange(who, rotaDate, rotaDate, turn.tier ? `${turn.tier} · ${turn.label}` : turn.label, revert),
+        onError: (err) => showError(notSaved("That change to the rota was not saved.", err), err),
+      },
+    );
+  };
+
+  /** Take one person off a turn from This week, the way the roster's Clear
+   *  does: one zone's turn alone where they hold another that day, otherwise
+   *  the day goes back to their standing window (nothing at the weekend). */
+  const removeFromWeekCell = (a: ScheduleAssignment): void => {
+    const userId = a.engineer.userId;
+    const zone = a.zoneCode ?? shifts.get(a.shiftCode)?.zoneCode;
+    const clear = weekClear(a, shifts, {
+      holdsTurnElsewhere: holdsTurnElsewhere(userId, a.rotaDate, zone, a.shiftCode),
+      baseShiftCode: baseShiftFor(userId),
+      teamDefaultShiftCode: (catalogue.data?.teams ?? []).find((t) => t.key === a.teamKey)?.defaultShiftCode,
+    });
+    // Only a whole day put back can be undone exactly; a zone's turn cannot.
+    const revert = clear.zoneCode ? undefined : rotaRevert(userId, a.teamKey, a.rotaDate, a.rotaDate, clear.shiftCode);
+    applyRange.mutate(
+      {
+        userId,
+        teamKey: a.teamKey,
+        shiftCode: clear.shiftCode,
+        ...(clear.zoneCode ? { zoneCode: clear.zoneCode } : {}),
+        from: a.rotaDate,
+        to: a.rotaDate,
+        note: "cleared from the week",
+      },
+      {
+        onSuccess: () => recordChange({ userId, name: a.engineer.name }, a.rotaDate, a.rotaDate, clear.what, revert),
+        onError: (err) => showError(notSaved("That change to the rota was not saved.", err), err),
+      },
+    );
   };
 
   /** A tag as the change log names it: a move worked as another team's
@@ -1407,6 +1473,33 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     (view === "week" || view === "roster") && engagementUserIds.length > 0,
   );
 
+  /** This week is editable by a rota admin of the family on screen and by a
+   *  CSM or portal admin; a lead keeps the roster. The server checks every
+   *  write. */
+  const weekEditable = view === "week" && !noRotaOfTheirs && mayEditWeekOf(rotaAccess.data, readerEmail, family);
+  /** Who This week's "+ Add" offers: the people of the family's teams on
+   *  screen (the team filter and the rota narrow it as they do the roster). */
+  const weekPeople = useMemo(() => {
+    const ofFamily = new Set(
+      (catalogue.data?.teams ?? []).filter((t) => t.family === family).map((t) => t.key),
+    );
+    return Object.entries(teamMembers)
+      .filter(([teamKey]) => ofFamily.has(teamKey))
+      .flatMap(([teamKey, members]) =>
+        members.map((m) => ({ userId: m.userId, name: m.name || m.email, teamKey })),
+      );
+  }, [teamMembers, catalogue.data?.teams, family]);
+
+  /** Every person's own teams, across all of them, so the roster can put
+   *  leave filed under some other team on the person's own row. */
+  const ownTeams = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const t of catalogue.data?.teams ?? []) {
+      for (const m of t.members ?? []) out.set(m.userId, [...(out.get(m.userId) ?? []), t.key]);
+    }
+    return out;
+  }, [catalogue.data?.teams]);
+
   if (catalogue.isError) {
     return <QueryErrorState message="Could not load the schedule catalogue." error={catalogue.error} />;
   }
@@ -1581,7 +1674,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
 
             {/* Only the roster is edited, so the button is offered there alone:
                 on the other views it switched on a mode they do not have. */}
-            {editsHere && view === "roster" ? (
+            {(editsHere && view === "roster") || weekEditable ? (
               <button
                 className={`btn sm${editing ? " primary" : ""}`}
                 aria-pressed={editing}
@@ -1626,6 +1719,28 @@ export default function CsmTeamSchedulePage(): JSX.Element {
             and a bar saying "click a cell" above a view with none to click
             reads as something broken. Names the teams because the grid shows
             every team and only the reader's own rows are live. */}
+        {weekEditable && editing ? (
+          <div className="editbar">
+            <span className="pill">Editing</span>
+            <span>Every {family} team</span>
+            {changes.length === 0 ? (
+              <span className="hintx">
+                &ldquo;+ Add&rdquo; puts someone on a rotation that day &middot; &times; takes them off
+                &middot; changes save as you make them
+              </span>
+            ) : (
+              <span className="hintx" role="status">
+                <b>
+                  {changes.length} change{changes.length === 1 ? "" : "s"}
+                </b>{" "}
+                &middot; last: {changes[changes.length - 1].name},{" "}
+                {fmtRange(changes[changes.length - 1].from, changes[changes.length - 1].to)} &rarr;{" "}
+                {changes[changes.length - 1].what}
+              </span>
+            )}
+          </div>
+        ) : null}
+
         {editsHere && editing && view === "roster" ? (
           <div className="editbar">
             <span className="pill">Editing</span>
@@ -1730,6 +1845,16 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               engagementAllocations={engagements.allocations}
               engagementPeople={engagementPeople}
               engagementsFailed={engagements.isError}
+              edit={
+                weekEditable && editing
+                  ? ({
+                      people: weekPeople,
+                      onAdd: addToWeekCell,
+                      onRemove: removeFromWeekCell,
+                      busy: applyRange.isPending || applyAbsence.isPending,
+                    } satisfies WeekEditControls)
+                  : undefined
+              }
               {...scopeControls}
             />
           ) : view === "roster" ? (
@@ -1755,6 +1880,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
               meEmail={user?.email}
               leadTeams={leadTeams.data ?? []}
               teamMembers={teamMembers}
+              ownTeams={ownTeams}
               teamDefaultShift={teamDefaultShift}
               teamsWithoutDefault={teamsWithoutDefault}
               editedCells={editedCells}

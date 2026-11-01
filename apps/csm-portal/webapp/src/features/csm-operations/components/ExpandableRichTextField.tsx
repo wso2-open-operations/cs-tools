@@ -35,6 +35,7 @@ import {
   type ReactNode,
 } from "react";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
 
 /** The panel's height before anyone resizes it: it grows with its text from the minimum up to this. */
 export const RICH_TEXT_DEFAULT_MAX_HEIGHT = 300;
@@ -60,6 +61,9 @@ interface ExpandableRichTextFieldProps {
   placeholder?: string;
   /** Shown under the panel and referenced by it (aria-describedby). */
   helperText?: ReactNode;
+  /** Marks the field mandatory: the asterisk after the label (as MUI draws it) and
+   * `aria-required` on the editor. Display only: the form still decides what to send. */
+  required?: boolean;
   minHeight?: number;
   /** Laid out by the caller (e.g. a grid column). */
   sx?: Record<string, unknown>;
@@ -85,6 +89,7 @@ export default function ExpandableRichTextField({
   disabled = false,
   placeholder,
   helperText,
+  required = false,
   minHeight = 100,
   sx,
 }: ExpandableRichTextFieldProps): JSX.Element {
@@ -161,6 +166,7 @@ export default function ExpandableRichTextField({
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 0.5 }}>
         <Typography id={labelId} variant="caption" color="text.secondary" sx={{ display: "block" }}>
           {label}
+          {required && <RequiredMark />}
         </Typography>
         <Tooltip title="Expand to full screen">
           <IconButton
@@ -206,6 +212,7 @@ export default function ExpandableRichTextField({
             maxHeight={height ?? RICH_TEXT_DEFAULT_MAX_HEIGHT}
             toolbarVariant="full"
             disabled={disabled}
+            ariaRequired={required}
           />
         )}
       </Box>

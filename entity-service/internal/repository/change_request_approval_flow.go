@@ -928,8 +928,15 @@ type changeRequestGateSnapshot struct {
 	// priorWriter is work_item.updated_by as the PATCH found it, before its own write
 	// replaced it (set by lockChangeRequestForPatch only; read=false from every other reader
 	// of the snapshot, which run after a write of their own). A staff time response reads
-	// the proposer of a waiting time from it, never from the column afterwards.
+	// the proposer of a LEGACY waiting time (one stored before migration 0249, with no record
+	// of its proposer) from it when the write recorded nothing, never from the column
+	// afterwards: migration 0250's trigger records the replaced writer when the rule names
+	// them and they have a "user" row.
 	priorWriter lastWriter
+	// templateVersionID is the standard change template version the change request
+	// was raised from (change_request.standard_change_template_version_id), nil for
+	// one not raised from a template. See change_request_standard_change.go.
+	templateVersionID *string
 }
 
 // lockChangeRequestGateSnapshot reads (and locks, FOR UPDATE) the fields the
@@ -945,10 +952,11 @@ func lockChangeRequestGateSnapshot(ctx context.Context, tx pgx.Tx, id string) (c
 	var state, model, project *string
 	var snap changeRequestGateSnapshot
 	err := tx.QueryRow(ctx,
-		`SELECT cr.state::text, cr.change_model::text, cr.customer_approval_required, cr.customer_review_required, wi.project_id::text
+		`SELECT cr.state::text, cr.change_model::text, cr.customer_approval_required, cr.customer_review_required, wi.project_id::text,
+		        cr.standard_change_template_version_id::text
 		 FROM change_request cr LEFT JOIN work_item wi ON wi.id = cr.id
 		 WHERE cr.id = $1 FOR UPDATE OF cr`, id,
-	).Scan(&state, &model, &snap.approvalRequired, &snap.reviewRequired, &project)
+	).Scan(&state, &model, &snap.approvalRequired, &snap.reviewRequired, &project, &snap.templateVersionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return snap, &apierror.NotFoundError{Msg: "change request not found"}
 	}

@@ -18,9 +18,13 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -126,7 +130,7 @@ func (r *knowledgeBaseRepo) UpdateKnowledgeBaseName(ctx context.Context, id stri
 		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
-		return domain.KnowledgeBase{}, fmt.Errorf("update knowledge base name: %w", err)
+		return domain.KnowledgeBase{}, mapKnowledgeBaseByIDError("update knowledge base name", err)
 	}
 	return kb, nil
 }
@@ -143,7 +147,21 @@ func (r *knowledgeBaseRepo) SetKnowledgeBaseActive(ctx context.Context, id strin
 		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
-		return domain.KnowledgeBase{}, fmt.Errorf("set knowledge base active: %w", err)
+		return domain.KnowledgeBase{}, mapKnowledgeBaseByIDError("set knowledge base active", err)
 	}
 	return kb, nil
+}
+
+// mapKnowledgeBaseByIDError maps the driver errors a by-id UPDATE ... RETURNING
+// raises for a caller-supplied id: no row is a NotFoundError (404), Postgres
+// 22P02 (the id is not a UUID) is a ValidationError (400). Anything else is
+// wrapped with op.
+func mapKnowledgeBaseByIDError(op string, err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &apierror.NotFoundError{Msg: "knowledge base not found"}
+	}
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return &apierror.ValidationError{Msg: "id is not a valid UUID"}
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }

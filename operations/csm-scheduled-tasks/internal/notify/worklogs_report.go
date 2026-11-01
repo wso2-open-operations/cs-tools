@@ -149,6 +149,41 @@ func RenderWorklogsReport(r worklogreport.Report, caseLinkBase string) string {
 	return replacer.Replace(worklogsReportTemplate)
 }
 
+// teamAcronyms are the parts of a team key that are initialisms rather
+// than words. Without them "americas_cre_team" title-cases to "Americas
+// Cre Team", which reads worse than the key it replaced.
+var teamAcronyms = map[string]string{
+	"cs": "CS", "cre": "CRE", "sre": "SRE", "abt": "ABT", "sme": "SME",
+	"mi": "MI", "bi": "BI", "iam": "IAM", "apim": "APIM", "rnd": "RnD",
+	"qa": "QA", "hr": "HR", "it": "IT", "us": "US", "uk": "UK", "eu": "EU",
+}
+
+// teamDisplayName turns a key-shaped team name into something a reader
+// expects: "customer_onboarding_team" into "Customer Onboarding Team".
+//
+// Production stores the key in team.name for most teams, so the mail was
+// printing raw keys. A name that already reads as a name -- it has a
+// space or a capital, like "Americas CS Team - Integraion" -- is left
+// exactly as it is, typo and all: that is the name the recipients know,
+// and it is not this function's business to correct it.
+func teamDisplayName(name string) string {
+	if name == "" || strings.ToLower(name) != name || strings.ContainsAny(name, " -") {
+		return name
+	}
+	parts := strings.Split(name, "_")
+	for i, w := range parts {
+		if w == "" {
+			continue
+		}
+		if a, ok := teamAcronyms[w]; ok {
+			parts[i] = a
+			continue
+		}
+		parts[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
 func hrs(f float64) string { return strconv.FormatFloat(f, 'f', 2, 64) }
 
 // days renders a worked-day count, which is a whole number unless somebody
@@ -214,7 +249,7 @@ func renderWorklogBreakdowns(r worklogreport.Report) string {
 	teamPills := func(value func(worklogreport.TeamReport) string) string {
 		cells := make([]pillCell, 0, len(r.Teams))
 		for _, t := range r.Teams {
-			cells = append(cells, pillCell{t.TeamName, value(t)})
+			cells = append(cells, pillCell{teamDisplayName(t.TeamName), value(t)})
 		}
 		return pillRow(cells)
 	}
@@ -265,7 +300,7 @@ func renderWorklogTeamSections(r worklogreport.Report, daily bool, caseLinkBase 
 	for _, t := range r.Teams {
 		b.WriteString(`<table class="teamStrip" border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout:fixed; margin:18px 0 0; background-color:#fff4ec; border:1px solid #ffd9bf; border-radius:8px 8px 0 0; font-size:13px;"><tbody><tr>`)
 		b.WriteString(`<td ` + statName + `><div style="font-size:11px; color:inherit; opacity:0.7; letter-spacing:0.5px;">TEAM</div>` +
-			`<div style="font-size:17px; font-weight:700; color:inherit;">` + escapeHTML(t.TeamName) + `</div></td>`)
+			`<div style="font-size:17px; font-weight:700; color:inherit;">` + escapeHTML(teamDisplayName(t.TeamName)) + `</div></td>`)
 		for _, c := range []struct{ v, l string }{
 			{strconv.Itoa(t.Members), "Members"},
 			{strconv.Itoa(t.Issues), "Issues"},

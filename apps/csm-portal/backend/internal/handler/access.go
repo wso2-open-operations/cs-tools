@@ -48,12 +48,14 @@ const (
 	// broader than approving one — see PermApproveTimeCard below, which is what's
 	// actually narrowed to the approver role.
 	PermTimeCardsAndUpdates
-	// PermEscalate is escalating or de-escalating a case. Held by the CS
-	// engineer, the escalator role and admin: any internal engineer may
-	// escalate, as in ServiceNow (whose escalation API lets every internal
-	// user escalate). De-escalating additionally requires being one of the
-	// case's ABT team leads -- CaseHandler.CreateCaseEscalation checks that
-	// itself, since a route permission can't see the case.
+	// PermEscalate is escalating a case. Held by the CS engineer, the
+	// escalator role and admin. It is NOT a route permission: POST
+	// /cases/{id}/escalations only requires PermView, and
+	// CaseHandler.CreateCaseEscalation enforces the rest because the rule
+	// depends on the body's action and on the case. ESCALATE needs this
+	// permission; DEESCALATE needs being one of the case's team leads
+	// instead (any portal role, no escalation role), and holding this
+	// permission does not substitute for that.
 	PermEscalate
 	// PermApproveTimeCard is approving or rejecting a time card — a state
 	// transition on the same PATCH /time-cards/{id} route ordinary field edits
@@ -148,7 +150,7 @@ const (
 	// cs_engineer and admin, who work the same accounts and need the same
 	// view -- so unlike PermViewerAccess it does not require the Viewer role:
 	// a cs_engineer or admin reaches it without separately holding Viewer.
-	// Every other route in the viewer-audience block (User Scan, the account
+	// Every other route in the viewer-audience block (the account
 	// escalation list, Drive files) stays on PermViewerAccess. The project
 	// time and CS reports use PermView instead.
 	// Keep the webapp's canViewCustomerHealth (portalAccess.ts) in sync with
@@ -156,7 +158,7 @@ const (
 	PermViewCustomerHealth
 	// PermUsageMetricsViewer is the Usage Metrics domain (/usage-metrics/*).
 	// Unlike the ex-"Support Portal Lite" domains still gated by
-	// PermViewerAccess (Viewer only: User Scan),
+	// PermViewerAccess (Viewer only: account escalations, Drive files),
 	// and unlike Customer Health (PermViewCustomerHealth, which cs_engineer
 	// and admin hold too), Usage Metrics is registered directly
 	// on THIS permission at the route level, not layered on top of
@@ -411,12 +413,13 @@ type portalRole struct {
 // NewAccessGuard builds a guard from cfg. Admin satisfies every permission.
 // CS engineer (renamed from support_engineer -- see AccessConfig.CsEngineer's
 // own doc comment), the role for people who work cases, satisfies every other
-// permission EXCEPT THREE: PermAdmin (admin-only, held by no other role,
-// unlike PermWrite which both share), PermEscalate, and PermApproveTimeCard —
-// escalating a case and approving a time card are each a dedicated
-// responsibility, held only by their own role (escalator / time-card
-// approver) plus admin, not by being a CS engineer alone. CS engineer DOES
-// still hold the broader PermTimeCardsAndUpdates (viewing/managing time
+// permission EXCEPT TWO: PermAdmin (admin-only, held by no other role,
+// unlike PermWrite which both share) and PermApproveTimeCard — approving a
+// time card is a dedicated responsibility, held only by its own role
+// (time-card approver) plus admin, not by being a CS engineer alone. CS
+// engineer holds PermEscalate (with the escalator role and admin); see its
+// own doc comment for how it is enforced. CS engineer also
+// holds the broader PermTimeCardsAndUpdates (viewing/managing time
 // cards short of approving them). The attachment-downloader role exists
 // separately so other staff can be granted just that one ability. The
 // usage-metrics and dashboard-designer roles gate nothing here (this backend

@@ -86,7 +86,7 @@ func (s *problemService) CreateWorkaroundProblem(ctx context.Context, src Workar
 		return id, err
 	}
 	if group != nil {
-		s.mirrorProblemFields(ctx, domain.UpdateProblemRequest{ID: id, AssignmentGroupID: group}, nil)
+		s.mirrorProblemUpdate(ctx, domain.UpdateProblemRequest{ID: id, AssignmentGroupID: group}, nil)
 	}
 	slog.InfoContext(ctx, "workaround problem: created",
 		"incidentId", incidentID, "problemId", id, "problemNumber", strOrEmpty(created.Number))

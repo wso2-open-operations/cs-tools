@@ -346,7 +346,7 @@ func TestMapGlobalRoles(t *testing.T) {
 		{"no classification: customer, pair not managed", account(nil), false, []string{"customer", "external"}, "customer_admin", true, false},
 		{"blank classification: customer, pair not managed", account(sampleStr("  ")), false, []string{"customer", "external"}, "customer_admin", true, false},
 		{"unknown account: customer, pair not managed", nil, false, []string{"customer", "external"}, "customer_admin", true, false},
-		{"integration user gets nothing", account(sampleStr("Partner")), true, nil, "", false, false},
+		{"integration user gets nothing, admin pair managed for revocation", account(sampleStr("Partner")), true, nil, "", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -747,8 +747,8 @@ func TestMembershipIngest_IntegrationUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	in := h.repo.upserts[0]
-	if !in.IsCsIntegrationUser || len(in.GlobalRoles) != 0 || len(in.ManagedAdminRoles) != 0 {
-		t.Errorf("integration user must get no global roles: %+v", in)
+	if !in.IsCsIntegrationUser || len(in.GlobalRoles) != 0 || len(in.ManagedAdminRoles) == 0 {
+		t.Errorf("integration user must get no global roles, admin pair managed for revocation: %+v", in)
 	}
 	if !reflect.DeepEqual(in.ProjectGroups, []string{projectGroupGeneralAccess, projectGroupAdmin}) {
 		t.Errorf("project groups still apply: %v", in.ProjectGroups)

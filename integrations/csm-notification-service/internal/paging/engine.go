@@ -354,8 +354,13 @@ func unknownSRETeamChats(l LadderConfig) []string {
 // sreTeamKey is the SRE team an incident is assigned to, as a teamChats key:
 // its assignment group through sre.teams.aliases, lower case.
 func (e *Engine) sreTeamKey(team string) string {
+	return sreTeamKeyIn(e.cfg.Ladder, team)
+}
+
+// sreTeamKeyIn is team's key through l's teams.aliases.
+func sreTeamKeyIn(l LadderConfig, team string) string {
 	key := teamKeyFor(team)
-	for group, alias := range e.cfg.Ladder.Teams.Aliases {
+	for group, alias := range l.Teams.Aliases {
 		if teamKeyFor(group) == key {
 			return teamKeyFor(alias)
 		}
@@ -462,19 +467,29 @@ func (e *Engine) hasTeamChat(key string) bool {
 // abtType, which only the Team Schedule knows, so any other group counts as
 // one -- its cards then stay in chat.
 func (e *Engine) hasOwnSRETeam(team string) bool {
-	key := e.sreTeamKey(team)
+	return KnownSRETeam(e.cfg.Ladder, team)
+}
+
+// KnownSRETeam reports whether an assignment group (or a case's account SRE
+// group) is an SRE team of its own on this ladder: it resolves, through
+// teams.aliases, to a team in teams.abts and is not a default group. One that
+// is not is paged as having no SRE team (every team on defaultRota). The
+// dispatcher's S0 case card asks the same question through IncidentRoutes,
+// so the card goes where the calls do.
+func KnownSRETeam(l LadderConfig, team string) bool {
+	key := sreTeamKeyIn(l, team)
 	if key == "" {
 		return false
 	}
-	for _, g := range e.cfg.Ladder.Teams.DefaultGroups {
+	for _, g := range l.Teams.DefaultGroups {
 		if teamKeyFor(g) == teamKeyFor(team) || teamKeyFor(g) == key {
 			return false
 		}
 	}
-	if len(e.cfg.Ladder.Teams.ABTs) == 0 {
+	if len(l.Teams.ABTs) == 0 {
 		return true
 	}
-	return contains(e.cfg.Ladder.Teams.ABTs, key)
+	return contains(l.Teams.ABTs, key)
 }
 
 // postUnanswered tells the team's space that a ladder called every rung and
@@ -579,10 +594,19 @@ func (e *Engine) threadReplies(t Trigger) bool {
 
 // incidentRooms is the rooms an incident's card went to: its SRE team's room from the Alert Settings
 // mapping, else its INCIDENT_CHAT_SPACES space, else the shared SRE room (IncidentFallbackAudience).
-// A case, or an incident with none of these, keeps the ladder's own spaces.
+// An S0 case on the SRE ladder uses its account SRE group the same way when it is a known SRE team, else the teamless rooms (sreCaseCard, CaseSREAudiences).
+// Any other case, or an incident with none of these, keeps the ladder's own spaces.
 func (e *Engine) incidentRooms(t Trigger) []chatRoom {
-	if t.isCase() || e.incidentChat == nil {
+	if e.incidentChat == nil {
 		return nil
+	}
+	group := t.Team
+	if t.isCase() {
+		// Only the SRE engine's S0 case has a card (sreCaseCard); every other case, CRE's included, keeps the ladder's own spaces.
+		if e.cfg.Kind != LadderSRE || !t.sreCaseCard() {
+			return nil
+		}
+		group = t.Routing.SRETeam
 	}
 	// The dispatcher's card picks its rooms with the same call, so the
 	// replies always land in the threads the card started.
@@ -593,7 +617,13 @@ func (e *Engine) incidentRooms(t Trigger) []chatRoom {
 			return audience != notifications.IncidentFallbackAudience && e.incidentChat.HasAudienceSpace(audience)
 		}
 	}
-	audiences, _ := notifications.IncidentAudiences(e.cfg.IncidentRoutes, e.cfg.IncidentChatFanout, t.Team, has)
+	var audiences []string
+	if t.isCase() {
+		// The rooms the dispatcher carded the S0 case in, chosen the same way (CaseSREAudiences).
+		audiences = notifications.CaseSREAudiences(e.cfg.IncidentRoutes, e.cfg.IncidentChatFanout, group, has)
+	} else {
+		audiences, _ = notifications.IncidentAudiences(e.cfg.IncidentRoutes, e.cfg.IncidentChatFanout, group, has)
+	}
 	var rooms []chatRoom
 	for _, audience := range audiences {
 		rooms = append(rooms, chatRoom{chat: e.incidentChat, room: audience, reply: true})
@@ -741,7 +771,7 @@ func (e *Engine) Handle(ctx context.Context, record eventbus.Record) error {
 	case events.TypeCaseCreated, events.TypeSeverityChanged, events.TypeCaseAssigned,
 		events.TypeCommentAdded, events.TypeStatusChanged:
 		// Customer cases: see cases.go.
-		return e.handleCase(ctx, env)
+		return e.handleCase(ctx, env, record.Value)
 	case events.TypeIncidentCreated:
 		var p events.IncidentCreatedPayload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
