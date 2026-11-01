@@ -30,14 +30,17 @@ import (
 const maxPortalBannerHTML = 100000
 
 type portalBannerService struct {
-	repo       repository.PortalBannerRepository
-	access     AccessService
-	adminRoles []string
+	repo                     repository.PortalBannerRepository
+	access                   AccessService
+	csmPortalBackendClientID string
 }
 
-// NewPortalBannerService constructs a PortalBannerService. adminRoles is AUTH_ADMIN_ROLES.
-func NewPortalBannerService(repo repository.PortalBannerRepository, access AccessService, adminRoles []string) PortalBannerService {
-	return &portalBannerService{repo: repo, access: access, adminRoles: adminRoles}
+// NewPortalBannerService constructs a PortalBannerService. csmPortalBackendClientID
+// is CSM_PORTAL_BACKEND_CLIENT_ID -- see requireCSMPortalBackendCaller's own doc
+// comment for why banner changes are gated on the caller's client id rather than
+// on AUTH_ADMIN_ROLES the way this service's sibling admin-gated features are.
+func NewPortalBannerService(repo repository.PortalBannerRepository, access AccessService, csmPortalBackendClientID string) PortalBannerService {
+	return &portalBannerService{repo: repo, access: access, csmPortalBackendClientID: csmPortalBackendClientID}
 }
 
 func (s *portalBannerService) ListCustomer(ctx context.Context) (domain.PortalBannerViewList, error) {
@@ -64,7 +67,7 @@ func (s *portalBannerService) listViews(ctx context.Context, filter repository.P
 }
 
 func (s *portalBannerService) ListAdmin(ctx context.Context) (domain.PortalBannerList, error) {
-	if _, err := s.requireAdmin(ctx); err != nil {
+	if _, err := s.requireCSMPortalBackendCaller(ctx); err != nil {
 		return domain.PortalBannerList{}, err
 	}
 	rows, err := s.repo.List(ctx, repository.PortalBannerFilter{})
@@ -78,7 +81,7 @@ func (s *portalBannerService) ListAdmin(ctx context.Context) (domain.PortalBanne
 }
 
 func (s *portalBannerService) Create(ctx context.Context, req domain.SavePortalBannerRequest) (domain.PortalBanner, error) {
-	actor, err := s.requireAdmin(ctx)
+	actor, err := s.requireCSMPortalBackendCaller(ctx)
 	if err != nil {
 		return domain.PortalBanner{}, err
 	}
@@ -90,7 +93,7 @@ func (s *portalBannerService) Create(ctx context.Context, req domain.SavePortalB
 }
 
 func (s *portalBannerService) Update(ctx context.Context, id string, req domain.SavePortalBannerRequest) (domain.PortalBanner, error) {
-	actor, err := s.requireAdmin(ctx)
+	actor, err := s.requireCSMPortalBackendCaller(ctx)
 	if err != nil {
 		return domain.PortalBanner{}, err
 	}
@@ -111,13 +114,35 @@ func (s *portalBannerService) Update(ctx context.Context, id string, req domain.
 	return *row, nil
 }
 
-func (s *portalBannerService) requireAdmin(ctx context.Context) (string, error) {
+// requireCSMPortalBackendCaller gates every banner mutation on the caller being
+// apps/csm-portal/backend itself, rather than on AUTH_ADMIN_ROLES the way this
+// service's siblings (rota access, SLA status, skills, schedule admin) check
+// "is this an admin" via holdsAnyRole. AUTH_ADMIN_ROLES has to be configured
+// twice -- once in csm-portal-backend, once here -- and nothing enforces the two
+// copies agree (see entity-service/CLAUDE.md); for banners, by explicit product
+// decision, every real admin check already happens exactly once, in
+// csm-portal-backend's own PermAdmin gate on this route, and the webapp's
+// identical frontend gate reads that same, single, correctly-configured value.
+// Trusting the caller's client id instead of re-deriving "is this user an
+// admin" here removes the second, independently-configured copy entirely.
+//
+// This is safe specifically because CSM_PORTAL_BACKEND_CLIENT_ID is never
+// reachable with RequireInternalCaller's Unrestricted scope unless the
+// forwarded human's email also matched CSM_PORTAL_USER_DOMAIN (see
+// AccessService.ResolveScope) -- so by the time this runs, a real WSO2/partner
+// person is already attached to the request; the UserEmail check below is
+// belt-and-braces, not the only thing standing between this and an anonymous
+// machine call.
+func (s *portalBannerService) requireCSMPortalBackendCaller(ctx context.Context) (string, error) {
 	if err := RequireInternalCaller(ctx, s.access, "banners are only available to internal callers"); err != nil {
 		return "", err
 	}
 	id := auth.IdentityFromContext(ctx)
-	if id.UserEmail == "" || !holdsAnyRole(id.Roles, s.adminRoles) {
-		return "", &apierror.ForbiddenError{Msg: "only a CSM admin can change banners"}
+	if id.UserEmail == "" {
+		return "", &apierror.ForbiddenError{Msg: "banners can only be changed by a signed-in person"}
+	}
+	if s.csmPortalBackendClientID == "" || id.ClientID != s.csmPortalBackendClientID {
+		return "", &apierror.ForbiddenError{Msg: "banners can only be changed through the CSM Portal"}
 	}
 	return id.UserEmail, nil
 }

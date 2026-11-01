@@ -1660,7 +1660,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
 		portalBannerHandler = handler.NewPortalBannerHandler(
-			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
 		// Monthly product regression reports: one business unit's regression
 		// cases whose fix ETA was shared last month, for the scheduled task
