@@ -350,8 +350,8 @@ export function standingWindowKey(shift: ScheduleShift | undefined, fallback: st
  * The rotation a standing window is stored on the hours of, on a weekday or a
  * weekend: AEST regular hours sit on the Morning rotation's 06:00-09:00, so
  * the people on them are listed with that rotation (tagged with their own
- * window), not as a window of their own. Same family, same hours, a plain turn
- * (not on-call, not escalation) worked on that kind of day. Undefined for a
+ * window), not as a window of their own. Same family, same hours on the same
+ * clock, a plain turn (not on-call, not escalation) worked on that kind of day. Undefined for a
  * rotation, or a standing window no rotation shares its hours with.
  */
 export function rotationHostOf(
@@ -366,6 +366,9 @@ export function rotationHostOf(
       !s.isOnCall &&
       !s.isEscalation &&
       s.family === window.family &&
+      // Minutes are on the window's own clock: the same numbers on another
+      // clock are other hours.
+      s.authoringTimeZone === window.authoringTimeZone &&
       s.startMinute === window.startMinute &&
       s.endMinute === window.endMinute &&
       (s.dayScope === "ANY" || (s.dayScope === "WEEKEND") === weekend)
