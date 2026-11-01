@@ -156,7 +156,13 @@ func (s *salesforceEventService) RefreshPartners(ctx context.Context, customerSf
 		res.PartnerSfIDs = append(res.PartnerSfIDs, pid)
 	}
 
-	res.Added, res.Removed, err = s.partners.Partners.ReplacePartners(ctx, customerSfID, customerID, partnerIDs, state)
+	if isResyncApply(ctx) {
+		// The admin resync only adds links; a stored link Salesforce no
+		// longer lists is left for the nightly sweep or the next event.
+		res.Added, err = s.partners.Partners.AddPartners(ctx, customerSfID, customerID, partnerIDs, state)
+	} else {
+		res.Added, res.Removed, err = s.partners.Partners.ReplacePartners(ctx, customerSfID, customerID, partnerIDs, state)
+	}
 	if err != nil {
 		s.recordIngestFailed(ctx, state, err)
 		return res, err

@@ -218,6 +218,18 @@ type SalesforceEventService interface {
 	HandleEvent(ctx context.Context, req domain.SalesforceEventRequest) error
 }
 
+// SalesforceResyncService backs the admin-only POST /salesforce/resync/preview
+// and /salesforce/resync/apply: for one account or one project, compare the
+// Salesforce data with the database, field by field and component by
+// component, then overwrite the chosen components from Salesforce. Preview
+// writes nothing. Apply never deletes a row and bypasses the duplicate-event
+// guard on its own path only. Both are synchronous and cap their Salesforce
+// calls per request; see salesforce_resync_service.go.
+type SalesforceResyncService interface {
+	Preview(ctx context.Context, req domain.SalesforceResyncRequest) (domain.SalesforceResyncPreview, error)
+	Apply(ctx context.Context, req domain.SalesforceResyncApplyRequest) (domain.SalesforceResyncApplyResponse, error)
+}
+
 // MembershipRegistrationService backs POST /users/me/memberships/register: the Customer Portal
 // calls it on every profile load, and it marks the signed-in user's still
 // un-accepted memberships as REGISTERED in Salesforce. The portal itself

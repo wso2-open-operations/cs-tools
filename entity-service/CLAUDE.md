@@ -11359,6 +11359,37 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
 
+## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
+
+An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per
+component, then overwrites chosen components from Salesforce. Code: `internal/service/salesforce_resync_*.go`
+(service, pure comparison in `_compare.go`/`_diff.go`, apply in `_apply.go`), `internal/repository/salesforce_resync_read_repo.go`
+(read-only), the list searches in `internal/salesentity/resync_search.go`. Wired in `routes.go` over the same
+ingest service as `POST /salesforce/events`, with no flag of its own: a component whose ingest flag is off or whose
+ingest is not built is reported `skipped` with a reason, by both endpoints.
+
+- **Who.** Internal caller with a user token whose roles hold one of `AUTH_ADMIN_ROLES` (the check the skill catalogue
+  uses). One resync per target at a time, per process: a second request for the same account/project is a 409.
+- **Components.** Account scope: `account`, `partners`, `projects`, `opportunities` (line items embedded),
+  `linkedOpportunities`, `invoices`, `contacts`, `memberships`. Project scope: `project`, `opportunities` (via the
+  project's links), `linkedOpportunities`, `invoices`, `memberships`. Apply runs the requested ones in that order.
+- **Preview writes nothing**, not even the `salesforce_ingest_state` ledger. It diffs the ingest's own mapper output
+  (`mapSalesEntity*`, `buildContactUpsert`, `buildMembershipUpsert`) against the stored columns of the same names, so a
+  CSM-only column cannot appear. `wouldTruncate` is set when the length guard (`truncateSfColumn`, account column limits)
+  still cuts the Salesforce value; `sfValue` is then the full Salesforce value. A row only CSM holds is `only_in_csm`:
+  informational, never makes a component differ. An account's person references (owner, technical owner, ...) are not
+  compared: resolving them can create a user.
+- **Apply never deletes a row**, and skips what the event path does after a write. It runs the per-record ingest
+  functions (`ingestOpportunityRecord`, `upsertProjectRecord`, ...) with the list it already read (no per-record
+  re-read) on a context marked by `withResyncApply`: the duplicate-event guard does not skip (`shouldSkipIngest`, the
+  membership step guard), stale line items, partner links (`AddPartners` instead of `ReplacePartners`) and project
+  groups are kept, no `project_contact.invited`/`registered` event is published, and no partner refresh starts behind a
+  membership. The event path never sets that mark and behaves as before.
+- **Call cap.** At most `resyncMaxSalesforceCalls` (200) sales-entity calls per request; opportunities are read 50 per
+  call (they carry line items), lists use keyset paging (`minLastModifiedDate` + `minId`). A component the cap (or the
+  request deadline, `resyncTimeMargin`) stops is `skipped` as a whole and `capped` is set; apply reads a component
+  completely before writing any of it. The server's `REQUEST_TIMEOUT` still bounds a request.
+
 ## Adding a new entity
 
 Follow these steps in order:

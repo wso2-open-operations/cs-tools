@@ -164,6 +164,137 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /salesforce/resync/preview:
+    post:
+      summary: "Compare one account's or one project's Salesforce data with the database, field by field and component by component. Writes nothing, not even the salesforce_ingest_state ledger."
+      description: "Admin-only (the caller's user token must hold one of AUTH_ADMIN_ROLES).
+        For scope account the components are account, partners, projects,
+        opportunities (line items are embedded), linkedOpportunities, invoices,
+        contacts and memberships; for scope project they are project,
+        opportunities, linkedOpportunities, invoices and memberships. Each
+        component is compared against the stored Salesforce-owned columns of the
+        rows its ingest writes, using the ingest's own mappers, so a column CSM
+        owns never appears. A component whose ingest feature flag is off, or
+        whose ingest is not built, is reported with status skipped and a
+        skippedReason. The request makes at most 200 Salesforce calls (opportunities
+        are read 50 per call); when that cap or the request time limit stops a
+        component, capped is true with a cappedReason and the component is
+        reported as skipped rather than as a partial diff. A row present only in
+        CSM is listed as only_in_csm and is informational: it never makes a
+        component differ and the apply never removes it. Salesforce-side people
+        references of an account (owner, technical owner and the like) are not
+        compared. One resync per target at a time: a second request for the same
+        account or project is refused with 409. Synchronous; the server's request
+        timeout applies."
+      operationId: previewSalesforceResync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncRequest'
+      responses:
+        "200":
+          description: The comparison, one entry per component of the scope.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncPreview'
+        "400":
+          description: Unknown scope, missing id, or a target with no Salesforce id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The account or project does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: A resync is already running for this account or project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /salesforce/resync/apply:
+    post:
+      summary: "Overwrite the chosen components of one account or project from Salesforce. Never deletes a row."
+      description: "Admin-only (the caller's user token must hold one of AUTH_ADMIN_ROLES).
+        Re-ingests only the requested components, parents before children
+        (account, partners, projects, opportunities, linked opportunities,
+        invoices, contacts, memberships), through the same per-record writes the
+        Salesforce events use, with the duplicate-event guard bypassed on this
+        path only. It never deletes a row: stored line items, partner links and
+        project groups that Salesforce no longer lists are left in place; no
+        invitation or welcome event is published and no partner refresh is
+        started behind a membership. A component is read from Salesforce
+        completely before any of its rows is written; if the 200-call cap or the
+        request time limit stops that read, the component is reported as skipped
+        and nothing of it is written. A component whose ingest is off is reported
+        as skipped. A component with any record that could not be written has
+        status failed, with the counts and the first errors. One resync per target
+        at a time (409 otherwise). Synchronous; the server's request timeout
+        applies."
+      operationId: applySalesforceResync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncApplyRequest'
+      responses:
+        "200":
+          description: The outcome of each requested component.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncApplyResponse'
+        "400":
+          description: Unknown scope, a component that is not part of the scope, no components, or a target with no Salesforce id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The account or project does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: A resync is already running for this account or project.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /customer-engagements/allocation-events:
     post:
       summary: >-
@@ -30388,6 +30519,162 @@ components:
         removed:
           type: integer
           description: account_relationship rows deleted.
+
+    SalesforceResyncRequest:
+      type: object
+      required: [scope, id]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+    SalesforceResyncApplyRequest:
+      type: object
+      required: [scope, id, components]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+        components:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SalesforceResyncComponentKey'
+    SalesforceResyncComponentKey:
+      type: string
+      enum: [account, partners, projects, project, opportunities, linkedOpportunities, invoices, contacts, memberships]
+      description: "Scope account takes account, partners, projects, opportunities, linkedOpportunities, invoices, contacts and memberships; scope project takes project, opportunities, linkedOpportunities, invoices and memberships."
+    SalesforceResyncPreview:
+      type: object
+      required: [target, capped, cappedReason, components]
+      properties:
+        target:
+          type: object
+          required: [scope, id, sfId, name]
+          properties:
+            scope:
+              type: string
+              enum: [account, project]
+            id:
+              type: string
+              format: uuid
+            sfId:
+              type: string
+              description: "The Salesforce id of the account or project."
+            name:
+              type: string
+              nullable: true
+        capped:
+          type: boolean
+          description: "True when the per-request Salesforce call cap (200) or the request time limit stopped at least one component."
+        cappedReason:
+          type: string
+          nullable: true
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncComponent'
+    SalesforceResyncComponent:
+      type: object
+      required: [key, label, status, skippedReason, counts, records]
+      properties:
+        key:
+          $ref: '#/components/schemas/SalesforceResyncComponentKey'
+        label:
+          type: string
+        status:
+          type: string
+          enum: [in_sync, differs, skipped]
+          description: "differs when at least one record differs or is missing in CSM; a record only CSM holds does not count."
+        skippedReason:
+          type: string
+          nullable: true
+          description: "Why the component was not compared (its ingest is off, or the call cap or time limit stopped it); null otherwise."
+        counts:
+          type: object
+          required: [inSync, differs, missingInCsm, onlyInCsm]
+          properties:
+            inSync:
+              type: integer
+            differs:
+              type: integer
+            missingInCsm:
+              type: integer
+            onlyInCsm:
+              type: integer
+        records:
+          type: array
+          description: "The records that are not in sync; in-sync records are only counted."
+          items:
+            type: object
+            required: [sfId, label, state, fields]
+            properties:
+              sfId:
+                type: string
+              label:
+                type: string
+              state:
+                type: string
+                enum: [differs, missing_in_csm, only_in_csm]
+              fields:
+                type: array
+                description: "The fields that differ; empty for missing_in_csm and only_in_csm."
+                items:
+                  type: object
+                  required: [field, csmValue, sfValue, wouldTruncate]
+                  properties:
+                    field:
+                      type: string
+                    csmValue:
+                      type: string
+                      nullable: true
+                    sfValue:
+                      type: string
+                      nullable: true
+                      description: "The value the ingest would write, or the full Salesforce value when wouldTruncate."
+                    wouldTruncate:
+                      type: boolean
+                      description: "True when the Salesforce value is longer than the CSM column, so the ingest would store it cut (or, for an account column, as NULL)."
+    SalesforceResyncApplyResponse:
+      type: object
+      required: [components]
+      properties:
+        components:
+          type: array
+          items:
+            type: object
+            required: [key, status, succeeded, failed, skippedReason, errors]
+            properties:
+              key:
+                $ref: '#/components/schemas/SalesforceResyncComponentKey'
+              status:
+                type: string
+                enum: [applied, failed, skipped]
+              succeeded:
+                type: integer
+              failed:
+                type: integer
+              skippedReason:
+                type: string
+                nullable: true
+              errors:
+                type: array
+                description: "The first records that could not be written (at most 50)."
+                items:
+                  type: object
+                  required: [sfId, message]
+                  properties:
+                    sfId:
+                      type: string
+                    message:
+                      type: string
 
     OutageCommunicationSweepResponse:
       type: object

@@ -47,6 +47,14 @@ import (
 // write, whether or not the guard ran.
 func shouldSkipIngest(ctx context.Context, states repository.SalesforceIngestStateRepository, entity, sfID, eventType string, lastModified *string) (skip bool, eventModifiedOn time.Time, err error) {
 	eventModifiedOn, hasModified := parseSalesforceLastModified(lastModified)
+	if isResyncApply(ctx) {
+		// The admin resync overwrites on purpose: the record version is
+		// still what the ledger records, but no stored version blocks it.
+		if !hasModified {
+			eventModifiedOn = time.Now().UTC()
+		}
+		return false, eventModifiedOn, nil
+	}
 	if !hasModified {
 		slog.WarnContext(ctx, "salesforce: record has no parseable lastModifiedDate, skipping duplicate guard",
 			"entity", entity, "sfId", sfID, "eventType", eventType, "lastModifiedDate", derefString(lastModified))
@@ -63,4 +71,23 @@ func shouldSkipIngest(ctx context.Context, states repository.SalesforceIngestSta
 		return true, eventModifiedOn, nil
 	}
 	return false, eventModifiedOn, nil
+}
+
+// resyncApplyKey marks a context as the admin resync's apply path.
+type resyncApplyKey struct{}
+
+// withResyncApply returns ctx marked as the admin resync's apply path. It is
+// set by the resync service only; the event path never sets it, so every
+// ingest behaves as before there. On a marked context the duplicate-event
+// guard (shouldSkipIngest and the membership ingest's own onboarding-step
+// guard) does not skip, the ingests only add and update (no row is
+// deleted), no invitation or welcome event is published, and no partner
+// refresh is started behind a membership.
+func withResyncApply(ctx context.Context) context.Context {
+	return context.WithValue(ctx, resyncApplyKey{}, true)
+}
+
+func isResyncApply(ctx context.Context) bool {
+	v, _ := ctx.Value(resyncApplyKey{}).(bool)
+	return v
 }

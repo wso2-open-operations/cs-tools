@@ -142,6 +142,17 @@ func (s *salesforceEventService) ingestOpportunity(ctx context.Context, sfID, ev
 	if err != nil {
 		return err
 	}
+	return s.ingestOpportunityRecord(ctx, opp, sfID, eventType, guard)
+}
+
+// ingestOpportunityRecord is ingestOpportunity's body for an Opportunity
+// already in hand: the admin resync reads opportunities itself and writes
+// them here.
+func (s *salesforceEventService) ingestOpportunityRecord(ctx context.Context, opp salesentity.Opportunity, sfID, eventType string, guard bool) error {
+	var err error
+	if s.support.States == nil {
+		return errors.New("salesforce: salesforce_ingest_state ledger is not configured")
+	}
 	// Sales Entity may answer with the 18-character form of a 15-character
 	// referenceId; the stored sf_id is whatever Salesforce returns.
 	if strings.TrimSpace(opp.ID) != "" {
@@ -172,6 +183,7 @@ func (s *salesforceEventService) ingestOpportunity(ctx context.Context, sfID, ev
 
 	row := mapSalesEntityOpportunity(ctx, opp)
 	row.SfID = sfID
+	row.KeepStaleLineItems = isResyncApply(ctx)
 	if customerID := strings.TrimSpace(opp.CustomerID); customerID != "" {
 		accountID, err := s.EnsureAccount(ctx, customerID)
 		if err != nil {
