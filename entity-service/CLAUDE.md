@@ -2303,7 +2303,10 @@ assignee/team-group emails sent alongside the existing Chat alert — see that
 repo's own `CLAUDE.md`, "SLA breach-alerting engine") — not used by anything
 in this service itself. `AssigneeEmail`/`AssigneeName` resolve via a
 `LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id`; `TeamEmail` is
-`"group".group_email` (the same `"group"` row `team` already joins through).
+`team.group_email` — **not** `"group".group_email`, a real, reported
+documentation bug: the two are different, independently-synced values for
+the same team, and `team.group_email` is the one other proven code
+(`TeamGroupEmails`, `migration_case_report_repo.go`) already relies on.
 
 **`TeamLeadName` does NOT come from `"group".manager_id` — a real, reported
 bug in an earlier version of this field, now fixed.** That earlier version

@@ -8796,11 +8796,17 @@ type SLAStatus struct {
 	// addressed by these fields. AssigneeName/AssigneeEmail resolve
 	// work_item.assigned_to_id the same way GetCaseByID's own
 	// AssignedEngineer join does; "" when the case has no assignee.
-	// TeamEmail is the SAME "group" row Team already comes from
-	// (account.cre_team_id) -- "group".group_email; "" when the case has
-	// no account, the account has no CRE team, or that team has no
+	// TeamEmail is NOT the "group" row Team's own display name comes from
+	// (account.cre_team_id -> "group") -- it is team.group_email, on the
+	// team row with the SAME id (team.id and "group".id coincide for a
+	// properly-synced CRE team -- see TeamLeadName's own doc comment
+	// below), since "group".group_email and team.group_email are two
+	// different, independently-synced values for the same team and
+	// team.group_email is the one other proven code (TeamGroupEmails,
+	// migration_case_report_repo.go) already relies on. "" when the case
+	// has no account, the account has no CRE team, or that team has no
 	// group_email set. TeamLeadName does NOT come from that same "group"
-	// row at all -- "group".manager_id is an unrelated field (a real,
+	// row at all either -- "group".manager_id is an unrelated field (a real,
 	// reported bug: an earlier version of this resolved TeamLeadName from
 	// it, which for most teams simply isn't set, and for any team where it
 	// is set names the wrong person). The real team lead is
