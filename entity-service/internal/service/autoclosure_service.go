@@ -627,18 +627,26 @@ var autoclosureDefaultTemplates = map[string]string{
 }
 
 var (
-	autoclosureParagraphBreak = regexp.MustCompile(`(?i)</p>\s*<p[^>]*>`)
-	autoclosureLineBreak      = regexp.MustCompile(`(?i)<br\s*/?>`)
-	autoclosureAnyTag         = regexp.MustCompile(`<[^>]*>`)
+	autoclosureLineBreak  = regexp.MustCompile(`(?i)<br\b[^>]*>`)
+	autoclosureItemEnd    = regexp.MustCompile(`(?i)</li\s*>\s*`)
+	autoclosureBlockEnd   = regexp.MustCompile(`(?i)</(?:p|div|ul|ol|h[1-6]|blockquote|tr|table|pre)\s*>\s*`)
+	autoclosureAnyTag     = regexp.MustCompile(`<[^>]*>`)
+	autoclosureBlankLines = regexp.MustCompile(`\n{3,}`)
 )
 
 // autoclosurePlainText turns a comment's HTML into plain text for the close
-// notes, which the portals treat as free text: "</p><p>" becomes a blank line,
-// "<br/>" a newline, and any other tag is dropped. HTML entities are left as
-// they are (the defaults use none).
+// notes, which the portals treat as free text. A <br> (any case, with or
+// without a slash or attributes) becomes a newline, the end of a list item
+// a newline, the end of any other common block element (p, div, ul, ol,
+// h1-h6, blockquote, tr, table, pre) a blank line, and every remaining tag is
+// dropped. Runs of blank lines collapse to one and the result is trimmed.
+// HTML entities are deliberately left as they are: decoding them is not
+// needed for the built-in wording, which uses none.
 func autoclosurePlainText(html string) string {
-	t := autoclosureParagraphBreak.ReplaceAllString(html, "\n\n")
-	t = autoclosureLineBreak.ReplaceAllString(t, "\n")
+	t := autoclosureLineBreak.ReplaceAllString(html, "\n")
+	t = autoclosureItemEnd.ReplaceAllString(t, "\n")
+	t = autoclosureBlockEnd.ReplaceAllString(t, "\n\n")
 	t = autoclosureAnyTag.ReplaceAllString(t, "")
+	t = autoclosureBlankLines.ReplaceAllString(t, "\n\n")
 	return strings.TrimSpace(t)
 }

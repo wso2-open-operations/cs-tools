@@ -379,6 +379,36 @@ func TestAutoclosureDefaultTemplatesAreHTMLSignedByCustomerSuccess(t *testing.T)
 	}
 }
 
+func TestAutoclosurePlainTextTable(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"div blocks", "<div>Hello</div><div>Thanks</div>", "Hello\n\nThanks"},
+		{"br with attributes", `a<br class="x">b`, "a\nb"},
+		{"upper case self-closing br", "a<BR/>b", "a\nb"},
+		{"br with space and slash", "a<br />b", "a\nb"},
+		{"p nested in div", "<div><p>a</p><p>b</p></div>", "a\n\nb"},
+		{"list items on their own lines", "<ul><li>a</li><li>b</li></ul>", "a\nb"},
+		{"paragraph with style", `<p style="color:red">a</p>  <p style="x">b</p>`, "a\n\nb"},
+		{"heading and blockquote", "<h1>T</h1><blockquote>q</blockquote>", "T\n\nq"},
+		{"inline tags dropped", "<p>a <b>b</b> <a href=\"u\">c</a></p>", "a b c"},
+		{"plain text", "just text\nsecond line", "just text\nsecond line"},
+		{"plain text trimmed", "  text  ", "text"},
+		{"empty", "", ""},
+		{"entities left alone", "<p>a &amp; b</p>", "a &amp; b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := autoclosurePlainText(tc.in); got != tc.want {
+				t.Errorf("autoclosurePlainText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	for key, text := range autoclosureDefaultTemplates {
+		got := autoclosurePlainText(text)
+		if strings.Contains(got, "<") || strings.Contains(got, "\n\n\n") || !strings.HasSuffix(got, "Thanks,\nCustomer Success Team") || !strings.HasPrefix(got, "Hello,\n\n") {
+			t.Errorf("%s: plain text = %q", key, got)
+		}
+	}
+}
+
 func TestAutoclosurePlainText(t *testing.T) {
 	got := autoclosurePlainText(autoclosureDefaultTemplates["awaiting_info.closure"])
 	want := "Hello,\n\nPlease note that this case is closed as we did not receive an update. " +
