@@ -104,6 +104,9 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 		}
 		created = true
 	}
+	if err := deriveOpportunityOnboarding(ctx, q, opportunityID); err != nil {
+		return false, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, err
 	}

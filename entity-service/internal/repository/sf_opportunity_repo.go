@@ -218,6 +218,9 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 		res.LineItemsDeleted = int(tag.RowsAffected())
 	}
 
+	if err := deriveOpportunityOnboarding(ctx, q, res.OpportunityID); err != nil {
+		return res, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}

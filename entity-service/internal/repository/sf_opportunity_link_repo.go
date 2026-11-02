@@ -114,6 +114,9 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 		}
 		created = true
 	}
+	if err := deriveProjectOnboarding(ctx, q, row.ProjectID); err != nil {
+		return false, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
 	}

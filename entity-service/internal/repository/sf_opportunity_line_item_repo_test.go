@@ -25,7 +25,8 @@ import (
 )
 
 // The standalone upsert takes the parent opportunity's lock (the one the
-// derived set replace holds) and reuses the derived path's statements.
+// derived set replace holds) and reuses the derived path's statements, then
+// re-derives the linked projects' onboarding before the ledger.
 func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 	q := &updateTagQuerier{update: updateSfOpportunityProductQuery, rows: 0}
 	created, err := writeSfOpportunityLineItem(context.Background(), q, "006OPP", "opp-row",
@@ -33,7 +34,7 @@ func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	want := []string{"pg_advisory_xact_lock", updateSfOpportunityProductQuery, insertSfOpportunityProductQuery, "salesforce_ingest_state"}
+	want := []string{"pg_advisory_xact_lock", updateSfOpportunityProductQuery, insertSfOpportunityProductQuery, deriveOnboardingForOpportunityQuery, "salesforce_ingest_state"}
 	if len(q.statements) != len(want) {
 		t.Fatalf("statements = %d, want %d", len(q.statements), len(want))
 	}
