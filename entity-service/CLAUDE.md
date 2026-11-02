@@ -11720,6 +11720,57 @@ ingest is not built is reported `skipped` with a reason, by both endpoints.
   request deadline, `resyncTimeMargin`) stops is `skipped` as a whole and `capped` is set; apply reads a component
   completely before writing any of it. The server's `REQUEST_TIMEOUT` still bounds a request.
 
+## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
+
+A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view
+only with people (`custom_dashboard_share`), with teams (`custom_dashboard_team_share`) and, since
+migration 0269, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
+Saved dashboards are live in production, so a change here must leave the stored rows as they are.
+
+**The link** (migration 0269, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
+`custom_dashboard_link_handler.go`):
+
+- `custom_dashboard.link_enabled` is the owner's switch; `link_id` is the id in the link, a new random
+  UUID each time the switch is turned on (never derived from the dashboard's id), so turning it off and on
+  again makes every earlier copy stop working. A CHECK keeps them in step (an id exactly when on); a partial
+  unique index serves the lookup by link id.
+- `GET /users/me/dashboards/{id}/link` answers `{enabled, linkId?, openedBy}`; `PUT` turns it on (no body;
+  on again keeps the same id) and `DELETE` turns it off (204), which in the same transaction deletes the
+  dashboard's `custom_dashboard_link_access` rows, so everyone who had it only through the link loses it.
+  All three touch only the caller's own row: another user's dashboard is the same 404 as a missing one.
+- `POST /users/me/shared-dashboards/link` with `{linkId}` opens a link and answers `{dashboardId, own}`.
+  **The link id is a bearer secret**: it travels in the body (never the path, so it is not in access
+  logs), and no error or log line quotes it (`linkId is not a UUID`, never the value; `writeServiceError`
+  logs validation errors). An unknown link, a link that is off and a caller who is not internal staff all
+  get the same 404, so the answer tells nobody whether a link id ever existed. The owner opening their own
+  link gets `own: true` and no row.
+- **Who counts as having opened it.** `custom_dashboard_link_access` holds one row per (dashboard, user)
+  for an internal user who opened the link and did not already have the dashboard: a user it is shared with
+  directly or through one of their teams gets no row (the Shared list already shows it to them), and
+  opening it again adds nothing. `openedBy` counts these rows only, never who; rows go with the dashboard
+  and with the user.
+- **The Shared list** (`ListSharedWithUser` / `GetSharedWithUser`) shows each dashboard once: a direct
+  share wins, then a team share (`sharedViaTeam`), then the link (`sharedViaLink: true`). A link row is
+  kept when a direct or team share is added later, so the dashboard comes back through the link when that
+  share goes.
+
+**Deleting the owner.** `owner_user_id` is ON DELETE SET NULL (migration 0255): a deleted user's dashboards
+stay with no owner while somebody can still see them, and nobody can edit, share, unshare, delete or turn
+the link of an ownerless dashboard off (every owner route matches no one). The rule is "kept while
+somebody can see it":
+
+- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0270) runs as the owner
+  goes and deletes a dashboard with no person share, no team share **and its link off**. A dashboard whose
+  link is on is kept, opened by anyone or not yet, and its link keeps working (0270).
+- Migration 0271 deletes an ownerless dashboard later, once its last share goes and its link is off:
+  `custom_dashboard_delete_if_orphaned(id)`, from AFTER DELETE triggers on both share tables (their rows go
+  when the recipient user or the team is deleted, both cascade) and from an AFTER UPDATE OF `link_enabled`
+  trigger for an ownerless dashboard whose link goes off. No API turns that link off today; the trigger is
+  there for a future admin route. A dashboard that has its owner is never touched by any of them.
+- The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
+  (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
+  (`DeletingTheOwnerKeepsLinkedDashboards`) and `custom_dashboard_orphan_integration_test.go` (0271).
+
 ## Adding a new entity
 
 Follow these steps in order:

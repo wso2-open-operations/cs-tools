@@ -132,6 +132,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var customDashboardHandler *handler.CustomDashboardHandler
 	var customDashboardShareHandler *handler.CustomDashboardShareHandler
 	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
+	var customDashboardLinkHandler *handler.CustomDashboardLinkHandler
 	if db != nil {
 		customDashboardRepo := repository.NewCustomDashboardRepository(db)
 		customDashboardHandler = handler.NewCustomDashboardHandler(
@@ -142,6 +143,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 		customDashboardTeamShareHandler = handler.NewCustomDashboardTeamShareHandler(
 			service.NewCustomDashboardTeamShareService(repository.NewCustomDashboardTeamShareRepository(db), customDashboardRepo, userRepo),
+		)
+		customDashboardLinkHandler = handler.NewCustomDashboardLinkHandler(
+			service.NewCustomDashboardLinkService(repository.NewCustomDashboardLinkRepository(db), userRepo),
 		)
 	}
 
@@ -2354,6 +2358,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /users/me/dashboards/{id}/team-shares", customDashboardTeamShareHandler.ListTeamShares)
 		mux.HandleFunc("PUT /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.AddTeamShare)
 		mux.HandleFunc("DELETE /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.RemoveTeamShare)
+	}
+	if customDashboardLinkHandler != nil {
+		// Sharing the caller's saved dashboards by link (owner), and opening
+		// a link (anyone internal); an opened dashboard is read through the
+		// shared-dashboards routes above.
+		mux.HandleFunc("GET /users/me/dashboards/{id}/link", customDashboardLinkHandler.GetLink)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/link", customDashboardLinkHandler.EnableLink)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/link", customDashboardLinkHandler.DisableLink)
+		mux.HandleFunc("POST /users/me/shared-dashboards/link", customDashboardLinkHandler.OpenLink)
 	}
 
 	if membershipRegistrationHandler != nil {

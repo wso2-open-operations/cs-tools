@@ -862,6 +862,18 @@ with `PermWrite` a view-only recipient would be handed a dashboard that answers 
 no data: each widget calls its own search route with the viewer's permissions (time cards, incidents
 and change requests keep theirs), so a widget outside the viewer's role fails on its own.
 
+**Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
+rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
+the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same
+reason as the Shared list: anyone internal with the link may view. The link id is a bearer secret:
+it comes in the body (`{linkId}`), never the path, is checked against `uuidRe` before any upstream call
+(a 400 with `errMsgDashboardLinkInvalid`, "copied in full"), lower-cased and passed on, and is never
+logged or quoted back. An upstream 404 (the link is off, unknown, or the caller is not internal staff:
+entity-service does not tell them apart) gets its own readable message (`errMsgDashboardLinkNotFound`);
+everything else goes through `mapUpstreamErrorGeneric`. `sharedViaLink` on both Shared responses says
+the caller has the dashboard only through its link. The routes are in
+`cmd/server/custom_dashboard_routes_test.go`'s must-exist list.
+
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):
 `DASHBOARD_GENERATE_LIMIT_PER_MINUTE` (default 10) in any minute and `DASHBOARD_GENERATE_LIMIT_PER_DAY`

@@ -44,13 +44,14 @@ type CustomDashboardShareRepository interface {
 	// RemoveShare stops sharing the owner's dashboard with a user; false when it
 	// was not shared with them (or is not the owner's).
 	RemoveShare(ctx context.Context, ownerID, dashboardID, userID string) (bool, error)
-	// ListSharedWithUser is every dashboard shared with the user, directly or
-	// with a team the user is in now (migration 0253), without definitions,
-	// ordered by name. Team shares count only for internal staff and never
-	// for the dashboard's owner.
+	// ListSharedWithUser is every dashboard shared with the user, directly,
+	// with a team the user is in now (migration 0253), or through a link they
+	// opened while it is on (migration 0269), without definitions, ordered by
+	// name. Team and link shares count only for internal staff, and nothing
+	// counts for the dashboard's owner.
 	ListSharedWithUser(ctx context.Context, userID string) ([]domain.SharedCustomDashboardSummary, error)
-	// GetSharedWithUser is one dashboard shared with the user, directly or
-	// with one of their teams as in ListSharedWithUser; nil when it is not.
+	// GetSharedWithUser is one dashboard shared with the user in any of the
+	// ways of ListSharedWithUser; nil when it is not.
 	GetSharedWithUser(ctx context.Context, userID, dashboardID string) (*domain.SharedCustomDashboard, error)
 }
 
@@ -152,17 +153,20 @@ func (r *customDashboardShareRepo) RemoveShare(ctx context.Context, ownerID, das
 
 // sharedWithUserFrom is the join both recipient reads use: the dashboards
 // shared with $1, each with its owner and the one share that grants it (alias
-// s: team_id / team_name / team_type are NULL for a direct share). Team
-// membership is read live from team_member: whoever is in the team now sees
-// the dashboard. A team share counts only when $1 is internal staff (person
-// shares check that when they are added; a team's members are not checked
-// then) and never for the dashboard's owner. A dashboard whose owner was
-// deleted (owner_user_id NULL, migration 0255) still shows, with an empty
-// owner. With several shares of one dashboard, the direct one wins, then the
-// team first by name.
+// s: team_id / team_name / team_type are NULL for a direct or link share; via
+// is 0 direct, 1 team, 2 link). Team membership is read live from
+// team_member: whoever is in the team now sees the dashboard. A link share is
+// a row of custom_dashboard_link_access (the user opened the link, migration
+// 0269) and counts only while the link is on. Team and link shares count only
+// when $1 is internal staff (person shares check that when they are added; a
+// team's members are not checked then), and no share counts for the
+// dashboard's owner. A dashboard whose owner was deleted (owner_user_id NULL,
+// migration 0255) still shows, with an empty owner. With several shares of
+// one dashboard, the direct one wins, then the team first by name, then the
+// link.
 const sharedWithUserFrom = `
 		 FROM (
-		   SELECT DISTINCT ON (g.dashboard_id) g.dashboard_id, g.created_on, g.team_id, g.team_name, g.team_type
+		   SELECT DISTINCT ON (g.dashboard_id) g.dashboard_id, g.created_on, g.team_id, g.team_name, g.team_type, g.via
 		   FROM (
 		     SELECT ps.dashboard_id, ps.created_on, NULL::uuid AS team_id, NULL::text AS team_name, NULL::text AS team_type, 0 AS via
 		     FROM custom_dashboard_share ps
@@ -173,6 +177,12 @@ const sharedWithUserFrom = `
 		     JOIN team t ON t.id = ts.team_id
 		     JOIN team_member tm ON tm.team_id = t.id AND tm.user_id = $1::uuid
 		     JOIN "user" me ON me.id = tm.user_id AND me.user_type = 'INTERNAL'
+		     UNION ALL
+		     SELECT la.dashboard_id, la.created_on, NULL::uuid, NULL::text, NULL::text, 2
+		     FROM custom_dashboard_link_access la
+		     JOIN custom_dashboard ld ON ld.id = la.dashboard_id AND ld.link_enabled
+		     JOIN "user" lme ON lme.id = la.user_id AND lme.user_type = 'INTERNAL'
+		     WHERE la.user_id = $1::uuid
 		   ) g
 		   ORDER BY g.dashboard_id, g.via, lower(g.team_name), g.created_on
 		 ) s
@@ -185,7 +195,7 @@ const sharedWithUserFrom = `
 // once, with the share that grants it (see sharedWithUserFrom).
 func (r *customDashboardShareRepo) ListSharedWithUser(ctx context.Context, userID string) ([]domain.SharedCustomDashboardSummary, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT d.id::text, d.name, COALESCE(o.id::text, ''), COALESCE(o.email, ''), `+fmt.Sprintf(dashboardShareUserName, "o")+`, s.created_on, d.updated_on, `+sharedViaTeamColumns+
+		`SELECT d.id::text, d.name, COALESCE(o.id::text, ''), COALESCE(o.email, ''), `+fmt.Sprintf(dashboardShareUserName, "o")+`, s.created_on, d.updated_on, `+sharedViaColumns+
 			sharedWithUserFrom+`
 		 ORDER BY lower(d.name), d.id`,
 		userID)
@@ -198,7 +208,7 @@ func (r *customDashboardShareRepo) ListSharedWithUser(ctx context.Context, userI
 		var ownerID, ownerEmail, ownerName string
 		var teamID, teamName, teamType *string
 		var d domain.SharedCustomDashboardSummary
-		if err := rows.Scan(&d.ID, &d.Name, &ownerID, &ownerEmail, &ownerName, &d.SharedOn, &d.UpdatedOn, &teamID, &teamName, &teamType); err != nil {
+		if err := rows.Scan(&d.ID, &d.Name, &ownerID, &ownerEmail, &ownerName, &d.SharedOn, &d.UpdatedOn, &teamID, &teamName, &teamType, &d.SharedViaLink); err != nil {
 			return nil, fmt.Errorf("list dashboards shared with user: scan: %w", err)
 		}
 		d.Owner = domain.NewUserReference(ownerID, ownerEmail, ownerName)
@@ -218,10 +228,10 @@ func (r *customDashboardShareRepo) GetSharedWithUser(ctx context.Context, userID
 	var teamID, teamName, teamType *string
 	var d domain.SharedCustomDashboard
 	err := r.db.QueryRow(ctx,
-		`SELECT d.id::text, d.name, d.definition, COALESCE(o.id::text, ''), COALESCE(o.email, ''), `+fmt.Sprintf(dashboardShareUserName, "o")+`, s.created_on, d.updated_on, `+sharedViaTeamColumns+
+		`SELECT d.id::text, d.name, d.definition, COALESCE(o.id::text, ''), COALESCE(o.email, ''), `+fmt.Sprintf(dashboardShareUserName, "o")+`, s.created_on, d.updated_on, `+sharedViaColumns+
 			sharedWithUserFrom+`
 		   AND d.id = $2::uuid`,
-		userID, dashboardID).Scan(&d.ID, &d.Name, &d.Definition, &ownerID, &ownerEmail, &ownerName, &d.SharedOn, &d.UpdatedOn, &teamID, &teamName, &teamType)
+		userID, dashboardID).Scan(&d.ID, &d.Name, &d.Definition, &ownerID, &ownerEmail, &ownerName, &d.SharedOn, &d.UpdatedOn, &teamID, &teamName, &teamType, &d.SharedViaLink)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -233,8 +243,9 @@ func (r *customDashboardShareRepo) GetSharedWithUser(ctx context.Context, userID
 	return &d, nil
 }
 
-// sharedViaTeamColumns are the granting share's team, NULL for a direct share.
-const sharedViaTeamColumns = `s.team_id::text, s.team_name, s.team_type`
+// sharedViaColumns are the granting share's team (NULL for a direct or link
+// share), then whether it is a link share.
+const sharedViaColumns = `s.team_id::text, s.team_name, s.team_type, s.via = 2`
 
 // sharedViaTeam is the team a shared dashboard reached the caller through; nil
 // for a direct share.
