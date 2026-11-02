@@ -19,6 +19,7 @@
 import {
   DecoratorNode,
   $getNodeByKey,
+  $nodesOfType,
   type DOMConversionMap,
   type EditorConfig,
   type LexicalEditor,
@@ -177,4 +178,21 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 
 export function $createImageNode(src: string, altText: string): ImageNode {
   return new ImageNode(sanitizeImageSrc(src), altText);
+}
+
+/** A `blob:` preview or a stored image's `/<uuid>`; what an upload-mode draft holds. */
+const UPLOADED_IMAGE_SRC =
+  /^(?:blob:|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$)/i;
+
+/**
+ * How many images of the upload flow the editor's content holds now: `blob:`
+ * previews (uploading or done) and stored `/<uuid>` images. An image removed
+ * from the content is not counted.
+ */
+export function countUploadedImages(editor: LexicalEditor): number {
+  return editor
+    .getEditorState()
+    .read(() =>
+      $nodesOfType(ImageNode).filter((n) => UPLOADED_IMAGE_SRC.test(n.__src)).length,
+    );
 }

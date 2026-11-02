@@ -80,8 +80,11 @@ import { mergeRegister, $getNearestNodeOfType } from "@lexical/utils";
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_IMAGE_TYPES_LABEL,
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_IMAGES_MESSAGE,
   RICH_TEXT_BLOCK_TAGS,
 } from "@components/rich-text-editor/richTextConstants";
+import { countUploadedImages } from "@components/rich-text-editor/ImageNode";
 import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
@@ -279,6 +282,11 @@ const Toolbar = ({
         return;
       }
       if (imageUploader) {
+        if (countUploadedImages(editor) >= MAX_COMMENT_IMAGES) {
+          showError(MAX_COMMENT_IMAGES_MESSAGE);
+          resetInput();
+          return;
+        }
         const src = imageUploader(file);
         editor.focus(() => {
           editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
