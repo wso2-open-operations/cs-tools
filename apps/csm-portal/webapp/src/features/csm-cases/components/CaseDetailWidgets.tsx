@@ -1023,6 +1023,7 @@ export function AttachmentsWidget({
   onRetry,
   uploading = false,
   uploadProgress = null,
+  onCancelUpload,
   uploadError,
   onUpload,
   onDownloadAll,
@@ -1050,6 +1051,8 @@ export function AttachmentsWidget({
    * progress and falls back to an indeterminate bar.
    */
   uploadProgress?: number | null;
+  /** Stops the upload in flight; shows a Cancel button next to the progress bar. */
+  onCancelUpload?: () => void;
   /** Message shown when the last upload failed (size, network, 413, …). */
   uploadError?: string | null;
   onUpload?: (file: File) => void;
@@ -1166,11 +1169,19 @@ export function AttachmentsWidget({
           />
         )}
         {uploading && (
-          <LinearProgress
-            sx={{ mb: 1 }}
-            variant={uploadProgress != null ? "determinate" : "indeterminate"}
-            value={uploadProgress ?? undefined}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <LinearProgress
+              sx={{ flex: 1 }}
+              aria-label="Upload progress"
+              variant={uploadProgress != null ? "determinate" : "indeterminate"}
+              value={uploadProgress ?? undefined}
+            />
+            {onCancelUpload && (
+              <Button size="small" variant="text" color="inherit" onClick={onCancelUpload}>
+                Cancel
+              </Button>
+            )}
+          </Box>
         )}
         {uploadError && (
           <Typography variant="body2" color="error" sx={{ mb: 1 }}>

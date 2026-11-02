@@ -80,3 +80,14 @@ export function inlineImageMaxBytes(): number {
 export function formatMegabytes(bytes: number): string {
   return `${Number((bytes / BYTES_PER_MB).toFixed(2))} MB`;
 }
+
+/**
+ * A size limit for a message, readable for big values: "10 MB" below 1024 MB,
+ * "10 GB" from there ("1.5 GB"). Use it for the attachment limit shown to a user.
+ */
+export function formatSizeLimit(bytes: number): string {
+  if (bytes >= 1024 * BYTES_PER_MB) {
+    return `${Number((bytes / (1024 * BYTES_PER_MB)).toFixed(2))} GB`;
+  }
+  return formatMegabytes(bytes);
+}

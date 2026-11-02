@@ -3259,6 +3259,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             refreshedAt={attachmentsUpdatedAt}
             uploading={isUploadingForThisCase}
             uploadProgress={isUploadingForThisCase ? postAttachment.uploadProgress : null}
+            onCancelUpload={isUploadingForThisCase ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError &&
               postAttachment.variables?.caseId === caseId

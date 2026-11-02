@@ -1114,3 +1114,28 @@ describe("AttachmentsWidget — per-row delete gate", () => {
     expect(screen.queryByRole("button", { name: "Delete theirs.txt" })).not.toBeInTheDocument();
   });
 });
+
+describe("AttachmentsWidget — upload progress and cancel", () => {
+  it("shows a determinate bar, a disabled Upload button and a working Cancel while uploading", () => {
+    const onCancelUpload = vi.fn();
+    render(
+      <AttachmentsWidgetHarness
+        attachments={[]}
+        uploading
+        uploadProgress={42}
+        onUpload={vi.fn()}
+        onCancelUpload={onCancelUpload}
+      />,
+    );
+    const bar = screen.getByRole("progressbar", { name: "Upload progress" });
+    expect(bar).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("button", { name: /Uploading… 42%/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no Cancel when nothing is uploading", () => {
+    render(<AttachmentsWidgetHarness attachments={[]} onUpload={vi.fn()} onCancelUpload={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+  });
+});
