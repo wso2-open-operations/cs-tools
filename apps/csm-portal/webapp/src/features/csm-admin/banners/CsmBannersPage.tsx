@@ -641,7 +641,6 @@ export default function CsmBannersPage(): JSX.Element {
             key={banner.id}
             variant="outlined"
             sx={(theme) => ({
-              borderRadius: 2,
               overflow: "hidden",
               border: "1px solid",
               borderColor: "rgba(0,0,0,0.32)",
@@ -678,9 +677,6 @@ export default function CsmBannersPage(): JSX.Element {
               dangerouslySetInnerHTML={{ __html: sanitizeAnnouncementHtml(banner.html) }}
             />
             <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1 }}>
-              <IconButton size="small" aria-label="Edit" onClick={() => openEdit(banner)} sx={{ flex: "none" }}>
-                <Pencil size={16} />
-              </IconButton>
               <Stack direction="row" spacing={0.75} useFlexGap sx={{ flex: "1 1 auto", flexWrap: "wrap" }}>
                   <Chip size="small" variant="outlined" label={kind} sx={outlinedTag("text.primary")} />
                   {banner.status !== "unpublished" && banner.visibleInCustomerPortal && (
@@ -690,6 +686,20 @@ export default function CsmBannersPage(): JSX.Element {
                     <Chip size="small" variant="outlined" label="CSM portal" sx={outlinedTag(CSM_TAG)} />
                   )}
               </Stack>
+              <IconButton
+                aria-label="Edit"
+                onClick={() => openEdit(banner)}
+                sx={{
+                  flex: "none",
+                  width: 32,
+                  height: 32,
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  "&:hover": { bgcolor: "primary.dark" },
+                }}
+              >
+                <Pencil size={18} />
+              </IconButton>
             </Box>
           </Paper>
           );
