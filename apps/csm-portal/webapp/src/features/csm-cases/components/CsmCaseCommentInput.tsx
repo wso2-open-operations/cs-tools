@@ -45,6 +45,7 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import {
   ALLOWED_IMAGE_TYPES_LABEL,
+  MAX_COMMENT_IMAGES_MESSAGE,
 } from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
@@ -274,11 +275,13 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
-  const onPasteError = useCallback((reason: "size" | "type") => {
+  const onPasteError = useCallback((reason: "size" | "type" | "count") => {
     setError(
-      reason === "type"
-        ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
-        : `Pasted image exceeds the maximum allowed size of ${formatBytes(inlineImageMaxBytes())}.`,
+      reason === "count"
+        ? MAX_COMMENT_IMAGES_MESSAGE
+        : reason === "type"
+          ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
+          : `Pasted image exceeds the maximum allowed size of ${formatBytes(inlineImageMaxBytes())}.`,
     );
   }, []);
 

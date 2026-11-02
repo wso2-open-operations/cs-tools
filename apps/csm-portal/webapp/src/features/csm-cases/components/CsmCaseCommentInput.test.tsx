@@ -57,13 +57,20 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onChange,
     attachments,
     onImageUpload,
+    onPasteError,
   }: {
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
     onImageUpload?: (file: File) => string;
+    onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
     <div data-testid="editor-stub">
+      {onPasteError && (
+        <button type="button" onClick={() => onPasteError("count")}>
+          paste-too-many
+        </button>
+      )}
       {onImageUpload && (
         <button
           type="button"
@@ -416,6 +423,12 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     upload.mockReset();
     URL.createObjectURL = vi.fn(() => `blob:https://csm.example.com/${(blobCount += 1)}`);
     URL.revokeObjectURL = vi.fn();
+  });
+
+  it("tells the user a comment can have at most 5 images when the editor refuses another", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "paste-too-many" }));
+    expect(screen.getByText("A comment can have at most 5 images.")).toBeInTheDocument();
   });
 
   it("gives the editor no image uploader without a case id, so images are embedded as before", () => {
