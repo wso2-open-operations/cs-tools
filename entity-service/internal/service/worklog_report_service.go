@@ -162,6 +162,14 @@ func NewWorklogReportService(repo repository.WorklogReportRepository,
 	}
 }
 
+// worklogTypeAgg is one work-item type's tally.
+type worklogTypeAgg struct {
+	approvedMin  int
+	pendingMin   int
+	approvedDays int
+	pendingDays  int
+}
+
 // perUser is the working accumulator for one person.
 type perUser struct {
 	roster       repository.WorklogRosterRow
@@ -178,6 +186,8 @@ type perUser struct {
 	// drives Worked Days and Average People Per Day; it does not drop
 	// logged time.
 	blocked map[time.Time]bool
+	// types is this person's tally per type bucket.
+	types map[string]*worklogTypeAgg
 	// leaveHalf is set when the absence covering the daily report's one
 	// day is a half day. summerizeTimeReport treats such a person as 0.5
 	// of a present member rather than an absent one.
@@ -260,6 +270,7 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			pendingKeys:  map[string]bool{},
 			seenKey:      map[string]bool{},
 			blocked:      map[time.Time]bool{},
+			types:        map[string]*worklogTypeAgg{},
 		}
 	}
 
@@ -305,13 +316,12 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	// and were never meant to reconcile. The repository already returns
 	// one row per (person, item, date, state), so each row is one
 	// increment.
-	type typeAgg struct {
-		approvedMin  int
-		pendingMin   int
-		approvedDays int
-		pendingDays  int
-	}
-	byType := map[string]*typeAgg{}
+	//
+	// The per-type tallies are kept PER PERSON while the cards are read and
+	// merged into byType only for people the report actually includes, so
+	// the breakdown always covers exactly the listed members and its hours
+	// add up to the total.
+	byType := map[string]*worklogTypeAgg{}
 
 	// Time logged by people on no team in scope: no section to put it in,
 	// so the mails cannot show it. That is a DATA gap (no team_member row),
@@ -352,10 +362,10 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		}
 
 		bucketType := worklogBucketType(t.ItemType, t.Severity)
-		ta := byType[bucketType]
+		ta := u.types[bucketType]
 		if ta == nil {
-			ta = &typeAgg{}
-			byType[bucketType] = ta
+			ta = &worklogTypeAgg{}
+			u.types[bucketType] = ta
 		}
 		// Issue identity is the (person, work item) pair, so the same
 		// item worked by two people counts once for each -- which is
@@ -460,6 +470,19 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			// still listed: absences feed Worked Days and the leave
 			// figures but never remove logged time.
 			continue
+		}
+		// Only now is the person certainly in the report: fold their type
+		// tallies into the breakdown.
+		for typ, pt := range u.types {
+			ta := byType[typ]
+			if ta == nil {
+				ta = &worklogTypeAgg{}
+				byType[typ] = ta
+			}
+			ta.approvedMin += pt.approvedMin
+			ta.pendingMin += pt.pendingMin
+			ta.approvedDays += pt.approvedDays
+			ta.pendingDays += pt.pendingDays
 		}
 		rosteredMemberDays += workedDays
 		approvedHrs := minutesToHours(u.approvedMin)

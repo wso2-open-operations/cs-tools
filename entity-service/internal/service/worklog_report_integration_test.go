@@ -1294,6 +1294,17 @@ func TestWorklogConfirmedEngagementAllocationBlanksDays(t *testing.T) {
 		}
 	}
 
+	// The type breakdown covers exactly the listed members.
+	{
+		var h float64
+		for _, b := range got.ByType {
+			h += b.TotalHours
+		}
+		if d := h - got.Totals.TotalHours; d > 0.02 || d < -0.02 {
+			t.Errorf("weekly byType hours = %v, total hours = %v, want them equal", h, got.Totals.TotalHours)
+		}
+	}
+
 	// The daily for Tuesday the 13th drops elif@ altogether.
 	tue := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
 	svc := service.NewWorklogReportService(
@@ -1309,5 +1320,13 @@ func TestWorklogConfirmedEngagementAllocationBlanksDays(t *testing.T) {
 				t.Error("elif@ is on a confirmed full allocation and must not be on the daily")
 			}
 		}
+	}
+	// ...and neither may their cards reach the daily's type breakdown.
+	var dh float64
+	for _, b := range daily.ByType {
+		dh += b.TotalHours
+	}
+	if d := dh - daily.Totals.TotalHours; d > 0.02 || d < -0.02 {
+		t.Errorf("daily byType hours = %v, total hours = %v, want them equal", dh, daily.Totals.TotalHours)
 	}
 }

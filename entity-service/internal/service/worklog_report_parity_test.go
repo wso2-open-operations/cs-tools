@@ -399,3 +399,60 @@ func TestWorklogDailyAveragesShareOnePresenceDivisor(t *testing.T) {
 			a.AvgApprovedHoursPerPerson, a.AvgTotalHoursPerPerson)
 	}
 }
+
+// byTypeSum adds up the type breakdown.
+func byTypeSum(r domain.WorklogReport) (hours float64, issues int) {
+	for _, b := range r.ByType {
+		hours += b.TotalHours
+		issues += b.Issues
+	}
+	return hours, issues
+}
+
+func TestWorklogDailyByTypeCoversOnlyIncludedPeople(t *testing.T) {
+	// u2 is on a confirmed allocation and so is not on the daily; their
+	// cards must not reach the type breakdown either.
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "alpha"), person("u2", "alpha")},
+		leave:  []repository.WorklogLeaveRow{absence("u2", "ENG_ALLOC", "ALLOCATION", "2026-10-20", "2026-11-20")},
+		times: []repository.WorklogTimeRow{
+			card("u1", "K-1", "2026-10-28", "SUBMITTED", "S4", 60),
+			card("u1", "K-2", "2026-10-28", "APPROVED", "S1", 120),
+			card("u2", "K-3", "2026-10-28", "SUBMITTED", "S4", 300),
+			card("u2", "K-4", "2026-10-28", "SUBMITTED", "S2", 240),
+		},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceDaily, "2026-10-28", "2026-10-28")
+	hours, issues := byTypeSum(r)
+	if r.Totals.TotalHours != 3 || hours != 3 {
+		t.Errorf("total hours = %v, byType hours = %v, want both 3 (u2 is excluded)", r.Totals.TotalHours, hours)
+	}
+	if r.Totals.Issues != 2 || issues != 2 {
+		t.Errorf("total issues = %d, byType issues = %d, want both 2", r.Totals.Issues, issues)
+	}
+}
+
+func TestWorklogWeeklyByTypeEqualsTotal(t *testing.T) {
+	// A weekend card, a person with no team, an absent-all-week person who
+	// logged nothing, and ordinary listed people: the breakdown must add up
+	// to the total exactly as the listed members do.
+	repo := &fakeWorklogRepo{
+		roster: []repository.WorklogRosterRow{person("u1", "alpha"), person("u2", "beta"), person("u3", "beta")},
+		leave:  []repository.WorklogLeaveRow{absence("u3", "AL/CL", "LEAVE", "2026-10-26", "2026-10-30")},
+		times: []repository.WorklogTimeRow{
+			card("u1", "M-1", "2026-10-27", "SUBMITTED", "S4", 75),
+			card("u1", "M-2", "2026-10-28", "APPROVED", "S0", 45),
+			card("u2", "M-3", "2026-10-29", "SUBMITTED", "S3", 90),
+			card("u1", "M-4", "2026-10-31", "SUBMITTED", "S4", 600), // weekend
+			card("ghost", "M-5", "2026-10-27", "SUBMITTED", "S4", 500),
+		},
+	}
+	r := build(t, repo, domain.WorklogReportCadenceWeekly, "2026-10-26", "2026-11-01")
+	hours, issues := byTypeSum(r)
+	if d := hours - r.Totals.TotalHours; d > 0.01 || d < -0.01 {
+		t.Errorf("byType hours = %v, total = %v, want them equal", hours, r.Totals.TotalHours)
+	}
+	if issues != r.Totals.Issues {
+		t.Errorf("byType issues = %d, total issues = %d, want them equal (one day per item)", issues, r.Totals.Issues)
+	}
+}
