@@ -55,7 +55,7 @@ function renderWeek(over: Partial<React.ComponentProps<typeof WeekTable>> = {}) 
 }
 
 describe("WeekTable", () => {
-  it("lists people on AEST regular hours on the Morning row, tagged AEST, not a row of their own", () => {
+  it("lists people on AEST regular hours on the Morning row, untagged, not a row of their own", () => {
     const morning = shift({ code: "CRE_MORNING", shortCode: "6-9am", label: "Morning 6-9am", startMinute: 360, endMinute: 540, sortOrder: 10 });
     const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", colourToken: "AEST", isRotation: false, startMinute: 360, endMinute: 540 });
     const { container } = renderWeek({
@@ -71,7 +71,8 @@ describe("WeekTable", () => {
     expect(row).toHaveTextContent("Ben");
     const ava = [...row.querySelectorAll(".nm")].filter((n) => n.textContent?.includes("Ava"));
     expect(ava).toHaveLength(2);
-    expect(ava[0].querySelector(".tier-t")).toHaveTextContent("AEST");
+    expect(ava[0].querySelector(".tier-t")).toBeNull();
+    expect(row).not.toHaveTextContent(/AEST/);
   });
 
   it("holds regular hours and the India region shift in one row", () => {

@@ -1186,21 +1186,6 @@
   text-transform: capitalize;
 }
 
-/* The window somebody works on another window's card (AEST on the Morning
-   card) stays at every width: unlike a tier, it is the only thing that says
-   why they are listed there. As written, not capitalised. */
-.csm-ts .ladder .lnm .tier-t.win-t {
-  display: inline-flex !important;
-  text-transform: none;
-}
-/* In a week cell it sits on its own line under the name. */
-.csm-ts .tw .nm .who .tier-t.win-t {
-  display: block;
-  width: max-content;
-  margin-top: 2px;
-  text-transform: none;
-}
-
 /* A card holding several windows with the same hours -- the Americas weekend
    and its on-call -- lays the roles out as columns. Stacked, the second role
    fell below a three-hour card on the evening it starts; the lane has the

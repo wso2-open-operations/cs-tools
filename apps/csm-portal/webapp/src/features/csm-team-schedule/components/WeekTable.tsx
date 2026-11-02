@@ -341,9 +341,9 @@ export default function WeekTable({
       /** An escalation turn stored with no tier: no turn to add anyone to. */
       untiered?: boolean;
       /** People listed on a rotation's row from a standing window on its hours
-       *  (AEST on the Morning row), by assignment id: that window's short code,
-       *  shown after the name. Not turns, so not offered for removal. */
-      tags?: Map<string, string>;
+       *  (AEST on the Morning row), by assignment id: shown as the row's
+       *  members, but not turns, so not offered for removal. */
+      standing?: Set<string>;
     };
     const TIERS: ScheduleTier[] = ["L1", "L2", "L3"];
     const out: Row[] = [];
@@ -435,14 +435,15 @@ export default function WeekTable({
     // nine-to-five over again.
     // People on a standing window stored on a rotation's hours (AEST regular
     // hours on the Morning rotation's 06:00-09:00) are listed on that
-    // rotation's row, tagged, as on the day view's card.
-    const tags = new Map<string, string>();
+    // rotation's row, untagged, as on the day view's card: the zone is the
+    // Roster's to show.
+    const standing = new Set<string>();
     const placed = rest.map((a) => {
       const own = shifts.get(a.shiftCode);
       const dow = new Date(`${a.rotaDate}T00:00:00`).getDay();
       const host = rotationHostOf(own, familyShifts, dow === 0 || dow === 6);
       if (!host || !own) return a;
-      tags.set(a.id, own.shortCode);
+      standing.add(a.id);
       return { ...a, shiftCode: host.code };
     });
     const byWindow = groupBy(placed, (a) => standingWindowKey(shifts.get(a.shiftCode), a.shiftCode));
@@ -463,7 +464,7 @@ export default function WeekTable({
         label: untiered ? `${shift.label} · tier not set` : undefined,
         sort: untiered ? 199 : (shift?.sortOrder ?? 999),
         untiered: Boolean(untiered),
-        ...(list.some((a) => tags.has(a.id)) ? { tags } : {}),
+        ...(list.some((a) => standing.has(a.id)) ? { standing } : {}),
       });
     }
 
@@ -611,7 +612,7 @@ export default function WeekTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ code, shift, list, label, token: rowToken, tiered, untiered, tags }) => {
+          {rows.map(({ code, shift, list, label, token: rowToken, tiered, untiered, standing }) => {
             const byDay = groupBy(list, (a) => a.rotaDate);
             const token = rowToken ?? shift?.colourToken ?? "";
             // A rotation or escalation turn can be edited here; regular hours
@@ -658,7 +659,7 @@ export default function WeekTable({
                     >
                       {edit && turn && editable ? (
                         <WeekEditCell
-                          cell={tags ? cell.filter((a) => !tags.has(a.id)) : cell}
+                          cell={standing ? cell.filter((a) => !standing.has(a.id)) : cell}
                           turn={turn}
                           rotaDate={iso}
                           dayName={dayName}
@@ -691,12 +692,7 @@ export default function WeekTable({
                             <span className="av" style={{ background: teamColourOf(a.teamKey) }}>
                               {initialsOf(a.engineer.name)}
                             </span>
-                            <span className="who">
-                              {a.engineer.name}
-                              {/* Under the name: beside it, it squeezed the
-                                  name into a column one letter wide. */}
-                              {tags?.has(a.id) ? <span className="tier-t win-t">{tags.get(a.id)}</span> : null}
-                            </span>
+                            <span className="who">{a.engineer.name}</span>
                             {/* A tier row already names the tier. */}
                             {a.tier && !tiered ? <span className="tier-t">{a.tier}</span> : null}
                           </div>

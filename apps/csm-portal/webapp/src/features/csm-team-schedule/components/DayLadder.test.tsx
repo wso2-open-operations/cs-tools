@@ -187,11 +187,11 @@ describe("DayLadder: cards that share their hours", () => {
     expect(names).toEqual(["Zara", "Asela"]);
   });
 
-  it("lists people on AEST regular hours in the Morning card's one list, tagged AEST", () => {
-    // AEST regular hours are stored on the morning's hours so the team sees
-    // who on Australian time is there. They are working hours, not a turn:
-    // the card stays the Morning rotation, one list with the AEST person
-    // tagged, and the on-call person in their own column.
+  it("lists people on AEST regular hours in the Morning card's one list, untagged", () => {
+    // AEST regular hours are stored on the morning's hours, so the card stays
+    // the Morning rotation: one list with the AEST person as one of its
+    // members, no zone tag (the Roster shows the zone), and the on-call
+    // person in their own column.
     const aest = shift({
       code: "CRE_REGULAR_AEST",
       shortCode: "AEST",
@@ -227,12 +227,13 @@ describe("DayLadder: cards that share their hours", () => {
     expect(card).not.toHaveTextContent(/AEST regular hours/i);
     const rows = [...card.querySelectorAll(".zflow .lnm")];
     expect(rows.map((r) => r.querySelector(".who")?.textContent)).toEqual(["Ben", "Ava"]);
-    expect(rows[1].querySelector(".tier-t")).toHaveTextContent("AEST");
+    expect(rows[1].querySelector(".tier-t")).toBeNull();
     expect(rows[0].querySelector(".tier-t")).toBeNull();
+    expect(card).not.toHaveTextContent(/AEST/);
     expect(card.querySelector(".zoc")).toHaveTextContent("Cal");
   });
 
-  it("keeps the Morning card on a day nobody is on the Morning rotation, listing the AEST person tagged", () => {
+  it("keeps the Morning card on a day nobody is on the Morning rotation, listing the AEST person untagged", () => {
     const aest = shift({
       code: "CRE_REGULAR_AEST",
       shortCode: "AEST",
@@ -265,7 +266,8 @@ describe("DayLadder: cards that share their hours", () => {
     const card = [...container.querySelectorAll(".zblk")].find((c) => c.textContent?.includes("Ava"))!;
     expect(card.querySelector(".zbt")).toHaveTextContent(/^Morning 6-9am$/);
     expect(card).not.toHaveTextContent(/AEST regular hours/i);
-    expect(card.querySelector(".zflow .lnm .tier-t")).toHaveTextContent("AEST");
+    expect(card.querySelector(".zflow .lnm .tier-t")).toBeNull();
+    expect(card).not.toHaveTextContent(/AEST/);
   });
 
   it("folds a window that differs only by team into the crowded card", () => {
