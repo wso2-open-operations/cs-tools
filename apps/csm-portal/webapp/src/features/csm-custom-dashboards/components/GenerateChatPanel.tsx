@@ -52,6 +52,8 @@ interface GenerateChatPanelProps {
  * The chat side of the generate page: a greeting, example prompts (shown until
  * the first message, and not when editing a saved dashboard; clicking one fills
  * the box so it can be edited before sending), the messages, and the input. Enter sends, Shift+Enter adds a line.
+ * The box has the cursor when the panel opens, after an example prompt is
+ * clicked, and when a reply arrives, so Enter works without a click into it.
  *
  * It only shows what it is given: the page owns the messages and decides what
  * a message does.
@@ -65,7 +67,15 @@ export default function GenerateChatPanel({
 }: GenerateChatPanelProps): JSX.Element {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const canSend = draft.trim().length > 0 && !busy;
+
+  // The box has the cursor when the chat opens and again when a reply arrives
+  // (it is disabled while one is on its way, which drops the focus), so Enter
+  // sends without a click into it first.
+  useEffect(() => {
+    if (!busy) inputRef.current?.focus();
+  }, [busy]);
 
   // Keep the newest message (or the "Generating…" bubble) in view. Optional
   // call: jsdom has no scrollIntoView.
@@ -117,7 +127,16 @@ export default function GenerateChatPanel({
         {messages.length === 0 && !editing && (
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
             {EXAMPLE_PROMPTS.map((prompt) => (
-              <Chip key={prompt} label={prompt} size="small" variant="outlined" onClick={() => setDraft(prompt)} />
+              <Chip
+                key={prompt}
+                label={prompt}
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  setDraft(prompt);
+                  inputRef.current?.focus();
+                }}
+              />
             ))}
           </Box>
         )}
@@ -133,6 +152,7 @@ export default function GenerateChatPanel({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
+          inputRef={inputRef}
           placeholder={messages.length === 0 && !editing ? "Describe a dashboard…" : "Ask for a change…"}
           size="small"
           fullWidth
