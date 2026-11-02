@@ -80,6 +80,11 @@ type AttachmentLink struct {
 	// URL is where the browser fetches the file, valid until ExpiresAt.
 	URL       string     `json:"url,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	// LargeFile is set on a download link for a file big enough that the
+	// browser should hand the URL to its own downloader (it can then stream to
+	// disk and resume) instead of reading the whole file into memory. Such a
+	// link serves several requests, so a resume works.
+	LargeFile bool `json:"largeFile,omitempty"`
 }
 
 // AttachmentLinksResponse is the body returned by POST /attachments/download.

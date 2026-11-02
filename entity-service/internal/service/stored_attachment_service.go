@@ -334,8 +334,9 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 	expires := s.now().Add(s.limits.ReadLinkTTL)
 	// A browser resumes a big download with a second, ranged request, which a
 	// one-use link would refuse.
+	large := false
 	if uses == downloadLinkMaxUses && s.limits.chunked(kind, sizeOrZero(row.SizeBytes)) && s.limits.LargeReadLinkMaxUses > uses {
-		uses = s.limits.LargeReadLinkMaxUses
+		uses, large = s.limits.LargeReadLinkMaxUses, true
 	}
 	shareID, err := s.store.CreateShare(ctx, filestore.ShareSpec{
 		Name: "dl", Scope: filestore.ShareRead, Path: *row.StorageKey,
@@ -350,6 +351,7 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 	l.Available = true
 	l.URL = s.store.DownloadURL(shareID)
 	l.ExpiresAt = &expires
+	l.LargeFile = large
 	return l
 }
 
