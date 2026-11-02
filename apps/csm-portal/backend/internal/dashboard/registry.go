@@ -895,6 +895,16 @@ func validateWidgets(d Dashboard, source string) error {
 						source, d.ID, w.ID, w.GroupBy.LinkResourceType, w.GroupBy.LinkResourceType, w.GroupBy.Field)
 				}
 			}
+			if w.GroupBy.Measure != "" {
+				switch {
+				case w.GroupBy.Measure != MeasureCount && w.GroupBy.Measure != MeasureHours:
+					return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"groupBy.measure\" %q; expected %q or %q",
+						source, d.ID, w.ID, w.GroupBy.Measure, MeasureCount, MeasureHours)
+				case w.ResourceType != ResourceTimeCard || !hasField:
+					return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"groupBy.measure\" is only supported on a %q widget grouped by a field",
+						source, d.ID, w.ID, ResourceTimeCard)
+				}
+			}
 		}
 		if w.DistinctBy != nil {
 			switch {

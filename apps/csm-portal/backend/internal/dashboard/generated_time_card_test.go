@@ -17,8 +17,11 @@ package dashboard
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // timeCardDashboard wraps widgets in a generated cs dashboard.
@@ -52,6 +55,153 @@ func TestParseGenerated_AcceptsTimeCardWidgets(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsTimeCardTotals: grouped on the server by state,
+// user, project or day, counting cards or summing hours.
+func TestParseGenerated_AcceptsTimeCardTotals(t *testing.T) {
+	raw := timeCardDashboard(
+		`{"id":"by-state","displayName":"Time Cards by State","resourceType":"time_card","shape":"pie","gridWidth":4,
+		  "query":{},"groupBy":{"field":"state"}}`,
+		`{"id":"hours-per-user","displayName":"Hours per User","resourceType":"time_card","shape":"bar","gridWidth":4,
+		  "query":{"startDate":"__startOfMonth:0__","endDate":"__today__"},"groupBy":{"field":"user","measure":"hours","maxGroups":10}}`,
+		`{"id":"cards-per-project","displayName":"Time Cards per Project","resourceType":"time_card","shape":"bar","gridWidth":4,
+		  "query":{"states":["approved"]},"groupBy":{"field":"project","measure":"count"}}`,
+		`{"id":"my-hours-per-day","displayName":"My Hours per Day","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"userIds":["__current_user__"],"startDate":"__daysAgo:13__","endDate":"__today__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-last-month","displayName":"Hours per Day Last Month","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfMonth:-1__","endDate":"__endOfMonth:-1__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-october","displayName":"Hours per Day in October","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"2026-10-01","endDate":"2026-10-31"},"groupBy":{"field":"day"}}`,
+		`{"id":"hours-30-days","displayName":"Hours, Last 31 Days","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__daysAgo:30__","endDate":"__today__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		// The catalogue's three day windows: last N days (N <= 31), this month, last month (above).
+		`{"id":"hours-this-month","displayName":"Hours per Day This Month","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfMonth:0__","endDate":"__today__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-this-month-full","displayName":"Hours per Day, This Month","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfMonth:0__","endDate":"__endOfMonth:0__"},"groupBy":{"field":"day","measure":"hours"}}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if g := d.Widgets[1].GroupBy; g == nil || g.Field != "user" || g.Measure != MeasureHours || g.MaxGroups != 10 {
+		t.Errorf("hours-per-user groupBy = %+v, want user / hours / 10", g)
+	}
+	if g := d.Widgets[0].GroupBy; g == nil || g.Measure != "" {
+		t.Errorf("by-state groupBy = %+v, want no measure (count)", g)
+	}
+}
+
+// TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid: every
+// grouped time card widget the catalogue shows the model (section 5a) passes
+// this backend's own check, so the catalogue cannot teach a widget the save
+// would refuse.
+func TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "### 5a. Time cards")
+	if !ok {
+		t.Fatal("catalogue has no section 5a")
+	}
+	section, _, _ = strings.Cut(section, "### 5b.")
+	var widgets []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		if strings.Contains(block, `"groupBy"`) {
+			widgets = append(widgets, block)
+		}
+		rest = next
+	}
+	if len(widgets) < 3 {
+		t.Fatalf("found %d grouped time card examples in section 5a, want at least 3 (day, user, project)", len(widgets))
+	}
+	for i, w := range widgets {
+		if _, err := ParseGenerated([]byte(timeCardDashboard(w))); err != nil {
+			t.Errorf("section 5a example %d is rejected: %v\n%s", i+1, err, w)
+		}
+	}
+}
+
+// TestParseGenerated_MeasureIsForTimeCardsOnly: a case widget, or a case
+// feedback bucket, with a measure is refused, so no other widget's groupBy
+// changes meaning.
+func TestParseGenerated_MeasureIsForTimeCardsOnly(t *testing.T) {
+	for name, w := range map[string]string{
+		"case": `{"id":"w","displayName":"W","resourceType":"case","shape":"pie","gridWidth":6,
+		          "query":{},"groupBy":{"field":"state","measure":"hours"}}`,
+		"incident": `{"id":"w","displayName":"W","resourceType":"incident","shape":"pie","gridWidth":6,
+		          "query":{},"groupBy":{"field":"state","measure":"count"}}`,
+		"case feedback bucket": `{"id":"w","displayName":"W","resourceType":"case_feedback","shape":"bar","gridWidth":6,
+		          "query":{},"groupBy":{"bucket":"week","measure":"count"}}`,
+	} {
+		_, err := ParseGenerated([]byte(timeCardDashboard(w)))
+		if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), `"groupBy.measure" is only supported on a "time_card" widget grouped by a field`) {
+			t.Errorf("%s: err = %v, want the measure refusal", name, err)
+		}
+	}
+}
+
+// TestValidateWidgets_MeasureNeedsAField: in a dashboard file (which, unlike
+// a generated one, may group a time card widget by bucket), a measure on a
+// bucket grouping is refused; a field grouping with one passes.
+func TestValidateWidgets_MeasureNeedsAField(t *testing.T) {
+	widget := func(g GroupByConfig) Dashboard {
+		return Dashboard{ID: "d", Widgets: []WidgetTemplate{{
+			ID: "w", DisplayName: "W", ResourceType: ResourceTimeCard, Shape: ShapeBar, GridWidth: 6, GroupBy: &g,
+		}}}
+	}
+	err := validateWidgets(widget(GroupByConfig{Bucket: "week", Measure: MeasureHours}), "test.json")
+	if err == nil || !strings.Contains(err.Error(), `"groupBy.measure" is only supported on a "time_card" widget grouped by a field`) {
+		t.Errorf("bucket with a measure: err = %v, want the measure refusal", err)
+	}
+	if err := validateWidgets(widget(GroupByConfig{Field: "user", Measure: MeasureHours}), "test.json"); err != nil {
+		t.Errorf("field with a measure: err = %v, want none", err)
+	}
+}
+
+// TestRelativeDate: relativeDate resolves the tokens as the webapp does, on
+// days where month and quarter lengths matter.
+func TestRelativeDate(t *testing.T) {
+	day := func(s string) time.Time {
+		d, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	for _, c := range []struct{ token, today, want string }{
+		{"__today__", "2026-11-02", "2026-11-02"},
+		{"__daysAgo:13__", "2026-11-02", "2026-10-20"},
+		{"__daysAgo:0__", "2026-03-01", "2026-03-01"},
+		{"__startOfMonth:0__", "2026-11-02", "2026-11-01"},
+		{"__startOfMonth:-1__", "2026-01-15", "2025-12-01"},
+		{"__endOfMonth:0__", "2024-02-10", "2024-02-29"},
+		{"__endOfMonth:-1__", "2026-03-31", "2026-02-28"},
+		{"__startOfQuarter:0__", "2026-11-02", "2026-10-01"},
+		{"__endOfQuarter:0__", "2026-11-02", "2026-12-31"},
+		{"__startOfQuarter:-1__", "2026-02-14", "2025-10-01"},
+		{"__endOfQuarter:-1__", "2026-02-14", "2025-12-31"},
+	} {
+		got, ok := relativeDate(c.token, day(c.today))
+		if !ok || !got.Equal(day(c.want)) {
+			t.Errorf("relativeDate(%s) on %s = %v %v, want %s", c.token, c.today, got.Format("2006-01-02"), ok, c.want)
+		}
+	}
+	for _, token := range []string{"__today:1__", "__daysAgo__", "__daysAgo:-1__", "__startOfMonth__", "__yesterday__", "2026-11-02"} {
+		if _, ok := relativeDate(token, day("2026-11-02")); ok {
+			t.Errorf("relativeDate(%s) resolved, want it left unresolved (the webapp does)", token)
+		}
+	}
+}
+
 func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 	tc := func(shape, rest string) string {
 		return timeCardDashboard(`{"id":"w","displayName":"W","resourceType":"time_card","shape":"` + shape + `","gridWidth":6` + rest + `}`)
@@ -59,7 +209,21 @@ func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 	cases := []struct {
 		name, raw, want string
 	}{
-		{"group by user", tc("bar", `,"query":{},"groupBy":{"field":"user","maxGroups":10}`), "cannot use groupBy"},
+		{"group by approver", tc("bar", `,"query":{},"groupBy":{"field":"approver","maxGroups":10}`), "groups by state, user, project or day only"},
+		{"group by a bucket", tc("bar", `,"query":{},"groupBy":{"bucket":"week"}`), "groups by state, user, project or day only"},
+		{"an unknown measure", tc("bar", `,"query":{},"groupBy":{"field":"user","measure":"minutes"}`), `unknown "groupBy.measure" "minutes"`},
+		{"day with no window", tc("bar", `,"query":{},"groupBy":{"field":"day"}`), "needs query.startDate and query.endDate"},
+		{"day with only an end", tc("bar", `,"query":{"endDate":"__today__"},"groupBy":{"field":"day"}`), "needs query.startDate and query.endDate"},
+		{"day with only a start", tc("bar", `,"query":{"startDate":"__daysAgo:6__"},"groupBy":{"field":"day"}`), "needs query.startDate and query.endDate"},
+		{"day over 32 plain days", tc("bar", `,"query":{"startDate":"2026-10-01","endDate":"2026-11-01"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day ending before it starts", tc("bar", `,"query":{"startDate":"2026-10-10","endDate":"2026-10-09"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day over 31 relative days", tc("bar", `,"query":{"startDate":"__daysAgo:31__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day over the last two months", tc("bar", `,"query":{"startDate":"__startOfMonth:-1__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		// Short at a quarter's start, too long by its end: refused whatever today is.
+		{"day over this quarter so far", tc("bar", `,"query":{"startDate":"__startOfQuarter:0__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day from a plain date to today", tc("bar", `,"query":{"startDate":"2026-10-20","endDate":"__today__"},"groupBy":{"field":"day"}`), "two plain dates or two relative dates"},
+		{"day with a timestamp", tc("bar", `,"query":{"startDate":"2026-10-01T00:00:00Z","endDate":"2026-10-07"},"groupBy":{"field":"day"}`), "takes plain dates (YYYY-MM-DD)"},
+		{"day with a token the webapp leaves as it is", tc("bar", `,"query":{"startDate":"__startOfMonth__","endDate":"__today__"},"groupBy":{"field":"day"}`), "not a relative date the dashboard can resolve"},
 		{"line", tc("line", `,"query":{},"days":30`), "shape must be count, list, pie or bar"},
 		{"a filter it does not take", tc("count", `,"query":{"projectIds":["p1"]}`), `"projectIds" is not a time card filter`},
 		{"a case-style filter list", tc("count", `,"query":{"filters":[{"field":"state","op":"in","values":["pending"]}]}`), `"filters" is not a time card filter`},

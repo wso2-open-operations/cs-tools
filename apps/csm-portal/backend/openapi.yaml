@@ -8776,6 +8776,66 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /time-cards/aggregate:
+    post:
+      summary: >-
+        Time card counts and summed minutes per state, user, project or day,
+        for dashboard charts (Postgres data sources only).
+      description: >-
+        Counts the cards POST /time-cards/search matches for the same filters.
+        "day" needs filters.startDate and filters.endDate, at most 31 days
+        apart, and returns every day of that window in date order. CS
+        engineers and admins only (narrower than the search, which time card
+        approvers can also use).
+      operationId: aggregateTimeCards
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateTimeCardsPayload'
+      responses:
+        "200":
+          description: >-
+            Counts and summed minutes per value of groupBy
+            (groups[].totalMinutes, othersMinutes and totalMinutes are set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: Request entity too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /time-cards:
     post:
       summary: Create a time card in the submitted state (ServiceNow data source only).
@@ -19486,6 +19546,34 @@ components:
           items:
             $ref: '#/components/schemas/TimeCardState'
 
+    AggregateTimeCardsPayload:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        groupBy:
+          type: string
+          enum: [state, user, project, day]
+          description: >-
+            "day" groups by work date and needs filters.startDate and
+            filters.endDate (at most 31 days, both inclusive). A card with no
+            project has no "project" bucket.
+        measure:
+          type: string
+          enum: [count, minutes]
+          default: count
+          description: >-
+            What the buckets are ranked by, and so which survive maxGroups.
+            Ignored for "day".
+        maxGroups:
+          type: integer
+          minimum: 0
+          default: 10
+          description: >-
+            How many buckets to return; the rest fold into othersCount and
+            othersMinutes. Ignored for "day".
+
     SearchTimeCardsPayload:
       type: object
       properties:
@@ -20417,6 +20505,11 @@ components:
         count:
           type: integer
           description: Number of matching records whose grouped field falls in this bucket.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on this bucket's time cards, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     AggregateResponse:
       type: object
@@ -20437,6 +20530,16 @@ components:
           type: integer
         totalRecords:
           type: integer
+        othersMinutes:
+          type: integer
+          description: >-
+            The minutes counterpart of othersCount. Set only by
+            POST /time-cards/aggregate.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on every matching time card, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     CaseFeedback:
       type: object

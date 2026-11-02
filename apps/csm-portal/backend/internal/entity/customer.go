@@ -604,6 +604,13 @@ func (c *CustomerEntityClient) SearchTimeCards(ctx context.Context, body []byte)
 	return c.do(ctx, http.MethodPost, "/time-cards/search", body)
 }
 
+// AggregateTimeCards calls POST /time-cards/aggregate on the entity service:
+// the cards POST /time-cards/search matches, counted and their logged minutes
+// summed per state, user, project or day. Response is returned as raw JSON.
+func (c *CustomerEntityClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/time-cards/aggregate", body)
+}
+
 // CreateTimeCard calls POST /time-cards on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) CreateTimeCard(ctx context.Context, body []byte) ([]byte, error) {

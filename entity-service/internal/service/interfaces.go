@@ -1128,6 +1128,10 @@ type TimeCardService interface {
 	// SearchCaseTimeCards returns a paginated list of time cards grouped and
 	// rolled up by case, using the same filters as SearchTimeCards.
 	SearchCaseTimeCards(ctx context.Context, req domain.SearchTimeCardsRequest) (domain.SearchCaseTimeCardsResponse, error)
+	// AggregateTimeCards counts the time cards SearchTimeCards would match,
+	// and sums their logged minutes, per state, user, project or day (see
+	// domain.AggregateTimeCardsRequest).
+	AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error)
 	// DeleteTimeCard permanently deletes a time card. Matches UpdateTimeCard's
 	// trust model exactly: this only validates the ID's shape and forwards the
 	// caller's token to SN, which enforces that only the submitter may delete

@@ -2642,6 +2642,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /change-requests/{id}/approvals/decision", changeRequestHandler.DecideChangeRequestApproval)
 
 	mux.HandleFunc("POST /time-cards/search", timeCardHandler.SearchTimeCards)
+	// Read-only, so open to the same callers as the search (RLS scopes both).
+	mux.HandleFunc("POST /time-cards/aggregate", timeCardHandler.AggregateTimeCards)
 	// Time cards are logged, edited and deleted by internal staff only;
 	// customers can read them (the two search routes) but never write. The
 	// gate makes that a property of entity-service itself rather than of

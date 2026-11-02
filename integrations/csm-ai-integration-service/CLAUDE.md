@@ -132,8 +132,10 @@ deployment without the mount gets.
 
 **Editing `catalogue.md` can break a backend test, by design.** The backend's
 `TestParseGenerated_TheCatalogueExampleIsValid` (`apps/csm-portal/backend/internal/dashboard`) reads this
-file and runs its section 10 example through the backend's own check, so the catalogue and the rules
-that judge the model's output cannot drift apart. After editing it, run the backend's
+file and runs its section 10 example through the backend's own check, and
+`TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` does the same for every grouped time card
+example in section 5a (at least three), so the catalogue and the rules that judge the model's output
+cannot drift apart. After editing it, run the backend's
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 

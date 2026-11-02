@@ -320,6 +320,13 @@ func (s *snTimeCardService) SearchTimeCards(ctx context.Context, req domain.Sear
 	}, nil
 }
 
+// AggregateTimeCards implements TimeCardService. The ServiceNow integration
+// has no time card aggregate, so this mode refuses it rather than paging
+// through every matching card to count them here.
+func (s *snTimeCardService) AggregateTimeCards(context.Context, domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error) {
+	return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "the time card aggregate is not supported when DATA_SOURCE=servicenow"}
+}
+
 // snCaseTimeCardBillingInfo mirrors the Choreo CaseTimeCardBillingInfo shape.
 type snCaseTimeCardBillingInfo struct {
 	TotalTime float64 `json:"totalTime"`

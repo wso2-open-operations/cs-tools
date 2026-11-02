@@ -1,3 +1,55 @@
+## 6. Sorting (lists only)
+
+`"sortBy": {"field": "<field>", "order": "asc" | "desc"}`
+
+Fields: `createdOn`, `updatedOn`, `severity`, `state`, `assignee`. For `time_card`: `workDate` or
+`updatedOn` only ("recent time cards" means `workDate` `desc`). For operations see section 5b (a
+problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate` only; a `case_feedback`
+list has no `sortBy`.
+"Recent" means `{"field": "createdOn", "order": "desc"}`; "recently updated" means `updatedOn`.
+
+---
+
+## 7. Grouping (pie and bar)
+
+**Fixed slices** — use when the groups are a short known list (severity, state, issue type, work
+state, engagement type, ABT teams). One slice per value, in a sensible order:
+
+```json
+"slices": [
+  { "label": "Critical", "color": "error",
+    "query": { "filters": [ { "field": "severity", "op": "in", "values": ["critical"] } ] } }
+]
+```
+
+Each slice's `query.filters` is added to the widget's own `query.filters`. `color` is optional, one
+of `primary`, `secondary`, `success`, `error`, `info`, `warning`; use `error` for the most severe
+or breached group, `warning` next, otherwise leave it out.
+
+**Server-side grouping** — use when the groups are open-ended:
+
+```json
+"groupBy": { "field": "account", "maxGroups": 10 }
+```
+
+`groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
+`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
+`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+section 5d). `measure` is for `time_card` only. Prefer `slices` for
+`state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
+add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
+that account:
+
+```json
+"groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
+```
+
+`maxGroups` 5 to 12.
+
+Never set both `slices` and `groupBy`.
+
+---
+
 ## 8. House rules for reading English
 
 | Words | Means |
@@ -50,8 +102,13 @@
 | "approved" (time cards) | `states ["approved", "processed"]` |
 | "rejected" / "recalled" (time cards) | `states ["rejected"]` / `states ["recalled"]` |
 | "time cards by state / status" | a `pie` or `bar` with one slice per state: Pending (`pending`), Submitted, Approved (approved + processed), Rejected. Leave Pending out only if the request asks to; add Recalled only if asked |
-| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date |
-| time cards "per user", "per engineer", "per project", a team's or a named person's, or hours | not expressible: `{"error": ...}` as in section 5a |
+| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
+| "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
+| time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
+| time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
+| time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
+| "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
+| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible: `{"error": ...}` as in section 5a |
 | "my open", "open … assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]` — "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
@@ -107,7 +164,9 @@ If two readings are plausible and the table does not settle it, pick the one abo
    ("by ABT"), never in an `anyOf` branch.
 9. A `time_card` widget: a flat `query` with only `states`, `userIds` (`["__current_user__"]` only),
    `startDate`, `endDate`; shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with
-   flat-query `slices`; never `groupBy`, `line`, a `filters` array or a team filter.
+   flat-query `slices` or `groupBy` (`user`, `project`, `day`, `state`; `measure` `hours` or `count`); a
+   `day` grouping has both dates from section 5a's window table (31 days at most); never `line`, a
+   `filters` array or a team filter. `measure` appears on no other resourceType.
 10. An `incident` / `change_request` / `problem` widget: only the keys, fields, ops and **exact-case
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.
