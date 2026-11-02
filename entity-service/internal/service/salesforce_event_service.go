@@ -361,6 +361,13 @@ func (s *salesforceEventService) upsertAccount(ctx context.Context, sfID, eventT
 	if err != nil {
 		return err
 	}
+	return s.upsertAccountRecord(ctx, cust, sfID, eventType, guard)
+}
+
+// upsertAccountRecord is upsertAccount's body for a Customer already in
+// hand: the admin resync reads accounts itself and writes them here.
+func (s *salesforceEventService) upsertAccountRecord(ctx context.Context, cust salesentity.Customer, sfID, eventType string, guard bool) error {
+	var err error
 	// The Salesforce id is stored as both sf_id and account.number (NOT NULL,
 	// UNIQUE), so a record without one could only be inserted as an empty
 	// number, once.

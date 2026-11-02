@@ -250,6 +250,13 @@ func (s *salesforceEventService) upsertProject(ctx context.Context, sfID, eventT
 	if err != nil {
 		return err
 	}
+	return s.upsertProjectRecord(ctx, p, sfID, eventType, guard)
+}
+
+// upsertProjectRecord is upsertProject's body for a Project__c already in
+// hand: the admin resync reads projects itself and writes them here.
+func (s *salesforceEventService) upsertProjectRecord(ctx context.Context, p salesentity.Project, sfID, eventType string, guard bool) error {
+	var err error
 	// Sales Entity may answer with the 18-character form of a 15-character
 	// referenceId; the stored sf_id is whatever Salesforce returns.
 	if strings.TrimSpace(p.ID) != "" {
@@ -285,18 +292,9 @@ func (s *salesforceEventService) upsertProject(ctx context.Context, sfID, eventT
 		return errProjectKeyMissing
 	}
 
-	row := domain.SalesforceProjectUpsert{
-		SfID:                    sfID,
-		Key:                     truncateString(ctx, "project.key", sfID, key, maxProjectKeyChars),
-		Name:                    truncateSfColumn(ctx, "project.name", sfID, optionalPtr(p.Name), maxProjectNameChars),
-		StartDate:               parseSalesforceDate(ctx, "startDate", sfID, p.StartDate),
-		EndDate:                 parseSalesforceDate(ctx, "endDate", sfID, p.EndDate),
-		Description:             optionalPtr(p.Description),
-		ComplianceViolationDate: parseSalesforceDate(ctx, "complianceViolationDate", sfID, p.ComplianceViolationDate),
-		GoLiveDate:              parseSalesforceDate(ctx, "goLiveDate", sfID, p.GoLiveDate),
-		Reactivate:              eventType == domain.SalesforceEventRestored,
-		AllowInsert:             s.project.InsertEnabled,
-	}
+	row := mapSalesEntityProject(ctx, p, sfID, key)
+	row.Reactivate = eventType == domain.SalesforceEventRestored
+	row.AllowInsert = s.project.InsertEnabled
 	if row.Name == nil {
 		slog.WarnContext(ctx, "salesforce: project has no name", "projectSfId", sfID)
 	}
@@ -342,6 +340,23 @@ func (s *salesforceEventService) upsertProject(ctx context.Context, sfID, eventT
 		"linkedByKey", res.LinkedByKey, "reactivated", res.Reactivated)
 	s.requeueChildrenOf(ctx, repository.MissingParent{Kind: repository.MissingParentProject, SfID: sfID, Key: row.Key})
 	return nil
+}
+
+// mapSalesEntityProject maps the Project__c's own fields onto the columns the
+// ingest owns; key is the trimmed Project_Key__c (a keyless project is
+// refused before this). The account, the project type and the insert switches
+// are resolved by the caller.
+func mapSalesEntityProject(ctx context.Context, p salesentity.Project, sfID, key string) domain.SalesforceProjectUpsert {
+	return domain.SalesforceProjectUpsert{
+		SfID:                    sfID,
+		Key:                     truncateString(ctx, "project.key", sfID, key, maxProjectKeyChars),
+		Name:                    truncateSfColumn(ctx, "project.name", sfID, optionalPtr(p.Name), maxProjectNameChars),
+		StartDate:               parseSalesforceDate(ctx, "startDate", sfID, p.StartDate),
+		EndDate:                 parseSalesforceDate(ctx, "endDate", sfID, p.EndDate),
+		Description:             optionalPtr(p.Description),
+		ComplianceViolationDate: parseSalesforceDate(ctx, "complianceViolationDate", sfID, p.ComplianceViolationDate),
+		GoLiveDate:              parseSalesforceDate(ctx, "goLiveDate", sfID, p.GoLiveDate),
+	}
 }
 
 // resolveInsertID fills row.InsertID with the id the backing system uses for
