@@ -63,8 +63,10 @@ import {
   SETTINGS_USER_EDIT_TOOLTIP,
   SETTINGS_USER_EMPTY_MESSAGE,
   SETTINGS_USER_INVITE_ALREADY_RUNNING,
+  SETTINGS_USER_ADDING_NOTICE,
   SETTINGS_USER_INVITE_SUCCESS,
   SETTINGS_USER_INVITING_NOTICE,
+  SETTINGS_USER_SYSTEM_USER_ADD_SUCCESS,
   SETTINGS_USER_PAGE_SIZE,
   SETTINGS_USER_PENDING_PROCESSING_TOOLTIP,
   SETTINGS_USER_PENDING_STATUS,
@@ -181,7 +183,10 @@ export default function SettingsUserManagement({
       await queryClient.refetchQueries({ queryKey, type: "all" });
       return queryClient.getQueryData<ProjectContact[]>(queryKey);
     },
-    onInvited: (email) => showSuccess(`${SETTINGS_USER_INVITE_SUCCESS}: ${email}`),
+    onInvited: (email, request) =>
+      showSuccess(
+        `${request.isCsIntegrationUser ? SETTINGS_USER_SYSTEM_USER_ADD_SUCCESS : SETTINGS_USER_INVITE_SUCCESS}: ${email}`,
+      ),
     onFailed: (email, message) => showError(`${email}: ${message}`),
   });
 
@@ -204,7 +209,11 @@ export default function SettingsUserManagement({
         return;
       }
       setIsAddModalOpen(false);
-      showSuccess(`Inviting ${data.contactEmail}. ${SETTINGS_USER_INVITING_NOTICE}`);
+      showSuccess(
+        data.isCsIntegrationUser
+          ? `Adding ${data.contactEmail}. ${SETTINGS_USER_ADDING_NOTICE}`
+          : `Inviting ${data.contactEmail}. ${SETTINGS_USER_INVITING_NOTICE}`,
+      );
     },
     [pendingInvites, showSuccess, showError],
   );
@@ -487,7 +496,7 @@ export default function SettingsUserManagement({
                           justifyContent: "flex-end",
                         }}
                       >
-                        {contact.canResendInvitation && (
+                        {contact.canResendInvitation && !contact.isCsIntegrationUser && (
                           <Tooltip title={SETTINGS_USER_RESEND_TOOLTIP}>
                             <span>
                               <IconButton
@@ -691,7 +700,11 @@ function PendingInviteRow({
         size="small"
         variant="outlined"
         icon={<CircularProgress size={12} color="inherit" aria-hidden />}
-        label={SETTINGS_USER_PENDING_STATUS.inviting}
+        label={
+          request.isCsIntegrationUser
+            ? SETTINGS_USER_PENDING_STATUS.adding
+            : SETTINGS_USER_PENDING_STATUS.inviting
+        }
         sx={{ typography: "caption" }}
       />
     ) : status === "failed" ? (

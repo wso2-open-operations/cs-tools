@@ -85,6 +85,23 @@ vi.mock("@features/settings/components/AddUserModal", () => ({
         >
           submit-invite
         </button>
+        <button
+          type="button"
+          onClick={() =>
+            onSubmit({
+              contactEmail: "jane.doe@example.com",
+              contactFirstName: "Jane",
+              contactLastName: "Doe",
+              isCsAdmin: false,
+              isCsIntegrationUser: true,
+              isLead: false,
+              isPortalUser: false,
+              isSecurityContact: false,
+            })
+          }
+        >
+          submit-system-user
+        </button>
       </div>
     ) : null,
 }));
@@ -125,6 +142,50 @@ describe("SettingsUserManagement", () => {
     expect(within(row).getByText("New Person")).toBeInTheDocument();
     expect(within(row).getByText("Inviting…")).toBeInTheDocument();
     expect(screen.getByText("user@test.dev")).toBeInTheDocument();
+  });
+
+  it("uses invitation wording for portal users", async () => {
+    mutateAsync.mockResolvedValueOnce("created");
+    render(<SettingsUserManagement projectId="p-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add user/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "submit-invite" }));
+    });
+
+    expect(showSuccess).toHaveBeenCalledWith("Inviting new@acme.com. This takes a few seconds.");
+    expect(showSuccess).toHaveBeenCalledWith("Invitation sent successfully: new@acme.com");
+  });
+
+  it("uses add wording, not invitation wording, for system users", async () => {
+    mutateAsync.mockResolvedValueOnce("created");
+    render(<SettingsUserManagement projectId="p-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add user/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "submit-system-user" }));
+    });
+
+    expect(showSuccess).toHaveBeenCalledWith("Adding jane.doe@example.com. This takes a few seconds.");
+    expect(showSuccess).toHaveBeenCalledWith("User added successfully: jane.doe@example.com");
+    for (const [msg] of showSuccess.mock.calls) {
+      expect(String(msg)).not.toMatch(/invit/i);
+    }
+  });
+
+  it("hides resend for an integration user even when the backend flags it resendable", () => {
+    contactsState.data = [
+      {
+        id: "c-1",
+        email: "jane.doe@example.com",
+        membershipStatus: "INVITED",
+        isCsIntegrationUser: true,
+        canResendInvitation: true,
+      },
+    ];
+    render(<SettingsUserManagement projectId="p-1" />);
+    expect(screen.getByText("jane.doe@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resend invitation" })).not.toBeInTheDocument();
   });
 
   it("shows the failure reason on the row with a retry action", async () => {

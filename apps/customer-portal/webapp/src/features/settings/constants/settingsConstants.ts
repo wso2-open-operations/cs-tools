@@ -185,7 +185,11 @@ export const SETTINGS_USER_ROLE_PERMISSIONS_TITLE = "Role Permissions";
 
 export const SETTINGS_USER_INVITE_SUCCESS = "Invitation sent successfully";
 
+export const SETTINGS_USER_SYSTEM_USER_ADD_SUCCESS = "User added successfully";
+
 export const SETTINGS_USER_ADD_ERROR = "Failed to add user. Please try again.";
+
+export const SETTINGS_USER_ADDING_NOTICE = "This takes a few seconds.";
 
 export const SETTINGS_USER_INVITING_NOTICE = "This takes a few seconds.";
 
@@ -197,6 +201,7 @@ export const SETTINGS_USER_INVITE_ALREADY_RUNNING =
 
 export const SETTINGS_USER_PENDING_STATUS = {
   inviting: "Inviting…",
+  adding: "Adding…",
   failed: "Failed",
   processing: "Processing",
 } as const;
@@ -267,6 +272,9 @@ export const ADD_USER_MODAL_NEXT = "Next";
 export const ADD_USER_DETAILS_INTRO =
   "Send an invitation to a new user to access the portal";
 
+export const ADD_USER_SYSTEM_USER_DETAILS_INTRO =
+  "Add a system user for system to system integrations. No invitation email is sent; the user is active immediately.";
+
 export const ADD_USER_FIRST_NAME_LABEL = "First Name";
 
 export const ADD_USER_FIRST_NAME_PLACEHOLDER = "Enter first name";
@@ -282,6 +290,10 @@ export const ADD_USER_MODAL_BACK = "Back";
 export const ADD_USER_MODAL_SENDING = "Sending...";
 
 export const ADD_USER_MODAL_SEND_INVITATION = "Send Invitation";
+
+export const ADD_USER_MODAL_ADDING = "Adding...";
+
+export const ADD_USER_MODAL_ADD_USER = "Add User";
 
 export const ADD_USER_MODAL_TITLE = "Add New User";
 
