@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -83,6 +84,13 @@ import (
 // to its type bucket. The two counters measure cases and case-days
 // respectively and never reconciled by design. A daily report shows no
 // gap only because one day cannot hold a second day.
+
+// worklogDropWeekendCards makes the weekly ignore cards dated on a Saturday
+// or Sunday, because the previous system gives weekend dates no team. It is
+// a single switch: set it to false to count weekend time. Absence (leave,
+// exclusion, allocation) is NOT such a switch -- absent-day time is always
+// counted on the weekly.
+const worklogDropWeekendCards = true
 
 // Only two states reach the report at all. addTimeReportDetails maps
 // 'Approved' to the approved bucket and 'Submitted' to the pending one,
@@ -165,7 +173,11 @@ type perUser struct {
 	seenKey      map[string]bool
 	disapproved  int
 	leaveCode    string
-	leaveDays    float64
+	// blocked is the set of weekdays in range covered by leave of any kind
+	// (a half day included), an exclusion or a confirmed allocation. It
+	// drives Worked Days and Average People Per Day; it does not drop
+	// logged time.
+	blocked map[time.Time]bool
 	// leaveHalf is set when the absence covering the daily report's one
 	// day is a half day. summerizeTimeReport treats such a person as 0.5
 	// of a present member rather than an absent one.
@@ -199,14 +211,15 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	if err != nil {
 		return domain.WorklogReport{}, err
 	}
-	// WHICH ROTA READ, AND WHETHER ONE HAPPENS AT ALL, IS THE WHOLE
-	// DIFFERENCE BETWEEN THE TWO CADENCES.
+	// THE WEEKLY IS NOT ROTA-DRIVEN, THE DAILY IS ONLY ON A WEEKEND.
 	//
-	// The weekly is rota-driven: WeeklyTimeReportUtil.getTeamInfo builds
-	// its roster from the shift API's rows for the range, so a person
-	// with no shift that week is in no section.
+	// The weekly (WeeklyTimeReportUtil_V2.getTeamInfo) starts from every
+	// member of the operational groups -- our team_member rows -- and
+	// then removes dates, not people: weekend dates, leave, exclusions
+	// and confirmed allocations. A person is in the report when at least
+	// one weekday survives, whatever they logged. No rota is read.
 	//
-	// The daily is NOT, except on a weekend.
+	// The daily is NOT rota-driven either, except on a weekend.
 	// DailyTimeReportUtil_V2.__internal_getTeamInfo starts from every
 	// member of the operational groups and narrows by shift only inside
 	//
@@ -220,16 +233,11 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	// 2026-10-21 that was 64 of team cre-abt's 98 members.
 	daily := req.Cadence == domain.WorklogReportCadenceDaily
 	weekendDaily := daily && isWeekend(from)
-	// A weekday daily reads no rota at all, so it issues no query here.
-	rotaGated := !daily || weekendDaily
+	rotaGated := weekendDaily
 
 	var rostered []string
 	if rotaGated {
-		read := s.repo.RosteredUserIDs
-		if weekendDaily {
-			read = s.repo.WeekendCrewUserIDs
-		}
-		if rostered, err = read(ctx, from, to); err != nil {
+		if rostered, err = s.repo.WeekendCrewUserIDs(ctx, from, to); err != nil {
 			return domain.WorklogReport{}, err
 		}
 	}
@@ -251,6 +259,7 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			approvedKeys: map[string]bool{},
 			pendingKeys:  map[string]bool{},
 			seenKey:      map[string]bool{},
+			blocked:      map[time.Time]bool{},
 		}
 	}
 
@@ -261,8 +270,10 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		if !ok {
 			continue
 		}
-		days, onFrom := leaveDaysInRange(l, from, to)
-		u.leaveDays += days
+		covered, onFrom := coveredWeekdays(l, from, to)
+		for _, d := range covered {
+			u.blocked[d] = true
+		}
 		if !onFrom {
 			continue
 		}
@@ -302,15 +313,21 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	}
 	byType := map[string]*typeAgg{}
 
+	// Time logged by people on no team in scope: no section to put it in,
+	// so the mails cannot show it. That is a DATA gap (no team_member row),
+	// not a rule, so it is surfaced below rather than papered over.
+	droppedMinutes := map[string]int{}
+
 	for _, t := range times {
-		u, ok := users[t.UserID]
-		if !ok {
-			// Logged time by somebody on no team. Counted nowhere in the
-			// mails, which only ever print team sections.
-			continue
-		}
 		state := strings.ToUpper(strings.TrimSpace(t.State))
 		approved := worklogApprovedStates[state]
+		u, ok := users[t.UserID]
+		if !ok {
+			if approved || worklogPendingStates[state] {
+				droppedMinutes[t.UserID] += t.Minutes
+			}
+			continue
+		}
 		if state == strings.ToUpper(string(domain.TimeCardStateRejected)) {
 			u.disapproved += t.Entries
 			continue
@@ -320,10 +337,25 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			continue
 		}
 
-		ta := byType[t.ItemType]
+		// WEEKLY ATTRIBUTES TIME PER DATE, WITH ONE DELIBERATE DEPARTURE.
+		// The previous system gives weekend dates an empty team list, and
+		// also empties days covered by leave (a half day included), an
+		// exclusion or a confirmed allocation, so cards on those days
+		// vanished from its report. We keep the weekend rule
+		// (worklogDropWeekendCards) but NOT the absence rule: time an
+		// engineer actually logged on a day marked absent is counted, as
+		// it was real work. This is a product decision, not parity. The
+		// daily report is a single date and applies its own presence
+		// rules further down; it is unchanged by this.
+		if !daily && worklogDropWeekendCards && isWeekend(t.WorkDate) {
+			continue
+		}
+
+		bucketType := worklogBucketType(t.ItemType, t.Severity)
+		ta := byType[bucketType]
 		if ta == nil {
 			ta = &typeAgg{}
-			byType[t.ItemType] = ta
+			byType[bucketType] = ta
 		}
 		// Issue identity is the (person, work item) pair, so the same
 		// item worked by two people counts once for each -- which is
@@ -351,6 +383,16 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		}
 	}
 
+	if len(droppedMinutes) > 0 {
+		var total int
+		for _, m := range droppedMinutes {
+			total += m
+		}
+		slog.WarnContext(ctx, "worklog report: time logged by people on no team in scope is left out",
+			"cadence", string(req.Cadence), "from", from.Format("2006-01-02"), "to", to.Format("2006-01-02"),
+			"people", len(droppedMinutes), "hours", minutesToHours(total))
+	}
+
 	weekdays := weekdaysBetween(from, to)
 
 	teams := map[string]*domain.WorklogTeamReport{}
@@ -360,16 +402,10 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 	// 180.17 hours, but adding its thirteen rounded developer figures
 	// gives 180.18.
 	teamMinutes := map[string]*[2]int{}
-	// Minutes logged by team LEADS, and how many of them there are, kept
-	// per team so the weekly average can take both out. ServiceNow calls
-	// these time_exclude_lead and the complement of nMembers_Cal.
-	teamLeadMinutes := map[string]*[2]int{}
-	teamLeadCount := map[string]int{}
-	// The daily report's divisor and numerator, which are built from
-	// presence rather than from a flat subtraction -- see where they are
-	// applied below.
+	// The daily report's divisor and numerators are built from presence
+	// -- see where they are applied below.
 	teamPresence := map[string]float64{}
-	teamLeadDeduction := map[string]float64{}
+	teamDailyApprovedMin := map[string]int{}
 	teamDailyMinutes := map[string]int{}
 	var totalPresence float64
 	var totals domain.WorklogTotals
@@ -411,9 +447,19 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 			continue
 		}
 
-		workedDays := weekdays - u.leaveDays
+		// Weekdays on which the person has a team: the weekly's Worked
+		// Days, and what makes them a member of the weekly at all.
+		workedDays := weekdays - float64(len(u.blocked))
 		if workedDays < 0 {
 			workedDays = 0
+		}
+		if !daily && workedDays == 0 && len(u.approvedKeys) == 0 && len(u.pendingKeys) == 0 {
+			// A person with no surviving weekday and no counted card is
+			// in no team and appears nowhere, as in the previous system.
+			// Unlike it, one who logged counted time on an absent day is
+			// still listed: absences feed Worked Days and the leave
+			// figures but never remove logged time.
+			continue
 		}
 		rosteredMemberDays += workedDays
 		approvedHrs := minutesToHours(u.approvedMin)
@@ -459,10 +505,9 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		tm[0] += u.approvedMin
 		tm[1] += u.pendingMin
 
-		// summerizeTimeReport counts a present member as 1, a half-day
-		// absence as 0.5 and a full-day absence as 0; then it decrements
-		// again for each lead who is not fully absent.
-		isLead := strings.EqualFold(u.roster.Role, "lead")
+		// A present member counts 1, a half-day absence 0.5 and a full-day
+		// absence 0. Leads are not on the roster (the repository leaves
+		// role 'lead' out), so nothing is subtracted for them.
 		presence := 1.0
 		if u.leaveCode != "" {
 			presence = 0
@@ -472,25 +517,11 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		}
 		teamPresence[u.roster.TeamKey] += presence
 		totalPresence += presence
-		if isLead && presence > 0 {
-			teamLeadDeduction[u.roster.TeamKey]++
-		}
-		// time_wl: the hours behind the daily average. Leads contribute
-		// nothing, and neither does anyone fully absent -- but a
-		// half-day absence contributes in full.
-		if !isLead && presence > 0 {
+		// The hours behind the daily average: nobody fully absent
+		// contributes, but a half-day absentee does in full.
+		if presence > 0 {
+			teamDailyApprovedMin[u.roster.TeamKey] += u.approvedMin
 			teamDailyMinutes[u.roster.TeamKey] += u.approvedMin + u.pendingMin
-		}
-
-		if isLead {
-			lm := teamLeadMinutes[u.roster.TeamKey]
-			if lm == nil {
-				lm = &[2]int{}
-				teamLeadMinutes[u.roster.TeamKey] = lm
-			}
-			lm[0] += u.approvedMin
-			lm[1] += u.pendingMin
-			teamLeadCount[u.roster.TeamKey]++
 		}
 
 		totals.Members++
@@ -525,79 +556,33 @@ func (s *worklogReportService) BuildReport(ctx context.Context, req domain.Workl
 		tr.ApprovedHours = minutesToHours(tm[0])
 		tr.PendingHours = minutesToHours(tm[1])
 		tr.TotalHours = minutesToHours(tm[0] + tm[1])
-		// *** The two cadences compute this differently, and the
-		// difference is deliberate on ServiceNow's side. ***
+		// PER-TEAM AVERAGES. The previous system's printed averages are
+		// defective and are deliberately NOT reproduced:
 		//
-		// WEEKLY excludes team leads from both halves: the action reads
-		// teams[t].nMembers_Cal and approved/pending.time_exclude_lead.
-		// It is NOT the off-by-one it looks like from the outside -- the
-		// delivered weekly mail divides Americas' 180.17 by 12 of its 13
-		// members because the thirteenth is the lead, and its
-		// single-member Australia team prints NaN and Infinity because
-		// excluding that team's only member leaves nothing to divide by.
+		//   - its weekly average approved figure is 0.00 for every team,
+		//     because the approved branch adds a non-lead's approved time
+		//     to the pending accumulator, so approved hours / person is
+		//     wrong whenever a team has approved time;
+		//   - it divides by team members less one "to exclude the lead",
+		//     although leads are already out of its roster, so it counts
+		//     the lead twice, and divides a single-member team by zero.
 		//
-		// DAILY divides by the whole membership. Its delivered mail puts
-		// Americas' 1.42 hours over 2 members for 0.71, which only works
-		// without an exclusion.
+		// Here every average is hours / a single divisor, the number of
+		// rostered members who count, and never NaN or Infinity (safeDiv
+		// gives 0 for an empty team; a one-member team divides by 1).
 		//
-		// Our own division is guarded, so a team of nothing but leads
-		// reports 0.00 where ServiceNow reports Infinity. That is the
-		// one place we knowingly differ, because Infinity is not a
-		// number anybody can act on.
+		// WEEKLY: the divisor is the team's members, the numerators the
+		// team's approved and total hours.
+		// DAILY: the divisor is presence (1 per present member, 0.5 for a
+		// half day, 0 for a full day) and the numerators are the approved
+		// and total hours of those who count -- the same shape, so the
+		// two averages share one divisor on each cadence.
 		avgApprovedHrs, avgTotalHrs := tr.ApprovedHours, tr.TotalHours
-		// *** THE DAILY REPORT EXCLUDES LEADS TOO. ***
-		//
-		// Its summerizeTimeReport builds nMembers_Cal from presence --
-		// 1 per present member, 0.5 for a half day, 0 for a full day --
-		// and then decrements once per lead who is not fully absent. The
-		// numerator is time_wl, which skips leads and anyone fully
-		// absent but keeps a half-day absentee's hours in full.
-		//
-		// The delivered daily mail dividing Americas' 1.42 hours by 2
-		// members for 0.71 does NOT show the absence of a lead
-		// exclusion, only that neither of those two was a lead. An
-		// earlier pass read it the other way and was wrong.
-		tr.MembersForAverage = round2(teamPresence[key] - teamLeadDeduction[key])
-		if tr.MembersForAverage < 0 {
-			tr.MembersForAverage = 0
-		}
-		avgApprovedHrs = 0
-		avgTotalHrs = minutesToHours(teamDailyMinutes[key])
-		if !daily {
-			lm := teamLeadMinutes[key]
-			if lm == nil {
-				lm = &[2]int{}
-			}
-			// The divisor is literally nMembers - 1, not the number of
-			// leads: summerizeTimeReport writes
-			// `var totMem_team_cal = team.nMembers - 1; //exclude the lead`
-			// and then subtracts anyone whose leaveDaysPerTeam is 7. That
-			// second subtraction never fires, because leaveDates is
-			// initialised empty and nothing ever pushes to it -- leave is
-			// applied by deleting teamInfo entries instead. So the divisor
-			// is a flat minus one, which is why all eleven teams in the
-			// delivered mail divide by their member count less one, and
-			// why the single-member Australia team divides by zero.
-			tr.MembersForAverage = float64(tr.Members - 1)
-			if tr.MembersForAverage < 0 {
-				tr.MembersForAverage = 0
-			}
-
-			// Avg Approved Hrs/person is 0.00 for all eleven teams in the
-			// delivered mail, including Castor which logged 4.13 approved
-			// hours. That is not a coincidence: buildTimeReport's approved
-			// branch adds a non-lead's approved time to
-			// `team.pending.time_exclude_lead` -- the pending accumulator
-			// -- so approved.time_exclude_lead only ever collects time a
-			// LEAD logged on a day they were not leading. It is a
-			// copy-paste slip in production, and the sum survives it,
-			// which is why the total average is still right.
-			//
-			// Our leads are a standing role rather than a per-day shift,
-			// so that accumulator has nothing to collect and the figure is
-			// 0.00 -- the same value the mail prints.
-			avgApprovedHrs = 0
-			avgTotalHrs = minutesToHours((tm[0] + tm[1]) - (lm[0] + lm[1]))
+		tr.MembersForAverage = float64(tr.Members)
+		if daily {
+			tr.MembersForAverage = round2(teamPresence[key])
+			avgApprovedHrs = minutesToHours(teamDailyApprovedMin[key])
+			avgTotalHrs = minutesToHours(teamDailyMinutes[key])
 		}
 		tr.AvgApprovedHoursPerPerson = safeDiv(avgApprovedHrs, tr.MembersForAverage)
 		tr.AvgTotalHoursPerPerson = safeDiv(avgTotalHrs, tr.MembersForAverage)
@@ -752,10 +737,16 @@ func orderedTypes[T any](m map[string]T) []string {
 	return append(out, rest...)
 }
 
-// leaveDaysInRange returns how many of the report's weekdays this absence
-// covers, and whether it covers the first day of the range (which is the
-// only day the daily report cares about). A half day counts 0.5.
-func leaveDaysInRange(l repository.WorklogLeaveRow, from, to time.Time) (float64, bool) {
+// coveredWeekdays returns the report's weekdays this absence covers, and
+// whether it covers the first day of the range (which is the only day the
+// daily report cares about).
+//
+// A half day covers its whole day. __internal_excludeUnavailableDays
+// splices the day's entries away for time_off_morning and time_off_evening
+// exactly as it does for a full time_off, so on the weekly the day stops
+// counting either way; the daily keeps its own half-day handling through
+// leaveHalf and does not read these days.
+func coveredWeekdays(l repository.WorklogLeaveRow, from, to time.Time) ([]time.Time, bool) {
 	start := dateOnly(l.StartsOn)
 	if start.Before(from) {
 		start = from
@@ -767,12 +758,7 @@ func leaveDaysInRange(l repository.WorklogLeaveRow, from, to time.Time) (float64
 			end = e
 		}
 	}
-	// A half day costs a WHOLE worked day, not half of one.
-	// ServiceNow's __internal_excludeUnavailableDays splices the day's
-	// entries away for time_off_morning and time_off_evening exactly as
-	// it does for a full time_off, so the day stops counting either way.
-	const weight = 1.0
-	var days float64
+	var days []time.Time
 	coversFrom := false
 	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
 		// coversFrom is decided BEFORE the weekend test, deliberately.
@@ -788,9 +774,28 @@ func leaveDaysInRange(l repository.WorklogLeaveRow, from, to time.Time) (float64
 		if isWeekend(d) {
 			continue
 		}
-		days += weight
+		days = append(days, d)
 	}
 	return days, coversFrom
+}
+
+// worklogBucketType is the type bucket a time card's work item falls in.
+//
+// The previous system buckets case time by the case's own type, where a
+// high-severity case (S0-S3) is an Incident and an S4 case is a Query.
+// The split reproduces that system's printed Incident and Query figures
+// from the same cards. Without it every case lands under Query and the
+// Incident bucket reads zero. Work items that are not cases keep their own
+// type.
+func worklogBucketType(itemType, severity string) string {
+	if itemType != "CASE" {
+		return itemType
+	}
+	switch strings.ToUpper(strings.TrimSpace(severity)) {
+	case "S0", "S1", "S2", "S3":
+		return "INCIDENT"
+	}
+	return itemType
 }
 
 // weekdaysBetween counts Monday-to-Friday days in the inclusive range.
