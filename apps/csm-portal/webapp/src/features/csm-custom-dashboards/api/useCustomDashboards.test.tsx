@@ -26,9 +26,17 @@ const putMock = vi.fn();
 const delMock = vi.fn();
 
 // The real client reads runtime config at module load, which isn't present
-// under vitest.
+// under vitest. BackendApiError is a stand-in the module under test and this
+// test share (same approach as saveErrorMessage.test.ts).
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ get: getMock, put: putMock, del: delMock }),
+  BackendApiError: class BackendApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 import {
@@ -36,8 +44,10 @@ import {
   useGetCustomDashboard,
   useGetCustomDashboards,
   usePutCustomDashboard,
+  useRenameCustomDashboard,
   type SavedCustomDashboard,
 } from "@features/csm-custom-dashboards/api/useCustomDashboards";
+import { BackendApiError } from "@api/backend/client";
 
 const ID = "5e636a12-0000-4000-8000-000000000001";
 
@@ -164,6 +174,69 @@ describe("useCustomDashboards", () => {
       });
 
       expect(queryClient.getQueryData([ApiQueryKeys.CSM_CUSTOM_DASHBOARD_DETAIL, ID])).toBeUndefined();
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: [ApiQueryKeys.CSM_CUSTOM_DASHBOARD_LIST] });
+    });
+  });
+
+  describe("useRenameCustomDashboard", () => {
+    it("reads the dashboard and saves it back under the same id with only the name changed", async () => {
+      const withWidget = { ...dashboard, widgets: [{ widgetId: "open-cases" }] } as BeDashboard;
+      getMock.mockResolvedValue({ ...saved, dashboard: withWidget });
+      const renamed = { ...saved, dashboard: { ...withWidget, displayName: "Open Cases" } };
+      putMock.mockResolvedValue(renamed);
+      const { queryClient, wrapper } = setup();
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+      const { result } = renderHook(() => useRenameCustomDashboard(), { wrapper });
+      await act(async () => {
+        await result.current.mutateAsync({ id: ID, name: "Open Cases" });
+      });
+
+      expect(getMock).toHaveBeenCalledWith(`/dashboards/custom/${ID}`);
+      expect(putMock).toHaveBeenCalledWith(`/dashboards/custom/${ID}`, {
+        dashboard: { ...withWidget, displayName: "Open Cases" },
+      });
+      expect(queryClient.getQueryData([ApiQueryKeys.CSM_CUSTOM_DASHBOARD_DETAIL, ID])).toEqual(renamed);
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: [ApiQueryKeys.CSM_CUSTOM_DASHBOARD_LIST] });
+    });
+
+    it("throws a 404 and saves nothing when the dashboard is gone", async () => {
+      getMock.mockResolvedValue(null);
+      const { wrapper } = setup();
+
+      const { result } = renderHook(() => useRenameCustomDashboard(), { wrapper });
+      await act(async () => {
+        await expect(result.current.mutateAsync({ id: ID, name: "New" })).rejects.toMatchObject({ status: 404 });
+      });
+
+      expect(putMock).not.toHaveBeenCalled();
+    });
+
+    it("throws the read's error and saves nothing when the dashboard can't be read", async () => {
+      const err = new BackendApiError(422, "This saved dashboard can't be shown any more. Generate it again.");
+      getMock.mockRejectedValue(err);
+      const { wrapper } = setup();
+
+      const { result } = renderHook(() => useRenameCustomDashboard(), { wrapper });
+      await act(async () => {
+        await expect(result.current.mutateAsync({ id: ID, name: "New" })).rejects.toBe(err);
+      });
+
+      expect(putMock).not.toHaveBeenCalled();
+    });
+
+    it("throws the save's error, and still refreshes the list", async () => {
+      getMock.mockResolvedValue(saved);
+      const err = new BackendApiError(409, "you already have a dashboard named: Taken");
+      putMock.mockRejectedValue(err);
+      const { queryClient, wrapper } = setup();
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+      const { result } = renderHook(() => useRenameCustomDashboard(), { wrapper });
+      await act(async () => {
+        await expect(result.current.mutateAsync({ id: ID, name: "Taken" })).rejects.toBe(err);
+      });
+
       expect(invalidate).toHaveBeenCalledWith({ queryKey: [ApiQueryKeys.CSM_CUSTOM_DASHBOARD_LIST] });
     });
   });

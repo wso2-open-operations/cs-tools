@@ -17,17 +17,41 @@
 import { BackendApiError } from "@api/backend/client";
 
 /**
- * What to tell the user when Save is refused. A name they already use (409)
- * is fixed in the chat; another refusal the user can act on (4xx, e.g. the
- * 50-dashboard limit) shows the backend's message; anything else is generic.
+ * What the Save dialog shows when Save is refused. A name the user already
+ * has (409) is fixed in the dialog itself; another refusal the user can act
+ * on (4xx, e.g. the 50-dashboard limit) shows the backend's message; anything
+ * else is generic.
  */
 export function saveErrorMessage(err: unknown, name: string): string {
   if (err instanceof BackendApiError && err.status === 409) {
-    return `You already have a dashboard named "${name}". Ask for a different name in the chat, then save again.`;
+    return nameTakenMessage(name);
   }
+  return refusalMessage(err) ?? "The dashboard couldn't be saved. Try again in a moment.";
+}
+
+/**
+ * What the rename dialog shows when a rename is refused. A name the user
+ * already has (409) is fixed in the dialog itself; another refusal the user
+ * can act on (4xx: the dashboard is gone, or was saved under rules that have
+ * since changed) shows the backend's message; anything else is generic.
+ */
+export function renameErrorMessage(err: unknown, name: string): string {
+  if (err instanceof BackendApiError && err.status === 409) {
+    return nameTakenMessage(name);
+  }
+  return refusalMessage(err) ?? "The dashboard couldn't be renamed. Try again in a moment.";
+}
+
+/** A name the user already has, as both dialogs word it: the fix is in the field above it. */
+function nameTakenMessage(name: string): string {
+  return `You already have a dashboard named "${name}". Choose a different name.`;
+}
+
+/** The backend's message for a 4xx, as a sentence; `null` for anything else. */
+function refusalMessage(err: unknown): string | null {
   if (err instanceof BackendApiError && err.status >= 400 && err.status < 500 && err.message) {
     const msg = err.message.charAt(0).toUpperCase() + err.message.slice(1);
     return /[.!?]$/.test(msg) ? msg : `${msg}.`;
   }
-  return "The dashboard couldn't be saved. Try again in a moment.";
+  return null;
 }

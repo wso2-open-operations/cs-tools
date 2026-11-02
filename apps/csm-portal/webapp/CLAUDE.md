@@ -618,6 +618,32 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## My Dashboards: the name on Save, and Rename
+
+A saved dashboard's name is its definition's `displayName` (entity-service keeps it as the row's `name`:
+unique per owner ignoring case, at most 255 characters). The user sets it in one dialog,
+`DashboardNameDialog` (`features/csm-custom-dashboards/components`), used in three places:
+
+- **Save on the generate page**, for a new dashboard and for "Edit with AI" alike
+  (`GenerateDashboardPage.tsx`): the dialog opens with the draft's name (the one the model gave it, or
+  the edited dashboard's own), so keeping it is one click, and the draft is PUT under the name
+  confirmed. An edit is still saved in place, under the same id.
+- **Rename in My Dashboards** (`MyDashboardsPage.tsx`, the pencil icon beside each switcher entry's
+  delete icon): `useRenameCustomDashboard` reads the dashboard (`GET /dashboards/custom/{id}`), sets
+  only `displayName` and PUTs it back under the same id. The row is updated in place, so its widgets,
+  shares (people and teams) and creation time stay. Rename stays off until the name actually changes.
+- A refusal shows **in the dialog, under the field**, never in a banner, and the dialog stays open:
+  a name the user already has (409, `saveErrorMessage` / `renameErrorMessage`, one wording), another
+  4xx in the backend's words (the 50-dashboard limit, a dashboard that is gone, one saved under rules
+  that have since changed: its read is a 422 and it is never saved again). The name is trimmed;
+  empty and over-length names never reach the backend.
+
+Phase 1 of this feature is in production, so a change here must leave users' saved dashboards as they
+are. Rename and an edit's Save send the served form back, and only the backend's round trip
+(`draftToDefinition`, see `apps/csm-portal/backend`'s own `CLAUDE.md`, "Custom dashboards") turns it
+into the stored definition unchanged: do not build a saved dashboard's PUT from anything other than
+what `GET /dashboards/custom/{id}` returned.
+
 ## Testing
 
 - Runner: Vitest (`jsdom` environment), configured inline in `vite.config.ts` — no separate `vitest.config.ts`.
