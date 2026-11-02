@@ -363,4 +363,83 @@ describe("AddProductModal", () => {
       screen.getByRole("combobox", { name: /Product Name/ }),
     ).not.toHaveTextContent("WSO2 API Manager");
   });
+
+  it("should tell version records that share a version apart by their profile", async () => {
+    mockMutateAsync.mockResolvedValue(undefined);
+    const sameVersion = [
+      { id: "ver-cp", version: "4.6.0", deploymentProfile: "API Control Plane" },
+      { id: "ver-tm", version: "4.6.0", deploymentProfile: "Traffic Manager" },
+      { id: "ver-ug", version: "4.6.0", deploymentProfile: "Universal Gateway" },
+      { id: "ver-none", version: "4.5.0", deploymentProfile: null },
+    ];
+    vi.mocked(useSearchProductVersions).mockImplementation(
+      (productId: string) =>
+        ({
+          data: productId
+            ? {
+                versions: sameVersion,
+                totalRecords: sameVersion.length,
+                offset: 0,
+                limit: 10,
+              }
+            : undefined,
+          isLoading: false,
+          isFetching: false,
+          isError: false,
+        }) as unknown as ReturnType<typeof useSearchProductVersions>,
+    );
+    renderWithProviders(
+      <AddProductModal
+        open={true}
+        deploymentId="dep-1"
+        projectId="proj-1"
+        onClose={mockOnClose}
+        onSuccess={mockOnSuccess}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByLabelText(/Product Name/));
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: /WSO2 API Manager/,
+        hidden: true,
+      }),
+    );
+    const versionField = screen.getByLabelText(/Version/);
+    await waitFor(() =>
+      expect(versionField).not.toHaveAttribute("aria-disabled", "true"),
+    );
+    fireEvent.mouseDown(versionField);
+
+    const optionNames = (await screen.findAllByRole("option", { hidden: true }))
+      .map((o) => o.textContent)
+      .filter((t) => t && t !== "Select");
+    expect(optionNames).toEqual([
+      "4.6.0 \u00b7 API Control Plane",
+      "4.6.0 \u00b7 Traffic Manager",
+      "4.6.0 \u00b7 Universal Gateway",
+      "4.5.0",
+    ]);
+
+    fireEvent.click(
+      screen.getByRole("option", {
+        name: "4.6.0 \u00b7 Traffic Manager",
+        hidden: true,
+      }),
+    );
+    const submitButton = screen.getByRole("button", { name: "Add Product" });
+    await waitFor(() => expect(submitButton).not.toBeDisabled());
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            productId: "prod-api-mgr",
+            versionId: "ver-tm",
+          }),
+        }),
+      );
+    });
+  });
 });

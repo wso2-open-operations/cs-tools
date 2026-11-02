@@ -62,6 +62,7 @@ import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 export default function UpdateHistoryTab({
   updates,
   productName,
+  fallbackProductName,
   productVersion,
   isLoading,
   onSaveUpdates,
@@ -92,17 +93,31 @@ export default function UpdateHistoryTab({
       return [];
     }
 
-    const productItem = productUpdateLevels.find(
-      (item) => item.productName === productName,
-    );
-    if (!productItem) return [];
+    const levelsFor = (name: string): number[] => {
+      const productItem = productUpdateLevels.find(
+        (item) => item.productName === name,
+      );
+      if (!productItem) return [];
 
-    const allLevels = productItem.productUpdateLevels
-      .filter((entry) => entry.productBaseVersion === productVersion)
-      .flatMap((entry) => entry.updateLevels);
+      const allLevels = productItem.productUpdateLevels
+        .filter((entry) => entry.productBaseVersion === productVersion)
+        .flatMap((entry) => entry.updateLevels);
 
-    return [...new Set(allLevels)].sort((a, b) => b - a);
-  }, [productName, productVersion, productUpdateLevels]);
+      return [...new Set(allLevels)].sort((a, b) => b - a);
+    };
+
+    const levels = levelsFor(productName);
+    // A profile's own stream may not carry this version; fall back to the
+    // product's stream rather than offering no levels at all.
+    if (
+      levels.length === 0 &&
+      fallbackProductName &&
+      fallbackProductName !== productName
+    ) {
+      return levelsFor(fallbackProductName);
+    }
+    return levels;
+  }, [productName, fallbackProductName, productVersion, productUpdateLevels]);
 
   const sortedUpdates = useMemo(() => {
     return [...updates].sort(

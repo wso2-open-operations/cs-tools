@@ -235,4 +235,49 @@ describe("DeploymentProductList", () => {
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("should show the deployment profile beside the version when there is one", () => {
+    vi.mocked(usePostDeploymentProductsSearchAll).mockReturnValue({
+      data: [
+        {
+          id: "prod-tm",
+          createdOn: "2026-01-17",
+          updatedOn: "2026-01-17",
+          description: "TM",
+          product: { id: "p1", label: "WSO2 API Manager" },
+          deployment: { id: "dep-1", label: "Staging" },
+          version: {
+            id: "v-tm",
+            label: "4.6.0",
+            deploymentProfile: "Traffic Manager",
+          },
+        },
+        {
+          id: "prod-none",
+          createdOn: "2026-01-17",
+          updatedOn: "2026-01-17",
+          description: "no profile",
+          product: { id: "p1", label: "WSO2 API Manager" },
+          deployment: { id: "dep-1", label: "Staging" },
+          version: { id: "v-none", label: "4.5.0" },
+        },
+      ],
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof usePostDeploymentProductsSearchAll>);
+
+    renderWithProviders(
+      <DeploymentProductList
+        deploymentId="dep-123"
+        projectId="proj-1"
+        {...defaultSelectionProps}
+      />,
+    );
+
+    expect(screen.getByText("4.6.0")).toBeInTheDocument();
+    expect(screen.getByText("Traffic Manager")).toBeInTheDocument();
+    // The profile-less version shows its version and no profile chip.
+    expect(screen.getByText("4.5.0")).toBeInTheDocument();
+    expect(screen.queryByText("All In One")).not.toBeInTheDocument();
+  });
 });
