@@ -18,6 +18,7 @@ import type { CommentBubbleProps } from "@features/support/types/supportComponen
 import {
   Avatar,
   Box,
+  Button,
   IconButton,
   Paper,
   CircularProgress,
@@ -29,7 +30,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Download,
   File,
@@ -170,11 +171,21 @@ export default function CommentBubble({
   const isPreviewableImage =
     attachmentCategory === "image" &&
     /\.(png|jpe?g|webp)$/i.test(comment.fileName ?? "");
-  const { data: imageDataUrl, isLoading: isImagePreviewLoading } =
-    useAttachmentPreview(
-      isAttachmentEntry && isPreviewableImage ? comment.id : null,
-      caseId,
-    );
+  // An attached image is only fetched once the person asks: each preview
+  // costs a one-use SFTPGo link, and a busy feed would otherwise create one per
+  // image on every render.
+  const [previewRequested, setPreviewRequested] = useState(false);
+  const {
+    data: imageDataUrl,
+    isLoading: isImagePreviewLoading,
+    isError: isImagePreviewError,
+    refetch: refetchImagePreview,
+  } = useAttachmentPreview(
+    isAttachmentEntry && isPreviewableImage && previewRequested
+      ? comment.id
+      : null,
+    caseId,
+  );
 
   const renderAttachmentIcon = () => {
     switch (attachmentCategory) {
@@ -372,7 +383,20 @@ export default function CommentBubble({
                 {formatCommentDate(comment.createdOn)}
               </Typography>
             </Stack>
+            {isPreviewableImage && !previewRequested && (
+              <Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Image size={14} aria-hidden />}
+                  onClick={() => setPreviewRequested(true)}
+                >
+                  Preview
+                </Button>
+              </Box>
+            )}
             {isPreviewableImage &&
+              previewRequested &&
               (isImagePreviewLoading ? (
                 <Skeleton
                   variant="rectangular"
@@ -393,6 +417,15 @@ export default function CommentBubble({
                   }}
                   onClick={() => onImageClick?.(imageDataUrl)}
                 />
+              ) : isImagePreviewError ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary">
+                    The preview could not be loaded.{" "}
+                  </Typography>
+                  <Button size="small" onClick={() => void refetchImagePreview()}>
+                    Try again
+                  </Button>
+                </Box>
               ) : null)}
           </Paper>
         ) : isImagesLoading ? (
