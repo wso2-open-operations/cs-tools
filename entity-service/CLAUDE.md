@@ -3762,6 +3762,43 @@ already use — no route path, request, or response shape changed.
   filtering, the same deliberate posture as `AccountContactRepository`/
   `ProjectContactRepository`'s own `callerEmail` parameter below.
 
+## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
+
+Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
+the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+`timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
+`project_stats_repo.go`), so the aggregate can never count a different set of cards from
+the search, or a different total from the search's `totalTime`; keep it that way.
+
+- **Response:** the shared `AggregateResponse`, plus `groups[].totalMinutes`,
+  `othersMinutes` and `totalMinutes`. Those three are pointers with `omitempty`, set only
+  here: every other aggregate leaves them nil and its JSON is unchanged
+  (`aggregate_response_json_test.go` pins both shapes). A zero is sent as `0`, not dropped.
+- **Ranking:** `measure` (`count`, the default, or `minutes`) decides which buckets survive
+  `maxGroups` (default 10); the rest fold into `othersCount` / `othersMinutes`. The top 10
+  users by cards and by hours are different people, so a widget showing hours must send
+  `minutes`.
+- **Keys and labels:** a `state` key is lower-cased (what the `states` filter accepts).
+  `user` and `project` keys are ids. Their labels never come back empty or NULL: a user with
+  no name falls back to their email, then their user name; a project with no name falls back
+  to its key. A NULL `p.name` used to fail the scan. A card with no project has no
+  `project` bucket and is not in that grouping's totals.
+- **`day`:** groups by `work_date` and needs both `startDate` and `endDate`, at most
+  `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
+  The query runs `generate_series` over the window, so every day comes back in date order,
+  days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
+  time card aggregate.
+- **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
+  (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
+  `CLAUDE.md`).
+
+Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
+check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
+(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+ranking by minutes disagree, it has a card with all five minute columns NULL, and the
+search-parity test compares both counts and minutes with `SearchTimeCards`.
+
 ## Linking a case to its originating conversation, and the activity feed's work-note count
 
 Reported live: a case created from a Novera chat ("create case" from an

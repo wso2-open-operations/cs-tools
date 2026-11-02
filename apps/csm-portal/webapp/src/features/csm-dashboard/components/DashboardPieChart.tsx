@@ -63,6 +63,11 @@ interface DashboardPieChartProps {
    * across every other dashboard is unaffected. See
    * `BeDashboardWidget.inlineLabels`. */
   inlineLabels?: boolean;
+  /** How a value reads in the labels, legend and centre total (e.g.
+   * `formatHours` for a time card totals widget). Absent shows the plain
+   * number, and the legend's screen-reader text keeps saying "cases", as
+   * before this prop existed. */
+  formatValue?: (value: number) => string;
 }
 
 /** One entry of the custom outer-label render function's own return value —
@@ -101,7 +106,10 @@ export default function DashboardPieChart({
   isError,
   onSliceClick,
   inlineLabels,
+  formatValue,
 }: DashboardPieChartProps): JSX.Element {
+  const shown = (value: number): string => (formatValue ? formatValue(value) : String(value));
+  const spoken = (value: number): string => (formatValue ? formatValue(value) : `${value} cases`);
   const theme = useTheme();
   const isDarkMode = useDarkMode();
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
@@ -225,7 +233,7 @@ export default function DashboardPieChart({
           fill={theme.palette.text.primary}
           role="button"
           tabIndex={0}
-          aria-label={`${slice.label}: ${slice.value} cases (${pct}%)`}
+          aria-label={`${slice.label}: ${spoken(slice.value)} (${pct}%)`}
           style={{ cursor: "pointer", outline: "none" }}
           onMouseEnter={() => setActiveIndex(index)}
           onMouseLeave={() => setActiveIndex(undefined)}
@@ -246,7 +254,7 @@ export default function DashboardPieChart({
             }
           }}
         >
-          {`${slice.label} ${slice.value}`}
+          {`${slice.label} ${shown(slice.value)}`}
         </text>
       </g>
     );
@@ -343,7 +351,7 @@ export default function DashboardPieChart({
             pointerEvents: "none",
           }}
         >
-          <Typography variant="h5">{total}</Typography>
+          <Typography variant="h5">{shown(total)}</Typography>
           <Typography variant="caption" color="text.secondary">
             Total
           </Typography>
@@ -359,7 +367,7 @@ export default function DashboardPieChart({
               key={slice.label}
               role="button"
               tabIndex={0}
-              aria-label={`${slice.label}: ${slice.value} cases (${pct}%)`}
+              aria-label={`${slice.label}: ${spoken(slice.value)} (${pct}%)`}
               // stopPropagation for the same reason as the wedge's own
               // onClick above — this row sits inside the tile-level
               // click-through `DashboardWidgetTile` attaches for
@@ -403,7 +411,7 @@ export default function DashboardPieChart({
                 {slice.label}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {slice.value} ({pct}%)
+                {shown(slice.value)} ({pct}%)
               </Typography>
             </Box>
           );

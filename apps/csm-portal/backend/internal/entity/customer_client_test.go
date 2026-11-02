@@ -114,6 +114,53 @@ func TestSearchTagsSendsPostWithBody(t *testing.T) {
 	}
 }
 
+// TestAggregateTimeCardsSendsPostWithBody pins the entity-service call shape
+// for the time card aggregate: a POST to /time-cards/aggregate carrying the
+// caller's body byte-for-byte.
+func TestAggregateTimeCardsSendsPostWithBody(t *testing.T) {
+	t.Parallel()
+
+	const reqBody = `{"groupBy":"user","measure":"minutes","maxGroups":5}`
+
+	var gotMethod, gotPath string
+	var gotBody []byte
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"test-token","token_type":"Bearer","expires_in":3600}`))
+	})
+	mux.HandleFunc("/time-cards/aggregate", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"groups":[],"othersCount":0,"totalRecords":0}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	client := NewCustomerEntityClient(CustomerEntityConfig{
+		BaseURL:      srv.URL,
+		TokenURL:     srv.URL + "/token",
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+	})
+
+	if _, err := client.AggregateTimeCards(context.Background(), []byte(reqBody)); err != nil {
+		t.Fatalf("AggregateTimeCards: %v", err)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotPath != "/time-cards/aggregate" {
+		t.Errorf("path = %q, want /time-cards/aggregate", gotPath)
+	}
+	if string(gotBody) != reqBody {
+		t.Errorf("body = %s, want %s", gotBody, reqBody)
+	}
+}
+
 // TestGetGroupSendsGetToGroupsID pins the entity-service call shape for the
 // group page opened from an approval stage: GET /groups/{id} (a "group" id,
 // not the team lookup) with no body and the id escaped into the path.

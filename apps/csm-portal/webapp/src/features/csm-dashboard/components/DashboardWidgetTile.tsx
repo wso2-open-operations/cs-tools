@@ -55,6 +55,7 @@ import {
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
+import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
@@ -624,7 +625,7 @@ function DashboardWidgetTile({
   // `undefined` renders no badge — shape "pie" keeps its total in the donut
   // hole instead, and list/bar themselves pass `undefined` while their own
   // total is still loading or errored.
-  const renderHeader = (total?: number): JSX.Element => (
+  const renderHeader = (total?: number, formatTotal?: (value: number) => string): JSX.Element => (
     <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
       <Box
         sx={{
@@ -647,7 +648,7 @@ function DashboardWidgetTile({
         </Typography>
         {total !== undefined && (
           <Chip
-            label={total.toLocaleString()}
+            label={formatTotal ? formatTotal(total) : total.toLocaleString()}
             size="small"
             color="default"
             sx={{ flexShrink: 0, fontWeight: 600 }}
@@ -777,6 +778,9 @@ function DashboardWidgetTile({
     // (`pointerEvents: "auto"`) for the chart specifically, letting its own
     // click and keyboard handling work exactly as before.
     const ChartComponent = shape === "pie" ? DashboardPieChart : DashboardBarChart;
+    // A time card totals widget measuring hours shows "12.5 h" on its
+    // chart and total; every other widget shows plain numbers.
+    const formatValue = groupBy?.measure === "hours" ? formatHours : undefined;
     const tileHref = config.buildHref(resolvePlaceholders(filters), {
       widgetId,
       displayName: resolvedDisplayName,
@@ -883,6 +887,7 @@ function DashboardWidgetTile({
           <Box sx={{ pb: resolvedDescription ? 1 : 2.5 }}>
             {renderHeader(
               shape === "bar" && !pieData.isLoading && !pieData.isError ? pieData.total : undefined,
+              formatValue,
             )}
           </Box>
           {resolvedDescription && (
@@ -897,6 +902,7 @@ function DashboardWidgetTile({
               isLoading={pieData.isLoading}
               isError={pieData.isError}
               onSliceClick={handleSliceClick}
+              formatValue={formatValue}
               // Only DashboardPieChart accepts this prop — shape "bar" never
               // sets `inlineLabels` on its own widget config, but guard it
               // here too rather than relying on that alone.

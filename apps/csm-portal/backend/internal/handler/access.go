@@ -314,6 +314,12 @@ const (
 	// every other field, so an onboarding_lead-only caller can still never edit
 	// anything but the two onboarding fields.
 	PermUpdateProject
+	// PermViewTimeCardTotals is POST /time-cards/aggregate: time card counts
+	// and logged hours per state, user, project or day. Held by the CS
+	// engineer and admin only -- narrower than PermTimeCardsAndUpdates (no
+	// time card approver) while who may see totals per user is still to be
+	// decided; a separate permission so that decision changes one line here.
+	PermViewTimeCardTotals
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -563,7 +569,8 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// The route-level floor for PATCH /projects/{id} -- see
 			// PermUpdateProject's own doc comment for the in-handler checks
 			// that narrow what each holder may actually set.
-			PermUpdateProject: build(cfg.CsEngineer, cfg.Admin, cfg.OnboardingLead),
+			PermUpdateProject:      build(cfg.CsEngineer, cfg.Admin, cfg.OnboardingLead),
+			PermViewTimeCardTotals: build(cfg.CsEngineer, cfg.Admin),
 		},
 	}
 }

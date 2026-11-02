@@ -86,7 +86,8 @@ Do not use any other dashboard field.
 | `bar` | Bars, one per group. | Same as `pie`. |
 | `line` | Cases opened vs closed per day. | **Only with `resourceType: "case"`.** `days` 1 to 90 (default 30). |
 
-A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` only (no `groupBy`, no `line`).
+A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
+state, user, project or day, counting cards or summing hours; no `line`).
 An `incident`, `change_request` or `problem` widget is `count`, `list`, or `pie`/`bar` with `slices` or
 `groupBy` by `state` only (no `line`). An `account` or `project` widget is `count`, `list`, or `pie`/`bar`
 with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count`, `list`, or `pie`/`bar`
@@ -165,13 +166,68 @@ Date tokens: `__today__`, `__daysAgo:N__`, `__startOfMonth:N__`, `__endOfMonth:N
 ```
 
 Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pie`/`bar` with
-**slices only**, each slice's `query` also a flat object (e.g. one slice per state).
+`slices` (each slice's `query` also a flat object, e.g. one slice per state) or `groupBy` (below).
+
+**Totals: grouping on the server.** A `pie`/`bar` time card widget may group with
+`"groupBy": {"field": "<field>", "measure": "count" | "hours", "maxGroups": N}`:
+
+| `groupBy.field` | One bar / wedge per | Notes |
+|---|---|---|
+| `user` | engineer who logged the cards | "per user", "per engineer", "per person", "by team member"; `bar`, `maxGroups` 5 to 12 |
+| `project` | project the cards were logged on | "per project"; `bar`, `maxGroups` 5 to 12; cards with no project are left out |
+| `day` | work date, every day of the window in date order (days with nothing at 0) | "per day", "daily"; always `bar`, no `maxGroups`; the window rules below |
+| `state` | time card state, as stored (approved and processed apart) | only for **hours** by state; card **counts** by state use the state slices of section 8 |
+
+`measure`: `"hours"` sums the time logged on the cards ("hours", "time logged", "time spent", "effort");
+`"count"` (or leaving `measure` out) counts the cards ("number of time cards", "how many"). With
+`maxGroups` the top groups are kept by that measure.
+
+**A `day` grouping needs a window**: both `startDate` and `endDate`, **two date tokens**, at most
+**31 days** long on every day. Use exactly one of these:
+
+| Request | `startDate` | `endDate` |
+|---|---|---|
+| "last N days" per day, N = 1 to 31 (e.g. 7, 14, 30) | `__daysAgo:<N-1>__` (last 7 days: `__daysAgo:6__`) | `__today__` |
+| "this month" per day | `__startOfMonth:0__` | `__today__` |
+| "last month", "previous month" per day | `__startOfMonth:-1__` | `__endOfMonth:-1__` |
+
+Anything longer per day ("this quarter", "this year", "last 60 days", "since <date>") is not expressible
+per day: reply with `{"error": ...}` suggesting the last 31 days per day, or the longer period per user or
+per project. A `user`, `project` or `state` grouping may use any date window (or none).
+
+**"Last N days" on any time card widget** (count, list, slices or any grouping) is `__daysAgo:<N-1>__` to
+`__today__`, exactly N work dates as in the table above ("last 30 days": `__daysAgo:29__`). This differs
+from the cases' `__daysAgo:N__` (section 8) on purpose: a time card window must not depend on the grouping.
+
+```json
+{ "id": "my-hours-per-day", "displayName": "My Hours per Day (Last 14 Days)", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 12,
+  "query": { "userIds": ["__current_user__"], "startDate": "__daysAgo:13__", "endDate": "__today__" },
+  "groupBy": { "field": "day", "measure": "hours" } }
+```
+
+```json
+{ "id": "hours-per-user", "displayName": "Hours Logged per User This Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "startDate": "__startOfMonth:0__", "endDate": "__today__" },
+  "groupBy": { "field": "user", "measure": "hours", "maxGroups": 10 } }
+```
+
+```json
+{ "id": "cards-per-project", "displayName": "Approved Time Cards per Project Last Month", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6,
+  "query": { "states": ["approved", "processed"], "startDate": "__startOfMonth:-1__", "endDate": "__endOfMonth:-1__" },
+  "groupBy": { "field": "project", "measure": "count", "maxGroups": 10 } }
+```
 
 **Not expressible for time cards** (reply with `{"error": ...}` naming what can be shown instead, e.g.
-"my time cards by state" or "time cards waiting for approval this month"):
-- per user / per engineer / per person / by team member, or another named person's time cards;
-- per project, per account, per case, or a team's (Rigel's, my team's) time cards;
-- hours or totals (sum of hours, billable hours): widgets count time cards, they do not add up hours.
+"my hours per day for the last 14 days" or "hours per user this month"):
+- another named person's time cards (only "my" time cards, or everyone's);
+- per account, per case or per approver, or a team's (Rigel's, my team's) time cards;
+- one total as a single number ("my total hours this month"): a `count` counts cards; offer the hours per
+  day, per user or per project instead;
+- billable hours (billable and non-billable are not told apart);
+- per day over more than 31 days (above).
 
 ### 5b. Operations: incidents, change requests, problems
 
@@ -329,7 +385,9 @@ or breached group, `warning` next, otherwise leave it out.
 ```
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
-`change_request` and `problem`: `state` only; `time_card`, `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only, section 5d). Prefer `slices` for
+`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
+`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
 that account:
@@ -396,8 +454,13 @@ Never set both `slices` and `groupBy`.
 | "approved" (time cards) | `states ["approved", "processed"]` |
 | "rejected" / "recalled" (time cards) | `states ["rejected"]` / `states ["recalled"]` |
 | "time cards by state / status" | a `pie` or `bar` with one slice per state: Pending (`pending`), Submitted, Approved (approved + processed), Rejected. Leave Pending out only if the request asks to; add Recalled only if asked |
-| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date |
-| time cards "per user", "per engineer", "per project", a team's or a named person's, or hours | not expressible: `{"error": ...}` as in section 5a |
+| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
+| "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
+| time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
+| time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
+| time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
+| "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
+| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible: `{"error": ...}` as in section 5a |
 | "my open", "open … assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]` — "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
@@ -453,7 +516,9 @@ If two readings are plausible and the table does not settle it, pick the one abo
    ("by ABT"), never in an `anyOf` branch.
 9. A `time_card` widget: a flat `query` with only `states`, `userIds` (`["__current_user__"]` only),
    `startDate`, `endDate`; shape `count`, `list` (sortBy `workDate`/`updatedOn`) or `pie`/`bar` with
-   flat-query `slices`; never `groupBy`, `line`, a `filters` array or a team filter.
+   flat-query `slices` or `groupBy` (`user`, `project`, `day`, `state`; `measure` `hours` or `count`); a
+   `day` grouping has both dates from section 5a's window table (31 days at most); never `line`, a
+   `filters` array or a team filter. `measure` appears on no other resourceType.
 10. An `incident` / `change_request` / `problem` widget: only the keys, fields, ops and **exact-case
     values** of section 5b; change request state in the flat `states`, never in `filters`; `groupBy` by
     `state` only; a problem list has no `sortBy`; no ids, no `anyOf`, no `line`.

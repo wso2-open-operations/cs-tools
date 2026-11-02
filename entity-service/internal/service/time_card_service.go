@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -210,6 +211,79 @@ func validateTimeCardMinutes(values ...int) error {
 		return &apierror.ValidationError{Msg: domain.MaxTimeCardMinutesMessage}
 	}
 	return nil
+}
+
+// defaultTimeCardMaxGroups is AggregateTimeCards' bucket cap when the request
+// sets none, the same default as the change request aggregate.
+const defaultTimeCardMaxGroups = 10
+
+// validTimeCardGroupBy and validTimeCardMeasure are AggregateTimeCardsRequest's
+// accepted GroupBy and (non-empty) Measure values.
+var (
+	validTimeCardGroupBy = map[string]bool{
+		domain.TimeCardGroupByState:   true,
+		domain.TimeCardGroupByUser:    true,
+		domain.TimeCardGroupByProject: true,
+		domain.TimeCardGroupByDay:     true,
+	}
+	validTimeCardMeasure = map[string]bool{
+		domain.TimeCardMeasureCount:   true,
+		domain.TimeCardMeasureMinutes: true,
+	}
+)
+
+// validateTimeCardAggregate checks everything AggregateTimeCards accepts
+// beyond the search's own filters: groupBy, measure, maxGroups, and for "day"
+// a window of both dates, in order, at most MaxTimeCardAggregateDays long.
+// Filters must already have passed validateTimeCardFilters (the dates parse).
+func validateTimeCardAggregate(req domain.AggregateTimeCardsRequest) error {
+	if req.GroupBy == "" {
+		return &apierror.ValidationError{Msg: "groupBy is required"}
+	}
+	if !validTimeCardGroupBy[req.GroupBy] {
+		return &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	}
+	if req.Measure != "" && !validTimeCardMeasure[req.Measure] {
+		return &apierror.ValidationError{Msg: "measure contains invalid value: " + req.Measure}
+	}
+	if req.MaxGroups < 0 {
+		return &apierror.ValidationError{Msg: "maxGroups must not be negative"}
+	}
+	if req.GroupBy != domain.TimeCardGroupByDay {
+		return nil
+	}
+	if req.Filters == nil || req.Filters.StartDate == nil || req.Filters.EndDate == nil {
+		return &apierror.ValidationError{Msg: "groupBy day requires filters.startDate and filters.endDate"}
+	}
+	start, _ := time.Parse("2006-01-02", *req.Filters.StartDate)
+	end, _ := time.Parse("2006-01-02", *req.Filters.EndDate)
+	if end.Before(start) {
+		return &apierror.ValidationError{Msg: "endDate must not be before startDate"}
+	}
+	if days := int(end.Sub(start).Hours()/24) + 1; days > domain.MaxTimeCardAggregateDays {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("groupBy day covers at most %d days", domain.MaxTimeCardAggregateDays)}
+	}
+	return nil
+}
+
+// AggregateTimeCards implements TimeCardService.
+func (s *timeCardService) AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest) (domain.AggregateResponse, error) {
+	if err := validateTimeCardFilters(req.Filters); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := validateTimeCardAggregate(req); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	// The same minimum bar as SearchTimeCards: an authenticated caller,
+	// results not scoped beyond what Postgres RLS already applies.
+	if _, err := resolveCallerEmail(ctx); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	maxGroups := req.MaxGroups
+	if maxGroups == 0 {
+		maxGroups = defaultTimeCardMaxGroups
+	}
+	return s.repo.AggregateTimeCards(ctx, req, maxGroups)
 }
 
 // SearchTimeCards implements TimeCardService.
