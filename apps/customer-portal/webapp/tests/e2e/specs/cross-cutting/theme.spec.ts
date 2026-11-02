@@ -138,25 +138,31 @@ test.describe("Theme", () => {
             timeout: LOAD_TIMEOUT_MS,
           });
 
-          const { scheme: applied, background } = await readTheme(page);
-          expect(
-            applied,
+          // Retried rather than read once: the shell being visible does not
+          // mean the scheme has been stamped on <html> yet.
+          await expect(
+            page.locator("html"),
             `${path} should render in ${scheme} — the shell applies the ` +
               `browser's prefers-color-scheme, so a page disagreeing with it ` +
               `is rendering outside the shell`,
-          ).toBe(scheme);
+          ).toHaveAttribute(SCHEME_ATTRIBUTE, scheme, {
+            timeout: LOAD_TIMEOUT_MS,
+          });
 
           // Every page agrees on the background too, which is what makes this a
           // consistent theme rather than one attribute set four times.
           const seen = backgrounds.get(scheme);
           if (seen) {
-            expect(
-              background,
-              `${path} renders a different background from the other ` +
-                `${scheme} pages`,
-            ).toBe(seen);
+            await expect
+              .poll(async () => (await readTheme(page)).background, {
+                message:
+                  `${path} renders a different background from the other ` +
+                  `${scheme} pages`,
+                timeout: LOAD_TIMEOUT_MS,
+              })
+              .toBe(seen);
           } else {
-            backgrounds.set(scheme, background);
+            backgrounds.set(scheme, (await readTheme(page)).background);
           }
         }
 
@@ -182,10 +188,13 @@ test.describe("Theme", () => {
         await expect(page.getByTestId(CASE_DETAIL.mainTestId)).toBeVisible({
           timeout: LOAD_TIMEOUT_MS,
         });
+        await expect(
+          page.locator("html"),
+          `the theme should survive a reload`,
+        ).toHaveAttribute(SCHEME_ATTRIBUTE, scheme, {
+          timeout: LOAD_TIMEOUT_MS,
+        });
         const afterReload = await readTheme(page);
-        expect(afterReload.scheme, `the theme should survive a reload`).toBe(
-          scheme,
-        );
 
         console.log(
           `Theme [${scheme}]: applied on ${PAGE_PATHS.length} pages, after ` +

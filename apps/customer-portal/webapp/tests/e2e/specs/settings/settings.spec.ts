@@ -170,21 +170,29 @@ test.describe("Settings", () => {
         `searching the ${field} "${query}" should keep ${target.email} listed`,
       ).not.toHaveCount(0);
 
+      // Every surviving row shows the term somewhere. Polled rather than
+      // snapshotted: the checks above already hold on the unfiltered list (the
+      // target was listed before the search too), so they do not prove the
+      // filter has applied — a one-off read could still see the old rows.
+      const needle = query.toLowerCase();
+      await expect
+        .poll(
+          async () =>
+            (await settings.anyUserRows().allInnerTexts()).every((text) =>
+              text.toLowerCase().includes(needle),
+            ),
+          {
+            message: `a row survived the ${field} search for "${query}" without showing it`,
+            timeout: 30_000,
+          },
+        )
+        .toBe(true);
+
       // Client-side over the loaded contacts, so this narrows rather than
       // fetches and can never grow the list.
-      await expect
-        .poll(() => settings.anyUserRows().count(), { timeout: 30_000 })
-        .toBeLessThanOrEqual(before);
-
-      // Every surviving row shows the term somewhere.
-      const texts = await settings.anyUserRows().allInnerTexts();
-      for (const text of texts) {
-        expect(
-          text.toLowerCase(),
-          `a row survived the ${field} search for "${query}" without showing it`,
-        ).toContain(query.toLowerCase());
-      }
-      return texts.length;
+      const count = await settings.anyUserRows().count();
+      expect(count).toBeLessThanOrEqual(before);
+      return count;
     };
 
     // ── by name ──────────────────────────────────────────────────────────────

@@ -261,14 +261,17 @@ export class ProjectTimeTrackingPage {
     const startIso = ProjectTimeTrackingPage.isoDate(start);
     const endIso = ProjectTimeTrackingPage.isoDate(end);
 
-    // Typing the start alone fires its own request, so the wait is armed around
-    // the END keystrokes — only then do both filters carry their final values.
-    await this.typeDate(TIME_TRACKING.dateFilter.startField, start);
-
+    // The wait is armed before EITHER date is typed. Typing the start fires its
+    // own request; when the end already holds `endIso`, that request is the
+    // only one carrying the final pair (re-typing the same end changes nothing,
+    // so no second request follows) — a waiter armed after it would time out.
+    // The predicate still requires both values, so a start-only request made
+    // against a different end cannot satisfy it.
     return this.applyFilterChange(
       (filters) =>
         filters.startDate === startIso && filters.endDate === endIso,
       async () => {
+        await this.typeDate(TIME_TRACKING.dateFilter.startField, start);
         await this.typeDate(TIME_TRACKING.dateFilter.endField, end);
         // Dismiss the picker popup so it cannot cover the list underneath.
         await this.page.keyboard.press("Escape");

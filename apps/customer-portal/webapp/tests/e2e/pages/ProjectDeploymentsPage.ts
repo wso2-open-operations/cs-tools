@@ -572,6 +572,35 @@ export class ProjectDeploymentsPage {
   }
 
   /**
+   * The name on each deployment card, in list order.
+   *
+   * Read off the page rather than taken from a fixture: deployment names are
+   * project data and have changed under this suite before — a project that once
+   * had "Production" later carried only timestamped records. A spec that merely
+   * needs *a* deployment should ask the page which ones exist.
+   *
+   * Headers are found by the per-card edit control they contain (it sits inside
+   * the AccordionSummary) rather than by `aria-expanded`, so expanded and
+   * collapsed cards are both listed.
+   *
+   * @returns One name per card currently listed.
+   */
+  async deploymentNames(): Promise<string[]> {
+    const headers = this.main()
+      .getByRole("button")
+      .filter({
+        has: this.page.getByRole("button", {
+          name: EDIT_DEPLOYMENT.openButton,
+          exact: true,
+        }),
+      });
+    const texts = await headers.allInnerTexts();
+    return texts
+      .map((t) => t.split("\n")[0].trim())
+      .filter((t) => t.length > 0);
+  }
+
+  /**
    * The accordion header of a deployment card.
    *
    * MUI's AccordionSummary is the clickable header, so this is what the chevron
@@ -580,24 +609,6 @@ export class ProjectDeploymentsPage {
    * @param name - Full deployment name.
    * @returns Locator for the card's header.
    */
-  /**
-   * The name on each deployment card, in list order.
-   *
-   * Read off the page rather than taken from a fixture: deployment names are
-   * project data and have changed under this suite before — a project that once
-   * had "Production" later carried only timestamped records. A spec that merely
-   * needs *a* deployment should ask the page which ones exist.
-   *
-   * @returns One name per card currently listed.
-   */
-  async deploymentNames(): Promise<string[]> {
-    const headers = this.main().getByRole("button", { expanded: false });
-    const texts = await headers.allInnerTexts();
-    return texts
-      .map((t) => t.split("\n")[0].trim())
-      .filter((t) => t.length > 0);
-  }
-
   deploymentSummary(name: string): Locator {
     return this.main()
       .getByRole("button")
