@@ -80,3 +80,31 @@ describe("TimeCardReviewDialog", () => {
     expect(screen.queryByText("Engineer's comment")).not.toBeInTheDocument();
   });
 });
+
+describe("TimeCardReviewDialog — required lead comment", () => {
+  const renderWith = (action?: "approve" | "reject") =>
+    render(
+      <TimeCardReviewDialog
+        card={card()}
+        action={action}
+        isDeciding={false}
+        onClose={vi.fn()}
+        onDecide={vi.fn()}
+      />,
+    );
+
+  it("is required when the dialog was opened from Reject", () => {
+    renderWith("reject");
+    expect(screen.getByRole("textbox", { name: /Lead's comment/ })).toBeRequired();
+  });
+
+  it("is marked in review mode too, since Reject is offered there", () => {
+    renderWith();
+    expect(screen.getByRole("textbox", { name: /Lead's comment/ })).toBeRequired();
+  });
+
+  it("is not required when the dialog was opened from Accept", () => {
+    renderWith("approve");
+    expect(screen.getByRole("textbox", { name: /Lead's comment/ })).not.toBeRequired();
+  });
+});

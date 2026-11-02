@@ -37,6 +37,7 @@ import {
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import RequiredMark from "@components/RequiredMark";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
 import {
   listSupportedTimeZones,
@@ -73,6 +74,10 @@ export default function UserProfileModal({
   const email = userMe?.email || info.email || "—";
   const initials = initialsOf(info.fullName);
   const timeZoneOptions = useMemo(() => listSupportedTimeZones(), []);
+  // A stored time zone can be changed but not cleared (handleSave refuses an
+  // empty one, and so does PATCH /users/me). With none stored yet, leaving
+  // the picker empty is no change at all, so it is not required then.
+  const tzRequired = isTzEditing && !!normalizeUserTimeZone(userMe?.timeZone);
 
   useEffect(() => {
     if (open && userMe) {
@@ -278,6 +283,7 @@ export default function UserProfileModal({
           <Box>
             <Typography variant="caption" color="text.secondary">
               Time zone
+              {tzRequired && <RequiredMark />}
             </Typography>
             {isTzEditing ? (
               <Box sx={{ display: "flex", gap: 1, alignItems: "center", mt: 0.5 }}>
@@ -290,6 +296,7 @@ export default function UserProfileModal({
                   renderInput={(params) => (
                     <TextField
                       {...params}
+                      required={tzRequired}
                       placeholder="Select a time zone"
                       helperText="Used to display dates and times in your zone"
                     />

@@ -135,7 +135,7 @@ describe("DeploymentAttachmentsPanel", () => {
     render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /edit runbook\.pdf/i }));
-    const nameField = screen.getByLabelText(/^name$/i);
+    const nameField = screen.getByRole("textbox", { name: "Name" });
     fireEvent.change(nameField, { target: { value: "runbook-v2.pdf" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
@@ -143,6 +143,19 @@ describe("DeploymentAttachmentsPanel", () => {
       { deploymentId: "dep-1", attachmentId: "att-1", name: "runbook-v2.pdf" },
       expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+  });
+
+  it("marks the attachment's Name required (Description stays optional) and blocks saving it blank", () => {
+    mockList({ data: [ATTACHMENT] });
+    render(<DeploymentAttachmentsPanel deploymentId="dep-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /edit runbook\.pdf/i }));
+    const nameField = screen.getByRole("textbox", { name: "Name" });
+    expect(nameField).toBeRequired();
+    expect(screen.getByRole("textbox", { name: "Description" })).not.toBeRequired();
+
+    fireEvent.change(nameField, { target: { value: "  " } });
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled();
   });
 
   it("confirms and deletes an attachment", () => {

@@ -18,14 +18,21 @@ import {
   Box,
   ColorSchemeToggle,
   Container,
+  GlobalStyles,
   Header as HeaderUI,
   Link as OxygenLink,
+  Stack,
   Typography,
 } from "@wso2/oxygen-ui";
 import { useEffect, useRef, useState, type JSX, type MouseEvent } from "react";
-import { Link, Outlet } from "react-router";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
+import BackToTop from "@components/BackToTop";
 import { accessibleLinkSx } from "@config/a11yThemeOverrides";
+import { opaquePaper } from "@config/colorUtils";
+import SearchBox, { SEARCH_INPUT_ATTR } from "@features/kb/components/SearchBox";
 import { useRouteChangeReset } from "@hooks/useRouteChangeReset";
+import { browseUrl } from "@utils/browseUrl";
+import { normalizeSearchQuery } from "@utils/searchQuery";
 
 const BRAND_LOGO_HEIGHT = {
   xs: 18,
@@ -35,7 +42,7 @@ const BRAND_LOGO_HEIGHT = {
   xl: 24,
 } as const;
 
-const MAIN_ID = "main-content";
+export const MAIN_ID = "main-content";
 
 const FOOTER_LINKS = [
   { href: "https://wso2.com/legal/", label: "WSO2 Legal" },
@@ -47,13 +54,27 @@ const FOOTER_LINKS = [
   { href: "https://wso2.com/contact/", label: "Report a Problem With This Page" },
 ] as const;
 
+/** Pages with their own prominent search box; the header search is hidden there. */
+const hasOwnSearch = (pathname: string): boolean =>
+  pathname === "/" || pathname === "/knowledge-bases" || pathname.startsWith("/knowledge-bases/");
+
+const isEditable = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
+};
+
 /**
  * Shell for every page of the public knowledge portal. The site is public:
- * no sign-in, no user menu. Just the brand, the page content and a footer.
+ * no sign-in, no user menu, no navigation beyond the brand. A sticky header
+ * with the brand and a search box on pages that lack their own, the page
+ * content and a footer.
  */
 export default function KBLayout(): JSX.Element {
   const mainRef = useRef<HTMLElement>(null);
   useRouteChangeReset(mainRef);
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const showHeaderSearch = !hasOwnSearch(pathname);
 
   // Oxygen doesn't expose a themed logo asset yet, so the colour scheme is
   // read off the document attribute directly.
@@ -74,6 +95,20 @@ export default function KBLayout(): JSX.Element {
     return () => observer.disconnect();
   }, []);
 
+  // "/" focuses the first search box on the page, as on most documentation sites.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || isEditable(event.target)) return;
+      const input = document.querySelector<HTMLInputElement>(`input[${SEARCH_INPUT_ATTR}]`);
+      if (!input) return;
+      event.preventDefault();
+      input.focus();
+      input.select();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const logoSrc = isDarkMode ? "/logo-white.svg" : "/logo-dark.svg";
 
   // A plain "#main-content" link would add a hash to the URL; focusing the
@@ -86,62 +121,101 @@ export default function KBLayout(): JSX.Element {
 
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <GlobalStyles
+        styles={{
+          // No global smooth scrolling: useRouteChangeReset must land at the top
+          // instantly on navigation. The outline and Back to top ask for smooth
+          // scrolling explicitly where it helps.
+          "@media print": {
+            ".kb-no-print": { display: "none !important" },
+            body: { background: "#fff" },
+          },
+        }}
+      />
       <OxygenLink
         href={`#${MAIN_ID}`}
         onClick={skipToContent}
         sx={[
-          {
+          (theme) => ({
             position: "absolute",
             left: 8,
             top: -64,
-            zIndex: (theme) => theme.zIndex.tooltip + 1,
+            zIndex: theme.zIndex.tooltip + 1,
             px: 2,
             py: 1,
             borderRadius: 1,
-            bgcolor: "background.paper",
+            border: 1,
+            borderColor: "divider",
+            boxShadow: 3,
+            fontWeight: 600,
+            bgcolor: opaquePaper(theme, 1),
             "&:focus": { top: 8 },
-          },
+          }),
           accessibleLinkSx,
         ]}
       >
         Skip to main content
       </OxygenLink>
 
-      <HeaderUI sx={{ width: "100%", maxWidth: "100%" }}>
-        <OxygenLink
-          component={Link}
-          to="/"
-          underline="none"
-          color="inherit"
-          sx={{ display: "inline-flex", flexShrink: 0 }}
-        >
-          <HeaderUI.Brand sx={{ flexShrink: 0, gap: { xs: 0.75, sm: 1, md: 1.5 } }}>
-            <HeaderUI.BrandLogo
-              sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}
-            >
-              <Box
-                component="img"
-                key={logoSrc}
-                src={logoSrc}
-                alt="WSO2"
-                sx={{ height: BRAND_LOGO_HEIGHT, width: "auto", display: "block" }}
+      <Box
+        component="div"
+        className="kb-no-print"
+        sx={{
+          position: "sticky",
+          top: 0,
+          zIndex: (theme) => theme.zIndex.appBar,
+          bgcolor: "background.paper",
+          borderBottom: 1,
+          borderColor: "divider",
+        }}
+      >
+        <HeaderUI sx={{ width: "100%", maxWidth: "100%", bgcolor: "transparent", borderBottom: 0 }}>
+          <OxygenLink
+            component={Link}
+            to="/"
+            underline="none"
+            color="inherit"
+            aria-label="WSO2 Knowledge Base home"
+            sx={{ display: "inline-flex", flexShrink: 0 }}
+          >
+            <HeaderUI.Brand sx={{ flexShrink: 0, gap: { xs: 0.75, sm: 1, md: 1.5 } }}>
+              <HeaderUI.BrandLogo
+                sx={{ display: "flex", alignItems: "center", flexShrink: 0 }}
+              >
+                <Box
+                  component="img"
+                  key={logoSrc}
+                  src={logoSrc}
+                  alt="WSO2"
+                  sx={{ height: BRAND_LOGO_HEIGHT, width: "auto", display: "block" }}
+                />
+              </HeaderUI.BrandLogo>
+              <HeaderUI.BrandTitle
+                sx={{
+                  whiteSpace: "nowrap",
+                  lineHeight: 1.2,
+                  flexShrink: 0,
+                  fontSize: { xs: "0.8125rem", sm: "0.875rem" },
+                }}
+              >
+                Knowledge Base
+              </HeaderUI.BrandTitle>
+            </HeaderUI.Brand>
+          </OxygenLink>
+          <HeaderUI.Spacer />
+          {showHeaderSearch && (
+            <Box sx={{ width: { xs: 160, sm: 280, md: 360 }, mr: { xs: 1, sm: 2 } }}>
+              <SearchBox
+                key={pathname}
+                label="Search articles"
+                placeholder="Search articles"
+                onSearch={(q) => navigate(browseUrl({ q: normalizeSearchQuery(q) }))}
               />
-            </HeaderUI.BrandLogo>
-            <HeaderUI.BrandTitle
-              sx={{
-                whiteSpace: "nowrap",
-                lineHeight: 1.2,
-                flexShrink: 0,
-                fontSize: { xs: "0.8125rem", sm: "0.875rem" },
-              }}
-            >
-              Knowledge Base
-            </HeaderUI.BrandTitle>
-          </HeaderUI.Brand>
-        </OxygenLink>
-        <HeaderUI.Spacer />
-        <ColorSchemeToggle />
-      </HeaderUI>
+            </Box>
+          )}
+          <ColorSchemeToggle />
+        </HeaderUI>
+      </Box>
 
       <Box
         component="main"
@@ -153,47 +227,65 @@ export default function KBLayout(): JSX.Element {
         <Outlet />
       </Box>
 
+      <BackToTop targetId={MAIN_ID} />
+
       <Box
         component="footer"
-        sx={{ borderTop: 2, borderColor: "primary.main", mt: 8, py: 4 }}
+        className="kb-no-print"
+        sx={{ borderTop: 1, borderColor: "divider", mt: 10, py: 5, bgcolor: "background.paper" }}
       >
         <Container maxWidth="lg">
-          <Box
-            component="nav"
-            aria-label="Legal and support"
-            sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: 1, columnGap: { xs: 2.5, md: 4 } }}
+          <Stack
+            direction={{ xs: "column", md: "row" }}
+            spacing={{ xs: 3, md: 6 }}
+            justifyContent="space-between"
+            alignItems={{ xs: "flex-start", md: "center" }}
           >
-            <Typography variant="body2" color="text.secondary">
-              ©{new Date().getFullYear()} WSO2 LLC
-            </Typography>
+            <Stack spacing={0.5} sx={{ minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                WSO2 Knowledge Base
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Troubleshooting guides, how-tos and answers for WSO2 products.
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ pt: 1 }}>
+                ©{new Date().getFullYear()} WSO2 LLC
+              </Typography>
+            </Stack>
             <Box
-              component="ul"
-              sx={{
-                listStyle: "none",
-                m: 0,
-                p: 0,
-                display: "flex",
-                flexWrap: "wrap",
-                rowGap: 1,
-                columnGap: { xs: 2.5, md: 4 },
-              }}
+              component="nav"
+              aria-label="Legal and support"
+              sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", rowGap: 1, columnGap: { xs: 2.5, md: 4 } }}
             >
-              {FOOTER_LINKS.map((link) => (
-                <li key={link.href}>
-                  <OxygenLink
-                    href={link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    underline="hover"
-                    color="text.primary"
-                    variant="body2"
-                  >
-                    {link.label}
-                  </OxygenLink>
-                </li>
-              ))}
+              <Box
+                component="ul"
+                sx={{
+                  listStyle: "none",
+                  m: 0,
+                  p: 0,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  rowGap: 1,
+                  columnGap: { xs: 2.5, md: 4 },
+                }}
+              >
+                {FOOTER_LINKS.map((link) => (
+                  <li key={link.href}>
+                    <OxygenLink
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      underline="hover"
+                      color="text.secondary"
+                      variant="body2"
+                    >
+                      {link.label}
+                    </OxygenLink>
+                  </li>
+                ))}
+              </Box>
             </Box>
-          </Box>
+          </Stack>
         </Container>
       </Box>
     </Box>

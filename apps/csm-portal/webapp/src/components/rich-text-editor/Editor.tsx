@@ -510,6 +510,7 @@ const Editor = ({
   onBlur,
   overlayElement,
   onPasteError,
+  ariaRequired = false,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -535,6 +536,8 @@ const Editor = ({
   overlayElement?: ReactNode;
   /** Called when a pasted image is rejected — `"type"` for an unsupported format (e.g. SVG), `"size"` for exceeding the max paste size. */
   onPasteError?: (reason: "size" | "type") => void;
+  /** Tells assistive tech the field is mandatory (`aria-required` on the editable area). */
+  ariaRequired?: boolean;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -735,6 +738,7 @@ const Editor = ({
                 id={id}
                 className="editor-input"
                 data-testid="case-description-editor"
+                ariaRequired={ariaRequired || undefined}
               />
             }
             placeholder={

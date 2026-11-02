@@ -337,6 +337,21 @@ describe("CellPicker: adding a tag", () => {
     expect(await screen.findByRole("button", { name: "+ New tag" })).toBeInTheDocument();
   });
 
+  it("marks the short code and the name required, and refuses a tag without both", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    for (const name of ["Tag short code", "Tag name"]) {
+      const field = screen.getByRole("textbox", { name });
+      expect(field).toBeRequired();
+      expect(field.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    }
+    fireEvent.change(screen.getByLabelText("Tag short code"), { target: { value: "Trn" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("A short code and a name are both needed.");
+  });
+
   it("refuses a short code another tag already draws, without asking the server", () => {
     const onCreateKind = vi.fn(() => Promise.resolve());
     renderWithCreate(onCreateKind);

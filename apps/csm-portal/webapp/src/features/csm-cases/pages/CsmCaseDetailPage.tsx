@@ -115,8 +115,9 @@ import LinkCaseDialog, {
   type CaseLinkType,
 } from "@features/csm-cases/components/LinkCaseDialog";
 import SetFixEtaDialog, {
-  type FixEtaSavePayload,
+  type FixEtaDatesPayload,
 } from "@features/csm-cases/components/SetFixEtaDialog";
+import { fixEtaCommentTextToHtml } from "@features/csm-cases/utils/fixEtaComment";
 import RequestUpdateDialog, {
   type RequestUpdateSavePayload,
 } from "@features/csm-cases/components/RequestUpdateDialog";
@@ -130,9 +131,9 @@ import { useAddCaseTag, useRemoveCaseTag } from "@features/csm-cases/api/useCase
 import { useGetCsmCaseEscalations } from "@features/csm-cases/api/useGetCsmCaseEscalations";
 import { usePostCsmCaseEscalation } from "@features/csm-cases/api/usePostCsmCaseEscalation";
 import {
-  canDeescalate,
-  canEscalateFurther,
   isEscalationLevelUnset,
+  showDeescalateAction,
+  showEscalateAction,
 } from "@features/csm-cases/utils/escalationLevel";
 import { ChildCasesWidget } from "@features/csm-cases/components/ChildCasesWidget";
 import { LinkedServiceRequestsWidget } from "@features/csm-cases/components/LinkedServiceRequestsWidget";
@@ -182,7 +183,6 @@ import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContex
 import { replaceUuids } from "@utils/redactIds";
 import { formatUtcDateForDisplay } from "@utils/dateTime";
 import {
-  escapeHtml,
   isBlankHtml,
   isDescriptionEchoedInComment,
   stripHtmlTags,
@@ -365,44 +365,6 @@ const TAB_DEFS: Array<{
 const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
   (t) => !t.hidden,
 ).map((t) => t.id);
-
-/**
- * Composes the customer-visible comment posted for "Share fix ETA with
- * customer" — matches the real wording ServiceNow production's own "Share
- * Fix ETA" CWF action uses verbatim, so the comment reads identically
- * regardless of which data source actually posted it. Posted directly via
- * POST /cases/{id}/comments instead of ServiceNow's own addPublicComment
- * PATCH field, which works on every data source. Only the ETA fields
- * actually set are included, matching the dialog's own "all three
- * independently optional" behavior.
- */
-function buildFixEtaShareComment(fields: {
-  bestCaseFixEta?: string;
-  mostLikelyFixEta?: string;
-  worstCaseFixEta?: string;
-  product?: string;
-  publicTicket?: string;
-}): string {
-  // product/publicTicket are free-text form input that ends up in a
-  // customer-visible comment — escape before interpolating, same as any
-  // other user-entered text embedded in markup. The ETA dates are not user
-  // free-text (picker-produced "YYYY-MM-DD" strings) and need no escaping.
-  const lines: string[] = [];
-  if (fields.product) lines.push(`Product: ${escapeHtml(fields.product)}`);
-  if (fields.publicTicket) {
-    lines.push(`Public git issue: ${escapeHtml(fields.publicTicket)}`);
-  }
-  if (fields.bestCaseFixEta) {
-    lines.push(`Best Case Estimate: ${fields.bestCaseFixEta}`);
-  }
-  if (fields.mostLikelyFixEta) {
-    lines.push(`Most Likely Estimate: ${fields.mostLikelyFixEta}`);
-  }
-  if (fields.worstCaseFixEta) {
-    lines.push(`Worst Case Estimate: ${fields.worstCaseFixEta}`);
-  }
-  return `<p>ETA information for the fix will be as follows.</p><p>${lines.join("<br>")}</p>`;
-}
 
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
@@ -1476,7 +1438,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
       }
 
       // Set fix ETA opens the date/time picker; the PATCH happens in
-      // onSetFixEta once a value is confirmed.
+      // onSaveFixEtaDates once a value is confirmed.
       if (action.secondary === "set_fix_eta") {
         setFixEtaOpen(true);
         return;
@@ -1974,79 +1936,71 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [createTask, showError],
   );
 
-  const onSetFixEta = useCallback(
-    (patch: FixEtaSavePayload) => {
-      // Same stale-response guard as onRequestUpdate below: the page stays
-      // mounted when caseId changes and usePatchCsmCase doesn't cancel an
-      // in-flight PATCH, so this case's response can arrive while another
-      // case is on screen. Closing the dialog on a stale success would shut
-      // the *new* case's dialog and throw away whatever was typed into it.
+  // The dialog drives the two steps itself (save the estimates, then post the
+  // engineer's edited comment) so it can stay open with the text intact if the
+  // comment step fails. Each handler resolves/rejects for it and reports the
+  // outcome here; neither closes the dialog.
+  //
+  // Both guard their UI feedback with the same stale-response check as
+  // onRequestUpdate below: the page stays mounted when caseId changes and
+  // neither mutation is cancelled, so a response for this case can arrive
+  // while another case is on screen. The requests themselves still run.
+  const onSaveFixEtaDates = useCallback(
+    (patch: FixEtaDatesPayload): Promise<void> => {
       const submittedViewToken = caseViewTokenRef.current;
       const isStale = (): boolean => caseViewTokenRef.current !== submittedViewToken;
-
-      // The ETA save and the "share with customer" step are sent separately,
-      // not bundled into one PATCH: addPublicComment (ServiceNow's own way
-      // of doing the share) is ServiceNow-only, and the backend used to
-      // reject the *entire* request when it was present on another data
-      // source — silently blocking the ETA save too. The share step itself
-      // no longer goes through that field at all: it posts a real,
-      // customer-visible comment via POST /cases/{id}/comments instead,
-      // which works on every data source.
-      const { addPublicComment, product, publicTicket, ...etaOnly } = patch;
-
-      const shareWithCustomer = (): void => {
-        if (!addPublicComment || !caseId) return;
-        void postComment
-          .mutateAsync({
-            caseId,
-            bodyHtml: buildFixEtaShareComment({ ...etaOnly, product, publicTicket }),
-            authorName: engineerName,
-            internal: false,
-          })
-          .then(
-            () => {
-              if (isStale()) return;
+      return new Promise<void>((resolve, reject) => {
+        patchCase.mutate(patch as BeCaseUpdatePayload, {
+          onSuccess: () => {
+            if (!isStale()) {
               setFeedback({
-                message: "Fix ETA shared with the customer.",
+                message: "Fix ETA updated.",
                 severity: "success",
                 sticky: false,
               });
-            },
-            (err: unknown) => {
-              if (isStale()) return;
-              showError("Fix ETA saved, but could not share it with the customer.", err);
-            },
-          );
-      };
-
-      patchCase.mutate(etaOnly as BeCaseUpdatePayload, {
-        onSuccess: () => {
-          // The share request is a real side effect the engineer asked for —
-          // it must still run even if the case view has since gone stale
-          // (navigated away mid-request); only the UI feedback below is
-          // skipped for a stale view, same as every other guarded callback
-          // on this page.
-          if (!isStale()) {
-            // Close on success, same as every other dialog on this page. The
-            // PATCH lands either way, so leaving it open reads as a failed
-            // save and invites a second submit of an estimate that's
-            // already stored.
-            setFixEtaOpen(false);
-            setFeedback({
-              message: "Fix ETA updated.",
-              severity: "success",
-              sticky: false,
-            });
-          }
-          shareWithCustomer();
-        },
-        onError: (err) => {
-          if (isStale()) return;
-          showError("Could not set the fix ETA.", err);
-        },
+            }
+            resolve();
+          },
+          onError: (err) => {
+            if (!isStale()) showError("Could not set the fix ETA.", err);
+            reject(err);
+          },
+        });
       });
     },
-    [patchCase, postComment, caseId, engineerName, showError],
+    [patchCase, showError],
+  );
+
+  const onPostFixEtaComment = useCallback(
+    async (commentText: string): Promise<void> => {
+      if (!caseId) return;
+      const submittedViewToken = caseViewTokenRef.current;
+      const isStale = (): boolean => caseViewTokenRef.current !== submittedViewToken;
+      try {
+        // A real, customer-visible comment (POST /cases/{id}/comments), the
+        // same endpoint as the public-reply composer, so it behaves the same on
+        // every data source.
+        await postComment.mutateAsync({
+          caseId,
+          bodyHtml: fixEtaCommentTextToHtml(commentText),
+          authorName: engineerName,
+          internal: false,
+        });
+      } catch (err) {
+        if (!isStale()) {
+          showError("Fix ETA saved, but could not share it with the customer.", err);
+        }
+        throw err;
+      }
+      if (!isStale()) {
+        setFeedback({
+          message: "Fix ETA shared with the customer.",
+          severity: "success",
+          sticky: false,
+        });
+      }
+    },
+    [postComment, caseId, engineerName, showError],
   );
 
   const onRequestUpdate = useCallback(
@@ -3071,14 +3025,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
               // Visibility is level-eligibility only -- isClosed disables
               // via actionDisabledReason below instead of hiding the button,
               // so its tooltip still has something to anchor to.
-              canEscalate && canEscalateFurther(c.escalationLevel)
+              showEscalateAction(canEscalate, c.escalationLevel)
                 ? () => setEscalationDialogAction("ESCALATE")
                 : undefined
             }
             onDeescalate={
-              canEscalate &&
-              canDeescalate(c.escalationLevel) &&
-              callerIsCaseTeamLead
+              // Team-lead only, no portal role needed: the backend
+              // authorizes a de-escalation on lead membership alone.
+              showDeescalateAction(callerIsCaseTeamLead, c.escalationLevel)
                 ? () => setEscalationDialogAction("DEESCALATE")
                 : undefined
             }
@@ -3446,7 +3400,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
           currentWorstCaseFixEta={c.worstCaseFixEta}
           isSaving={patchCase.isPending}
           onClose={() => setFixEtaOpen(false)}
-          onSave={onSetFixEta}
+          onSaveDates={onSaveFixEtaDates}
+          onPostComment={onPostFixEtaComment}
         />
       )}
 

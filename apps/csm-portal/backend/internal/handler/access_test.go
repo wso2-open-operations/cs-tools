@@ -710,7 +710,7 @@ func rolesOutsideCustomerHealthAudience() []string {
 
 // TestAccessGuard_CustomerHealthDoesNotWidenTheRestOfViewerAccess guards the
 // other direction: giving cs_engineer/admin the Customer Health dashboard must
-// not hand them the rest of the viewer-audience routes (User Scan, the Time
+// not hand them the rest of the viewer-audience routes (the Time
 // report, the account escalation list, Drive files), which stay Viewer-only.
 func TestAccessGuard_CustomerHealthDoesNotWidenTheRestOfViewerAccess(t *testing.T) {
 	g := NewAccessGuard(testAccessConfig())

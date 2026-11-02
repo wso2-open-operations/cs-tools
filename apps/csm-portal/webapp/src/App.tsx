@@ -78,6 +78,12 @@ import IncidentTaskDetailPage from "@features/csm-operations/pages/IncidentTaskD
 import CreateProblemPage from "@features/csm-operations/pages/CreateProblemPage";
 import OutageDetailPage from "@features/csm-operations/pages/OutageDetailPage";
 import CreateOutagePage from "@features/csm-operations/pages/CreateOutagePage";
+import StandardChangeTemplateDetailPage from "@features/csm-operations/pages/StandardChangeTemplateDetailPage";
+import StandardChangeProposalPage from "@features/csm-operations/pages/StandardChangeProposalPage";
+import {
+  OperationsIndexRedirect,
+  StandardChangesPathRedirect,
+} from "@features/csm-operations/pages/OperationsLegacyRedirects";
 import CsmAdminLayout from "@features/csm-admin/pages/CsmAdminLayout";
 import CsmUserManagementLandingPage from "@features/csm-admin/pages/CsmUserManagementLandingPage";
 import CsmUsersPage from "@features/csm-users/pages/CsmUsersPage";
@@ -121,7 +127,7 @@ import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticle
 import CsmKBArticleHistoryDetailPage from "@features/csm-kb-articles/pages/CsmKBArticleHistoryDetailPage";
 import CsmKBReviewQueuePage from "@features/csm-kb-articles/pages/CsmKBReviewQueuePage";
 import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
-// The four pages below (Time project report, User Scan, Usage Metrics,
+// The three pages below (Time project report, Usage Metrics,
 // Customer Health) have no modern/entity-service-backed equivalent.
 // Relocated out of the former "sales-sa"/"Support Portal Lite" tree (now
 // deleted); routing/audience-gating for each is isSplAudience, except Usage
@@ -129,7 +135,6 @@ import CsmKBAdminPage from "@features/csm-kb-articles/pages/CsmKBAdminPage";
 // see each flag's own doc comment.
 import SlaReportUpcomingPage from "@features/csm-reports/pages/SlaReportUpcomingPage";
 import TimelogsReportPage from "@features/csm-reports/pages/TimelogsReportPage";
-import UserScanPage from "@features/csm-user-scan/pages/UserScanPage";
 import UsageMetricsPage from "@features/csm-usage-metrics/pages/UsageMetricsPage";
 import CustomerHealthDashboardPage from "@features/csm-customer-health/pages/CustomerHealthDashboardPage";
 import CustomerHealthDetailPage from "@features/csm-customer-health/pages/CustomerHealthDetailPage";
@@ -515,14 +520,13 @@ export default function App(): JSX.Element {
                       an OLD `?tab=` link (this section's shape before this
                       change): `LegacyQueryTabRedirect` translates it to the
                       new path form, or lands on the first usable tab if
-                      there's no `?tab=` at all. */}
+                      there's no `?tab=` at all. An old link to the
+                      standard changes tab (`?tab=standard_changes`, or the
+                      `/operations/standard-changes` path) lands on
+                      Standard changes inside Change requests
+                      (`OperationsLegacyRedirects`). */}
                   <Route path="operations">
-                    <Route
-                      index
-                      element={
-                        <LegacyQueryTabRedirect sectionId="operations" basePath="/operations" />
-                      }
-                    />
+                    <Route index element={<OperationsIndexRedirect />} />
                     <Route path=":tab" element={<OperationsPage />} />
                     <Route
                       path="service-requests/new"
@@ -579,6 +583,9 @@ export default function App(): JSX.Element {
                       }
                     />
                     <Route path="outages/:id" element={<OutageDetailPage />} />
+                    <Route path="standard-changes" element={<StandardChangesPathRedirect />} />
+                    <Route path="standard-changes/:id" element={<StandardChangeTemplateDetailPage />} />
+                    <Route path="standard-change-proposals/:id" element={<StandardChangeProposalPage />} />
                   </Route>
 
                   <Route path="engagements" element={<CsmEngagementsPage />} />
@@ -664,21 +671,8 @@ export default function App(): JSX.Element {
                     <Route path="admin" element={<CsmKBAdminPage />} />
                   </Route>
 
-                  {/* The following sections have no modern/entity-service-backed
-                      equivalent and so stay limited to their original
-                      audience (a caller holding the viewer role) via
-                      isSplAudience — see that flag's own doc comment. They
-                      used to live under the separate "/spl" prefix/app
-                      (former standalone apps/support-portal-lite/webapp);
-                      that split is gone, so these mount as normal routes
-                      like everything else, enforced the normal way: a hidden
-                      nav entry (csmNavItems.ts's `requires`) plus the page
-                      itself failing closed should it ever be reached
-                      directly. */}
-                  <Route path="user-scan" element={<UserScanPage />} />
-
-                  {/* Usage Metrics and Customer Health are the exceptions: NOT
-                      limited to isSplAudience. Usage Metrics also goes to
+                  {/* Usage Metrics and Customer Health are gated by their own
+                      flags, not isSplAudience. Usage Metrics also goes to
                       cs_engineer/admin and the dedicated usage_metrics_viewer
                       role (canViewUsageMetrics); Customer Health to
                       cs_engineer/admin as well as viewer

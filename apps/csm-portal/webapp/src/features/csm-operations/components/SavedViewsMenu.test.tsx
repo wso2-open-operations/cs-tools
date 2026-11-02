@@ -225,6 +225,18 @@ describe("SavedViewsMenu", () => {
     );
   });
 
+  it("marks View name required (Save stays disabled while it is blank) and Filter link optional", () => {
+    renderMenu();
+    fireEvent.click(screen.getByRole("button", { name: /saved views/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /save current view/i }));
+
+    expect(screen.getByRole("textbox", { name: /^view name$/i })).toBeRequired();
+    expect(screen.getByRole("textbox", { name: /^filter link$/i })).not.toBeRequired();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /^view name$/i }), { target: { value: "   " } });
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+  });
+
   it("saves a pasted filter link instead of the filters on screen", async () => {
     renderMenu({ currentQs: "q=hello" });
     fireEvent.click(screen.getByRole("button", { name: /saved views/i }));

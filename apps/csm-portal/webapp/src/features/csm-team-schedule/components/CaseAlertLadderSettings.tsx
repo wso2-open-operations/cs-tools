@@ -17,6 +17,7 @@
  */
 
 import { useId, useRef, useState, type FormEvent, type JSX, type ReactNode, type RefObject } from "react";
+import RequiredMark from "@components/RequiredMark";
 import { familyOfLadder } from "../utils/caseAlertChainSettings";
 import { useCaseAlertDrafts, type DraftChange } from "../utils/caseAlertDrafts";
 import type {
@@ -37,6 +38,7 @@ import {
   formatLadderValue,
   ladderKeysByName,
   ladderKeysFor,
+  ladderValueRequired,
   limitHint,
   parseDraft,
   sameLadderValue,
@@ -759,14 +761,20 @@ interface EditorProps {
   errors?: Record<string, string>;
 }
 
-/** The editor for one key, by the kind of value it takes. */
+/** The editor for one key, by the kind of value it takes. Each caption sits in
+ *  a span so its asterisk stays beside it in the label's flex column. */
 function Editor({ spec, draft, onChange, teamRows, errors }: EditorProps): JSX.Element {
   const ids = useId();
+  const required = ladderValueRequired(spec);
   const text = (type: "text" | "number" | "email" = "text") => (
     <label>
-      {spec.inputLabel ?? "New value"}
+      <span>
+        {spec.inputLabel ?? "New value"}
+        {required ? <RequiredMark /> : null}
+      </span>
       <input
         type={type}
+        required={required}
         min={type === "number" ? spec.min : undefined}
         max={type === "number" ? spec.max : undefined}
         value={draft.text}
@@ -792,8 +800,11 @@ function Editor({ spec, draft, onChange, teamRows, errors }: EditorProps): JSX.E
     case "enum":
       return (
         <label>
-          New value
-          <select value={draft.text} onChange={(e) => onChange({ ...draft, text: e.target.value })}>
+          <span>
+            New value
+            <RequiredMark />
+          </span>
+          <select required value={draft.text} onChange={(e) => onChange({ ...draft, text: e.target.value })}>
             {(spec.options ?? []).map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -850,12 +861,23 @@ function Editor({ spec, draft, onChange, teamRows, errors }: EditorProps): JSX.E
       return (
         <>
           <label>
-            Name
-            <input value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
+            <span>
+              Name
+              <RequiredMark />
+            </span>
+            <input required value={draft.name} onChange={(e) => onChange({ ...draft, name: e.target.value })} />
           </label>
           <label>
-            Email
-            <input type="email" value={draft.email} onChange={(e) => onChange({ ...draft, email: e.target.value })} />
+            <span>
+              Email
+              <RequiredMark />
+            </span>
+            <input
+              type="email"
+              required
+              value={draft.email}
+              onChange={(e) => onChange({ ...draft, email: e.target.value })}
+            />
           </label>
         </>
       );

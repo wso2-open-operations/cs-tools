@@ -124,10 +124,11 @@ const APPROVED_STATES: readonly ChangeRequestState[] = [
 ];
 
 /** Why an approved change request's fields can no longer be edited, or null while they can. The entity service refuses
- * the edit itself (400 `change_request_approved_read_only`); this only keeps the Edit button from offering it. */
+ * the edit itself (400 `change_request_approved_read_only`); this only keeps the Edit button from offering it. Worded
+ * without naming the CAB: a Standard change is approved by Request Approval, with no CAB stage. */
 export function changeRequestApprovedReadOnlyReason(state: ChangeRequestState | null | undefined): string | null {
   return state && APPROVED_STATES.includes(state)
-    ? "CAB approval has been received, so this change request's fields are read-only. Work notes can still be added."
+    ? "This change request has been approved, so its fields are read-only. Work notes can still be added."
     : null;
 }
 

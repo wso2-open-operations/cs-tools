@@ -16,6 +16,7 @@
 
 import {
   Building,
+  ClipboardCheck,
   File,
   FolderOpen,
   GitPullRequest,
@@ -39,6 +40,7 @@ export const KIND_LABEL: Record<RecentViewKind, string> = {
   change_request: "Change requests",
   problem: "Problems",
   outage: "Outages",
+  standard_change: "Standard changes",
 };
 
 /** Stable display order for kind groups. */
@@ -49,6 +51,7 @@ export const KIND_ORDER: RecentViewKind[] = [
   "account",
   "incident",
   "change_request",
+  "standard_change",
   "problem",
   "outage",
   "page",
@@ -74,5 +77,7 @@ export function kindIcon(kind: RecentViewKind, size = 16): JSX.Element {
       return <Wrench size={size} />;
     case "outage":
       return <Megaphone size={size} />;
+    case "standard_change":
+      return <ClipboardCheck size={size} />;
   }
 }

@@ -295,9 +295,10 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 
 // callerIsCaseTeamLead reports whether the caller is one of the case's ABT
 // team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it.
-// Escalating is open to any internal engineer (PermEscalate); only
-// de-escalation is gated this way.
+// account's CRE team) -- the only people authorized to de-escalate it. Being
+// the lead is sufficient: no escalation-capable portal role is needed, and
+// holding one (PermEscalate) does not substitute for it. Escalating is the
+// reverse: it needs PermEscalate and ignores team leadership.
 //
 // Fails closed (returns false) on any lookup/parse error or when the case's
 // team has no lead. Matches by the caller's platform user id first (GET
@@ -1852,15 +1853,24 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
+	// The route only requires PermView; the rule that depends on the body's
+	// action is enforced here. ESCALATE needs PermEscalate (a nil guard
+	// denies). DEESCALATE needs the caller to be one of the case's team
+	// leads and nothing else: a lead with no escalation role passes, a
+	// non-lead holding PermEscalate does not.
+	if action == "DEESCALATE" {
+		if !h.callerIsCaseTeamLead(r, caseID, user) {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+	} else if h.access == nil || !h.access.Permits(PermEscalate, user.Roles) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
-	// This route's permission (PermEscalate) is also held by roles that
-	// never write anything else here (escalator), so a caller reaching this
-	// point may have no "user" row yet. See ensureUserProvisioned's own doc
-	// comment.
+	// A caller reaching this point may have no "user" row yet: a team lead
+	// needs no portal role beyond view, and escalator-only callers never
+	// write anything else here. See ensureUserProvisioned's own doc comment.
 	ensureUserProvisioned(r.Context(), h.entity, user)
 
 	result, err := h.entity.CreateCaseEscalation(r.Context(), caseID, body)

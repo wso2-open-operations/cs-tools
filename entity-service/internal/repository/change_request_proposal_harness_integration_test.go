@@ -138,7 +138,11 @@ const crSyncStamp = "sn-sync"
 
 // syncWritesConversationAs is syncWritesConversation by the named writer (a WSO2 user in the
 // previous system, mirrored by the sync): the work_item is stamped with them first, as the sync
-// stamps it, so they are the change's last writer -- the only thing that names a proposer.
+// stamps it, so they are the change's last writer. The record of who proposed a time (0249) is
+// not written by this helper (migration 0250's trigger may record the previous writer when a
+// legacy time was already waiting, which the conversation write then moves off): on a row that
+// has none this is the LEGACY shape (a time stored before 0249), whose proposer is the last
+// writer; on a row that has one, the record stays about the time it was written for.
 func (f *crFlow) syncWritesConversationAs(id, writer string, on *string, confirmation string) {
 	f.t.Helper()
 	f.execSQL(`UPDATE work_item SET updated_by = $2 WHERE id = $1`, id, writer)
@@ -147,12 +151,38 @@ func (f *crFlow) syncWritesConversationAs(id, writer string, on *string, confirm
 
 // customerWroteProposal leaves the change request as the proposal of the start on by the
 // registered contact userID would -- for a date the API itself refuses (in the past, out of
-// range), which the tests need on a change whose proposer is recorded: the contact is the last
-// writer, as the API leaves it after a proposal, and the date is written afterwards.
+// range), which the tests need on a change whose proposer is recorded: the date and the record
+// of who proposed it in one write, and the contact as the last writer, as the API leaves them.
 func (f *crFlow) customerWroteProposal(id, userID, on string) {
 	f.t.Helper()
 	f.execSQL(`UPDATE work_item SET updated_by = $2 WHERE id = $1`, id, crFlowEmail(userID))
-	f.syncWritesConversation(id, sp(on), "")
+	f.execSQL(`UPDATE change_request SET customer_updated_on = $2::text::timestamptz, customer_updated_date_confirmation = NULL,
+	                  customer_proposed_by_user_id = $3::uuid, customer_proposed_for = $2::text::timestamptz, customer_proposed_on = now()
+	           WHERE id = $1`, id, on, userID)
+}
+
+// proposalRecord reads the record of who proposed the stored time (migration 0249) straight from
+// the table: the contact's user id ("" when none), the time it is for (RFC 3339 UTC, "" when NULL)
+// and whether it says when.
+func (f *crFlow) proposalRecord(id string) (by, forOn string, hasOn bool) {
+	f.t.Helper()
+	if err := f.scoped.QueryRow(f.sys, `
+		SELECT COALESCE(customer_proposed_by_user_id::text, ''),
+		       COALESCE(to_char(customer_proposed_for AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), ''),
+		       customer_proposed_on IS NOT NULL
+		FROM change_request WHERE id = $1`, id).Scan(&by, &forOn, &hasOn); err != nil {
+		f.t.Fatalf("read the proposal record: %v", err)
+	}
+	return by, forOn, hasOn
+}
+
+// wantProposalRecord asserts the record names userID ("" = nobody) for the time forOn ("" = NULL).
+func (f *crFlow) wantProposalRecord(id, when, userID, forOn string) {
+	f.t.Helper()
+	by, gotFor, hasOn := f.proposalRecord(id)
+	if by != userID || gotFor != forOn || hasOn != (userID != "") {
+		f.t.Fatalf("proposal record %s = by %q for %q (on set: %v), want by %q for %q", when, by, gotFor, hasOn, userID, forOn)
+	}
 }
 
 // onlyTheProposerIsLeft makes the change one nobody can be asked about, while the registered
@@ -251,17 +281,22 @@ func (f *crFlow) counter(id string, start, end *string) error {
 }
 
 // snap renders everything an act must leave consistent when it is refused: the
-// state, the window, both conversation columns, the hold, the last writer, every
-// stage with each approver's state.
+// state, the window, both conversation columns, the record of who proposed the time,
+// the hold, the last writer, every stage with each approver's state.
 func (f *crFlow) snap(id string) string {
 	f.t.Helper()
 	cr := f.get(id)
 	on, conf := f.conversation(id)
 	alias := map[string]string{crScopeUserA1: "alice", crScopeUserA2: "bob"}
+	recBy, recFor, recOn := f.proposalRecord(id)
+	if a, ok := alias[recBy]; ok {
+		recBy = a
+	}
 	var parts []string
 	parts = append(parts, f.state(id))
 	parts = append(parts, fmt.Sprintf("window=%v..%v", derefStr(cr.PlannedStartOn), derefStr(cr.PlannedEndOn)))
 	parts = append(parts, fmt.Sprintf("proposal=%q answer=%q", on, conf))
+	parts = append(parts, fmt.Sprintf("record=%q for %q on=%v", recBy, recFor, recOn))
 	parts = append(parts, fmt.Sprintf("hold=%v", cr.OnHold != nil && *cr.OnHold))
 	parts = append(parts, "by="+f.updatedBy(id))
 	for _, st := range f.stages(id) {

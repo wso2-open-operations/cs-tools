@@ -31,10 +31,11 @@ import (
 // approved (CAB approval received -- or, for a Standard change, which is
 // pre-approved and has no CAB stage, Request Approval having scheduled it), what
 // was approved is what gets implemented, so none of its fields can be changed any
-// more. Work notes (and the customer-visible comment) can still be added, and the
-// lifecycle still moves: state changes, on hold, a Re-schedule out of Customer
-// Approval (the customer is asked about the new time) and WSO2's answer to a time
-// the customer proposed are not edits of the approved content.
+// more. Work notes (and the customer-visible comment) can still be added, the
+// deviation from the implementation plan can still be recorded from Implement on
+// (below), and the lifecycle still moves: state changes, on hold, a Re-schedule
+// out of Customer Approval (the customer is asked about the new time) and WSO2's
+// answer to a time the customer proposed are not edits of the approved content.
 //
 // Like the customer requirements lock it is a pure function of the stored state
 // (no marker, no column): the states below are only ever reached through an
@@ -49,6 +50,11 @@ import (
 // least as strict: the Customer Project and the type are frozen from Request
 // Approval on (change_request_customer_lock.go), and the deployments and
 // deployment products by changeRequestLinksLockedStates, which holds these states.
+// The one exception, on purpose, is the deviation from the implementation plan: it
+// records what the implementation did, not what was approved, so it is outside
+// this lock and has a rule of its own (change_request_deviation.go): recordable in
+// implement, review and customer_review, and final once the change is closed,
+// canceled or rolled back.
 
 // changeRequestApprovedStates are the (upper-case) states a change request is in
 // only once it has been approved to proceed.
@@ -69,10 +75,19 @@ func changeRequestContentApproved(state string) bool {
 }
 
 // approvedContentLockedMsg is the 400 for a PATCH that changes the named fields of
-// an approved change request.
+// an approved change request. It says what is still possible: work notes, and,
+// from Implement on until the change is closed, canceled or rolled back, the
+// deviation from the implementation plan (change_request_deviation.go): in
+// implement, review and customer_review. In customer_approval and scheduled
+// implementation has not started yet, and closed and rollback are final, so there
+// only work notes can be added.
 func approvedContentLockedMsg(fields []string, state string) string {
-	return fmt.Sprintf("%s can no longer be changed: the change request has been approved (current state: %s), so its fields are read-only; only work notes can be added",
-		strings.Join(fields, ", "), lockStateName(state))
+	still := "only work notes can be added"
+	if deviationRecordableState(state) {
+		still = "only work notes and the deviation from the implementation plan can be added"
+	}
+	return fmt.Sprintf("%s can no longer be changed: the change request has been approved (current state: %s), so its fields are read-only; %s",
+		strings.Join(fields, ", "), lockStateName(state), still)
 }
 
 // approvedLockField is one field of a PATCH the lock judges: the API name, a SQL

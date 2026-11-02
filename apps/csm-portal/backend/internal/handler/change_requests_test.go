@@ -128,6 +128,25 @@ func TestCreateChangeRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("forwards a clone's implementationDeviation unchanged", func(t *testing.T) {
+		const reqPayload = `{"subject":"Deploy v2","type":"normal","implementationDeviation":"<p>Ran the migration in two batches.</p>"}`
+		var capturedBody []byte
+		client := &mockEntityChangeRequestClient{
+			createChangeRequestFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"message":"Change request created.","changeRequest":{"id":"` + testCRID + `"}}`), nil
+			},
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).CreateChangeRequest(w, r)
+
+		assertStatus(t, w, http.StatusCreated)
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		// Create uses mapUpstreamError (like PATCH), not the Generic variant: the
 		// entity service's 400 explains why a project / deployments /
@@ -750,6 +769,33 @@ func TestUpstreamErrorCodesPassThrough(t *testing.T) {
 		body := assertErrorBodyKeys(t, w)
 		if body["message"] != refusal || body["errorCode"] != "change_request_proposer_not_recorded" {
 			t.Errorf("body = %v", body)
+		}
+	})
+	t.Run("PATCH: the deviation's refusals keep their words and their own codes, and the field is forwarded", func(t *testing.T) {
+		const deviation = `{"implementationDeviation":"<p>Ran the migration in two batches.</p>"}`
+		for code, refusal := range map[string]string{
+			"change_request_deviation_not_yet":          "implementationDeviation cannot be changed yet: the deviation from the implementation plan can be recorded once implementation has started (current state: scheduled)",
+			"change_request_deviation_final":            "implementationDeviation can no longer be changed: the change request is closed, so its record is final",
+			"change_request_deviation_not_incorporated": "approval cannot be requested until the deviation from the implementation plan carried over from the cloned change request has been folded into the implementation plan and cleared",
+		} {
+			var forwarded []byte
+			client := &mockEntityChangeRequestClient{
+				patchChangeRequestFn: func(_ context.Context, _ string, body []byte) ([]byte, error) {
+					forwarded = body
+					return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: envelope(400, refusal, `"`+code+`"`)}
+				},
+			}
+			r := withUser(httptest.NewRequest(http.MethodPatch, "/change-requests/"+testCRID, strings.NewReader(deviation)))
+			r.SetPathValue("id", testCRID)
+			w := httptest.NewRecorder()
+			NewChangeRequestHandler(client).PatchChangeRequest(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+			if string(forwarded) != deviation {
+				t.Errorf("%s: upstream received %q, want %q", code, forwarded, deviation)
+			}
+			if body := assertErrorBodyKeys(t, w); body["message"] != refusal || body["errorCode"] != code {
+				t.Errorf("%s: body = %v", code, body)
+			}
 		}
 	})
 	t.Run("PATCH: a 403 keeps the fixed message and the code", func(t *testing.T) {

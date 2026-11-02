@@ -81,7 +81,7 @@ func acResolved(t *testing.T, pool *pgxpool.Pool, daysAgo int, nullResolvedOn bo
 	}
 	id := resp.Incident.ID
 	state, code, notes, resolver := "RESOLVED", "SOLVED_PERMANENTLY", "fixed", icEngineerID
-	if err := repo.UpdateIncidentLifecycle(acCtx(), id, repository.IncidentLifecycleUpdate{
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), id, repository.IncidentLifecycleUpdate{
 		State: &state, ResolutionCode: &code, ResolutionNotes: &notes, ResolvedByID: &resolver,
 	}, "ic-engineer@test.local"); err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -314,7 +314,7 @@ func TestIncidentManualClose_RecordsClosedOnAndBy(t *testing.T) {
 	inc := acResolved(t, pool, 1, false)
 
 	closedState, actor := "CLOSED", acActorID
-	if err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState, DefaultResolvedByID: &actor}, "ic-caller@test.local"); err != nil {
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState, DefaultResolvedByID: &actor}, "ic-caller@test.local"); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	first := acRead(t, pool, inc)
@@ -327,7 +327,7 @@ func TestIncidentManualClose_RecordsClosedOnAndBy(t *testing.T) {
 	}
 
 	reopen := "IN_PROGRESS"
-	if err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &reopen}, "ic-caller@test.local"); err != nil {
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &reopen}, "ic-caller@test.local"); err != nil {
 		t.Fatalf("re-open: %v", err)
 	}
 	if r := acRead(t, pool, inc); r.closedOn == nil || !r.closedOn.Equal(*first.closedOn) || deref(r.closedBy) != acActorID {
@@ -335,7 +335,7 @@ func TestIncidentManualClose_RecordsClosedOnAndBy(t *testing.T) {
 	}
 
 	// Closing again with nobody to attribute it to.
-	if err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState}, "system-m2m@wso2.com"); err != nil {
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState}, "system-m2m@wso2.com"); err != nil {
 		t.Fatalf("close again: %v", err)
 	}
 	if r := acRead(t, pool, inc); r.closedOn == nil || r.closedBy != nil {
@@ -344,7 +344,7 @@ func TestIncidentManualClose_RecordsClosedOnAndBy(t *testing.T) {
 
 	// A save of an already-closed incident is not a new close.
 	stamped := acRead(t, pool, inc).closedOn
-	if err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState, DefaultResolvedByID: &actor}, "ic-caller@test.local"); err != nil {
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState, DefaultResolvedByID: &actor}, "ic-caller@test.local"); err != nil {
 		t.Fatalf("resend close: %v", err)
 	}
 	if r := acRead(t, pool, inc); !r.closedOn.Equal(*stamped) || r.closedBy != nil {

@@ -26,6 +26,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { useMemo, useState, type JSX } from "react";
 import type { BeSubscriptionType } from "@api/backend/types";
+import RequiredMark from "@components/RequiredMark";
 import EditorWithSourceToggle from "@components/rich-text-editor/EditorWithSourceToggle";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { DRY_RUN_TAG_LABEL, useAnnouncementDryRun } from "@features/csm-announcements/api/useAnnouncementDryRun";
@@ -41,6 +42,7 @@ import AudienceScopeControls, {
 import ResolvedAudienceList from "@features/csm-announcements/components/ResolvedAudienceList";
 import type { CustomerAudienceDefinition } from "@features/csm-announcements/types/announcementRequests";
 import { useNavTransition } from "@hooks/useNavTransition";
+import { hasVisibleContent } from "@utils/sanitizeHtml";
 
 /**
  * The two default exclusions offered for the "all customer projects" scope,
@@ -62,11 +64,6 @@ const CLOSED_STATES: string[] = ["Restricted", "Suspended"];
  * vocabulary on the backend.
  */
 export const SECURITY_ANNOUNCEMENT_TAG_LABEL = "Security Announcement";
-
-/** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
-function isEmptyHtml(html: string): boolean {
-  return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length === 0;
-}
 
 const PENDING_TARGET = "/announcements?tab=pending";
 
@@ -163,7 +160,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
     [scope, projectIds, excludeClosedStates, excludeCloudTypes],
   );
 
-  const canSaveDraft = subject.trim().length > 0 && !isEmptyHtml(description) && !busy;
+  const canSaveDraft = subject.trim().length > 0 && hasVisibleContent(description) && !busy;
 
   const canSubmitForApproval =
     canRunDryRun &&
@@ -319,6 +316,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
             sx={{ display: "block", mb: 0.5 }}
           >
             Description
+            <RequiredMark />
           </Typography>
           {/* Editor doesn't accept an `id`, so associate the label by wrapping
               the editor in a labelled group for assistive tech. */}
@@ -332,6 +330,7 @@ export default function CreateCustomerAnnouncementForm(): JSX.Element {
               maxHeight={420}
               toolbarVariant="full"
               disabled={busy}
+              ariaRequired
             />
           </Box>
         </Grid>

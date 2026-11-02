@@ -51,7 +51,7 @@ describe("feature visibility by portal access", () => {
   // comment_updater), which a plain viewer holds none of. Usage Metrics is
   // also hidden: canViewUsageMetrics needs full access or
   // usage_metrics_viewer, which a plain viewer holds neither of (reported
-  // live). User Scan (isSplAudience) stays visible. Customer Health is not a
+  // live). Customer Health is not a
   // top-level section for a plain viewer: it moves under the Customers
   // dropdown (showCustomerHealthUnderCustomers), see the describe block below.
   //
@@ -82,7 +82,6 @@ describe("feature visibility by portal access", () => {
       "allocations",
       "announcements",
       "customers",
-      "user-scan",
       "help",
     ]);
   });
@@ -90,7 +89,7 @@ describe("feature visibility by portal access", () => {
   // Customer Health is for the viewer role AND for cs_engineer/admin
   // (canViewCustomerHealth); Usage Metrics for cs_engineer/admin and
   // usage_metrics_viewer. Both sit together at the end of the sidebar, above
-  // User Scan (viewer-only), Settings and Help.
+  // Settings and Help.
   it("shows Customer Health and Usage Metrics to a CS engineer, at the end of the sidebar above Settings and Help", () => {
     expect(visibleNavSections(csEngineer).map((s) => s.id).slice(-4)).toEqual([
       "customer-health",
@@ -103,20 +102,17 @@ describe("feature visibility by portal access", () => {
     expect(featureStateForPath("/usage-metrics", csEngineer)).toBe("enabled");
   });
 
-  it("puts Customer Health and Usage Metrics above User Scan and Help for a CS engineer who also holds viewer", () => {
+  it("puts Customer Health and Usage Metrics above Settings and Help for a CS engineer who also holds viewer", () => {
     const both = getPortalAccess(["cs_engineer", "viewer"]);
-    expect(visibleNavSections(both).map((s) => s.id).slice(-5)).toEqual([
+    expect(visibleNavSections(both).map((s) => s.id).slice(-4)).toEqual([
       "customer-health",
       "usage-metrics",
-      "user-scan",
       "admin",
       "help",
     ]);
   });
 
-  it("keeps User Scan viewer-only while Customer Health also opens to a CS engineer", () => {
-    expect(visibleNavSections(csEngineer).map((s) => s.id)).not.toContain("user-scan");
-    expect(featureStateForPath("/user-scan", csEngineer)).toBe("hidden");
+  it("opens Customer Health to a CS engineer without the viewer role", () => {
     // Roles that hold neither viewer nor full access still do not see it.
     for (const role of ["escalator", "attachment_downloader", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "security_team"]) {
       const access = getPortalAccess([role]);

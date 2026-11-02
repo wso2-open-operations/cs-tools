@@ -64,8 +64,21 @@ vi.mock("@features/csm-cases/api/useDeployedProductOptions", () => ({
   }),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="Description body" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="Description body"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 vi.mock("@components/attachments/AttachmentsField", () => ({ default: () => null }));
@@ -177,6 +190,15 @@ function renderPrefilledForm(): void {
   render(<CsmCaseCreatePage />);
   fireEvent.change(screen.getByLabelText("Description body"), { target: { value: "<p>Help</p>" } });
 }
+
+describe("CsmCaseCreatePage required Description", () => {
+  it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
+    render(<CsmCaseCreatePage />);
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("Description body")).toHaveAttribute("aria-required", "true");
+  });
+});
 
 describe("CsmCaseCreatePage watch list", () => {
   it("pre-fills with the project's registered eligible contacts when a project is selected", () => {

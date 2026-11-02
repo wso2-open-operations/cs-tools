@@ -1370,54 +1370,6 @@ func (m *mockEntityTaskClient) UpdateTask(ctx context.Context, id string, body [
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
 }
 
-// ----- mock sales entity / entity-service scan clients (user_scan.go) -----
-
-type mockSalesEntityClient struct {
-	getContactByEmailFn    func(ctx context.Context, email string) (*entity.Contact, error)
-	getSubscriptionByKeyFn func(ctx context.Context, subscriptionKey string) (*entity.Subscription, error)
-}
-
-func (m *mockSalesEntityClient) GetContactByEmail(ctx context.Context, email string) (*entity.Contact, error) {
-	if m.getContactByEmailFn != nil {
-		return m.getContactByEmailFn(ctx, email)
-	}
-	return nil, nil
-}
-
-func (m *mockSalesEntityClient) GetSubscriptionByKey(ctx context.Context, subscriptionKey string) (*entity.Subscription, error) {
-	if m.getSubscriptionByKeyFn != nil {
-		return m.getSubscriptionByKeyFn(ctx, subscriptionKey)
-	}
-	return nil, nil
-}
-
-type mockEntityScanClient struct {
-	searchUsersFn                    func(ctx context.Context, body []byte) ([]byte, error)
-	searchProjectsFn                 func(ctx context.Context, body []byte) ([]byte, error)
-	resendProjectContactInvitationFn func(ctx context.Context, projectID, email string) ([]byte, error)
-}
-
-func (m *mockEntityScanClient) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {
-	if m.searchUsersFn != nil {
-		return m.searchUsersFn(ctx, body)
-	}
-	return []byte(`{"users":[]}`), nil
-}
-
-func (m *mockEntityScanClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
-	if m.searchProjectsFn != nil {
-		return m.searchProjectsFn(ctx, body)
-	}
-	return []byte(`{"projects":[]}`), nil
-}
-
-func (m *mockEntityScanClient) ResendProjectContactInvitation(ctx context.Context, projectID, email string) ([]byte, error) {
-	if m.resendProjectContactInvitationFn != nil {
-		return m.resendProjectContactInvitationFn(ctx, projectID, email)
-	}
-	return nil, nil
-}
-
 // ----- mock entity comment client -----
 
 type mockEntityCommentClient struct {

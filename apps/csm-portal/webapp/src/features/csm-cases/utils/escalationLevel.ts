@@ -91,3 +91,28 @@ export function canEscalateFurther(level: string | null | undefined): boolean {
 export function canDeescalate(level: string | null | undefined): boolean {
   return !isEscalationLevelUnset(level);
 }
+
+/**
+ * Whether the Escalate button is offered. Needs an escalation-capable portal
+ * role (`canEscalate`) and a level that can still go up. Client-side
+ * affordance only; the backend enforces the permission.
+ */
+export function showEscalateAction(
+  canEscalate: boolean,
+  level: string | null | undefined,
+): boolean {
+  return canEscalate && canEscalateFurther(level);
+}
+
+/**
+ * Whether the De-escalate button is offered. Deliberately independent of any
+ * portal role: the backend authorizes a de-escalation solely on the caller
+ * being one of the case's current team leads, and holding an escalation role
+ * does not substitute for that. Client-side affordance only.
+ */
+export function showDeescalateAction(
+  callerIsCaseTeamLead: boolean,
+  level: string | null | undefined,
+): boolean {
+  return callerIsCaseTeamLead && canDeescalate(level);
+}

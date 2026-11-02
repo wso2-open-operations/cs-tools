@@ -223,7 +223,10 @@ func main() {
 	userHandler := handler.NewUserHandler(entityClient, scimClient, csmMigrationFirstAccess, internalWriteGroups)
 	projectHandler := handler.NewProjectHandler(entityClient)
 	projectStatsHandler := handler.NewProjectStatsHandler(entityClient)
-	caseHandler := handler.NewCaseHandler(entityClient)
+	// With the agent attached: a case raised from a Novera chat is reported
+	// back to it, so its effectiveness reporting can see escalations it did
+	// not drive itself.
+	caseHandler := handler.NewCaseHandlerWithAgent(entityClient, aiChatAgentWsClient)
 	deploymentHandler := handler.NewDeploymentHandler(entityClient)
 	deployedProductHandler := handler.NewDeployedProductHandler(entityClient)
 	attachmentHandler := handler.NewAttachmentHandler(entityClient)
