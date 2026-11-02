@@ -110,6 +110,7 @@ func (h *KBHandler) SearchArticles(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.entity.SearchKBArticles(r.Context(), entity.SearchRequest{
 		KnowledgeBaseID: req.KnowledgeBaseID,
 		States:          []string{entity.StatePublished},
+		PublicOnly:      true,
 		SearchQuery:     req.SearchQuery,
 		Pagination:      entity.Pagination{Limit: req.Limit, Offset: req.Offset},
 	})
