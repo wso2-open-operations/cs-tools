@@ -24,6 +24,7 @@ import {
   ADD_DEPLOYMENT,
   ADD_PRODUCT,
   CASE_DETAIL,
+  DEPLOYMENT_DOCUMENTS,
   DEPLOYMENTS_LIST,
   MUI_PAGINATION,
   DELETE_DEPLOYMENT,
@@ -571,6 +572,35 @@ export class ProjectDeploymentsPage {
   }
 
   /**
+   * The name on each deployment card, in list order.
+   *
+   * Read off the page rather than taken from a fixture: deployment names are
+   * project data and have changed under this suite before — a project that once
+   * had "Production" later carried only timestamped records. A spec that merely
+   * needs *a* deployment should ask the page which ones exist.
+   *
+   * Headers are found by the per-card edit control they contain (it sits inside
+   * the AccordionSummary) rather than by `aria-expanded`, so expanded and
+   * collapsed cards are both listed.
+   *
+   * @returns One name per card currently listed.
+   */
+  async deploymentNames(): Promise<string[]> {
+    const headers = this.main()
+      .getByRole("button")
+      .filter({
+        has: this.page.getByRole("button", {
+          name: EDIT_DEPLOYMENT.openButton,
+          exact: true,
+        }),
+      });
+    const texts = await headers.allInnerTexts();
+    return texts
+      .map((t) => t.split("\n")[0].trim())
+      .filter((t) => t.length > 0);
+  }
+
+  /**
    * The accordion header of a deployment card.
    *
    * MUI's AccordionSummary is the clickable header, so this is what the chevron
@@ -932,18 +962,19 @@ export class ProjectDeploymentsPage {
    *
    * Scoped to the readout rather than matched page-wide: the same "U12" is also
    * rendered as the entry's own badge in the list below, so an unscoped locator
-   * resolves to two elements. `.last()` picks the innermost container holding the
-   * label — the readout box itself, whose only other child is the value.
+   * resolves to two elements. The value is the element straight after the
+   * label; matching by container stopped working once the label got a wrapper
+   * of its own (live 2026-10-22).
    *
    * @param level - Expected level, without the "U" prefix.
    * @returns Locator for the value.
    */
   currentUpdateLevel(level: string): Locator {
-    return this.modal()
-      .locator("div")
-      .filter({ has: this.currentUpdateLevelLabel() })
-      .last()
-      .getByText(MANAGE_PRODUCT.currentLevelValue(level), { exact: true });
+    // The first element after the label whose text is the value — the readout,
+    // which precedes the history list's own copy of it.
+    return this.currentUpdateLevelLabel().locator(
+      `xpath=following::*[normalize-space(.)="${MANAGE_PRODUCT.currentLevelValue(level)}"][1]`,
+    );
   }
 
   /**
@@ -1060,6 +1091,81 @@ export class ProjectDeploymentsPage {
         { timeout: LOAD_TIMEOUT_MS },
       ),
       this.productSubmitButton().click(),
+    ]);
+    return response;
+  }
+
+  //
+  // Documents, inside an expanded deployment card.
+  //
+
+  /** The Documents section of the expanded deployment. */
+  documentsSection(): Locator {
+    return this.main().getByText(DEPLOYMENT_DOCUMENTS.section, { exact: true });
+  }
+
+  /** The Upload control that opens the Add Document dialog. */
+  uploadDocumentButton(): Locator {
+    return this.main().getByRole("button", {
+      name: DEPLOYMENT_DOCUMENTS.uploadButton,
+      exact: true,
+    });
+  }
+
+  /** The upload dialog. Matched by its own title, which in deployment mode is
+   * "Add Document" rather than the case tab's "Upload Attachment". */
+  uploadDocumentDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: DEPLOYMENT_DOCUMENTS.uploadModal.title });
+  }
+
+  /** A document row, found by the file name it lists. */
+  documentRow(name: string): Locator {
+    return this.main().getByText(name, { exact: false });
+  }
+
+  /**
+   * Uploads a file to the expanded deployment's Documents section.
+   *
+   * Sets the file on the dropzone's hidden input rather than clicking "Choose
+   * file", which would open the OS picker that Playwright cannot drive.
+   *
+   * @param filePath - Path to the file to upload.
+   * @param documentName - Name to store it under.
+   * @returns The successful POST response, for asserting on the wire.
+   */
+  async uploadDocument(
+    filePath: string,
+    documentName: string,
+  ): Promise<Response> {
+    await expect(this.uploadDocumentButton()).toBeEnabled({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.uploadDocumentButton().click();
+
+    const dialog = this.uploadDocumentDialog();
+    await expect(dialog).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+
+    await dialog.locator('input[type="file"]').setInputFiles(filePath);
+    await dialog
+      .getByLabel(DEPLOYMENT_DOCUMENTS.uploadModal.nameField)
+      .fill(documentName);
+
+    const confirm = dialog.getByRole("button", {
+      name: DEPLOYMENT_DOCUMENTS.uploadModal.confirmButton,
+      exact: true,
+    });
+    await expect(confirm).toBeEnabled({ timeout: LOAD_TIMEOUT_MS });
+
+    const [response] = await Promise.all([
+      this.page.waitForResponse(
+        (r) =>
+          /\/deployments\/[^/]+\/attachments$/.test(new URL(r.url()).pathname) &&
+          r.request().method() === "POST",
+        { timeout: LOAD_TIMEOUT_MS },
+      ),
+      confirm.click(),
     ]);
     return response;
   }

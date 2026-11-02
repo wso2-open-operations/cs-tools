@@ -134,7 +134,7 @@ test.describe("View Case", () => {
 
           // The comment, on the Activity tab (the default). Pinned per case: the S4
           // case's wording differs from the other three (see the fixture note).
-          await expect(caseDetail.comment(comment)).toBeVisible();
+          await expect(await caseDetail.scrollToComment(comment)).toBeVisible();
 
           // ── Details tab ──────────────────────────────────────────────────
           await caseDetail.openDetailsTab();
