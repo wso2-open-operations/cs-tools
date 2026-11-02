@@ -641,7 +641,6 @@ export default function CsmBannersPage(): JSX.Element {
             key={banner.id}
             variant="outlined"
             sx={(theme) => ({
-              borderRadius: 2,
               overflow: "hidden",
               border: "1px solid",
               borderColor: "rgba(0,0,0,0.32)",
