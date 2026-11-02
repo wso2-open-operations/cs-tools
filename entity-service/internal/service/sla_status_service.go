@@ -18,11 +18,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
@@ -61,20 +66,34 @@ func normalizeSLAStatusPagination(p *domain.Pagination) error {
 }
 
 type slaStatusService struct {
-	repo   repository.SLAStatusRepository
-	access AccessService
+	repo                     repository.SLAStatusRepository
+	access                   AccessService
+	csmPortalBackendClientID string
+	publisher                EventPublisherService
 }
 
 // NewSLAStatusService constructs an SLAStatusService backed by the given
-// repository. access gates every call to internal callers
-// (an Unrestricted AccessScope) -- see requireInternalCaller's own doc comment
-// for why: unlike every other Postgres-backed read, this endpoint has no
-// per-project/per-case filtering of its own to scope by (it returns every
-// currently-active clock across every case in one bulk list), so there is
-// no scope short of "internal service" that would be safe to hand this out
-// under.
-func NewSLAStatusService(repo repository.SLAStatusRepository, access AccessService) SLAStatusService {
-	return &slaStatusService{repo: repo, access: access}
+// repository. access gates every read to internal callers (an Unrestricted
+// AccessScope) -- see requireInternalCaller's own doc comment for why:
+// unlike every other Postgres-backed read, this endpoint has no per-project/
+// per-case filtering of its own to scope by (it returns every currently-
+// active clock across every case in one bulk list), so there is no scope
+// short of "internal service" that would be safe to hand this out under.
+// csmPortalBackendClientID is CSM_PORTAL_BACKEND_CLIENT_ID, gating
+// SearchActiveSLAStatuses' own admin=true request and RequestRecalculation
+// -- the CSM portal's "Recalculate SLA" admin action -- the same way
+// portalBannerService.requireCSMPortalBackendCaller gates banner mutations:
+// trusting the caller's client id instead of re-checking AUTH_ADMIN_ROLES
+// here. This used to check AUTH_ADMIN_ROLES directly (requireAdminRole), which
+// requires that list to be configured identically in both csm-portal-backend
+// (which already gates this route on its own PermAdmin check) and here --
+// nothing enforces the two copies agree, and a real admin whose role name
+// only matched one of the two copies got a 403 from entity-service despite
+// passing csm-portal-backend's own gate. publisher may be nil (Event Hub not
+// configured for this deployment); RequestRecalculation reports that as a
+// ServiceUnavailableError rather than silently doing nothing.
+func NewSLAStatusService(repo repository.SLAStatusRepository, access AccessService, csmPortalBackendClientID string, publisher EventPublisherService) SLAStatusService {
+	return &slaStatusService{repo: repo, access: access, csmPortalBackendClientID: csmPortalBackendClientID, publisher: publisher}
 }
 
 // requireInternalCaller rejects anyone whose AccessScope is not Unrestricted
@@ -83,15 +102,25 @@ func (s *slaStatusService) requireInternalCaller(ctx context.Context) error {
 	return RequireInternalCaller(ctx, s.access, "sla status is only available to internal services")
 }
 
-// slaStatusSourceFilters maps the lowercase, caller-facing sourceFilter
-// values this endpoint accepts to sla_source_enum's real labels -- kept as
-// an explicit allow-list (rather than just upper-casing whatever the caller
-// sends) so an unrecognized value is a 400 naming the problem, not a query
-// bound to a string that can never match any row.
-var slaStatusSourceFilters = map[string]string{
-	"":           "",
-	"csm":        "CSM",
-	"servicenow": "SERVICENOW",
+// requireCSMPortalBackendCaller gates the SLA engine's admin actions
+// (SearchActiveSLAStatuses' own admin=true request, RequestRecalculation) on
+// the caller being apps/csm-portal/backend itself -- mirrors
+// portalBannerService.requireCSMPortalBackendCaller exactly; see that
+// method's own doc comment for the full reasoning (one admin check, in
+// csm-portal-backend's own PermAdmin gate, not two independently-configured
+// AUTH_ADMIN_ROLES lists that can silently drift apart).
+func (s *slaStatusService) requireCSMPortalBackendCaller(ctx context.Context) error {
+	if err := RequireInternalCaller(ctx, s.access, "the SLA engine admin actions are only available through the CSM portal"); err != nil {
+		return err
+	}
+	id := auth.IdentityFromContext(ctx)
+	if id.UserEmail == "" {
+		return &apierror.ForbiddenError{Msg: "the SLA engine admin actions can only be used by a signed-in person"}
+	}
+	if s.csmPortalBackendClientID == "" || id.ClientID != s.csmPortalBackendClientID {
+		return &apierror.ForbiddenError{Msg: "the SLA engine admin actions can only be used through the CSM Portal"}
+	}
+	return nil
 }
 
 // slaClockTargetFilters maps the lowercase, caller-facing target values
@@ -107,19 +136,34 @@ var slaClockTargetFilters = map[string]string{
 	"resolution": "RESOLUTION",
 }
 
-// SearchActiveSLAStatuses implements SLAStatusService.
-func (s *slaStatusService) SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string) (domain.SearchSLAStatusResponse, error) {
-	if err := s.requireInternalCaller(ctx); err != nil {
+// SearchActiveSLAStatuses implements SLAStatusService. admin=true swaps the
+// ordinary internal-caller check for requireCSMPortalBackendCaller -- it
+// only ever narrows who may call this with admin=true, never widens the
+// plain (admin=false) call every existing internal caller already makes
+// (csm-notification-service's own startup reconciliation included), so this
+// is purely additive: nothing about the non-admin path's behavior changes
+// for a caller that never sends it.
+func (s *slaStatusService) SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, admin bool) (domain.SearchSLAStatusResponse, error) {
+	if admin {
+		// requireCSMPortalBackendCaller already includes the internal-caller
+		// check, so this is the admin=true request's only gate -- no
+		// redundant second call.
+		if err := s.requireCSMPortalBackendCaller(ctx); err != nil {
+			return domain.SearchSLAStatusResponse{}, err
+		}
+	} else if err := s.requireInternalCaller(ctx); err != nil {
 		return domain.SearchSLAStatusResponse{}, err
 	}
+	return s.searchActiveSLAStatuses(ctx, req)
+}
+
+// searchActiveSLAStatuses is SearchActiveSLAStatuses' shared body, once the
+// caller's own access check (above) has passed.
+func (s *slaStatusService) searchActiveSLAStatuses(ctx context.Context, req domain.Pagination) (domain.SearchSLAStatusResponse, error) {
 	if err := normalizeSLAStatusPagination(&req); err != nil {
 		return domain.SearchSLAStatusResponse{}, err
 	}
-	source, ok := slaStatusSourceFilters[strings.ToLower(sourceFilter)]
-	if !ok {
-		return domain.SearchSLAStatusResponse{}, &apierror.ValidationError{Msg: "source must be one of: csm, servicenow"}
-	}
-	statuses, total, err := s.repo.SearchActiveSLAStatuses(ctx, req, source)
+	statuses, total, err := s.repo.SearchActiveSLAStatuses(ctx, req)
 	if err != nil {
 		return domain.SearchSLAStatusResponse{}, err
 	}
@@ -131,8 +175,41 @@ func (s *slaStatusService) SearchActiveSLAStatuses(ctx context.Context, req doma
 	}, nil
 }
 
+// slaRecalculationEntityID is the fixed Event Hub partition key
+// TypeSLARecalculationRequested publishes under -- there is no single
+// case/incident this request is "about", unlike every other event this
+// service publishes.
+const slaRecalculationEntityID = "sla-engine"
+
+// RequestRecalculation implements SLAStatusService.
+func (s *slaStatusService) RequestRecalculation(ctx context.Context) error {
+	if err := s.requireCSMPortalBackendCaller(ctx); err != nil {
+		return err
+	}
+	if s.publisher == nil {
+		return &apierror.ServiceUnavailableError{Msg: "SLA recalculation is not available in this deployment"}
+	}
+	requestedBy := auth.IdentityFromContext(ctx).UserEmail
+	payload, err := json.Marshal(events.SLARecalculationRequestedPayload{
+		RequestedByEmail: requestedBy,
+		RequestedAt:      time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("encode sla.recalculation_requested payload: %w", err)
+	}
+	if err := s.publisher.Publish(ctx, events.TypeSLARecalculationRequested, slaRecalculationEntityID, payload); err != nil {
+		return fmt.Errorf("publish sla.recalculation_requested: %w", err)
+	}
+	// requestedBy (an email address) is deliberately not logged here -- see
+	// this repo's own "No PII in keys or logs" convention. It's carried in
+	// the published payload itself for any downstream consumer that
+	// genuinely needs it for audit.
+	slog.InfoContext(ctx, "sla engine: recalculation requested")
+	return nil
+}
+
 // GetClockState implements SLAStatusService.
-func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error) {
+func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
 	if err := s.requireInternalCaller(ctx); err != nil {
 		return domain.SLAClockState{}, err
 	}
@@ -143,9 +220,5 @@ func (s *slaStatusService) GetClockState(ctx context.Context, workItemID, target
 	if !ok {
 		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "target must be one of: response, workaround, resolution"}
 	}
-	source, ok := slaStatusSourceFilters[strings.ToLower(sourceFilter)]
-	if !ok {
-		return domain.SLAClockState{}, &apierror.ValidationError{Msg: "source must be one of: csm, servicenow"}
-	}
-	return s.repo.GetClockState(ctx, workItemID, targetEnum, source)
+	return s.repo.GetClockState(ctx, workItemID, targetEnum)
 }

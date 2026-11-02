@@ -22,8 +22,16 @@ declare global {
     config: {
       CSM_PORTAL_AUTH_BASE_URL: string;
       CSM_PORTAL_AUTH_CLIENT_ID: string;
-      CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: string;
-      CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: string;
+      /**
+       * Optional. Where the IdP sends the browser after sign-in / sign-out.
+       * Unset means the SDK uses the page's own origin
+       * (`window.location.origin`), so the app works on whatever host and port
+       * it is served from; the origin it runs on still has to be registered as
+       * a redirect URI on the IdP application. Set one only to override that,
+       * e.g. behind a proxy whose public origin differs from the browser's.
+       */
+      CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL?: string;
+      CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?: string;
       CSM_PORTAL_BACKEND_BASE_URL: string;
       /**
        * TEMPORARY / LOCAL DEV ONLY. Real Asgardeo sign-in still happens —
@@ -117,25 +125,26 @@ declare global {
 interface AuthConfig {
   baseUrl: string;
   clientId: string;
-  signInRedirectURL: string;
-  signOutRedirectURL: string;
+  /** Undefined lets AsgardeoProvider default to `window.location.origin`. */
+  signInRedirectURL?: string;
+  signOutRedirectURL?: string;
 }
 
 const getAuthConfig = (): AuthConfig => {
   const config = window.config;
   const baseUrl = config?.CSM_PORTAL_AUTH_BASE_URL;
   const clientId = config?.CSM_PORTAL_AUTH_CLIENT_ID;
-  const signInRedirectURL = config?.CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL;
-  const signOutRedirectURL = config?.CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL;
+  // Blank counts as unset, so a placeholder empty string in config.js does not
+  // reach the SDK as an (invalid) redirect URL.
+  const signInRedirectURL =
+    config?.CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL?.trim() || undefined;
+  const signOutRedirectURL =
+    config?.CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?.trim() || undefined;
 
   const missingVars: string[] = [];
 
   if (!baseUrl) missingVars.push("CSM_PORTAL_AUTH_BASE_URL");
   if (!clientId) missingVars.push("CSM_PORTAL_AUTH_CLIENT_ID");
-  if (!signInRedirectURL)
-    missingVars.push("CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL");
-  if (!signOutRedirectURL)
-    missingVars.push("CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL");
 
   if (missingVars.length > 0) {
     throw new Error(

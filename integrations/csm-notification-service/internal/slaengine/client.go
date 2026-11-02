@@ -231,32 +231,15 @@ type searchActiveSLAStatusResponse struct {
 	Offset   int              `json:"offset"`
 }
 
-// slaEngineSourceFilter is the sla.source value entity-service's own
-// in-process SLA engine tags every clock it registers — 'csm', migration
-// 0134's own original, unchanged intent: 'CSM' rows are owned by that
-// in-process engine, 'SERVICENOW' rows are owned by a real, independent,
-// continuously-running external sync job that populates sla_policy/sla.
-// Every call in this file that scopes a GET /sla-status(/clock-state) read
-// to this engine's own rows must use this constant, not a literal, so the
-// two can never drift apart — setting it to the sync job's own tag would
-// make GetActiveCSMSLAClocks/GetClockState scope to rows that job owns
-// instead, letting a pre-alert check pick up an unrelated synced row for the
-// same case, or the bulk reconciliation pass ingest sync-owned rows as if
-// they were this engine's own.
-const slaEngineSourceFilter = "csm"
-
 // activeSLAStatusPageSize is this client's own page size for
 // GetActiveCSMSLAClocks — well under entity-service's own 2000-row cap
 // (internal/service/sla_status_service.go's maxSLAStatusLimit), chosen
 // purely so one slow page can't single-handedly reproduce the gateway
 // timeout the abandoned poll design hit (see this package's own doc
-// comment above) — this call is scoped to source=csm (see
-// slaEngineSourceFilter), a much smaller row set than that design ever had
-// to page through, but there's no reason to risk a single, large round trip
-// when several small ones cost nothing extra at startup.
+// comment above).
 const activeSLAStatusPageSize = 200
 
-// GetActiveCSMSLAClocks calls GET /sla-status?source=csm, paging
+// GetActiveCSMSLAClocks calls GET /sla-status, paging
 // through every currently-open clock this engine's own entity-service
 // counterpart is tracking, and returns the full, flattened list. Called
 // once, from Engine.Reconcile, itself called once at process startup (see
@@ -267,7 +250,7 @@ func (c *EntityClient) GetActiveCSMSLAClocks(ctx context.Context) ([]activeSLACl
 	var all []activeSLAClock
 	offset := 0
 	for {
-		path := fmt.Sprintf("/sla-status?source=%s&limit=%d&offset=%d", slaEngineSourceFilter, activeSLAStatusPageSize, offset)
+		path := fmt.Sprintf("/sla-status?limit=%d&offset=%d", activeSLAStatusPageSize, offset)
 		respBody, err := c.do(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("slaengine: fetch active csm sla clocks (offset %d): %w", offset, err)
@@ -338,9 +321,21 @@ type clockState struct {
 	// produced wake times off by however much of the pause fell on a
 	// weekend.
 	BusinessPauseDurationSeconds int64 `json:"businessPauseDurationSeconds"`
+	// AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName mirror entity-service's
+	// own domain.SLAClockState fields of the same name — resolved there from
+	// work_item.assigned_to_id and the case's account's own CRE "group" row,
+	// "" when not resolvable (no assignee, no team, or the team has no
+	// group_email/manager_id set). Engine.sendBreachEmails reads these from
+	// the exact same GetClockState call sendBreachAlert already makes for its
+	// own stale-alert suppression check, rather than a second round trip to
+	// GET /sla-status.
+	AssigneeName  string `json:"assigneeName,omitempty"`
+	AssigneeEmail string `json:"assigneeEmail,omitempty"`
+	TeamEmail     string `json:"teamEmail,omitempty"`
+	TeamLeadName  string `json:"teamLeadName,omitempty"`
 }
 
-// GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>&source=csm
+// GetClockState calls GET /sla-status/clock-state?workItemId=<caseID>&target=<clockType>
 // and returns entity-service's own durable record for this exact clock,
 // right before a breach alert for it is actually sent (Engine.
 // sendBreachAlert) — a last, authoritative check against the real source of
@@ -380,7 +375,7 @@ type clockState struct {
 // comment explains why that fails open (sends anyway) rather than
 // suppressing a possibly-real alert over a transient entity-service hiccup.
 func (c *EntityClient) GetClockState(ctx context.Context, caseID, clockType string) (clockState, error) {
-	path := fmt.Sprintf("/sla-status/clock-state?workItemId=%s&target=%s&source=%s", url.QueryEscape(caseID), url.QueryEscape(clockType), slaEngineSourceFilter)
+	path := fmt.Sprintf("/sla-status/clock-state?workItemId=%s&target=%s", url.QueryEscape(caseID), url.QueryEscape(clockType))
 	respBody, err := c.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return clockState{}, fmt.Errorf("slaengine: get clock state (case %s, %s): %w", caseID, clockType, err)

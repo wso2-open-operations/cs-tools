@@ -47,7 +47,7 @@ func (p countingPinger) Health(ctx context.Context) error {
 }
 
 func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
-	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{})
+	h := NewHealthHandler(fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{}, fakePinger{}).WithAIIntegration(fakePinger{})
 
 	w := httptest.NewRecorder()
 	h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
@@ -57,8 +57,8 @@ func TestHealthHandler_GetHealthDependencies_AllHealthy(t *testing.T) {
 	if resp.Status != "ok" {
 		t.Errorf("Status = %q, want ok", resp.Status)
 	}
-	if len(resp.Dependencies) != 5 {
-		t.Fatalf("len(Dependencies) = %d, want 5", len(resp.Dependencies))
+	if len(resp.Dependencies) != 6 {
+		t.Fatalf("len(Dependencies) = %d, want 6", len(resp.Dependencies))
 	}
 	for _, d := range resp.Dependencies {
 		if d.Status != "ok" {
@@ -105,7 +105,7 @@ func TestHealthHandler_GetHealthDependencies_NotConfiguredIsNotDown(t *testing.T
 	}
 	for _, d := range resp.Dependencies {
 		switch d.Name {
-		case "CSM Notification Service", "CSM Integration Service", "Engineering Entity Service":
+		case "CSM Notification Service", "CSM Integration Service", "Engineering Entity Service", "CSM AI Integration Service":
 			if d.Status != "not_configured" {
 				t.Errorf("%s status = %q, want not_configured", d.Name, d.Status)
 			}
@@ -139,5 +139,33 @@ func TestHealthHandler_GetHealthDependencies_CachesWithinTTL(t *testing.T) {
 	assertStatus(t, w, http.StatusOK)
 	if got := atomic.LoadInt32(&calls); got != 10 {
 		t.Errorf("Health calls after the TTL elapsed = %d, want 10 (a second fan-out of 5)", got)
+	}
+}
+
+func TestHealthHandler_GetHealthDependencies_ChecksTheAIIntegrationService(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pinger HealthPinger
+		want   string
+	}{
+		{"up", fakePinger{}, "ok"},
+		{"down", fakePinger{err: errors.New("down")}, "down"},
+	} {
+		h := NewHealthHandler(fakePinger{}, fakePinger{}, nil, nil, nil).WithAIIntegration(tc.pinger)
+		w := httptest.NewRecorder()
+		h.GetHealthDependencies(w, httptest.NewRequest(http.MethodGet, "/health/dependencies", nil))
+		resp := decodeJSON[HealthDependenciesResponse](t, w)
+		found := false
+		for _, d := range resp.Dependencies {
+			if d.Name == "CSM AI Integration Service" {
+				found = true
+				if d.Status != tc.want {
+					t.Errorf("%s: status = %q, want %q", tc.name, d.Status, tc.want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: no CSM AI Integration Service entry", tc.name)
+		}
 	}
 }

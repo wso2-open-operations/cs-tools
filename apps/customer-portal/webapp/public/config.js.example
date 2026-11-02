@@ -31,20 +31,16 @@ window.config = {
   //   in Asgardeo / Identity Server for this portal.
   CUSTOMER_PORTAL_AUTH_CLIENT_ID: "<your-client-id>",
 
-  // CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL
-  //   The URL the identity provider redirects to after a successful login.
-  //   Must exactly match one of the Allowed Callback URLs configured on the
-  //   application in Asgardeo / Identity Server.
-  //   Local development : "http://localhost:3000"
-  //   Production        : "https://<your-portal-domain>"
-  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "http://localhost:3000",
-
-  // CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL
-  //   The URL the identity provider redirects to after logout.
-  //   Must exactly match one of the Allowed Logout URLs configured on the
-  //   application in Asgardeo / Identity Server.
-  //   Typically the same as SIGN_IN_REDIRECT_URL.
-  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "http://localhost:3000",
+  // CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL / CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL  (optional)
+  //   Where the identity provider redirects after login / logout. When unset,
+  //   both default to the page's own origin (window.location.origin), so the
+  //   portal signs in on whatever host and port it is served from. That origin
+  //   must still be registered as an Allowed Callback URL and Allowed Logout
+  //   URL on the application in Asgardeo / Identity Server. Uncomment only to
+  //   override, e.g. behind a proxy whose public origin differs from the
+  //   browser's.
+  // CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: "https://<your-portal-domain>",
+  // CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: "https://<your-portal-domain>",
 
   // ── Backend API ────────────────────────────────────────────────────────────
   //

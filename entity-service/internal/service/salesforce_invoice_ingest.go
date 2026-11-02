@@ -29,8 +29,13 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
 )
 
-// sf_invoice's bounded text columns (migration 0081) are all VARCHAR(40).
-const maxSfInvoiceTextChars = 40
+// sf_invoice's bounded text columns (migration 0081, name and description
+// widened by migration 0254). classification is still VARCHAR(40).
+const (
+	maxSfInvoiceNameChars        = 80
+	maxSfInvoiceDescriptionChars = 255
+	maxSfInvoiceClassChars       = 40
+)
 
 // SalesEntityInvoiceClient fetches one Salesforce Invoice__c from REST
 // sales/sales-entity-service.
@@ -185,11 +190,11 @@ func (s *salesforceEventService) deleteInvoice(ctx context.Context, sfID string)
 // mapSalesEntityInvoice maps the Sales Entity record onto sf_invoice's
 // columns; OpportunityID is resolved by the caller. The original due date
 // falls back to the current one when Salesforce has none, as the ServiceNow
-// script did. The three text columns are VARCHAR(40); a longer value is cut
-// and logged.
+// script did. The three text columns are bounded (name 80, description 255,
+// classification 40); a longer value is cut and logged.
 func mapSalesEntityInvoice(ctx context.Context, sfID string, inv salesentity.Invoice) domain.SalesforceInvoiceUpsert {
-	text := func(column string, v *string) *string {
-		return truncateSfColumn(ctx, "sf_invoice."+column, sfID, optionalPtr(v), maxSfInvoiceTextChars)
+	text := func(column string, v *string, max int) *string {
+		return truncateSfColumn(ctx, "sf_invoice."+column, sfID, optionalPtr(v), max)
 	}
 	originalDue := inv.OriginalInvoiceDueDate
 	if optionalPtr(originalDue) == nil {
@@ -197,9 +202,9 @@ func mapSalesEntityInvoice(ctx context.Context, sfID string, inv salesentity.Inv
 	}
 	return domain.SalesforceInvoiceUpsert{
 		SfID:                   sfID,
-		Name:                   text("name", inv.Name),
-		Description:            text("description", inv.Description),
-		Classification:         text("classification", inv.Classification),
+		Name:                   text("name", inv.Name, maxSfInvoiceNameChars),
+		Description:            text("description", inv.Description, maxSfInvoiceDescriptionChars),
+		Classification:         text("classification", inv.Classification, maxSfInvoiceClassChars),
 		InvoicedAmount:         inv.Amount,
 		InvoiceDate:            parseSalesforceDate(ctx, "invoiceDate", sfID, inv.InvoiceDate),
 		InvoicedDueDate:        parseSalesforceDate(ctx, "dueDate", sfID, inv.DueDate),

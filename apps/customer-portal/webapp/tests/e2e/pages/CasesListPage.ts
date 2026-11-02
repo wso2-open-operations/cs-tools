@@ -43,6 +43,35 @@ export class CasesListPage {
   }
 
   /**
+   * The search panel's text input, scoped to the main content area.
+   *
+   * AllCasesPage renders ListSearchPanel (search input + Filters toggle) only
+   * when the list is unfiltered: with `?statusFilter=active|resolved` or a
+   * dashboard `?severityId=` it renders a bare Divider in its place
+   * (`hideSearchPanel`). The panel is therefore absent from the DOM, not merely
+   * hidden, so callers assert absence with `toHaveCount(0)`.
+   *
+   * Scoped to `app-main` so the header's global search box can never satisfy
+   * it, whatever its placeholder.
+   *
+   * @returns Locator for the input.
+   */
+  searchPanelInput(): Locator {
+    return this.main().getByPlaceholder(CASES_LIST.searchPlaceholder);
+  }
+
+  /**
+   * The search panel's Filters toggle, in either of its labels.
+   *
+   * @returns Locator for the button.
+   */
+  searchPanelFiltersButton(): Locator {
+    return this.main().getByRole("button", {
+      name: CASES_LIST.filtersButtonAnyState,
+    });
+  }
+
+  /**
    * Opens the list and waits for the search box.
    *
    * @param projectId - Project whose cases to list.
@@ -187,6 +216,46 @@ export class CasesListPage {
     return this.main()
       .getByRole("button")
       .filter({ hasText: CASES_LIST.createdByPrefix });
+  }
+
+  /**
+   * Every case card on the current page, whether or not it names a creator.
+   *
+   * `rows()` narrows by "Created by", which ListCard omits for cases without a
+   * creator — fine for comparing creators, but it under-counts. This narrows by
+   * the "Updated …" footer every card renders, so it is the one to use when the
+   * number of rendered rows is itself the assertion.
+   *
+   * @returns Locator for the cards.
+   */
+  caseCards(): Locator {
+    return this.main()
+      .getByRole("button")
+      .filter({ hasText: CASES_LIST.rowUpdatedPattern });
+  }
+
+  /**
+   * The card for one case, identified by its case number.
+   *
+   * ListCard renders the number as its own text node, so an exact match on it
+   * picks out exactly one card even when titles repeat.
+   *
+   * @param caseNumber - The case's `number` from the search response.
+   * @returns Locator for the card.
+   */
+  caseCard(caseNumber: string): Locator {
+    return this.caseCards().filter({
+      has: this.page.getByText(caseNumber, { exact: true }),
+    });
+  }
+
+  /**
+   * The list's empty-state message (either wording).
+   *
+   * @returns Locator for the message.
+   */
+  emptyState(): Locator {
+    return this.main().getByText(CASES_LIST.emptyStatePattern);
   }
 
   /**

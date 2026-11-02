@@ -4693,20 +4693,29 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 		wiArgs = append(wiArgs, *req.DeployedProductID)
 		widx++
 	}
-	if req.BestCaseFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("best_case_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.BestCaseFixEta)
+	// Server-side "fix ETA shared" stamp: eta_shared_on is re-stamped whenever
+	// a written date differs from the stored one (or was unset), so it needs
+	// no request field and works for a caller with no end-user identity. The
+	// CASE reads the pre-update row, all in the one statement.
+	var etaChanged []string
+	for _, c := range []struct {
+		col string
+		val *string
+	}{
+		{"best_case_eta", req.BestCaseFixEta},
+		{"most_likely_eta", req.MostLikelyFixEta},
+		{"worst_case_eta", req.WorstCaseFixEta},
+	} {
+		if c.val == nil {
+			continue
+		}
+		wiSets = append(wiSets, fmt.Sprintf("%s = $%d::date", c.col, widx))
+		etaChanged = append(etaChanged, fmt.Sprintf("%s IS DISTINCT FROM $%d::date", c.col, widx))
+		wiArgs = append(wiArgs, *c.val)
 		widx++
 	}
-	if req.MostLikelyFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("most_likely_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.MostLikelyFixEta)
-		widx++
-	}
-	if req.WorstCaseFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("worst_case_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.WorstCaseFixEta)
-		widx++
+	if len(etaChanged) > 0 {
+		wiSets = append(wiSets, "eta_shared_on = CASE WHEN "+strings.Join(etaChanged, " OR ")+" THEN NOW() ELSE eta_shared_on END")
 	}
 	if req.WorkaroundProvided != nil {
 		if *req.WorkaroundProvided {
@@ -5002,6 +5011,10 @@ var caseActivityFieldChangeLabelOverrides = map[string]string{
 	"acknowledged_by_user_id": "Acknowledged by",
 	"parent_id":               "Parent case",
 	"workaround_provided_on":  "Workaround Provided",
+	"best_case_eta":           "Best Case Fix ETA",
+	"most_likely_eta":         "Most Likely Fix ETA",
+	"worst_case_eta":          "Worst Case Fix ETA",
+	"eta_shared_on":           "Fix ETA Shared",
 	"fix_issued_on":           "Update Released",
 	"assignment_group_id":     "Assignment group",
 	"service_id":              "Service",
