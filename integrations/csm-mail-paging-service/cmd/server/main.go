@@ -56,9 +56,10 @@ func run() error {
 	defer stop()
 
 	mb, err := gmail.New(ctx, gmail.Config{
-		CredentialsJSON: cfg.GmailCredentialsJSON,
-		DelegatedUser:   cfg.GmailDelegatedUser,
-		ProcessedLabel:  cfg.ProcessedLabel,
+		ClientID:       cfg.GmailClientID,
+		ClientSecret:   cfg.GmailClientSecret,
+		RefreshToken:   cfg.GmailRefreshToken,
+		ProcessedLabel: cfg.ProcessedLabel,
 	})
 	if err != nil {
 		return err
