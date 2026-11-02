@@ -68,3 +68,15 @@ export function formatLimitMb(bytes: number): string {
   const mb = bytes / MIB;
   return Number.isInteger(mb) ? String(mb) : mb.toFixed(1);
 }
+
+/**
+ * A byte limit as text for messages: whole or one-decimal GB from 1024 MB up
+ * ("10 GB", "1.5 GB"), otherwise MB ("10 MB").
+ */
+export function formatLimit(bytes: number): string {
+  if (bytes >= 1024 * MIB) {
+    const gb = bytes / (1024 * MIB);
+    return `${Number.isInteger(gb) ? String(gb) : gb.toFixed(1)} GB`;
+  }
+  return `${formatLimitMb(bytes)} MB`;
+}
