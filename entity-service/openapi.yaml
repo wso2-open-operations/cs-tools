@@ -36747,6 +36747,14 @@ components:
         available:
           type: boolean
           description: True when url can be used to fetch the file.
+        largeFile:
+          type: boolean
+          description: >-
+            True for a download link of a file at or above
+            ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES. The browser should hand
+            the url to its own downloader (it streams to disk and can resume)
+            instead of reading the file into memory; the link serves
+            ATTACHMENT_LARGE_READ_LINK_MAX_USES requests so a resume works.
         reason:
           type: string
           enum: [NOT_STORED, FAILED, DELETED, STORAGE_UNAVAILABLE]

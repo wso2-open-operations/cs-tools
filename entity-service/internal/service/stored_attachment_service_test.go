@@ -713,11 +713,14 @@ func TestResolveLinks_ALargeDownloadCanBeResumed(t *testing.T) {
 			key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.bin"
 			size := tc.size
 			repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA0000001", Name: "a.bin", Status: "COMPLETE", StorageKey: &key, SizeBytes: &size}
-			_, err := chunkedSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{
+			resp, err := chunkedSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{
 				Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}, Purpose: tc.purpose,
 			})
 			if err != nil || len(store.shares) != 1 || store.shares[0].MaxUses != tc.want {
 				t.Fatalf("shares = %+v err = %v, want MaxUses %d", store.shares, err, tc.want)
+			}
+			if wantLarge := tc.want == 10; resp.Links[0].LargeFile != wantLarge {
+				t.Errorf("largeFile = %v, want %v", resp.Links[0].LargeFile, wantLarge)
 			}
 		})
 	}
