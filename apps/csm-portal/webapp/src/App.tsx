@@ -115,6 +115,9 @@ import CsmAnnouncementsPage from "@features/csm-announcements/pages/CsmAnnouncem
 import CsmAnnouncementCreatePage from "@features/csm-announcements/pages/CsmAnnouncementCreatePage";
 import HelpPage from "@features/help/pages/HelpPage";
 import CsmKBArticlesLayout from "@features/csm-kb-articles/pages/CsmKBArticlesLayout";
+import ProductsLayout from "@features/csm-products/pages/ProductsLayout";
+import ProductCatalogPage from "@features/csm-products/pages/ProductCatalogPage";
+import ReleaseLinesPage from "@features/csm-products/pages/ReleaseLinesPage";
 import CsmKBArticlesAllPage from "@features/csm-kb-articles/pages/CsmKBArticlesAllPage";
 import CsmKBArticlesListPage from "@features/csm-kb-articles/pages/CsmKBArticlesListPage";
 import CsmKBArticleEditorPage from "@features/csm-kb-articles/pages/CsmKBArticleEditorPage";
@@ -662,6 +665,15 @@ export default function App(): JSX.Element {
                     <Route path="my-articles/:id/history" element={<CsmKBArticleHistoryDetailPage />} />
                     <Route path="to-review" element={<CsmKBReviewQueuePage />} />
                     <Route path="admin" element={<CsmKBAdminPage />} />
+                  </Route>
+
+                  {/* Products: the product catalogue behind the public Support
+                      Matrix and Release Matrix. Editing is a catalogue
+                      manager's job; the pages offer it only to them. */}
+                  <Route path="products" element={<ProductsLayout />}>
+                    <Route index element={<Navigate to="catalogue" replace />} />
+                    <Route path="catalogue" element={<ProductCatalogPage />} />
+                    <Route path="release-lines" element={<ReleaseLinesPage />} />
                   </Route>
 
                   {/* The following sections have no modern/entity-service-backed

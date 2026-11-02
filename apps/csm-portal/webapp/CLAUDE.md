@@ -58,6 +58,24 @@ failure also hides the tab). And the All Skills tab's create/edit/(de)activate a
 `usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
 manager table are always sent to the backend, never done in the browser.
 
+**Products** (`features/csm-products`, `/products`) is another deliberate exception, on top of a real backend
+gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
+New release line, and the Retire action inside each edit dialog) renders only for `usePortalAccess().canManageProductCatalog` (`product_catalog_manager` or `admin`). The
+backend's `PermManageProductCatalog` refuses the catalogue write routes of the products API (`POST /products`,
+`POST /products/{id}/versions`, `PATCH`/`retire` on `/product-versions/{id}`, `/release-lines`) to anyone else, so for a
+reader each control would only ever 403. A save applies at once (there is no draft step): a PATCH carries only the
+changed keys (`utils/catalogChange.ts`), and the backend applies a version's listing-wide fields to every live
+deployment-profile row with the same `publicId` (which the edit dialog spells out before saving); a retire retires
+the whole listing, and Add version creates every profile in one call. The API sends dates as RFC 3339 timestamps
+and the support status/type upper case; `utils/catalogWire.ts` turns them into the `YYYY-MM-DD` / lower-case shapes
+the feature works with, in the read hooks only. The Catalogue never lists cloud (SaaS)
+products or end-of-life products (every version retired or discontinued), nor retired or discontinued versions or
+retired release lines, so there is no Restore (`isListedProduct`, `listedVersions`, `utils/catalogProducts.ts`). Adding a version pre-fills
+its publishing settings from the product's latest live version (`listingFormFrom`), shown in a collapsed "Advanced
+configuration" section, and creates one row per deployment profile: the first, then — after reading back its
+`publicId` — the rest with that `publicId`, stopping at the first failure (`useAddCatalogVersion`). A refusal's message is shown inside the
+dialog; a success closes it and goes to `useSuccessBanner`.
+
 **`AddUserDialog.tsx` only collects an email — there are no first/last name fields.** The backend
 (`apps/csm-portal/backend`'s own `CLAUDE.md`, "Creating a user") looks that email up in SCIM and fills
 `firstName`/`lastName`/phone from that record; a 400 from SCIM having no matching user (or a match with

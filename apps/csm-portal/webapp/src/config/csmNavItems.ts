@@ -57,6 +57,7 @@ import type { PortalAccess } from "@context/current-user/portalAccess";
  * visibility state.
  */
 import { PLG_NAV_SECTION } from "@features/plg/config/plgNavItems";
+import { PRODUCTS_NAV_SECTION } from "@features/csm-products/config/productsNavItems";
 
 export interface CsmNavNode {
   /**
@@ -305,6 +306,10 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       },
     ],
   },
+  // The product catalogue behind the public Support Matrix and Release
+  // Matrix. Declared in features/csm-products/config/productsNavItems, like
+  // PLG below.
+  PRODUCTS_NAV_SECTION,
   // PLG Customer Success Portal. Declared in
   // features/plg/config/plgNavItems so a change to PLG's pages does not
   // touch this file. Hide the whole section with
@@ -501,6 +506,12 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/help#announcements",
       },
       { id: "help.customers", label: "Customers", href: "/help#customers" },
+      {
+        id: "help.products",
+        label: "Products",
+        href: "/help#products",
+        requires: "canViewStaffSections",
+      },
       {
         id: "help.people-access",
         label: "People & project access",

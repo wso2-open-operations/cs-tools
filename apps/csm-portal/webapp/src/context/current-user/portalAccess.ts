@@ -55,6 +55,12 @@ export const PORTAL_ROLE = {
   // setting a project's onboarding status and owner via PATCH /projects/{id},
   // and nothing else. It grants no read access. See canEditProjectOnboarding.
   onboardingLead: "onboarding_lead",
+  // Grants PermManageProductCatalog on the backend (internal/handler/access.go)
+  // -- adding, editing and retiring products, versions and release lines in
+  // the product catalogue (the write routes of the products API), and nothing
+  // else. It grants no read access. See
+  // canManageProductCatalog.
+  productCatalogManager: "product_catalog_manager",
 } as const;
 
 // Roles that, held alone, let someone use the portal at all. announcement_creator
@@ -63,7 +69,9 @@ export const PORTAL_ROLE = {
 // grants nothing, and counting it would let a caller holding nothing else in
 // past the "no access" screen into a portal where every call is a 403.
 // onboarding_lead is excluded too: the backend gives it no read permission,
-// only the one onboarding PATCH.
+// only the one onboarding PATCH. product_catalog_manager likewise: catalogue
+// managers are staff who also hold a viewing role, and on its own it grants
+// only the draft routes.
 // comment_updater is excluded for the identical reason: on its own it grants
 // only editing/deleting someone else's comment (canUpdateDeleteAnyComment),
 // and reaching a comment at all first requires being able to view the case
@@ -71,7 +79,8 @@ export const PORTAL_ROLE = {
 const ROLES_THAT_GRANT_ACCESS: readonly string[] = Object.values(PORTAL_ROLE).filter(
   (role) => role !== PORTAL_ROLE.announcementCreator &&
     role !== PORTAL_ROLE.commentUpdater &&
-    role !== PORTAL_ROLE.onboardingLead,
+    role !== PORTAL_ROLE.onboardingLead &&
+    role !== PORTAL_ROLE.productCatalogManager,
 );
 
 export interface PortalAccess {
@@ -144,6 +153,14 @@ export interface PortalAccess {
    * controls are offered.
    */
   canEditProjectOnboarding: boolean;
+  /**
+   * Editing the product catalogue in the Products section: adding, editing
+   * and retiring products, versions and release lines (applied at once).
+   * `product_catalog_manager` or `admin` -- `cs_engineer` alone does not hold
+   * it. Mirrors the backend's `PermManageProductCatalog`, which gates every
+   * catalogue write route. Reading the catalogue needs only view.
+   */
+  canManageProductCatalog: boolean;
   /**
    * The Security Center section (Security reports + Vulnerabilities tabs)
    * and the API calls behind it. `admin`, `cs_engineer`, and the dedicated
@@ -334,6 +351,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canCreateUser: true,
       canUpdateProjectClosureState: true,
       canEditProjectOnboarding: true,
+      canManageProductCatalog: true,
       canUseSecurityCenter: true,
       canUsePlg: true,
       canManagePlaybooks: true,
@@ -370,6 +388,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canCreateUser: isAdmin,
     canUpdateProjectClosureState: isAdmin,
     canEditProjectOnboarding: isAdmin || has(PORTAL_ROLE.onboardingLead),
+    canManageProductCatalog: isAdmin || has(PORTAL_ROLE.productCatalogManager),
     canUseSecurityCenter: full || has(PORTAL_ROLE.securityTeam),
     canUsePlg: full,
     canManagePlaybooks: isAdmin,

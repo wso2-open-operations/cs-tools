@@ -141,6 +141,29 @@ type PortalBannerService interface {
 	Update(ctx context.Context, id string, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
 }
 
+// ProductCatalogService reads the product catalogue (products, versions with
+// their EOL and public-feed fields, release lines, Carbon reference data) and
+// applies a catalogue manager's edits.
+type ProductCatalogService interface {
+	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	CreateProduct(ctx context.Context, payload json.RawMessage) (domain.Product, error)
+	UpdateProduct(ctx context.Context, id string, payload json.RawMessage) (domain.Product, error)
+
+	SearchAllProductVersions(ctx context.Context, req domain.SearchAllProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
+	GetProductVersion(ctx context.Context, id string) (domain.ProductVersion, error)
+	CreateProductVersions(ctx context.Context, productID string, payload json.RawMessage) (domain.ProductVersionList, error)
+	UpdateProductVersion(ctx context.Context, id string, payload json.RawMessage) (domain.ProductVersionList, error)
+	RetireProductVersion(ctx context.Context, id string) (domain.ProductVersionList, error)
+
+	ListReleaseLines(ctx context.Context, includeRetired bool) (domain.ReleaseLineList, error)
+	CreateReleaseLine(ctx context.Context, payload json.RawMessage) (domain.ReleaseLine, error)
+	UpdateReleaseLine(ctx context.Context, id string, payload json.RawMessage) (domain.ReleaseLine, error)
+	RetireReleaseLine(ctx context.Context, id string) (domain.ReleaseLine, error)
+
+	ListCarbonPlatformHistory(ctx context.Context) (domain.CarbonPlatformHistoryList, error)
+	ListCarbonKernelReleases(ctx context.Context) (domain.CarbonKernelReleaseList, error)
+}
+
 // RunbookService manages the runbook catalog (Operations > Runbooks): numbered, named runbook links and their alert names.
 type RunbookService interface {
 	List(ctx context.Context) (domain.RunbookList, error)

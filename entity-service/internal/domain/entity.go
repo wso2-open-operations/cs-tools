@@ -2110,6 +2110,19 @@ type Product struct {
 	Class     ProductClass `json:"class"`
 	CreatedOn time.Time    `json:"createdOn"`
 	UpdatedOn time.Time    `json:"updatedOn"`
+
+	// Product catalogue fields (migration 0269 onward). unit, businessUnit
+	// and manufacturer are the lowercase enum values.
+	Code         *string `json:"code"`
+	Unit         *string `json:"unit"`
+	BusinessUnit *string `json:"businessUnit"`
+	Manufacturer *string `json:"manufacturer"`
+	Description  *string `json:"description"`
+	// VersionCount is the live (not retired) versions, RetiredVersionCount the
+	// retired ones, ActiveVersionCount the live ones not discontinued.
+	VersionCount        int `json:"versionCount"`
+	RetiredVersionCount int `json:"retiredVersionCount"`
+	ActiveVersionCount  int `json:"activeVersionCount"`
 }
 
 // SearchProductsRequest is the input for a product search operation.
@@ -2199,6 +2212,26 @@ type ProductVersion struct {
 	DeploymentProfile *string   `json:"deploymentProfile"`
 	CreatedOn         time.Time `json:"createdOn"`
 	UpdatedOn         time.Time `json:"updatedOn"`
+
+	// Product catalogue fields (migrations 0269-0271). The public feeds group
+	// the live rows sharing PublicID into one listing.
+	ProductName                string         `json:"productName"`
+	ProductCode                *string        `json:"productCode"`
+	SerialNumber               *string        `json:"serialNumber"`
+	SupportEOLAnnouncementDate *time.Time     `json:"supportEolAnnouncementDate"`
+	PublicID                   *int64         `json:"publicId"`
+	PublicName                 *string        `json:"publicName"`
+	PublicAbbreviation         *string        `json:"publicAbbreviation"`
+	Description                *string        `json:"description"`
+	IsPublic                   bool           `json:"isPublic"`
+	ShowInSupportMatrix        bool           `json:"showInSupportMatrix"`
+	Tags                       []string       `json:"tags"`
+	ReleaseLinks               *string        `json:"releaseLinks"`
+	LegacyStatus               *bool          `json:"legacyStatus"`
+	ReleaseLineID              *string        `json:"releaseLineId"`
+	ReleaseLineName            *string        `json:"releaseLineName"`
+	Carbon                     *CatalogCarbon `json:"carbon"`
+	RetiredOn                  *time.Time     `json:"retiredOn"`
 }
 
 // SearchProductVersionsRequest is the input for a product version search operation.
@@ -2213,6 +2246,14 @@ type SearchProductVersionsRequest struct {
 	// Omitted (or empty) applies no profile filter and returns every profile.
 	// Postgres data source only.
 	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+	// ExcludeRetired leaves out retired rows. Omitted (false) returns every
+	// row, retired ones included, as before the catalogue existed.
+	ExcludeRetired bool `json:"excludeRetired,omitempty"`
+	// Feed (support-matrix or release-matrix) restricts to the live rows with
+	// a public listing on that feed. POST /product-versions/search only.
+	Feed string `json:"feed,omitempty"`
+	// PublicID restricts to the rows of one public listing.
+	PublicID *int64 `json:"publicId,omitempty"`
 }
 
 // SearchProductVersionsResponse is the paginated result of a product version search.

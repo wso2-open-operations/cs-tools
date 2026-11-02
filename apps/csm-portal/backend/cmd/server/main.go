@@ -562,6 +562,25 @@ func main() {
 	route("POST /products/search", handler.PermView, productHandler.SearchProducts)
 	route("GET /products/github-repo", handler.PermView, productHandler.GetProductRepoMapping)
 	route("POST /products/{id}/versions/search", handler.PermView, productHandler.SearchProductVersions)
+	// Product catalogue (the data behind the public Support Matrix and Release
+	// Matrix), served by entity-service's products API under the same paths:
+	// reads are PermView; writes (applied at once) are PermManageProductCatalog,
+	// which entity-service re-checks.
+	productCatalogHandler := handler.NewProductCatalogHandler(customerEntityClient)
+	route("GET /products/{id}", handler.PermView, productCatalogHandler.GetProduct)
+	route("POST /products", handler.PermManageProductCatalog, productCatalogHandler.CreateProduct)
+	route("PATCH /products/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProduct)
+	route("POST /products/{id}/versions", handler.PermManageProductCatalog, productCatalogHandler.CreateProductVersions)
+	route("POST /product-versions/search", handler.PermView, productCatalogHandler.SearchAllProductVersions)
+	route("GET /product-versions/{id}", handler.PermView, productCatalogHandler.GetProductVersion)
+	route("PATCH /product-versions/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProductVersion)
+	route("POST /product-versions/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireProductVersion)
+	route("GET /release-lines", handler.PermView, productCatalogHandler.ListReleaseLines)
+	route("POST /release-lines", handler.PermManageProductCatalog, productCatalogHandler.CreateReleaseLine)
+	route("PATCH /release-lines/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateReleaseLine)
+	route("POST /release-lines/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireReleaseLine)
+	route("GET /carbon-platform-history", handler.PermView, productCatalogHandler.ListCarbonPlatformHistory)
+	route("GET /carbon-kernel-releases", handler.PermView, productCatalogHandler.ListCarbonKernelReleases)
 	route("POST /deployments", handler.PermWrite, deploymentHandler.PostDeployment)
 	route("POST /kb-articles", handler.PermWrite, kbArticleHandler.CreateKBArticle)
 	route("GET /kb-articles/{id}", handler.PermView, kbArticleHandler.GetKBArticle)
@@ -1094,7 +1113,7 @@ func loadDirectory() *directory.Directory {
 //	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
 //	AUTH_DASHBOARD_DESIGNER_ROLES, AUTH_SALES_SOLUTIONS_ROLES,
 //	AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES,
-//	AUTH_SECURITY_TEAM_ROLES
+//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_SECURITY_TEAM_ROLES
 //	    Each is a comma-separated list of role names; a caller whose token's
 //	    "roles" claim holds any one of them has that role.
 //
@@ -1105,7 +1124,8 @@ func loadDirectory() *directory.Directory {
 // nobody can use the portal.
 //
 // AUTH_SALES_SOLUTIONS_ROLES, AUTH_WORKNOTE_CREATOR_ROLES,
-// AUTH_COMMENT_UPDATER_ROLES and AUTH_ONBOARDING_LEAD_ROLES are unlike the rest:
+// AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES and
+// AUTH_PRODUCT_CATALOG_MANAGER_ROLES are unlike the rest:
 // leaving any of them unset
 // does not warn. sales_solutions is a normal, expected unconfigured state (CS
 // Portal alone still works fine) rather than a misconfiguration nobody can
@@ -1116,7 +1136,8 @@ func loadDirectory() *directory.Directory {
 // AccessConfig.WorknoteCreator's/CommentUpdater's own doc comments), so
 // leaving either empty is purely "this extra role isn't provisioned yet,"
 // never a state that locks anyone out. onboarding_lead is the same: admin
-// already holds PermManageOnboarding regardless.
+// already holds PermManageOnboarding regardless; and product_catalog_manager:
+// admin already holds PermManageProductCatalog regardless.
 func loadAccessConfig() handler.AccessConfig {
 	var unset []string
 	roles := func(name string) []string {
@@ -1149,14 +1170,16 @@ func loadAccessConfig() handler.AccessConfig {
 		// unset variable here a normal, no-op state.
 		SecurityTeam: roles("AUTH_SECURITY_TEAM_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES,
-		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES or
-		// AUTH_ONBOARDING_LEAD_ROLES is a normal, supported state (see this
-		// function's own doc comment for why each is), so all four deliberately bypass the roles() helper
+		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES,
+		// AUTH_ONBOARDING_LEAD_ROLES or AUTH_PRODUCT_CATALOG_MANAGER_ROLES is a
+		// normal, supported state (see this function's own doc comment for why
+		// each is), so all five deliberately bypass the roles() helper
 		// to avoid adding themselves to the unset-variable warning below.
-		SalesSolutions:  splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
-		WorknoteCreator: splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
-		CommentUpdater:  splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
-		OnboardingLead:  splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		SalesSolutions:        splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
+		WorknoteCreator:       splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
+		CommentUpdater:        splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
+		OnboardingLead:        splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		ProductCatalogManager: splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 	}
 	if len(unset) > 0 {
 		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)
