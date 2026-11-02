@@ -99,14 +99,31 @@ type InitiateAttachmentUploadRequest struct {
 	SizeBytes   int64  `json:"sizeBytes"`
 }
 
+// Upload methods an InitiateAttachmentUploadResponse can ask for.
+const (
+	UploadMethodMultipart = "multipart"
+	UploadMethodTUS       = "tus"
+)
+
 // InitiateAttachmentUploadResponse tells the browser where to send the file.
-// The browser POSTs a multipart form with the file in the FieldName field to
-// UploadURL, exactly once, before ExpiresAt, then calls confirm.
+//
+// With UploadMethod "multipart" the browser POSTs a multipart form with the file
+// in the FieldName field to UploadURL, exactly once, before ExpiresAt.
+//
+// With "tus" (a large file) it uses the TUS resumable-upload protocol against
+// UploadURL: create the upload with Upload-Length and an Upload-Metadata of
+// share_id=ShareID and path=Path, send the chunks (ChunkSize bytes each), and
+// resume from the server's offset after a break. ExpiresAt only bounds starting
+// it. Either way the browser then calls confirm.
 type InitiateAttachmentUploadResponse struct {
 	AttachmentID string    `json:"attachmentId"`
 	Number       string    `json:"number"`
+	UploadMethod string    `json:"uploadMethod"`
 	UploadURL    string    `json:"uploadUrl"`
-	FieldName    string    `json:"fieldName"`
+	FieldName    string    `json:"fieldName,omitempty"`
+	ShareID      string    `json:"shareId,omitempty"`
+	Path         string    `json:"path,omitempty"`
+	ChunkSize    int64     `json:"chunkSize,omitempty"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
 }

@@ -145,6 +145,14 @@ func (c *Client) UploadURL(shareID string) string {
 	return c.publicURL + "/api/v2/shares/" + url.PathEscape(shareID)
 }
 
+// ChunkedUploadURL is the TUS endpoint for uploads to a write share. The
+// browser creates the upload there with the share id and a path relative to the
+// share's folder in its Upload-Metadata, then sends the chunks to the Location
+// it gets back.
+func (c *Client) ChunkedUploadURL() string {
+	return c.publicURL + "/api/v2/shares-chunked-uploads"
+}
+
 // CreateShare creates a share and returns its id. SFTPGo accepts a share on a
 // path that does not exist and only fails when it is used, so callers create
 // the folder (MkdirAll) first for a write share.

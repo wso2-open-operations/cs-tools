@@ -92,6 +92,7 @@ type fileStore interface {
 	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
 	DownloadURL(shareID string) string
 	UploadURL(shareID string) string
+	ChunkedUploadURL() string
 }
 
 // StoredAttachmentLimits are the settings the service runs under.
@@ -103,6 +104,25 @@ type StoredAttachmentLimits struct {
 	// stay valid.
 	ReadLinkTTL   time.Duration
 	UploadLinkTTL time.Duration
+
+	// ChunkedThresholdBytes is the size from which a file (never a comment
+	// image) is uploaded in TUS chunks; 0 turns that off. ChunkedUploadLinkTTL
+	// is how long such a link may wait to be used, ChunkSizeBytes the chunk size
+	// the browser is told to send, and LargeReadLinkMaxUses how many requests the
+	// download link of a file that large serves, so it can be resumed.
+	ChunkedThresholdBytes int64
+	ChunkedUploadLinkTTL  time.Duration
+	ChunkSizeBytes        int64
+	LargeReadLinkMaxUses  int
+}
+
+// tusStagedName is the name a chunked upload is stored under in its staging
+// folder. It is ours, not the browser's, so no file name can reach the path.
+const tusStagedName = "upload.bin"
+
+// chunked reports whether a file of this kind and size goes up in TUS chunks.
+func (l StoredAttachmentLimits) chunked(kind domain.StoredAttachmentKind, size int64) bool {
+	return kind != domain.StoredAttachmentComment && l.ChunkedThresholdBytes > 0 && size >= l.ChunkedThresholdBytes
 }
 
 type storedAttachmentService struct {
@@ -312,6 +332,11 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 		return l
 	}
 	expires := s.now().Add(s.limits.ReadLinkTTL)
+	// A browser resumes a big download with a second, ranged request, which a
+	// one-use link would refuse.
+	if uses == downloadLinkMaxUses && s.limits.chunked(kind, sizeOrZero(row.SizeBytes)) && s.limits.LargeReadLinkMaxUses > uses {
+		uses = s.limits.LargeReadLinkMaxUses
+	}
 	shareID, err := s.store.CreateShare(ctx, filestore.ShareSpec{
 		Name: "dl", Scope: filestore.ShareRead, Path: *row.StorageKey,
 		MaxUses: uses, ExpiresAt: expires,
@@ -390,7 +415,12 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	// One folder per upload, and a share on just that folder that accepts one
 	// request: the browser can put one file there and reach nothing else.
 	staging := filestore.StagingDir(row.ID)
-	expires := s.now().Add(s.limits.UploadLinkTTL)
+	tus := s.limits.chunked(req.Kind, req.SizeBytes)
+	ttl := s.limits.UploadLinkTTL
+	if tus && s.limits.ChunkedUploadLinkTTL > 0 {
+		ttl = s.limits.ChunkedUploadLinkTTL
+	}
+	expires := s.now().Add(ttl)
 	shareID, err := s.openUploadShare(ctx, staging, expires)
 	if err != nil {
 		// The row would sit PENDING forever; record that it never got a link.
@@ -398,14 +428,26 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, storageUnavailable(ctx, "open upload share", err)
 	}
 	auditLink(ctx, "upload", req.Kind, row.ID, staging, shareID, expires)
-	return domain.InitiateAttachmentUploadResponse{
+	resp := domain.InitiateAttachmentUploadResponse{
 		AttachmentID: row.ID,
 		Number:       row.Number,
-		UploadURL:    s.store.UploadURL(shareID),
-		FieldName:    "filenames",
 		ExpiresAt:    expires,
 		MaxBytes:     limit,
-	}, nil
+	}
+	if tus {
+		// Creating the TUS upload spends the share's one use; the chunks that
+		// follow do not need the share, so a resume after expiry still works.
+		resp.UploadMethod = domain.UploadMethodTUS
+		resp.UploadURL = s.store.ChunkedUploadURL()
+		resp.ShareID = shareID
+		resp.Path = "/" + tusStagedName
+		resp.ChunkSize = s.limits.ChunkSizeBytes
+		return resp, nil
+	}
+	resp.UploadMethod = domain.UploadMethodMultipart
+	resp.UploadURL = s.store.UploadURL(shareID)
+	resp.FieldName = "filenames"
+	return resp, nil
 }
 
 func (s *storedAttachmentService) openUploadShare(ctx context.Context, staging string, expires time.Time) (string, error) {

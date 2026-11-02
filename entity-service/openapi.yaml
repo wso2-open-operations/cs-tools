@@ -270,9 +270,15 @@ paths:
         Start an upload. Checks the caller may add a file to the parent (a
         REGISTERED member of its project, or internal), that the work item is not
         closed (refused for every caller), and the size and type. Records a
-        PENDING attachment and returns a one-use link: the browser POSTs a
-        multipart form with the file in the field named by fieldName to uploadUrl
-        before expiresAt, then calls confirm. A comment image (type comment) may
+        PENDING attachment and returns a one-use link. With uploadMethod
+        multipart the browser POSTs a multipart form with the file in the field
+        named by fieldName to uploadUrl before expiresAt, then calls confirm. A
+        file of ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES or more (never a comment
+        image) gets uploadMethod tus: the browser uses the TUS resumable-upload
+        protocol against uploadUrl (create the upload with Upload-Length and an
+        Upload-Metadata of share_id=shareId and path=path, send chunkSize-byte
+        chunks, resume from the server's offset after a break) and then calls
+        confirm. expiresAt only bounds starting a TUS upload. A comment image (type comment) may
         only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
         before its comment exists. Not registered (404) without the SFTPGo
         settings. The response is never cacheable.
@@ -36801,20 +36807,38 @@ components:
 
     InitiateAttachmentUploadResponse:
       type: object
-      required: [attachmentId, number, uploadUrl, fieldName, expiresAt, maxBytes]
+      required: [attachmentId, number, uploadMethod, uploadUrl, expiresAt, maxBytes]
       properties:
         attachmentId:
           type: string
           format: uuid
         number:
           type: string
+        uploadMethod:
+          type: string
+          enum: [multipart, tus]
+          description: >-
+            multipart is one POST of a form; tus is the TUS resumable upload
+            used for a large file.
         uploadUrl:
           type: string
           format: uri
-          description: POST a multipart form here, once, before expiresAt.
+          description: >-
+            multipart - POST a multipart form here, once, before expiresAt.
+            tus - the TUS creation endpoint.
         fieldName:
           type: string
-          description: The multipart field the file goes in (filenames).
+          description: multipart only. The multipart field the file goes in (filenames).
+        shareId:
+          type: string
+          description: tus only. Goes in Upload-Metadata as share_id. A secret; never log it.
+        path:
+          type: string
+          description: tus only. Goes in Upload-Metadata as path (relative to the share's folder).
+        chunkSize:
+          type: integer
+          format: int64
+          description: tus only. How many bytes to send per chunk.
         expiresAt:
           type: string
           format: date-time
