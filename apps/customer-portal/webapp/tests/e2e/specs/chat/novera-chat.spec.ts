@@ -28,8 +28,10 @@
 // ⚠️ WRITES:
 //
 // - `hasAgent` on the project, which changes Get Help for every other spec. The
-//   restore runs from `finally`, and the restore is best-effort so a run
-//   that died mid-flow is corrected by the next one.
+//   restore runs from `finally` through the same Settings toggle that switched
+//   it on (setNoveraEnabled) — the direct API PATCH is rejected by staging, so
+//   restoring through it silently left the assistant on. A restore that fails
+//   now fails the test rather than being swallowed.
 // - a conversation per test, and a case from the second, none of which can be
 //   deleted — so a full run leaves two conversations and one case behind.
 //
@@ -55,7 +57,7 @@ import { expectSuccess } from "../../utils/caseFlows";
 import { conversationSearchWith } from "../../utils/listSearch";
 import {
   NOVERA_REPLY_SETTLE_MS,
-  setNoveraViaApi,
+  setNoveraEnabled,
 } from "../../utils/noveraFlows";
 import { idPattern, projectPathPattern } from "../../utils/ids";
 
@@ -460,7 +462,7 @@ test.describe("Novera Chat", () => {
     } finally {
       // Off again whatever happened: leaving the assistant on sends every
       // create-case spec to the chat instead of the form.
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -480,7 +482,7 @@ test.describe("Novera Chat", () => {
           `conversation`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -550,7 +552,7 @@ test.describe("Novera Chat", () => {
           `${conversationId} and posted "${NOVERA_CHAT_INPUT.followUp}"`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -599,7 +601,7 @@ test.describe("Novera Chat", () => {
           `offers View only`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -664,7 +666,7 @@ test.describe("Novera Chat", () => {
         `Novera chat: viewed closed ${chatNumber} (${conversationId})`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -681,7 +683,20 @@ test.describe("Novera Chat", () => {
 
     // Support in the side menu, then the Chat History card's full list.
     const chat = await openChatHistory(page);
-    await expect(chat.historyRows().first()).toBeVisible({ timeout: 60_000 });
+
+    // A project id does not mean the project has any conversations, so wait for
+    // the list to settle either way and skip on an empty one — this test only
+    // reads, and has nothing to open without an existing chat.
+    const empty = page.getByText(NOVERA_CHAT.history.emptyMessage, {
+      exact: true,
+    });
+    await expect(chat.historyRows().first().or(empty)).toBeVisible({
+      timeout: 60_000,
+    });
+    test.skip(
+      await empty.isVisible(),
+      `${NOVERA_CHAT_INPUT.projectType} has no conversations in its Chat History.`,
+    );
 
     // Prefer a closed conversation's View — it only reads. Fall back to the
     // newest row's Resume, which opens the same details page.
@@ -795,7 +810,7 @@ test.describe("Novera Chat", () => {
           `${created.number ?? created.id}`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await setNoveraEnabled(page, project.id, false);
     }
   });
 
@@ -1161,7 +1176,7 @@ test.describe("Novera Chat", () => {
 
         console.log(`Novera chat: whitespace-only text cannot be submitted`);
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await setNoveraEnabled(page, project.id, false);
       }
     });
 
@@ -1206,7 +1221,7 @@ test.describe("Novera Chat", () => {
           `Novera chat: ${max} characters accepted, ${max + 1} refused`,
         );
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await setNoveraEnabled(page, project.id, false);
       }
     });
 
@@ -1248,7 +1263,7 @@ test.describe("Novera Chat", () => {
             `conversation ${conversationId}`,
         );
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await setNoveraEnabled(page, project.id, false);
       }
     });
   });

@@ -1460,9 +1460,12 @@ test.describe("Dashboard", () => {
     test.skip(!project.id, "Subscription needs a project id.");
 
     const dashboard = new DashboardPage(page);
+    // Armed before navigating, so the user details the modal reads are known
+    // to have arrived — saveProfileTimeZone re-arms it before each reload.
+    const profile = { userDetails: userDetailsLoad(page) };
     await dashboard.openViaSideNav(project.id);
 
-    const original = await openProfileTimeZone(page);
+    const original = await openProfileTimeZone(page, profile.userDetails);
     // The UI cannot clear a time zone, so an account without one could not be
     // put back the way it was.
     test.skip(
@@ -1477,19 +1480,22 @@ test.describe("Dashboard", () => {
     try {
       const target = await saveProfileTimeZone(
         page,
+        profile,
         (labels) => labels.find((label) => label !== original),
         saved,
       );
-      expect(await openProfileTimeZone(page)).toBe(target);
+      expect(await openProfileTimeZone(page, profile.userDetails)).toBe(target);
       await closeProfile(page);
       console.log(`Profile time zone: ${original} → ${target}`);
     } finally {
       if (saved.changed) {
-        const restored = await saveProfileTimeZone(page, (labels) =>
+        const restored = await saveProfileTimeZone(page, profile, (labels) =>
           labels.find((label) => label === original),
         );
         expect(restored).toBe(original);
-        expect(await openProfileTimeZone(page)).toBe(original);
+        expect(await openProfileTimeZone(page, profile.userDetails)).toBe(
+          original,
+        );
         console.log(`Profile time zone restored to ${original}`);
       }
     }
@@ -1688,12 +1694,45 @@ async function expectSidebarWidth(
 const PROFILE_TIMEOUT_MS = 60_000;
 
 /**
- * Opens Account → Profile and the Time Zone select's option list.
+ * Starts waiting for the shell's `GET /users/me`, which the profile modal takes
+ * its time zone from.
+ *
+ * Call this **before** the navigation or reload that issues it.
  *
  * @param page - The page under test.
- * @returns The time zone label the select currently shows.
+ * @returns Promise for the user details response.
  */
-async function openProfileTimeZone(page: Page): Promise<string> {
+function userDetailsLoad(page: Page): Promise<Response> {
+  return page.waitForResponse(
+    (r) =>
+      r.request().method() === "GET" &&
+      /\/users\/me$/.test(new URL(r.url()).pathname),
+    { timeout: PROFILE_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Opens Account → Profile and the Time Zone select's option list.
+ *
+ * Readiness comes from the `GET /users/me` response, not from the select's
+ * text: the select shows its placeholder both while loading and when the user
+ * genuinely has no time zone, so the placeholder disappearing cannot be waited
+ * for.
+ *
+ * @param page - The page under test.
+ * @param userDetails - The `GET /users/me` response for the current page load.
+ * @returns The selected time zone's label, or the placeholder when none is set.
+ */
+async function openProfileTimeZone(
+  page: Page,
+  userDetails: Promise<Response>,
+): Promise<string> {
+  const response = await userDetails;
+  expect(response.ok(), `GET /users/me returned ${response.status()}`).toBe(
+    true,
+  );
+  const { timeZone } = (await response.json()) as { timeZone?: string | null };
+
   await page.getByRole("button", { name: ACCOUNT_MENU.trigger }).click();
   await page
     .getByRole("menuitem", { name: ACCOUNT_MENU.profileItem })
@@ -1703,14 +1742,18 @@ async function openProfileTimeZone(page: Page): Promise<string> {
     name: ACCOUNT_MENU.timeZoneSelect,
   });
   await expect(select).toBeVisible({ timeout: PROFILE_TIMEOUT_MS });
-  // The select renders the placeholder until /users/me and /metadata resolve.
-  await expect(select).not.toHaveText("", { timeout: PROFILE_TIMEOUT_MS });
-  const current = (await select.innerText()).trim();
   await select.click();
+  // Options come from /metadata, so their presence means the labels are known.
   await expect(page.getByRole("option").first()).toBeVisible({
     timeout: PROFILE_TIMEOUT_MS,
   });
-  return current;
+  if (!timeZone) return ACCOUNT_MENU.timeZonePlaceholder;
+
+  // Read the label off the selected option rather than the select: the select
+  // falls back to the raw IANA id until the metadata labels it.
+  const selected = page.getByRole("option", { selected: true });
+  await expect(selected).toHaveCount(1, { timeout: PROFILE_TIMEOUT_MS });
+  return (await selected.innerText()).trim();
 }
 
 /**
@@ -1731,16 +1774,19 @@ async function closeProfile(page: Page): Promise<void> {
  * the reload a time zone change triggers.
  *
  * @param page - The page under test.
+ * @param profile - Holds the `GET /users/me` wait for the current page load;
+ *   replaced with the post-reload one, armed before the save is clicked.
  * @param pick - Chooses the label to select from the offered options.
  * @param saved - Optional flag set to true once the PATCH has succeeded.
  * @returns The label that was saved.
  */
 async function saveProfileTimeZone(
   page: Page,
+  profile: { userDetails: Promise<Response> },
   pick: (labels: string[]) => string | undefined,
   saved?: { changed: boolean },
 ): Promise<string> {
-  await openProfileTimeZone(page);
+  await openProfileTimeZone(page, profile.userDetails);
   const labels = (await page.getByRole("option").allInnerTexts()).map((l) =>
     l.trim(),
   );
@@ -1758,6 +1804,7 @@ async function saveProfileTimeZone(
       r.request().method() === "PATCH" && /\/users\/me$/.test(r.url()),
   );
   const reload = page.waitForEvent("load");
+  profile.userDetails = userDetailsLoad(page);
   await modal.getByRole("button", { name: ACCOUNT_MENU.saveButton }).click();
   const response = await patch;
   expect(response.ok(), `PATCH /users/me returned ${response.status()}`).toBe(

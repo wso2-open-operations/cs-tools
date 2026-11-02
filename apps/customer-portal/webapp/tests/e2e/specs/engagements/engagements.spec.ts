@@ -300,10 +300,18 @@ test.describe("Engagements", () => {
     await main.getByRole("combobox", { name: pagination.rowsPerPageLabel }).click();
     await page.getByRole("option", { name: "25", exact: true }).click();
     const shown = Math.min(25, total);
-    await expect(range).toHaveText(new RegExp(`^1[–-]${shown} of ${total}$`), {
-      timeout: 60_000,
-    });
     await expect(rows).toHaveCount(shown, { timeout: 60_000 });
+    // ListPagination renders nothing once every record fits on one page
+    // (`totalRecords <= rowsPerPage`), so the range only exists past 25.
+    if (total > 25) {
+      await expect(range).toHaveText(new RegExp(`^1[–-]${shown} of ${total}$`), {
+        timeout: 60_000,
+      });
+    } else {
+      await expect(main.locator(".MuiTablePagination-root")).toHaveCount(0, {
+        timeout: 60_000,
+      });
+    }
 
     console.log(`Engagements: ${total} over pages of ${size}; 25 per page shows ${shown}`);
   });

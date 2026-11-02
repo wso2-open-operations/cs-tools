@@ -162,6 +162,43 @@ async function deleteToken(page: Page, name: string): Promise<void> {
   await expect(tokenRow(page, name)).toHaveCount(0, { timeout: LOAD_TIMEOUT_MS });
 }
 
+/**
+ * Cleanup: deletes a token if the project still has it.
+ *
+ * Decides from the list's own search response rather than from a flag the test
+ * sets, so a failure anywhere after the create POST — the secret step, a
+ * payload check — still removes the token. Reloads first, because such a
+ * failure can leave a dialog open over the list.
+ *
+ * One search returns user and service tokens alike (the sub-tabs filter it
+ * client-side), and the generated name is unique, so a plain text match on the
+ * response is enough to know whether the token exists.
+ *
+ * @param page - The page under test.
+ * @param name - Token name.
+ * @param tab - Sub-tab the token is listed under, when not the default one.
+ */
+async function removeTokenIfPresent(
+  page: Page,
+  name: string,
+  tab?: string | RegExp,
+): Promise<void> {
+  const listed = page.waitForResponse(
+    (r) =>
+      r.request().method() === "POST" &&
+      /\/registry-tokens\/search$/.test(new URL(r.url()).pathname),
+    { timeout: LOAD_TIMEOUT_MS },
+  );
+  await openRegistryTokens(page);
+  const response = await listed;
+  expect(response.ok(), `listing tokens returned ${response.status()}`).toBe(true);
+  if (!(await response.text()).includes(name)) return;
+
+  if (tab) await page.getByRole("tab", { name: tab }).click();
+  await expect(tokenRow(page, name)).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+  await deleteToken(page, name);
+}
+
 test.describe("Settings — Registry Tokens", () => {
   test.describe.configure({ timeout: 180_000 });
 
@@ -172,10 +209,8 @@ test.describe("Settings — Registry Tokens", () => {
   test("generates a user token and rejects a duplicate name", async ({ page }) => {
     await openRegistryTokens(page);
     const name = tokenName();
-    let created = false;
     try {
       await generateToken(page, name);
-      created = true;
 
       // The same name is refused before anything is sent.
       const again = await startGenerating(page, name);
@@ -187,17 +222,15 @@ test.describe("Settings — Registry Tokens", () => {
       await expect(again).toHaveCount(0);
       console.log(`Registry Tokens: generated "${name}"; duplicate name refused`);
     } finally {
-      if (created) await deleteToken(page, name);
+      await removeTokenIfPresent(page, name);
     }
   });
 
   test("regenerates a token's secret", async ({ page }) => {
     await openRegistryTokens(page);
     const name = tokenName();
-    let created = false;
     try {
       const original = await generateToken(page, name);
-      created = true;
 
       await rowAction(page, name, REGISTRY_TOKEN_ACTIONS.regenerateMenuItem);
       const dialog = page.getByRole("dialog");
@@ -227,31 +260,39 @@ test.describe("Settings — Registry Tokens", () => {
       await expect(tokenRow(page, name)).toBeVisible();
       console.log(`Registry Tokens: regenerated the secret of "${name}"`);
     } finally {
-      if (created) await deleteToken(page, name);
+      await removeTokenIfPresent(page, name);
     }
   });
 
   test("deletes a token, after a cancelled first attempt", async ({ page }) => {
     await openRegistryTokens(page);
     const name = tokenName();
-    await generateToken(page, name);
+    let deleted = false;
+    try {
+      await generateToken(page, name);
 
-    // Cancel keeps it.
-    await rowAction(page, name, REGISTRY_TOKENS.deleteMenuItem);
-    const confirm = page.getByRole("dialog");
-    await expect(
-      confirm.getByText(REGISTRY_TOKENS.deleteDialogTitle, { exact: true }),
-    ).toBeVisible();
-    await confirm.getByRole("button", { name: REGISTRY_TOKENS.cancelButton, exact: true }).click();
-    await expect(confirm).toHaveCount(0);
-    await expect(tokenRow(page, name)).toBeVisible();
+      // Cancel keeps it.
+      await rowAction(page, name, REGISTRY_TOKENS.deleteMenuItem);
+      const confirm = page.getByRole("dialog");
+      await expect(
+        confirm.getByText(REGISTRY_TOKENS.deleteDialogTitle, { exact: true }),
+      ).toBeVisible();
+      await confirm.getByRole("button", { name: REGISTRY_TOKENS.cancelButton, exact: true }).click();
+      await expect(confirm).toHaveCount(0);
+      await expect(tokenRow(page, name)).toBeVisible();
 
-    // Delete removes it, and it stays gone after a reload.
-    await deleteToken(page, name);
-    await page.reload();
-    await openRegistryTokens(page);
-    await expect(tokenRow(page, name)).toHaveCount(0);
-    console.log(`Registry Tokens: deleted "${name}"`);
+      // Delete removes it, and it stays gone after a reload.
+      await deleteToken(page, name);
+      await page.reload();
+      await openRegistryTokens(page);
+      await expect(tokenRow(page, name)).toHaveCount(0);
+      deleted = true;
+      console.log(`Registry Tokens: deleted "${name}"`);
+    } finally {
+      // Skipped only once the reload has proven it gone; any earlier failure —
+      // the cancel step included — falls through to the existence check.
+      if (!deleted) await removeTokenIfPresent(page, name);
+    }
   });
 
   test("generates a service token for a system user", async ({ page }) => {
@@ -266,7 +307,6 @@ test.describe("Settings — Registry Tokens", () => {
 
     const name = tokenName();
     const user = REGISTRY_SERVICE_TOKEN_INPUT.createdFor;
-    let created = false;
     try {
       await page.getByRole("button", { name: REGISTRY_SERVICE_TOKENS.generateButton }).click();
       const dialog = page.getByRole("dialog");
@@ -304,7 +344,6 @@ test.describe("Settings — Registry Tokens", () => {
         robotName: name,
         createdFor: user,
       });
-      created = true;
 
       await expect(
         dialog.getByText(REGISTRY_TOKENS.createdDialogTitle, { exact: true }),
@@ -319,7 +358,7 @@ test.describe("Settings — Registry Tokens", () => {
       await expect(row).toContainText(user);
       console.log(`Registry Tokens: generated service token "${name}" for ${user}`);
     } finally {
-      if (created) await deleteToken(page, name);
+      await removeTokenIfPresent(page, name, REGISTRY_SERVICE_TOKENS.tab);
     }
   });
 });

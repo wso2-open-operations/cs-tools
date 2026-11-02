@@ -306,13 +306,15 @@ test.describe("Security Report Analysis", () => {
         // CS numbers are issued in creation order, so the rows' numbers are a
         // proxy for created date that the list itself displays.
         const numbersAfter = async (label: string, order: string) => {
-          const sorted = nextSraSearch(
-            page,
-            (b) =>
-              b.sortBy?.field === created.value &&
-              b.sortBy?.order?.toLowerCase() === order,
-          );
           if (!(await orderSelect.innerText()).includes(label)) {
+            // Armed only when a search will follow: left un-awaited, it would
+            // time out and reject unhandled.
+            const sorted = nextSraSearch(
+              page,
+              (b) =>
+                b.sortBy?.field === created.value &&
+                b.sortBy?.order?.toLowerCase() === order,
+            );
             await orderSelect.click();
             await page.getByRole("option", { name: label, exact: true }).click();
             await sorted;

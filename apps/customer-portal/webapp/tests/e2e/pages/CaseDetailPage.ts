@@ -191,15 +191,18 @@ export class CaseDetailPage {
    */
   async scrollToComment(text: string): Promise<Locator> {
     const target = this.comment(text);
-    for (let attempt = 0; attempt < 20 && !(await target.count()); attempt++) {
+    await expect(async () => {
+      if (await target.count()) return;
+      // Bounded so a feed with no paragraph yet cannot stall the retry loop on
+      // the default action timeout.
       await this.main()
         .getByRole("paragraph")
         .last()
-        .scrollIntoViewIfNeeded()
+        .scrollIntoViewIfNeeded({ timeout: 2_000 })
         .catch(() => undefined);
       await this.page.mouse.wheel(0, 5_000);
-      await this.page.waitForTimeout(1_000);
-    }
+      await expect(target).not.toHaveCount(0, { timeout: 1_000 });
+    }).toPass({ intervals: [500, 1_000, 2_000], timeout: LOAD_TIMEOUT_MS });
     return target;
   }
 

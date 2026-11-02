@@ -176,7 +176,9 @@ test.describe("Create Case — validation", () => {
           // ("Production") already chosen (live 2026-10-27), so there is no gate
           // to observe — the product field must then be open straight away.
           if (await deploymentPreselected(form)) {
-            await expect(form.productVersionSelect()).toBeEnabled();
+            // Either the placeholder or an auto-selected single product — the
+            // placeholder alone is absent when the deployment has one product.
+            await expect(form.productReadySignal()).toBeEnabled();
             await expect(form.productGateMessage()).toHaveCount(0);
             return;
           }

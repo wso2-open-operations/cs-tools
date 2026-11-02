@@ -555,6 +555,9 @@ export const NOVERA_CHAT = {
      * (ConversationListRowAction). */
     resumeButton: "Resume",
     viewButton: "View",
+    /** AllConversationsList's empty state with no search or filter applied
+     * (ALL_CONVERSATIONS_LIST_EMPTY_DEFAULT_MESSAGE). */
+    emptyMessage: "No conversations yet.",
     /** ListResultsBar's count, with `entityLabel: "chat sessions"`. */
     resultsCountPattern: /Showing (\d+) of (\d+) chat sessions/,
     filtersButton: "Filters",
