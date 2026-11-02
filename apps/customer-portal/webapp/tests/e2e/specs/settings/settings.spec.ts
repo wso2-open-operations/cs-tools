@@ -164,29 +164,33 @@ test.describe("Settings", () => {
     const search = async (field: string, query: string): Promise<number> => {
       await settings.searchInput().fill(query);
 
-      // The target is still listed — it is what the query was taken from.
-      await expect(
-        settings.userRow(target.email),
-        `searching the ${field} "${query}" should keep ${target.email} listed`,
-      ).not.toHaveCount(0);
-
-      // Every surviving row shows the term somewhere. Polled rather than
-      // snapshotted: the checks above already hold on the unfiltered list (the
-      // target was listed before the search too), so they do not prove the
-      // filter has applied — a one-off read could still see the old rows.
+      // Both conditions judged on ONE snapshot of the rows, polled until it
+      // settles: the target is still listed (it is what the query was taken
+      // from), and every surviving row shows the term. Checked separately they
+      // could pass on different states — the target on the unfiltered list, and
+      // "every row" vacuously on an empty one.
       const needle = query.toLowerCase();
+      const email = target.email.toLowerCase();
       await expect
         .poll(
-          async () =>
-            (await settings.anyUserRows().allInnerTexts()).every((text) =>
-              text.toLowerCase().includes(needle),
-            ),
+          async () => {
+            const texts = (await settings.anyUserRows().allInnerTexts()).map(
+              (text) => text.toLowerCase(),
+            );
+            if (!texts.some((text) => text.includes(email))) {
+              return `${target.email} is not listed`;
+            }
+            if (!texts.every((text) => text.includes(needle))) {
+              return `a row survived without showing "${query}"`;
+            }
+            return "ok";
+          },
           {
-            message: `a row survived the ${field} search for "${query}" without showing it`,
+            message: `searching the ${field} "${query}"`,
             timeout: 30_000,
           },
         )
-        .toBe(true);
+        .toBe("ok");
 
       // Client-side over the loaded contacts, so this narrows rather than
       // fetches and can never grow the list.

@@ -31,7 +31,8 @@
 //   restore runs from `finally` through the same Settings toggle that switched
 //   it on (setNoveraEnabled) — the direct API PATCH is rejected by staging, so
 //   restoring through it silently left the assistant on. A restore that fails
-//   now fails the test rather than being swallowed.
+//   now fails the test rather than being swallowed. Only a test that switched
+//   it on switches it off, so a project that already had it on keeps it.
 // - a conversation per test, and a case from the second, none of which can be
 //   deleted — so a full run leaves two conversations and one case behind.
 //
@@ -73,6 +74,25 @@ test.describe("Novera Chat", () => {
 
   const project = PROJECTS[NOVERA_CHAT_INPUT.projectType];
 
+  /** Whether this test switched Novera on itself. Set just before the write, so
+   * a failure after it still reverts it; teardown leaves a pre-existing "on"
+   * alone. */
+  let turnedNoveraOn = false;
+  test.beforeEach(() => {
+    turnedNoveraOn = false;
+  });
+
+  /**
+   * Teardown: switches Novera back off only if this test switched it on, so the
+   * project is left in its pre-test state either way.
+   *
+   * @param page - Test page.
+   * @returns Resolves once the restore (if any) is confirmed.
+   */
+  async function restoreNovera(page: Page): Promise<void> {
+    if (turnedNoveraOn) await setNoveraEnabled(page, project.id, false);
+  }
+
   /**
    * Makes sure the AI Chat Assistant (Novera) is on, through Settings → AI
    * Assistant — the same control the "get help" test drives.
@@ -92,6 +112,7 @@ test.describe("Novera Chat", () => {
     await settings.openTab(SETTINGS.tabs.aiAssistant);
     await expect(settings.noveraToggle()).toBeEnabled({ timeout: 30_000 });
     if (!(await settings.noveraToggle().isChecked())) {
+      turnedNoveraOn = true;
       await settings.setNovera(project.id, true);
     }
     await expect(
@@ -408,6 +429,7 @@ test.describe("Novera Chat", () => {
       // is rejected, so the assertions that follow are what establish the state
       // — not the click.
       if (!(await settings.noveraToggle().isChecked())) {
+        turnedNoveraOn = true;
         await settings.setNovera(project.id, true);
       }
 
@@ -460,9 +482,10 @@ test.describe("Novera Chat", () => {
       // conversation is not aborted mid-creation.
       await page.waitForTimeout(SUBMIT_SETTLE_MS);
     } finally {
-      // Off again whatever happened: leaving the assistant on sends every
-      // create-case spec to the chat instead of the form.
-      await setNoveraEnabled(page, project.id, false);
+      // Off again whatever happened, if this test turned it on: leaving the
+      // assistant on sends every create-case spec to the chat instead of the
+      // form. One that was already on is left as it was found.
+      await restoreNovera(page);
     }
   });
 
@@ -482,7 +505,7 @@ test.describe("Novera Chat", () => {
           `conversation`,
       );
     } finally {
-      await setNoveraEnabled(page, project.id, false);
+      await restoreNovera(page);
     }
   });
 
@@ -552,7 +575,7 @@ test.describe("Novera Chat", () => {
           `${conversationId} and posted "${NOVERA_CHAT_INPUT.followUp}"`,
       );
     } finally {
-      await setNoveraEnabled(page, project.id, false);
+      await restoreNovera(page);
     }
   });
 
@@ -601,7 +624,7 @@ test.describe("Novera Chat", () => {
           `offers View only`,
       );
     } finally {
-      await setNoveraEnabled(page, project.id, false);
+      await restoreNovera(page);
     }
   });
 
@@ -666,7 +689,7 @@ test.describe("Novera Chat", () => {
         `Novera chat: viewed closed ${chatNumber} (${conversationId})`,
       );
     } finally {
-      await setNoveraEnabled(page, project.id, false);
+      await restoreNovera(page);
     }
   });
 
@@ -810,7 +833,7 @@ test.describe("Novera Chat", () => {
           `${created.number ?? created.id}`,
       );
     } finally {
-      await setNoveraEnabled(page, project.id, false);
+      await restoreNovera(page);
     }
   });
 
@@ -1176,7 +1199,7 @@ test.describe("Novera Chat", () => {
 
         console.log(`Novera chat: whitespace-only text cannot be submitted`);
       } finally {
-        await setNoveraEnabled(page, project.id, false);
+        await restoreNovera(page);
       }
     });
 
@@ -1221,7 +1244,7 @@ test.describe("Novera Chat", () => {
           `Novera chat: ${max} characters accepted, ${max + 1} refused`,
         );
       } finally {
-        await setNoveraEnabled(page, project.id, false);
+        await restoreNovera(page);
       }
     });
 
@@ -1263,7 +1286,7 @@ test.describe("Novera Chat", () => {
             `conversation ${conversationId}`,
         );
       } finally {
-        await setNoveraEnabled(page, project.id, false);
+        await restoreNovera(page);
       }
     });
   });
