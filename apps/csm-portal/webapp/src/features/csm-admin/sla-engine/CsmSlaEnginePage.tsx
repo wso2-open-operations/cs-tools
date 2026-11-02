@@ -37,16 +37,23 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { Link as RouterLink } from "react-router";
+import { useMemo, useState, type ChangeEvent, type JSX, type MouseEvent } from "react";
+import { Link as RouterLink, useNavigate } from "react-router";
+import SeverityChip from "@components/SeverityChip";
+import { severityFromBe } from "@api/backend/mappers";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
-import { CASE_TYPE_LABEL, caseTypeDetailBasePath } from "@features/csm-cases/utils/caseType";
+import {
+  CASE_TYPE_COLOR,
+  CASE_TYPE_LABEL,
+  caseTypeDetailBasePath,
+  caseTypeHasSeverity,
+} from "@features/csm-cases/utils/caseType";
 import type { BeCaseType } from "@api/backend/types";
 import { useActiveSlaStatuses, useRequestSlaRecalculation } from "@features/csm-admin/sla-engine/useSlaEngine";
 
 const DEFAULT_ROWS_PER_PAGE = 25;
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
-const TABLE_COLUMN_COUNT = 7;
+const TABLE_COLUMN_COUNT = 8;
 const SLA_ENGINE_PAGE_PATH = "/admin/sla-engine";
 
 function formatTimestamp(value: string | null): string {
@@ -58,11 +65,6 @@ function formatTimestamp(value: string | null): string {
 /** entity-service sends SLAStatus.CaseType uppercase (e.g. "SERVICE_REQUEST"); CASE_TYPE_LABEL/caseTypeDetailBasePath are keyed lowercase. */
 function lowerCaseType(caseType: string | undefined): BeCaseType | undefined {
   return caseType ? (caseType.toLowerCase() as BeCaseType) : undefined;
-}
-
-function caseTypeLabel(caseType: string | undefined): string {
-  if (!caseType) return "—";
-  return CASE_TYPE_LABEL[lowerCaseType(caseType) as BeCaseType] ?? caseType;
 }
 
 /** Where this row's case/SR/SRA/etc. detail page lives -- each type has its own route, not just `/cases`. */
@@ -79,6 +81,7 @@ function caseDetailPath(caseId: string, caseType: string | undefined): string {
  * effect, typically right after clicking Recalculate.
  */
 export default function CsmSlaEnginePage(): JSX.Element {
+  const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
@@ -108,7 +111,7 @@ export default function CsmSlaEnginePage(): JSX.Element {
   };
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 3, maxWidth: 960 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box>
         <Typography variant="h5" sx={{ mb: 0.5 }}>
           SLA Engine
@@ -185,6 +188,7 @@ export default function CsmSlaEnginePage(): JSX.Element {
                     <TableCell>Case</TableCell>
                     <TableCell sx={{ maxWidth: 260 }}>Title</TableCell>
                     <TableCell>Type</TableCell>
+                    <TableCell>Severity</TableCell>
                     <TableCell>Clock type</TableCell>
                     <TableCell>Elapsed</TableCell>
                     <TableCell>Status</TableCell>
@@ -211,37 +215,80 @@ export default function CsmSlaEnginePage(): JSX.Element {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    activeStatuses.data.statuses.map((status) => (
-                      <TableRow key={`${status.caseId}-${status.clockType}`}>
-                        <TableCell sx={{ fontFamily: "monospace" }}>
-                          <Box
-                            component={RouterLink}
-                            to={caseDetailPath(status.caseId, status.caseType)}
-                            state={{ from: SLA_ENGINE_PAGE_PATH }}
-                            sx={{
-                              color: "inherit",
-                              textDecoration: "none",
-                              "&:hover": { textDecoration: "underline" },
-                            }}
-                          >
-                            {caseIdLabel(status) || status.caseId}
-                          </Box>
-                        </TableCell>
-                        <TableCell sx={{ maxWidth: 260 }}>
-                          <Typography variant="body2" noWrap title={status.caseTitle || undefined}>
-                            {status.caseTitle || "—"}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{caseTypeLabel(status.caseType)}</TableCell>
-                        <TableCell>{status.clockType}</TableCell>
-                        <TableCell>{Math.round(status.businessElapsedPercent)}%</TableCell>
-                        <TableCell>
-                          {status.isPaused && <Chip size="small" variant="outlined" label="Paused" sx={{ mr: 0.5 }} />}
-                          {status.hasBreached && <Chip size="small" variant="outlined" color="error" label="Breached" />}
-                        </TableCell>
-                        <TableCell>{formatTimestamp(status.startedOn)}</TableCell>
-                      </TableRow>
-                    ))
+                    activeStatuses.data.statuses.map((status) => {
+                      const detailPath = caseDetailPath(status.caseId, status.caseType);
+                      const lowerType = lowerCaseType(status.caseType);
+                      return (
+                        <TableRow
+                          key={`${status.caseId}-${status.clockType}`}
+                          onClick={(e: MouseEvent<HTMLTableRowElement>) => {
+                            // The case-id cell below is a real RouterLink: a plain
+                            // click on it already navigates via its own handler
+                            // (which calls preventDefault), and that click still
+                            // bubbles up here -- do nothing then, or this pushes a
+                            // second, duplicate history entry for the same
+                            // destination. A modified click (cmd/ctrl/shift/alt)
+                            // deliberately does not preventDefault -- react-router
+                            // leaves it to the browser to open a new tab -- so skip
+                            // here too, or the current tab would also navigate away
+                            // while a new tab is opening.
+                            if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                            navigate(detailPath, { state: { from: SLA_ENGINE_PAGE_PATH } });
+                          }}
+                          sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}
+                        >
+                          <TableCell sx={{ fontFamily: "monospace" }}>
+                            <Box
+                              component={RouterLink}
+                              to={detailPath}
+                              state={{ from: SLA_ENGINE_PAGE_PATH }}
+                              sx={{
+                                color: "inherit",
+                                textDecoration: "none",
+                                "&:hover": { textDecoration: "underline" },
+                              }}
+                            >
+                              {caseIdLabel(status) || status.caseId}
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ maxWidth: 260 }}>
+                            <Typography variant="body2" noWrap title={status.caseTitle || undefined}>
+                              {status.caseTitle || "—"}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {lowerType ? (
+                              <Chip
+                                size="small"
+                                variant="outlined"
+                                color={CASE_TYPE_COLOR[lowerType]}
+                                label={CASE_TYPE_LABEL[lowerType] ?? status.caseType}
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {caseTypeHasSeverity(lowerType) ? (
+                              <SeverityChip severity={severityFromBe(status.priority)} />
+                            ) : (
+                              "—"
+                            )}
+                          </TableCell>
+                          <TableCell>{status.clockType}</TableCell>
+                          <TableCell>{Math.round(status.businessElapsedPercent)}%</TableCell>
+                          <TableCell>
+                            {status.isPaused && (
+                              <Chip size="small" variant="outlined" label="Paused" sx={{ mr: 0.5 }} />
+                            )}
+                            {status.hasBreached && (
+                              <Chip size="small" variant="outlined" color="error" label="Breached" />
+                            )}
+                          </TableCell>
+                          <TableCell>{formatTimestamp(status.startedOn)}</TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
