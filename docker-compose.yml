@@ -339,6 +339,7 @@ services:
     depends_on:
       - entity-service
       - mock-oidc
+      - csm-ai-integration-service
     environment:
       OAUTH2_CLIENT_ID: csm-portal-backend-dev-client
       OAUTH2_CLIENT_SECRET: dev-secret
@@ -373,6 +374,9 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3001
       PORT: "8080"
       DASHBOARDS_DIR: ./dashboards.example
+      # Dashboard generation: the model calls are made by
+      # csm-ai-integration-service below; this backend holds no model client.
+      CSM_AI_INTEGRATION_SERVICE_BASE_URL: http://csm-ai-integration-service:8080
       # The team catalogue. Unset, every team filter returns nothing and the
       # backend warns "team registry is empty" at startup. These are the teams
       # seed-team-schedule.sql creates; the display names must match the seeded
@@ -525,6 +529,25 @@ services:
       PORT: "8080"
     ports:
       - "127.0.0.1:8084:8080"
+
+  csm-ai-integration-service:
+    build:
+      context: ./integrations/csm-ai-integration-service
+      dockerfile: ../../docker/local/csm-ai-integration-service.Dockerfile
+    environment:
+      PORT: "8080"
+      # The model key, taken from your shell or a git-ignored .env next to
+      # this file; empty by default, which leaves model calls off (the generate
+      # routes answer 503 and the portal shows that generation is not
+      # available). Never put the key in this file.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Optional gateway and model, also from the shell or that .env (keep
+      # internal gateway addresses out of this file). The older
+      # DASHBOARD_GENERATE_* names are still read as a fallback.
+      CLAUDE_BASE_URL: ${CLAUDE_BASE_URL:-${DASHBOARD_GENERATE_BASE_URL:-}}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-${DASHBOARD_GENERATE_MODEL:-}}
+    ports:
+      - "127.0.0.1:8087:8080"
 
   csm-notification-service:
     build:

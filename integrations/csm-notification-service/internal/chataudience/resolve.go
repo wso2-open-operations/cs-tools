@@ -46,6 +46,19 @@ const (
 	// decides this before ever calling Resolve, since it replaces Resolve's
 	// whole team-first decision rather than adding to it.
 	Migration = "Migration"
+	// SLADefault is the audience an SLA breach alert (internal/slaengine)
+	// substitutes for IncidentMonitor in Resolve's own return value, before
+	// posting -- never returned by Resolve itself. The Incident Monitor
+	// Chat space has more than one incoming webhook pointed at it (one for
+	// the general incident feed, one dedicated to SLA breach cards, one for
+	// something else), a single Google Chat space supports perfectly well,
+	// so this does not change WHICH space an SLA alert lands in, only which
+	// of that space's own webhooks posts it -- a routing identity, not a
+	// destination change. Every other Resolve outcome (a real team's own
+	// space, Evaluation, Onboarding, Americas) is unaffected: only the
+	// literal "no team space, fall back to the shared room" case is
+	// retargeted, and only for this one caller.
+	SLADefault = "SLA Default"
 )
 
 // onboardingStatuses are the entity-service project.onboarding_status raw

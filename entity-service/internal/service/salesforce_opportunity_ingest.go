@@ -32,20 +32,22 @@ import (
 )
 
 // The VARCHAR limits of sf_opportunity / sf_opportunity_product (migration
-// 0080). Salesforce allows longer values for some of these fields; a longer
-// value is cut and logged rather than failing the whole event.
+// 0080, widened for the line-item product columns by migration 0254).
+// Salesforce allows longer values for some of these fields; a longer value is
+// cut and logged rather than failing the whole event. product_description is
+// TEXT and has no limit here.
 const (
 	maxSfOpportunityNameChars        = 200
 	maxSfOpportunityStageChars       = 40
 	maxSfOpportunityEulaVersionChars = 160
 	maxSfLineItemSfIDChars           = 40
-	maxSfLineItemNameChars           = 200
-	maxSfLineItemProductNameChars    = 100
-	maxSfLineItemProductCodeChars    = 70
-	maxSfLineItemProductDescChars    = 250
+	maxSfLineItemNameChars           = 376
+	maxSfLineItemProductNameChars    = 255
+	maxSfLineItemProductCodeChars    = 255
+	maxSfLineItemEngProductCodeChars = 255 // a comma-separated list of product abbreviations
 	maxSfLineItemProductFamilyChars  = 100
 	maxSfLineItemProductSfIDChars    = 40
-	maxSfLineItemShortChars          = 40 // product_unit, classification, eng_product_code, environment
+	maxSfLineItemShortChars          = 40 // product_unit, classification, environment
 )
 
 // defaultEulaVersionDecimal is what the ServiceNow script stores in
@@ -342,10 +344,10 @@ func mapSalesEntityLineItem(ctx context.Context, id string, li salesentity.Subsc
 	if p := li.Product; p != nil {
 		out.ProductName = col("product_name", p.Name, maxSfLineItemProductNameChars)
 		out.ProductCode = col("product_code", p.ProductCode, maxSfLineItemProductCodeChars)
-		out.ProductDescription = col("product_description", p.Description, maxSfLineItemProductDescChars)
+		out.ProductDescription = optionalPtr(p.Description) // TEXT: never truncated
 		out.ProductFamily = col("product_family", p.Family, maxSfLineItemProductFamilyChars)
 		out.ProductUnit = col("product_unit", p.ProductUnit, maxSfLineItemShortChars)
-		out.EngProductCode = col("eng_product_code", p.EngProductCode, maxSfLineItemShortChars)
+		out.EngProductCode = col("eng_product_code", p.EngProductCode, maxSfLineItemEngProductCodeChars)
 		out.ProductSfID = col("product_sf_id", p.ID, maxSfLineItemProductSfIDChars)
 	}
 	return out

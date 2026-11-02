@@ -760,11 +760,10 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	// SLA-clock registration is scoped to req.Type == "case" only -- the
+	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
-	// comment): service_request/engagement/security_report_analysis/
-	// announcement have no sla_policy naming convention this engine's
-	// resolver understands. Best-effort and nil-safe: s.slaEngine is nil
+	// comment and that var's own doc comment for which types are covered
+	// and why). Best-effort and nil-safe: s.slaEngine is nil
 	// when WithSLAEngine was never wired in (e.g. CSM_SLA_ENGINE_ENABLED=
 	// false, or no database configured at all), and a missing/failed clock
 	// registration must never fail case creation, which has already
@@ -778,7 +777,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// tracking whatsoever from creation onward, regardless of severity,
 	// until/unless its severity happened to change later (which calls
 	// ReviseCaseClocks, registering clocks as a side effect).
-	if s.slaEngine != nil && req.Type == "case" {
+	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
 		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
 	}
 	if len(watcherIDs) > 0 {
@@ -967,7 +966,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// has already committed by the time this runs, so the only remaining
 	// ordering constraint is "before the publish," which this now also
 	// satisfies -- see registerCaseSLAClocksEvent's own doc comment.
-	if req.Type == "case" {
+	if slaClockEligibleCreateTypes[req.Type] {
 		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
 	}
 
@@ -3135,25 +3134,46 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 		}
 	}
 
+	// The prior fix ETA dates and share stamp are read only when an ETA date
+	// is in the request: the ETA entries log a genuine change only. A failed
+	// read is logged and skips those entries, never the update.
+	var beforeEta *domain.CaseView
+	if req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
+		if cv, err := s.GetCaseByID(ctx, req.ID); err != nil {
+			slog.ErrorContext(ctx, "update case: read prior fix ETAs for activity entries failed", "caseId", req.ID, "error", err)
+		} else {
+			beforeEta = &cv
+		}
+	}
+
 	updatedOn, err := s.repo.UpdateCaseFields(ctx, req, actor.ID, actor.Email)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, err
 	}
 
-	s.recordCaseFieldsActivity(ctx, req, prevWorkaround, updatedOn, actor.Email)
+	s.recordCaseFieldsActivity(ctx, req, prevWorkaround, beforeEta, updatedOn, actor.Email)
 
 	// Deliberately independent of s.publisher (never touches Event Hub) --
 	// same reasoning every other SLAEngineService call site in this file
-	// gives. WorkaroundProvided is the one genuine "workaround was
-	// provided" signal anywhere in the domain model -- unlike
-	// ApplyCaseStateEffects (called from UpdateCase's own State branch),
-	// which only ever pauses/resumes this clock, never completes it.
-	// false (a recall) is deliberately not handled the opposite way here:
-	// there's no "reopen a completed clock" operation on SLAEngineRepository,
-	// and recalling a workaround is rare enough that this is a real, known
-	// gap rather than a fix worth building speculatively.
-	if s.slaEngine != nil && req.WorkaroundProvided != nil && *req.WorkaroundProvided {
-		s.slaEngine.CompleteWorkaroundClock(ctx, req.ID)
+	// gives. Re-checks every active clock's own pause/resume/stop/cancel
+	// condition text against the case's current facts whenever this bundle
+	// touches a field those conditions can reference -- WorkaroundProvided
+	// (a policy's own pause_condition reads
+	// "...ORu_workaround_providedISNOTEMPTY", so providing one PAUSES the
+	// clock rather than completing it, and a recall is picked up for free
+	// by the matching resume_condition) and the three fix-ETA values (a
+	// policy's own stop_condition reads "...ORfix_eta_sharedISNOTEMPTY",
+	// which repository.CaseFacts.FixEtaShared now answers from these values
+	// directly -- see that field's own doc comment for why eta_shared_on,
+	// a separate explicit "share with customer" action, is the wrong
+	// signal here). See SLAEngineService.ApplyCaseFieldEffects' own doc
+	// comment for the two hardcoded CompleteClock hooks this replaced. No
+	// override needed on this data source -- s.repo.UpdateCaseFields just
+	// above already committed to this service's own Postgres row, so the
+	// fresh read ApplyCaseFieldEffects makes is already correct (contrast
+	// snCaseService.UpdateCase's own call site, which does need one).
+	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, nil, nil)
 	}
 	// Deliberately independent of s.slaEngine above -- this is the signal
 	// csm-notification-service's own Redis-based SLA engine needs to
@@ -3163,19 +3183,6 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	// published this before.
 	if req.WorkaroundProvided != nil && *req.WorkaroundProvided {
 		publishWorkaroundProvidedEvent(ctx, s.publisher, req.ID)
-	}
-	// Checked via GetCaseEtaSharedOn, not a request field -- eta_shared_on
-	// has no ServiceNow equivalent and no guaranteed connection to this
-	// specific PATCH (see snCaseService.UpdateCase's own identical check
-	// for the full reasoning); this branch is where a case's fix-ETA
-	// fields themselves get edited, so it's a natural, frequent point to
-	// also pick up a fix ETA having since been shared.
-	if s.slaEngine != nil {
-		if etaSharedOn, err := s.repo.GetCaseEtaSharedOn(ctx, req.ID); err != nil {
-			slog.ErrorContext(ctx, "update case: eta shared on lookup failed", "caseId", req.ID, "error", err)
-		} else if etaSharedOn != nil {
-			s.slaEngine.CompleteFixEtaSharedClocks(ctx, req.ID)
-		}
 	}
 
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
@@ -3236,22 +3243,49 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	return domain.UpdateCaseResponse{Message: "Case updated successfully", Case: resp}, nil
 }
 
-// recordCaseFieldsActivity logs the activity-feed entry for updateCaseFields'
-// workaround field: set stores the new timestamp, recall stores the prior one
-// as old (and nothing when it was not set), which the feed renders as a
-// date-time.
-func (s *caseService) recordCaseFieldsActivity(ctx context.Context, req domain.UpdateCaseRequest, prevOn *time.Time, updatedOn time.Time, actorEmail string) {
-	if req.WorkaroundProvided == nil {
+// recordCaseFieldsActivity logs the activity-feed entries for updateCaseFields'
+// workaround and fix-ETA fields. Workaround set stores the new timestamp,
+// recall stores the prior one as old (and nothing when it was not set); the
+// feed renders both as date-times. The three ETA dates are logged only on a
+// real change (old empty when previously unset, values "YYYY-MM-DD"), so they
+// need before. When any date changed the repository also re-stamped
+// eta_shared_on to the update time, logged here as an RFC 3339 UTC value.
+func (s *caseService) recordCaseFieldsActivity(ctx context.Context, req domain.UpdateCaseRequest, prevWorkaround *time.Time, before *domain.CaseView, updatedOn time.Time, actorEmail string) {
+	if req.WorkaroundProvided != nil {
+		var prev string
+		if prevWorkaround != nil {
+			prev = prevWorkaround.UTC().Format(time.RFC3339)
+		}
+		if *req.WorkaroundProvided {
+			s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
+		} else if prev != "" {
+			s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, "", actorEmail)
+		}
+	}
+	if before == nil {
 		return
 	}
-	var prev string
-	if prevOn != nil {
-		prev = prevOn.UTC().Format(time.RFC3339)
+	changed := false
+	for _, e := range []struct {
+		field    string
+		new, old *string
+	}{
+		{"best_case_eta", req.BestCaseFixEta, before.BestCaseFixEta},
+		{"most_likely_eta", req.MostLikelyFixEta, before.MostLikelyFixEta},
+		{"worst_case_eta", req.WorstCaseFixEta, before.WorstCaseFixEta},
+	} {
+		if e.new == nil || *e.new == derefString(e.old) {
+			continue
+		}
+		changed = true
+		s.recordFieldChangeActivity(ctx, req.ID, e.field, derefString(e.old), *e.new, actorEmail)
 	}
-	if *req.WorkaroundProvided {
-		s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
-	} else if prev != "" {
-		s.recordFieldChangeActivity(ctx, req.ID, "workaround_provided_on", prev, "", actorEmail)
+	if changed {
+		var prev string
+		if before.EtaSharedOn != nil {
+			prev = before.EtaSharedOn.UTC().Format(time.RFC3339)
+		}
+		s.recordFieldChangeActivity(ctx, req.ID, "eta_shared_on", prev, updatedOn.UTC().Format(time.RFC3339), actorEmail)
 	}
 }
 

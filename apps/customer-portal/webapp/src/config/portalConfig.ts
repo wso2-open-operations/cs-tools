@@ -21,8 +21,15 @@
 export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_AUTH_BASE_URL: string;
   CUSTOMER_PORTAL_AUTH_CLIENT_ID: string;
-  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL: string;
-  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL: string;
+  /**
+   * Optional. Where the IdP sends the browser after sign-in / sign-out. Unset
+   * means the SDK uses the page's own origin (`window.location.origin`), so the
+   * app works on whatever host and port it is served from; that origin still
+   * has to be registered on the IdP application. Set one only to override it,
+   * e.g. behind a proxy whose public origin differs from the browser's.
+   */
+  CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL?: string;
+  CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?: string;
   CUSTOMER_PORTAL_BACKEND_BASE_URL: string;
   CUSTOMER_PORTAL_THEME: string;
   CUSTOMER_PORTAL_LOG_LEVEL: string;

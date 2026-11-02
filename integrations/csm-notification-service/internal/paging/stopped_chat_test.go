@@ -152,7 +152,7 @@ func TestStoppedChat_SREIncidentAssigned(t *testing.T) {
 	}
 }
 
-// An incident whose rungs replied under its card replies there when it stops.
+// An incident whose rungs replied under its card replies there when its chain restarts.
 func TestStoppedChat_RepliesUnderTheIncidentCard(t *testing.T) {
 	chat := &fakeChat{}
 	e := incidentSpaceEngine(chat)
@@ -163,7 +163,7 @@ func TestStoppedChat_RepliesUnderTheIncidentCard(t *testing.T) {
 	}
 	st := LadderState{Plan: plan, Placed: []bool{true, false}}
 
-	e.postStopped(context.Background(), st, cancelAssigned, nil)
+	e.postStopped(context.Background(), st, cancelStateChange, &Trigger{Priority: "CRITICAL"})
 
 	if len(chat.stopped) != 1 {
 		t.Fatalf("stopped replies = %d; want 1", len(chat.stopped))
@@ -250,5 +250,24 @@ func TestConfig_AckChat(t *testing.T) {
 	}
 	if cfg.CRE.AckChatOn() || !cfg.SRE.AckChatOn() {
 		t.Errorf("cre on=%v sre on=%v; want cre off, sre on", cfg.CRE.AckChatOn(), cfg.SRE.AckChatOn())
+	}
+}
+
+// An answered SRE incident posts no "paging stopped" reply under its incident card, however it was answered.
+func TestStoppedChat_SREIncidentAnsweredUnderTheIncidentCardPostsNothing(t *testing.T) {
+	for _, reason := range []cancelReason{cancelStateChange, cancelAcknowledged, cancelPublicComment, cancelAssigned} {
+		t.Run(string(reason), func(t *testing.T) {
+			chat := &fakeChat{}
+			e := incidentSpaceEngine(chat)
+			e.cfg.CallSendingEnabled = true
+			plan := Plan{
+				Trigger: Trigger{IncidentID: "inc-1", Record: RecordIncident, Team: "MS/PC SRE Group", Priority: "HIGH", Routing: RoutingContext{Ladder: LadderSRE}},
+				Calls:   []PlannedCall{{Level: Level1, Ordinal: 1, Recipient: Recipient{Name: "Jane Doe"}}},
+			}
+			e.postStopped(context.Background(), LadderState{Plan: plan, Placed: []bool{true}}, reason, nil)
+			if len(chat.stopped) != 0 || len(chat.acks) != 0 {
+				t.Errorf("stopped %+v, acknowledged %+v; want nothing", chat.stopped, chat.acks)
+			}
+		})
 	}
 }

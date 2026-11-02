@@ -129,6 +129,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 	}
 
+	var customDashboardHandler *handler.CustomDashboardHandler
+	var customDashboardShareHandler *handler.CustomDashboardShareHandler
+	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
+	if db != nil {
+		customDashboardRepo := repository.NewCustomDashboardRepository(db)
+		customDashboardHandler = handler.NewCustomDashboardHandler(
+			service.NewCustomDashboardService(customDashboardRepo, userRepo),
+		)
+		customDashboardShareHandler = handler.NewCustomDashboardShareHandler(
+			service.NewCustomDashboardShareService(repository.NewCustomDashboardShareRepository(db), customDashboardRepo, userRepo),
+		)
+		customDashboardTeamShareHandler = handler.NewCustomDashboardTeamShareHandler(
+			service.NewCustomDashboardTeamShareService(repository.NewCustomDashboardTeamShareRepository(db), customDashboardRepo, userRepo),
+		)
+	}
+
 	// event_publish_failures, sla_clocks, scheduled_task_run, and
 	// alert_incident_mapping have no ServiceNow equivalent. They are
 	// Postgres-backed and registered only when a pool is available
@@ -210,7 +226,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var slaStatusHandler *handler.SLAStatusHandler
 	if db != nil {
 		slaStatusRepo := repository.NewSLAStatusRepository(repository.NewScoped(db))
-		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc))
+		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc, cfg.CSMPortalBackendClientID, eventPublisher))
 	}
 
 	// scheduled_task_run has no ServiceNow equivalent either — same
@@ -1573,6 +1589,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// (what the call-escalation ladders start from) and takes work notes, with no ServiceNow behind it.
 		activeIncidentSvc = service.NewIncidentServiceWithPublisher(incidentRepo, userRepo, incidentEventPublisher)
 	}
+	// This engine's own in-process SLA clock registration/revision/state
+	// effects, now also wired into incidents (previously case-only) -- see
+	// SLAEngineService.RegisterIncidentClocks' own doc comment. Same
+	// slaEngineSvc instance constructed above for cases (nil when
+	// CSM_SLA_ENGINE_ENABLED=false or no database, which
+	// WithIncidentSLAEngine tolerates); reaches every branch above
+	// (DataSourceServiceNow's *snIncidentService, the dual-write mirror's
+	// own *incidentService, and the plain-Postgres default's
+	// *incidentService) through this one decorator call, mirroring
+	// activeCaseSvc's identical WithSLAEngine wiring. Only one real
+	// sla_policy row currently matches anything for incidents -- see that
+	// doc comment for which one and why everything else is a safe no-op for
+	// now.
+	activeIncidentSvc = service.WithIncidentSLAEngine(activeIncidentSvc, slaEngineSvc)
 	// SLA_DATA_SOURCE=servicenow: SLA-filtered incident search/aggregate is
 	// answered by a read-only ServiceNow-backed incident service instead of the
 	// Postgres sla_live query, the same routing the case service gets via
@@ -1630,7 +1660,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
 		portalBannerHandler = handler.NewPortalBannerHandler(
-			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
 		// Monthly product regression reports: one business unit's regression
 		// cases whose fix ETA was shared last month, for the scheduled task
@@ -2015,6 +2045,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if slaStatusHandler != nil {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
+		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
@@ -2250,6 +2281,29 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PATCH /users/me/saved-filter-views", savedFilterViewHandler.Save)
 		mux.HandleFunc("DELETE /users/me/saved-filter-views", savedFilterViewHandler.Delete)
 		mux.HandleFunc("POST /users/me/saved-filter-views/reorder", savedFilterViewHandler.Reorder)
+	}
+	if customDashboardHandler != nil {
+		// The caller's own saved dashboards (CSM portal My Dashboards).
+		mux.HandleFunc("GET /users/me/dashboards", customDashboardHandler.List)
+		mux.HandleFunc("GET /users/me/dashboards/{id}", customDashboardHandler.Get)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
+	}
+	if customDashboardShareHandler != nil {
+		// Sharing the caller's saved dashboards (owner) and the ones shared
+		// with the caller (recipient, view only).
+		mux.HandleFunc("GET /users/me/dashboards/{id}/shares", customDashboardShareHandler.ListShares)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/shares/{userId}", customDashboardShareHandler.AddShare)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/shares/{userId}", customDashboardShareHandler.RemoveShare)
+		mux.HandleFunc("GET /users/me/shared-dashboards", customDashboardShareHandler.ListSharedWithMe)
+		mux.HandleFunc("GET /users/me/shared-dashboards/{id}", customDashboardShareHandler.GetSharedWithMe)
+	}
+	if customDashboardTeamShareHandler != nil {
+		// Sharing the caller's saved dashboards with teams (owner); the
+		// members read them through the shared-dashboards routes above.
+		mux.HandleFunc("GET /users/me/dashboards/{id}/team-shares", customDashboardTeamShareHandler.ListTeamShares)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.AddTeamShare)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.RemoveTeamShare)
 	}
 
 	if membershipRegistrationHandler != nil {

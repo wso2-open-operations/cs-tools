@@ -473,3 +473,51 @@ describe("incident, change request and problem click-throughs", () => {
     ).toBe("/operations?tab=problems");
   });
 });
+
+describe("time card click-throughs", () => {
+  it("a time card widget with no filters opens the Time Cards page", () => {
+    expect(WIDGET_RESOURCE_CONFIG.time_card.buildHref({}, ctx)).toBe("/time-cards");
+  });
+
+  it("a filtered one opens the preview page, and the round trip sends the same search", () => {
+    const filters = { states: ["pending", "submitted"], startDate: "2026-07-16", endDate: "2026-08-15" };
+    const href = WIDGET_RESOURCE_CONFIG.time_card.buildHref(filters, ctx);
+    expect(href.startsWith("/dashboard/preview/time-cards?")).toBe(true);
+
+    const back = parseWidgetPreviewFilters(hrefParams(href)).filters;
+    const body = WIDGET_RESOURCE_CONFIG.time_card.buildSearchRequestBody?.({ filters: back, offset: 0, limit: 10 });
+    expect(body).toEqual({ filters, pagination: { offset: 0, limit: 10 } });
+  });
+
+  it("the tile's own fetch body is unchanged", () => {
+    const filters = { states: ["approved"], startDate: "2026-07-01" };
+    const sortBy = { field: "workDate", order: "desc" };
+    expect(
+      WIDGET_RESOURCE_CONFIG.time_card.buildSearchRequestBody?.({ filters, offset: 5, limit: 5, sortBy }),
+    ).toEqual({ filters, pagination: { offset: 5, limit: 5 }, sortBy });
+  });
+});
+
+describe("account click-throughs", () => {
+  it("an account widget with no filters opens the Accounts page", () => {
+    expect(WIDGET_RESOURCE_CONFIG.account.buildHref({}, ctx)).toBe("/customers/accounts");
+  });
+
+  it("a filtered one opens the preview page, and the round trip sends the same search", () => {
+    const filters = { lifeCycle: "Customer", abtTeam: "Rigel", risks: ["hasEolProduct", "hasNoGoLive"], hasProject: true };
+    const href = WIDGET_RESOURCE_CONFIG.account.buildHref(filters, ctx);
+    expect(href.startsWith("/dashboard/preview/accounts?")).toBe(true);
+
+    const back = parseWidgetPreviewFilters(hrefParams(href)).filters;
+    const body = WIDGET_RESOURCE_CONFIG.account.buildSearchRequestBody?.({ filters: back, offset: 0, limit: 10 });
+    expect(body).toEqual({ filters, pagination: { offset: 0, limit: 10 } });
+  });
+
+  it("the tile's own fetch body is unchanged and sends no sortBy", () => {
+    const filters = { healthStatus: "at_risk", active: false };
+    expect(
+      WIDGET_RESOURCE_CONFIG.account.buildSearchRequestBody?.({ filters, offset: 0, limit: 5, sortBy: { field: "name" } }),
+    ).toEqual({ filters, pagination: { offset: 0, limit: 5 } });
+  });
+});
+

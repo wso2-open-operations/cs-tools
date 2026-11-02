@@ -47,8 +47,12 @@ interface SectionTabsProps extends SectionTabsState {
  *
  * A tab the deployment marked WIP stays in the strip but is disabled and
  * chipped, so the section still advertises what is coming without offering a
- * dead panel; a hidden tab never reaches this component. Renders nothing when
- * the section has no visible tabs at all, which only happens if every tab is
+ * dead panel; a hidden tab never reaches this component. A tab that's only
+ * visible because the signed-in admin switched it on in their own Feature
+ * Preview dialog (`tab.previewedOnly`) stays enabled and clickable, but still
+ * gets its own colourful "Preview" chip, so previewing admin never mistakes
+ * "I can see this" for "this is live for everyone". Renders nothing when the
+ * section has no visible tabs at all, which only happens if every tab is
  * hidden by config.
  */
 export default function SectionTabs({
@@ -111,6 +115,32 @@ export default function SectionTabs({
                     color="warning"
                     variant="outlined"
                     sx={{ height: 18, fontSize: 10 }}
+                  />
+                </Box>
+              }
+            />
+          ) : tab.previewedOnly ? (
+            // Unlike the WIP chip, this tab is fully enabled -- only the chip
+            // itself marks it as not generally available yet. A solid, filled
+            // chip in the theme's own primary (button) colour -- the same
+            // colour the app's primary actions use -- so it reads as a
+            // distinct, eye-catching "just you" signal rather than another
+            // flavour of WIP.
+            <Tab
+              key={tab.key}
+              value={tab.key}
+              label={
+                <Box
+                  component="span"
+                  sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                >
+                  {tab.label}
+                  <Chip
+                    size="small"
+                    label="Preview"
+                    color="primary"
+                    variant="filled"
+                    sx={{ height: 18, fontSize: 10, fontWeight: 600 }}
                   />
                 </Box>
               }

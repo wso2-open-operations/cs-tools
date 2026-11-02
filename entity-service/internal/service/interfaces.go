@@ -130,6 +130,42 @@ type SavedFilterViewService interface {
 	Reorder(ctx context.Context, req domain.ReorderSavedFilterViewRequest) (domain.SavedFilterViewList, error)
 }
 
+// CustomDashboardService is the caller's own saved custom dashboards (CSM
+// portal My Dashboards). Postgres-only; the owner is always the authenticated
+// user resolved from x-user-id-token, never a client-supplied user id, and
+// another user's dashboard is reported as not found.
+type CustomDashboardService interface {
+	List(ctx context.Context) (domain.CustomDashboardList, error)
+	Get(ctx context.Context, id string) (domain.CustomDashboard, error)
+	Save(ctx context.Context, id string, req domain.SaveCustomDashboardRequest) (domain.CustomDashboard, error)
+	Delete(ctx context.Context, id string) error
+}
+
+// CustomDashboardShareService shares the caller's saved dashboards with other
+// users, view only (CSM portal Shared Dashboards). Postgres-only. The caller is
+// always resolved from x-user-id-token. Only a dashboard's owner lists or
+// changes its shares; a recipient sees only the dashboards shared with them,
+// never who else has them.
+type CustomDashboardShareService interface {
+	ListShares(ctx context.Context, dashboardID string) (domain.CustomDashboardShareList, error)
+	AddShare(ctx context.Context, dashboardID, userID string) (domain.CustomDashboardShareList, error)
+	RemoveShare(ctx context.Context, dashboardID, userID string) error
+	ListSharedWithMe(ctx context.Context) (domain.SharedCustomDashboardList, error)
+	GetSharedWithMe(ctx context.Context, dashboardID string) (domain.SharedCustomDashboard, error)
+}
+
+// CustomDashboardTeamShareService shares the caller's saved dashboards with
+// teams (team table), view only. Postgres-only; the caller is resolved from
+// x-user-id-token, and only a dashboard's owner lists or changes its team
+// shares. The team's members see the dashboard through
+// CustomDashboardShareService's ListSharedWithMe / GetSharedWithMe.
+type CustomDashboardTeamShareService interface {
+	ListTeamShares(ctx context.Context, dashboardID string) (domain.CustomDashboardTeamShareList, error)
+	AddTeamShare(ctx context.Context, dashboardID, teamID string) (domain.CustomDashboardTeamShareList, error)
+	RemoveTeamShare(ctx context.Context, dashboardID, teamID string) error
+}
+
+// RunbookService manages the alert-name to runbook catalog (Operations > Runbooks).
 // PortalBannerService is the HTML banners both portals show. Customer and CSM
 // reads each return only published rows for that portal. Writes require a
 // CSM admin (AUTH_ADMIN_ROLES).
@@ -266,24 +302,43 @@ type EventPublisherService interface {
 type SLAStatusService interface {
 	// SearchActiveSLAStatuses returns every currently-active SLA clock across
 	// every case-like work item, paginated. A ValidationError is returned for
-	// an invalid pagination limit or an unrecognized sourceFilter.
-	// sourceFilter, case-insensitive, accepts "" (no filter), "csm" or
-	// "servicenow" -- "csm" is what csm-notification-service's own
-	// Redis-recovery reconciliation pass sends, so it only ever scans this
-	// engine's own (much smaller) row set rather than the full
-	// ServiceNow-synced table.
-	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, sourceFilter string) (domain.SearchSLAStatusResponse, error)
+	// an invalid pagination limit. There used to be a sourceFilter
+	// parameter here (csm-notification-service's own Redis-recovery
+	// reconciliation pass scoped itself to "csm") -- removed along with
+	// sla.source itself: the previous system's own sync job no longer
+	// writes SLA rows at all past cutover, so there is nothing left to
+	// filter by, and that reconciliation pass now gets every active clock.
+	//
+	// admin, when true, requires the caller to be csm-portal-backend itself
+	// (a ForbiddenError otherwise -- see requireCSMPortalBackendCaller's own
+	// doc comment for why this is checked by client id, not an
+	// AUTH_ADMIN_ROLES role list) -- this is what lets the CSM portal's
+	// "Recalculate SLA" admin page show which clocks are currently running
+	// (normally right after RequestRecalculation) without opening the bulk
+	// list to every internal caller. It only ever narrows: every existing
+	// admin=false caller (csm-notification-service's own startup
+	// reconciliation included) is completely unaffected by this parameter's
+	// existence.
+	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, admin bool) (domain.SearchSLAStatusResponse, error)
 
 	// GetClockState returns the full, current state of one (work item,
 	// clock target) "sla" row, regardless of whether it's currently
 	// "active" -- unlike SearchActiveSLAStatuses, which only ever lists
 	// active rows. See domain.SLAClockState's own doc comment for why this
 	// distinction exists and who needs it. A ValidationError is returned
-	// for a malformed workItemId, an unrecognized target (must be
-	// "response"/"workaround"/"resolution", case-insensitive), or an
-	// unrecognized sourceFilter (same accepted values as
-	// SearchActiveSLAStatuses's own).
-	GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error)
+	// for a malformed workItemId or an unrecognized target (must be
+	// "response"/"workaround"/"resolution", case-insensitive).
+	GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error)
+
+	// RequestRecalculation publishes TypeSLARecalculationRequested so
+	// csm-notification-service rebuilds its Redis-held SLA tracking from
+	// this service's own durable `sla`/`sla_policy` tables -- see that
+	// event's own doc comment for when this is needed. Admin-gated the same
+	// way SearchActiveSLAStatuses' own admin=true request is. A
+	// ServiceUnavailableError is returned when Event Hub publishing isn't
+	// configured for this deployment at all, since silently doing nothing
+	// would defeat the only reason this method exists.
+	RequestRecalculation(ctx context.Context) error
 }
 
 // SLADurationPolicyService backs GET /sla-duration-policy — see

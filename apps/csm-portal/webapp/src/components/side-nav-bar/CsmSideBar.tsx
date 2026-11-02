@@ -27,6 +27,7 @@ import {
 import {
   featureState,
   hasVisibleShortcutChild,
+  isPreviewedOnly,
   visibleNavSections,
   visibleRailChildren,
   visibleShortcutTo,
@@ -256,6 +257,11 @@ export default function CsmSideBar({
                rendered but disabled below. */
             visibleNavSections(access, previewOverrides)
               .map((item) => {
+                // Only reachable once `item` has already resolved to
+                // "enabled" (a `wip` item takes the branch below and returns
+                // early), so this can never also be true for a WIP item --
+                // no badge conflict to resolve.
+                const itemPreviewedOnly = isPreviewedOnly(item.id, access, previewOverrides);
                 const itemContent = (
                   <Sidebar.Item id={item.id}>
                     <Sidebar.ItemIcon>
@@ -265,6 +271,9 @@ export default function CsmSideBar({
                         String(ItemLabel.children), so a wrapper element would render
                         as "[object Object]". */}
                     <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
+                    {itemPreviewedOnly && (
+                      <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>
+                    )}
                   </Sidebar.Item>
                 );
 
@@ -313,9 +322,17 @@ export default function CsmSideBar({
                         <item.icon size={20} />
                       </Sidebar.ItemIcon>
                       <Sidebar.ItemLabel>{item.label}</Sidebar.ItemLabel>
+                      {itemPreviewedOnly && (
+                        <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>
+                      )}
                       {children.map((child) => {
                         const childWip =
                           featureState(child.id, access, previewOverrides) === "wip";
+                        const childPreviewedOnly = isPreviewedOnly(
+                          child.id,
+                          access,
+                          previewOverrides,
+                        );
                         return (
                           <Sidebar.Item id={child.id} key={child.id}>
                             {child.icon && (
@@ -326,6 +343,9 @@ export default function CsmSideBar({
                             <Sidebar.ItemLabel>{child.label}</Sidebar.ItemLabel>
                             {childWip && (
                               <Sidebar.ItemBadge color="warning">WIP</Sidebar.ItemBadge>
+                            )}
+                            {childPreviewedOnly && (
+                              <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>
                             )}
                           </Sidebar.Item>
                         );

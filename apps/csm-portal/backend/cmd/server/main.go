@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -50,6 +51,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
+// main loads the configuration, builds every upstream client and handler,
+// registers the routes and serves until SIGINT or SIGTERM, then shuts down
+// gracefully. Invalid required configuration stops the start.
 func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
@@ -100,6 +104,24 @@ func main() {
 	if err != nil {
 		slog.Error("invalid timeout configuration", "err", err)
 		os.Exit(1)
+	}
+
+	// integrations/csm-ai-integration-service makes the generator's model
+	// calls when CSM_AI_INTEGRATION_SERVICE_BASE_URL is set (see below).
+	aiCfg, err := loadAIIntegrationConfig(os.Getenv)
+	if err != nil {
+		slog.Error("invalid AI integration service configuration", "err", err)
+		os.Exit(1)
+	}
+	// Per-user limits on POST /dashboards/generate: each call is a model call.
+	generateLimits, err := loadGenerateRateLimits(os.Getenv)
+	if err != nil {
+		slog.Error("invalid dashboard generate limit configuration", "err", err)
+		os.Exit(1)
+	}
+	if aiCfg.Enabled() && aiCfg.Timeout >= reqTimeouts.RESTWrite {
+		slog.Warn("CSM_AI_INTEGRATION_SERVICE_TIMEOUT should be shorter than REST_WRITE_TIMEOUT",
+			"aiTimeout", aiCfg.Timeout, "writeTimeout", reqTimeouts.RESTWrite)
 	}
 
 	// All upstream service clients (entity, updates, SCIM, and future notification
@@ -340,7 +362,23 @@ func main() {
 	if engineeringEntityClient != nil {
 		engineeringPinger = engineeringEntityClient
 	}
-	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger)
+	// aiClient stays nil (and aiPinger an untyped nil) when the service is
+	// not configured; see notificationPinger above for the typed-nil pitfall.
+	var aiClient *csmai.Client
+	var aiPinger handler.HealthPinger
+	if aiCfg.Enabled() {
+		aiClient = csmai.NewClient(csmai.Config{
+			BaseURL:      aiCfg.BaseURL,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       aiCfg.Scopes,
+			Timeout:      aiCfg.Timeout,
+		})
+		aiPinger = aiClient
+	}
+	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger).
+		WithAIIntegration(aiPinger)
 
 	// timecardApproverRoleIDs is optional: empty means none of
 	// AUTH_TIMECARD_APPROVER_ROLES' real role names has a configured ID, in
@@ -357,6 +395,20 @@ func main() {
 		WithGrantableRoles(grantableRoles)
 	grantableRolesHandler := handler.NewGrantableRolesHandler(grantableRoles)
 	dashboardHandler := handler.NewDashboardHandler(accessGuard)
+	// The AI integration service makes the model calls when configured
+	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
+	// answers with a fixed sample. This backend holds no model client.
+	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	if aiClient != nil {
+		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+	}
+	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
+	// A team named in a generated dashboard's creTeam / sreTeam filter (its
+	// registry key) becomes the team's group id, once, here.
+	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
+		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
+	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
 	caseHandler = caseHandler.WithAccessGuard(accessGuard)
 	projectHandler = projectHandler.WithAccessGuard(accessGuard)
 	timeCardHandler = timeCardHandler.WithAccessGuard(accessGuard)
@@ -459,6 +511,33 @@ func main() {
 	route("GET /dashboards/filter-presets", handler.PermView, dashboardHandler.GetFilterPresets)
 	route("GET /dashboards/sections", handler.PermView, dashboardHandler.GetSharedSections)
 	route("GET /dashboards/{dashboardId}", handler.PermView, dashboardHandler.GetDashboardDetail)
+	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
+	// the webapp's `canWrite` on that menu section. A literal path, so it never
+	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
+	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
+	// Same permission as generating one. "custom" is a literal segment, so it
+	// never collides with the {dashboardId} wildcard.
+	route("GET /dashboards/custom", handler.PermWrite, customDashboardHandler.ListCustomDashboards)
+	route("GET /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.GetCustomDashboard)
+	route("PUT /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.SaveCustomDashboard)
+	route("DELETE /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.DeleteCustomDashboard)
+	// Sharing one of the caller's dashboards, view only (owner only).
+	route("GET /dashboards/custom/{id}/shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardShares)
+	route("PUT /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.AddCustomDashboardShare)
+	route("DELETE /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardShare)
+	// Sharing a saved dashboard with a registry team (by team key); whoever
+	// is in the team sees it under Shared Dashboards.
+	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
+	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
+	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Dashboards other users shared with the caller, view only. "shared" is a
+	// literal segment, like "custom", so it never collides with {dashboardId}.
+	// PermView, like the system dashboards: anyone a dashboard can be shared
+	// with (any internal user, any member of a team) can open it, and its
+	// widgets query with the viewer's own permissions.
+	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
+	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
 	route("GET /updates/product-update-levels", handler.PermTimeCardsAndUpdates, updatesHandler.GetProductUpdateLevels)
 	route("POST /updates/levels/search", handler.PermTimeCardsAndUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
@@ -740,6 +819,10 @@ func main() {
 	route("GET /portal-banners/manage", handler.PermAdmin, bannerHandler.ListManagedBanners)
 	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
 	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
+
+	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
+	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
+	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)

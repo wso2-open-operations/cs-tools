@@ -15,12 +15,26 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JSX } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import "@testing-library/jest-dom/vitest";
-import { LegacyQueryTabRedirect } from "@components/section-tabs/SectionTabs";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
+
+// `SectionTabs.tsx` imports `@hooks/useSectionTabs`, which now also exports
+// `useRouteTabs` (reads `usePortalAccess`) -- pulling in the real
+// `@api/backend/client`/`@config/apiConfig` transitively at module load, even
+// though this file only exercises the unrelated `LegacyQueryTabRedirect`.
+// Same boilerplate this repo's own convention already uses wherever a test
+// transitively imports those two modules.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
+}));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
+
+import { LegacyQueryTabRedirect } from "@components/section-tabs/SectionTabs";
 
 function setOverrides(value: unknown): void {
   window.config = {

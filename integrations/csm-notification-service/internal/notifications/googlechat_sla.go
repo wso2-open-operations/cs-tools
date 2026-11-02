@@ -164,7 +164,7 @@ func (c *GoogleChatClient) SendSLABreachAlert(ctx context.Context, audience, clo
 		if teamLeadName != "" {
 			teamDisplay = team + " (" + teamLeadName + ")"
 		}
-		lines = append(lines, caseAlertLine(`<b>Team :</b> <b>%s</b>`, teamDisplay))
+		lines = append(lines, caseAlertLine(`<b>Team :</b> <font color="%s"><b>%s</b></font>`, slaBreachColor(tier), teamDisplay))
 	}
 	lines = append(lines, caseAlertLine(`<b>Priority :</b> <font color="%s">%s</font>`, severityColor, severityLabel))
 	if state != "" {

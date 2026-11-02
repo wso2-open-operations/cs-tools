@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { resolveRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
+import {
+  resolveRelativeDatePlaceholder,
+  resolveRelativeDatePlaceholderToDate,
+} from "@utils/resolveRelativeDatePlaceholder";
 import { hasFieldFilterEntries, isFieldFilterEntry } from "./widgetPreviewUrl";
 
 /**
@@ -34,9 +37,11 @@ import { hasFieldFilterEntries, isFieldFilterEntry } from "./widgetPreviewUrl";
  * Colombo-based) without hardcoding that assumption into the platform.
  *
  * Every filter value that ISN'T a recognized placeholder — a literal date, a
- * UUID, an enum value — passes through unchanged. Non-case-filter-shaped
- * `filters` (every other resourceType's flat record) also pass through
- * unchanged, same fail-open convention as `resolveTeamPlaceholder`.
+ * UUID, an enum value — passes through unchanged. A flat filters record
+ * (every other resourceType's) has only its `startDate` / `endDate` resolved,
+ * to a plain local date (a time card search's work-date bounds); every other
+ * flat key passes through unchanged, same fail-open convention as
+ * `resolveTeamPlaceholder`.
  *
  * The entity-service's own placeholder resolution (`resolveRelativeDate`,
  * still UTC-based) stays in place as a dead fallback — should this function
@@ -50,6 +55,42 @@ export function resolveRelativeDateFilters(
   filters: Record<string, unknown>,
   now: Date = new Date(),
 ): Record<string, unknown> {
+  return resolveFlatDateFilters(resolveCaseFieldDateFilters(filters, now), now);
+}
+
+/**
+ * The flat date keys a non-case resourceType's filters may carry a
+ * relative-date placeholder in: a time card search's `startDate` / `endDate`
+ * (work date) and a project search's `endDateFrom` / `endDateTo` (the
+ * project's end date), all whole days and inclusive. They resolve to a plain
+ * local `YYYY-MM-DD`, not an instant: both searches compare dates.
+ */
+const FLAT_DATE_FILTER_KEYS = ["startDate", "endDate", "endDateFrom", "endDateTo"] as const;
+
+/**
+ * Resolves relative date placeholders in the flat date filters
+ * (FLAT_DATE_FILTER_KEYS) to plain dates. Returns `filters` itself when
+ * nothing changes, else a copy.
+ */
+function resolveFlatDateFilters(filters: Record<string, unknown>, now: Date): Record<string, unknown> {
+  let resolved: Record<string, unknown> | undefined;
+  for (const key of FLAT_DATE_FILTER_KEYS) {
+    const value = filters[key];
+    if (typeof value !== "string") continue;
+    const date = resolveRelativeDatePlaceholderToDate(value, now);
+    if (date === undefined) continue;
+    resolved ??= { ...filters };
+    resolved[key] = date;
+  }
+  return resolved ?? filters;
+}
+
+/**
+ * Resolves relative date placeholders in the values of `filters.filters`
+ * entries, each by its own op. Returns `filters` itself when nothing changes,
+ * else a copy.
+ */
+function resolveCaseFieldDateFilters(filters: Record<string, unknown>, now: Date): Record<string, unknown> {
   const fieldFilters = filters.filters;
   if (!hasFieldFilterEntries(fieldFilters)) return filters;
 

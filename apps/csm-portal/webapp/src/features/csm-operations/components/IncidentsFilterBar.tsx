@@ -61,6 +61,7 @@ import OperationsAnyOfGroups, { type AnyOfFieldDef } from "@features/csm-operati
 import { completeAnyOfGroups } from "@features/csm-operations/utils/operationsAnyOf";
 import AsyncEntityMultiSelect from "@components/AsyncEntityMultiSelect";
 import { useSearchItServices } from "@api/useSearchItServices";
+import { useSearchIncidentExtraGroups } from "@api/useSearchGroups";
 import AsyncAssignedUserIdMultiSelect from "@features/csm-cases/components/AsyncAssignedUserIdMultiSelect";
 
 const { DatePicker, LocalizationProvider } = DatePickers;
@@ -151,16 +152,25 @@ export default function IncidentsFilterBar({
   // `sreTeamOptions`. This is a fresh field on a different resource, not a
   // copy of that decision).
   const { data: teams } = useTeams(true, "sre-abt");
-  const sreTeamOptions = useMemo(
-    () =>
-      (teams ?? [])
-        .filter(
-          (t): t is typeof t & { sreGroupId: string } =>
-            Boolean(t.sreGroupId) && t.family === "sre-abt",
-        )
-        .map((t) => ({ value: t.sreGroupId, label: t.name })),
-    [teams],
-  );
+  // The extra assignment groups an incident may carry (the security operations
+  // group) are appended after the teams, deduped by id. A loading or failed
+  // request just yields no extras: the team options never wait on it.
+  const { data: extraGroups } = useSearchIncidentExtraGroups("", true);
+  const sreTeamOptions = useMemo(() => {
+    const options = (teams ?? [])
+      .filter(
+        (t): t is typeof t & { sreGroupId: string } =>
+          Boolean(t.sreGroupId) && t.family === "sre-abt",
+      )
+      .map((t) => ({ value: t.sreGroupId, label: t.name }));
+    const seen = new Set(options.map((o) => o.value));
+    for (const g of extraGroups ?? []) {
+      if (seen.has(g.id)) continue;
+      seen.add(g.id);
+      options.push({ value: g.id, label: g.name });
+    }
+    return options;
+  }, [teams, extraGroups]);
 
   const stateOptions = useMemo(
     () => INCIDENT_STATES.map((st) => ({ value: st, label: incidentStateLabel(st) })),

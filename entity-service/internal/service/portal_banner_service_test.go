@@ -56,13 +56,33 @@ func (r *recordingBannerRepo) Update(_ context.Context, actor, id string, req do
 	return &row, nil
 }
 
+const testCSMPortalBackendClientID = "csm-portal-backend-client-id"
+
+// bannerAdminCtx is a generic admin identity (role-based), reused by several
+// other services in this package (e.g. sla_status_service_test.go) whose own
+// admin gate is still AUTH_ADMIN_ROLES-based -- kept exactly as it always was.
+// portalBannerService itself no longer reads Roles at all; use
+// bannerCSMPortalCtx for its own tests instead.
 func bannerAdminCtx() context.Context {
 	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "admin@wso2.com", Roles: []string{"cs_admin"}})
 }
 
+// bannerCSMPortalCtx is what a real admin's banner change looks like by the
+// time it reaches this service: csm-portal-backend's own client id (its
+// PermAdmin gate has already run) plus the forwarded human's email.
+func bannerCSMPortalCtx() context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{
+		Validated: true, UserEmail: "admin@wso2.com", ClientID: testCSMPortalBackendClientID,
+	})
+}
+
+func newTestPortalBannerService(repo repository.PortalBannerRepository) PortalBannerService {
+	return NewPortalBannerService(repo, alwaysUnrestrictedAccess{}, testCSMPortalBackendClientID)
+}
+
 func TestPortalBannerListCustomerForcesTheCustomerAudience(t *testing.T) {
 	repo := &recordingBannerRepo{rows: []domain.PortalBanner{{ID: "a", HTML: "<p>hi</p>", SortOrder: 0, Status: domain.PortalBannerPublished}}}
-	svc := NewPortalBannerService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
+	svc := newTestPortalBannerService(repo)
 	got, err := svc.ListCustomer(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -75,10 +95,34 @@ func TestPortalBannerListCustomerForcesTheCustomerAudience(t *testing.T) {
 	}
 }
 
-func TestPortalBannerCreateRequiresTheAdminRole(t *testing.T) {
+func TestPortalBannerCreateRequiresTheCSMPortalBackendClientID(t *testing.T) {
 	repo := &recordingBannerRepo{}
-	svc := NewPortalBannerService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
-	ctx := auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "eng@wso2.com", Roles: []string{"cs_engineer"}})
+	svc := newTestPortalBannerService(repo)
+	// A real admin's own call, but not proxied through csm-portal-backend
+	// (e.g. some other internal service, or a direct call) -- must still be
+	// refused, since the admin check now lives entirely in csm-portal-backend.
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Validated: true, UserEmail: "admin@wso2.com", ClientID: "some-other-client",
+	})
+	_, err := svc.Create(ctx, domain.SavePortalBannerRequest{Status: "draft", HTML: "<p>x</p>"})
+	var forbidden *apierror.ForbiddenError
+	if !errors.As(err, &forbidden) {
+		t.Fatalf("err = %v", err)
+	}
+	if repo.actor != "" {
+		t.Fatal("repo was called")
+	}
+}
+
+func TestPortalBannerCreateRequiresASignedInPerson(t *testing.T) {
+	repo := &recordingBannerRepo{}
+	svc := newTestPortalBannerService(repo)
+	// The right client id, but no forwarded human at all (a pure machine
+	// call) -- still refused; csm-portal-backend never calls this with an
+	// empty UserEmail in practice, but the service doesn't trust that alone.
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Validated: true, ClientID: testCSMPortalBackendClientID,
+	})
 	_, err := svc.Create(ctx, domain.SavePortalBannerRequest{Status: "draft", HTML: "<p>x</p>"})
 	var forbidden *apierror.ForbiddenError
 	if !errors.As(err, &forbidden) {
@@ -91,9 +135,9 @@ func TestPortalBannerCreateRequiresTheAdminRole(t *testing.T) {
 
 func TestPortalBannerCreateStoresTheAdmin(t *testing.T) {
 	repo := &recordingBannerRepo{}
-	svc := NewPortalBannerService(repo, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
+	svc := newTestPortalBannerService(repo)
 	start := time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC)
-	_, err := svc.Create(bannerAdminCtx(), domain.SavePortalBannerRequest{
+	_, err := svc.Create(bannerCSMPortalCtx(), domain.SavePortalBannerRequest{
 		Status: " published ", HTML: "  <p>hi</p>  ", SortOrder: 1, StartsAt: &start,
 	})
 	if err != nil {
@@ -105,7 +149,7 @@ func TestPortalBannerCreateStoresTheAdmin(t *testing.T) {
 }
 
 func TestPortalBannerRejectsABadSave(t *testing.T) {
-	svc := NewPortalBannerService(&recordingBannerRepo{}, alwaysUnrestrictedAccess{}, []string{"cs_admin"})
+	svc := newTestPortalBannerService(&recordingBannerRepo{})
 	end := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	start := end.Add(time.Hour)
 	for _, req := range []domain.SavePortalBannerRequest{
@@ -114,7 +158,7 @@ func TestPortalBannerRejectsABadSave(t *testing.T) {
 		{Status: "draft", HTML: "<p>x</p>", SortOrder: -1},
 		{Status: "draft", HTML: "<p>x</p>", StartsAt: &start, ExpiresAt: &end},
 	} {
-		if _, err := svc.Create(bannerAdminCtx(), req); err == nil {
+		if _, err := svc.Create(bannerCSMPortalCtx(), req); err == nil {
 			t.Fatalf("accepted %+v", req)
 		}
 	}

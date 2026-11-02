@@ -139,13 +139,24 @@ type AndGroup []OrTerm
 // delegating.
 type Condition []AndGroup
 
-// knownFields is the vocabulary this engine's CaseFacts can answer
-// questions about -- see the package doc comment. Longest-prefix matching
-// (matchField below) means order here doesn't matter; kept alphabetical for
-// readability.
+// knownFields is the vocabulary this engine's CaseFacts/IncidentFacts can
+// answer questions about -- see the package doc comment. Longest-prefix
+// matching (matchField below) means order here doesn't matter; kept
+// alphabetical for readability. "business_service"/"category" are
+// incident-only (service.isIncidentPolicy's own marker check already
+// guarantees a case policy's conditions never carry either); "priority"/
+// "state" are shared field NAMES between case and incident policies, but
+// each entity's own adapter (service.caseConditionFacts/
+// incidentConditionFacts) and translator (service.translateSLACondition/
+// translateIncidentSLACondition) resolve their very different underlying
+// vocabularies (case severity labels/codes vs. incident priority labels/
+// codes) before a Clause ever reaches this package -- this package itself
+// has no idea which entity a given Condition came from.
 var knownFields = []string{
 	"account",
+	"business_service",
 	"case_type",
+	"category",
 	"cs_engineer_response_comment",
 	"fix_eta_shared",
 	"opened_at",

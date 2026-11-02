@@ -997,10 +997,35 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   account: {
     searchEndpoint: "/accounts/search",
+    // The preview page's URL round-trip decodes every filter value as a
+    // comma-split string array; the account search's single-valued keys take
+    // one string, and `hasProject`/`active` a JSON boolean, so unwrap them
+    // back (a no-op for a tile's own fetch, whose filters never went through
+    // that round-trip). The rest is the default `{filters, pagination}` body:
+    // the search takes no `sortBy`.
+    buildSearchRequestBody: ({ filters, offset, limit }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      for (const key of ["lifeCycle", "abtTeam", "healthStatus"] as const) {
+        const v = flat[key];
+        if (Array.isArray(v)) flat[key] = v[0];
+      }
+      for (const key of ["hasProject", "active"] as const) {
+        const v = Array.isArray(flat[key]) ? (flat[key] as unknown[])[0] : flat[key];
+        if (v === "true" || v === "false") flat[key] = v === "true";
+      }
+      return { filters: flat, pagination: { offset, limit } };
+    },
     itemsKey: "accounts",
     primaryLabel: (item) => asString(item.name) ?? "—",
     secondaryLabel: (item) => asString(item.tier),
-    buildHref: () => "/customers/accounts",
+    // The Accounts page reads no filters from its URL, so it can only show
+    // the unfiltered list: a widget that filters accounts (life cycle, team,
+    // risk, health) opens the preview page instead, which lists exactly what
+    // the tile counted.
+    buildHref: (filters, ctx) =>
+      hasFiltersBeyond(filters, [])
+        ? widgetPreviewFallbackHref("accounts", "account", filters, ctx)
+        : "/customers/accounts",
     icon: Building2,
     iconColor: "secondary",
     previewSlug: "accounts",
@@ -1074,6 +1099,16 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   user: {
     searchEndpoint: "/users/search",
+    // The preview page's URL round trip turns a boolean filter into a
+    // string array (`active=true` -> `["true"]`); `/users/search` takes
+    // `active` as a boolean, so turn it back. The rest is the default
+    // `{filters, pagination, sortBy?}` body.
+    buildSearchRequestBody: ({ filters, offset, limit, sortBy }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      const v = Array.isArray(flat.active) ? (flat.active as unknown[])[0] : flat.active;
+      if (v === "true" || v === "false") flat.active = v === "true";
+      return { filters: flat, pagination: { offset, limit }, ...(sortBy ? { sortBy } : {}) };
+    },
     itemsKey: "users",
     primaryLabel: (item) => {
       const first = asString(item.firstName);
@@ -1091,6 +1126,19 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   time_card: {
     searchEndpoint: "/time-cards/search",
+    // The preview page's URL round-trip decodes every filter value as a
+    // comma-split array; the search's `startDate`/`endDate` are single
+    // dates, so unwrap them back (a no-op for a tile's own fetch, whose
+    // filters never went through that round-trip). The rest is the default
+    // `{filters, pagination, sortBy?}` body.
+    buildSearchRequestBody: ({ filters, offset, limit, sortBy }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      for (const key of ["startDate", "endDate"] as const) {
+        const v = flat[key];
+        if (Array.isArray(v)) flat[key] = v[0];
+      }
+      return { filters: flat, pagination: { offset, limit }, ...(sortBy ? { sortBy } : {}) };
+    },
     itemsKey: "timeCards",
     primaryLabel: (item) => {
       const caseNumber = nestedNumber(item.case);
@@ -1101,7 +1149,14 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       const state = asString(item.state);
       return state ? humanizeState(state) : undefined;
     },
-    buildHref: () => "/time-cards",
+    // The Time Cards page reads no filters from its URL, so it can only show
+    // the unfiltered list: a widget that filters time cards (by state, date,
+    // "mine") opens the preview page instead, which lists exactly what the
+    // tile counted.
+    buildHref: (filters, ctx) =>
+      hasFiltersBeyond(filters, [])
+        ? widgetPreviewFallbackHref("time-cards", "time_card", filters, ctx)
+        : "/time-cards",
     icon: Clock,
     iconColor: "warning",
     previewSlug: "time-cards",

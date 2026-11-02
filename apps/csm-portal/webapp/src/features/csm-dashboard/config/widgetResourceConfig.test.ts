@@ -562,6 +562,33 @@ describe("WIDGET_RESOURCE_CONFIG.case_feedback.buildSearchRequestBody", () => {
   });
 });
 
+describe("WIDGET_RESOURCE_CONFIG.user.buildSearchRequestBody", () => {
+  // `/users/search` takes `active` as a boolean; the preview page's URL round
+  // trip hands it back as a string array.
+  const build = WIDGET_RESOURCE_CONFIG.user.buildSearchRequestBody!;
+
+  it("turns a round-tripped active filter back into a boolean", () => {
+    for (const [raw, want] of [[["true"], true], [["false"], false], ["true", true]] as const) {
+      const body = build({ filters: { active: raw, roleIds: ["agent"] }, offset: 0, limit: 10 }) as {
+        filters: Record<string, unknown>;
+      };
+      expect(body.filters).toEqual({ active: want, roleIds: ["agent"] });
+    }
+  });
+
+  it("is otherwise the default body: filters, pagination and sortBy when set", () => {
+    expect(build({ filters: { active: true }, offset: 20, limit: 10 })).toEqual({
+      filters: { active: true },
+      pagination: { offset: 20, limit: 10 },
+    });
+    expect(build({ filters: {}, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } })).toEqual({
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+      sortBy: { field: "name", order: "asc" },
+    });
+  });
+});
+
 describe("WIDGET_RESOURCE_CONFIG.project.buildSearchRequestBody", () => {
   // `POST /projects/search` decodes a flat body and rejects unknown top-level
   // fields, so a `filters` wrapper (even empty) is a 400.

@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
@@ -35,6 +37,91 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 )
+
+// fakeDurableDedup is a durableDedup test double backed by a plain map —
+// mirrors a real Redis SETNX/SET/DEL closely enough for Handle's own
+// durable claim logic, with no real Redis needed. setNXErr/setErr/delErr
+// simulate a transient Redis failure on the next matching call only, then
+// clear themselves — enough to test the fail-open path without permanently
+// breaking every later call in the same test. Unlike a real Redis TTL, this
+// fake never expires a key on its own — tests that need to simulate a
+// durableDedupInProgressTTL expiry do so by calling expire directly.
+type fakeDurableDedup struct {
+	mu                             sync.Mutex
+	claimed                        map[string]bool
+	setNXErr                       error
+	setErr                         error
+	delErr                         error
+	setNXCalls, setCalls, delCalls int
+}
+
+func newFakeDurableDedup() *fakeDurableDedup {
+	return &fakeDurableDedup{claimed: map[string]bool{}}
+}
+
+func (f *fakeDurableDedup) SetNX(ctx context.Context, key string, _ any, _ time.Duration) *redis.BoolCmd {
+	cmd := redis.NewBoolCmd(ctx)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setNXCalls++
+	if f.setNXErr != nil {
+		cmd.SetErr(f.setNXErr)
+		f.setNXErr = nil
+		return cmd
+	}
+	if f.claimed[key] {
+		cmd.SetVal(false)
+		return cmd
+	}
+	f.claimed[key] = true
+	cmd.SetVal(true)
+	return cmd
+}
+
+func (f *fakeDurableDedup) Set(ctx context.Context, key string, _ any, _ time.Duration) *redis.StatusCmd {
+	cmd := redis.NewStatusCmd(ctx)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.setCalls++
+	if f.setErr != nil {
+		cmd.SetErr(f.setErr)
+		f.setErr = nil
+		return cmd
+	}
+	f.claimed[key] = true
+	cmd.SetVal("OK")
+	return cmd
+}
+
+// expire simulates a real Redis TTL firing for key — this fake has no
+// background expiry of its own, so a test exercising "the in-progress claim
+// already expired" calls this directly instead of sleeping.
+func (f *fakeDurableDedup) expire(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.claimed, key)
+}
+
+func (f *fakeDurableDedup) Del(ctx context.Context, keys ...string) *redis.IntCmd {
+	cmd := redis.NewIntCmd(ctx)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delCalls++
+	if f.delErr != nil {
+		cmd.SetErr(f.delErr)
+		f.delErr = nil
+		return cmd
+	}
+	var n int64
+	for _, k := range keys {
+		if f.claimed[k] {
+			delete(f.claimed, k)
+			n++
+		}
+	}
+	cmd.SetVal(n)
+	return cmd
+}
 
 type sentEmail struct {
 	from        string
@@ -887,15 +974,18 @@ func TestDispatcher_Handle_CommentAdded_TruncatedComment_FetchFailureFallsBackTo
 
 // mockSLAEngine is a hand-written fake for slaEngineService.
 type mockSLAEngine struct {
-	mu                      sync.Mutex
-	registerCalls           []struct{ caseID, priority, caseNumber string }
-	applyStateCalls         []struct{ caseID, newStatus string }
-	completeResponseCalls   []string
-	completeWorkaroundCalls []string
-	// completeWorkaroundErr, when set, is returned by CompleteWorkaroundClock
+	mu                    sync.Mutex
+	registerCalls         []struct{ caseID, priority, caseNumber string }
+	applyStateCalls       []struct{ caseID, newStatus string }
+	completeResponseCalls []string
+	pauseWorkaroundCalls  []string
+	// pauseWorkaroundErr, when set, is returned by PauseWorkaroundClock
 	// after still recording the call — simulates a Redis outage so a test
 	// can confirm the error actually propagates out of Handle.
-	completeWorkaroundErr error
+	pauseWorkaroundErr error
+	recalculateCalls   int
+	recalculateErr     error
+	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
@@ -916,11 +1006,24 @@ func (m *mockSLAEngine) CompleteResponseClock(_ context.Context, caseID string) 
 	m.completeResponseCalls = append(m.completeResponseCalls, caseID)
 }
 
-func (m *mockSLAEngine) CompleteWorkaroundClock(_ context.Context, caseID string) error {
+func (m *mockSLAEngine) PauseWorkaroundClock(_ context.Context, caseID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.completeWorkaroundCalls = append(m.completeWorkaroundCalls, caseID)
-	return m.completeWorkaroundErr
+	m.pauseWorkaroundCalls = append(m.pauseWorkaroundCalls, caseID)
+	return m.pauseWorkaroundErr
+}
+
+func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recalculateCalls++
+	return m.recalculateErr
+}
+
+func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team})
 }
 
 // TestDispatcher_Handle_CaseCreated_RegistersSLAClocksWhenConfigured verifies
@@ -1014,7 +1117,7 @@ func TestDispatcher_Handle_CommentAdded_NotSupportEngineer_DoesNotCompleteRespon
 }
 
 // TestDispatcher_Handle_WorkaroundProvided_CompletesWorkaroundClock verifies
-// handleWorkaroundProvided calls slaEngine.CompleteWorkaroundClock with the
+// handleWorkaroundProvided calls slaEngine.PauseWorkaroundClock with the
 // payload's own caseId — the fix for the case PATCH workaroundProvided:true
 // gap (entity-service's own Postgres-side SLA engine completed its clock,
 // but this engine's own Redis-based one never heard about it at all before
@@ -1028,8 +1131,8 @@ func TestDispatcher_Handle_WorkaroundProvided_CompletesWorkaroundClock(t *testin
 	if err := d.Handle(context.Background(), record); err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
-	if len(sla.completeWorkaroundCalls) != 1 || sla.completeWorkaroundCalls[0] != "CASE-1" {
-		t.Errorf("unexpected CompleteWorkaroundClock calls: %v", sla.completeWorkaroundCalls)
+	if len(sla.pauseWorkaroundCalls) != 1 || sla.pauseWorkaroundCalls[0] != "CASE-1" {
+		t.Errorf("unexpected PauseWorkaroundClock calls: %v", sla.pauseWorkaroundCalls)
 	}
 }
 
@@ -1055,7 +1158,7 @@ func TestDispatcher_Handle_WorkaroundProvided_NoEngineConfigured_NoError(t *test
 // eventbus.Consumer retries the record instead of silently acknowledging a
 // clock that was never actually completed.
 func TestDispatcher_Handle_WorkaroundProvided_StoreFailure_ReturnsErrorForRetry(t *testing.T) {
-	sla := &mockSLAEngine{completeWorkaroundErr: errors.New("redis: connection refused")}
+	sla := &mockSLAEngine{pauseWorkaroundErr: errors.New("redis: connection refused")}
 	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
 
 	record := eventbus.Record{Value: []byte(`{"type":"case.workaround_provided","entityId":"CASE-1","payload":{"caseId":"CASE-1"}}`)}
@@ -1063,8 +1166,48 @@ func TestDispatcher_Handle_WorkaroundProvided_StoreFailure_ReturnsErrorForRetry(
 	if err := d.Handle(context.Background(), record); err == nil {
 		t.Fatal("expected Handle() to return an error so the record is retried, got nil")
 	}
-	if len(sla.completeWorkaroundCalls) != 1 || sla.completeWorkaroundCalls[0] != "CASE-1" {
-		t.Errorf("unexpected CompleteWorkaroundClock calls: %v", sla.completeWorkaroundCalls)
+	if len(sla.pauseWorkaroundCalls) != 1 || sla.pauseWorkaroundCalls[0] != "CASE-1" {
+		t.Errorf("unexpected PauseWorkaroundClock calls: %v", sla.pauseWorkaroundCalls)
+	}
+}
+
+// TestDispatcher_Handle_SLARecalculationRequested_RunsInBackground verifies
+// handleSLARecalculationRequested returns immediately (never blocking this
+// consumer's own Handle call on the recalculation itself) and still calls
+// slaEngine.RecalculateFromEntity exactly once, from its own goroutine.
+func TestDispatcher_Handle_SLARecalculationRequested_RunsInBackground(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"sla.recalculation_requested","entityId":"sla-engine","payload":{"requestedByEmail":"admin@example.com","requestedAt":"2026-01-05T10:00:00Z"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		sla.mu.Lock()
+		calls := sla.recalculateCalls
+		sla.mu.Unlock()
+		if calls == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("RecalculateFromEntity was not called within the timeout")
+}
+
+// TestDispatcher_Handle_SLARecalculationRequested_NoEngineConfigured_NoError
+// verifies an unconfigured slaEngine is a silent no-op, same posture as
+// every other slaEngine call site in this file.
+func TestDispatcher_Handle_SLARecalculationRequested_NoEngineConfigured_NoError(t *testing.T) {
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"sla.recalculation_requested","entityId":"sla-engine","payload":{"requestedByEmail":"admin@example.com","requestedAt":"2026-01-05T10:00:00Z"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
 	}
 }
 
@@ -1576,6 +1719,187 @@ func TestDispatcher_Handle_CaseAcknowledged_RetryAfterChatFailureResends(t *test
 	}
 }
 
+// TestDurableDedup_SkipsARedeliveredAlreadySucceededRecord is the
+// regression test for the actual, reported incident: a Kafka
+// consumer-group rebalance/restart redelivering a record this process
+// already handled completely and successfully, resending its Chat card a
+// second time. With WithDurableDedup configured, a THIRD call with the
+// exact same record content, after the first already succeeded, must not
+// reach the handler at all.
+func TestDurableDedup_SkipsARedeliveredAlreadySucceededRecord(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(newFakeDurableDedup())
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("first Handle() error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Fatalf("expected 1 send after the first delivery, got %d", len(chat.caseAcknowledgedCalls))
+	}
+
+	// A later redelivery of the identical record -- same bytes, same
+	// recordBaseKey -- simulating a rebalance/restart replaying from a
+	// stale committed offset.
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("redelivered Handle() error = %v, want nil (skipped, not an error)", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Errorf("chat calls = %d after a redelivery of an already-succeeded record, want still 1 (no duplicate send)", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_DoesNotBlockAGenuineRetryAfterFailure confirms durable
+// dedup does not regress the ordinary, far more common retry case: a
+// record whose handler genuinely failed must still be retried successfully
+// once the failure clears, exactly as it already does with no durable
+// dedup configured (see the sibling test with the same name minus this
+// prefix) -- the claim is released on failure specifically so this keeps
+// working.
+func TestDurableDedup_DoesNotBlockAGenuineRetryAfterFailure(t *testing.T) {
+	chat := &mockGoogleChatSender{err: errors.New("webhook unreachable")}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(newFakeDurableDedup())
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err == nil {
+		t.Fatal("expected the chat error to propagate on the first attempt")
+	}
+	chat.err = nil
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("retry: Handle() error = %v, want nil once the failure clears", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 2 {
+		t.Errorf("expected 2 send attempts (1 failed, 1 succeeded) with durable dedup configured, got %d", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_RedisSetNXErrorFailsOpen confirms a durable-dedup check
+// that itself fails (Redis unreachable) never blocks processing a record —
+// the in-memory done/chatKey guards elsewhere still apply regardless.
+func TestDurableDedup_RedisSetNXErrorFailsOpen(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	dedup := newFakeDurableDedup()
+	dedup.setNXErr = errors.New("redis unavailable")
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(dedup)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v, want nil -- a durable dedup check failure must fail open", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Errorf("chat calls = %d, want 1 -- the record must still be processed despite the Redis error", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_NilRedisDedupIsANoOp confirms a deployment that never
+// calls WithDurableDedup (no Redis configured, the same posture every
+// pre-existing test in this file already exercises) behaves exactly as
+// before this feature existed -- a redelivery of an already-succeeded
+// record is NOT caught, since the durable mechanism simply isn't
+// available, same as every other optional feature in this package.
+func TestDurableDedup_NilRedisDedupIsANoOp(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("first Handle() error = %v, want nil", err)
+	}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("second Handle() error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 2 {
+		t.Errorf("chat calls = %d, want 2 -- with no durable dedup configured, a second delivery is processed again, unaffected by this feature", len(chat.caseAcknowledgedCalls))
+	}
+}
+
+// TestDurableDedup_UsesShortTTLBeforeDispatchAndExtendsOnlyOnSuccess is the
+// regression test for a CodeRabbit-caught gap: claiming at the full 3-day
+// durableDedupTTL BEFORE dispatchByType ever ran would mean a process
+// killed mid-handler left the record claimed -- indistinguishable from
+// "succeeded" -- for up to 3 days, even though it was never sent. Confirms
+// the actual sequence: SetNX (the short in-progress claim) happens before
+// the chat send, and Set (the long-lived "done" extension) happens only
+// after it succeeds -- Del is never called on a success path.
+func TestDurableDedup_UsesShortTTLBeforeDispatchAndExtendsOnlyOnSuccess(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	dedup := newFakeDurableDedup()
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(dedup)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v, want nil", err)
+	}
+	if dedup.setNXCalls != 1 {
+		t.Errorf("SetNX calls = %d, want 1 (the short in-progress claim, taken before dispatch)", dedup.setNXCalls)
+	}
+	if dedup.setCalls != 1 {
+		t.Errorf("Set calls = %d, want 1 (extending the claim to its full TTL after a successful send)", dedup.setCalls)
+	}
+	if dedup.delCalls != 0 {
+		t.Errorf("Del calls = %d, want 0 -- a successful record must never release its claim", dedup.delCalls)
+	}
+}
+
+// TestDurableDedup_CrashMidHandlerSelfHealsAfterInProgressTTLExpires is the
+// regression test for the actual crash scenario CodeRabbit's review
+// described: a process killed (OOM, deploy, crash) after claiming a record
+// but before dispatchByType ever returns leaves the short in-progress
+// marker behind with no release ever running. Simulates that exact
+// sequence directly -- pre-claim the key the way durablyClaimRecord would,
+// then let the in-progress TTL "expire" (this fake's own expire helper,
+// since it has no real TTL countdown) -- and confirms a fresh delivery of
+// the same record afterward is processed normally rather than being
+// skipped as if it were a stale repeat of an already-done record. Before
+// the two-state (short in-progress / long done) fix, this exact scenario
+// meant the notification was silently, permanently dropped: the crashed
+// attempt's claim lived at the full 3-day TTL, so eventbus.Consumer's
+// redelivery would have found the record already "claimed" and committed
+// its offset without ever sending anything.
+func TestDurableDedup_CrashMidHandlerSelfHealsAfterInProgressTTLExpires(t *testing.T) {
+	chat := &mockGoogleChatSender{}
+	dedup := newFakeDurableDedup()
+	d := newTestDispatcher(&mockEmailSender{}, chat, &mockCallSender{}).WithDurableDedup(dedup)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.acknowledged","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","severity":"HIGH","product":"api-manager","acknowledgerName":"Jane Doe"}}`)}
+	baseKey := recordBaseKey(record)
+
+	// Simulate a crashed earlier attempt: it claimed the record (the short
+	// in-progress marker a real durablyClaimRecord call would have taken)
+	// but never got anywhere near markRecordDone or releaseDurableRecordClaim
+	// -- the process just died.
+	dedup.SetNX(context.Background(), durableDedupKeyPrefix+baseKey, 1, durableDedupInProgressTTL)
+	if len(chat.caseAcknowledgedCalls) != 0 {
+		t.Fatal("test setup error: no chat send should have happened yet")
+	}
+
+	// A real redelivery arriving while the crashed attempt's short marker is
+	// still live must still be skipped -- it might genuinely still be
+	// in-flight on another instance.
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() while in-progress marker is live: error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 0 {
+		t.Fatal("chat sent while the record's in-progress marker was still live -- should have been skipped as possibly still in-flight")
+	}
+
+	// Once the short in-progress TTL actually expires, exactly as it would
+	// in real Redis minutes after the crash, the next redelivery must be
+	// treated as new and genuinely processed -- not lost forever.
+	dedup.expire(durableDedupKeyPrefix + baseKey)
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() after the in-progress marker expired: error = %v, want nil", err)
+	}
+	if len(chat.caseAcknowledgedCalls) != 1 {
+		t.Errorf("chat calls = %d, want 1 -- the crashed attempt's claim must self-heal once its short TTL expires, not drop the notification forever", len(chat.caseAcknowledgedCalls))
+	}
+}
+
 func TestDispatcher_Handle_SeverityChanged(t *testing.T) {
 	mock := &mockEmailSender{}
 	chat := &mockGoogleChatSender{}
@@ -1607,6 +1931,44 @@ func TestDispatcher_Handle_SeverityChanged(t *testing.T) {
 	}
 	if gotChat.productName != "api-manager" {
 		t.Errorf("SendSeverityChangedAlert productName = %q, want the payload's product %q", gotChat.productName, "api-manager")
+	}
+}
+
+// TestDispatcher_Handle_SeverityChanged_RevisesSLAClocks confirms
+// handleSeverityChanged calls slaEngine.ReviseClocks with the payload's own
+// new severity and display fields -- the fix for a real, reported gap:
+// before this, nothing here ever reacted to case.severity_changed at all,
+// so a case's Redis-held SLA tracking kept ticking down its OLD severity's
+// clock, under its OLD duration, indefinitely.
+func TestDispatcher_Handle_SeverityChanged_RevisesSLAClocks(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Something broke","oldSeverity":"LOW","newSeverity":"HIGH","product":"api-manager","team":"Phoenix","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	if len(sla.reviseCalls) != 1 {
+		t.Fatalf("expected 1 ReviseClocks call, got %d", len(sla.reviseCalls))
+	}
+	got := sla.reviseCalls[0]
+	if got.caseID != "CASE-1" || got.priority != "HIGH" || got.caseNumber != "CS0001001" || got.wso2CaseID != "WSO2-1000" || got.caseTitle != "Something broke" || got.product != "api-manager" || got.team != "Phoenix" {
+		t.Errorf("unexpected ReviseClocks args: %+v", got)
+	}
+}
+
+// TestDispatcher_Handle_SeverityChanged_NoEngineConfigured_NoError verifies
+// an unconfigured slaEngine is a silent no-op, same posture as every other
+// slaEngine call site in this file.
+func TestDispatcher_Handle_SeverityChanged_NoEngineConfigured_NoError(t *testing.T) {
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{})
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.severity_changed","entityId":"CASE-1","payload":{"projectId":"PROJ-1","caseId":"CASE-1","oldSeverity":"LOW","newSeverity":"HIGH","product":"api-manager","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
 	}
 }
 

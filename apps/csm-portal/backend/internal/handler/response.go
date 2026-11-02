@@ -99,7 +99,11 @@ func writeJSONValue(w http.ResponseWriter, statusCode int, v any) {
 // mirroring the Ballerina getStatusCode pattern in the customer-portal. Use
 // this only for PATCH/update endpoints: their 4xx failures are reliably a
 // rejection of something in the payload the caller just sent (e.g. "Invalid
-// state transition"), so the upstream reason is worth showing. Every other
+// state transition"), so the upstream reason is worth showing. The same holds
+// for the customer-health lifecycle handlers and the custom dashboard writes
+// (SaveCustomDashboard, AddCustomDashboardShare, AddCustomDashboardTeamShare:
+// a duplicate name, the dashboard limit, an unknown user, sharing with
+// yourself), listed in this backend's CLAUDE.md. Every other
 // endpoint should use mapUpstreamErrorGeneric instead — most of them forward
 // a request that's only partially validated at this layer, so a 4xx from
 // upstream isn't necessarily something the caller could have avoided, and

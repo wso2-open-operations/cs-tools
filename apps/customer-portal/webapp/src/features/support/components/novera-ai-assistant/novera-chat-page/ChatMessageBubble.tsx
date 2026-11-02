@@ -31,7 +31,10 @@ import { Bot, ThumbsDown, ThumbsUp, User } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChatSender } from "@features/support/types/conversations";
+import {
+  ChatSender,
+  NoveraActionType,
+} from "@features/support/types/conversations";
 import {
   MAX_FEEDBACK_TAGS,
   feedbackTagPrompt,
@@ -150,6 +153,7 @@ export default function ChatMessageBubble({
   onThumbsUp,
   onThumbsDown,
   onFeedbackTag,
+  onSolutionWorked,
   onRequestTokenIncrease,
 }: ChatMessageBubbleProps): JSX.Element {
   const isUser = message.sender === ChatSender.USER;
@@ -210,6 +214,26 @@ export default function ChatMessageBubble({
     !hideFeedbackRow &&
     !!message.feedbackMessageId &&
     (!!onThumbsUp || !!onThumbsDown);
+
+  /**
+   * The agent attaches a `solutionProposed` action to every substantive answer
+   * — "did this resolve your issue?" — and this component was passed the
+   * handler for it but never rendered anything, so the button has never
+   * appeared. That is half of why resolved=1 had never been reached by any
+   * conversation; the other half was the backend not listening for the click.
+   *
+   * Driven off the action rather than a local flag so the agent stays in
+   * control of when to ask: it withholds the action on a turn that opened a
+   * support case, where asking would be wrong.
+   */
+  const solutionAction = message.actions?.find(
+    (action) => action.type === NoveraActionType.SolutionProposed,
+  );
+  const showSolutionButton =
+    message.sender === ChatSender.BOT &&
+    !message.isError &&
+    !!solutionAction &&
+    !!onSolutionWorked;
 
   /**
    * Reason chips appear only once a rating exists, so giving the rating is never
@@ -466,6 +490,21 @@ export default function ChatMessageBubble({
               </Box>
             )}
           </Box>
+
+          {showSolutionButton && (
+            <Box sx={{ mt: 1 }}>
+              <Button
+                size="small"
+                variant="outlined"
+                color={solutionAction?.style === "danger" ? "error" : "primary"}
+                onClick={onSolutionWorked}
+              >
+                {/* The agent supplies the wording, so it can change without a
+                    frontend release. */}
+                {solutionAction?.label ?? "This Resolved My Issue"}
+              </Button>
+            </Box>
+          )}
 
           {showFeedbackRow && (
             <Stack

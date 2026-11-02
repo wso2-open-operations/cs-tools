@@ -1,0 +1,4 @@
+# Never bake a local .env (it would hold the model key) into an image.
+.env
+.env.*
+!.env.example

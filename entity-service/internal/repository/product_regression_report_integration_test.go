@@ -39,6 +39,8 @@ const (
 	prrProductADupID  = "6d200000-0000-4000-8000-000000000031"
 	prrProductBID     = "6d200000-0000-4000-8000-000000000032"
 	prrDeployedID     = "6d200000-0000-4000-8000-000000000040"
+	prrDeployedNoVer  = "6d200000-0000-4000-8000-000000000041"
+	prrVersionID      = "6d200000-0000-4000-8000-000000000060"
 	prrRegressionTag  = "6d200000-0000-4000-8000-000000000050"
 	prrOtherTagID     = "6d200000-0000-4000-8000-000000000051"
 	prrRegressionName = "S_RG_TEST"
@@ -72,6 +74,7 @@ func prrCleanup(t *testing.T, pool *pgxpool.Pool) {
 		`DELETE FROM work_item WHERE id::text LIKE '6d200000-0000-4000-8000-%'`,
 		`DELETE FROM tag WHERE id::text LIKE '6d200000-0000-4000-8000-%'`,
 		`DELETE FROM deployed_product WHERE id::text LIKE '6d200000-0000-4000-8000-%'`,
+		`DELETE FROM product_version WHERE id::text LIKE '6d200000-0000-4000-8000-%'`,
 		`DELETE FROM product WHERE id::text LIKE '6d200000-0000-4000-8000-%'`,
 	} {
 		if _, err := pool.Exec(ctx, s); err != nil {
@@ -105,8 +108,15 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 		($2, now(), now(), 't', 't', 'WSO2', 'SOFTWARE', 'PRR API Manager '),
 		($3, now(), now(), 't', 't', 'WSO2', 'SOFTWARE', 'PRR Identity Server')`,
 		prrProductAID, prrProductADupID, prrProductBID)
+	exec(`INSERT INTO product_version (id, created_on, updated_on, created_by, updated_by, version, product_id)
+		VALUES ($1, now(), now(), 't', 't', '4.2.0', $2)`, prrVersionID, prrProductAID)
+	// The deployed product's own name is NULL, as it is on almost every
+	// live row: the product and version it points at supply the text.
+	exec(`INSERT INTO deployed_product (id, created_on, updated_on, created_by, updated_by, number, name, product_id, version_id)
+		VALUES ($1, now(), now(), 't', 't', 'PRR-DP-1', NULL, $2, $3)`, prrDeployedID, prrProductAID, prrVersionID)
+	// A deployed product with a product but no version.
 	exec(`INSERT INTO deployed_product (id, created_on, updated_on, created_by, updated_by, number, name, product_id)
-		VALUES ($1, now(), now(), 't', 't', 'PRR-DP-1', 'PRR API Manager 4.2.0 All In One', $2)`, prrDeployedID, prrProductAID)
+		VALUES ($1, now(), now(), 't', 't', 'PRR-DP-2', NULL, $2)`, prrDeployedNoVer, prrProductBID)
 	exec(`INSERT INTO tag (id, created_on, updated_on, name) VALUES
 		($1, now(), now(), $3), ($2, now(), now(), 'prr_other')`, prrRegressionTag, prrOtherTagID, prrRegressionName)
 
@@ -126,7 +136,7 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 			VALUES (gen_random_uuid(), now(), now(), $1, $2)`, workItemID, tagID)
 	}
 	at := func(t time.Time) *time.Time { return &t }
-	a, aDup, b, dp := prrProductAID, prrProductADupID, prrProductBID, prrDeployedID
+	a, aDup, b, dp, dpNoVer := prrProductAID, prrProductADupID, prrProductBID, prrDeployedID, prrDeployedNoVer
 
 	// Listed: product A, tagged, ETA shared mid-month, with a deployment.
 	listed1 := caseItem(1, &a, &dp, at(time.Date(2026, 9, 10, 9, 0, 0, 0, loc)), "CASE")
@@ -144,8 +154,12 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	// Not listed: in the month, right product, but not tagged as a regression.
 	tagged(caseItem(5, &a, nil, at(time.Date(2026, 9, 15, 0, 0, 0, 0, loc)), "CASE"), prrOtherTagID)
 	// Listed only when product B is asked for.
-	listedB := caseItem(6, &b, nil, at(time.Date(2026, 9, 5, 0, 0, 0, 0, loc)), "CASE")
+	listedB := caseItem(6, &b, &dpNoVer, at(time.Date(2026, 9, 5, 0, 0, 0, 0, loc)), "CASE")
 	tagged(listedB, prrRegressionTag)
+	// Listed: a new case that carries only a deployed product (no product
+	// of its own), ETA shared after case 2 so the row order is unchanged.
+	listed10 := caseItem(10, nil, &dp, at(time.Date(2026, 9, 30, 23, 45, 0, 0, loc)), "CASE")
+	tagged(listed10, prrRegressionTag)
 	// Not listed: no product at all.
 	tagged(caseItem(7, nil, nil, at(time.Date(2026, 9, 5, 0, 0, 0, 0, loc)), "CASE"), prrRegressionTag)
 	// Not listed: no ETA ever shared.
@@ -169,14 +183,17 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02"}; !equalStringSlices(got, want) {
+	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR10"}; !equalStringSlices(got, want) {
 		t.Fatalf("product A rows = %v, want %v (ETA order; boundaries, tag, product, type and NULL ETA all respected)", got, want)
 	}
 	if rows[0].Product != "PRR API Manager" || rows[1].Product != "PRR API Manager" {
 		t.Errorf("products = %q / %q, want both trimmed to the same name so they group together", rows[0].Product, rows[1].Product)
 	}
-	if rows[0].DeployedProduct != "PRR API Manager 4.2.0 All In One" || rows[1].DeployedProduct != "" {
-		t.Errorf("deployed products = %q / %q", rows[0].DeployedProduct, rows[1].DeployedProduct)
+	if rows[0].DeployedProduct != "PRR API Manager 4.2.0" || rows[1].DeployedProduct != "" {
+		t.Errorf("product column = %q / %q, want \"PRR API Manager 4.2.0\" (NULL deployed product name, product + version) and \"\" (no deployed product)", rows[0].DeployedProduct, rows[1].DeployedProduct)
+	}
+	if rows[2].Product != "PRR API Manager" || rows[2].DeployedProduct != "PRR API Manager 4.2.0" {
+		t.Errorf("deployed-product-only case = %q / %q, want it grouped under the deployed product's product with product + version", rows[2].Product, rows[2].DeployedProduct)
 	}
 	if rows[0].IssueKey != "ACME-PRR-01" || rows[0].Subject != "regression 01" || rows[0].ID != listed1 {
 		t.Errorf("row 1 = %+v", rows[0])
@@ -190,8 +207,11 @@ func TestProductRegressionReportIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list both: %v", err)
 	}
-	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR06"}; !equalStringSlices(got, want) {
+	if got, want := numbersOf(rows), []string{"CSPRR01", "CSPRR02", "CSPRR10", "CSPRR06"}; !equalStringSlices(got, want) {
 		t.Errorf("both products = %v, want %v in product name order", got, want)
+	}
+	if len(rows) == 4 && rows[3].DeployedProduct != "PRR Identity Server" {
+		t.Errorf("version-less product column = %q, want the product name only", rows[3].DeployedProduct)
 	}
 
 	// A product nobody has, or no product at all, lists nothing.

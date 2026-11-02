@@ -69,4 +69,23 @@ type Task struct {
 	// same doc.
 	To []string
 	Cc []string
+	// RunNowNarrow is optional and set only by a task that supports the
+	// narrowing flags of an on-demand run (--dry-run, --limit, --states; see
+	// cmd/server/runnow.go). It returns the handler to run with the options
+	// applied, and the effective settings to log. It may only tighten what the
+	// task is configured with, never loosen it, and returns an error for a
+	// value it cannot honour. Nil means the task takes no narrowing flags and a
+	// run-now of it runs Handler as is.
+	RunNowNarrow func(o RunNowOptions) (handler func(ctx context.Context) error, settings []any, err error)
+}
+
+// RunNowOptions are the narrowing arguments of an on-demand run. A zero value
+// means "not given".
+type RunNowOptions struct {
+	// DryRun forces a dry run.
+	DryRun bool
+	// Limit is the daily limit for this run; 0 means not given.
+	Limit int
+	// States is the subset of states to work; nil means not given.
+	States []string
 }

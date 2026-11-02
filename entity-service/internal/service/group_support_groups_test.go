@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"sync/atomic"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -29,6 +31,12 @@ type stubGroupRepo struct{ called string }
 // SearchGroups records that the unfiltered group search was called.
 func (s *stubGroupRepo) SearchGroups(context.Context, string, int, int) ([]domain.Group, int, error) {
 	s.called = "teams"
+	return []domain.Group{}, 0, nil
+}
+
+// SearchIncidentExtraGroups records that the extra-group search was called.
+func (s *stubGroupRepo) SearchIncidentExtraGroups(context.Context, string, int, int) ([]domain.Group, int, error) {
+	s.called = "extra groups"
 	return []domain.Group{}, 0, nil
 }
 
@@ -51,6 +59,29 @@ func TestSearchGroups_SupportGroupsOnlyPicksTheSupportGroupSet(t *testing.T) {
 		}
 		if repo.called != want {
 			t.Errorf("filters %+v searched %s, want %s", filters, repo.called, want)
+		}
+	}
+}
+
+// incidentExtraGroupsOnly picks the extra-group search, wins over
+// supportGroupsOnly, and leaves the other searches alone when false.
+func TestSearchGroups_IncidentExtraGroupsOnly(t *testing.T) {
+	for name, c := range map[string]struct {
+		filters *domain.SearchGroupsFilters
+		want    string
+	}{
+		"extra only":       {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true}, "extra groups"},
+		"both flags":       {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true, SupportGroupsOnly: true}, "extra groups"},
+		"explicit false":   {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: false}, "teams"},
+		"support only":     {&domain.SearchGroupsFilters{SupportGroupsOnly: true}, "support groups"},
+		"extra with query": {&domain.SearchGroupsFilters{IncidentExtraGroupsOnly: true, SearchQuery: "soc"}, "extra groups"},
+	} {
+		repo := &stubGroupRepo{}
+		if _, err := NewGroupService(repo).SearchGroups(context.Background(), domain.SearchGroupsRequest{Filters: c.filters}); err != nil {
+			t.Fatalf("%s: SearchGroups: %v", name, err)
+		}
+		if repo.called != c.want {
+			t.Errorf("%s: searched %s, want %s", name, repo.called, c.want)
 		}
 	}
 }
@@ -89,5 +120,44 @@ func TestSNSearchGroups_SupportGroupsOnly(t *testing.T) {
 	}
 	if sre.Total != 2 || len(sre.Groups) != 1 || sre.Groups[0].Name != "Zeta SRE" {
 		t.Errorf("got %+v, want page 2 of the 2 SRE groups", sre)
+	}
+}
+
+// IncidentExtraGroupsOnly has no resolvable allowlist on ServiceNow: it yields
+// an empty result without any upstream call, and wins over supportGroupsOnly.
+func TestSNSearchGroups_IncidentExtraGroupsOnly(t *testing.T) {
+	var calls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"groups":[],"totalRecords":0}`))
+	})
+	svc := NewServiceNowGroupService(newTestSNClient(t, mux))
+
+	for name, f := range map[string]*domain.SearchGroupsFilters{
+		"extra only":             {IncidentExtraGroupsOnly: true},
+		"extra and support only": {IncidentExtraGroupsOnly: true, SupportGroupsOnly: true},
+	} {
+		got, err := svc.SearchGroups(contextWithUserIDToken("token"), domain.SearchGroupsRequest{
+			Filters:    f,
+			Pagination: domain.Pagination{Limit: 5, Offset: 2},
+		})
+		if err != nil {
+			t.Fatalf("%s: SearchGroups: %v", name, err)
+		}
+		if got.Groups == nil || len(got.Groups) != 0 || got.Total != 0 || got.Limit != 5 || got.Offset != 2 {
+			t.Errorf("%s: got %+v, want an empty non-nil result with the paging echoed", name, got)
+		}
+		if n := atomic.LoadInt32(&calls); n != 0 {
+			t.Errorf("%s: %d upstream calls, want 0", name, n)
+		}
+	}
+
+	if _, err := svc.SearchGroups(contextWithUserIDToken("token"), domain.SearchGroupsRequest{Filters: &domain.SearchGroupsFilters{}}); err != nil {
+		t.Fatalf("unset: SearchGroups: %v", err)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Errorf("unset flag: %d upstream calls, want 1", n)
 	}
 }

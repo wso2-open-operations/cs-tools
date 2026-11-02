@@ -282,16 +282,35 @@ export default function NoveraChatPage(): JSX.Element {
       // carry the flag, so this can preserve a notice but never invent one.
       // Match on feedbackMessageId too, because the websocket message keeps a
       // client-generated id (`bot-<ts>`) while REST returns the server id.
+      //
+      // `actions` needs the same treatment and for the same reason: the agent
+      // sends them only on the live socket, so scrolling up to load an older
+      // page would rebuild the list without them and make a visible "This
+      // Resolved My Issue" button vanish mid-conversation. Carried only from
+      // the current session — REST never returns actions, so this can preserve
+      // a button but never invent one on a historical message.
       const flagged = new Set<string>();
+      const liveActions = new Map<string, NoveraAction[]>();
       for (const m of prev) {
-        if (!m.isTokenLimitNotice) continue;
-        flagged.add(m.id);
-        if (m.feedbackMessageId) flagged.add(m.feedbackMessageId);
+        if (m.isTokenLimitNotice) {
+          flagged.add(m.id);
+          if (m.feedbackMessageId) flagged.add(m.feedbackMessageId);
+        }
+        if (m.actions?.length) {
+          liveActions.set(m.id, m.actions);
+          if (m.feedbackMessageId) liveActions.set(m.feedbackMessageId, m.actions);
+        }
       }
-      if (flagged.size === 0) return convertedMessages;
-      return convertedMessages.map((m) =>
-        flagged.has(m.id) ? { ...m, isTokenLimitNotice: true } : m,
-      );
+      if (flagged.size === 0 && liveActions.size === 0) return convertedMessages;
+      return convertedMessages.map((m) => {
+        const carriedActions = liveActions.get(m.id);
+        if (!flagged.has(m.id) && !carriedActions) return m;
+        return {
+          ...m,
+          ...(flagged.has(m.id) ? { isTokenLimitNotice: true } : {}),
+          ...(carriedActions ? { actions: carriedActions } : {}),
+        };
+      });
     });
     queryClient.invalidateQueries({
       queryKey: [ApiQueryKeys.CONVERSATION_MESSAGES, urlConversationId, 10],
@@ -812,10 +831,15 @@ export default function NoveraChatPage(): JSX.Element {
     ],
   );
 
+  // isInputDisabled is set when the agent sends a solutionWorked action, i.e.
+  // the conversation is already resolved. The composer is disabled then, but
+  // the buttons on earlier answers stay on screen — without this guard one of
+  // them would still post "This Resolved My Issue" into a resolved
+  // conversation.
   const handleSolutionWorked = useCallback(() => {
-    if (isSending) return;
+    if (isSending || isInputDisabled) return;
     void sendViaWebSocket("This Resolved My Issue");
-  }, [isSending, sendViaWebSocket]);
+  }, [isSending, isInputDisabled, sendViaWebSocket]);
 
   // Answer feedback (👍/👎) over the existing chat socket (#2534). Optimistic:
   // reflect the vote immediately, revert if the send fails. feedback_ack later

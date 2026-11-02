@@ -92,6 +92,17 @@ const (
 	// entirely (it also sends the Google Chat breach alert directly,
 	// without a second event round-trip through this topic).
 	TypeSLAClockRegister Type = "sla.clock.register"
+	// TypeSLARecalculationRequested asks csm-notification-service's own
+	// Redis-held SLA tracking (see that repo's own CLAUDE.md, "SLA
+	// breach-alerting engine") to rebuild itself from this service's durable
+	// `sla`/`sla_policy` tables -- the CSM portal's "Recalculate SLA" admin
+	// action (SLAStatusService.RequestRecalculation), for recovering from a
+	// Redis state that no longer agrees with reality. Not an email/Chat
+	// trigger, so no Recipients field, same reasoning as
+	// TypeKBArticlePublished below. Published once per click, keyed by a
+	// fixed entity id (there is no single entity this is "about") -- see
+	// SLARecalculationRequestedPayload's own doc comment.
+	TypeSLARecalculationRequested Type = "sla.recalculation_requested"
 	// TypeKBArticlePublished is published when a KB article transitions
 	// to the published state, for csm-notification-service's Flow 2
 	// (embedding -> Pinecone) to consume on its own dedicated handling,
@@ -312,6 +323,19 @@ type CaseAcknowledgedPayload struct {
 // operation" posture.
 type WorkaroundProvidedPayload struct {
 	CaseID string `json:"caseId"`
+}
+
+// SLARecalculationRequestedPayload is the Payload shape for
+// TypeSLARecalculationRequested -- mirrors csm-notification-service's own
+// SLARecalculationRequestedPayload. RequestedByEmail/RequestedAt are purely
+// for that service's own log line (whoever clicked it, and when the
+// request was made, as opposed to whenever the consumer happens to pick it
+// up) -- nothing in the recalculation itself is scoped by them. RequestedAt
+// is RFC3339, same convention as this package's other timestamp fields
+// (e.g. ElevatedAt in csm-notification-service's own events.go).
+type SLARecalculationRequestedPayload struct {
+	RequestedByEmail string `json:"requestedByEmail"`
+	RequestedAt      string `json:"requestedAt"`
 }
 
 // SeverityChangedPayload is the Payload shape for TypeSeverityChanged —

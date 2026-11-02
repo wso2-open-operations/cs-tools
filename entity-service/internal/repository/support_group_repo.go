@@ -61,6 +61,19 @@ func incidentAssignableGroupSQL(extraIDsParam int) string {
 	       OR g.id = ANY($%d::uuid[]))`, extraIDsParam)
 }
 
+// incidentExtraGroupSQL is the allowlist part of incidentAssignableGroupSQL on
+// its own: every active "group" whose id is in the configured allowlist
+// (INCIDENT_EXTRA_ASSIGNMENT_GROUP_IDS), whether or not it supports a service.
+// An empty allowlist matches nothing. Same bind parameter, columns, alias and
+// active convention as incidentAssignableGroupSQL.
+func incidentExtraGroupSQL(extraIDsParam int) string {
+	return fmt.Sprintf(`
+	SELECT g.id, g.name, g.parent_id
+	FROM "group" g
+	WHERE g.is_active IS NOT FALSE
+	  AND g.id = ANY($%d::uuid[])`, extraIDsParam)
+}
+
 // extraGroupIDsArg is the bind value for incidentAssignableGroupSQL's
 // allowlist parameter: never nil, which would bind NULL.
 func extraGroupIDsArg(ids []string) []string {

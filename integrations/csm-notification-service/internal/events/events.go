@@ -111,6 +111,17 @@ const (
 	// full design.
 	TypeSLATierReached Type = "sla.tier_reached"
 
+	// TypeSLARecalculationRequested is the CSM portal's "Recalculate SLA"
+	// admin action — published once per click by entity-service
+	// (SLAStatusService.RequestRecalculation), consumed by
+	// internal/slaengine.Dispatcher.handleSLARecalculationRequested, which
+	// kicks off Engine.RecalculateFromEntity in its own detached goroutine
+	// (never on this consumer's own goroutine — see that method's own doc
+	// comment for why). Like TypeSLATierReached, not an email/Chat trigger,
+	// so dispatch.Handle's main switch still has no reaction for it beyond
+	// handing it to the SLA engine.
+	TypeSLARecalculationRequested Type = "sla.recalculation_requested"
+
 	// TypeCRApprovalRequested is published by csm-flow-service's
 	// cr_approval_notice flow when a change request enters an approval state.
 	// Unlike the case.* types, its recipients and subject arrive already
@@ -150,6 +161,7 @@ var KnownTypes = []Type{
 	TypeIncidentSpecialOpsAlert,
 	TypePagingTestCallRequested,
 	TypeSLATierReached,
+	TypeSLARecalculationRequested,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
 	TypeOutageNotificationDue, TypeOutageCommunicationDue, TypeOutageStatusPageDue,
 	TypeProjectContactInvited, TypeProjectContactRegistered,
@@ -653,6 +665,17 @@ type SLATierReachedPayload struct {
 	CaseID    string `json:"caseId"`
 	ClockType string `json:"clockType"`
 	Tier      string `json:"tier"`
+}
+
+// SLARecalculationRequestedPayload is the Payload shape for
+// TypeSLARecalculationRequested — mirrors entity-service's own
+// SLARecalculationRequestedPayload. Both fields are purely for this
+// service's own log line (who asked, and when); nothing about the
+// recalculation itself is scoped by them — it always rebuilds every
+// currently-active clock, not just ones touched by this particular request.
+type SLARecalculationRequestedPayload struct {
+	RequestedByEmail string `json:"requestedByEmail"`
+	RequestedAt      string `json:"requestedAt"`
 }
 
 // IncidentAcknowledgedPayload is the Payload shape for

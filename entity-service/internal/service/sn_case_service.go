@@ -1125,18 +1125,18 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	// notification-service clock either never gets scheduled or has to
 	// wait for Reconcile on that process's next restart. Registering first
 	// guarantees the row already exists by the time any consumer of this
-	// event asks about it. Scoped to req.Type == "case" only (plain support
-	// cases) -- service_request/engagement/security_report_analysis/
-	// announcement have no sla_policy naming convention this engine's
-	// resolver understands (see sla_policy_resolver.go's own doc comment on
-	// scope), and are out of scope for this change. Shares s.slaEngine==nil
+	// event asks about it. Scoped to slaClockEligibleCreateTypes (see that
+	// var's own doc comment, sla_engine_service.go, for which types are
+	// covered and why) -- engagement/announcement have no confirmed,
+	// non-duplicated sla_policy coverage and are out of scope for this
+	// change. Shares s.slaEngine==nil
 	// guard implicitly (RegisterCaseClocks is itself a no-op-safe
 	// best-effort call), and deliberately does its own GetCaseByID fetch
 	// rather than reusing publishCaseCreated's internal one (which isn't
 	// exposed to this call site) -- same "independent re-fetch" pattern
 	// every other best-effort hook in this file already uses
 	// (applyResponseSLAOnComment, applyCustomerReplyStateTransition).
-	if req.Type == "case" {
+	if slaClockEligibleCreateTypes[req.Type] {
 		s.registerCaseSLAClocks(ctx, resp.Case.ID)
 	}
 	s.publishCaseCreated(ctx, req, resp.Case.ID)
@@ -3765,14 +3765,36 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
 	}
 	// Deliberately independent of s.publisher, same reasoning as the state
-	// effects call just above. WorkaroundProvided is the one genuine
-	// "workaround was provided" signal anywhere in the domain model --
-	// applyCaseStateSLAEffects only ever pauses/resumes this clock, never
-	// completes it. false (a recall) is deliberately not handled the
-	// opposite way -- see SLAEngineService.CompleteWorkaroundClock's own
-	// doc comment.
-	if s.slaEngine != nil && req.WorkaroundProvided != nil && *req.WorkaroundProvided {
-		s.slaEngine.CompleteWorkaroundClock(ctx, req.ID)
+	// effects call just above. Re-checks every active clock's own
+	// pause/resume/stop/cancel condition text against the case's current
+	// (dual-write) Postgres facts whenever this PATCH touches a field those
+	// conditions can reference -- WorkaroundProvided and the three fix-ETA
+	// values. See SLAEngineService.ApplyCaseFieldEffects' own doc comment
+	// for why this replaced two hardcoded CompleteClock hooks (one of them
+	// keyed on GetCaseEtaSharedOn/eta_shared_on, which is the wrong signal
+	// for this -- see repository.CaseFacts.FixEtaShared's own doc comment).
+	//
+	// Both overrides are REQUIRED on this data source, unlike caseService's
+	// own identical call site -- a CodeRabbit-caught gap: this PATCH just
+	// wrote to the previous system, not to this service's own Postgres
+	// mirror, which a separate, continuously-running sync job catches up on
+	// its own schedule rather than synchronously within this request. A
+	// fresh repository.CaseFacts read right here can still see the OLD
+	// value, which would silently decide the wrong effect (a newly-provided
+	// workaround not pausing its clock, a newly-shared fix ETA not stopping
+	// it, a recall leaving a clock paused). fixEtaSharedOverride is TRUE
+	// whenever any of the three fields is set in this very request -- that
+	// alone makes FixEtaShared true regardless of the mirror's current
+	// value or either of the other two fields' own state -- and left nil
+	// (fall back to the fresh read, already correct for a field this PATCH
+	// didn't touch) otherwise.
+	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
+		var fixEtaSharedOverride *bool
+		if req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
+			fixEtaShared := true
+			fixEtaSharedOverride = &fixEtaShared
+		}
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, req.WorkaroundProvided, fixEtaSharedOverride)
 	}
 	// Deliberately independent of s.slaEngine above and of s.publisher's
 	// usual EVENT_PUBLISHING_ENABLED gate (publishWorkaroundProvidedEvent
@@ -3783,31 +3805,6 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// published this before.
 	if req.WorkaroundProvided != nil && *req.WorkaroundProvided {
 		publishWorkaroundProvidedEvent(ctx, s.publisher, req.ID)
-	}
-	// Independent of the WorkaroundProvided check above, same "no Event Hub
-	// dependency" reasoning -- a caller can set workaroundProvided and
-	// addPublicComment together (CompleteWorkaroundClock would then simply
-	// be redundant for that one clock, see CompleteFixEtaSharedClocks' own
-	// doc comment).
-	//
-	// Checked via GetCaseEtaSharedOn, not req.AddPublicComment directly:
-	// eta_shared_on (work_item.eta_shared_on) is the actual record of a
-	// shared fix ETA, and it has no guaranteed connection to this specific
-	// PATCH -- it has no ServiceNow equivalent field at all (see
-	// domain.CaseView.EtaSharedOn's own doc comment), so nothing about
-	// *when* ServiceNow's own "Share Fix ETA" action actually lands in
-	// Postgres is guaranteed to line up with this request's own
-	// AddPublicComment flag. Checking the persisted fact on every UpdateCase
-	// call instead (cheap, idempotent, same CompleteClock safety net as
-	// every other completion path) means a case's clocks still get
-	// completed the next time anything about it changes, even if this
-	// specific PATCH wasn't the one that shared the ETA.
-	if s.slaEngine != nil {
-		if etaSharedOn, err := s.GetCaseEtaSharedOn(ctx, req.ID); err != nil {
-			slog.WarnContext(ctx, "sn update case: eta shared on lookup failed", "caseId", req.ID, "error", err)
-		} else if etaSharedOn != nil {
-			s.slaEngine.CompleteFixEtaSharedClocks(ctx, req.ID)
-		}
 	}
 	if publishCaseAssign {
 		assigneeName := assigneeEmail

@@ -5988,6 +5988,13 @@ type SearchGroupsFilters struct {
 	// (the ones assignmentGroupId takes), not team-registry ids, which the
 	// search returns without this filter on the Postgres data source.
 	SupportGroupsOnly bool `json:"supportGroupsOnly,omitempty"`
+	// IncidentExtraGroupsOnly limits the result to the active groups the
+	// deployment has configured as extra incident assignment groups (and none
+	// when none are configured). Ids are "group" ids, as with SupportGroupsOnly.
+	// The set may include a group that is also a service's support group, so it
+	// can overlap SupportGroupsOnly results. It wins over SupportGroupsOnly when
+	// both are set. Other data sources return an empty result.
+	IncidentExtraGroupsOnly bool `json:"incidentExtraGroupsOnly,omitempty"`
 }
 
 // SearchGroupsRequest is the input for POST /groups/search.
@@ -8796,12 +8803,29 @@ type SLAStatus struct {
 	// addressed by these fields. AssigneeName/AssigneeEmail resolve
 	// work_item.assigned_to_id the same way GetCaseByID's own
 	// AssignedEngineer join does; "" when the case has no assignee.
-	// TeamEmail/TeamLeadName resolve from the SAME "group" row Team
-	// already comes from (account.cre_team_id) -- "group".group_email and
-	// "group".manager_id -> "user".name respectively; "" when the case has
-	// no account, the account has no CRE team, or that team has no
-	// group_email/manager_id set. All four are best-effort display/routing
-	// enrichment, not part of the SLA clock itself.
+	// TeamEmail is NOT the "group" row Team's own display name comes from
+	// (account.cre_team_id -> "group") -- it is team.group_email, on the
+	// team row with the SAME id (team.id and "group".id coincide for a
+	// properly-synced CRE team -- see TeamLeadName's own doc comment
+	// below), since "group".group_email and team.group_email are two
+	// different, independently-synced values for the same team and
+	// team.group_email is the one other proven code (TeamGroupEmails,
+	// migration_case_report_repo.go) already relies on. "" when the case
+	// has no account, the account has no CRE team, or that team has no
+	// group_email set. TeamLeadName does NOT come from that same "group"
+	// row at all either -- "group".manager_id is an unrelated field (a real,
+	// reported bug: an earlier version of this resolved TeamLeadName from
+	// it, which for most teams simply isn't set, and for any team where it
+	// is set names the wrong person). The real team lead is
+	// team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id -- the identical join CaseTeamLeads already uses
+	// for the escalation ladder's own team-lead notifications
+	// (escalation_repo.go), just picking one (oldest membership first) for
+	// this single-string field, since a team can genuinely have more than
+	// one lead (team_member.role has no uniqueness constraint for 'lead',
+	// unlike the one-per-team 'americas_team_lead' role). All four are
+	// best-effort display/routing enrichment, not part of the SLA clock
+	// itself.
 	AssigneeName  string `json:"assigneeName,omitempty"`
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
@@ -8909,6 +8933,23 @@ type SLAClockState struct {
 	// weekends/holidays the pause spanned. Always 0 for a 24x7-scheduled
 	// clock (nothing ever writes this column for one).
 	BusinessPauseDurationSeconds int64 `json:"businessPauseDurationSeconds"`
+	// AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName mirror SLAStatus's
+	// own fields of the same name and the SAME resolution -- see that
+	// type's own doc comment, in particular for why TeamLeadName is NOT
+	// the account's CRE "group" row's own manager_id (a real, fixed bug)
+	// but team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id, the same join CaseTeamLeads already uses.
+	// Added so csm-notification-service's SLA breach email reaction can
+	// read all four from the exact same read it already makes right
+	// before sending a breach alert (GetClockState, for its own
+	// stale-alert suppression check) rather than needing a second round
+	// trip to GET /sla-status. "" when not resolvable (no assignee, no
+	// team, or the team has no group_email/lead set) -- same as
+	// SLAStatus's own posture.
+	AssigneeName  string `json:"assigneeName,omitempty"`
+	AssigneeEmail string `json:"assigneeEmail,omitempty"`
+	TeamEmail     string `json:"teamEmail,omitempty"`
+	TeamLeadName  string `json:"teamLeadName,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed

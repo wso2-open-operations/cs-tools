@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -45,8 +45,9 @@ paths:
       summary: >-
         Aggregating dependency health check. Distinct from GET /health (a pure
         liveness probe): this checks SCIM Service, Updates Service, CSM
-        Notification Service, CSM Integration Service and Engineering Entity
-        Service (each optional except SCIM/Updates). This backend's own core
+        Notification Service, CSM Integration Service, Engineering Entity
+        Service and CSM AI Integration Service (each optional except
+        SCIM/Updates). This backend's own core
         entity-service is not checked here. Do not wire this up as the
         liveness/restart probe — a downstream blip here must not restart or
         drain an otherwise-healthy instance.
@@ -4582,6 +4583,994 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /dashboards/generate:
+    post:
+      summary: Generate a dashboard from a chat message.
+      description: >
+        Turns the user's latest message on the Custom Dashboards generate page
+        (and the dashboard being edited, if any) into a dashboard to preview,
+        plus a chat reply. The dashboard is in the same shape as
+        GET /dashboards/{dashboardId}. Nothing is stored. CS engineers and
+        admins only. 400 when the prompt is missing, blank or over 2000
+        characters, checked before any other work, or when the dashboard being
+        edited cannot be read. With the AI integration service configured
+        (CSM_AI_INTEGRATION_SERVICE_BASE_URL) the dashboard comes from the
+        model through that service (the dashboard id is always given by the
+        backend: the draft's id when it is a UUID, else a new one); without
+        it, a sample dashboard is returned for every valid request. A team named in a
+        creTeam / sreTeam filter (its team registry key) is turned into that
+        team's group id before the reply. 422 when the model declines (the
+        message says why), refuses, or names a team that cannot be filtered
+        (unknown, in the wrong field, or with no group configured; the message
+        says which); 502 when its answer is not
+        a usable dashboard or the model cannot be reached; 504 when it takes
+        too long; 503 when generation is unavailable (no sample loaded, or the
+        AI integration service has no model key). 413 when the dashboard being edited is over
+        64 KiB as a definition (the size a saved one may be), checked before
+        any model call. 429, with Retry-After in seconds, when the caller has
+        started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)
+        generations in the last minute or DASHBOARD_GENERATE_LIMIT_PER_DAY
+        (default 100) in the last 24 hours; a refused prompt does not count.
+      operationId: generateDashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: Over the caller's generate limit (per minute or per 24 hours).
+          headers:
+            Retry-After:
+              description: Seconds until the caller may generate again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "504":
+          description: GatewayTimeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom:
+    get:
+      summary: List the caller's saved custom dashboards.
+      description: >
+        The dashboards the caller saved to My Dashboards, ordered by name,
+        without their definitions (for the dropdown). An empty list is
+        `{"dashboards": []}`. Stored in entity-service against the caller. CS
+        engineers and admins only.
+      operationId: listCustomDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}:
+    get:
+      summary: Get one of the caller's saved custom dashboards.
+      description: >
+        A dashboard the caller saved to My Dashboards, in the same shape as
+        GET /dashboards/{dashboardId} so it is drawn with the same components.
+        The stored definition is checked again the way it was when saved; 422
+        when it no longer passes because the dashboard rules changed since it
+        was saved (the message asks the user to generate it again). 404 when
+        the caller has no dashboard with this id, including another user's.
+        CS engineers and admins only.
+      operationId: getCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Save one of the caller's custom dashboards.
+      description: >
+        Saves the generate page's draft to My Dashboards: creates the dashboard
+        with this id, or replaces it when the caller already saved one with
+        this id (200 either way). The draft is in the GET /dashboards/{dashboardId}
+        shape; its id, when present, must match the path. It is checked the
+        same way a generated dashboard is before it is stored (400 when it is
+        not a valid dashboard, has a blank or over-255-character name, or is
+        over 64 KB). The name is the dashboard's displayName. Stored in
+        entity-service against the caller; 409 when the caller already has
+        another dashboard with that name, 400 at 50 saved dashboards (the
+        message says which), 404 when the id is another user's dashboard. CS
+        engineers and admins only.
+      operationId: saveCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCustomDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete one of the caller's saved custom dashboards.
+      description: >
+        Removes a dashboard from the caller's My Dashboards (204). 404 when the
+        caller has no dashboard with this id, including another user's, which
+        is left as it is. CS engineers and admins only.
+      operationId: deleteCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/shares:
+    get:
+      summary: List who one of the caller's saved dashboards is shared with.
+      description: >
+        The people the caller shared this dashboard with (view only), ordered
+        by name. Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only.
+      operationId: listCustomDashboardShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/shares/{userId}:
+    put:
+      summary: Share one of the caller's saved dashboards with a user.
+      description: >
+        No request body. The user can view the dashboard in Shared Dashboards
+        (the owner's current version), not change it. Owner only. 400 when the
+        user is the caller or is not internal staff (the message says which);
+        404 when the dashboard is not the caller's or there is no such user.
+        Sharing again is a 200. The response is the dashboard's shares after
+        the change. CS engineers and admins only.
+      operationId: addCustomDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved dashboards with a user.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's or is not
+        shared with that user. CS engineers and admins only.
+      operationId: removeCustomDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/team-shares:
+    get:
+      summary: List the teams one of the caller's saved dashboards is shared with.
+      description: >
+        The teams the caller shared this dashboard with (view only), ordered
+        by name, each by registry key, name and family. A team no longer in
+        the registry is listed with an empty key. Owner only: 404 when the
+        caller has no dashboard with this id, including another user's. CS
+        engineers and admins only.
+      operationId: listCustomDashboardTeamShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/team-shares/{teamKey}:
+    put:
+      summary: Share one of the caller's saved dashboards with a team.
+      description: >
+        No request body. Whoever is in the team when the dashboard is read
+        (internal staff, not its owner) can view it in Shared Dashboards: the
+        membership is live, so someone who joins later sees it and someone who
+        leaves stops seeing it. Only teams in the team registry with a group id
+        can be chosen; any other key is a 404 without an upstream call. Owner
+        only: 404 when the dashboard is not the caller's. Sharing again is a
+        200. The response is the dashboard's team shares after the change. CS
+        engineers and admins only.
+      operationId: addCustomDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved dashboards with a team.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's, is not shared
+        with that team, or the key is not a registry team. CS engineers and
+        admins only.
+      operationId: removeCustomDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared:
+    get:
+      summary: List the dashboards other users shared with the caller.
+      description: >
+        View only. Each entry names its owner (who shared it); ordered by name,
+        without definitions (for the Shared Dashboards switcher). An empty list
+        is `{"dashboards": []}`. The caller's own dashboards are not listed.
+        Every portal role that can view dashboards (a dashboard can be shared
+        with any internal user or team).
+      operationId: listSharedDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/{id}:
+    get:
+      summary: Get one dashboard shared with the caller.
+      description: >
+        View only: the owner's current version, in the same shape as
+        GET /dashboards/{dashboardId}, with who shared it. The stored
+        definition is checked again; 422 when it no longer passes because the
+        dashboard rules changed since it was saved (the message asks the
+        recipient to have the owner update it). 404 when it is not shared with
+        the caller, including the caller's own. Every portal role that can view
+        dashboards; each widget's data is read with the caller's own
+        permissions.
+      operationId: getSharedDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /deployments:
     post:
       summary: Create a new deployment.
@@ -6598,7 +7587,13 @@ paths:
         filters.supportGroupsOnly true the result is limited to the groups an
         incident can be created in with an explicit assignmentGroupId: active
         groups that are the support group of at least one service (their ids
-        are what assignmentGroupId takes).
+        are what assignmentGroupId takes). With filters.incidentExtraGroupsOnly
+        true the result is limited to the active groups on the incident extra
+        assignment group allowlist (for example the security operations
+        group), which an incident can also be created in; when the allowlist
+        is empty the result is empty. If both filters are sent,
+        incidentExtraGroupsOnly takes precedence and supportGroupsOnly is
+        ignored.
       operationId: searchGroups
       security:
         - bearerAuth: []
@@ -6617,6 +7612,14 @@ paths:
                     supportGroupsOnly:
                       type: boolean
                       default: false
+                    incidentExtraGroupsOnly:
+                      type: boolean
+                      default: false
+                      description: >-
+                        Optional. When true, only active groups on the
+                        incident extra assignment group allowlist are
+                        returned; an empty allowlist returns no groups. Wins
+                        over supportGroupsOnly when both are sent.
                 pagination:
                   type: object
                   properties:
@@ -16567,6 +17570,90 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /sla-status/manage:
+    get:
+      summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
+      description: >
+        A CSM admin. Same limit/offset query params as entity-service's own
+        GET /sla-status; responses are Cache-Control no-store. Typically polled right
+        after POST /sla-engine/recalculate to show which clocks are currently running.
+      operationId: searchActiveSLAStatusesManage
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Every currently-active SLA clock, paginated.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can view this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sla-engine/recalculate:
+    post:
+      summary: Recalculate SLA — the CSM admin action.
+      description: >
+        A CSM admin. Publishes a request for integrations/csm-notification-service to
+        rebuild its own Redis-held SLA tracking from entity-service's durable record —
+        for recovering from a Redis state that no longer agrees with reality. No request
+        body. Responses are Cache-Control no-store.
+      operationId: requestSLARecalculation
+      responses:
+        "204":
+          description: >
+            The request was published. The actual rebuild happens asynchronously — this
+            means "requested", not "done". Poll GET /sla-status/manage for progress.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: SLA recalculation is not available in this deployment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /skills/levels:
     get:
       summary: The skill level scales and their levels.
@@ -17290,6 +18377,234 @@ components:
             phone gaps are listed errors first, then by this tier. A missing number is an error
             except for the 2nd and 3rd responders (called together with the 1st), where it is a
             warning.
+    GenerateDashboardRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >
+            The user's latest chat message. Trimmed; must not be empty or only
+            whitespace, and at most 2000 characters (counted in characters, not
+            bytes). Otherwise 400 with a message meant for the user.
+        current:
+          description: >
+            The dashboard being edited (the previous reply's dashboard), so a
+            follow-up message can change it. Omitted for the first message.
+          allOf:
+            - $ref: '#/components/schemas/Dashboard'
+    GenerateDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - reply
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        reply:
+          type: string
+          description: The chat message to show for this turn.
+    SaveCustomDashboardRequest:
+      type: object
+      required:
+        - dashboard
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+    CustomDashboardSummary:
+      type: object
+      required:
+        - id
+        - name
+        - createdOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CustomDashboardList:
+      type: object
+      required:
+        - dashboards
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardSummary'
+    CustomDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - createdOn
+        - updatedOn
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CustomDashboardPerson:
+      type: object
+      required:
+        - id
+        - email
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        email:
+          type: string
+        name:
+          type: string
+    CustomDashboardShare:
+      type: object
+      required:
+        - user
+        - sharedOn
+      properties:
+        user:
+          $ref: '#/components/schemas/CustomDashboardPerson'
+        sharedOn:
+          type: string
+          format: date-time
+    CustomDashboardShareList:
+      type: object
+      required:
+        - shares
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardShare'
+    CustomDashboardTeamShareTeam:
+      type: object
+      required:
+        - key
+        - name
+      properties:
+        key:
+          type: string
+          description: The team's registry key; empty when the team is no longer in the registry.
+        name:
+          type: string
+        family:
+          type: string
+          description: The team's family, e.g. cre-abt, cre, sre-abt.
+    CustomDashboardTeamShare:
+      type: object
+      required:
+        - team
+        - sharedOn
+      properties:
+        team:
+          $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
+        sharedOn:
+          type: string
+          format: date-time
+    CustomDashboardTeamShareList:
+      type: object
+      required:
+        - shares
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardTeamShare'
+    SharedViaTeam:
+      type: object
+      nullable: true
+      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name).
+      required:
+        - id
+        - name
+        - type
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          description: The team's type, e.g. cre-abt, sre-abt.
+    SharedDashboardSummary:
+      type: object
+      required:
+        - id
+        - name
+        - owner
+        - sharedViaTeam
+        - sharedOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardPerson'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          $ref: '#/components/schemas/SharedViaTeam'
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+          description: When the owner last changed the dashboard.
+    SharedDashboardList:
+      type: object
+      required:
+        - dashboards
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedDashboardSummary'
+    SharedDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - owner
+        - sharedViaTeam
+        - sharedOn
+        - updatedOn
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardPerson'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          $ref: '#/components/schemas/SharedViaTeam'
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
     ImportRotaRequest:
       type: object
       description: The rota import file, schema version 1.
@@ -17564,7 +18879,7 @@ components:
             properties:
               name:
                 type: string
-                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service]
+                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service, CSM AI Integration Service]
               status:
                 type: string
                 description: >-
@@ -25083,7 +26398,9 @@ components:
             otherwise) and forwards the body unchanged; the entity service
             decides the group. Sent: used when it is an active group that is
             the support group of at least one service (POST /groups/search
-            with filters.supportGroupsOnly lists them), otherwise 400. Not
+            with filters.supportGroupsOnly lists them), or when it is an
+            active group on the incident extra assignment group allowlist
+            (filters.incidentExtraGroupsOnly lists them), otherwise 400. Not
             sent: the service's support group; when the service has none, the
             default team (GET /incidents/create-defaults); with neither, the
             incident is created unassigned. A work note records the choice.

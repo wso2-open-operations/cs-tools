@@ -45,24 +45,49 @@ jobs:
             const filenames = files.map(f => f.filename);
             core.info(`Changed files:\n${filenames.join('\n')}`);
 
-            // App labels — applied when any file under the app changes
-            // Area/Platform labels — generic across all apps (covers both CSM Portal and Customer Portal)
+            // Component labels: one per top-level component directory. Add a row here
+            // when a new app, integration or operations service is created.
+            const componentPrefixes = {
+              'App/CSM Portal':                              'apps/csm-portal/',
+              'App/Customer Portal':                         'apps/customer-portal/',
+              'App/Git Internals Dashboard':                 'apps/git-internals-dashboard/',
+              'App/Knowledge Portal':                        'apps/knowledge-portal/',
+              'App/MTTR Application':                        'apps/mttr-application/',
+              'App/Security Advisory Patches Portal':        'apps/security-advisory-patches-portal/',
+              'App/Today I Learned':                         'apps/today-i-learned/',
+              'Entity Service':                              'entity-service/',
+              'Int/ACP Closure Service':                     'integrations/acp-closure-service/',
+              'Int/CSM AI Integration Service':              'integrations/csm-ai-integration-service/',
+              'Int/CSM Integration Service':                 'integrations/csm-integration-service/',
+              'Int/CSM Mail Paging Service':                 'integrations/csm-mail-paging-service/',
+              'Int/CSM Notification Service':                'integrations/csm-notification-service/',
+              'Int/CSM Portal Activity Stream Service':      'integrations/csm-portal-activity-stream-service/',
+              'Int/Customer Portal Activity Stream Service': 'integrations/customer-portal-activity-stream-service/',
+              'Int/Customer Service':                        'integrations/customer-service/',
+              'Int/SFTPGo Authentication Service':           'integrations/sftpgo-authentication-service/',
+              'Int/SRE Alert Core Service':                  'integrations/sre-alert-core-service/',
+              'Int/SRE Alert Ingestion Service':             'integrations/sre-alert-ingestion-service/',
+              'Ops/CSM Scheduled Tasks':                     'operations/csm-scheduled-tasks/',
+              'Ops/CSM Webhooks':                            'operations/csm-webhooks/',
+            };
+
+            // Area/Platform labels: generic across every app
             const fileRules = [
-              { label: 'App/CSM Portal',      test: f => f.startsWith('apps/csm-portal/') },
-              { label: 'App/Customer Portal', test: f => f.startsWith('apps/customer-portal/') },
-              { label: 'Area/Backend',        test: f => /^apps\/[^/]+\/backend\//.test(f) },
-              { label: 'Area/Backend',        test: f => /^apps\/[^/]+\/backend-v2\//.test(f) },
+              ...Object.entries(componentPrefixes).map(([label, prefix]) => ({
+                label,
+                test: f => f.startsWith(prefix),
+              })),
+              { label: 'Area/Backend',        test: f => /^apps\/[^/]+\/backend(-v2)?\//.test(f) },
               { label: 'Area/Frontend',       test: f => /^apps\/[^/]+\/webapp\//.test(f) },
               { label: 'Platform/Microapp',   test: f => /^apps\/[^/]+\/microapp\//.test(f) },
               { label: 'Platform/Web',        test: f => /^apps\/[^/]+\/webapp\//.test(f) },
-              { label: 'Entity Service',      test: f => f.startsWith('entity-service/') },
-              { label: 'Int/CSM Integration Service',      test: f => f.startsWith('integrations/csm-integration-service/') },
-              { label: 'Int/CSM Notification Service',      test: f => f.startsWith('integrations/csm-notification-service/') },
             ];
 
-            const labelsToApply = fileRules
-              .filter(({ test }) => filenames.some(test))
-              .map(({ label }) => label);
+            const labelsToApply = [...new Set(
+              fileRules
+                .filter(({ test }) => filenames.some(test))
+                .map(({ label }) => label)
+            )];
 
             // Type label — inferred from the conventional-commit prefix in the PR title.
             // Strips leading [TAG] prefixes (e.g. "[CSM][Web] fix: ...") before matching.

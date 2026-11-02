@@ -196,14 +196,53 @@ func TestAutoclosureAdvance_AwaitingInfoCloseSetsTheNonResponsivenessCode(t *tes
 	if u.ResolutionCode == nil || *u.ResolutionCode != domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness {
 		t.Errorf("an Awaiting Info close must carry the auto-closure resolution code, got %v", u.ResolutionCode)
 	}
-	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") {
-		t.Errorf("closeNotes = %v, want the closure text", u.CloseNotes)
+	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") || strings.Contains(*u.CloseNotes, "<") {
+		t.Errorf("closeNotes = %v, want the closure text as plain text", u.CloseNotes)
 	}
 	if email, ok := autoclosureActorFromContext(cases.updateCtx[0]); !ok || email != "system@example.com" {
 		t.Errorf("the close must be made as the system user, ctx actor = %q (%v)", email, ok)
 	}
 	if len(cases.comments) != 1 || !strings.Contains(cases.comments[0].Content, "did not receive an update") {
 		t.Errorf("closure comment missing: %+v", cases.comments)
+	}
+}
+
+func TestAutoclosureAdvance_CloseNotes(t *testing.T) {
+	existing := "  Engineer's own note.\nSecond line <b>kept</b>  "
+	for _, state := range []domain.CaseState{domain.CaseStateAwaitingInfo, domain.CaseStateSolutionProposed} {
+		for _, tc := range []struct {
+			name     string
+			existing *string
+			want     string // empty means the existing note, unchanged
+		}{
+			{"existing note is kept verbatim", &existing, existing},
+			{"empty note falls back", strp(""), ""},
+			{"whitespace-only note falls back", strp(" \n\t "), ""},
+			{"nil note falls back", nil, ""},
+		} {
+			t.Run(string(state)+"/"+tc.name, func(t *testing.T) {
+				code := domain.CaseResolutionCodeSolvedWorkaroundProvided
+				repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(state, strp("SECOND_COMMENT"))}}
+				cases := &fakeAutoclosureCases{view: domain.CaseView{ResolutionCode: &code, CloseNotes: tc.existing}}
+				if _, err := newACService(repo, cases).Advance(context.Background(), acTestCaseID, domain.AutoclosureAdvanceRequest{Stage: domain.AutoclosureStageClose}); err != nil {
+					t.Fatalf("Advance: %v", err)
+				}
+				if len(cases.updates) != 1 || cases.updates[0].CloseNotes == nil {
+					t.Fatalf("updates = %+v, want one with close notes", cases.updates)
+				}
+				got := *cases.updates[0].CloseNotes
+				if tc.want != "" {
+					if got != tc.want {
+						t.Errorf("closeNotes = %q, want the existing note %q", got, tc.want)
+					}
+				} else if got != autoclosurePlainText(autoclosureDefaultTemplates[string(state)+".closure"]) || strings.Contains(got, "<") {
+					t.Errorf("closeNotes = %q, want the plain-text closure wording", got)
+				}
+				if len(cases.comments) != 1 || !strings.HasPrefix(cases.comments[0].Content, "<p>") {
+					t.Errorf("closure comment must still be the HTML text: %+v", cases.comments)
+				}
+			})
+		}
 	}
 }
 
@@ -316,6 +355,72 @@ func TestAutoclosureDefaultTemplatesCoverEveryStateAndKind(t *testing.T) {
 				t.Errorf("no default template for %s.%s", state, kind)
 			}
 		}
+	}
+}
+
+func TestAutoclosureDefaultTemplatesAreHTMLSignedByCustomerSuccess(t *testing.T) {
+	for key, text := range autoclosureDefaultTemplates {
+		if strings.TrimSpace(text) == "" {
+			t.Errorf("%s: empty", key)
+			continue
+		}
+		if strings.Contains(text, "\n") {
+			t.Errorf("%s: contains a raw newline: %q", key, text)
+		}
+		if !strings.HasPrefix(text, "<p>") || !strings.HasSuffix(text, "</p>") {
+			t.Errorf("%s: not wrapped in <p>...</p>: %q", key, text)
+		}
+		if !strings.Contains(text, "Thanks,<br/>Customer Success Team") {
+			t.Errorf("%s: missing the Customer Success Team sign-off: %q", key, text)
+		}
+		if strings.Contains(strings.ToLower(text), "support team") {
+			t.Errorf("%s: mentions the support team: %q", key, text)
+		}
+	}
+}
+
+func TestAutoclosurePlainTextTable(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"div blocks", "<div>Hello</div><div>Thanks</div>", "Hello\n\nThanks"},
+		{"br with attributes", `a<br class="x">b`, "a\nb"},
+		{"upper case self-closing br", "a<BR/>b", "a\nb"},
+		{"br with space and slash", "a<br />b", "a\nb"},
+		{"p nested in div", "<div><p>a</p><p>b</p></div>", "a\n\nb"},
+		{"list items on their own lines", "<ul><li>a</li><li>b</li></ul>", "a\nb"},
+		{"paragraph with style", `<p style="color:red">a</p>  <p style="x">b</p>`, "a\n\nb"},
+		{"heading and blockquote", "<h1>T</h1><blockquote>q</blockquote>", "T\n\nq"},
+		{"inline tags dropped", "<p>a <b>b</b> <a href=\"u\">c</a></p>", "a b c"},
+		{"plain text", "just text\nsecond line", "just text\nsecond line"},
+		{"plain text trimmed", "  text  ", "text"},
+		{"empty", "", ""},
+		{"entities left alone", "<p>a &amp; b</p>", "a &amp; b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := autoclosurePlainText(tc.in); got != tc.want {
+				t.Errorf("autoclosurePlainText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+	for key, text := range autoclosureDefaultTemplates {
+		got := autoclosurePlainText(text)
+		if strings.Contains(got, "<") || strings.Contains(got, "\n\n\n") || !strings.HasSuffix(got, "Thanks,\nCustomer Success Team") || !strings.HasPrefix(got, "Hello,\n\n") {
+			t.Errorf("%s: plain text = %q", key, got)
+		}
+	}
+}
+
+func TestAutoclosurePlainText(t *testing.T) {
+	got := autoclosurePlainText(autoclosureDefaultTemplates["awaiting_info.closure"])
+	want := "Hello,\n\nPlease note that this case is closed as we did not receive an update. " +
+		"Thank you for contacting the Customer Success Team.\n\nThanks,\nCustomer Success Team"
+	if got != want {
+		t.Errorf("plain text = %q, want %q", got, want)
+	}
+	if got := autoclosurePlainText("<P class=\"x\">a</P> <p>b<BR>c<b>d</b></p>"); got != "a\n\nb\ncd" {
+		t.Errorf("mixed case/attributes = %q", got)
+	}
+	if got := autoclosurePlainText("custom wording"); got != "custom wording" {
+		t.Errorf("plain override = %q, want unchanged", got)
 	}
 }
 

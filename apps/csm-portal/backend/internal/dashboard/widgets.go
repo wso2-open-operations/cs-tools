@@ -662,6 +662,61 @@ func injectTypeFilter(query map[string]any, resourceType ResourceType, source, d
 	return query
 }
 
+// StripImpliedTypeFilters is the reverse of injectImpliedTypeFilters: it
+// removes, from every widget's and slice's Query, the exact {"field":"type",
+// "op":"in","values":["<resourceType>"]} entry load time adds for a
+// caseTableResourceTypes widget, so a served definition reads as authored
+// again. Loading the result injects the same filter back. Any other "type"
+// filter (more values, another op) is kept, as is everything on a widget of
+// any other ResourceType. A "filters" array left empty is removed.
+//
+// It exists for definitions that come back from a client in the served form
+// (the generate page's draft) and are then shown to an author, the model,
+// which is told the type filter is added for it.
+func StripImpliedTypeFilters(d *Dashboard) {
+	for wi := range d.Widgets {
+		w := &d.Widgets[wi]
+		if !caseTableResourceTypes[w.ResourceType] {
+			continue
+		}
+		stripTypeFilter(w.Query, w.ResourceType)
+		for si := range w.Slices {
+			stripTypeFilter(w.Slices[si].Query, w.ResourceType)
+		}
+	}
+}
+
+// stripTypeFilter removes query's injected type filter for resourceType, in
+// place. A nil query or a non-array "filters" is left alone.
+func stripTypeFilter(query map[string]any, resourceType ResourceType) {
+	filters, ok := query["filters"].([]any)
+	if !ok {
+		return
+	}
+	kept := make([]any, 0, len(filters))
+	for _, entry := range filters {
+		if !isImpliedTypeFilter(entry, resourceType) {
+			kept = append(kept, entry)
+		}
+	}
+	if len(kept) == 0 {
+		delete(query, "filters")
+		return
+	}
+	query["filters"] = kept
+}
+
+// isImpliedTypeFilter reports whether entry is exactly the filter
+// injectTypeFilter adds for resourceType.
+func isImpliedTypeFilter(entry any, resourceType ResourceType) bool {
+	m, ok := entry.(map[string]any)
+	if !ok || len(m) != 3 || m["field"] != "type" || m["op"] != "in" {
+		return false
+	}
+	values, ok := m["values"].([]any)
+	return ok && len(values) == 1 && values[0] == string(resourceType)
+}
+
 // isPresetRef reports whether m is a filter-preset reference, the
 // {"preset": "presetKey"} shape a literal filter object ({"field":
 // ...,"op":...,"values":...}) may be replaced with wherever one is legal

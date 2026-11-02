@@ -113,6 +113,7 @@ PostgreSQL-backed **entity service**, which is the platform's system of record.
 | Customer portal | [`apps/customer-portal`](../customer-portal/README.md) | Go BFF (`backend-v2`) + React | The customer-facing portal. `backend-v2` is the PostgreSQL-era backend; `apps/customer-portal/backend` is the older, deprecated stack. |
 | Entity service | [`entity-service`](../../entity-service/README.md) | Go | System of record API over PostgreSQL. Publishes domain events (for example `case.created`, `comment.added`) to the event bus. Can also be configured with an external ticketing/case system adapter (`DATA_SOURCE`); the default and the one used here is `postgres`. |
 | Integration service | [`integrations/csm-integration-service`](../../integrations/csm-integration-service/README.md) | Go | Machine-to-machine REST API (accounts, projects, contacts, a subset of cases) for third-party callers. Inbound trust is delegated to the API gateway. |
+| AI integration service | [`integrations/csm-ai-integration-service`](../../integrations/csm-ai-integration-service/README.md) | Go | Every model call of the platform (today: dashboard generation for this portal's backend), with the catalogues the model reads. Organization-visible; the backend is its only caller. |
 | Notification service | [`integrations/csm-notification-service`](../../integrations/csm-notification-service/README.md) | Go | Event consumer (health endpoint only) that sends email, chat and voice-call notifications. |
 | Activity-stream services | [`integrations/csm-portal-activity-stream-service`](../../integrations/csm-portal-activity-stream-service/README.md), [`integrations/customer-portal-activity-stream-service`](../../integrations/customer-portal-activity-stream-service/README.md) | Go | Consume the event stream and expose a per-case Server-Sent-Events feed to each portal's activity tab. |
 | Alert services | [`integrations/sre-alert-ingestion-service`](../../integrations/sre-alert-ingestion-service/README.md), [`integrations/sre-alert-core-service`](../../integrations/sre-alert-core-service/README.md) | Go | Ingest monitoring alerts, deduplicate them into incidents and forward them to the platform through the integration service. |
@@ -239,6 +240,7 @@ On startup the stack:
 | Customer portal backend-v2 | http://localhost:8090 (REST), `:8092` (WebSocket) |
 | entity-service | http://localhost:8081 |
 | csm-integration-service | http://localhost:8084 |
+| csm-ai-integration-service | http://localhost:8087 |
 | csm-notification-service (health only) | http://localhost:8083/health |
 | csm-portal-activity-stream-service | health `:8085`, SSE `:9095` |
 | customer-portal-activity-stream-service | health `:8086`, SSE `:9096` |
@@ -314,6 +316,7 @@ service, with only the component you are editing running on the host).
 | CSM webapp, fully local | `pnpm run dev:local`: the Vite dev server acts as the gateway, pointing at a mock identity provider on `:9100` and a backend on `:8080` | [`webapp/README.md`](./webapp/README.md#local-full-stack-mode-sandboxed-dev) |
 | entity-service | `cp .env.example .env`, fill in the database settings, then `go run cmd/api/main.go` (listens on `:8080`, health on `:8081`) | [`entity-service/README.md`](../../entity-service/README.md) |
 | csm-integration-service | `go run ./cmd/server/main.go` | [README](../../integrations/csm-integration-service/README.md) |
+| csm-ai-integration-service | `go run ./cmd/server` | [README](../../integrations/csm-ai-integration-service/README.md) |
 | Other integrations and operations | see each component's README | [`integrations/`](../../integrations), [`operations/`](../../operations) |
 
 The backend and the entity service load a `.env` file from the working directory automatically (a missing file is
@@ -349,10 +352,11 @@ README (and its `.env.example`) for the full list, defaults and validation rules
 
 | Component | Mechanism | Key settings | Full reference |
 |---|---|---|---|
-| CSM webapp | `public/config.js` (from `config.js.example`) | `CSM_PORTAL_AUTH_BASE_URL`, `CSM_PORTAL_AUTH_CLIENT_ID`, `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL`, `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL`, `CSM_PORTAL_BACKEND_BASE_URL`; optional stream, theme, feature-override and banner keys | [`webapp/README.md`](./webapp/README.md#configuration) |
+| CSM webapp | `public/config.js` (from `config.js.example`) | `CSM_PORTAL_AUTH_BASE_URL`, `CSM_PORTAL_AUTH_CLIENT_ID`, `CSM_PORTAL_BACKEND_BASE_URL`; optional sign-in/sign-out redirect URLs (default to the page origin), stream, theme, feature-override and banner keys | [`webapp/README.md`](./webapp/README.md#configuration) |
 | CSM backend | env / `.env` (from `.env.example`) | `OAUTH2_CLIENT_ID`, `OAUTH2_CLIENT_SECRET`, `OAUTH2_TOKEN_URL`; `CUSTOMER_ENTITY_BASE_URL`, `UPDATES_BASE_URL`, `SCIM_BASE_URL` (+ `*_SCOPES`); `AUTH_JWKS_ENDPOINT`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_TOKEN_VALIDATOR_ENABLED`; `AUTH_*_ROLES`; `CORS_ALLOWED_ORIGINS`, `PORT` | [`backend/README.md`](./backend/README.md#configuration-reference) |
 | entity-service | env / `.env` (from `.env.example`) | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_SSLMODE`; `SERVER_PORT`, `HEALTH_PORT`; `DATA_SOURCE` (default `postgres`); `AUTH_ISSUER`, `AUTH_JWKS_URL`, `AUTH_USER_TOKEN_AUDIENCES`; `M2M_CLIENT_IDS`; `EVENT_PUBLISHING_ENABLED`, `EVENT_HUB_BROKER`, `EVENT_HUB_CONNECTION_STRING`, `EVENT_HUB_TOPIC`; optional `REDIS_URL` / `REDIS_ADDR` | [`entity-service/README.md`](../../entity-service/README.md#configuration-reference) |
 | csm-integration-service | env / `.env` | `ENTITY_BASE_URL`, `ENTITY_TOKEN_URL`, `ENTITY_CLIENT_ID`, `ENTITY_CLIENT_SECRET`, `ENTITY_SCOPES`, `PORT` | [README](../../integrations/csm-integration-service/README.md) |
+| csm-ai-integration-service | env / `.env` | `ANTHROPIC_API_KEY` (secret), `CLAUDE_BASE_URL`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT`, `CATALOGUE_DIR`, `PORT` | [README](../../integrations/csm-ai-integration-service/README.md) |
 | csm-notification-service | env / `.env` | `EVENT_HUB_*` consumer settings, channel credentials, `PORT` | [README](../../integrations/csm-notification-service/README.md) |
 | Activity-stream services | env / `.env` | `EVENT_HUB_*`, `OAUTH2_*`, `CUSTOMER_ENTITY_BASE_URL`, `AUTH_JWKS_ENDPOINT`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `HEALTH_PORT`, `STREAM_PORT` | [CSM](../../integrations/csm-portal-activity-stream-service/README.md), [customer](../../integrations/customer-portal-activity-stream-service/README.md) |
 | Scheduled tasks, webhooks, alert services | env or `config.toml` | see each README | [`operations/`](../../operations), [`integrations/`](../../integrations) |

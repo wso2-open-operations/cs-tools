@@ -21,6 +21,7 @@ import ChatMessageBubble from "@features/support/components/novera-ai-assistant/
 import type { ChatMessageBubbleProps } from "@features/support/types/supportComponents";
 import {
   ChatSender,
+  NoveraActionType,
   type Message,
 } from "@features/support/types/conversations";
 
@@ -283,3 +284,145 @@ describe("ChatMessageBubble", () => {
     });
   });
 });
+
+// The agent attaches a `solutionProposed` action to every substantive answer.
+// This component was passed onSolutionWorked but never rendered anything, so
+// the button had never appeared for any customer — half of why no conversation
+// had ever reached resolved=1.
+describe("ChatMessageBubble solution-proposed action", () => {
+  const withAction = (over: Partial<Message> = {}): Message =>
+    botAnswer({
+      actions: [
+        {
+          type: NoveraActionType.SolutionProposed,
+          label: "This Resolved My Issue",
+          style: "primary",
+        },
+      ],
+      ...over,
+    });
+
+  it("should render the button using the label the agent sent", () => {
+    renderBubble(withAction(), { onSolutionWorked: vi.fn() });
+    expect(
+      screen.getByRole("button", { name: "This Resolved My Issue" }),
+    ).toBeInTheDocument();
+  });
+
+  it("should call onSolutionWorked when clicked", () => {
+    const onSolutionWorked = vi.fn();
+    renderBubble(withAction(), { onSolutionWorked });
+    fireEvent.click(
+      screen.getByRole("button", { name: "This Resolved My Issue" }),
+    );
+    expect(onSolutionWorked).toHaveBeenCalledTimes(1);
+  });
+
+  // The wording is the agent's, so it can change without a frontend release.
+  it("should follow the agent's label rather than a hardcoded string", () => {
+    renderBubble(
+      withAction({
+        actions: [
+          {
+            type: NoveraActionType.SolutionProposed,
+            label: "Yes, that fixed it",
+          },
+        ],
+      }),
+      { onSolutionWorked: vi.fn() },
+    );
+    expect(
+      screen.getByRole("button", { name: "Yes, that fixed it" }),
+    ).toBeInTheDocument();
+  });
+
+  // The agent withholds the action on a turn that opened a support case, where
+  // asking "did this resolve your issue?" would be wrong.
+  it("should not render when the agent sent no action", () => {
+    renderBubble(botAnswer(), { onSolutionWorked: vi.fn() });
+    expect(
+      screen.queryByRole("button", { name: /resolved my issue/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should not render without a handler to call", () => {
+    renderBubble(withAction());
+    expect(
+      screen.queryByRole("button", { name: "This Resolved My Issue" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should not render on an error bubble", () => {
+    renderBubble(withAction({ isError: true }), {
+      onSolutionWorked: vi.fn(),
+    });
+    expect(
+      screen.queryByRole("button", { name: "This Resolved My Issue" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should not render on a user message", () => {
+    renderBubble(withAction({ sender: ChatSender.USER }), {
+      onSolutionWorked: vi.fn(),
+    });
+    expect(
+      screen.queryByRole("button", { name: "This Resolved My Issue" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("should ignore an unrelated action type", () => {
+    renderBubble(
+      withAction({ actions: [{ type: "somethingElse", label: "Nope" }] }),
+      { onSolutionWorked: vi.fn() },
+    );
+    expect(
+      screen.queryByRole("button", { name: "Nope" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// Regression guards for the two review findings on #3127. Both live in
+// NoveraChatPage, but the behaviour they protect is this button, so the rules
+// are pinned here where the button is.
+describe("solution-proposed button, review regressions", () => {
+  // A REST history rebuild (scrolling up for an older page) must not drop a
+  // button that the live socket put on screen.
+  it("should still render when actions were carried across a history rebuild", () => {
+    const carried = {
+      type: NoveraActionType.SolutionProposed,
+      label: "This Resolved My Issue",
+      style: "primary" as const,
+    };
+    // What the merge in NoveraChatPage produces: a REST-shaped message with
+    // the live session's actions reattached.
+    const rebuilt = botAnswer({ id: "server-id-1", actions: [carried] });
+    renderBubble(rebuilt, { onSolutionWorked: vi.fn() });
+    expect(
+      screen.getByRole("button", { name: "This Resolved My Issue" }),
+    ).toBeInTheDocument();
+  });
+
+  // The handler is guarded on the resolved state, so a stale button on an
+  // earlier answer cannot post into a resolved conversation. From this
+  // component's side the contract is simply: one click, one call.
+  it("should not fire more than once per click", () => {
+    const onSolutionWorked = vi.fn();
+    renderBubble(
+      botAnswer({
+        actions: [
+          {
+            type: NoveraActionType.SolutionProposed,
+            label: "This Resolved My Issue",
+          },
+        ],
+      }),
+      { onSolutionWorked },
+    );
+    const button = screen.getByRole("button", {
+      name: "This Resolved My Issue",
+    });
+    fireEvent.click(button);
+    expect(onSolutionWorked).toHaveBeenCalledTimes(1);
+  });
+});
+

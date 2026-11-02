@@ -65,11 +65,13 @@ export default function CsmAdminLayout(): JSX.Element {
   const { user } = useCurrentUser();
   const hasDashboardsTabAccess = hasDashboardBuilderAccess(user?.roles);
   const hasBannersTabAccess = (user?.roles ?? []).some((role) => role.toLowerCase() === "admin");
+  const hasSlaEngineTabAccess = hasBannersTabAccess;
   const allTabs = useRouteTabs("admin");
   const tabs = useMemo(() => {
     const visible = allTabs.tabs.filter((tab) => {
       if (tab.node.id === "admin.dashboards") return hasDashboardsTabAccess;
       if (tab.node.id === "admin.banners") return hasBannersTabAccess;
+      if (tab.node.id === "admin.sla-engine") return hasSlaEngineTabAccess;
       return true;
     });
     // `allTabs.activeKey` was resolved against the UNFILTERED list — if
@@ -81,7 +83,7 @@ export default function CsmAdminLayout(): JSX.Element {
       ? allTabs.activeKey
       : (visible[0]?.key ?? "");
     return { ...allTabs, tabs: visible, activeKey };
-  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess]);
+  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess, hasSlaEngineTabAccess]);
 
   const location = useLocation();
   const { pathname } = location;

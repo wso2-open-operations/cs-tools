@@ -23,6 +23,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -443,6 +444,13 @@ func dryRunDetail(stage domain.AutoclosureStage, c repository.AutoclosureCandida
 // first and a refused close (an open child appeared, a concurrent edit) would
 // leave a "this case is closed" comment on a case that is not.
 //
+// The case's existing close notes are kept as they are (the process this
+// replaces never wrote its message there). Only when there are none does the
+// close set the plain-text form of the closure wording, because closing an
+// internal-caller case in dual-write requires non-empty close notes. The
+// closure message itself is the customer-visible HTML comment posted after
+// the close.
+//
 // Awaiting Info tickets get the non-responsiveness resolution code (which
 // keeps them out of the KB process); Solution Proposed tickets keep whatever
 // resolution they were proposed with.
@@ -452,7 +460,15 @@ func (s *autoclosureService) closeCase(ctx context.Context, c repository.Autoclo
 		return "", fmt.Errorf("read ticket before closing: %w", err)
 	}
 	closed := domain.CaseStateClosed
-	update := domain.UpdateCaseRequest{ID: c.ID, State: &closed, CloseNotes: &comment}
+	// An existing close note is passed back exactly as it is, so closing never
+	// overwrites an engineer's own note. Only a case with none gets the
+	// plain-text form of the closure wording: the comment is HTML, the close
+	// notes are free text.
+	notes := autoclosurePlainText(comment)
+	if view.CloseNotes != nil && strings.TrimSpace(*view.CloseNotes) != "" {
+		notes = *view.CloseNotes
+	}
+	update := domain.UpdateCaseRequest{ID: c.ID, State: &closed, CloseNotes: &notes}
 	if view.Cause != nil {
 		update.Cause = view.Cause
 	} else {
@@ -577,32 +593,60 @@ func (s *autoclosureService) commentText(state domain.CaseState, kind string, ov
 }
 
 // autoclosureDefaultTemplates holds the comments sent to the customer, keyed
-// "<state>.<kind>". They are defaults: a caller may send its own for any key
-// (the scheduled task reads them from its configuration), so wording can
-// change without a deploy of this service.
+// "<state>.<kind>". They are HTML (a <p> per paragraph, <br/> for a line break
+// inside one), because comments are rendered as HTML wherever customers read
+// them and plain line breaks would collapse into one run-on paragraph. They
+// are defaults: a caller may send its own for any key (the scheduled task
+// reads them from its configuration), so wording can change without a deploy
+// of this service. Overrides are used verbatim, so they must be HTML too.
 var autoclosureDefaultTemplates = map[string]string{
-	"solution_proposed.first_reminder": "Hello,\n\n" +
-		"This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
-		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.\n\n" +
-		"Thanks,\nSupport Team",
-	"solution_proposed.second_reminder": "Hello,\n\n" +
-		"Please let us know whether you need further support for this case. " +
-		"Please note that if you are unable to respond, the case will be closed off after one week.\n\n" +
-		"Thanks,\nSupport Team",
-	"solution_proposed.closure": "Hello,\n\n" +
-		"Please note that this case has been closed due to inactivity after the solution was suggested. " +
-		"Thank you for contacting the Support Team.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.first_reminder": "Hello,\n\n" +
-		"This case will be automatically closed as no further updates have been received. " +
-		"Please share the requested details to continue the investigation of the issue.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.second_reminder": "Hello,\n\n" +
-		"Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.\n\n" +
-		"Please note that if you are unable to respond, the case will be closed off after one week.\n\n" +
-		"Thanks,\nSupport Team",
-	"awaiting_info.closure": "Hello,\n\n" +
-		"Please note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Support Team.\n\n" +
-		"Thanks,\nSupport Team",
+	"solution_proposed.first_reminder": "<p>Hello,</p>" +
+		"<p>This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
+		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"solution_proposed.second_reminder": "<p>Hello,</p>" +
+		"<p>Please let us know whether you need further support for this case. " +
+		"Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"solution_proposed.closure": "<p>Hello,</p>" +
+		"<p>Please note that this case has been closed due to inactivity after the solution was suggested. " +
+		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.first_reminder": "<p>Hello,</p>" +
+		"<p>This case will be automatically closed as no further updates have been received. " +
+		"Please share the requested details to continue the investigation of the issue.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.second_reminder": "<p>Hello,</p>" +
+		"<p>Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.</p>" +
+		"<p>Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+	"awaiting_info.closure": "<p>Hello,</p>" +
+		"<p>Please note that this case is closed as we did not receive an update. " +
+		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>Thanks,<br/>Customer Success Team</p>",
+}
+
+var (
+	autoclosureLineBreak  = regexp.MustCompile(`(?i)<br\b[^>]*>`)
+	autoclosureItemEnd    = regexp.MustCompile(`(?i)</li\s*>\s*`)
+	autoclosureBlockEnd   = regexp.MustCompile(`(?i)</(?:p|div|ul|ol|h[1-6]|blockquote|tr|table|pre)\s*>\s*`)
+	autoclosureAnyTag     = regexp.MustCompile(`<[^>]*>`)
+	autoclosureBlankLines = regexp.MustCompile(`\n{3,}`)
+)
+
+// autoclosurePlainText turns a comment's HTML into plain text for the close
+// notes, which the portals treat as free text. A <br> (any case, with or
+// without a slash or attributes) becomes a newline, the end of a list item
+// a newline, the end of any other common block element (p, div, ul, ol,
+// h1-h6, blockquote, tr, table, pre) a blank line, and every remaining tag is
+// dropped. Runs of blank lines collapse to one and the result is trimmed.
+// HTML entities are deliberately left as they are: decoding them is not
+// needed for the built-in wording, which uses none.
+func autoclosurePlainText(html string) string {
+	t := autoclosureLineBreak.ReplaceAllString(html, "\n")
+	t = autoclosureItemEnd.ReplaceAllString(t, "\n")
+	t = autoclosureBlockEnd.ReplaceAllString(t, "\n\n")
+	t = autoclosureAnyTag.ReplaceAllString(t, "")
+	t = autoclosureBlankLines.ReplaceAllString(t, "\n\n")
+	return strings.TrimSpace(t)
 }
