@@ -48,6 +48,12 @@ export const BANNER_RIGHT_GAP_PX = 24;
 
 export const ERROR_UNSUPPORTED_TYPE =
   "This image format can't be pasted inline. Only JPEG, PNG, and WebP images support inline display. You can still upload this file as an attachment.";
+/** Most images one comment draft may hold when images are uploaded on paste. */
+export const MAX_COMMENT_IMAGES = 5;
+/** The refusal for adding an image to a draft that already holds the maximum. */
+export function imageCountExceededMessage(): string {
+  return `A comment can have at most ${MAX_COMMENT_IMAGES} images.`;
+}
 /** The refusal for an image over the configured inline image limit. */
 export function imageSizeExceededMessage(): string {
   return `Image exceeds the maximum allowed size of ${formatLimitMb(inlineImageMaxBytes())} MB.`;

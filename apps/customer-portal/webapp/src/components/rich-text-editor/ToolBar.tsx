@@ -103,8 +103,10 @@ import {
 } from "@lexical/rich-text";
 import { $createParagraphNode } from "lexical";
 
+import { imageCountExceededMessage } from "@constants/common";
 import {
   insertImageWithUpload,
+  remainingImageSlots,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
 
@@ -117,6 +119,7 @@ const Toolbar = ({
   showKeyboardHint = false,
   enterToSubmit = false,
   onImageUpload,
+  onPasteError,
 }: {
   onAttachmentClick?: () => void;
   disabled?: boolean;
@@ -125,6 +128,8 @@ const Toolbar = ({
   enterToSubmit?: boolean;
   /** See Editor's `onImageUpload`: images are uploaded instead of read as base64. */
   onImageUpload?: ImageUploadHandler;
+  /** Told when an image is refused because the draft already holds the maximum. */
+  onPasteError?: (reason: "count") => void;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
   const [editor] = useLexicalComposerContext();
@@ -288,6 +293,12 @@ const Toolbar = ({
         return;
       }
       if (onImageUpload) {
+        if (remainingImageSlots(editor) <= 0) {
+          if (onPasteError) onPasteError("count");
+          else showError(imageCountExceededMessage());
+          resetInput();
+          return;
+        }
         editor.focus(() => {
           insertImageWithUpload(editor, file, file.name, onImageUpload);
         });

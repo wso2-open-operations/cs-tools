@@ -17,6 +17,7 @@
 
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from "lexical";
 import { $isImageNode } from "@components/rich-text-editor/ImageNode";
+import { MAX_COMMENT_IMAGES } from "@constants/common";
 import { INSERT_IMAGE_COMMAND } from "@features/support/utils/richTextEditor";
 
 /**
@@ -34,6 +35,23 @@ function $removeImagesBySrc(node: LexicalNode, src: string): void {
   if ($isElementNode(node)) {
     for (const child of node.getChildren()) $removeImagesBySrc(child, src);
   }
+}
+
+/** A preview (blob:) or an already stored ("/<uuid>") image counts toward the cap. */
+const COUNTED_IMAGE_SRC = /^(blob:|\/[0-9a-f-]{8,}$)/i;
+
+function $countImages(node: LexicalNode): number {
+  if ($isImageNode(node)) return COUNTED_IMAGE_SRC.test(node.getSrc()) ? 1 : 0;
+  if ($isElementNode(node)) {
+    return node.getChildren().reduce((n, child) => n + $countImages(child), 0);
+  }
+  return 0;
+}
+
+/** How many more images the draft can take before it reaches MAX_COMMENT_IMAGES. */
+export function remainingImageSlots(editor: LexicalEditor): number {
+  const used = editor.getEditorState().read(() => $countImages($getRoot()));
+  return Math.max(0, MAX_COMMENT_IMAGES - used);
 }
 
 /**
