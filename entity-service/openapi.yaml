@@ -23343,6 +23343,10 @@ components:
           type: string
           format: date-time
           nullable: true
+        deploymentProfile:
+          type: string
+          nullable: true
+          description: Deployment profile of this version (product_version.deployment_profile), e.g. "All In One" or "API Control Plane"; null when it has none. Several versions of one product can share a name and differ only by profile. Postgres data source only; always null on the ServiceNow data source.
 
     ProductRef:
       type: object

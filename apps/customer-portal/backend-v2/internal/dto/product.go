@@ -172,8 +172,11 @@ type ProductVersionSummary struct {
 	ReleaseDate                    *string `json:"releaseDate,omitempty"`
 	SupportEOLDate                 *string `json:"supportEolDate,omitempty"`
 	EarliestPossibleSupportEOLDate *string `json:"earliestPossibleSupportEolDate,omitempty"`
-	CreatedOn                      *string `json:"createdOn,omitempty"`
-	UpdatedOn                      *string `json:"updatedOn,omitempty"`
+	// DeploymentProfile tells apart version rows that share Version (e.g. the
+	// "API Control Plane" and "Traffic Manager" records of one release).
+	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+	CreatedOn         *string `json:"createdOn,omitempty"`
+	UpdatedOn         *string `json:"updatedOn,omitempty"`
 }
 
 // SearchProductVersionsResponse is the portal's response for
@@ -200,6 +203,7 @@ func MapSearchProductVersions(r entity.SearchProductVersionsResponse) SearchProd
 			ReleaseDate:                    v.ReleaseDate,
 			SupportEOLDate:                 v.SupportEOLDate,
 			EarliestPossibleSupportEOLDate: v.EarliestPossibleSupportEOLDate,
+			DeploymentProfile:              v.DeploymentProfile,
 			CreatedOn:                      v.CreatedOn,
 			UpdatedOn:                      v.UpdatedOn,
 		})
