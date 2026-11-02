@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -161,6 +161,12 @@ export type PostCsmCaseAttachmentResult = UseMutationResult<
    * `sftpgoAttachmentStorageEnabled` is on.
    */
   uploadProgress: number | null;
+  /**
+   * Stops the upload in flight (a large, chunked one; a small one-shot upload
+   * cannot be interrupted). The mutation then fails with "The upload was
+   * cancelled." and the half-made attachment is left to the server's cleanup.
+   */
+  cancelUpload: () => void;
 };
 
 /**
@@ -192,6 +198,8 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
   const { user } = useCurrentUser();
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelUpload = useCallback(() => abortRef.current?.abort(), []);
 
   const mutation = useMutation<
     CaseAttachment | null,
@@ -204,6 +212,8 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
       // check below does not apply.
       if (isEntityAttachmentsEnabled()) {
         setUploadProgress(0);
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
           await uploadEntityAttachment(api, {
             type: WORK_ITEM_ATTACHMENT_TYPE,
@@ -211,6 +221,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
             file: input.file,
             name: input.name,
             onProgress: setUploadProgress,
+            signal: controller.signal,
           });
         } catch (err) {
           throw new Error(
@@ -218,6 +229,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
             { cause: err },
           );
         } finally {
+          if (abortRef.current === controller) abortRef.current = null;
           setUploadProgress(null);
         }
         return null;
@@ -301,7 +313,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
     },
   });
 
-  return { ...mutation, uploadProgress };
+  return { ...mutation, uploadProgress, cancelUpload };
 }
 
 /**

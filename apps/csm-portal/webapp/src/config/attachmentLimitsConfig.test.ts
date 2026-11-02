@@ -20,6 +20,7 @@ import {
   LEGACY_ATTACHMENT_MAX_BYTES,
   entityAttachmentMaxBytes,
   formatMegabytes,
+  formatSizeLimit,
   getMaxAttachmentSizeBytes,
   inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
@@ -90,5 +91,20 @@ describe("formatMegabytes", () => {
   it("prints whole and fractional megabytes", () => {
     expect(formatMegabytes(10 * MB)).toBe("10 MB");
     expect(formatMegabytes(2.5 * MB)).toBe("2.5 MB");
+  });
+});
+
+describe("formatSizeLimit", () => {
+  it("uses MB below 1024 MB and GB from there", () => {
+    expect(formatSizeLimit(10 * MB)).toBe("10 MB");
+    expect(formatSizeLimit(1023 * MB)).toBe("1023 MB");
+    expect(formatSizeLimit(1024 * MB)).toBe("1 GB");
+    expect(formatSizeLimit(10 * 1024 * MB)).toBe("10 GB");
+    expect(formatSizeLimit(1536 * MB)).toBe("1.5 GB");
+  });
+
+  it("formats the configured limit of 10240 MB as 10 GB", () => {
+    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240 });
+    expect(formatSizeLimit(entityAttachmentMaxBytes())).toBe("10 GB");
   });
 });

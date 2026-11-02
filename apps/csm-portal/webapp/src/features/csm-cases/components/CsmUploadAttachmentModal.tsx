@@ -36,7 +36,7 @@ import {
   type JSX,
 } from "react";
 import { formatBytes } from "@utils/formatBytes";
-import { getMaxAttachmentSizeBytes } from "@config/attachmentLimitsConfig";
+import { formatSizeLimit, getMaxAttachmentSizeBytes } from "@config/attachmentLimitsConfig";
 
 interface CsmUploadAttachmentModalProps {
   open: boolean;
@@ -149,7 +149,7 @@ export default function CsmUploadAttachmentModal({
         {tooLarge && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {file?.name} is {formatBytes(file.size)}. The maximum attachment size
-            is {formatBytes(maxBytes)}.
+            is {formatSizeLimit(maxBytes)}.
           </Alert>
         )}
         <input
@@ -198,7 +198,7 @@ export default function CsmUploadAttachmentModal({
               Drag a file here, or click to choose
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Up to {formatBytes(maxBytes)}
+              Up to {formatSizeLimit(maxBytes)}
             </Typography>
           </Box>
         ) : (
