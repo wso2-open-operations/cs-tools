@@ -14,25 +14,28 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Incident auto-close: when and by whom an incident was closed.
+-- When and by whom an incident was closed.
 --
--- ServiceNow closed RESOLVED incidents itself, 14 days after resolved_at,
--- stamping closed_at and closed_by (= resolved_by). The CSM database is now
--- the record of truth and does that close itself (POST /incidents/autoclose,
--- driven by operations/csm-scheduled-tasks), so the two fields need columns.
--- A manual close stamps them too (updateIncidentLifecycleTx).
+-- Incidents are closed 14 days after they are resolved (POST /incidents/autoclose,
+-- driven by operations/csm-scheduled-tasks), and by hand, so the two facts need
+-- columns. Both are stamped by updateIncidentLifecycleTx on entering CLOSED.
 --
 --   closed_on     when the incident entered CLOSED. NULL for incidents closed
 --                 before this migration: nothing is backfilled.
---   closed_by_id  who it is attributed to; same target and ON DELETE as
---                 resolved_by_id (migration 0058).
+--   closed_by_id  who the close is attributed to: the closer on a manual close,
+--                 the auto-close's system user when it has a user row, NULL
+--                 otherwise. Same target and ON DELETE as resolved_by_id
+--                 (migration 0058).
 --
--- The partial index serves the sweep's "RESOLVED and resolved long enough
--- ago" scan; it holds only RESOLVED rows, so it stays small.
+-- The two indexes are built concurrently by migrations 0257 and 0258, each in a
+-- file of its own, so building them does not block incident writes.
 --
--- Idempotent: every statement is guarded and safe to re-run.
+-- Safe to run again: every statement is guarded. The foreign key takes a lock on
+-- "user" as well as incident, so the wait for the locks is bounded, as in
+-- 0249, rather than queueing every user lookup behind a long transaction.
+SET lock_timeout = '5s';
+
 ALTER TABLE incident ADD COLUMN IF NOT EXISTS closed_on TIMESTAMPTZ;
 ALTER TABLE incident ADD COLUMN IF NOT EXISTS closed_by_id UUID REFERENCES "user"(id) ON DELETE SET NULL;
 
-CREATE INDEX IF NOT EXISTS idx_incident_closed_by_id ON incident (closed_by_id);
-CREATE INDEX IF NOT EXISTS idx_incident_resolved_on_resolved ON incident (resolved_on) WHERE state = 'RESOLVED';
+RESET lock_timeout;
