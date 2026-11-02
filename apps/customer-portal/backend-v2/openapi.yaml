@@ -6589,8 +6589,15 @@ components:
       properties:
         attachmentId: {type: string, format: uuid}
         number: {type: string}
-        uploadUrl: {type: string}
-        fieldName: {type: string, example: filenames}
+        uploadMethod:
+          type: string
+          enum: [multipart, tus]
+          description: multipart is one POST of a form; tus is the resumable chunked upload used for a large file.
+        uploadUrl: {type: string, description: "multipart - POST the form here once. tus - the TUS creation endpoint."}
+        fieldName: {type: string, example: filenames, description: multipart only}
+        shareId: {type: string, description: "tus only. Sent as share_id in Upload-Metadata. A secret; never log it."}
+        path: {type: string, description: "tus only. Sent as path in Upload-Metadata."}
+        chunkSize: {type: integer, format: int64, description: "tus only. Bytes per chunk."}
         expiresAt: {type: string, format: date-time}
         maxBytes: {type: integer, format: int64}
     StoredAttachmentConfirmRequest:

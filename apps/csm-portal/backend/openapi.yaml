@@ -1331,7 +1331,7 @@ paths:
                   format: int64
       responses:
         "201":
-          description: The attachment id and number, uploadUrl, fieldName, expiresAt and maxBytes; never cacheable.
+          description: The attachment id and number, uploadMethod (multipart or tus), uploadUrl, expiresAt and maxBytes, plus fieldName for multipart and shareId, path and chunkSize for tus; never cacheable.
           content:
             application/json:
               schema:
