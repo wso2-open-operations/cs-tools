@@ -88,7 +88,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onChange,
     overlayElement,
     onImageUpload,
+    onPasteError,
   }: {
+    onPasteError?: (reason: "size" | "type" | "count") => void;
     onChange?: (html: string) => void;
     overlayElement?: React.ReactNode;
     onImageUpload?: (file: File, previewUrl: string) => Promise<void>;
@@ -112,6 +114,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
           add image
         </button>
       )}
+      <button type="button" onClick={() => onPasteError?.("count")}>
+        report too many images
+      </button>
       {overlayElement}
     </div>
   ),
@@ -282,6 +287,16 @@ describe("ActivityCommentInput", () => {
       expect(mockMutate).not.toHaveBeenCalled();
       expect(
         await screen.findByText(/could not be uploaded/i),
+      ).toBeInTheDocument();
+    });
+
+    it("tells the user a comment can have at most 5 images", async () => {
+      renderInput();
+      fireEvent.click(
+        screen.getByRole("button", { name: "report too many images" }),
+      );
+      expect(
+        await screen.findByText("A comment can have at most 5 images."),
       ).toBeInTheDocument();
     });
 

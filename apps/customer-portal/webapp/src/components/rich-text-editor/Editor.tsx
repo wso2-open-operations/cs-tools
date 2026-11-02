@@ -47,6 +47,7 @@ import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import {
   insertImageWithUpload,
+  remainingImageSlots,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
@@ -219,7 +220,7 @@ const ClipboardImagePlugin = ({
   onPasteError,
   onImageUpload,
 }: {
-  onPasteError?: (reason: "size" | "type") => void;
+  onPasteError?: (reason: "size" | "type" | "count") => void;
   onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
@@ -238,6 +239,9 @@ const ClipboardImagePlugin = ({
 
       const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
       const maxPasteImageSize = inlineImageMaxBytes();
+      // Only the upload-on-paste flow is capped; base64 images have a server cap.
+      let slots = handlers.onImageUpload ? remainingImageSlots(editor) : Infinity;
+      let countReported = false;
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           event.preventDefault();
@@ -256,8 +260,14 @@ const ClipboardImagePlugin = ({
           }
 
           if (handlers.onImageUpload) {
+            if (slots <= 0) {
+              if (!countReported) handlers.onPasteError?.("count");
+              countReported = true;
+              continue;
+            }
+            slots -= 1;
             insertImageWithUpload(editor, file, "Pasted Image", handlers.onImageUpload);
-            break;
+            continue;
           }
 
           const reader = new FileReader();
@@ -362,7 +372,7 @@ const Editor = ({
   onBlur?: () => void;
   /** Optional element rendered as an absolute overlay at the bottom-right inside the editor. */
   overlayElement?: ReactNode;
-  onPasteError?: (reason: "size" | "type") => void;
+  onPasteError?: (reason: "size" | "type" | "count") => void;
   /**
    * When set, pasted and toolbar-inserted images are not read as base64: each is
    * shown from a local blob: URL while this handler stores it (see
@@ -455,6 +465,7 @@ const Editor = ({
               showKeyboardHint={showKeyboardHint}
               enterToSubmit={enterToSubmit}
               onImageUpload={onImageUpload}
+              onPasteError={onPasteError}
             />
             <Divider sx={{ my: 1 }} />
           </>
