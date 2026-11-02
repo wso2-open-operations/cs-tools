@@ -177,10 +177,10 @@ func lineItemDiffFields(li domain.SalesforceOpportunityLineItemUpsert, raw sales
 		{name: "totalPrice", stored: st["total_price"], written: resyncNumText(li.TotalPrice), numeric: true},
 		{name: "productName", stored: st["product_name"], written: li.ProductName, raw: optionalPtr(p.Name), limit: maxSfLineItemProductNameChars},
 		{name: "productCode", stored: st["product_code"], written: li.ProductCode, raw: optionalPtr(p.ProductCode), limit: maxSfLineItemProductCodeChars},
-		{name: "productDescription", stored: st["product_description"], written: li.ProductDescription, raw: optionalPtr(p.Description), limit: maxSfLineItemProductDescChars},
+		{name: "productDescription", stored: st["product_description"], written: li.ProductDescription, raw: optionalPtr(p.Description), limit: 0},
 		{name: "productFamily", stored: st["product_family"], written: li.ProductFamily, raw: optionalPtr(p.Family), limit: maxSfLineItemProductFamilyChars},
 		{name: "productUnit", stored: st["product_unit"], written: li.ProductUnit, raw: optionalPtr(p.ProductUnit), limit: maxSfLineItemShortChars},
-		{name: "engProductCode", stored: st["eng_product_code"], written: li.EngProductCode, raw: optionalPtr(p.EngProductCode), limit: maxSfLineItemShortChars},
+		{name: "engProductCode", stored: st["eng_product_code"], written: li.EngProductCode, raw: optionalPtr(p.EngProductCode), limit: maxSfLineItemEngProductCodeChars},
 		{name: "productSfId", stored: st["product_sf_id"], written: li.ProductSfID, raw: optionalPtr(p.ID), limit: maxSfLineItemProductSfIDChars},
 	})
 }
@@ -200,9 +200,9 @@ func invoiceDiffFields(ctx context.Context, inv salesentity.Invoice, st map[stri
 	sfID := strings.TrimSpace(derefString(inv.ID))
 	row := mapSalesEntityInvoice(ctx, sfID, inv)
 	return diffResyncFields([]resyncFieldSpec{
-		{name: "name", stored: st["name"], written: row.Name, raw: optionalPtr(inv.Name), limit: maxSfInvoiceTextChars},
-		{name: "description", stored: st["description"], written: row.Description, raw: optionalPtr(inv.Description), limit: maxSfInvoiceTextChars},
-		{name: "classification", stored: st["classification"], written: row.Classification, raw: optionalPtr(inv.Classification), limit: maxSfInvoiceTextChars},
+		{name: "name", stored: st["name"], written: row.Name, raw: optionalPtr(inv.Name), limit: maxSfInvoiceNameChars},
+		{name: "description", stored: st["description"], written: row.Description, raw: optionalPtr(inv.Description), limit: maxSfInvoiceDescriptionChars},
+		{name: "classification", stored: st["classification"], written: row.Classification, raw: optionalPtr(inv.Classification), limit: maxSfInvoiceClassChars},
 		{name: "opportunity", stored: resyncStoredSfID(st["opportunity_sf_id"]), written: resyncSfIDText(derefString(inv.OpportunityID))},
 		{name: "amount", stored: st["invoiced_amount"], written: resyncNumText(row.InvoicedAmount), numeric: true},
 		{name: "invoiceDate", stored: st["invoice_date"], written: resyncDateText(row.InvoiceDate)},
