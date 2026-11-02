@@ -37,7 +37,7 @@ func TestEmailNotifier_Send_InternalNoticeLinksProjectNameWhenSfIDPresent(t *tes
 	_, err := n.Send(context.Background(), Notice{
 		Subject:     "subject",
 		Body:        internalReminderBody(),
-		ProjectSfID: "a0d4U00000aUJURQA4",
+		ProjectSfID: "a0d000000000002AAA",
 		Recipients: Recipients{
 			AccountOwner: recipients.Contact{Email: "am@wso2.com"},
 		},
@@ -47,7 +47,7 @@ func TestEmailNotifier_Send_InternalNoticeLinksProjectNameWhenSfIDPresent(t *tes
 	}
 	got := sender.calls[0].htmlBody
 
-	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d4U00000aUJURQA4" style="color:#2c66bd;font-weight:700;text-decoration:none;" target="_blank">Acme - Subscription</a>`
+	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d000000000002AAA" style="color:#2c66bd;font-weight:700;text-decoration:none;" target="_blank">Acme - Subscription</a>`
 	if !strings.Contains(got, want) {
 		t.Errorf("htmlBody missing the Project Name Salesforce link.\nwant substring: %s\ngot: %s", want, got)
 	}
@@ -97,7 +97,7 @@ func TestEmailNotifier_Send_InvoiceNoticeLinksProjectNameWhenSfIDPresent(t *test
 	_, err := n.Send(context.Background(), Notice{
 		Subject:     "subject",
 		Body:        invoiceReminderBody(),
-		ProjectSfID: "a0d4U00000aUJURQA4",
+		ProjectSfID: "a0d000000000002AAA",
 		// Real invoice notices carry one entry per invoice; "" = no sfId.
 		InvoiceSfIDs: []string{""},
 		Recipients: Recipients{
@@ -109,7 +109,7 @@ func TestEmailNotifier_Send_InvoiceNoticeLinksProjectNameWhenSfIDPresent(t *test
 	}
 	got := sender.calls[0].htmlBody
 
-	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d4U00000aUJURQA4"`
+	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d000000000002AAA"`
 	if !strings.Contains(got, want) {
 		t.Errorf("htmlBody missing the Project Name Salesforce link in the invoice notice.\nwant substring: %s\ngot: %s", want, got)
 	}
@@ -131,7 +131,7 @@ func TestEmailNotifier_Send_NoBusinessContactNoticeLinksProjectNameWhenSfIDPrese
 	_, err := n.Send(context.Background(), Notice{
 		Subject:     "subject",
 		Body:        noBusinessContactBody(),
-		ProjectSfID: "a0d4U00000aUJURQA4",
+		ProjectSfID: "a0d000000000002AAA",
 		Recipients:  Recipients{AccountOwner: recipients.Contact{Email: "am@wso2.com"}},
 	})
 	if err != nil {
@@ -139,7 +139,7 @@ func TestEmailNotifier_Send_NoBusinessContactNoticeLinksProjectNameWhenSfIDPrese
 	}
 	got := sender.calls[0].htmlBody
 
-	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d4U00000aUJURQA4"`
+	want := `Project Name: <a href="https://wso2.my.salesforce.com/a0d000000000002AAA"`
 	if !strings.Contains(got, want) {
 		t.Errorf("htmlBody missing the Project Name Salesforce link in the no-business-contact notice.\nwant substring: %s\ngot: %s", want, got)
 	}
@@ -164,7 +164,7 @@ func TestEmailNotifier_Send_CustomerNoticeNeverLinksProjectName(t *testing.T) {
 	_, err := n.Send(context.Background(), Notice{
 		Subject:     "subject",
 		Body:        "Some customer-facing body mentioning Acme - Subscription.",
-		ProjectSfID: "a0d4U00000aUJURQA4",
+		ProjectSfID: "a0d000000000002AAA",
 		Recipients: Recipients{
 			Customers: []recipients.Contact{{Email: "customer@example.com"}},
 		},

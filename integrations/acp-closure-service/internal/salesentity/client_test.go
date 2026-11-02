@@ -189,19 +189,19 @@ func TestGetProject(t *testing.T) {
 		if body["id"] == "a0dmissing" {
 			return http.StatusOK, `[]`
 		}
-		return http.StatusOK, `[{"id":"a0dE200000E7CxNIAV","key":"APPSUB","startDate":"2025-07-01","endDate":"2026-10-13","customerId":"001E200000tk3ZyIAI","status":"Open"}]`
+		return http.StatusOK, `[{"id":"a0d000000000001AAA","key":"APPSUB","startDate":"2025-07-01","endDate":"2026-10-13","customerId":"001000000000001AAA","status":"Open"}]`
 	}}
 	c := newTestClient(t, f)
 
-	p, err := c.GetProject(context.Background(), "a0dE200000E7CxNIAV")
+	p, err := c.GetProject(context.Background(), "a0d000000000001AAA")
 	if err != nil {
 		t.Fatalf("GetProject: %v", err)
 	}
-	if p.ID != "a0dE200000E7CxNIAV" || deref(p.EndDate) != "2026-10-13" || deref(p.StartDate) != "2025-07-01" || deref(p.CustomerID) != "001E200000tk3ZyIAI" {
+	if p.ID != "a0d000000000001AAA" || deref(p.EndDate) != "2026-10-13" || deref(p.StartDate) != "2025-07-01" || deref(p.CustomerID) != "001000000000001AAA" {
 		t.Errorf("project = %+v", p)
 	}
 	body := f.bodies("/projects/search")[0]
-	if body["id"] != "a0dE200000E7CxNIAV" || body["limit"] != float64(1) {
+	if body["id"] != "a0d000000000001AAA" || body["limit"] != float64(1) {
 		t.Errorf("request = %v, want {id, limit: 1}", body)
 	}
 
@@ -217,24 +217,24 @@ func TestGetCustomer(t *testing.T) {
 		if ids, _ := body["ids"].([]any); len(ids) == 1 && ids[0] == "001missing" {
 			return http.StatusOK, `[]`
 		}
-		return http.StatusOK, `[{"id":"001E200000tk3ZyIAI","owner":{"name":"Kavith R","email":"kavithr@wso2.com"},"technicalOwner":"to@wso2.com",
-			"renewalManager":{"name":"Abinash A","email":"abinash@wso2.com"},"accountClassification":"Partner","primaryPartnerAccountId":null,"isPartner":false}]`
+		return http.StatusOK, `[{"id":"001000000000001AAA","owner":{"name":"Kim Owner","email":"owner@example.com"},"technicalOwner":"to@wso2.com",
+			"renewalManager":{"name":"Robin Renewal","email":"renewal@example.com"},"accountClassification":"Partner","primaryPartnerAccountId":null,"isPartner":false}]`
 	}}
 	c := newTestClient(t, f)
 
-	cu, err := c.GetCustomer(context.Background(), "001E200000tk3ZyIAI")
+	cu, err := c.GetCustomer(context.Background(), "001000000000001AAA")
 	if err != nil {
 		t.Fatalf("GetCustomer: %v", err)
 	}
-	if deref(cu.Owner.Email) != "kavithr@wso2.com" || deref(cu.Owner.Name) != "Kavith R" || deref(cu.TechnicalOwner) != "to@wso2.com" ||
-		deref(cu.RenewalManager.Email) != "abinash@wso2.com" || deref(cu.AccountClassification) != "Partner" || cu.PrimaryPartnerAccountID != nil {
+	if deref(cu.Owner.Email) != "owner@example.com" || deref(cu.Owner.Name) != "Kim Owner" || deref(cu.TechnicalOwner) != "to@wso2.com" ||
+		deref(cu.RenewalManager.Email) != "renewal@example.com" || deref(cu.AccountClassification) != "Partner" || cu.PrimaryPartnerAccountID != nil {
 		t.Errorf("customer = %+v", cu)
 	}
 	body := f.bodies("/customer-search")[0]
 	if body["isRealTime"] != true || body["limit"] != float64(1) {
 		t.Errorf("request = %v, want isRealTime true and limit 1", body)
 	}
-	if ids, _ := body["ids"].([]any); len(ids) != 1 || ids[0] != "001E200000tk3ZyIAI" {
+	if ids, _ := body["ids"].([]any); len(ids) != 1 || ids[0] != "001000000000001AAA" {
 		t.Errorf("ids = %v", body["ids"])
 	}
 
@@ -245,7 +245,7 @@ func TestGetCustomer(t *testing.T) {
 
 func TestProjectContacts(t *testing.T) {
 	f := &fakeSalesEntity{responses: func(string, map[string]any) (int, string) {
-		return http.StatusOK, `[{"id":"a0e1","email":"jane@bankco.com","state":"REGISTERED","roles":["Portal user","Business Contact"],"contact":{"name":"Jane B","email":"jane@bankco.com"}}]`
+		return http.StatusOK, `[{"id":"a0e1","email":"jane@customer.example","state":"REGISTERED","roles":["Portal user","Business Contact"],"contact":{"name":"Jane B","email":"jane@customer.example"}}]`
 	}}
 	c := newTestClient(t, f)
 
@@ -253,7 +253,7 @@ func TestProjectContacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProjectContacts: %v", err)
 	}
-	if len(got) != 1 || got[0].Email != "jane@bankco.com" || deref(got[0].State) != "REGISTERED" || len(got[0].Roles) != 2 || deref(got[0].Contact.Name) != "Jane B" {
+	if len(got) != 1 || got[0].Email != "jane@customer.example" || deref(got[0].State) != "REGISTERED" || len(got[0].Roles) != 2 || deref(got[0].Contact.Name) != "Jane B" {
 		t.Errorf("contacts = %+v", got)
 	}
 	body := f.bodies("/project-contacts/search")[0]
@@ -357,17 +357,17 @@ func TestUpdateProjectStatus(t *testing.T) {
 		if path == "/projects/a0dmissing" {
 			return http.StatusNotFound, `{"message":"not found"}`
 		}
-		return http.StatusOK, `{"id":"a0dE200000E7CxNIAV","status":"Suspended"}`
+		return http.StatusOK, `{"id":"a0d000000000001AAA","status":"Suspended"}`
 	}}
 	c := newTestClient(t, f)
 
-	if err := c.UpdateProjectStatus(context.Background(), "a0dE200000E7CxNIAV", "Suspended"); err != nil {
+	if err := c.UpdateProjectStatus(context.Background(), "a0d000000000001AAA", "Suspended"); err != nil {
 		t.Fatalf("UpdateProjectStatus: %v", err)
 	}
-	if got := f.methodsFor("/projects/a0dE200000E7CxNIAV"); len(got) != 1 || got[0] != http.MethodPatch {
+	if got := f.methodsFor("/projects/a0d000000000001AAA"); len(got) != 1 || got[0] != http.MethodPatch {
 		t.Errorf("methods = %v, want one PATCH", got)
 	}
-	body := f.bodies("/projects/a0dE200000E7CxNIAV")[0]
+	body := f.bodies("/projects/a0d000000000001AAA")[0]
 	if len(body) != 1 || body["status"] != "Suspended" {
 		t.Errorf("request = %v, want {status: Suspended}", body)
 	}

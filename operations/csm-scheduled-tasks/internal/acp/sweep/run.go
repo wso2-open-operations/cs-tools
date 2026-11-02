@@ -19,6 +19,7 @@ package sweep
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -52,7 +53,13 @@ const (
 // (NewSalesforceDetails reads it live from Salesforce). A details failure is
 // a failure of that project, like any other. A single project's processProject
 // failure is logged and recorded in Result.Failures, and the sweep
-// continues — one project's problem must never block the rest.
+// continues — one project's problem must never block the rest. Two
+// exceptions (see evaluate): a project whose own record is unusable is
+// recorded in Result.Skipped and does not fail the run, and a CSM write
+// failure every project would hit (CSM refusing or not taking writes) stops
+// the sweep and is returned, since every later notice would go out without
+// being recorded. Each listed project is read again from CSM just before it
+// is decided (rereadProject).
 //
 // The open projects are all listed first (listOpenProjects) and only then
 // evaluated. Evaluating page by page would skip projects: a suspension moves
@@ -76,8 +83,8 @@ const (
 // detail, not evaluated, not counted toward failures, just logged and
 // counted in Result.ProjectsExcluded. This applies uniformly to both the
 // broad sweep and the ACP_TEST_PROJECT_ID-scoped path: if projectID itself is
-// excluded, GetProject is never called at all. Per explicit design
-// direction (Sajith Ekanayake): this exists for deliberate business-driven
+// excluded, GetProject is never called at all. Per an explicit design
+// decision: this exists for deliberate business-driven
 // exclusions, not as a workaround for data
 // bugs — a project excluded here produces zero log signal about whatever
 // might be wrong with it, which is the opposite of what you want for an
@@ -101,7 +108,9 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		}
 
 		result.ProjectsEvaluated++
-		evaluate(ctx, details, updater, ntf, now, proj, &result)
+		// One project: a stop has nothing left to stop, and the failure is
+		// already in result.
+		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
 
 		return result, nil
 	}
@@ -111,16 +120,47 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 		return result, err
 	}
 
-	for _, proj := range projects {
-		if skipExcluded(ctx, proj.ID, excludedProjectIDs, &result) {
+	for i, listed := range projects {
+		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
 		}
 
 		result.ProjectsEvaluated++
-		evaluate(ctx, details, updater, ntf, now, proj, &result)
+		proj, err := rereadProject(ctx, reader, listed.ID)
+		if err != nil {
+			slog.ErrorContext(ctx, "processProject failed", "projectID", listed.ID, "err", err)
+			result.Failures = append(result.Failures, ProjectFailure{ProjectID: listed.ID, Err: err})
+			continue
+		}
+		if err := evaluate(ctx, details, updater, ntf, now, proj, &result); err != nil {
+			return result, fmt.Errorf("sweep: stopped at project %s, %d project(s) not evaluated: %w", listed.ID, len(projects)-i-1, err)
+		}
 	}
 
 	return result, nil
+}
+
+// rereadProject reads the listed project id again from CSM, right before it
+// is decided. The list is read before any project is evaluated (see Run), so
+// by the time a project is reached its listed closure states and
+// suspensionProcessState can be as old as the run; every record write sends
+// the whole suspensionProcessState rebuilt from what was read, so deciding
+// from the listing could undo a change made since, such as entity-service's
+// reopen. CSM reads its own database, so a re-read sees every committed
+// write.
+func rereadProject(ctx context.Context, reader sweepReader, id string) (project, error) {
+	raw, err := reader.GetProject(ctx, id)
+	if err != nil {
+		return project{}, fmt.Errorf("re-read project from CSM: %w", err)
+	}
+	var proj project
+	if err := json.Unmarshal(raw, &proj); err != nil {
+		return project{}, fmt.Errorf("parse re-read project: %w", err)
+	}
+	if proj.ID == "" {
+		proj.ID = id
+	}
+	return proj, nil
 }
 
 // listOpenProjects pages through /projects/search for every Open project,
@@ -192,18 +232,36 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 // ACP_TEST_PROJECT_ID-scoped early check and the broad-sweep loop) so the
 // log line and counter update have exactly one definition.
 // evaluate fills in proj's details and decides it, recording a failure of
-// either step against the project.
-func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) {
+// either step against the project. A project whose own data is unusable
+// (dataError) is recorded as skipped, not failed: a retry cannot fix it, and
+// failing the run for it would retry and alert on every run until someone
+// fixed the record. It returns the error only when CSM is refusing writes
+// (writesFailingError), which stops the run: every later project would send
+// its notice and then fail to record it, so the next run would send it
+// again.
+func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
 	if err == nil {
 		err = processProject(ctx, reader, updater, ntf, now, full)
 	} else {
 		err = fmt.Errorf("read project details: %w", err)
 	}
-	if err != nil {
-		slog.ErrorContext(ctx, "processProject failed", "projectID", proj.ID, "err", err)
-		result.Failures = append(result.Failures, ProjectFailure{ProjectID: proj.ID, Err: err})
+	if err == nil {
+		return nil
 	}
+	var bad *dataError
+	if errors.As(err, &bad) {
+		slog.WarnContext(ctx, "project skipped: its record needs fixing", "projectID", proj.ID, "err", err)
+		result.Skipped = append(result.Skipped, ProjectFailure{ProjectID: proj.ID, Err: err})
+		return nil
+	}
+	slog.ErrorContext(ctx, "processProject failed", "projectID", proj.ID, "err", err)
+	result.Failures = append(result.Failures, ProjectFailure{ProjectID: proj.ID, Err: err})
+	var refused *writesFailingError
+	if errors.As(err, &refused) {
+		return err
+	}
+	return nil
 }
 
 func skipExcluded(ctx context.Context, id string, excludedProjectIDs map[string]bool, result *Result) bool {

@@ -47,7 +47,7 @@ type project struct {
 	// was caught). Trust the wire over the spec if they disagree again.
 	ProjectKey string             `json:"key"`
 	Account    *projectAccountRef `json:"account"`
-	// SfID is the project's Salesforce record ID (e.g. "a0dE200000E7CxNIAV"),
+	// SfID is the project's Salesforce record ID (e.g. "a0d000000000001AAA"),
 	// confirmed present on a real GetProject response. Used to render the
 	// internal notice's "Project Name" field as a hyperlink to
 	// https://wso2.my.salesforce.com/{SfID} — Salesforce's generic
@@ -87,7 +87,7 @@ type project struct {
 // notice subject line); the upstream shape carries more (activationDate,
 // tier, region, ...) that this component doesn't need — except IsPartner
 // (Phase 2), confirmed present here via direct Postman testing. Nullable:
-// absent on any account this field predates, per the same "ServiceNow can
+// absent on any account this field predates, per the same "the legacy system can
 // omit any of these" convention Opportunity/Invoice document explicitly.
 // hasPrimaryPartner is deliberately NOT here — confirmed via Postman that
 // it's only present on GetAccount's full response, not this shortened
@@ -179,7 +179,7 @@ type entityRefDTO struct {
 }
 
 // opportunityDTO mirrors csm-integration-service's Opportunity schema.
-// Sourced from ServiceNow's Salesforce-sync data; every field but ID is
+// Sourced from the legacy system's Salesforce-sync data; every field but ID is
 // nullable — confirmed via real search results that EulaVersion (the text
 // field) is null even on normal, active opportunities where
 // EulaVersionDecimal is populated fine. EulaVersion is still what the
@@ -313,9 +313,13 @@ type Result struct {
 	ProjectsEvaluated int
 	ProjectsExcluded  int
 	Failures          []ProjectFailure
+	// Skipped are projects whose own record is unusable (dataError): logged
+	// and left for someone to fix, without failing the run.
+	Skipped []ProjectFailure
 }
 
-// ProjectFailure records a single project's processProject failure.
+// ProjectFailure records a single project's processProject failure, or why
+// it was skipped.
 type ProjectFailure struct {
 	ProjectID string
 	Err       error

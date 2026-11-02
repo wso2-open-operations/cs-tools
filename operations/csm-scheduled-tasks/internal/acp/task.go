@@ -60,10 +60,12 @@ type Config struct {
 	// DryRun decides, sends and logs, but writes nothing to CSM or
 	// Salesforce. ACP_DRY_RUN, default true. It does not stop emails: with
 	// EmailEnabled the notices are sent, and because no notice is recorded
-	// they are sent again on every run.
+	// they are sent again on every run, so cmd/server allows that only with
+	// a debug list.
 	DryRun bool
 	// EmailEnabled sends notices for real; when false they are only logged.
-	// ACP_EMAIL_SEND_ENABLED (default false) and ALERTS_ENABLED together.
+	// ACP_EMAIL_SEND_ENABLED, default false. A real run (DryRun false) needs
+	// it: Run refuses one without it.
 	EmailEnabled bool
 	// AllowNonWSO2Recipients lets notices reach addresses outside
 	// @wso2.com. ACP_ALLOW_NON_WSO2_RECIPIENTS, default false; production
@@ -77,6 +79,11 @@ type Config struct {
 	// ExcludedProjectIDs are CSM project ids the run skips.
 	// ACP_EXCLUDED_PROJECT_IDS.
 	ExcludedProjectIDs map[string]bool
+	// RunOnWeekends runs on a Saturday or Sunday too. Set for a
+	// TRYOUT_TASK=acp_closure only, which emails nobody but its debug list:
+	// someone trying it out on a weekend must not read an empty run as "no
+	// projects due".
+	RunOnWeekends bool
 }
 
 // Run returns the acp_closure handler. A sweep that could not list the
@@ -97,11 +104,19 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
+		// A real run records each notice and suspends on day 0 whether or
+		// not the notice was emailed, so without email it would suspend
+		// customers who were never told. cmd/server refuses this
+		// configuration at startup; this is the last guard.
+		if !cfg.DryRun && !cfg.EmailEnabled {
+			return fmt.Errorf("acp run %s: refusing a real run with emails off: it would record notices nobody received and suspend on day 0", runID)
+		}
+
 		// The schedule is weekdays only, but a retry of Friday's run can
 		// land on a Saturday. Succeeding without doing anything closes that
 		// period; Monday's run is a new one and catches up.
-		if isWeekend(now) {
-			slog.InfoContext(ctx, "acp: weekend, skipping run: no notices sent and no projects suspended", "runID", runID)
+		if isWeekend(now) && !cfg.RunOnWeekends {
+			slog.WarnContext(ctx, "acp: Saturday or Sunday in Colombo: this run did nothing (no project evaluated, no notice sent, no project suspended); Monday's run catches up", "runID", runID)
 			return nil
 		}
 
@@ -127,19 +142,26 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 
 		ctx = entity.WithCorrelationID(ctx, runID)
 		result, err := sweep.Run(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs)
-		if err != nil {
-			return fmt.Errorf("acp run %s: %w", runID, err)
-		}
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,
 			"dryRun", cfg.DryRun,
+			"stoppedEarly", err != nil,
 			"projectsEvaluated", result.ProjectsEvaluated,
 			"projectsExcluded", result.ProjectsExcluded,
+			"projectsSkipped", len(result.Skipped),
 			"failureCount", len(result.Failures),
 		)
 		for _, f := range result.Failures {
 			slog.ErrorContext(ctx, "acp: project failed", "runID", runID, "projectID", f.ProjectID, "err", f.Err)
+		}
+		// A skipped project's record needs fixing; a retry cannot help it,
+		// so it does not fail the run (and alert on every retry).
+		for _, s := range result.Skipped {
+			slog.WarnContext(ctx, "acp: project skipped, its record needs fixing", "runID", runID, "projectID", s.ProjectID, "err", s.Err)
+		}
+		if err != nil {
+			return fmt.Errorf("acp run %s: %w", runID, err)
 		}
 		return failuresError(runID, result.Failures)
 	}
@@ -192,7 +214,7 @@ func isWeekend(now time.Time) bool {
 
 // ParseProjectIDs parses ACP_EXCLUDED_PROJECT_IDS: a comma-separated list
 // of CSM project ids the run skips entirely, never fetching or evaluating
-// them. Per explicit design direction (Sajith Ekanayake): this is for
+// them. Per an explicit design decision: this is for
 // deliberate, verified business exclusions — expected to be empty in
 // production almost all the time. Not a substitute for fixing genuine data
 // issues; a project put here produces zero signal about whatever might

@@ -24,7 +24,7 @@ import (
 
 // TestProject_ParsesNestedAccountFromRealGetProjectResponse is a regression
 // test for a real bug found via direct Postman testing against staging:
-// GetProject's response (GET /projects/e3e87599-1bc7-6650-182c-0dc5604bcb68)
+// GetProject's response (GET /projects/00000000-0000-4000-8000-000000000001)
 // nests the account reference as "account": {"id": ..., "name": ...}, not a
 // flat top-level "accountId" string. The project struct originally assumed
 // the latter, so accountID() silently returned "" — which produced a real
@@ -34,9 +34,9 @@ import (
 // account object to prove extra fields don't break parsing).
 func TestProject_ParsesNestedAccountFromRealGetProjectResponse(t *testing.T) {
 	const realGetProjectResponse = `{
-		"id": "e3e87599-1bc7-6650-182c-0dc5604bcb68",
+		"id": "00000000-0000-4000-8000-000000000001",
 		"account": {
-			"id": "f213fdd1-1b4b-a650-a002-c9d3604bcbac",
+			"id": "00000000-0000-4000-8000-000000000002",
 			"name": "ACP Test Partner Account"
 		},
 		"endDate": null
@@ -51,7 +51,7 @@ func TestProject_ParsesNestedAccountFromRealGetProjectResponse(t *testing.T) {
 		t.Fatal("Account = nil, want populated from the nested \"account\" object")
 	}
 
-	const wantAccountID = "f213fdd1-1b4b-a650-a002-c9d3604bcbac"
+	const wantAccountID = "00000000-0000-4000-8000-000000000002"
 	if got := proj.accountID(); got != wantAccountID {
 		t.Errorf("accountID() = %q, want %q", got, wantAccountID)
 	}
@@ -86,9 +86,9 @@ func TestProject_AccountIDIsEmptyWhenAccountIsAbsent(t *testing.T) {
 // live response actually names it "key". Trust the wire, not the spec.
 func TestProject_ParsesNameProjectKeyStartDateAndAccountName(t *testing.T) {
 	const realGetProjectResponse = `{
-		"id": "e3e87599-1bc7-6650-182c-0dc5604bcb68",
+		"id": "00000000-0000-4000-8000-000000000001",
 		"account": {
-			"id": "f213fdd1-1b4b-a650-a002-c9d3604bcbac",
+			"id": "00000000-0000-4000-8000-000000000002",
 			"name": "ACP Test Partner Account",
 			"activationDate": null,
 			"tier": "",
@@ -96,7 +96,7 @@ func TestProject_ParsesNameProjectKeyStartDateAndAccountName(t *testing.T) {
 			"agentEnabled": false,
 			"kbReferencesEnabled": false
 		},
-		"sfId": "a0dE200000CZ9ZNIA1",
+		"sfId": "a0d000000000003AAA",
 		"name": "ACP Partner Project - Subscription",
 		"key": "APPSUB",
 		"subscriptionType": "subscription",
@@ -133,13 +133,13 @@ func TestProject_ParsesNameProjectKeyStartDateAndAccountName(t *testing.T) {
 	if proj.Account == nil || proj.Account.Name != "ACP Test Partner Account" {
 		t.Errorf("Account.Name = %v, want %q", proj.Account, "ACP Test Partner Account")
 	}
-	if proj.SfID == nil || *proj.SfID != "a0dE200000CZ9ZNIA1" {
-		t.Errorf("SfID = %v, want %q", proj.SfID, "a0dE200000CZ9ZNIA1")
+	if proj.SfID == nil || *proj.SfID != "a0d000000000003AAA" {
+		t.Errorf("SfID = %v, want %q", proj.SfID, "a0d000000000003AAA")
 	}
 }
 
 // TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse is a
-// regression test addressing a real review concern (Sajith Ekanayake):
+// regression test addressing a real review concern:
 // Name/ProjectKey/StartDate were only regression-tested against
 // a GetProject-shaped fixture, but the unattended production sweep
 // (ACP_TEST_PROJECT_ID unset) reads projects from /projects/search instead — a
@@ -152,7 +152,7 @@ func TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse(t *test
 	const realSearchProjectsResponse = `{
 		"projects": [
 			{
-				"id": "266f6292-1b46-f510-264c-997a234bcba9",
+				"id": "00000000-0000-4000-8000-000000000006",
 				"name": "DemoCloud - Cloud Support",
 				"key": "DEMOCLOUDCLOUDSUB",
 				"subscriptionType": "cloud_support",
@@ -160,7 +160,7 @@ func TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse(t *test
 				"endDate": null,
 				"createdOn": "2023-10-25T06:54:50Z",
 				"account": {
-					"id": "cf3fee52-1b46-f510-264c-997a234bcbe5",
+					"id": "00000000-0000-4000-8000-000000000004",
 					"name": "DemoCloud"
 				},
 				"closureState": "Open",
@@ -204,7 +204,7 @@ func TestProject_ParsesNameKeyAndStartDateFromRealSearchProjectsResponse(t *test
 // accountManager.
 func TestAccountDTO_ParsesTechnicalOwnerAndRenewalAccountManager(t *testing.T) {
 	const realGetAccountResponse = `{
-		"id": "f213fdd1-1b4b-a650-a002-c9d3604bcbac",
+		"id": "00000000-0000-4000-8000-000000000002",
 		"name": "ACP Test Partner Account",
 		"technicalOwner": {"id": "tech-1", "name": "Alex Fernando", "email": "alex.fernando@wso2.example"},
 		"accountManager": {"id": "am-1", "name": "Jordan Perera", "email": "jordan.perera@wso2.example"},
@@ -233,10 +233,10 @@ func TestAccountDTO_ParsesTechnicalOwnerAndRenewalAccountManager(t *testing.T) {
 // a wrong JSON tag would silently make every opportunity ineligible.
 func TestOpportunityDTO_ParsesStageFromRealGetOpportunityResponse(t *testing.T) {
 	const realGetOpportunityResponse = `{
-		"id": "024f5c23-1bec-43d0-0bb3-da47b04bcbe0",
+		"id": "00000000-0000-4000-8000-000000000008",
 		"name": "Test Opp 1 for Support T",
 		"account": {
-			"id": "270f942f-1b28-4350-a002-c9d3604bcb79",
+			"id": "00000000-0000-4000-8000-000000000005",
 			"name": "Test Acc for Support T"
 		},
 		"eulaVersion": "EULA 3.3 customised",
@@ -259,7 +259,7 @@ func TestOpportunityDTO_ParsesStageFromRealGetOpportunityResponse(t *testing.T) 
 // Salesforce" link, so a wrong JSON tag would silently drop the link.
 func TestInvoiceDTO_ParsesSfIDFromRealGetInvoiceResponse(t *testing.T) {
 	const realGetInvoiceResponse = `{
-		"id": "bab87559-1bc7-6650-182c-0dc5604bcb5d",
+		"id": "00000000-0000-4000-8000-000000000003",
 		"name": "ACP Partner Invoice",
 		"invoicedAmount": null,
 		"invoiceDate": "2025-12-30",
@@ -267,18 +267,18 @@ func TestInvoiceDTO_ParsesSfIDFromRealGetInvoiceResponse(t *testing.T) {
 		"invoicedDueDate": "2026-07-13",
 		"invoiceOriginalDueDate": "2025-06-18",
 		"opportunity": {
-			"id": "1c687195-1bc7-66d4-0bb3-da47b04bcbca",
+			"id": "00000000-0000-4000-8000-000000000007",
 			"name": "ACP Partner Opportunity"
 		},
 		"classification": "PS",
-		"sfId": "a0IE2000006XBu5MAG"
+		"sfId": "a0I000000000001AAA"
 	}`
 
 	var inv invoiceDTO
 	if err := json.Unmarshal([]byte(realGetInvoiceResponse), &inv); err != nil {
 		t.Fatalf("unmarshal real GetInvoice response: %v", err)
 	}
-	if inv.SfID == nil || *inv.SfID != "a0IE2000006XBu5MAG" {
-		t.Errorf("SfID = %v, want %q", inv.SfID, "a0IE2000006XBu5MAG")
+	if inv.SfID == nil || *inv.SfID != "a0I000000000001AAA" {
+		t.Errorf("SfID = %v, want %q", inv.SfID, "a0I000000000001AAA")
 	}
 }

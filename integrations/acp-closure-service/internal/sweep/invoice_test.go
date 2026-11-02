@@ -28,8 +28,8 @@ func testInvoiceProject() project {
 	start := time.Date(2025, 9, 10, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2027, 9, 9, 0, 0, 0, 0, time.UTC)
 	return project{
-		Name:       "C&S Wholesale Grocers - Subscription",
-		ProjectKey: "CSWHOLESALESUB",
+		Name:       "Example Wholesale & Grocers - Subscription",
+		ProjectKey: "EXWHOLESALESUB",
 		StartDate:  &start,
 		EndDate:    &end,
 	}
@@ -106,18 +106,18 @@ func TestInternalInvoiceNoticeBody(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := internalInvoiceNoticeBody(tt.window, proj, "Lochana De Alwis", invoice)
+			got := internalInvoiceNoticeBody(tt.window, proj, "Lee Example", invoice)
 
 			if !strings.Contains(got, tt.wantIntroContains) {
 				t.Errorf("body missing intro %q\ngot: %s", tt.wantIntroContains, got)
 			}
-			if !strings.Contains(got, "Project Name: C&S Wholesale Grocers - Subscription") {
+			if !strings.Contains(got, "Project Name: Example Wholesale & Grocers - Subscription") {
 				t.Error("body missing Project Name field")
 			}
-			if !strings.Contains(got, "Project Key: CSWHOLESALESUB") {
+			if !strings.Contains(got, "Project Key: EXWHOLESALESUB") {
 				t.Error("body missing Project Key field")
 			}
-			if !strings.Contains(got, "Account Owner: Lochana De Alwis") {
+			if !strings.Contains(got, "Account Owner: Lee Example") {
 				t.Error("body missing Account Owner field")
 			}
 			if !strings.Contains(got, "Start Date: 2025-09-10") {
@@ -158,7 +158,7 @@ func TestCustomerInvoiceNoticeBody(t *testing.T) {
 	t.Run("reminder window: gentle payment reminder wording", func(t *testing.T) {
 		got := customerInvoiceNoticeBody(closure.NoticeWindow7, proj, invoice)
 
-		if !strings.Contains(got, "This is a gentle reminder that payment for your WSO2 subscription associated with the project C&S Wholesale Grocers - Subscription which is due on 10/10/2026 if not settled.") {
+		if !strings.Contains(got, "This is a gentle reminder that payment for your WSO2 subscription associated with the project Example Wholesale & Grocers - Subscription which is due on 10/10/2026 if not settled.") {
 			t.Errorf("body missing the reminder intro sentence with the correct project name/date, got: %s", got)
 		}
 		if !strings.Contains(got, "billing@wso2.com") {
@@ -177,7 +177,7 @@ func TestCustomerInvoiceNoticeBody(t *testing.T) {
 	t.Run("terminal window: past-due suspension wording", func(t *testing.T) {
 		got := customerInvoiceNoticeBody(closure.NoticeWindow0, proj, invoice)
 
-		if !strings.Contains(got, "Your WSO2 subscription for C&S Wholesale Grocers - Subscription(CSWHOLESALESUB) is currently past due.") {
+		if !strings.Contains(got, "Your WSO2 subscription for Example Wholesale & Grocers - Subscription(EXWHOLESALESUB) is currently past due.") {
 			t.Errorf("body missing the suspended intro sentence with the correct project name/key, got: %s", got)
 		}
 		if !strings.Contains(got, "suspended on 10/10/2026") {

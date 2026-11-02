@@ -1217,6 +1217,13 @@ func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oaut
 // such duplicates, and 4 hours still lands in the same working day.
 const acpRetryBackoff = 4 * time.Hour
 
+// acpMaxAttempts allows acp_closure one retry per day. Each retry can send a
+// project's notice again (its email went out, its CSM record failed), so the
+// rest waits for the next weekday's run; the failure alert says so.
+// acp_reopen_check has no cap: entity-service records each reopen, so its
+// retry repeats nothing.
+const acpMaxAttempts = 2
+
 // acpTask builds the acp_closure task from the ACP_* settings, stopping
 // startup on a missing or unsafe one: a task that fails every weekday is
 // worse than one that never starts. Called only when ACP_ENABLED=true.
@@ -1251,28 +1258,16 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		os.Exit(1)
 	}
 
-	cfg := acp.Config{
-		// Fails toward a dry run: unset or malformed is true.
-		DryRun:                 envBool("ACP_DRY_RUN", true),
-		EmailEnabled:           envBool("ACP_EMAIL_SEND_ENABLED", false) && alertsEnabled,
-		AllowNonWSO2Recipients: envBool("ACP_ALLOW_NON_WSO2_RECIPIENTS", false),
-		StandingRecipients:     splitComma(os.Getenv("ACP_STANDING_CC_RECIPIENTS")),
-		TestProjectID:          strings.TrimSpace(os.Getenv("ACP_TEST_PROJECT_ID")),
-		ExcludedProjectIDs:     acp.ParseProjectIDs(os.Getenv("ACP_EXCLUDED_PROJECT_IDS")),
+	// The unsafe combinations are refused here, not warned about: see
+	// acpConfig.
+	debug := debugFor(recipientOverrides, acpTaskName)
+	cfg, warnings, err := acpConfig(readACPSettings(alertsEnabled, emailBaseURL, debug))
+	for _, w := range warnings {
+		slog.Warn(w)
 	}
-	if cfg.DryRun && cfg.EmailEnabled {
-		slog.Warn("ACP_DRY_RUN and ACP_EMAIL_SEND_ENABLED are both true: notices are sent for real but not recorded, so the same notices are sent again on every run")
-	}
-	if cfg.EmailEnabled && emailBaseURL == "" {
-		slog.Error("ACP_EMAIL_SEND_ENABLED is true but EMAIL_BASE_URL is not set; refusing to start since no notice could be sent")
+	if err != nil {
+		slog.Error("unsafe ACP configuration; refusing to start", "err", err)
 		os.Exit(1)
-	}
-	// A tryout skips the ledger but talks to the real CSM and Salesforce, so
-	// unless it is scoped to one test project it would write to every open
-	// project. Like case_autoclosure, such a tryout is always a dry run.
-	if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == acpTaskName && !cfg.DryRun && cfg.TestProjectID == "" {
-		slog.Warn("TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
-		cfg.DryRun = true
 	}
 
 	to, cc := recipientsFor(recipientOverrides, acpTaskName)
@@ -1286,9 +1281,10 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 			SalesEntity: salesEntityClient,
 			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
 			// instead, the same as a report task's debug mail mode.
-			Email: notify.ForReport(emailClient, debugFor(recipientOverrides, acpTaskName)),
+			Email: notify.ForReport(emailClient, debug),
 		}, cfg),
 		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
 		To:           to,
 		Cc:           cc,
 	}

@@ -86,7 +86,7 @@ type cascadeDecision struct {
 // the run. Building both from the snapshot let the second write reset the
 // first cascade's section: a real staging run recorded an invoice "suspend"
 // and then the subscription cascade's IGNORED record wrote the invoice
-// section back to "open", after which ServiceNow reopened the project and
+// section back to "open", after which the legacy system reopened the project and
 // the next run suspended and emailed it again. history is that in-memory
 // copy, updated after every successful record write.
 //
@@ -98,7 +98,7 @@ type cascadeDecision struct {
 // Building the invoice cascade is treated differently (CodeRabbit, PR
 // #1933): a failure there — a transient SearchProjectOpportunityLinks/
 // SearchInvoices/GetOpportunity error, a malformed date or EULA-version
-// field on one ServiceNow-synced row — is logged and does not stop the
+// field on one legacy-synced row — is logged and does not stop the
 // subscription cascade, which was already built successfully and doesn't
 // depend on invoice data at all, from being executed. The invoice error is
 // still returned once the loop finishes, so Run still counts this project
@@ -296,7 +296,7 @@ func needsCustomerAudience(window closure.NoticeWindow) bool {
 // half entirely when there's no linked account — a project with
 // proj.Account == nil previously produced a dangling "...of " with a
 // trailing space and nothing after it in a real outbound email subject (PR
-// #1440 review, Sajith Ekanayake).
+// #1440 review).
 func projectOfAccount(projectName, accountName string) string {
 	if accountName == "" {
 		return projectName
@@ -308,7 +308,7 @@ func projectOfAccount(projectName, accountName string) string {
 // Renewal Manager/Technical Owner) notice's title line. Every internal copy
 // is [ACP]-prefixed regardless of window — that prefix marks "this is the
 // internal-audience copy," not "this is a 90/60/30 window" (confirmed
-// against real examples from Chamara spanning 90 through 0; an earlier
+// against real examples from the product owner spanning 90 through 0; an earlier
 // version of this function had the rule backwards). Day-0 gets distinct
 // "suspension notice" wording instead of "N Days Reminder" — there's no
 // "days remaining" left to report once a project is actually suspended.
@@ -332,7 +332,7 @@ func customerNoticeSubject(window closure.NoticeWindow, projectName string) stri
 }
 
 // internalReminderBodyTemplate is the day-count (90/60/30/15/7) internal
-// notice body, confirmed verbatim from real examples Chamara shared. The
+// notice body, confirmed verbatim from real examples the product owner shared. The
 // greeting always names the Account Manager (%[1]s), regardless of which of
 // the three internal recipients is actually reading their copy — not
 // personalized per recipient. Dates are formatted 2006-01-02.
@@ -388,7 +388,7 @@ func internalNoticeBody(window closure.NoticeWindow, proj project, accountOwnerN
 // customerUpcomingSuspensionBodyTemplate is the 15/7-day customer-facing
 // body — future tense, no greeting (customer-facing notices never open with
 // "Dear X", confirmed explicitly). Dates are formatted 01/02/2006 (US
-// style), distinct from the internal bodies' 2006-01-02 — matches Chamara's
+// style), distinct from the internal bodies' 2006-01-02 — matches the product owner's
 // real examples exactly.
 const customerUpcomingSuspensionBodyTemplate = `We regret to inform you that the project %[1]s will be suspended on %[2]s due to non-renewal of the contracts upon the end of the previous subscription period.
 
@@ -416,7 +416,7 @@ func customerNoticeBody(window closure.NoticeWindow, proj project) string {
 
 // noBusinessContactBodyTemplate is the fixed body for the urgent
 // no-business-contact notice, confirmed verbatim from a real existing
-// notice Chamara shared. Dates are formatted 2006-01-02; Account Owner is
+// notice the product owner shared. Dates are formatted 2006-01-02; Account Owner is
 // the resolved Account Manager's *name*, not email.
 const noBusinessContactBodyTemplate = `Internal - Customer Project without Business Contacts
 
@@ -493,7 +493,7 @@ func accountName(proj project) string {
 // suspensionProcessState record: the caller (processProject) skips
 // recordNoticeSent on any error here, so a partial send in that order would
 // make the window look "not yet notified" on the next sweep and resend the
-// same internal notice for real (Sajith Ekanayake). This
+// same internal notice for real (raised in review). This
 // does mean ntf.Send(internalNotice) has two call sites below rather than
 // one — that's the tradeoff for keeping "skip contact-fetch entirely for
 // internal-only windows" (needsCustomerAudience) and "never send before
@@ -762,22 +762,20 @@ func recordNoticeSent(ctx context.Context, updater projectUpdater, projectID str
 // already-fetched endDateClosureState — no extra round-trip), mirroring
 // legacy's checkForOpenProject guard.
 //
-// "Closed" is the end-date value ServiceNow's "Update WSO2 Closure State"
-// business rule maps to an overall "Suspended" (an end-date "Suspended" did
-// not count there), and the only end-date suspension value Salesforce's
+// "Closed" is the end-date value the legacy system mapped to an overall
+// "Suspended" (an end-date "Suspended" did not count there), and the only end-date suspension value Salesforce's
 // Closure_State_End_Date_Based__c picklist has. CSM's own roll-up accepts both,
 // so the overall closureState is "Suspended" either way. Invoice suspension
 // keeps writing "Suspended" (suspendInvoice), as legacy did.
 //
 // Guarding on "not Open" rather than one exact value matters: projects this
 // component suspended before it wrote "Closed" hold "Suspended" (and real
-// legacy-suspended projects hold "Closed", e.g. acac149b-eba1-4714-fcf5-
-// f5dabad0cdb1), and both must count as already handled.
+// legacy-suspended projects hold "Closed"), and both must count as already handled.
 //
 // Deliberately logs nothing, matching DryRunProjectUpdater's own silence —
 // per explicit user direction, the log should show notice/email content
 // only, nothing else, full stop. Known, accepted tradeoff (raised in PR
-// #1440 review, Sajith Ekanayake): the retry scenario where a prior run
+// #1440 review): the retry scenario where a prior run
 // already recorded the notice (ShouldNotify=false) but suspend itself
 // failed or was interrupted produces zero dry-run output for that project,
 // since notifyForWindow is never called on that path either. Confirmed

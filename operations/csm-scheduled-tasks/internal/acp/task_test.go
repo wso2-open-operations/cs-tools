@@ -17,6 +17,7 @@
 package acp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -133,5 +134,15 @@ func TestIsWeekend(t *testing.T) {
 				t.Errorf("isWeekend(%v) = %v, want %v", tt.now, got, tt.want)
 			}
 		})
+	}
+}
+
+// A real run with emails off would record notices nobody received and
+// suspend on day 0, so Run refuses it before reading anything (the clients
+// are nil: any read would panic).
+func TestRun_RefusesARealRunWithEmailsOff(t *testing.T) {
+	err := Run(Clients{}, Config{DryRun: false, EmailEnabled: false})(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "refusing a real run with emails off") {
+		t.Fatalf("err = %v, want the refusal", err)
 	}
 }

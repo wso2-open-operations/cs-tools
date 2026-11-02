@@ -90,14 +90,14 @@ func partnerFixture() *fakeSalesforce {
 			"a0dP": {ID: "a0dP", StartDate: sp("2025-07-01"), EndDate: sp("2026-10-13"), CustomerID: sp("001P")},
 		},
 		customers: map[string]salesentity.Customer{
-			"001P": {ID: "001P", Owner: &salesentity.User{Name: sp("Kavith R"), Email: sp("kavithr@wso2.com")},
-				TechnicalOwner: sp("to@wso2.com"), RenewalManager: &salesentity.User{Name: sp("Abinash A"), Email: sp("abinash@wso2.com")},
+			"001P": {ID: "001P", Owner: &salesentity.User{Name: sp("Kim Owner"), Email: sp("owner@example.com")},
+				TechnicalOwner: sp("to@wso2.com"), RenewalManager: &salesentity.User{Name: sp("Robin Renewal"), Email: sp("renewal@example.com")},
 				AccountClassification: sp("Partner")},
 		},
 		members: map[string][]salesentity.ProjectContact{
 			"a0dP": {
 				{Email: "invited@acme.com", State: sp("REGISTERED"), Roles: []string{"Portal user", "Business Contact"},
-					Contact: &salesentity.ProjectContactPerson{Name: sp("Jane B"), Email: sp("jane@acme.com")}},
+					Contact: &salesentity.ProjectContactPerson{Name: sp("Jane B"), Email: sp("jane@customer.example")}},
 				{Email: "gone@acme.com", State: sp("DEACTIVATED"), Roles: []string{"Business Contact"}},
 				{Email: "dev@acme.com", State: sp("INVITED"), Roles: []string{"Portal user"}},
 			},
@@ -117,7 +117,7 @@ func partnerFixture() *fakeSalesforce {
 }
 
 func csmPartnerProject() project {
-	return project{ID: "e3e87599-csm", Name: "ACP Partner Project - Subscription", ProjectKey: "APPSUB",
+	return project{ID: "csm-project-1", Name: "ACP Partner Project - Subscription", ProjectKey: "APPSUB",
 		Account: &projectAccountRef{ID: "f213fdd1-csm", Name: "ACP Test Partner Account"}, SfID: sp("a0dP")}
 }
 
@@ -133,7 +133,7 @@ func TestSalesforceDetails_ProjectFieldsComeFromSalesforce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("forProject: %v", err)
 	}
-	if got.ID != "e3e87599-csm" || got.ProjectKey != "APPSUB" || got.Name != "ACP Partner Project - Subscription" {
+	if got.ID != "csm-project-1" || got.ProjectKey != "APPSUB" || got.Name != "ACP Partner Project - Subscription" {
 		t.Errorf("CSM identity changed: %+v", got)
 	}
 	if got.EndDate == nil || !got.EndDate.Equal(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)) ||
@@ -219,9 +219,9 @@ func TestSalesforceDetails_AccountAndPrimaryPartner(t *testing.T) {
 			if err := json.Unmarshal(raw, &acc); err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			if acc.AccountManager == nil || acc.AccountManager.Name != "Kavith R" || stringValue(acc.AccountManager.Email) != "kavithr@wso2.com" ||
+			if acc.AccountManager == nil || acc.AccountManager.Name != "Kim Owner" || stringValue(acc.AccountManager.Email) != "owner@example.com" ||
 				acc.TechnicalOwner == nil || stringValue(acc.TechnicalOwner.Email) != "to@wso2.com" ||
-				acc.RenewalAccountManager == nil || stringValue(acc.RenewalAccountManager.Email) != "abinash@wso2.com" {
+				acc.RenewalAccountManager == nil || stringValue(acc.RenewalAccountManager.Email) != "renewal@example.com" {
 				t.Errorf("account people = %+v", acc)
 			}
 			if acc.HasPrimaryPartner == nil || *acc.HasPrimaryPartner != tc.want {
@@ -247,7 +247,7 @@ func TestSalesforceDetails_Contacts(t *testing.T) {
 		t.Fatalf("project contacts = %+v, want the two live memberships", projectContacts)
 	}
 	jane := projectContacts[0]
-	if jane.Name != "Jane B" || jane.Email != "jane@acme.com" || len(jane.Roles) != 2 || jane.Roles[1] != "BUSINESS_CONTACT" {
+	if jane.Name != "Jane B" || jane.Email != "jane@customer.example" || len(jane.Roles) != 2 || jane.Roles[1] != "BUSINESS_CONTACT" {
 		t.Errorf("business contact = %+v", jane)
 	}
 	if projectContacts[1].Email != "dev@acme.com" || projectContacts[1].Name != "dev@acme.com" {
@@ -347,8 +347,15 @@ func csmListing(t *testing.T, projects ...project) *mockEntityReader {
 		return nil, errors.New("not from CSM")
 	}
 	return &mockEntityReader{
-		searchProjectsFn:                func(context.Context, []byte) ([]byte, error) { return page, nil },
-		getProjectFn:                    func(_ context.Context, id string) ([]byte, error) { return json.Marshal(projects[0]) },
+		searchProjectsFn: func(context.Context, []byte) ([]byte, error) { return page, nil },
+		getProjectFn: func(_ context.Context, id string) ([]byte, error) {
+			for _, p := range projects {
+				if p.ID == id {
+					return json.Marshal(p)
+				}
+			}
+			return json.Marshal(projects[0])
+		},
 		getAccountFn:                    func(context.Context, string) ([]byte, error) { return fail() },
 		searchAccountContactsFn:         func(context.Context, string, []byte) ([]byte, error) { return fail() },
 		searchProjectContactsFn:         func(context.Context, string, []byte) ([]byte, error) { return fail() },
@@ -383,11 +390,11 @@ func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 			t.Fatalf("scoped=%q: notices = %d, want the internal and the customer suspension notice", scoped, len(ntf.sent))
 		}
 		internal := ntf.sent[0].Recipients
-		if internal.AccountOwner.Email != "kavithr@wso2.com" || internal.RenewalManager.Email != "abinash@wso2.com" || internal.TechnicalOwner.Email != "to@wso2.com" {
+		if internal.AccountOwner.Email != "owner@example.com" || internal.RenewalManager.Email != "renewal@example.com" || internal.TechnicalOwner.Email != "to@wso2.com" {
 			t.Errorf("internal recipients = %+v, want Salesforce's account people", internal)
 		}
 		customer := ntf.sent[1].Recipients.Customers
-		if len(customer) != 1 || customer[0].Email != "jane@acme.com" {
+		if len(customer) != 1 || customer[0].Email != "jane@customer.example" {
 			t.Errorf("customer recipients = %+v, want the Salesforce business contact", customer)
 		}
 		if ntf.sent[0].ProjectSfID != "a0dP" || ntf.sent[0].ProjectID != proj.ID {
@@ -413,10 +420,11 @@ func TestRun_SalesforceDetailsDecideAndCSMIsWritten(t *testing.T) {
 	}
 }
 
-// TestRun_DetailFailureIsAProjectFailure: a project Salesforce does not know
-// (or with no sfId) is a visible failure for that project only; the run goes
-// on to the next one.
-func TestRun_DetailFailureIsAProjectFailure(t *testing.T) {
+// TestRun_UnknownToSalesforceIsSkipped: a project Salesforce does not know
+// (or with no sfId) is skipped with a warning, not a failure: every retry
+// would fail the same way until someone fixes the record. The run goes on to
+// the next one and succeeds.
+func TestRun_UnknownToSalesforceIsSkipped(t *testing.T) {
 	missing := csmPartnerProject()
 	missing.ID, missing.SfID = "csm-missing", sp("a0dmissing")
 	ok := csmPartnerProject()
@@ -430,7 +438,7 @@ func TestRun_DetailFailureIsAProjectFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if result.ProjectsEvaluated != 2 || len(result.Failures) != 1 || result.Failures[0].ProjectID != "csm-missing" {
-		t.Errorf("result = %+v, want two evaluated and one failure for csm-missing", result)
+	if result.ProjectsEvaluated != 2 || len(result.Failures) != 0 || len(result.Skipped) != 1 || result.Skipped[0].ProjectID != "csm-missing" {
+		t.Errorf("result = %+v, want two evaluated, no failure and csm-missing skipped", result)
 	}
 }

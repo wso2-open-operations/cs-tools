@@ -33,7 +33,7 @@ import (
 type resolvedInvoice struct {
 	ID string
 	// Number is what the notice shows as "Invoice Id": the invoice's name
-	// (ServiceNow u_name, e.g. US20268838), as legacy shows it. Falls back to
+	// (legacy u_name, e.g. US00000001), as legacy shows it. Falls back to
 	// ID, the internal record ID, only when the invoice has no name.
 	Number             string
 	Opportunity        string
@@ -295,7 +295,7 @@ func parseEULAVersionDecimal(s *string) (float64, error) {
 }
 
 // invoiceNumber returns the value the notice shows as "Invoice Id". Legacy
-// shows the invoice's name (ServiceNow u_name, e.g. US20268838). The API's
+// shows the invoice's name (legacy u_name, e.g. US00000001). The API's
 // "id" is an internal record ID nobody recognises, and the Salesforce ID is
 // used only for the "Open in Salesforce" link. Falls back to the record ID
 // only when there's no name, so the field is never blank.

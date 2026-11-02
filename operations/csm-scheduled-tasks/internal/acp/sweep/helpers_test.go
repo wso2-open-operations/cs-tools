@@ -18,16 +18,22 @@ package sweep
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/notify"
 )
 
 type mockEntityReader struct {
-	searchAccountContactsFn         func(ctx context.Context, accountID string, body []byte) ([]byte, error)
-	searchProjectContactsFn         func(ctx context.Context, projectID string, body []byte) ([]byte, error)
-	searchProjectsFn                func(ctx context.Context, body []byte) ([]byte, error)
-	searchProjectsCalls             [][]byte
-	getProjectFn                    func(ctx context.Context, id string) ([]byte, error)
+	searchAccountContactsFn func(ctx context.Context, accountID string, body []byte) ([]byte, error)
+	searchProjectContactsFn func(ctx context.Context, projectID string, body []byte) ([]byte, error)
+	searchProjectsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchProjectsCalls     [][]byte
+	getProjectFn            func(ctx context.Context, id string) ([]byte, error)
+	getProjectCalls         []string
+	// listed holds each project as the last search listed it, by id: with no
+	// getProjectFn, GetProject answers from it, so the sweep's re-read of a
+	// listed project sees the listing unless a test says otherwise.
+	listed                          map[string][]byte
 	getAccountFn                    func(ctx context.Context, id string) ([]byte, error)
 	getAccountCalls                 []string
 	searchProjectOpportunityLinksFn func(ctx context.Context, body []byte) ([]byte, error)
@@ -69,18 +75,39 @@ func (m *mockEntityReader) GetAccount(ctx context.Context, id string) ([]byte, e
 }
 
 func (m *mockEntityReader) GetProject(ctx context.Context, id string) ([]byte, error) {
+	m.getProjectCalls = append(m.getProjectCalls, id)
 	if m.getProjectFn != nil {
 		return m.getProjectFn(ctx, id)
+	}
+	if raw, ok := m.listed[id]; ok {
+		return raw, nil
 	}
 	return []byte(`{}`), nil
 }
 
 func (m *mockEntityReader) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
 	m.searchProjectsCalls = append(m.searchProjectsCalls, body)
-	if m.searchProjectsFn != nil {
-		return m.searchProjectsFn(ctx, body)
+	if m.searchProjectsFn == nil {
+		return []byte(`{"projects":[],"total":0,"limit":50,"offset":0,"hasMore":false}`), nil
 	}
-	return []byte(`{"projects":[],"total":0,"limit":50,"offset":0,"hasMore":false}`), nil
+	raw, err := m.searchProjectsFn(ctx, body)
+	var page struct {
+		Projects []json.RawMessage `json:"projects"`
+	}
+	if err == nil && json.Unmarshal(raw, &page) == nil {
+		if m.listed == nil {
+			m.listed = map[string][]byte{}
+		}
+		for _, p := range page.Projects {
+			var ref struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(p, &ref) == nil && ref.ID != "" {
+				m.listed[ref.ID] = p
+			}
+		}
+	}
+	return raw, err
 }
 
 func (m *mockEntityReader) SearchAccountContacts(ctx context.Context, accountID string, body []byte) ([]byte, error) {

@@ -16,10 +16,10 @@
 
 // Package suspensionstate translates between the real, confirmed shape of a
 // project's suspensionProcessState (a free-form JSON blob written by an
-// existing ServiceNow suspension flow, keyed by
+// existing legacy suspension flow, keyed by
 // based_on_subscription_end_date/based_on_due_invoices/based_on_compliance —
 // confirmed via a real write against the dedicated test project
-// e3e87599-1bc7-6650-182c-0dc5604bcb68) and this component's own
+// 00000000-0000-4000-8000-000000000001) and this component's own
 // closure.NoticeWindow. Phase 1 reads/writes based_on_subscription_end_date;
 // Phase 2 reads/writes based_on_due_invoices the same way, via its own
 // parallel functions below — each track has its own independent

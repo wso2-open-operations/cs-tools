@@ -75,17 +75,20 @@ type salesforceDetails struct{ sf SalesforceReader }
 func (d salesforceDetails) forProject(ctx context.Context, proj project) (project, entityReader, error) {
 	sfID := strings.TrimSpace(stringValue(proj.SfID))
 	if sfID == "" {
-		return proj, nil, errors.New("project has no Salesforce id")
+		return proj, nil, &dataError{err: errors.New("project has no Salesforce id")}
 	}
 	sp, err := d.sf.GetProject(ctx, sfID)
+	if errors.Is(err, salesentity.ErrNotFound) {
+		return proj, nil, &dataError{err: fmt.Errorf("salesforce project: %w", err)}
+	}
 	if err != nil {
 		return proj, nil, fmt.Errorf("salesforce project: %w", err)
 	}
 	if proj.StartDate, err = salesforceDate(sp.StartDate); err != nil {
-		return proj, nil, fmt.Errorf("salesforce project start date: %w", err)
+		return proj, nil, &dataError{err: fmt.Errorf("salesforce project start date: %w", err)}
 	}
 	if proj.EndDate, err = salesforceDate(sp.EndDate); err != nil {
-		return proj, nil, fmt.Errorf("salesforce project end date: %w", err)
+		return proj, nil, &dataError{err: fmt.Errorf("salesforce project end date: %w", err)}
 	}
 
 	r := &salesforceReader{sf: d.sf, projectSfID: sfID}
@@ -95,6 +98,9 @@ func (d salesforceDetails) forProject(ctx context.Context, proj project) (projec
 		return proj, r, nil
 	}
 	cu, err := d.sf.GetCustomer(ctx, customerID)
+	if errors.Is(err, salesentity.ErrNotFound) {
+		return proj, nil, &dataError{err: fmt.Errorf("salesforce account: %w", err)}
+	}
 	if err != nil {
 		return proj, nil, fmt.Errorf("salesforce account: %w", err)
 	}
@@ -107,6 +113,17 @@ func (d salesforceDetails) forProject(ctx context.Context, proj project) (projec
 	proj.Account = &projectAccountRef{ID: customerID, Name: name, IsPartner: &isPartner}
 	return proj, r, nil
 }
+
+// dataError is a project whose own record cannot be used: no Salesforce id,
+// a Salesforce id Salesforce does not have, or a date that does not parse.
+// Every run would fail the same way until someone fixes the record, so the
+// project is skipped with a warning instead of failing the run (see
+// evaluate). A transient failure (Salesforce down, a timeout) is not one.
+type dataError struct{ err error }
+
+func (e *dataError) Error() string { return e.err.Error() }
+
+func (e *dataError) Unwrap() error { return e.err }
 
 // salesforceDate reads a Salesforce Date ("2026-10-13", or a datetime whose
 // first ten characters are the date) as UTC midnight, the value CSM's copy

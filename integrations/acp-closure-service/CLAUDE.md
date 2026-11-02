@@ -1,5 +1,11 @@
 # ACP Closure Service
 
+**Superseded by `operations/csm-scheduled-tasks`' `acp_closure` sub-cron.**
+`main` refuses to start unless `DRY_RUN=true` and `IS_EMAIL_SEND_ENABLED=false`,
+so this service can only decide and log, never run for real beside
+`acp_closure`. Its rules are frozen: change `internal/acp` there instead. The
+rest of this file describes the service as built.
+
 Go port of Phase 1 of the Account Closure Process (ACP) — subscription
 end-date closure only. Ports the decision/action logic from
 `docs/legacy-servicenow-reference/ACPMainProcess.js` and
@@ -493,8 +499,8 @@ isn't lost or re-litigated:
   - No-business-contact (see below): `"[Urgent] [ACP] No Business Contacts
     Specified for Project {ProjectName}"`.
   `ProjectName` itself often already contains the word "Subscription"
-  (e.g. `"TICKETNETWORK - Subscription"`), which is why a literal internal
-  subject can visually resemble "...Subscription of TicketNetwork" without
+  (e.g. `"EXAMPLETIX - Subscription"`), which is why a literal internal
+  subject can visually resemble "...Subscription of ExampleTix" without
   "Subscription of" being separate template wording.
 - **Every notice has a real `Body` now** — not just the no-business-contact
   one. Internal bodies (`internalNoticeBody`) open with a greeting that
@@ -618,7 +624,7 @@ already reads the field from both endpoints.
 
 **"Invoice Id" shows the invoice number, not a record ID.** The internal
 invoice notice's "Invoice Id:" field shows the invoice's `name` (ServiceNow
-`u_name`, e.g. `US20268838`), which is what the real legacy email shows. The
+`u_name`, e.g. `US00000001`), which is what the real legacy email shows. The
 API's `id` is an internal record ID (a UUID) that nobody recognises. The
 invoice's Salesforce ID (ServiceNow `u_id`, the API's `sfId`) is used only
 for the "Open in Salesforce" link, as in the reference email. Confirmed by
@@ -662,7 +668,7 @@ icon is deliberately left out, as for the Project Name link.
 Free-form JSON written by an existing, live ServiceNow suspension flow —
 **not** something this component's design invented. Confirmed via a real
 write against the dedicated test project
-(`e3e87599-1bc7-6650-182c-0dc5604bcb68`):
+(`00000000-0000-4000-8000-000000000001`):
 
 ```json
 {
@@ -864,7 +870,7 @@ plain authenticated HTTP call.
   gets wrapped in `emailHTMLTemplate` (`renderEmailHTML`), unconditionally:
   a real branded shell (WSO2 logo, orange accent border, footer
   disclaimer), confirmed against real received examples of both kinds
-  (e.g. a real internal day-0 notice, "Dear Nisha Farook..."). An earlier
+  (e.g. a real internal day-0 notice, "Dear Nora Example..."). An earlier
   version of this code kept the internal notice on the bare
   `plainTextToHTML` fragment alone (based on a different, less complete
   reference) — that was wrong, corrected once a fuller real example

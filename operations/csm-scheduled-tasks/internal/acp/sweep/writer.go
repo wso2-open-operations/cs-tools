@@ -19,7 +19,10 @@ package sweep
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/apierror"
 )
 
 // CSMWriter writes a CSM project. Satisfied by *entity.Client.
@@ -45,9 +48,45 @@ func NewWriter(csm CSMWriter, sf SalesforceStatusWriter) *Writer {
 	return &Writer{csm: csm, sf: sf}
 }
 
-// UpdateProject writes the CSM project id.
+// UpdateProject writes the CSM project id. A failure that every other
+// project's write would hit too is a *writesFailingError, which stops the
+// run (see evaluate).
 func (w *Writer) UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error) {
-	return w.csm.UpdateProject(ctx, id, body)
+	resp, err := w.csm.UpdateProject(ctx, id, body)
+	if err != nil && failsEveryWrite(err) {
+		return nil, &writesFailingError{err: err}
+	}
+	return resp, err
+}
+
+// writesFailingError is a CSM write failure that is not about the project:
+// the write was refused (401/403: this component's client id missing from
+// entity-service's M2M_CLIENT_IDS), throttled (429), or CSM is down (5xx, or
+// no response). Notices go out before they are recorded, so carrying on
+// would send every remaining due notice without recording it, and the next
+// run would send them all again.
+type writesFailingError struct{ err error }
+
+func (e *writesFailingError) Error() string {
+	return "CSM is not taking writes: " + e.err.Error()
+}
+
+func (e *writesFailingError) Unwrap() error { return e.err }
+
+// failsEveryWrite reports whether err, from a CSM write, would fail any
+// project's write: anything but a 4xx about this request (a 400, 404, 409
+// or 422 is the project's own).
+func failsEveryWrite(err error) bool {
+	var ae *apierror.Error
+	if !errors.As(err, &ae) {
+		return true
+	}
+	switch {
+	case ae.StatusCode == http.StatusUnauthorized, ae.StatusCode == http.StatusForbidden,
+		ae.StatusCode == http.StatusTooManyRequests, ae.StatusCode >= 500:
+		return true
+	}
+	return false
 }
 
 // SuspendInSalesforce sets State__c to Suspended on the Salesforce project

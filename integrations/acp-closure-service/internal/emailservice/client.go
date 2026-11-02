@@ -15,11 +15,11 @@
 // under the License.
 
 // Package emailservice is an HTTP client for WSO2's internal email
-// notification service (owned by Rashmika's team). The real wire contract
+// notification service (owned by the CSM notifications team). The real wire contract
 // was confirmed directly against that service's own client code
 // (integrations/csm-notification-service/internal/notifications/email.go,
 // dev-app-csm-portal branch) — POST /send-email, OAuth2 client-credentials
-// auth, no scopes required (confirmed explicitly with Rashmika — unlike
+// auth, no scopes required (confirmed explicitly with its owners — unlike
 // csm-integration-service, this token endpoint doesn't need one). Only the
 // fields this component actually uses (to, cc, subject, an HTML body) are
 // exposed; bcc/replyTo/attachments exist on the real API but have no ACP
@@ -91,7 +91,7 @@ func NewClient(cfg Config) (*Client, error) {
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
 		TokenURL:     cfg.TokenURL,
-		// No Scopes: confirmed with Rashmika that this token endpoint,
+		// No Scopes: confirmed with its owners that this token endpoint,
 		// unlike csm-integration-service's, requires none.
 	}
 

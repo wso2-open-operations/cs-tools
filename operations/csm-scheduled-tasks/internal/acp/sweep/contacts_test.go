@@ -207,7 +207,7 @@ func TestProcessProject_SkipsAccountContactsWhenBusinessContactsFound(t *testing
 }
 
 // realV10ProjectContacts has the shape of a live csm-integration-service
-// v1.0 (ServiceNow) contacts response: "roles" holds only ServiceNow access
+// v1.0 (legacy data source) contacts response: "roles" holds only legacy access
 // roles, never project roles. Names and addresses are made up.
 const realV10ProjectContacts = `{"contacts":[
 	{"id":"00000000-0000-4000-8000-000000000003","name":"Pat Partner","email":"pat.partner@customer.example","registrationState":"REGISTERED","notificationsEnabled":true,"roles":["sn_customerservice.partner","sn_customerservice.customer"],"customerContactPresent":true,"grantsCaseAccess":true},

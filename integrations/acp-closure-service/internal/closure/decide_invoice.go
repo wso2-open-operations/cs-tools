@@ -60,7 +60,7 @@ func DecideInvoice(
 // account with a primary partner always uses it, regardless of the
 // invoice's own EULA version; otherwise it's decided by the EULA version
 // alone. eulaVersion <= 0 (unset/unknown) never uses it on its own — the
-// legacy code's "eula_version > 0" guard exists because ServiceNow returns
+// legacy code's "eula_version > 0" guard exists because the legacy system returns
 // 0 for a missing decimal field, not because 0 is a real EULA version.
 func usesGracePeriod(eulaVersion float64, hasPrimaryPartner bool) bool {
 	return hasPrimaryPartner || (eulaVersion > 0 && eulaVersion <= 3.3)

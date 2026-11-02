@@ -233,13 +233,13 @@ func TestRun_PageFetchFailureIsFatal(t *testing.T) {
 // SearchProjects sweep at all — proving a scoped run can't accidentally
 // touch every open project in the environment.
 func TestRun_ScopedToProjectIDFetchesOnlyThatProject(t *testing.T) {
-	const testProjectID = "e3e87599-1bc7-6650-182c-0dc5604bcb68"
+	const testProjectID = "00000000-0000-4000-8000-000000000001"
 
 	var gotID string
 	reader := &mockEntityReader{
 		getProjectFn: func(ctx context.Context, id string) ([]byte, error) {
 			gotID = id
-			return []byte(`{"id": "` + testProjectID + `", "account": {"id": "f213fdd1-1b4b-a650-a002-c9d3604bcbac"}, "endDate": null}`), nil
+			return []byte(`{"id": "` + testProjectID + `", "account": {"id": "00000000-0000-4000-8000-000000000002"}, "endDate": null}`), nil
 		},
 		searchProjectsFn: func(ctx context.Context, body []byte) ([]byte, error) {
 			t.Fatal("SearchProjects should not be called when scoped to a single project")
@@ -278,7 +278,7 @@ func TestRun_ScopedProjectFetchFailureIsFatal(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "e3e87599-1bc7-6650-182c-0dc5604bcb68", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "00000000-0000-4000-8000-000000000001", nil)
 	if err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
@@ -335,10 +335,10 @@ func TestRun_SkipsExcludedProjectsInBroadSweep(t *testing.T) {
 // TestRun_ScopedToProjectIDSkipsExcludedProjectWithoutFetching verifies the
 // ACP_TEST_PROJECT_ID + ACP_EXCLUDED_PROJECT_IDS interaction: if the scoped
 // projectID is itself excluded, Run must not call GetProject at all — per
-// Sajith Ekanayake's explicit requirement, excluded projects must not even
+// an explicit design requirement, excluded projects must not even
 // have their details fetched, not just be skipped after fetching.
 func TestRun_ScopedToProjectIDSkipsExcludedProjectWithoutFetching(t *testing.T) {
-	const excludedID = "e3e87599-1bc7-6650-182c-0dc5604bcb68"
+	const excludedID = "00000000-0000-4000-8000-000000000001"
 
 	reader := &mockEntityReader{
 		getProjectFn: func(ctx context.Context, id string) ([]byte, error) {
