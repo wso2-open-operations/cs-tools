@@ -118,6 +118,18 @@ describe("getUpdateStreamKey", () => {
     expect(getUpdateStreamKey("wso2am")).toBe("wso2am");
   });
 
+  it("leaves a product with no catalogue key exactly as it was", () => {
+    // A product whose `code` is null reaches here with its display label as the
+    // key (recommendedLevelsProductKey). That never matched an update stream,
+    // before profiles or now; the profile must not change that either way.
+    expect(getUpdateStreamKey("WSO2 API Manager", "Traffic Manager")).toBe(
+      "WSO2 API Manager",
+    );
+    expect(getUpdateStreamKey("WSO2 API Manager", null)).toBe(
+      "WSO2 API Manager",
+    );
+  });
+
   it("never remaps another product, even for a profile name that matches", () => {
     expect(getUpdateStreamKey("wso2is", "Traffic Manager")).toBe("wso2is");
     expect(getUpdateStreamKey("", "Traffic Manager")).toBe("");

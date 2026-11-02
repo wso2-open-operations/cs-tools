@@ -134,6 +134,21 @@ describe("UpdateHistoryTab update-level streams", () => {
     expect(offeredLevels()).toEqual([]);
   });
 
+  it("offers nothing for a product keyed by its label, as before profiles", () => {
+    // No catalogue key (product.code is null): the display label matches no
+    // update stream. Unchanged behaviour, pinned so the profile work cannot
+    // alter it.
+    render(
+      <UpdateHistoryTab
+        {...baseProps}
+        productName="WSO2 API Manager"
+        fallbackProductName="WSO2 API Manager"
+      />,
+    );
+
+    expect(offeredLevels()).toEqual([]);
+  });
+
   it("keeps working without a fallback name", () => {
     render(<UpdateHistoryTab {...baseProps} productName="wso2am-acp" />);
 
