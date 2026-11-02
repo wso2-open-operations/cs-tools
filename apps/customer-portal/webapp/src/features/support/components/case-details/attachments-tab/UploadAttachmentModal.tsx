@@ -17,6 +17,7 @@
 import type { UploadAttachmentModalProps } from "@features/support/types/supportComponents";
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -24,7 +25,9 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  LinearProgress,
   TextField,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
@@ -34,10 +37,11 @@ import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportCo
 import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   entityAttachmentMaxBytes,
-  formatLimitMb,
+  formatLimit,
 } from "@config/attachmentLimitsConfig";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import {
+  isAbortError,
   UploadConfirmPendingError,
   type StoredUploadStep,
 } from "@api/storedAttachments";
@@ -93,6 +97,9 @@ export default function UploadAttachmentModal({
   // steps; off, it is sent as base64 through the portal backend as before.
   const useStored = isEntityAttachmentsEnabled();
   const [uploadStep, setUploadStep] = useState<StoredUploadStep | null>(null);
+  // Bytes sent so far; set only while a large (TUS) upload runs.
+  const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [storedError, setStoredError] = useState<string | null>(null);
   // Set when the file arrived but the final confirm failed: retry only that step.
   const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
@@ -103,7 +110,7 @@ export default function UploadAttachmentModal({
   const maxBytes = useStored
     ? entityAttachmentMaxBytes()
     : MAX_ATTACHMENT_SIZE_BYTES;
-  const maxLabel = `${formatLimitMb(maxBytes)} MB`;
+  const maxLabel = formatLimit(maxBytes);
   const isPending =
     storedUpload.isPending ||
     storedConfirm.isPending ||
@@ -134,11 +141,16 @@ export default function UploadAttachmentModal({
     setFileSizeErrorVisible(false);
     setReadErrorVisible(false);
     setUploadStep(null);
+    setProgress(null);
     setStoredError(null);
     setPendingConfirm(null);
   }, []);
 
   const handleClose = useCallback(() => {
+    // Cancels a large upload still running; the pending row is left to the
+    // server's cleanup. No effect on a finished or multipart upload.
+    abortRef.current?.abort();
+    abortRef.current = null;
     reset();
     onClose();
   }, [onClose, reset]);
@@ -209,6 +221,9 @@ export default function UploadAttachmentModal({
 
     if (useStored) {
       setStoredError(null);
+      setProgress(null);
+      const controller = new AbortController();
+      abortRef.current = controller;
       storedUpload.mutate(
         {
           type: isDeploymentMode ? "deployment" : "work_item",
@@ -217,6 +232,8 @@ export default function UploadAttachmentModal({
           body: { name: attachmentName },
           ...(isDeploymentMode ? { deploymentId } : { caseId }),
           onStep: setUploadStep,
+          signal: controller.signal,
+          onProgress: (sent, total) => setProgress({ sent, total }),
         },
         {
           onSuccess: () => {
@@ -224,7 +241,10 @@ export default function UploadAttachmentModal({
             onSuccess?.();
           },
           onError: (error) => {
+            if (controller.signal.aborted || isAbortError(error)) return;
+            abortRef.current = null;
             setUploadStep(null);
+            setProgress(null);
             if (error instanceof UploadConfirmPendingError) {
               setPendingConfirm(error.attachmentId);
             }
@@ -389,6 +409,25 @@ export default function UploadAttachmentModal({
           <SelectedFileDisplay fileName={file.name} fileType={file.type} />
         )}
 
+        {progress && storedUpload.isPending && (
+          <Box sx={{ mt: 2 }}>
+            <LinearProgress
+              variant="determinate"
+              value={
+                progress.total > 0
+                  ? Math.min(100, (progress.sent / progress.total) * 100)
+                  : 0
+              }
+              aria-label="Upload progress"
+            />
+            <Typography variant="caption" color="text.secondary">
+              {progress.total > 0
+                ? `${Math.min(100, Math.floor((progress.sent / progress.total) * 100))}%`
+                : ""}
+            </Typography>
+          </Box>
+        )}
+
         <TextField
           fullWidth
           label={isDeploymentMode ? "Document name" : "Attachment name"}
@@ -413,7 +452,17 @@ export default function UploadAttachmentModal({
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2, pt: 1 }}>
-        <Button onClick={handleClose} disabled={isPending}>
+        <Button
+          onClick={handleClose}
+          disabled={
+            isPending &&
+            !(
+              storedUpload.isPending &&
+              (uploadStep === "preparing" ||
+                (uploadStep === "uploading" && progress !== null))
+            )
+          }
+        >
           Cancel
         </Button>
         {isPending ? (

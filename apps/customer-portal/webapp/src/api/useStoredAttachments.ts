@@ -68,6 +68,10 @@ export interface StoredUploadVariables {
   caseId?: string;
   deploymentId?: string;
   onStep?: (step: StoredUploadStep) => void;
+  /** Cancels a large (TUS) upload. */
+  signal?: AbortSignal;
+  /** Bytes sent so far, for a large (TUS) upload. */
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
 }
 
 /**
@@ -98,13 +102,15 @@ export function useStoredAttachmentUpload() {
 
   const upload = useMutation<StoredAttachmentConfirmed, Error, StoredUploadVariables>({
     mutationKey: ["postCaseAttachment"],
-    mutationFn: ({ type, parentId, file, body, onStep }) =>
+    mutationFn: ({ type, parentId, file, body, onStep, signal, onProgress }) =>
       uploadStoredAttachment(authFetch, {
         type,
         parentId,
         file,
         name: body.name,
         onStep,
+        signal,
+        onProgress,
       }),
     onSuccess: (_data, vars) => invalidate(vars),
   });

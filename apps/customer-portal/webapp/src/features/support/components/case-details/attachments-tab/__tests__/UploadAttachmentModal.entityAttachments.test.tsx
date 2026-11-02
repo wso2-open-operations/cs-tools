@@ -139,4 +139,34 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     });
     expect(uploadMutate).toHaveBeenCalledTimes(1);
   });
+
+  it("passes an abort signal and a progress callback, and shows the GB limit", () => {
+    (window as unknown as { config?: unknown }).config = {
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240,
+    };
+    const { pick } = renderModal({ caseId: "case-1" });
+    const big = new File(["x"], "big.bin");
+    Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 * 1024 });
+    pick(big);
+    expect(screen.getByText(/exceeds 10 GB limit/i)).toBeInTheDocument();
+    pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    const [vars] = uploadMutate.mock.calls[0];
+    expect(vars.signal).toBeInstanceOf(AbortSignal);
+    expect(typeof vars.onProgress).toBe("function");
+  });
+
+  it("aborts the running upload when the modal is closed", () => {
+    const { pick, onClose } = renderModal({ caseId: "case-1" });
+    pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    const [vars, options] = uploadMutate.mock.calls[0];
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(vars.signal.aborted).toBe(true);
+    expect(onClose).toHaveBeenCalled();
+    // The rejection that follows a cancel is not shown as an error.
+    options.onError(Object.assign(new Error("The upload was cancelled."), { name: "AbortError" }));
+    expect(screen.queryByText("The upload was cancelled.")).not.toBeInTheDocument();
+  });
 });

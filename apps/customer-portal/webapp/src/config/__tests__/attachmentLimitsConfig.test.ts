@@ -18,6 +18,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   entityAttachmentMaxBytes,
+  formatLimit,
   formatLimitMb,
   inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
@@ -58,5 +59,13 @@ describe("attachment size limits", () => {
   it("formats a limit as MB for messages", () => {
     expect(formatLimitMb(25 * MIB)).toBe("25");
     expect(formatLimitMb(2.5 * MIB)).toBe("2.5");
+  });
+
+  it("formats a limit as GB from 1024 MB, else MB", () => {
+    expect(formatLimit(10 * MIB)).toBe("10 MB");
+    expect(formatLimit(1023 * MIB)).toBe("1023 MB");
+    expect(formatLimit(1024 * MIB)).toBe("1 GB");
+    expect(formatLimit(10 * 1024 * MIB)).toBe("10 GB");
+    expect(formatLimit(1.5 * 1024 * MIB)).toBe("1.5 GB");
   });
 });
