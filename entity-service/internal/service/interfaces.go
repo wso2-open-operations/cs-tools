@@ -165,6 +165,18 @@ type CustomDashboardTeamShareService interface {
 	RemoveTeamShare(ctx context.Context, dashboardID, teamID string) error
 }
 
+// CustomDashboardLinkService lets anyone with a saved dashboard's link view
+// it, view only, internal staff only. Postgres-only; the caller is resolved
+// from x-user-id-token. Only the owner reads or changes the link; whoever
+// opens it then sees the dashboard through CustomDashboardShareService's
+// ListSharedWithMe / GetSharedWithMe.
+type CustomDashboardLinkService interface {
+	GetLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	EnableLink(ctx context.Context, dashboardID string) (domain.CustomDashboardLink, error)
+	DisableLink(ctx context.Context, dashboardID string) error
+	OpenLink(ctx context.Context, req domain.OpenCustomDashboardLinkRequest) (domain.OpenedCustomDashboardLink, error)
+}
+
 // RunbookService manages the alert-name to runbook catalog (Operations > Runbooks).
 // PortalBannerService is the HTML banners both portals show. Customer and CSM
 // reads each return only published rows for that portal. Writes require a

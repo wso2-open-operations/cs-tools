@@ -70,8 +70,9 @@ function SharedDashboardView({ id }: { id: string }): JSX.Element {
  * the user (`GET /dashboards/shared`), view only: no edit, share or delete. A
  * switcher with search, as My Dashboards has, each entry naming who shared
  * it ("Shared by <owner>", or "Shared with your team <team> by <owner>" when
- * it reached the user through a team; "a former user" once the owner's user
- * has been deleted); the open one says the same and "View only". No id in the URL,
+ * it reached the user through a team, "Opened from a link shared by <owner>"
+ * when they have it only through its link; "a former user" once the owner's
+ * user has been deleted); the open one says the same and "View only". No id in the URL,
  * or one that is not in the list, opens the first one; while the list is
  * being re-read an unknown id waits for it, as on My Dashboards.
  */
@@ -134,7 +135,8 @@ export default function SharedDashboardsPage(): JSX.Element {
 
   const sharedBy = (d: SharedDashboardSummary): string => {
     const owner = d.owner ? d.owner.name || d.owner.email : "a former user";
-    return d.sharedViaTeam ? `Shared with your team ${d.sharedViaTeam.name} by ${owner}` : `Shared by ${owner}`;
+    if (d.sharedViaTeam) return `Shared with your team ${d.sharedViaTeam.name} by ${owner}`;
+    return d.sharedViaLink ? `Opened from a link shared by ${owner}` : `Shared by ${owner}`;
   };
 
   return (

@@ -644,6 +644,37 @@ are. Rename and an edit's Save send the served form back, and only the backend's
 into the stored definition unchanged: do not build a saved dashboard's PUT from anything other than
 what `GET /dashboards/custom/{id}` returned.
 
+## Sharing a dashboard by link (the Share dialog's Anyone tab, and the link page)
+
+The owner shares a saved dashboard with people, teams or anyone internal who has its link, from
+`ShareCustomDashboardDialog` (`features/csm-custom-dashboards/components`), whose toggle reads
+**People / Teams / Anyone**. The rules are entity-service's (its `CLAUDE.md`, "Saved custom dashboards:
+sharing by link"); the webapp only shows them.
+
+- **Anyone tab**: `DashboardLinkSection` in place of the search. The switch "Anyone with CSM Portal Viewer
+  access and the link can view" turns the link on (`usePutCustomDashboardLink`) or off
+  (`useDeleteCustomDashboardLink`), both answering into the cached link (`useGetCustomDashboardLink`,
+  key `CSM_CUSTOM_DASHBOARD_LINK`). While it is on: the link (`dashboardLinkUrl`,
+  `utils/dashboardLinkUrl.ts`, `/dashboard/shared/link/<linkId>` on this origin) with a Copy button, and
+  "Opened by N people" (never who). Turning it off takes the dashboard from everyone who had it only
+  through the link; turning it on again makes a new link.
+- **"Shared with"**, under every tab, starts with an "Anyone with CSM Portal Viewer access" row while the
+  link is on. The dialog reads the same link query, so the switch changes the row at once. "Not shared
+  with anyone yet." shows only when no person, no team and the link is known to be off: a link still
+  loading waits, and one that could not be read says so instead.
+- **The link page** (`pages/OpenDashboardLinkPage.tsx`, route `dashboard/shared/link/:linkId` in
+  `App.tsx`, under the Dashboards tab strip): opens the link once (`useOpenDashboardLink`, the id in the
+  POST body, never a URL the backend logs) and replaces itself with `/dashboard/my/<id>` when the caller
+  owns it, else `/dashboard/shared/<id>`. A 4xx shows the backend's words ("Couldn't open the link", with
+  a way to Shared Dashboards); anything else is generic; the link id is never shown. **The answer is kept
+  in the page's own state from `mutateAsync`, not read from the mutation**: `main.tsx` renders under
+  `StrictMode`, whose remount detaches `useMutation`'s observer, so `isSuccess` never arrived and the page
+  hung on "Opening the dashboard…" (a test runs it under `StrictMode`). A ref keeps the call to one per
+  link id.
+- **Shared Dashboards** names one the user has only through its link "Opened from a link shared by
+  <owner>" (`sharedViaLink`); a team share's wording wins when both are set. A dashboard whose owner was
+  deleted names them "a former user"; it stays while somebody can still see it, its link included.
+
 ## Testing
 
 - Runner: Vitest (`jsdom` environment), configured inline in `vite.config.ts` — no separate `vitest.config.ts`.

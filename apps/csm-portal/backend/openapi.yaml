@@ -5431,6 +5431,179 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/link:
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved dashboards.
+      description: >
+        Off for every dashboard until its owner turns it on. While on, the
+        response carries the link id (the webapp builds the link from it) and
+        how many people have opened the link; who they are is not listed.
+        Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only.
+      operationId: getCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Turn on the link to one of the caller's saved dashboards.
+      description: >
+        No request body. Any internal user who opens the link
+        (POST /dashboards/shared/link) can then view the dashboard, view only,
+        under Shared Dashboards, while the link stays on. Turning on a link
+        that is already on keeps the same link. Owner only; CS engineers and
+        admins only.
+      operationId: enableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Turn off the link to one of the caller's saved dashboards.
+      description: >
+        The link stops working, and everyone who had the dashboard only
+        through it loses it; turning it on again makes a new link. Turning off
+        a link that is off is not an error. Owner only; CS engineers and
+        admins only.
+      operationId: disableCustomDashboardLink
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /dashboards/shared:
     get:
       summary: List the dashboards other users shared with the caller.
@@ -5480,6 +5653,67 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "422":
           description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/link:
+    post:
+      summary: Open a saved dashboard's link.
+      description: >
+        The link id is in the body, not the path, so it stays out of access
+        logs. From then on the dashboard is listed under GET /dashboards/shared
+        (sharedViaLink true) while the link stays on, unless the caller owns
+        it (own true: open it under My Dashboards) or already has it through a
+        person or team share. Opening it again changes nothing. 400 when
+        linkId is not a UUID; 404 when the link is unknown or turned off.
+        Every portal role that can view dashboards.
+      operationId: openDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDashboardLinkRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedDashboardLink'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
           content:
             application/json:
               schema:
@@ -18570,7 +18804,7 @@ components:
     SharedViaTeam:
       type: object
       nullable: true
-      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name).
+      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name).
       required:
         - id
         - name
@@ -18584,6 +18818,37 @@ components:
         type:
           type: string
           description: The team's type, e.g. cre-abt, sre-abt.
+    CustomDashboardLink:
+      type: object
+      required: [enabled, openedBy]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether anyone internal with the link may view the dashboard.
+        linkId:
+          type: string
+          format: uuid
+          description: The id in the link; absent while the link is off. A new one each time the link is turned on.
+        openedBy:
+          type: integer
+          description: How many people have opened the link since it was turned on.
+    OpenDashboardLinkRequest:
+      type: object
+      required: [linkId]
+      properties:
+        linkId:
+          type: string
+          format: uuid
+    OpenedDashboardLink:
+      type: object
+      required: [dashboardId, own]
+      properties:
+        dashboardId:
+          type: string
+          format: uuid
+        own:
+          type: boolean
+          description: True when the caller owns the dashboard (open it with GET /dashboards/custom/{id}); otherwise GET /dashboards/shared/{id}.
     SharedDashboardSummary:
       type: object
       required:
@@ -18591,6 +18856,7 @@ components:
         - name
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -18606,6 +18872,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -18628,6 +18897,7 @@ components:
         - dashboard
         - owner
         - sharedViaTeam
+        - sharedViaLink
         - sharedOn
         - updatedOn
       properties:
@@ -18640,6 +18910,9 @@ components:
           description: Who shared the dashboard (its owner); null once that user has been deleted.
         sharedViaTeam:
           $ref: '#/components/schemas/SharedViaTeam'
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link; false for a person or team share.
         sharedOn:
           type: string
           format: date-time

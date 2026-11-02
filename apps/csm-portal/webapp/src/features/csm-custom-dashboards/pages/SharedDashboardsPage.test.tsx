@@ -24,6 +24,7 @@ interface Summary {
   name: string;
   owner: { id: string | null; email: string; name: string } | null;
   sharedViaTeam: { id: string; name: string; type: string } | null;
+  sharedViaLink: boolean;
   sharedOn: string;
   updatedOn: string;
 }
@@ -47,8 +48,8 @@ import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDa
 
 const jane = { id: "jane", email: "jane.doe@example.com", name: "Jane Doe" };
 const ben = { id: "ben", email: "ben@example.com", name: "Ben Bee" };
-const A: Summary = { id: "5e636a12-0000-4000-8000-00000000000a", name: "Alpha", owner: jane, sharedViaTeam: null, sharedOn: "x", updatedOn: "y" };
-const B: Summary = { id: "5e636a12-0000-4000-8000-00000000000b", name: "Beta", owner: ben, sharedViaTeam: null, sharedOn: "x", updatedOn: "y" };
+const A: Summary = { id: "5e636a12-0000-4000-8000-00000000000a", name: "Alpha", owner: jane, sharedViaTeam: null, sharedViaLink: false, sharedOn: "x", updatedOn: "y" };
+const B: Summary = { id: "5e636a12-0000-4000-8000-00000000000b", name: "Beta", owner: ben, sharedViaTeam: null, sharedViaLink: false, sharedOn: "x", updatedOn: "y" };
 const rigel = { id: "391737f4-0588-2f9f-9bdd-b18d39f83d9a", name: "Rigel", type: "cre-abt" };
 
 function sharedWith(widgetId: string) {
@@ -139,6 +140,22 @@ describe("SharedDashboardsPage", () => {
       .filter((o) => !o.contains(box) && o.getAttribute("aria-disabled") !== "true")
       .map((o) => o.textContent);
     expect(visible).toEqual(["AlphaShared with your team Rigel by Jane Doe"]);
+  });
+
+  it("says when a dashboard reached the user only through its link", () => {
+    listState = { data: [{ ...A, sharedViaLink: true }, B] };
+    renderAt(`/dashboard/shared/${A.id}`);
+    expect(screen.getByText(/Alpha · Opened from a link shared by Jane Doe/)).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Select dashboard" }));
+    expect(screen.getAllByText("Opened from a link shared by Jane Doe").length).toBeGreaterThan(0);
+    expect(screen.getByText("Shared by Ben Bee")).toBeInTheDocument();
+  });
+
+  it("names the team over the link when both are set", () => {
+    listState = { data: [{ ...A, sharedViaTeam: rigel, sharedViaLink: true }, B] };
+    renderAt(`/dashboard/shared/${A.id}`);
+    expect(screen.getByText(/Alpha · Shared with your team Rigel by Jane Doe/)).toBeInTheDocument();
   });
 
   it("names a former user when the owner's user has been deleted", () => {

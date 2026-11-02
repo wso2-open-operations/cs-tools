@@ -156,12 +156,14 @@ type customDashboardTeamShareListResponse struct {
 // caller, without its definition. Owner is nil once the owner's user has been
 // deleted (the dashboard stays while it is shared). SharedViaTeam is the
 // caller's team it was shared with; nil when it was shared with the caller
-// directly.
+// directly or only by link. SharedViaLink is true when the caller has it only
+// because they opened its link.
 type SharedCustomDashboardSummary struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Owner         *CustomDashboardPerson `json:"owner"`
 	SharedViaTeam *CustomDashboardTeam   `json:"sharedViaTeam"`
+	SharedViaLink bool                   `json:"sharedViaLink"`
 	SharedOn      string                 `json:"sharedOn"`
 	UpdatedOn     string                 `json:"updatedOn"`
 }
@@ -171,14 +173,15 @@ type sharedCustomDashboardListResponse struct {
 }
 
 // SharedCustomDashboard is one dashboard shared with the caller, with its
-// definition (the owner's current version, view only). Owner and
-// SharedViaTeam as in SharedCustomDashboardSummary.
+// definition (the owner's current version, view only). Owner,
+// SharedViaTeam and SharedViaLink as in SharedCustomDashboardSummary.
 type SharedCustomDashboard struct {
 	ID            string                 `json:"id"`
 	Name          string                 `json:"name"`
 	Definition    string                 `json:"definition"`
 	Owner         *CustomDashboardPerson `json:"owner"`
 	SharedViaTeam *CustomDashboardTeam   `json:"sharedViaTeam"`
+	SharedViaLink bool                   `json:"sharedViaLink"`
 	SharedOn      string                 `json:"sharedOn"`
 	UpdatedOn     string                 `json:"updatedOn"`
 }
@@ -300,4 +303,79 @@ func (c *CustomerEntityClient) AddCustomDashboardTeamShare(ctx context.Context, 
 func (c *CustomerEntityClient) RemoveCustomDashboardTeamShare(ctx context.Context, id, teamID string) error {
 	_, err := c.do(ctx, http.MethodDelete, customDashboardTeamSharePath(id, teamID), nil)
 	return err
+}
+
+// CustomDashboardLink is whether anyone internal with a saved dashboard's link
+// may view it, as its owner sees it. LinkID is the id in the link, "" while it
+// is off; OpenedBy is how many people opened it since it was turned on.
+type CustomDashboardLink struct {
+	Enabled  bool   `json:"enabled"`
+	LinkID   string `json:"linkId,omitempty"`
+	OpenedBy int    `json:"openedBy"`
+}
+
+// OpenedCustomDashboardLink is the dashboard a link opened. Own is true when
+// the caller owns it; otherwise it is read as a shared dashboard.
+type OpenedCustomDashboardLink struct {
+	DashboardID string `json:"dashboardId"`
+	Own         bool   `json:"own"`
+}
+
+type openCustomDashboardLinkRequest struct {
+	LinkID string `json:"linkId"`
+}
+
+func decodeCustomDashboardLink(raw []byte) (CustomDashboardLink, error) {
+	var l CustomDashboardLink
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return CustomDashboardLink{}, fmt.Errorf("entity: decode custom dashboard link: %w", err)
+	}
+	return l, nil
+}
+
+// GetCustomDashboardLink calls GET /users/me/dashboards/{id}/link (owner
+// only: another user's dashboard is a 404).
+func (c *CustomerEntityClient) GetCustomDashboardLink(ctx context.Context, id string) (CustomDashboardLink, error) {
+	raw, err := c.do(ctx, http.MethodGet, customDashboardPath(id)+"/link", nil)
+	if err != nil {
+		return CustomDashboardLink{}, err
+	}
+	return decodeCustomDashboardLink(raw)
+}
+
+// EnableCustomDashboardLink calls PUT /users/me/dashboards/{id}/link (no
+// body) and returns the link; a link that is already on keeps its id.
+func (c *CustomerEntityClient) EnableCustomDashboardLink(ctx context.Context, id string) (CustomDashboardLink, error) {
+	raw, err := c.do(ctx, http.MethodPut, customDashboardPath(id)+"/link", nil)
+	if err != nil {
+		return CustomDashboardLink{}, err
+	}
+	return decodeCustomDashboardLink(raw)
+}
+
+// DisableCustomDashboardLink calls DELETE /users/me/dashboards/{id}/link
+// (204): the link stops working and whoever had the dashboard only through
+// it loses it.
+func (c *CustomerEntityClient) DisableCustomDashboardLink(ctx context.Context, id string) error {
+	_, err := c.do(ctx, http.MethodDelete, customDashboardPath(id)+"/link", nil)
+	return err
+}
+
+// OpenCustomDashboardLink calls POST /users/me/shared-dashboards/link with
+// the link id in the body (never the path, so it stays out of access logs).
+// An unknown or turned-off link is a 404 *apierror.Error.
+func (c *CustomerEntityClient) OpenCustomDashboardLink(ctx context.Context, linkID string) (OpenedCustomDashboardLink, error) {
+	body, err := json.Marshal(openCustomDashboardLinkRequest{LinkID: linkID})
+	if err != nil {
+		return OpenedCustomDashboardLink{}, fmt.Errorf("entity: encode custom dashboard link: %w", err)
+	}
+	raw, err := c.do(ctx, http.MethodPost, "/users/me/shared-dashboards/link", body)
+	if err != nil {
+		return OpenedCustomDashboardLink{}, err
+	}
+	var o OpenedCustomDashboardLink
+	if err := json.Unmarshal(raw, &o); err != nil {
+		return OpenedCustomDashboardLink{}, fmt.Errorf("entity: decode opened custom dashboard link: %w", err)
+	}
+	return o, nil
 }

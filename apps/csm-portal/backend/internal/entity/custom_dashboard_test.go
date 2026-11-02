@@ -375,3 +375,116 @@ func TestSharedCustomDashboards_DecodeTheTeam(t *testing.T) {
 		t.Fatalf("sharedViaTeam = %+v, %+v; want Rigel, then nil", list[0].SharedViaTeam, list[1].SharedViaTeam)
 	}
 }
+
+func TestSharedCustomDashboards_DecodeViaLink(t *testing.T) {
+	listClient, _ := newCustomDashboardTestClient(t, http.StatusOK,
+		`{"dashboards":[{"id":"`+testCustomDashboardID+`","name":"By link","owner":null,"sharedViaTeam":null,"sharedViaLink":true,"sharedOn":"a","updatedOn":"b"},`+
+			`{"id":"`+testCustomDashboardID+`","name":"Older entity-service","owner":null,"sharedOn":"a","updatedOn":"b"}]}`)
+	list, err := listClient.ListSharedCustomDashboards(userContext())
+	if err != nil || len(list) != 2 || !list[0].SharedViaLink || list[1].SharedViaLink {
+		t.Fatalf("list = %+v, %v; want via link, then not", list, err)
+	}
+	getClient, _ := newCustomDashboardTestClient(t, http.StatusOK,
+		`{"id":"`+testCustomDashboardID+`","name":"By link","definition":"{}","owner":null,"sharedViaTeam":null,"sharedViaLink":true,"sharedOn":"a","updatedOn":"b"}`)
+	d, err := getClient.GetSharedCustomDashboard(userContext(), testCustomDashboardID)
+	if err != nil || !d.SharedViaLink {
+		t.Fatalf("dashboard = %+v, %v; want via link", d, err)
+	}
+}
+
+const testLinkID = "5e636a12-0000-4000-8000-0000000000cc"
+
+func TestGetCustomDashboardLink(t *testing.T) {
+	client, got := newCustomDashboardTestClient(t, http.StatusOK, `{"enabled":true,"linkId":"`+testLinkID+`","openedBy":2}`)
+	l, err := client.GetCustomDashboardLink(userContext(), testCustomDashboardID)
+	if err != nil {
+		t.Fatalf("GetCustomDashboardLink: %v", err)
+	}
+	if got.method != http.MethodGet || got.path != "/users/me/dashboards/"+testCustomDashboardID+"/link" || got.userToken != "user-token" {
+		t.Errorf("request = %s %s (token %q)", got.method, got.path, got.userToken)
+	}
+	if l != (CustomDashboardLink{Enabled: true, LinkID: testLinkID, OpenedBy: 2}) {
+		t.Fatalf("link = %+v", l)
+	}
+}
+
+func TestEnableCustomDashboardLink(t *testing.T) {
+	client, got := newCustomDashboardTestClient(t, http.StatusOK, `{"enabled":true,"linkId":"`+testLinkID+`","openedBy":0}`)
+	l, err := client.EnableCustomDashboardLink(userContext(), testCustomDashboardID)
+	if err != nil {
+		t.Fatalf("EnableCustomDashboardLink: %v", err)
+	}
+	if got.method != http.MethodPut || got.path != "/users/me/dashboards/"+testCustomDashboardID+"/link" || got.body != "" {
+		t.Errorf("request = %s %s body %q, want PUT with no body", got.method, got.path, got.body)
+	}
+	if !l.Enabled || l.LinkID != testLinkID {
+		t.Fatalf("link = %+v", l)
+	}
+}
+
+func TestDisableCustomDashboardLink(t *testing.T) {
+	client, got := newCustomDashboardTestClient(t, http.StatusNoContent, "")
+	if err := client.DisableCustomDashboardLink(userContext(), testCustomDashboardID); err != nil {
+		t.Fatalf("DisableCustomDashboardLink: %v", err)
+	}
+	if got.method != http.MethodDelete || got.path != "/users/me/dashboards/"+testCustomDashboardID+"/link" {
+		t.Errorf("request = %s %s", got.method, got.path)
+	}
+}
+
+// The link id goes in the body, never the path, so it stays out of access logs.
+func TestOpenCustomDashboardLink(t *testing.T) {
+	client, got := newCustomDashboardTestClient(t, http.StatusOK, `{"dashboardId":"`+testCustomDashboardID+`","own":true}`)
+	o, err := client.OpenCustomDashboardLink(userContext(), testLinkID)
+	if err != nil {
+		t.Fatalf("OpenCustomDashboardLink: %v", err)
+	}
+	if got.method != http.MethodPost || got.path != "/users/me/shared-dashboards/link" || got.userToken != "user-token" {
+		t.Errorf("request = %s %s (token %q)", got.method, got.path, got.userToken)
+	}
+	var body map[string]string
+	if err := json.Unmarshal([]byte(got.body), &body); err != nil || len(body) != 1 || body["linkId"] != testLinkID {
+		t.Errorf("body = %q, want {\"linkId\": %q}", got.body, testLinkID)
+	}
+	if o.DashboardID != testCustomDashboardID || !o.Own {
+		t.Fatalf("opened = %+v", o)
+	}
+}
+
+func TestCustomDashboardLinkClient_PassesStatusErrorsThrough(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		call   func(*CustomerEntityClient) error
+	}{
+		{"get not the owner's", http.StatusNotFound, func(c *CustomerEntityClient) error {
+			_, err := c.GetCustomDashboardLink(userContext(), testCustomDashboardID)
+			return err
+		}},
+		{"enable not the owner's", http.StatusNotFound, func(c *CustomerEntityClient) error {
+			_, err := c.EnableCustomDashboardLink(userContext(), testCustomDashboardID)
+			return err
+		}},
+		{"disable not the owner's", http.StatusNotFound, func(c *CustomerEntityClient) error {
+			return c.DisableCustomDashboardLink(userContext(), testCustomDashboardID)
+		}},
+		{"open off or unknown", http.StatusNotFound, func(c *CustomerEntityClient) error {
+			_, err := c.OpenCustomDashboardLink(userContext(), testLinkID)
+			return err
+		}},
+		{"open bad link id", http.StatusBadRequest, func(c *CustomerEntityClient) error {
+			_, err := c.OpenCustomDashboardLink(userContext(), testLinkID)
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _ := newCustomDashboardTestClient(t, tc.status, `{"code":0,"message":"from entity-service"}`)
+			err := tc.call(client)
+			var apiErr *apierror.Error
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tc.status {
+				t.Fatalf("err = %v, want *apierror.Error with status %d", err, tc.status)
+			}
+		})
+	}
+}
