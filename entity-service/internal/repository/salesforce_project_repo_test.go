@@ -164,6 +164,8 @@ func (r scanRow) Scan(dest ...any) error {
 			*d = v.(time.Time)
 		case **string:
 			*d = v.(*string)
+		case *[]string:
+			*d = v.([]string)
 		case *int:
 			*d = v.(int)
 		case *int64:
@@ -427,7 +429,7 @@ func TestSalesforceProjectSQL_ColumnList(t *testing.T) {
 	if regexp.MustCompile(`\bonboarding_status\b`).MatchString(updateSalesforceProjectQuery) {
 		t.Error("project UPDATE writes onboarding_status")
 	}
-	if !strings.Contains(insertSalesforceProjectQuery, "'NOT_APPLICABLE'") || !regexp.MustCompile(`\bonboarding_status\b`).MatchString(insertSalesforceProjectQuery) {
+	if !strings.Contains(insertSalesforceProjectQuery, "'NOT_APPLICABLE'::onboarding_status_enum") || !regexp.MustCompile(`\bonboarding_status\b`).MatchString(insertSalesforceProjectQuery) {
 		t.Error("project INSERT must default onboarding_status to NOT_APPLICABLE")
 	}
 	if regexp.MustCompile(`\bis_active\b`).MatchString(updateSalesforceProjectQuery) {

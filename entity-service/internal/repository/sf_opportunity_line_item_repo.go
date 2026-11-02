@@ -85,6 +85,10 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, sfOpportunityLockKey(opportunitySfID)); err != nil {
 		return false, fmt.Errorf("upsert line item from salesforce: lock: %w", err)
 	}
+	previous, err := previousIDs(ctx, q, previousLineItemOpportunitiesQuery, li.LineItemSfID)
+	if err != nil {
+		return false, fmt.Errorf("upsert line item from salesforce: %w", err)
+	}
 	args := []any{
 		domain.SalesforceSyncActor,
 		opportunityID, li.Name, li.ProductName, li.Quantity,
@@ -105,6 +109,9 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 		created = true
 	}
 	if err := deriveOpportunityOnboarding(ctx, q, opportunityID); err != nil {
+		return false, err
+	}
+	if err := deriveMovedLineItemOpportunities(ctx, q, previous, opportunityID); err != nil {
 		return false, err
 	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {

@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -58,11 +59,16 @@ func TestDeriveOnboarding_ScopesAndBlankIDs(t *testing.T) {
 	if err := deriveOpportunityOnboarding(ctx, q, "o1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(q.sql) != 2 || q.sql[0] != deriveOnboardingForProjectQuery || q.sql[1] != deriveOnboardingForOpportunityQuery {
+	// Each derivation takes the shared lock immediately before its statement.
+	if len(q.sql) != 4 || !strings.Contains(q.sql[0], "pg_advisory_xact_lock") || q.sql[1] != deriveOnboardingForProjectQuery ||
+		!strings.Contains(q.sql[2], "pg_advisory_xact_lock") || q.sql[3] != deriveOnboardingForOpportunityQuery {
 		t.Fatalf("unexpected statements: %v", q.sql)
 	}
-	if q.args[0][1] != "p1" || q.args[1][1] != "o1" {
-		t.Errorf("scope args = %v, %v", q.args[0], q.args[1])
+	if q.args[0][0] != onboardingDeriveLockKey || q.args[2][0] != onboardingDeriveLockKey {
+		t.Errorf("lock keys = %v, %v", q.args[0], q.args[2])
+	}
+	if q.args[1][1] != "p1" || q.args[3][1] != "o1" {
+		t.Errorf("scope args = %v, %v", q.args[1], q.args[3])
 	}
 }
 
@@ -206,6 +212,122 @@ func TestDeriveOnboarding_Postgres(t *testing.T) {
 	for id, w := range want {
 		if g := read(id); g != w {
 			t.Errorf("project %s = %+v, want %+v", id, g, w)
+		}
+	}
+}
+
+// TestDeriveOnboarding_PostgresConcurrentLinkAndLine: a link and its onboarding
+// line are written in two concurrent transactions. Each derives right after its
+// own write; the shared lock makes the second derive wait for the first commit
+// and then see both rows, so the project ends NOT_STARTED whichever writer
+// commits second. Needs ENTITY_SERVICE_TEST_PG_DSN; creates and drops its own
+// schema.
+func TestDeriveOnboarding_PostgresConcurrentLinkAndLine(t *testing.T) {
+	dsn := os.Getenv("ENTITY_SERVICE_TEST_PG_DSN")
+	if dsn == "" {
+		t.Skip("ENTITY_SERVICE_TEST_PG_DSN not set")
+	}
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close(ctx)
+	const schema = "onb_derive_concurrency_test"
+	for _, stmt := range []string{
+		`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`,
+		`CREATE SCHEMA ` + schema,
+		`CREATE TYPE ` + schema + `.onboarding_status_enum AS ENUM ('NOT_STARTED','IN_PROGRESS','COMPLETED','ON_HOLD','NOT_APPLICABLE','EXPIRED','CANCELLED')`,
+		`CREATE TABLE ` + schema + `.project (id uuid PRIMARY KEY, onboarding_status ` + schema + `.onboarding_status_enum,
+			onboarding_start_date date, onboarding_expiry_date date, total_onboarding_duration interval,
+			remaining_onboarding_duration interval, updated_on timestamptz, updated_by text)`,
+		`CREATE TABLE ` + schema + `.sf_opportunity_link (opportunity_id uuid, project_id uuid, link_sf_id text)`,
+		`CREATE TABLE ` + schema + `.sf_opportunity_product (id uuid DEFAULT gen_random_uuid(), line_item_sf_id text, opportunity_id uuid,
+			product_name text, service_start_date date, service_end_date date)`,
+		`INSERT INTO ` + schema + `.project (id, onboarding_status) VALUES ('30000000-0000-0000-0000-000000000001', 'NOT_APPLICABLE')`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+	defer func() { _, _ = admin.Exec(ctx, `DROP SCHEMA `+schema+` CASCADE`) }()
+
+	const projectID, oppID = "30000000-0000-0000-0000-000000000001", "40000000-0000-0000-0000-000000000001"
+	begin := func() (*pgx.Conn, pgx.Tx) {
+		c, err := pgx.Connect(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := c.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `SET LOCAL search_path = `+schema+`, public`); err != nil {
+			t.Fatal(err)
+		}
+		return c, tx
+	}
+	cA, txA := begin()
+	cB, txB := begin()
+	defer cA.Close(ctx)
+	defer cB.Close(ctx)
+
+	// A: the link writer. Writes its row, derives (no line visible yet).
+	if _, err := txA.Exec(ctx, `INSERT INTO sf_opportunity_link VALUES ($1, $2, 'lnk')`, oppID, projectID); err != nil {
+		t.Fatal(err)
+	}
+	if err := deriveProjectOnboarding(ctx, txA, projectID); err != nil {
+		t.Fatal(err)
+	}
+	// B: the line item writer. Writes its row (A's link is uncommitted, invisible), then derives.
+	if _, err := txB.Exec(ctx, `INSERT INTO sf_opportunity_product (opportunity_id, line_item_sf_id, product_name, service_start_date, service_end_date)
+		VALUES ($1, 'li', $2, CURRENT_DATE - 1, CURRENT_DATE + 30)`, oppID, onboardingProductName); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- deriveOpportunityOnboarding(ctx, txB, oppID) }()
+	select {
+	case err := <-done:
+		t.Fatalf("B derived without waiting for A to commit (err=%v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("B still blocked after A committed")
+	}
+	if err := txB.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := admin.QueryRow(ctx, `SELECT onboarding_status::text FROM `+schema+`.project WHERE id = $1`, projectID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "NOT_STARTED" {
+		t.Errorf("status = %s, want NOT_STARTED", status)
+	}
+
+	// The previous-owner reads return what the rows hold (and an empty slice for none).
+	if _, err := admin.Exec(ctx, `SET search_path = `+schema+`, public`); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ sql, key, want string }{
+		{previousLinkProjectsQuery, "lnk", projectID},
+		{previousLineItemOpportunitiesQuery, "li", oppID},
+		{previousLinkProjectsQuery, "none", ""},
+	} {
+		got, err := previousIDs(ctx, admin, c.sql, c.key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (c.want == "" && len(got) != 0) || (c.want != "" && (len(got) != 1 || got[0] != c.want)) {
+			t.Errorf("%.40s %q = %v, want [%s]", c.sql, c.key, got, c.want)
 		}
 	}
 }

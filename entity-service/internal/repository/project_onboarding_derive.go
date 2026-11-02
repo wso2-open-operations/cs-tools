@@ -82,12 +82,56 @@ const deriveOnboardingForProjectQuery = deriveOnboardingBody + `
 const deriveOnboardingForOpportunityQuery = deriveOnboardingBody + `
 	  AND p.id IN (SELECT project_id FROM sf_opportunity_link WHERE opportunity_id = $2::uuid)`
 
+// onboardingDeriveLockKey is the ONE advisory-lock key every derivation takes.
+// The writers that feed the rule (project, link, opportunity, line item) each
+// serialise on their own key, so a line item and its link can commit in
+// concurrent transactions. Under READ COMMITTED each derive statement then
+// sees only committed rows, and both transactions could derive without the
+// other's row, leaving the project NOT_APPLICABLE. Taking this one lock after
+// the caller's own write and immediately before the derive statement orders
+// the two: the later transaction blocks until the earlier one commits, and
+// its derive statement, which starts after the lock is granted, takes a fresh
+// snapshot that includes the earlier row. A single global key is acceptable
+// because the lock is held only to the end of an ingest transaction that is
+// otherwise a few indexed writes. The project writer takes it before its
+// own project UPDATE (lockOnboardingDerive) so it never holds a project row
+// lock while waiting for a derivation that wants that same row.
+const onboardingDeriveLockKey = "onboarding-derive"
+
+func lockOnboardingDerive(ctx context.Context, q querier) error {
+	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, onboardingDeriveLockKey); err != nil {
+		return fmt.Errorf("derive project onboarding: lock: %w", err)
+	}
+	return nil
+}
+
+// previousLinkProjectsQuery and previousLineItemOpportunitiesQuery read, before
+// a write, the owners the row has now, so a move can re-derive the old owner.
+const previousLinkProjectsQuery = `
+	SELECT COALESCE(array_agg(DISTINCT project_id::text) FILTER (WHERE project_id IS NOT NULL), '{}'::text[])
+	FROM sf_opportunity_link WHERE link_sf_id = $1`
+
+const previousLineItemOpportunitiesQuery = `
+	SELECT COALESCE(array_agg(DISTINCT opportunity_id::text) FILTER (WHERE opportunity_id IS NOT NULL), '{}'::text[])
+	FROM sf_opportunity_product WHERE line_item_sf_id = $1`
+
+func previousIDs(ctx context.Context, q querier, sql, sfID string) ([]string, error) {
+	var ids []string
+	if err := q.QueryRow(ctx, sql, sfID).Scan(&ids); err != nil {
+		return nil, fmt.Errorf("read previous owners: %w", err)
+	}
+	return ids, nil
+}
+
 // deriveProjectOnboarding applies the rule to one project. Run it inside the
 // ingest transaction, after the project, link or product line it follows has
 // been written. A blank id is ignored.
 func deriveProjectOnboarding(ctx context.Context, q querier, projectID string) error {
 	if projectID == "" {
 		return nil
+	}
+	if err := lockOnboardingDerive(ctx, q); err != nil {
+		return err
 	}
 	if _, err := q.Exec(ctx, deriveOnboardingForProjectQuery, domain.SalesforceSyncActor, projectID); err != nil {
 		return fmt.Errorf("derive project onboarding: %w", err)
@@ -101,8 +145,40 @@ func deriveOpportunityOnboarding(ctx context.Context, q querier, opportunityID s
 	if opportunityID == "" {
 		return nil
 	}
+	if err := lockOnboardingDerive(ctx, q); err != nil {
+		return err
+	}
 	if _, err := q.Exec(ctx, deriveOnboardingForOpportunityQuery, domain.SalesforceSyncActor, opportunityID); err != nil {
 		return fmt.Errorf("derive project onboarding: %w", err)
+	}
+	return nil
+}
+
+// deriveMovedLinkProjects re-derives the projects a link belonged to before a
+// write that moved it to newProjectID, so the old owner picks its remaining
+// earliest qualifying line.
+func deriveMovedLinkProjects(ctx context.Context, q querier, previous []string, newProjectID string) error {
+	for _, id := range previous {
+		if id == newProjectID {
+			continue
+		}
+		if err := deriveProjectOnboarding(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deriveMovedLineItemOpportunities is the same for a line item that moved
+// from one opportunity to another.
+func deriveMovedLineItemOpportunities(ctx context.Context, q querier, previous []string, newOpportunityID string) error {
+	for _, id := range previous {
+		if id == newOpportunityID {
+			continue
+		}
+		if err := deriveOpportunityOnboarding(ctx, q, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }

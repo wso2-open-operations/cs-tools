@@ -133,7 +133,7 @@ const insertSalesforceProjectQuery = `
 		COALESCE($12::uuid, gen_random_uuid()), now(), now(), $1, $1,
 		$2, $3, $4, $5::uuid, $6, $7, $8,
 		$9::uuid, $10, $11, TRUE,
-		'NOT_APPLICABLE'
+		'NOT_APPLICABLE'::onboarding_status_enum
 	)
 	RETURNING id::text`
 
@@ -179,6 +179,11 @@ func writeSalesforceProject(ctx context.Context, q querier, row domain.Salesforc
 	var res domain.SalesforceProjectUpsertResult
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, salesforceProjectLockKey(row.SfID)); err != nil {
 		return res, fmt.Errorf("upsert project from salesforce: lock: %w", err)
+	}
+
+	// Before any project row is touched: see lockOnboardingDerive.
+	if err := lockOnboardingDerive(ctx, q); err != nil {
+		return res, fmt.Errorf("upsert project from salesforce: %w", err)
 	}
 
 	args := []any{
