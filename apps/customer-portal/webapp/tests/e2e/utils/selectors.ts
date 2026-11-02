@@ -53,6 +53,11 @@ export const ACCOUNT_MENU = {
    * Email and Mobile Number as DISABLED TEXTBOXES, so their contents are input
    * values — `getByText` cannot see them. */
   closeButton: "Close profile",
+  /** The profile modal's time zone `Select` (aria-label "Time Zone"). */
+  timeZoneSelect: "Time Zone",
+  /** Shown in the select when the profile has no time zone. */
+  timeZonePlaceholder: "Select timezone",
+  saveButton: "Save Changes",
 } as const;
 
 /**
@@ -136,6 +141,16 @@ export const CREATE_CASE = {
 /** Side navigation. Items are buttons inside the sidebar landmark; which ones
  * render depends on the project's feature flags (see SideBar.tsx). */
 export const SIDE_NAV = {
+  /** The header's sidebar toggle (Oxygen `HeaderToggle`); its label flips
+   * with the state it would switch to. */
+  expandToggle: "Expand sidebar",
+  collapseToggle: "Collapse sidebar",
+  /** The app's sidebar wrapper; Oxygen's own sidebar is the `complementary`
+   * inside it, and is the element whose width the toggle changes. */
+  sidebarTestId: "app-sidebar",
+  /** Oxygen's sidebar widths in px (COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_WIDTH). */
+  collapsedWidthPx: 64,
+  expandedWidthPx: 250,
   /**
    * The route each item opens, relative to `/projects/{id}/`.
    *
@@ -426,6 +441,15 @@ export const UPDATES = {
     summaryLabels: ["Product Name", "Product Version", "Released Update Level"],
     /** Filters over the listed updates. */
     filterButtons: ["All", "Security", "Regular"],
+    /** The selected filter button is MUI "contained"; the rest "outlined". */
+    activeFilterClass: /MuiButton-contained/,
+    /** Each update is a card headed "Update Number: N" with a type chip
+     * ("Security" / "Regular"). */
+    updateCardText: /Update Number:/,
+    /** EmptyState when a filter leaves nothing — expected for a level with no
+     * updates of that type. */
+    emptyFilterMessage: (filter: string) =>
+      `No ${filter === "All" ? "" : filter.toLowerCase() + " "}updates for this level.`,
     /** Each listed update shows its number and, when it has one, a description
      * section. The number is rendered inline as "Update Number: <n>". */
     updateNumberPrefix: "Update Number:",
@@ -709,6 +733,19 @@ export const ENGAGEMENTS = {
   noHeadingUntilFiltered: true,
   /** Sort controls, from the shared ListResultsBar. Status is ordinal, so its
    * order labels read Descending/Ascending rather than Newest/Oldest first. */
+  /** List pagination (MUI TablePagination via ListPagination): 10 per page by
+   * default (ENGAGEMENTS_PAGE_SIZE), hidden entirely when everything fits. */
+  pagination: {
+    pageSize: 10,
+    rowsPerPageOptions: [5, 10, 25, 50],
+    rowsPerPageLabel: /Rows per page/,
+    nextPageButton: "Go to next page",
+    previousPageButton: "Go to previous page",
+    displayedRowsPattern: /(\d+)[–-](\d+) of (\d+)/,
+  },
+  /** Export menu (CaseListCsvExportButton, filenamePrefix "engagements"). */
+  exportFilenamePattern: (extension: string): RegExp =>
+    new RegExp(`^engagements.*-\\d{4}-\\d{2}-\\d{2}\\.${extension}$`),
   sort: {
     fieldSelectId: "list-sort-field",
     orderSelectId: "list-sort-order",
@@ -738,10 +775,10 @@ export const ENGAGEMENTS = {
    * The Engagement Type filter, inside the Filters panel.
    *
    * Its options ARE the engagement-type breakdown: `engagementTypeOptions`
-   * builds them from `stats.engagementTypeCount`, keeping only the four display
-   * names below and in this order, and omitting any the project has none of. So
-   * which options appear is project data — a test must read them rather than
-   * assume all four.
+   * builds them from `stats.engagementTypeCount`, keeping only the five display
+   * names (DISPLAY_NAMES in useEngagementsPageState) in that order, and omitting
+   * any the project has none of. So which options appear is project data — a
+   * test must read them rather than assume all five.
    *
    * ⚠️ One option can stand for SEVERAL backend ids: types sharing a display
    * name are grouped and their ids comma-joined into the option's value, which
@@ -756,11 +793,12 @@ export const ENGAGEMENTS = {
     /**
      * ⚠️ Do NOT assert the offered entries against a fixed list.
      *
-     * This repo's `engagementTypeOptions` keeps only four display names
-     * (Consultancy, Onboarding, Migration, Follow Up) and drops anything
-     * unmapped — but the DEPLOYED build does not: staging offers five,
-     * including "New Feature Improvement". Verified live 2026-10-08. The same
-     * source/deployment drift shows up in the Time Tracking date labels.
+     * This repo's `engagementTypeOptions` keeps only its display names
+     * (Consultancy, Onboarding, Migration, Follow Up and, since it was added
+     * to DISPLAY_NAMES, New Feature Improvement) and drops anything unmapped.
+     * The DEPLOYED build offered "New Feature Improvement" before the repo
+     * did (verified live 2026-10-08) — source and deployment drift, as they
+     * also do in the Time Tracking date labels.
      *
      * So which entries appear is both project data and build-dependent. Tests
      * read them and act on what is offered.
@@ -1267,6 +1305,66 @@ export const TIME_TRACKING = {
  * the Security Report Analysis list. */
 export const SECURITY_CENTER = {
   pathSegment: "security-center",
+  /** The two stat cards above the tabs (SECURITY_STAT_CONFIGS). Clicking one
+   * filters the Security Report Analysis list in place — the URL does not
+   * change — and swaps the cards and tabs for a Back button and this heading. */
+  statCards: [
+    {
+      label: "Outstanding Security Reports",
+      title: "Outstanding Security Reports",
+      subtitle: "Security reports without closed state",
+      closed: false,
+    },
+    {
+      label: "Resolved Security Reports (Last 30d)",
+      title: "Resolved Security Reports (Last 30d)",
+      subtitle: "Security reports in closed state",
+      closed: true,
+    },
+  ],
+  statBackButton: "Back",
+  /** The Security Report Analysis section (SecurityReportAnalysis.tsx). Its
+   * list searches via POST /projects/{id}/cases/search with caseTypes
+   * ["security_report_analysis"]. */
+  reportAnalysis: {
+    title: "Security Report Analysis",
+    subtitle: "Security vulnerability reports uploaded for analysis",
+    viewTabs: ["My Reports", "All Reports"],
+    caseType: "security_report_analysis",
+    filtersButton: "Filters",
+    clearFiltersButton: /^Clear Filters/,
+    /** The only filter: a multi-select of case states (`#status`). */
+    statusFilterId: "status",
+    /** Client-side pagination over the fully-fetched list
+     * (SECURITY_REPORT_ANALYSIS_PAGE_SIZE), via MUI TablePagination. */
+    pageSize: 10,
+    nextPageButton: "Go to next page",
+    previousPageButton: "Go to previous page",
+    displayedRowsPattern: /(\d+)[–-](\d+) of (\d+)/,
+    sort: {
+      fieldSelectId: "list-sort-field",
+      orderSelectId: "list-sort-order",
+      fields: [
+        { value: "updatedOn", label: "Updated date", ordinal: false },
+        { value: "createdOn", label: "Created date", ordinal: false },
+        { value: "state", label: "Status", ordinal: true },
+      ],
+      /** Order labels depend on the field kind (ListResultsBar). */
+      orders: {
+        chronological: { desc: "Newest first", asc: "Oldest first" },
+        ordinal: { desc: "Descending", asc: "Ascending" },
+      },
+    },
+  },
+  /** A report analysis opens at this segment under security-center. */
+  reportAnalysisSegment: "security-report-analysis",
+  /** Tabs on a report analysis's detail view (CaseDetailsContent hides Calls,
+   * Knowledge Base and Escalation for isSecurityReportAnalysis). Labels may
+   * carry a count — "Attachments (2)" — so these match the prefix. */
+  reportDetailTabs: {
+    shown: [/^Activity\b/, /^Details\b/, /^Attachments\b/],
+    hidden: [/^Calls\b/, /^Knowledge Base\b/, /^Escalation\b/],
+  },
   /** The list search covers case number, title AND description — which is what
    * lets a report be found by its stable description rather than by its
    * date-stamped generated title. */
@@ -1311,6 +1409,10 @@ export const SECURITY_CENTER = {
       productVersionPlaceholder: "Select a Product Version",
       productVersionAllOption: "All Versions",
     },
+    /** On a vulnerability's details page: the "NVD" link, opening
+     * https://nvd.nist.gov/vuln/detail/<CVE> in a new tab. */
+    nvdLinkLabel: "NVD",
+    nvdUrlPattern: /^https:\/\/nvd\.nist\.gov\/vuln\/detail\/CVE-\d{4}-\d+$/,
     /** Rows are keyed by CVE, e.g. "CVE-2024-1234". */
     cvePattern: /CVE-\d{4}-\d+/,
   },
@@ -1456,6 +1558,30 @@ export const DASHBOARD = {
   ],
   /** The one card that opens nothing. */
   nonClickableStatCard: "Avg. Response Time (Last 30d)",
+  /**
+   * The accordion sections a stat card's item page groups its list into
+   * (DashboardItemsPage's `sections`, labels inline there), in render order.
+   *
+   * Each section's header carries a count chip holding the search's
+   * `totalRecords` — the list's real total. The rows under it are not: every
+   * section fetches a single page of 10 and never loads more, so counting rows
+   * would cap at 10 per section.
+   *
+   * A section is only rendered when its permission is on and its total is
+   * non-zero, so a page lists a subset of these, and none at all when the mode
+   * is empty (`statCardTargets[].emptyMessage` shows instead).
+   */
+  itemSections: [
+    "Cases",
+    "Service Requests",
+    "Security Report Analysis",
+    "Engagements",
+    "Change Requests",
+  ],
+  /** ErrorIndicator's test id. It replaces a stat card's value when the stats
+   * query fails, and an item section's rows when that section's search fails —
+   * where the section's chip then reads 0, which is not a real total. */
+  errorIndicatorTestId: "error-indicator",
   /** Sections below the stat cards. */
   sections: {
     /** Used twice on the page — the severity donut and the cases table beneath
@@ -1469,19 +1595,24 @@ export const DASHBOARD = {
      * nav item — which SIDE_NAV_VISIBILITY records as on for all three fixture
      * projects. */
     outstandingEngagements: "Outstanding Engagements",
-    /** The four categories the engagements donut always renders, in legend
+    /** The five categories the engagements donut always renders, in legend
      * order (OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA in
      * features/dashboard/constants/dashboard.ts).
      *
      * Rendered from that fixed list rather than from the data, so a category
      * with no outstanding engagements still appears — with a zero. Asserting
      * only the ones that happen to be non-empty would pass on a project where
-     * the chart had silently dropped a category. */
+     * the chart had silently dropped a category.
+     *
+     * "New Feature Improvement" was added to the chart after the first four;
+     * a build deployed before that change renders only four, and the fifth
+     * then fails as missing rather than being skipped. */
     engagementCategories: [
       "Consultancy",
       "Onboarding",
       "Migration",
       "Follow Up",
+      "New Feature Improvement",
     ],
     /** Gated on `showOutstandingOpsChart` (`hasSR || hasCR`) — the same access
      * that governs the Operations nav item, so it is present for some projects
@@ -1546,6 +1677,22 @@ export const DASHBOARD = {
          * carries the numeric id. */
         option: { label: "S4(Query)", id: 13 },
       },
+      /** Multi-select over the project's case states minus Closed
+       * (`filterCasesTableMetadataOptions`). Option labels are the API's
+       * `caseStates[].label` unchanged. The table shows a Status column. */
+      status: { label: "Status", selectId: "statusIds" },
+      /** Multi-select over `issueTypes`; its request field is `issueIds`. The
+       * table has no category column, so a case's issue type is only visible in
+       * the search response. */
+      category: { label: "Category", selectId: "issueTypes" },
+      /** Multi-select over the project's contacts. Each option is labelled with
+       * the contact's full name (email when the name is blank) and sends the
+       * email in `createdBy`. The table's Created by column shows the email. */
+      createdBy: { label: "Created By", selectId: "createdBy" },
+      /** Multi-select over the project's deployments, sent as `deploymentIds`.
+       * Only rendered when `permissions.hasDeployments` is on
+       * (`includeDeploymentFilter` in DashboardPage.tsx). */
+      deployment: { label: "Deployment", selectId: "deploymentIds" },
     },
     /** MUI TablePagination at the foot of the card. The table starts at 5 rows
      * (`useState(5)` in CasesTable) and offers 5, 10, 25 and 50. */
@@ -1565,6 +1712,10 @@ export const DASHBOARD = {
      * switching to My Cases as an account that raised no cases on this
      * project, which is a legitimate state and not a failed filter. */
     emptyMessage: "No outstanding cases.",
+    /** The statuses the table searches with when no status is ticked and the
+     * project's filter metadata lists no open states
+     * (`CASE_TABLE_OUTSTANDING_STATUS_IDS`). */
+    fallbackStatusIds: [1, 10, 18, 1003, 1006],
     /** Marks a data row; the header row has no case id. */
     rowIdPattern: /ID: CS\d+/,
     /** Captures the case number out of a row's text. */
@@ -1628,6 +1779,16 @@ export const DASHBOARD = {
    * than something every project shows.
    */
   severityLegend: [
+    /** S0 is drawn only for Managed Cloud Subscription: the dashboard drops the
+     * Catastrophic (P0) severity elsewhere (S0_SEVERITY_LABELS). `projectTypes`
+     * limits which projects test this entry; entries without it apply to all. */
+    {
+      label: "S0 - Catastrophic",
+      severityId: "14",
+      title: "Outstanding S0 Cases",
+      description: "Manage and track S0 outstanding support cases",
+      projectTypes: ["Managed Cloud Subscription"],
+    },
     {
       label: "S1 - Critical",
       severityId: "10",
@@ -1653,6 +1814,62 @@ export const DASHBOARD = {
       description: "Manage and track S4 outstanding support cases",
     },
   ],
+  /**
+   * The legend of the Outstanding Engagements donut. Each entry opens the
+   * Engagements list narrowed to that type and to non-Closed states.
+   *
+   * These five are the whole legend — OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA
+   * in features/dashboard/constants/dashboard.ts. The chart matches backend
+   * type labels to these names case-insensitively, so "New Feature
+   * Improvement" picks up the backend type of that label (offered by the
+   * deployed Engagement Type filter, see ENGAGEMENTS.engagementType). It is
+   * the most recent addition: a build deployed without it renders only the
+   * first four, and its test then fails on the missing entry by design.
+   *
+   * Unlike the severity legend, nothing about the filter reaches the URL: the
+   * dashboard navigates to the bare `engagements` path and hands the type over
+   * in router state (`engagementTypeId`, `engagementTypeLabel`). The `title`
+   * and `description` are built from that state by EngagementsPage, so they —
+   * and the request's `engagementTypeKeys` — are the only evidence the filter
+   * travelled.
+   */
+  engagementLegend: [
+    {
+      label: "Consultancy",
+      title: "Outstanding Consultancy Engagements",
+      description: "Outstanding Consultancy engagements without closed state",
+    },
+    {
+      label: "Onboarding",
+      title: "Outstanding Onboarding Engagements",
+      description: "Outstanding Onboarding engagements without closed state",
+    },
+    {
+      label: "Migration",
+      title: "Outstanding Migration Engagements",
+      description: "Outstanding Migration engagements without closed state",
+    },
+    {
+      label: "Follow Up",
+      title: "Outstanding Follow Up Engagements",
+      description: "Outstanding Follow Up engagements without closed state",
+    },
+    {
+      label: "New Feature Improvement",
+      title: "Outstanding New Feature Improvement Engagements",
+      description:
+        "Outstanding New Feature Improvement engagements without closed state",
+    },
+  ],
+  /** What the engagements donut shows instead of a chart and legend when the
+   * project has no outstanding engagements at all (CasesTrendChart's `isEmpty`
+   * branch) — so there is no legend entry to click. */
+  engagementsChartEmptyMessage: "No Outstanding Engagements found",
+  /** ListItems' empty copy on the Engagements list when opened from the chart.
+   * The chart's type filter lives outside the list's own filter state, so
+   * `hasListRefinement` is false and the "yet" wording is shown rather than
+   * "Try adjusting your filters". */
+  engagementsListEmptyMessage: "No engagements yet.",
 } as const;
 
 /** Calls tab of a case detail page, and its Request Call modal. */
@@ -1809,6 +2026,18 @@ export const SUPPORT_CENTER = {
         "Conversations that were resolved via chat during the last 30 days",
     },
   ],
+  /**
+   * What `?statusFilter=resolved` narrows the cases list to (AllCasesPage).
+   *
+   * The page looks up the case state labelled `CaseStatus.CLOSED` in
+   * `GET /projects/{id}/filters` and sends its id as `filters.statusIds`, and
+   * adds `getLast30DaysUtcRange()` — `closedStartDate` = now − 30 days and
+   * `closedEndDate` = now, both UTC, second precision (`YYYY-MM-DDTHH:MM:SSZ`).
+   */
+  resolvedCases: {
+    closedStatusLabel: "Closed",
+    windowDays: 30,
+  },
 } as const;
 
 /** Cases list (`/projects/:projectId/support/cases`).
@@ -1834,10 +2063,23 @@ export const CASES_LIST = {
   resultsCountPattern: /Showing (\d+) of (\d+) cases/,
   /** Prefix ListCard puts before the creator on every row that has one. */
   createdByPrefix: "Created by ",
+  /** ListCard's "Updated <date>" footer, which — unlike "Created by" — every
+   * row renders (it falls back to "Updated Not Available"). The lookahead keeps
+   * the results bar's "Updated on" sort option from ever counting as a row. */
+  rowUpdatedPattern: /Updated (?!on\b)/,
+  /** ListItems' empty state: "No cases found. Try adjusting…" when the list
+   * carries a filter (statusFilter=resolved puts the Closed id into the
+   * filters, so that is the one it shows), "No cases yet." otherwise. */
+  emptyStatePattern: /^No cases (found|yet)\b/,
   /** Opens the filter panel (ListSearchBar). The panel is collapsed by default,
    * so no filter label is in the DOM until this is clicked. Its label becomes
    * "Clear Filters (n)" once any filter is applied — these specs apply none. */
   filtersButton: "Filters",
+  /** The same toggle in either of its states — "Filters", or "Clear Filters (n)"
+   * once a search term or filter is active. Used where the assertion is about
+   * the search panel being present or absent at all, so a persisted filter
+   * relabelling the button cannot make "absent" pass on a technicality. */
+  filtersButtonAnyState: /^(Clear )?Filters\b/,
   /** Label of the Created By filter (deriveFilterLabels("createdBy")), which is
    * withheld on My Cases since the list is already narrowed to one creator. */
   createdByFilterLabel: "Created By",
@@ -2036,4 +2278,94 @@ export const CASE_DETAIL = {
     confirmButton: "Confirm",
     cancelButton: "Cancel",
   },
+} as const;
+
+/** Settings → Registry Tokens (SettingsRegistryTokens, GenerateTokenModal,
+ * DeleteTokenModal). Token names must match REGISTRY_TOKEN_ROBOT_NAME_REGEX:
+ * lowercase letters, digits and dashes. */
+export const REGISTRY_TOKENS = {
+  tab: "Registry Tokens",
+  generateUserButton: "Generate User Token",
+  generateDialogTitle: "Generate User Token",
+  nameLabel: "Token Name",
+  generateButton: "Generate Token",
+  cancelButton: "Cancel",
+  createdDialogTitle: "Token Created Successfully",
+  secretLabel: "Token Secret",
+  closeButton: "Close",
+  duplicateError: "A token with this name already exists.",
+  rowActions: "Token actions",
+  deleteMenuItem: "Delete Token",
+  deleteDialogTitle: "Delete Registry Token",
+  deleteButton: "Delete",
+} as const;
+
+/** Registry token row actions beyond delete (RegenerateTokenModal). */
+export const REGISTRY_TOKEN_ACTIONS = {
+  regenerateMenuItem: "Regenerate Secret",
+  regenerateDialogTitle: "Regenerate Token Secret",
+  regenerateButton: "Regenerate Secret",
+  regeneratedDialogTitle: "Token Regenerated Successfully",
+  newSecretLabel: "New Token Secret",
+} as const;
+
+/** Registry Tokens → Service Tokens sub-tab (admins only) and its dialog. */
+export const REGISTRY_SERVICE_TOKENS = {
+  /** Sub-tab label carries a count: "Service Tokens (3)". */
+  tab: /^Service Tokens/,
+  generateButton: "Generate Service Token",
+  generateDialogTitle: "Generate Service Token",
+  createdForLabel: "System User (Created For)",
+} as const;
+
+/** Membership Roles checkboxes in Settings → User Management → Add User
+ * (ADD_USER_ROLES). Each label is followed by a description, so tests match
+ * the leading name. System User is exclusive of the others. */
+export const SETTINGS_ROLE_LABELS = {
+  admin: "Admin",
+  portalUser: "Portal User",
+  securityContact: "Security Contact",
+  systemUser: "System User",
+  others: ["Admin", "Lead", "Portal User", "Security Contact"],
+} as const;
+
+/** Role badges a user row shows (getRoleBadges). Note Security Contact is
+ * badged "Security User". */
+export const SETTINGS_ROLE_BADGES = {
+  admin: "Admin",
+  portalUser: "Portal User",
+  securityUser: "Security User",
+  systemUser: "System User",
+} as const;
+
+/** Operations hub → change requests → a change request's PDF
+ * (OPERATIONS_HUB_FOOTER_VIEW_ALL_CR, ChangeRequestDetailsPage). The PDF is
+ * built in the browser and handed over as a download. */
+export const CHANGE_REQUEST_PDF = {
+  operationsNavItem: "Operations",
+  viewAllButton: "View all change requests",
+  downloadButton: "Download Change Request PDF",
+} as const;
+
+/** The portal home (`/`), reached from the header's "Customer Portal" link: a
+ * Projects table and a Cases table (UserGlobalSearch). Headings carry totals,
+ * e.g. "Projects (3)", "Cases (571)". */
+export const PORTAL_HOME = {
+  headerLink: "Customer Portal",
+  projectsHeading: /^Projects \((\d+)\)$/,
+  casesHeading: /^Cases \((\d+)\)$/,
+  projectColumns: ["Project Key", "Name", "Status", "Action Required", "Outstanding", "Active Chats"],
+  caseColumns: ["Details", "Case Type", "Severity", "Status", "Created by", "Created on", "Project"],
+  /** Shown under the cases table when it holds more than it renders. */
+  viewMoreButton: /^View More \((\d+) more\)$/,
+} as const;
+
+/** The license footer at the end of an expanded deployment card
+ * (DeploymentCardLicenseFooter). The file is built client-side from the
+ * `POST .../deployments/{id}/license` response and saved as
+ * `subscription-<deployment name>.json` (useDownloadDeploymentLicense). */
+export const DEPLOYMENT_LICENSE = {
+  downloadButton: "Download License",
+  filenamePattern: /^subscription-.+\.json$/,
+  requestPathPattern: /\/projects\/[^/]+\/deployments\/[^/]+\/license$/,
 } as const;

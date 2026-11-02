@@ -34,18 +34,28 @@
 // applied.
 //
 
-import { test, expect, withSession, type Page } from "../../fixtures/test";
+import { promises as fs } from "node:fs";
+import {
+  test,
+  expect,
+  withSession,
+  type Locator,
+  type Page,
+} from "../../fixtures/test";
 import { CaseAttachmentsPage } from "../../pages/CaseAttachmentsPage";
 import { CaseDetailPage } from "../../pages/CaseDetailPage";
+import { CasesListPage } from "../../pages/CasesListPage";
 import { EngagementsPage } from "../../pages/EngagementsPage";
 import {
   ATTACHMENT_FILES,
   ENGAGEMENT_INPUT,
   PROJECTS,
+  ProjectType,
 } from "../../config/testData";
 import {
   CASE_ATTACHMENTS,
   CASE_CALLS,
+  CASES_LIST,
   ENGAGEMENTS,
 } from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
@@ -163,7 +173,11 @@ test.describe("Engagements", () => {
       // The cards are gone while filtered — the page shows one or the other —
       // and Back is what brings them back. It does not navigate: it clears the
       // stat filter, so the URL is the same before and after.
-      await expect(engagements.statCard(card.label)).toHaveCount(0);
+      //
+      // Checked by the card's button, not its text: "Outstanding Engagements"
+      // is both the card label and the filtered list's heading, so a text match
+      // would find the heading and report the card still there.
+      await expect(engagements.statCardButton(card.label)).toHaveCount(0);
 
       const filteredUrl = page.url();
       await engagements.backButton().click();
@@ -225,6 +239,145 @@ test.describe("Engagements", () => {
     await engagements.waitForList();
 
     console.log(`Engagements: sorted by each field and reversed the order`);
+  });
+
+  /** The CS numbers of the rendered rows, as numbers, in order. */
+  async function rowNumbers(rows: Locator): Promise<number[]> {
+    return (await rows.allInnerTexts()).map((text) =>
+      Number(/CS(\d+)/.exec(text)?.[1] ?? NaN),
+    );
+  }
+
+  // ✅ READ-ONLY.
+  // Runs on Managed Cloud Subscription: it is the fixture project with more
+  // engagements than one page holds (the Subscription one has only a few, and
+  // ListPagination renders nothing until the list overflows a page).
+  test("pages through the list and changes rows per page", async ({ page }) => {
+    const paged = PROJECTS[ProjectType.MANAGED_CLOUD_SUBSCRIPTION];
+    test.skip(!paged.id, "Managed Cloud Subscription needs a project id.");
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(paged.id);
+    await engagements.waitForList();
+    const main = page.getByTestId("app-main");
+    const rows = engagements.rows();
+    const { pagination } = ENGAGEMENTS;
+    const size = pagination.pageSize;
+    const next = main.getByRole("button", { name: pagination.nextPageButton });
+    const previous = main.getByRole("button", { name: pagination.previousPageButton });
+    test.skip(
+      (await next.count()) === 0,
+      "All engagements fit on one page, so the list renders no pagination.",
+    );
+    // The pagination footer's own range ("1–10 of N"), not the results bar's.
+    const range = main
+      .locator(".MuiTablePagination-displayedRows")
+      .filter({ hasText: pagination.displayedRowsPattern });
+    const total = Number(pagination.displayedRowsPattern.exec(await range.innerText())![3]);
+
+    // Page 1.
+    await expect(range).toHaveText(new RegExp(`^1[–-]${size} of ${total}$`));
+    await expect(previous).toBeDisabled();
+    await expect(rows).toHaveCount(size);
+    const firstPage = await rowNumbers(rows);
+
+    // Page 2: the next slice, disjoint from page 1.
+    await next.click();
+    const end2 = Math.min(2 * size, total);
+    await expect(range).toHaveText(new RegExp(`^${size + 1}[–-]${end2} of ${total}$`), {
+      timeout: 60_000,
+    });
+    await expect(rows).toHaveCount(end2 - size, { timeout: 60_000 });
+    const secondPage = await rowNumbers(rows);
+    expect(secondPage.filter((n) => firstPage.includes(n))).toEqual([]);
+
+    // Back to page 1: the same rows.
+    await previous.click();
+    await expect(previous).toBeDisabled();
+    await expect.poll(() => rowNumbers(rows)).toEqual(firstPage);
+
+    // Rows per page → 25: more rows on one page, range widened to match.
+    await main.getByRole("combobox", { name: pagination.rowsPerPageLabel }).click();
+    await page.getByRole("option", { name: "25", exact: true }).click();
+    const shown = Math.min(25, total);
+    await expect(range).toHaveText(new RegExp(`^1[–-]${shown} of ${total}$`), {
+      timeout: 60_000,
+    });
+    await expect(rows).toHaveCount(shown, { timeout: 60_000 });
+
+    console.log(`Engagements: ${total} over pages of ${size}; 25 per page shows ${shown}`);
+  });
+
+  // ✅ READ-ONLY. Both files are built in the browser from the loaded list.
+  test("exports the list to CSV and PDF", async ({ page }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+    const rows = engagements.rows();
+    test.skip((await rows.count()) === 0, "No engagements to export.");
+    const firstNumber = /CS\d+/.exec(await rows.first().innerText())![0];
+
+    const list = new CasesListPage(page);
+    await list.openExportMenu();
+    const csv = await list.exportAs(CASES_LIST.export.csvItem);
+    expect(csv.suggestedFilename()).toMatch(ENGAGEMENTS.exportFilenamePattern("csv"));
+    const csvText = await fs.readFile((await csv.path())!, "utf8");
+    expect(csvText.length, "the CSV should not be empty").toBeGreaterThan(0);
+    expect(csvText, "the CSV should carry the listed engagements").toContain(firstNumber);
+
+    await list.openExportMenu();
+    const pdf = await list.exportAs(CASES_LIST.export.pdfItem);
+    expect(pdf.suggestedFilename()).toMatch(ENGAGEMENTS.exportFilenamePattern("pdf"));
+    const pdfBytes = await fs.readFile((await pdf.path())!);
+    expect(pdfBytes.subarray(0, 5).toString(), "a PDF file").toBe("%PDF-");
+
+    console.log(
+      `Engagements: exported ${csv.suggestedFilename()} and ${pdf.suggestedFilename()}`,
+    );
+  });
+
+  // ✅ READ-ONLY.
+  test("orders the list by created date, newest and oldest first", async ({ page }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+    const rows = engagements.rows();
+    test.skip((await rows.count()) < 2, "Ordering needs at least two engagements.");
+    const { fields, orders } = ENGAGEMENTS.sort;
+
+    await engagements.chooseSortOption(engagements.sortFieldSelect(), fields.createdOn.label);
+    await expect(engagements.sortFieldSelect()).toContainText(fields.createdOn.label);
+
+    // CS numbers are issued in creation order, so they stand in for the
+    // created date the list sorts by.
+    const ordered = async (label: string, descending: boolean): Promise<number[]> => {
+      if (!(await engagements.sortOrderSelect().innerText()).includes(label)) {
+        await engagements.chooseSortOption(engagements.sortOrderSelect(), label);
+      }
+      await expect(engagements.sortOrderSelect()).toContainText(label);
+      let numbers: number[] = [];
+      await expect
+        .poll(
+          async () => {
+            numbers = await rowNumbers(rows);
+            const sorted = [...numbers].sort((a, b) => (descending ? b - a : a - b));
+            return numbers.length > 1 && numbers.join() === sorted.join();
+          },
+          { timeout: 60_000, message: `rows should be ${label}` },
+        )
+        .toBe(true);
+      return numbers;
+    };
+
+    const newest = await ordered(orders.newestFirst.label, true);
+    const oldest = await ordered(orders.oldestFirst.label, false);
+    expect(newest[0]).toBeGreaterThan(oldest[0]);
+
+    console.log(`Engagements: newest first CS${newest[0]}, oldest first CS${oldest[0]}`);
   });
 
   test("searches the list, then filters and clears", async ({ page }) => {

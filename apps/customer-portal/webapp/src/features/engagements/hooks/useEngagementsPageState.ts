@@ -338,6 +338,7 @@ export function useEngagementsPageState() {
       "Onboarding",
       "Migration",
       "Follow Up",
+      "New Feature Improvement",
     ];
     const DISPLAY_BY_LOWER = new Map(
       DISPLAY_NAMES.map((n) => [n.toLowerCase(), n]),

@@ -141,9 +141,43 @@ export class ServiceRequestCreatePage {
     });
   }
 
+  /**
+   * Selects a deployment by its exact name.
+   *
+   * The select loads deployments 10 at a time and fetches the next page when
+   * its list is scrolled to the bottom (CreateServiceRequestPage). Runs of the
+   * deployment specs keep adding "Automation Test Deployment …" records, which
+   * push older ones such as "Production" off the first page — so this scrolls
+   * until the option appears or the list stops growing.
+   *
+   * @param name - Exact deployment option label.
+   */
   async selectDeployment(name: string): Promise<void> {
     await this.deploymentSelect().click();
-    await this.page.getByRole("option", { name, exact: true }).click();
+    const option = this.page.getByRole("option", { name, exact: true });
+    const listbox = this.page.getByRole("listbox");
+    await expect(listbox.getByRole("option").nth(1)).toBeVisible({
+      timeout: 60_000,
+    });
+
+    let previous = -1;
+    for (let attempt = 0; attempt < 30 && !(await option.count()); attempt++) {
+      const count = await listbox.getByRole("option").count();
+      if (count === previous) {
+        // Nothing new arrived after the last scroll: give the next page a
+        // moment, then stop if it still has not grown.
+        await this.page.waitForTimeout(1_500);
+        if ((await listbox.getByRole("option").count()) === count) break;
+      }
+      previous = count;
+      await listbox.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await this.page.waitForTimeout(500);
+    }
+
+    await option.scrollIntoViewIfNeeded();
+    await option.click();
   }
 
   /**

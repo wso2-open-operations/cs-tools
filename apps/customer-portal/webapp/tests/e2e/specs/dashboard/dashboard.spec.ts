@@ -27,22 +27,58 @@
 // became clickable would navigate somewhere on a stray click.
 //
 
-import { test, expect, withSession } from "../../fixtures/test";
+import {
+  test,
+  expect,
+  withSession,
+  type Locator,
+  type Page,
+  type Response,
+} from "../../fixtures/test";
 import { CaseDetailPage } from "../../pages/CaseDetailPage";
 import { DashboardPage } from "../../pages/DashboardPage";
+import { EngagementsPage } from "../../pages/EngagementsPage";
+import { SideNavPage } from "../../pages/SideNavPage";
+import { ProjectSwitcherPage } from "../../pages/ProjectSwitcherPage";
 import {
   DASHBOARD_OPERATIONS_VISIBILITY,
   PROJECTS,
   ProjectType,
 } from "../../config/testData";
-import { DASHBOARD } from "../../utils/selectors";
+import {
+  ACCOUNT_MENU,
+  DASHBOARD,
+  ENGAGEMENTS,
+  PORTAL_HOME,
+  PROJECT_SWITCHER,
+  SIDE_NAV,
+} from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
 import {
+  type CaseSearchFilters,
+  type CaseSearchResult,
+  type CaseSearchResultItem,
+  caseSearchFiltersOf,
   caseSearchWithPagination,
   caseSearchWithSeverity,
   caseSearchWithoutSeverity,
+  dashboardCasesSearch,
+  engagementChartSearch,
+  isUnfilteredDashboardSearch,
   myCasesSearchResponse,
+  recordDashboardCasesSearches,
+  sameIds,
 } from "../../utils/listSearch";
+import {
+  type FilterOption,
+  type ProjectContact,
+  type ProjectFiltersBody,
+  engagementStatsResponse,
+  hasDeployments,
+  projectContactsResponse,
+  projectFeaturesResponse,
+  projectFiltersResponse,
+} from "../../utils/projectMetadata";
 import {
   RECORD_ID_PATTERN,
   projectPathPattern,
@@ -451,7 +487,7 @@ test.describe("Dashboard", () => {
             `breakdown (permissions.hasEngagements).`,
         );
 
-        // All four categories, every time. They are rendered from a fixed list
+        // All five categories, every time. They are rendered from a fixed list
         // (OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA) rather than from the
         // data, so one with no engagements still appears with a zero —
         // asserting only the non-empty ones would pass on a chart that had
@@ -565,6 +601,264 @@ test.describe("Dashboard", () => {
         );
       });
 
+      // DSH-28. Status is the one filter whose field the table also shows, so it
+      // is checked three ways: the request carries exactly the ticked state ids,
+      // every case the backend returns is in one of those states, and every row
+      // rendered shows one of them.
+      //
+      // Two states are ticked where the data allows, because the filter is
+      // multi-select and the contract is "any of", not "the last one clicked".
+      // They are taken from a sample of the unfiltered table, so the filtered
+      // result is known to be non-empty — a filter that matched nothing would
+      // pass every "each row is …" check vacuously.
+      test("filters the cases table by status and clears it", async ({
+        page,
+      }) => {
+        test.skip(!project.id, `${projectType} needs a project id.`);
+
+        const table = await openCasesTableBaseline(page, project.id);
+        test.skip(
+          table.baseline.cases.length === 0,
+          `${projectType} has no outstanding cases, so there is no status ` +
+            `to filter to.`,
+        );
+
+        const options = (table.metadata.caseStates ?? []).filter(
+          (state) => !isClosedLabel(state.label),
+        );
+        const present = uniqueLabels(
+          table.baseline.cases.map((item) => item.status?.label),
+        );
+        const offered = present.filter((label) =>
+          options.some((option) => option.label === label),
+        );
+        expect(
+          offered,
+          `the table shows cases in ${JSON.stringify(present)}, but the ` +
+            `Status filter offers ${JSON.stringify(options.map((o) => o.label))} ` +
+            `— a status on screen should be filterable`,
+        ).not.toHaveLength(0);
+
+        // A second state for the multi-select. The first is on screen, so the
+        // result cannot be empty. The second is another state on screen only
+        // when that still leaves a third out; otherwise it is a state the sample
+        // does not hold — so whenever the sample has two or more states, the
+        // selection excludes some of it and narrowing can be asserted.
+        const second =
+          offered.length >= 3
+            ? offered[1]
+            : (options.find((option) => !present.includes(option.label))
+                ?.label ??
+              options.find((option) => option.label !== offered[0])?.label);
+        const labels = second ? [offered[0], second] : [offered[0]];
+        const ids = labels.map((label) =>
+          Number(options.find((option) => option.label === label)?.id),
+        );
+
+        const { filtered, narrowingProven } = await exerciseCasesTableFilter(
+          page,
+          table,
+          {
+            filter: DASHBOARD.casesTable.filters.status,
+            labels,
+            carriesSelection: (filters) => sameIds(filters.statusIds, ids),
+            caseMatches: (item) => labels.includes(item.status?.label ?? ""),
+            describeCase: (item) => item.status?.label ?? "no status",
+            rowMatches: (row) => labels.some((label) => row.includes(label)),
+          },
+        );
+
+        console.log(
+          `Dashboard (${projectType}): status filter ` +
+            `${JSON.stringify(labels)} (ids ${ids.join(",")}) → ` +
+            `${filtered.totalRecords} of ${table.baseline.totalRecords}, ` +
+            `verified on request, response and rows; narrowing ` +
+            `${narrowingProven ? "asserted" : "unprovable (sample all matched)"}; then cleared`,
+        );
+      });
+
+      // DSH-29. The table has no category column, so the rows cannot show the
+      // filter took. It is verified on the wire instead: the request carries the
+      // chosen issue-type id in `issueIds`, and every case the backend returns
+      // has that issue type. The rows are then checked to come from those cases.
+      test("filters the cases table by category and clears it", async ({
+        page,
+      }) => {
+        test.skip(!project.id, `${projectType} needs a project id.`);
+
+        const table = await openCasesTableBaseline(page, project.id);
+        test.skip(
+          table.baseline.cases.length === 0,
+          `${projectType} has no outstanding cases, so there is no category ` +
+            `to filter to.`,
+        );
+
+        const options = table.metadata.issueTypes ?? [];
+        const present = uniqueLabels(
+          table.baseline.cases.map((item) => item.issueType?.label),
+        );
+        // The least common category in the sample, so that when the sample
+        // holds more than one the filter has something to drop.
+        const frequency = (label: string): number =>
+          table.baseline.cases.filter((item) => item.issueType?.label === label)
+            .length;
+        const chosen = options
+          .filter((option) => present.includes(option.label))
+          .sort((a, b) => frequency(a.label) - frequency(b.label))[0];
+        test.skip(
+          !chosen,
+          `none of ${projectType}'s sampled outstanding cases has ` +
+            `an issue type the Category filter offers (cases: ` +
+            `${JSON.stringify(present)}, filter: ` +
+            `${JSON.stringify(options.map((o) => o.label))}), so no choice ` +
+            `is known to return data.`,
+        );
+        const category = chosen as FilterOption;
+        const id = Number(category.id);
+
+        const { filtered, narrowingProven } = await exerciseCasesTableFilter(
+          page,
+          table,
+          {
+            filter: DASHBOARD.casesTable.filters.category,
+            labels: [category.label],
+            carriesSelection: (filters) => sameIds(filters.issueIds, [id]),
+            caseMatches: (item) => item.issueType?.label === category.label,
+            describeCase: (item) => item.issueType?.label ?? "no issue type",
+          },
+        );
+
+        console.log(
+          `Dashboard (${projectType}): category filter "${category.label}" ` +
+            `(issueIds [${id}]) → ${filtered.totalRecords} of ` +
+            `${table.baseline.totalRecords}, verified on request and response ` +
+            `(no category column); rows matched the response; narrowing ` +
+            `${narrowingProven ? "asserted" : "unprovable (sample all matched)"}; then cleared`,
+        );
+      });
+
+      // DSH-30. Created by is offered per project contact, labelled by name and
+      // sent as the contact's email. The Created by column shows the email, so
+      // this is checked on the request, the response and the rows.
+      //
+      // The creator is taken from the unfiltered sample *and* the contact list:
+      // a case raised by someone no longer a contact is on screen but cannot be
+      // filtered to, which is not a fault in the filter.
+      test("filters the cases table by creator and clears it", async ({
+        page,
+      }) => {
+        test.skip(!project.id, `${projectType} needs a project id.`);
+
+        const contactsResponse = projectContactsResponse(page, project.id);
+        const table = await openCasesTableBaseline(page, project.id);
+        const contacts = await contactsResponse;
+        test.skip(
+          table.baseline.cases.length === 0,
+          `${projectType} has no outstanding cases, so there is no creator ` +
+            `to filter to.`,
+        );
+
+        // Labelled exactly as CasesTable labels the option.
+        const optionLabel = (contact: ProjectContact): string =>
+          `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() ||
+          contact.email;
+        const creators = uniqueLabels(
+          table.baseline.cases.map((item) => item.createdBy?.toLowerCase()),
+        );
+        const candidate = contacts.find(
+          (contact) =>
+            creators.includes(contact.email.toLowerCase()) &&
+            // An option name shared by two contacts could not be told apart.
+            contacts.filter((c) => optionLabel(c) === optionLabel(contact))
+              .length === 1,
+        );
+        test.skip(
+          !candidate,
+          `none of the creators of ${projectType}'s sampled outstanding ` +
+            `cases (${JSON.stringify(creators)}) is a uniquely named project ` +
+            `contact, so the Created By filter offers no choice known to ` +
+            `return data.`,
+        );
+        const contact = candidate as ProjectContact;
+        const email = contact.email.toLowerCase();
+
+        const { filtered, narrowingProven } = await exerciseCasesTableFilter(
+          page,
+          table,
+          {
+            filter: DASHBOARD.casesTable.filters.createdBy,
+            labels: [optionLabel(contact)],
+            carriesSelection: (filters) =>
+              sameIds(filters.createdBy, [contact.email]),
+            caseMatches: (item) => item.createdBy?.toLowerCase() === email,
+            describeCase: (item) => item.createdBy ?? "no creator",
+            rowMatches: (row) => row.toLowerCase().includes(email),
+          },
+        );
+
+        console.log(
+          `Dashboard (${projectType}): created-by filter ` +
+            `"${optionLabel(contact)}" <${contact.email}> → ` +
+            `${filtered.totalRecords} of ${table.baseline.totalRecords}, ` +
+            `verified on request, response and rows; narrowing ` +
+            `${narrowingProven ? "asserted" : "unprovable (sample all matched)"}; then cleared`,
+        );
+      });
+
+      // DSH-31. The Deployment filter is withheld unless the project has
+      // deployments — `includeDeploymentFilter={permissions.hasDeployments}` in
+      // DashboardPage.tsx, where hasDeployments is the features response's
+      // deployment read *or* write flag (getProjectPermissions).
+      //
+      // The flag is read from the same features response the page received
+      // rather than recorded per project, so the assertion follows whatever the
+      // backend says today — and the run's output records which way each
+      // project went.
+      test("offers the Deployment filter only when the project has deployments", async ({
+        page,
+      }) => {
+        test.skip(!project.id, `${projectType} needs a project id.`);
+
+        const featuresResponse = projectFeaturesResponse(page, project.id);
+        const dashboard = new DashboardPage(page);
+        await dashboard.openViaSideNav(project.id);
+        const features = await featuresResponse;
+        const expected = hasDeployments(features);
+
+        await dashboard.casesTableFiltersButton().click();
+
+        // The Status filter is rendered for every project, so it marks the panel
+        // as open and populated — without it an absent Deployment filter could
+        // just be a panel still opening.
+        const filters = DASHBOARD.casesTable.filters;
+        await expect(dashboard.filterSelect(filters.status.selectId)).toBeVisible();
+
+        const deployment = dashboard.filterSelect(filters.deployment.selectId);
+        if (expected) {
+          await expect(
+            deployment,
+            `${projectType} has deployments, so the Deployment filter should ` +
+              `be offered`,
+          ).toBeVisible();
+          await expect(
+            dashboard.filterLabel(filters.deployment.selectId),
+          ).toHaveText(filters.deployment.label);
+        } else {
+          await expect(
+            deployment,
+            `${projectType} has no deployments, so the Deployment filter ` +
+              `should be withheld`,
+          ).toHaveCount(0);
+        }
+
+        console.log(
+          `Dashboard (${projectType}): hasDeployments=${expected} ` +
+            `(read=${!!features.hasDeploymentReadAccess}, ` +
+            `write=${!!features.hasDeploymentWriteAccess}) → Deployment ` +
+            `filter ${expected ? "offered" : "withheld"}`,
+        );
+      });
+
 
       for (const target of DASHBOARD.statCardTargets) {
         test(`opens the ${target.title} list from the ${target.label} card`, async ({
@@ -607,6 +901,70 @@ test.describe("Dashboard", () => {
 
           console.log(
             `Dashboard (${projectType}): ${target.title} listed ${rows} items`,
+          );
+        });
+      }
+
+      // DSH-02. The card and the page it opens are two independent queries: the
+      // card sums `GET /projects/{id}/stats/cases` (actionRequiredCount /
+      // outstandingCount / resolvedCases.pastThirtyDays, for the case types the
+      // project's features allow) plus the change-request stats when hasCR; the
+      // page runs one search per section — cases, SRs, SRA, engagements, CRs,
+      // gated on the same feature flags — filtered by state labels and, for
+      // Closed, a closedStartDate/closedEndDate window. DashboardPage's own
+      // comment says the scoping exists so these "match what is visible on the
+      // page", so equality is the contract and a difference is a finding.
+      //
+      // Compared against the sum of the section chips, not the rows: each
+      // section is a single page of 10, so rows undercount anything larger.
+      for (const target of DASHBOARD.statCardTargets) {
+        test(`the ${target.label} card value matches the total of the ${target.title} list`, async ({
+          page,
+        }) => {
+          test.skip(!project.id, `${projectType} needs a project id.`);
+
+          const dashboard = new DashboardPage(page);
+          await dashboard.openViaSideNav(project.id);
+
+          const cardValue = await dashboard.statCardValue(target.label);
+          expect(
+            cardValue,
+            `the ${target.label} card failed to load its stats, so there is ` +
+              "no value to compare",
+          ).not.toBeNull();
+
+          await dashboard.statCardButton(target.label).click();
+          await expect(page).toHaveURL(
+            new RegExp(`/projects/${project.id}/${target.pathSegment}$`),
+          );
+
+          const totals = await dashboard.itemSectionTotals(target.emptyMessage);
+
+          // A section whose search failed still renders, with its chip at 0 —
+          // summing that would compare the card against a broken list.
+          await expect(
+            dashboard.errorIndicators(),
+            `a section of ${target.title} failed to load, so its total is not real`,
+          ).toHaveCount(0);
+
+          const listTotal = Object.values(totals).reduce(
+            (sum, count) => sum + count,
+            0,
+          );
+          const breakdown =
+            Object.entries(totals)
+              .map(([section, count]) => `${section} ${count}`)
+              .join(", ") || "empty";
+
+          expect(
+            listTotal,
+            `the ${target.label} card shows ${cardValue}, but ${target.title} ` +
+              `lists ${listTotal} (${breakdown})`,
+          ).toBe(cardValue);
+
+          console.log(
+            `Dashboard (${projectType}): ${target.label} card ${cardValue} = ` +
+              `${target.title} total ${listTotal} (${breakdown})`,
           );
         });
       }
@@ -734,6 +1092,12 @@ test.describe("Dashboard", () => {
       });
 
       for (const entry of DASHBOARD.severityLegend) {
+        if (
+          "projectTypes" in entry &&
+          !(entry.projectTypes as readonly string[]).includes(projectType)
+        ) {
+          continue;
+        }
         test(`the ${entry.label} legend entry opens its list`, async ({
           page,
         }) => {
@@ -765,6 +1129,221 @@ test.describe("Dashboard", () => {
 
           console.log(
             `Dashboard (${projectType}): ${entry.label} → ${entry.title}`,
+          );
+        });
+      }
+
+      // The Outstanding Engagements legend, entry by entry. Unlike the severity
+      // legend, the type does not travel in the URL — DashboardPage navigates to
+      // the bare engagements path with `engagementTypeId`/`engagementTypeLabel`
+      // in router state — so the heading built from that state and the search
+      // request's `engagementTypeKeys` are what prove the filter arrived. The
+      // returned cases are then checked to be of that type, and their count
+      // against the number the legend shows for it.
+      for (const entry of DASHBOARD.engagementLegend) {
+        test(`the ${entry.label} engagements legend entry opens its list`, async ({
+          page,
+        }) => {
+          test.skip(!project.id, `${projectType} needs a project id.`);
+
+          const heading = DASHBOARD.sections.outstandingEngagements;
+
+          // Both armed before navigating: the features decide whether the card
+          // exists, and the engagement stats are what its legend is drawn from
+          // — reading them off the page's own requests is what lets the
+          // drill-down be compared with what the legend actually showed.
+          const featuresResponse = projectFeaturesResponse(page, project.id);
+          const statsResponse = engagementStatsResponse(page, project.id);
+
+          const dashboard = new DashboardPage(page);
+          await dashboard.openViaSideNav(project.id);
+
+          // Gated on `permissions.hasEngagements` — the same flag the
+          // "renders the Outstanding Engagements breakdown" test skips on, read
+          // here from the features response rather than inferred from a
+          // missing legend, so an empty chart is not mistaken for a withheld one.
+          const features = await featuresResponse;
+          test.skip(
+            !features.hasEngagementsReadAccess,
+            `${projectType} does not expose the Outstanding Engagements ` +
+              `breakdown (permissions.hasEngagements).`,
+          );
+
+          // Summed per category exactly as DashboardPage does: every backend
+          // type whose label matches the display name, case-insensitively —
+          // one display name can stand for several backend ids.
+          const outstanding = (await statsResponse)
+            .outstandingEngagementTypeCount ?? [];
+          const ofCategory = (label: string) =>
+            outstanding.filter(
+              (type) => type.label.toLowerCase() === label.toLowerCase(),
+            );
+          const countOf = (label: string): number =>
+            ofCategory(label).reduce((sum, type) => sum + (type.count ?? 0), 0);
+          const legendCount = countOf(entry.label);
+          const typeIds = ofCategory(entry.label).map((type) => Number(type.id));
+          const chartTotal = DASHBOARD.engagementLegend.reduce(
+            (sum, category) => sum + countOf(category.label),
+            0,
+          );
+
+          // Settled on the FIRST legend entry rather than this one, so the wait
+          // proves the chart rendered at all; whether this entry is in it is
+          // then a separate assertion with its own message. Otherwise a chart
+          // that rendered without this entry — a build deployed before it was
+          // added to OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA — would time
+          // out looking like a chart that never loaded.
+          const legend = dashboard.legendEntry(entry.label, heading);
+          const firstEntry = dashboard.legendEntry(
+            DASHBOARD.engagementLegend[0].label,
+            heading,
+          );
+          await expect(
+            firstEntry.or(dashboard.engagementsChartEmpty()),
+            "the Outstanding Engagements card should settle into its chart or " +
+              "its empty state",
+          ).toBeVisible({ timeout: 60_000 });
+
+          // A project with no outstanding engagements at all gets the card's
+          // empty state, which has no legend — so there is nothing to click.
+          if (chartTotal === 0) {
+            await expect(dashboard.engagementsChartEmpty()).toBeVisible();
+            await expect(legend).toHaveCount(0);
+            test.info().annotations.push({
+              type: "empty-chart",
+              description:
+                `${projectType} has no outstanding engagements; the card ` +
+                `shows "${DASHBOARD.engagementsChartEmptyMessage}" and no legend.`,
+            });
+            test.skip(
+              true,
+              `${projectType} has no outstanding engagements, so the ` +
+                `Outstanding Engagements card renders its empty state and ` +
+                `has no ${entry.label} legend entry to click.`,
+            );
+          }
+
+          // The chart draws every category from a fixed list, zero or not, so on
+          // a rendered chart an absent entry is a missing category — never a
+          // data gap — and fails rather than skips.
+          await expect(
+            legend,
+            `the "${entry.label}" legend entry is not rendered on the ` +
+              "Outstanding Engagements chart, though the chart itself is — is " +
+              `the build under test deployed with the "${entry.label}" ` +
+              "category (OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA)?",
+          ).toBeVisible();
+
+          // Armed before the click. The ids are those the stats gave this
+          // category; none means the legend falls back to the category name as
+          // its id, which the page cannot turn into a number — the request then
+          // carries no type ids at all.
+          const search = engagementChartSearch(page, typeIds);
+          await legend.click();
+
+          // Nothing after the path: the type travels in router state, so a
+          // query string here would mean the hand-over changed shape.
+          // (Not projectPathPattern, which deliberately tolerates a query.)
+          await expect(page).toHaveURL(
+            new RegExp(`/projects/${project.id}/${ENGAGEMENTS.pathSegment}$`),
+          );
+
+          const engagements = new EngagementsPage(page);
+          const main = page.getByTestId("app-main");
+          await expect(engagements.heading(entry.title)).toBeVisible({
+            timeout: 60_000,
+          });
+          await expect(
+            main.getByText(entry.description, { exact: true }),
+          ).toBeVisible();
+
+          const response = await search;
+          await expectSuccess(
+            response,
+            `engagements search for ${entry.label} (ids [${typeIds.join(",")}])`,
+          );
+          const result = (await response.json()) as CaseSearchResult;
+
+          // Every engagement returned is of the clicked type and not Closed —
+          // checked on the response, which carries the type the rows only
+          // render as a chip.
+          const strays = result.cases
+            .filter(
+              (item) =>
+                item.engagementType?.label?.toLowerCase() !==
+                  entry.label.toLowerCase() ||
+                item.status?.label?.toLowerCase() === "closed",
+            )
+            .map(
+              (item) =>
+                `${item.number} (${item.engagementType?.label ?? "no type"}, ` +
+                `${item.status?.label ?? "no status"})`,
+            );
+          expect(
+            strays,
+            `every engagement listed from the ${entry.label} legend entry ` +
+              `should be an outstanding ${entry.label} engagement`,
+          ).toEqual([]);
+
+          // The legend's number and the list it opens are two queries — stats
+          // and search — so equality is the contract and a difference a
+          // finding. Soft, so the row checks below still report.
+          expect
+            .soft(
+              result.totalRecords,
+              `the ${entry.label} legend entry shows ${legendCount}, but the ` +
+                `list it opens holds ${result.totalRecords}`,
+            )
+            .toBe(legendCount);
+
+          await engagements.waitForList();
+
+          if (result.cases.length === 0) {
+            await expect(
+              main.getByText(DASHBOARD.engagementsListEmptyMessage, {
+                exact: true,
+              }),
+            ).toBeVisible();
+            await expect(engagements.rows()).toHaveCount(0);
+            test.info().annotations.push({
+              type: "empty-drilldown",
+              description:
+                `${projectType}: ${entry.label} has ${legendCount} outstanding ` +
+                `engagements; the list shows its empty state, so there were ` +
+                `no rows to check the type of.`,
+            });
+            console.log(
+              `Dashboard (${projectType}): ${entry.label} → ${entry.title}, ` +
+                `empty (legend ${legendCount}), ids [${typeIds.join(",")}]`,
+            );
+            return;
+          }
+
+          // The rows are the response's engagements, and each shows the type
+          // chip — the user-visible half of the check above.
+          const numbers = new Set(result.cases.map((item) => item.number));
+          const rowCount = await engagements.rows().count();
+          expect(rowCount).toBeGreaterThan(0);
+          for (let index = 0; index < rowCount; index += 1) {
+            const row = engagements.rows().nth(index);
+            const number = await engagements.rowNumber(index);
+            expect(
+              number !== null && numbers.has(number),
+              `row ${index + 1} (${number}) should be one of the search's ` +
+                `engagements`,
+            ).toBe(true);
+            await expect(
+              // Case-insensitive, as DashboardPage matches backend labels to
+              // the display name; the chip shows the backend's own label.
+              row.getByText(new RegExp(`^${entry.label}$`, "i")),
+              `row ${index + 1} (${number}) should show the ${entry.label} type`,
+            ).not.toHaveCount(0);
+          }
+
+          console.log(
+            `Dashboard (${projectType}): ${entry.label} → ${entry.title}, ` +
+              `${result.totalRecords} listed (legend ${legendCount}), ` +
+              `${rowCount} rows checked, ids [${typeIds.join(",")}]`,
           );
         });
       }
@@ -870,4 +1449,589 @@ test.describe("Dashboard", () => {
       }
     });
   }
+
+  // ⚠️ WRITES the signed-in user's profile (PATCH /users/me), then restores the
+  // original time zone in `finally`. Runs once, not per project type: the
+  // profile belongs to the user, not the project.
+  test("changes the profile time zone from the account menu and restores it", async ({
+    page,
+  }) => {
+    const project = PROJECTS[ProjectType.SUBSCRIPTION];
+    test.skip(!project.id, "Subscription needs a project id.");
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.openViaSideNav(project.id);
+
+    const original = await openProfileTimeZone(page);
+    // The UI cannot clear a time zone, so an account without one could not be
+    // put back the way it was.
+    test.skip(
+      original === ACCOUNT_MENU.timeZonePlaceholder,
+      "The test account has no time zone set, so it could not be restored.",
+    );
+    await closeProfile(page);
+
+    // Set by saveProfileTimeZone as soon as the PATCH succeeds, so a failure
+    // after the write (the reload, the re-read) still restores the original.
+    const saved = { changed: false };
+    try {
+      const target = await saveProfileTimeZone(
+        page,
+        (labels) => labels.find((label) => label !== original),
+        saved,
+      );
+      expect(await openProfileTimeZone(page)).toBe(target);
+      await closeProfile(page);
+      console.log(`Profile time zone: ${original} → ${target}`);
+    } finally {
+      if (saved.changed) {
+        const restored = await saveProfileTimeZone(page, (labels) =>
+          labels.find((label) => label === original),
+        );
+        expect(restored).toBe(original);
+        expect(await openProfileTimeZone(page)).toBe(original);
+        console.log(`Profile time zone restored to ${original}`);
+      }
+    }
+  });
+
+  // ✅ READ-ONLY. As the Subscription admin (the suite's session): the header's
+  // "Customer Portal" link leads to the portal home and its two tables.
+  test("opens the portal home from the Customer Portal link", async ({ page }) => {
+    const project = PROJECTS[ProjectType.SUBSCRIPTION];
+    test.skip(!project.id, "Subscription needs a project id.");
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.openViaSideNav(project.id);
+    await page
+      .locator("header")
+      .first()
+      .getByText(PORTAL_HOME.headerLink, { exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 60_000 });
+
+    const projectsHeading = page.getByRole("heading", { name: PORTAL_HOME.projectsHeading });
+    const casesHeading = page.getByRole("heading", { name: PORTAL_HOME.casesHeading });
+    await expect(projectsHeading).toBeVisible({ timeout: 60_000 });
+    await expect(casesHeading).toBeVisible({ timeout: 60_000 });
+
+    const tables = page.getByRole("table");
+    await expect(tables).toHaveCount(2);
+    const [projectsTable, casesTable] = [tables.nth(0), tables.nth(1)];
+
+    // Projects: its columns, one row per project the heading counts, and the
+    // fixture projects among them.
+    for (const column of PORTAL_HOME.projectColumns) {
+      await expect(
+        projectsTable.getByRole("columnheader", { name: column, exact: true }),
+      ).toBeVisible();
+    }
+    const projectTotal = Number(
+      PORTAL_HOME.projectsHeading.exec(await projectsHeading.innerText())![1],
+    );
+    const projectRows = projectsTable.locator("tbody").getByRole("row");
+    await expect(projectRows).toHaveCount(projectTotal);
+    for (const fixture of Object.values(PROJECTS)) {
+      if (fixture.name) {
+        await expect(projectsTable.getByText(fixture.name, { exact: true })).toBeVisible();
+      }
+    }
+
+    // Cases: its columns, and rows; View More offers the rest when the total
+    // exceeds what is rendered.
+    for (const column of PORTAL_HOME.caseColumns) {
+      await expect(
+        casesTable.getByRole("columnheader", { name: column, exact: true }),
+      ).toBeVisible();
+    }
+    const caseTotal = Number(PORTAL_HOME.casesHeading.exec(await casesHeading.innerText())![1]);
+    const caseRows = casesTable.locator("tbody").getByRole("row");
+    await expect(caseRows.first()).toBeVisible();
+    const shown = await caseRows.count();
+    expect(shown).toBeLessThanOrEqual(caseTotal);
+    if (shown < caseTotal) {
+      const viewMore = page.getByRole("button", { name: PORTAL_HOME.viewMoreButton });
+      await expect(viewMore).toBeVisible();
+      const more = Number(PORTAL_HOME.viewMoreButton.exec(await viewMore.innerText())![1]);
+      expect(shown + more, "View More should offer the rest of the cases").toBe(caseTotal);
+    }
+
+    console.log(
+      `Portal home: ${projectTotal} project(s); ${shown} of ${caseTotal} case(s) shown`,
+    );
+  });
+
+  // ✅ READ-ONLY. Switches project from the header, as the Subscription admin
+  // session (the suite's signed-in user), and back again.
+  test("switches project from the top bar and loads its dashboard", async ({
+    page,
+  }) => {
+    const from = PROJECTS[ProjectType.SUBSCRIPTION];
+    const to = PROJECTS[ProjectType.MANAGED_CLOUD_SUBSCRIPTION];
+    test.skip(!from.id || !to.id, "Needs both project ids.");
+
+    const dashboard = new DashboardPage(page);
+    const switcher = new ProjectSwitcherPage(page);
+    const header = page.locator("header").first();
+
+    /** Opens the switcher on the current project and picks another. */
+    const switchTo = async (
+      current: { name: string },
+      target: { id: string; name: string },
+    ) => {
+      await header.getByText(current.name, { exact: true }).first().click();
+      const filter = page.getByPlaceholder(PROJECT_SWITCHER.searchPlaceholder);
+      if (await filter.isVisible().catch(() => false)) {
+        await filter.fill(target.name);
+      }
+      const option = switcher.option(target.name);
+      await expect(option, `"${target.name}" should be offered`).toBeVisible({
+        timeout: 60_000,
+      });
+      await option.click();
+
+      // The target's dashboard: its URL, the header naming it, and the stat
+      // cards loading for it.
+      await expect(page).toHaveURL(projectPathPattern(target.id, "dashboard"), {
+        timeout: 60_000,
+      });
+      await expect(header.getByText(target.name, { exact: true }).first()).toBeVisible({
+        timeout: 60_000,
+      });
+      await expect(header.getByText(current.name, { exact: true })).toHaveCount(0);
+      await expect(dashboard.statCard(DASHBOARD.statCards[0].label)).toBeVisible({
+        timeout: 60_000,
+      });
+    };
+
+    await dashboard.openViaSideNav(from.id);
+    await expect(header.getByText(from.name, { exact: true }).first()).toBeVisible();
+
+    await switchTo(from, to);
+    await switchTo(to, from);
+
+    console.log(`Dashboard: switched ${from.name} → ${to.name} → back`);
+  });
+
+  // ✅ READ-ONLY. The collapsed state is kept in the browser only
+  // (setSidebarCollapsed), never sent to the backend.
+  test("expands and collapses the side menu from the header toggle", async ({
+    page,
+  }) => {
+    const project = PROJECTS[ProjectType.SUBSCRIPTION];
+    test.skip(!project.id, "Subscription needs a project id.");
+
+    const dashboard = new DashboardPage(page);
+    await dashboard.openViaSideNav(project.id);
+    const sideNav = new SideNavPage(page);
+    // SideNavPage.sidebar() matches both nested <aside>s, so measure Oxygen's
+    // inner one; labels are still looked up through the page object.
+    const sidebar = page
+      .getByTestId(SIDE_NAV.sidebarTestId)
+      .getByRole("complementary");
+    const expandToggle = page.getByRole("button", {
+      name: SIDE_NAV.expandToggle,
+    });
+    const collapseToggle = page.getByRole("button", {
+      name: SIDE_NAV.collapseToggle,
+    });
+
+    // The state persists per browser, so the run may start expanded; collapse
+    // first so the test always begins from "Expand sidebar".
+    if (await collapseToggle.isVisible()) {
+      await collapseToggle.click();
+    }
+    await expect(expandToggle).toBeVisible();
+    await expectSidebarWidth(sidebar, SIDE_NAV.collapsedWidthPx);
+
+    await expandToggle.click();
+    await expect(collapseToggle).toBeVisible();
+    await expect(expandToggle).toHaveCount(0);
+    await expectSidebarWidth(sidebar, SIDE_NAV.expandedWidthPx);
+    // Expanded, the items show their labels, not just icons.
+    await expect(
+      sideNav.sidebar().first().getByText(SIDE_NAV.items.dashboard, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await collapseToggle.click();
+    await expect(expandToggle).toBeVisible();
+    await expect(collapseToggle).toHaveCount(0);
+    await expectSidebarWidth(sidebar, SIDE_NAV.collapsedWidthPx);
+  });
 });
+
+/**
+ * Waits for the sidebar to settle at a width (it animates between states).
+ *
+ * @param sidebar - The sidebar landmark.
+ * @param widthPx - The expected width, allowing a few px for borders.
+ * @returns Resolves once the width is within tolerance.
+ */
+async function expectSidebarWidth(
+  sidebar: Locator,
+  widthPx: number,
+): Promise<void> {
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0), {
+      message: `the sidebar should settle at about ${widthPx}px wide`,
+      timeout: 10_000,
+    })
+    .toBeGreaterThanOrEqual(widthPx - 4);
+  await expect
+    .poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0))
+    .toBeLessThanOrEqual(widthPx + 4);
+}
+
+/** How long to allow the profile modal and its post-save reload. */
+const PROFILE_TIMEOUT_MS = 60_000;
+
+/**
+ * Opens Account → Profile and the Time Zone select's option list.
+ *
+ * @param page - The page under test.
+ * @returns The time zone label the select currently shows.
+ */
+async function openProfileTimeZone(page: Page): Promise<string> {
+  await page.getByRole("button", { name: ACCOUNT_MENU.trigger }).click();
+  await page
+    .getByRole("menuitem", { name: ACCOUNT_MENU.profileItem })
+    .click();
+  const modal = page.getByRole("dialog");
+  const select = modal.getByRole("combobox", {
+    name: ACCOUNT_MENU.timeZoneSelect,
+  });
+  await expect(select).toBeVisible({ timeout: PROFILE_TIMEOUT_MS });
+  // The select renders the placeholder until /users/me and /metadata resolve.
+  await expect(select).not.toHaveText("", { timeout: PROFILE_TIMEOUT_MS });
+  const current = (await select.innerText()).trim();
+  await select.click();
+  await expect(page.getByRole("option").first()).toBeVisible({
+    timeout: PROFILE_TIMEOUT_MS,
+  });
+  return current;
+}
+
+/**
+ * Closes the Time Zone option list, then the profile modal, without saving.
+ *
+ * @param page - The page under test.
+ * @returns Resolves once the modal is gone.
+ */
+async function closeProfile(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toHaveCount(0);
+  await page.getByRole("button", { name: ACCOUNT_MENU.closeButton }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+}
+
+/**
+ * Opens the profile, picks a time zone and saves it, waiting for the PATCH and
+ * the reload a time zone change triggers.
+ *
+ * @param page - The page under test.
+ * @param pick - Chooses the label to select from the offered options.
+ * @param saved - Optional flag set to true once the PATCH has succeeded.
+ * @returns The label that was saved.
+ */
+async function saveProfileTimeZone(
+  page: Page,
+  pick: (labels: string[]) => string | undefined,
+  saved?: { changed: boolean },
+): Promise<string> {
+  await openProfileTimeZone(page);
+  const labels = (await page.getByRole("option").allInnerTexts()).map((l) =>
+    l.trim(),
+  );
+  const target = pick(labels);
+  expect(target, "no suitable time zone option was offered").toBeTruthy();
+  await page.getByRole("option", { name: target!, exact: true }).click();
+
+  const modal = page.getByRole("dialog");
+  await expect(
+    modal.getByRole("combobox", { name: ACCOUNT_MENU.timeZoneSelect }),
+  ).toHaveText(target!);
+
+  const patch = page.waitForResponse(
+    (r) =>
+      r.request().method() === "PATCH" && /\/users\/me$/.test(r.url()),
+  );
+  const reload = page.waitForEvent("load");
+  await modal.getByRole("button", { name: ACCOUNT_MENU.saveButton }).click();
+  const response = await patch;
+  expect(response.ok(), `PATCH /users/me returned ${response.status()}`).toBe(
+    true,
+  );
+  if (saved) saved.changed = true;
+  // The success toast is not asserted: a time zone change reloads the page
+  // straight after showing it, so it is usually gone before it can be seen.
+  // The re-read after the reload is the proof the value was stored.
+  await reload;
+  await expect(
+    page.getByRole("button", { name: ACCOUNT_MENU.trigger }),
+  ).toBeVisible({ timeout: PROFILE_TIMEOUT_MS });
+  return target!;
+}
+
+/** How long to allow the cases table to re-render after its search returns. */
+const TABLE_TIMEOUT_MS = 60_000;
+
+/** The dashboard's cases table at rest, unfiltered, with the metadata its
+ * filters are built from. */
+interface CasesTableBaseline {
+  dashboard: DashboardPage;
+  metadata: ProjectFiltersBody;
+  /** The non-Closed state ids the table searches with when no status is
+   * ticked — what an unfiltered (or cleared) search carries. */
+  defaultStatusIds: number[];
+  /** The unfiltered search's result, at {@link SAMPLE_ROWS} rows. Its cases
+   * are what the specs pick filter values from, so each choice is known to
+   * match something — and whether it should exclude something. */
+  baseline: CaseSearchResult;
+}
+
+/** Rows per page to sample the unfiltered table at — the largest page size it
+ * offers. The default 5 rows is too few to find a second status, category or
+ * creator on most projects, and without one a filter that the backend ignored
+ * would be indistinguishable from one that matched everything. */
+const SAMPLE_ROWS = 50;
+
+/** Whether a case-state label is Closed, which the table neither searches by
+ * default nor offers as a filter option (`isClosedCaseStatusLabel`). */
+function isClosedLabel(label: string): boolean {
+  return label.trim().toLowerCase() === "closed";
+}
+
+/** Distinct, non-empty values, in first-seen order. */
+function uniqueLabels(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => !!value))];
+}
+
+/**
+ * Opens the dashboard and waits for the cases table's unfiltered search.
+ *
+ * The filter metadata is captured from the page's own request so the specs
+ * can map option labels to the ids the request should carry, and the default
+ * status set is derived from it exactly as CasesTable derives it.
+ *
+ * @param page - Test page.
+ * @param projectId - Project to open.
+ * @returns The table at rest.
+ */
+async function openCasesTableBaseline(
+  page: Page,
+  projectId: string,
+): Promise<CasesTableBaseline> {
+  const metadataResponse = projectFiltersResponse(page, projectId);
+  const searches = recordDashboardCasesSearches(page);
+
+  const dashboard = new DashboardPage(page);
+  await dashboard.openViaSideNav(projectId);
+  const metadata = await metadataResponse;
+
+  const fromMetadata = (metadata.caseStates ?? [])
+    .filter((state) => !isClosedLabel(state.label))
+    .map((state) => Number(state.id));
+  const defaultStatusIds =
+    fromMetadata.length > 0
+      ? fromMetadata
+      : [...DASHBOARD.casesTable.fallbackStatusIds];
+
+  let unfiltered: Response | undefined;
+  await expect
+    .poll(
+      () => {
+        unfiltered = [...searches].reverse().find((response) => {
+          const filters = caseSearchFiltersOf(response);
+          return (
+            !!filters && isUnfilteredDashboardSearch(filters, defaultStatusIds)
+          );
+        });
+        return !!unfiltered;
+      },
+      {
+        message:
+          "the cases table should search with the default outstanding states",
+        timeout: TABLE_TIMEOUT_MS,
+      },
+    )
+    .toBe(true);
+  const response = unfiltered as Response;
+  await expectSuccess(response, "unfiltered cases search");
+  let baseline = (await response.json()) as CaseSearchResult;
+
+  await dashboard.waitForCasesTableSettled();
+
+  // Widen the sample when there is more than the first page to see. Only the
+  // page size changes, so the filters stay the unfiltered set.
+  if (baseline.totalRecords > baseline.cases.length) {
+    const widened = caseSearchWithPagination(page, {
+      limit: SAMPLE_ROWS,
+      offset: 0,
+    });
+    await dashboard.selectRowsPerPage(SAMPLE_ROWS);
+    const widenedResponse = await widened;
+    await expectSuccess(widenedResponse, "unfiltered cases search, widened");
+    baseline = (await widenedResponse.json()) as CaseSearchResult;
+    await expectRowsFrom(dashboard, baseline, "widened unfiltered");
+  }
+
+  return { dashboard, metadata, defaultStatusIds, baseline };
+}
+
+/** One filter, how to choose it, and how to tell it took. */
+interface CasesTableFilterExercise {
+  filter: { label: string; selectId: string };
+  /** Option labels to tick. The first must be known to match a case. */
+  labels: string[];
+  /** Whether a search request carries exactly this selection. */
+  carriesSelection: (filters: CaseSearchFilters) => boolean;
+  /** Whether a returned case satisfies the selection. */
+  caseMatches: (item: CaseSearchResultItem) => boolean;
+  /** How a case's filtered field reads, for the failure message. */
+  describeCase: (item: CaseSearchResultItem) => string;
+  /** Whether a rendered row shows the selection — only for filters whose
+   * field the table displays. */
+  rowMatches?: (row: string) => boolean;
+}
+
+/**
+ * Polls until the table's rows are a non-empty subset of a search's cases.
+ *
+ * A subset rather than equal: the table drops S0 cases client-side on projects
+ * that exclude them (`excludeS0`), and only those, so every row must still come
+ * from the response.
+ *
+ * @param dashboard - The dashboard.
+ * @param result - The search the rows should come from.
+ * @param what - Which search, for the failure message.
+ */
+async function expectRowsFrom(
+  dashboard: DashboardPage,
+  result: CaseSearchResult,
+  what: string,
+): Promise<void> {
+  const numbers = new Set(result.cases.map((item) => item.number));
+  await expect
+    .poll(
+      async () => {
+        const rows = await dashboard.casesTableCaseNumbers();
+        return (
+          rows.length > 0 &&
+          rows.length <= numbers.size &&
+          rows.every((row) => numbers.has(row))
+        );
+      },
+      {
+        message: `the table's rows should be the ${what} search's cases`,
+        timeout: TABLE_TIMEOUT_MS,
+      },
+    )
+    .toBe(true);
+}
+
+/**
+ * Applies a filter to the cases table, checks it narrowed the table, then
+ * clears it and checks the table came back unfiltered.
+ *
+ * @param page - Test page.
+ * @param table - The table at rest, from {@link openCasesTableBaseline}.
+ * @param exercise - The filter and how to verify it.
+ * @returns The filtered search's result, and whether the sample held a case
+ *   outside the selection — i.e. whether narrowing was actually asserted.
+ */
+async function exerciseCasesTableFilter(
+  page: Page,
+  table: CasesTableBaseline,
+  exercise: CasesTableFilterExercise,
+): Promise<{ filtered: CaseSearchResult; narrowingProven: boolean }> {
+  const { dashboard, defaultStatusIds, baseline } = table;
+  const { filter, labels } = exercise;
+  const select = dashboard.filterSelect(filter.selectId);
+
+  // The panel is collapsed on load and its contents unmounted.
+  await expect(select).toHaveCount(0);
+  await dashboard.casesTableFiltersButton().click();
+  await expect(select).toBeVisible();
+  await expect(dashboard.filterLabel(filter.selectId)).toHaveText(filter.label);
+
+  // Armed before ticking: each tick searches on its own, and only the request
+  // carrying the whole selection is the filter applied.
+  const applied = dashboardCasesSearch(page, exercise.carriesSelection);
+  await dashboard.selectFilterOptions(filter.selectId, labels);
+  const appliedResponse = await applied;
+  await expectSuccess(appliedResponse, `cases search filtered by ${filter.label}`);
+  const filtered = (await appliedResponse.json()) as CaseSearchResult;
+
+  await expect(select).toContainText(labels[0]);
+
+  // The first label was taken from a case on screen, so an empty result is a
+  // wrong answer rather than a quiet project.
+  expect(
+    filtered.cases.length,
+    `filtering by ${filter.label} ${JSON.stringify(labels)} should return the ` +
+      `case it was chosen from`,
+  ).toBeGreaterThan(0);
+
+  const strays = filtered.cases
+    .filter((item) => !exercise.caseMatches(item))
+    .map((item) => `${item.number} (${exercise.describeCase(item)})`);
+  expect(
+    strays,
+    `every case returned for ${filter.label} ${JSON.stringify(labels)} ` +
+      `should match it`,
+  ).toEqual([]);
+
+  // Narrowing is only provable when the sample holds a case outside the
+  // selection; then the filtered total must be smaller than the unfiltered
+  // one. Without such a case — every sampled case already matches — a filter
+  // the backend ignored would return the same total, so nothing is claimed.
+  const excluded = baseline.cases.filter((item) => !exercise.caseMatches(item));
+  if (excluded.length > 0) {
+    expect(
+      filtered.totalRecords,
+      `filtering by ${filter.label} ${JSON.stringify(labels)} should drop ` +
+        `cases outside it, e.g. ${excluded[0].number} ` +
+        `(${exercise.describeCase(excluded[0])})`,
+    ).toBeLessThan(baseline.totalRecords);
+  }
+
+  await expectRowsFrom(dashboard, filtered, "filtered");
+  if (exercise.rowMatches) {
+    const rows = await dashboard.casesTableRows().allInnerTexts();
+    for (const [index, row] of rows.entries()) {
+      expect(
+        exercise.rowMatches(row),
+        `row ${index + 1} should show ${filter.label} ${JSON.stringify(labels)}: ` +
+          `${row.replace(/\s+/g, " ")}`,
+      ).toBe(true);
+    }
+  }
+
+  // One field is active however many of its options are ticked.
+  const clearFilters = dashboard.clearFiltersButton(1);
+  await expect(clearFilters).toBeVisible();
+  await expect(dashboard.casesTableFiltersButton()).toHaveCount(0);
+
+  // Clearing goes back to the default status set with nothing else — the same
+  // search the page loaded with. Armed before the click so the page's own
+  // first load cannot satisfy it.
+  const cleared = dashboardCasesSearch(page, (filters) =>
+    isUnfilteredDashboardSearch(filters, defaultStatusIds),
+  );
+  await clearFilters.click();
+  const clearedResponse = await cleared;
+  await expectSuccess(clearedResponse, "cases search after clearing");
+  const restored = (await clearedResponse.json()) as CaseSearchResult;
+
+  await expect(dashboard.casesTableFiltersButton()).toBeVisible();
+  await expect(select).not.toContainText(labels[0]);
+  expect(
+    restored.totalRecords,
+    "clearing should restore the unfiltered total",
+  ).toBe(baseline.totalRecords);
+  await expectRowsFrom(dashboard, restored, "cleared");
+
+  return { filtered, narrowingProven: excluded.length > 0 };
+}

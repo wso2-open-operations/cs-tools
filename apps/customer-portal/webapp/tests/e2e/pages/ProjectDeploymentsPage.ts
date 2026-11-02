@@ -951,18 +951,19 @@ export class ProjectDeploymentsPage {
    *
    * Scoped to the readout rather than matched page-wide: the same "U12" is also
    * rendered as the entry's own badge in the list below, so an unscoped locator
-   * resolves to two elements. `.last()` picks the innermost container holding the
-   * label — the readout box itself, whose only other child is the value.
+   * resolves to two elements. The value is the element straight after the
+   * label; matching by container stopped working once the label got a wrapper
+   * of its own (live 2026-10-22).
    *
    * @param level - Expected level, without the "U" prefix.
    * @returns Locator for the value.
    */
   currentUpdateLevel(level: string): Locator {
-    return this.modal()
-      .locator("div")
-      .filter({ has: this.currentUpdateLevelLabel() })
-      .last()
-      .getByText(MANAGE_PRODUCT.currentLevelValue(level), { exact: true });
+    // The first element after the label whose text is the value — the readout,
+    // which precedes the history list's own copy of it.
+    return this.currentUpdateLevelLabel().locator(
+      `xpath=following::*[normalize-space(.)="${MANAGE_PRODUCT.currentLevelValue(level)}"][1]`,
+    );
   }
 
   /**

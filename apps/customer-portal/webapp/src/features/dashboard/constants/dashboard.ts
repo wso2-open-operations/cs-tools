@@ -204,6 +204,11 @@ export const OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA = [
   { key: "onboarding", name: "Onboarding", color: colors.blue[500] },
   { key: "migration", name: "Migration", color: colors.orange[500] },
   { key: "follow-up", name: "Follow Up", color: colors.purple[500] },
+  {
+    key: "new-feature-improvement",
+    name: "New Feature Improvement",
+    color: colors.brown[500],
+  },
 ] as const;
 
 // Configuration for Cases Trend Chart (same legend order as Outstanding Engagements).

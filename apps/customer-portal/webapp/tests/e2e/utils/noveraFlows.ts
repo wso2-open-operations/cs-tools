@@ -183,12 +183,44 @@ export async function setNoveraViaApi(
     );
   }
 
+  // Authorize exactly as the app does. The id token scanned from sessionStorage
+  // above can be a stale copy (the replayed session bundle) that the backend
+  // rejects with 401, while the app's own calls carry a current one — so take
+  // the Authorization header off one of those, reloading to provoke a call.
+  const backendRequest = page.waitForRequest(
+    (r) =>
+      r.url().startsWith(context.baseUrl!) && !!r.headers()["authorization"],
+    { timeout: 60_000 },
+  );
+  await page.reload();
+  const authorization = (await backendRequest).headers()["authorization"];
+
+  // Skip the write when the project is already in the wanted state. Staging's
+  // PATCH /projects/{id} has been answering 502 "Failed to resolve user roles"
+  // (live 2026-10-22) even for a no-op, which failed every chat test before it
+  // reached the UI; the GET does not hit that path.
+  const current = await page.request.fetch(
+    `${context.baseUrl}/projects/${projectId}`,
+    { headers: { Authorization: authorization } },
+  );
+  if (current.ok()) {
+    const details = (await current.json().catch(() => null)) as {
+      hasAgent?: boolean | null;
+      account?: { hasAgent?: boolean | null };
+    } | null;
+    // Effective state as the app reads it (GetHelpDropdown, Settings): the
+    // project's own flag, falling back to the account's when it is unset.
+    const effective =
+      details?.hasAgent ?? details?.account?.hasAgent ?? false;
+    if (effective === enabled) return;
+  }
+
   const response = await page.request.fetch(
     `${context.baseUrl}/projects/${projectId}`,
     {
       method: "PATCH",
       headers: {
-        Authorization: `Bearer ${context.token}`,
+        Authorization: authorization,
         "Content-Type": "application/json",
       },
       data: { hasAgent: enabled },

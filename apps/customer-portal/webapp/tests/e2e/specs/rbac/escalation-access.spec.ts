@@ -81,18 +81,6 @@ const EXPECTATIONS: { role: RoleKey; maxLevel: number }[] = [
   { role: "ADMIN", maxLevel: 3 },
   { role: "PORTAL", maxLevel: 3 },
   { role: "LEAD", maxLevel: MAX_LEVEL },
-  // ⚠️ SECURITY = 0 is a REQUIREMENT, not a description of the current build.
-  // `showEscalateButton` in CaseDetailsActionRow gates only on the escalation
-  // level, the case not being Closed, EL5 being the ceiling, and `isCurrentUserLead`
-  // for levels 3-4. There is no Security-contact check anywhere in that path, so
-  // as implemented a Security Contact IS offered escalation at EL0 and this case
-  // will fail.
-  //
-  // Left as specified on purpose: flipping it to match the code would turn a
-  // missing restriction into a green test and erase the requirement. If the
-  // restriction is not wanted, delete this entry rather than invert it — an
-  // inverted assertion would then claim to verify something nobody asked for.
-  { role: "SECURITY", maxLevel: 0 },
 ];
 
 test.describe("RBAC — escalation ceiling per user type", () => {

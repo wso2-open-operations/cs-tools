@@ -178,6 +178,31 @@ export class CaseDetailPage {
     return this.main().getByText(text, { exact: false }).first();
   }
 
+  /**
+   * Scrolls the Activity feed until a comment is loaded, then returns it.
+   *
+   * The feed pages in older entries when its bottom sentinel scrolls into view
+   * (IntersectionObserver in CaseDetailsActivityPanel). The fixture cases
+   * collect fresh comments from case-comment.spec.ts on every run, which pushes
+   * their original comment beyond the first page (live 2026-10-27).
+   *
+   * @param text - Comment text, matched as a substring.
+   * @returns Locator for the comment.
+   */
+  async scrollToComment(text: string): Promise<Locator> {
+    const target = this.comment(text);
+    for (let attempt = 0; attempt < 20 && !(await target.count()); attempt++) {
+      await this.main()
+        .getByRole("paragraph")
+        .last()
+        .scrollIntoViewIfNeeded()
+        .catch(() => undefined);
+      await this.page.mouse.wheel(0, 5_000);
+      await this.page.waitForTimeout(1_000);
+    }
+    return target;
+  }
+
   //
   // Details tab.
   //

@@ -72,6 +72,34 @@ test.describe("Novera Chat", () => {
   const project = PROJECTS[NOVERA_CHAT_INPUT.projectType];
 
   /**
+   * Makes sure the AI Chat Assistant (Novera) is on, through Settings → AI
+   * Assistant — the same control the "get help" test drives.
+   *
+   * Replaces setNoveraViaApi for switching ON: staging's PATCH /projects/{id}
+   * from a direct API call has been rejected (502 "Failed to resolve user
+   * roles", then 401) while the app's own toggle and the account-level flag
+   * keep Novera active. Only toggles when it is not already ticked, so a run
+   * normally writes nothing.
+   *
+   * @param page - Test page.
+   * @returns Resolves once Settings reports Novera Active.
+   */
+  async function ensureNoveraOn(page: Page): Promise<void> {
+    const settings = new SettingsPage(page);
+    await settings.openViaSideNav(project.id);
+    await settings.openTab(SETTINGS.tabs.aiAssistant);
+    await expect(settings.noveraToggle()).toBeEnabled({ timeout: 30_000 });
+    if (!(await settings.noveraToggle().isChecked())) {
+      await settings.setNovera(project.id, true);
+    }
+    await expect(
+      settings.noveraChip(SETTINGS.aiAssistant.novera.activeChip),
+      "Novera must report Active before the chat flow can be exercised — " +
+        "Get Help opens the create-case form while it is off",
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  /**
    * Enables the assistant, opens Get Help and submits the question.
    *
    * Shared so each test can run alone: both need a live conversation, and the
@@ -92,24 +120,9 @@ test.describe("Novera Chat", () => {
     // of the chat, and the failure then surfaces several steps later pointing at
     // the wrong thing entirely.
     //
-    // Enabled through the API rather than the Settings toggle: the toggle's own
-    // PATCH currently aborts in the browser, so clicking it cannot turn the
-    // assistant on at all. See setNoveraViaApi for the detail. The toggle
-    // remains covered by settings.spec.ts, which drives the real control.
-    await page.goto(`/projects/${project.id}/dashboard`);
-    await setNoveraViaApi(page, project.id, true);
-
-    // Then confirm it through the UI, in Settings → AI Assistant → Support
-    // Capabilities: the chip is what a user sees, and reading it back proves the
-    // write actually landed rather than merely returning 2xx.
-    const settings = new SettingsPage(page);
-    await settings.open(project.id);
-    await settings.openTab(SETTINGS.tabs.aiAssistant);
-    await expect(
-      settings.noveraChip(SETTINGS.aiAssistant.novera.activeChip),
-      "Novera must report Active before the chat flow can be exercised — " +
-        "Get Help opens the create-case form while it is off",
-    ).toBeVisible({ timeout: 30_000 });
+    // Through the Settings toggle (ensureNoveraOn), not setNoveraViaApi: the
+    // direct API PATCH is currently rejected by staging (live 2026-10-22).
+    await ensureNoveraOn(page);
 
     const chat = new NoveraChatPage(page);
 
@@ -656,6 +669,64 @@ test.describe("Novera Chat", () => {
   });
 
 
+  // ✅ READ-ONLY. Opens an existing conversation from Support → Chat History and
+  // checks its details; creates nothing, so it needs no fresh chat of its own.
+  test("opens a chat from Support → Chat History and shows its details", async ({
+    page,
+  }) => {
+    test.skip(
+      !project.id,
+      `${NOVERA_CHAT_INPUT.projectType} needs a project id.`,
+    );
+
+    // Support in the side menu, then the Chat History card's full list.
+    const chat = await openChatHistory(page);
+    await expect(chat.historyRows().first()).toBeVisible({ timeout: 60_000 });
+
+    // Prefer a closed conversation's View — it only reads. Fall back to the
+    // newest row's Resume, which opens the same details page.
+    const viewable = chat.historyRows().filter({
+      has: page.getByRole("button", {
+        name: NOVERA_CHAT.history.viewButton,
+        exact: true,
+      }),
+    });
+    const row = (await viewable.count()) > 0
+      ? viewable.first()
+      : chat.historyRows().first();
+    const chatNumber = NOVERA_CHAT.history.numberPattern.exec(
+      await row.innerText(),
+    )?.[0];
+    expect(chatNumber, "the row should show its chat number").toBeTruthy();
+
+    await row
+      .getByRole("button", {
+        name: new RegExp(
+          `^(${NOVERA_CHAT.history.viewButton}|${NOVERA_CHAT.history.resumeButton})$`,
+        ),
+      })
+      .first()
+      .click();
+
+    // The conversation's own page, describing that chat.
+    await expect(page).toHaveURL(NOVERA_CHAT.resumedConversationPattern, {
+      timeout: 60_000,
+    });
+    const session = NOVERA_CHAT.session;
+    for (const label of [
+      session.section,
+      session.statusLabel,
+      session.chatNumberLabel,
+    ]) {
+      await expect(chat.sessionLabel(label).first(), label).toBeVisible({
+        timeout: 60_000,
+      });
+    }
+    await expect(chat.sessionLabel(chatNumber!).first()).toBeVisible();
+
+    console.log(`Novera chat: opened ${chatNumber} from Chat History`);
+  });
+
   test("view case", async ({ page }) => {
     test.skip(
       !project.id,
@@ -1050,8 +1121,7 @@ test.describe("Novera Chat", () => {
     async function openDescribeIssue(page: Page): Promise<NoveraChatPage> {
       // Same first step as the flows above, and for the same reason: the
       // describe-issue page only exists while the assistant is on.
-      await page.goto(`/projects/${project.id}/dashboard`);
-      await setNoveraViaApi(page, project.id, true);
+      await ensureNoveraOn(page);
 
       const chat = new NoveraChatPage(page);
       await chat.openViaGetHelp(project.id);

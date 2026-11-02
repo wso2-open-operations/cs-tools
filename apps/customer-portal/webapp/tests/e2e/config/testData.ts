@@ -542,15 +542,16 @@ export const CALL_REQUEST_INPUT = {
  * so the optional fields are exercised too.
  */
 export const DEPLOYMENT_PRODUCT_INPUT = {
-  /** Option label in the modal's Product Name select. */
-  productName: "API Manager",
-  /** The same product as the deployment's product list renders it.
-   *
-   * The two differ: the select offers the short name while the list shows the
-   * full product label, so the row's control reads "Edit WSO2 API Manager" for
-   * a product picked as "API Manager". Verified live. */
+  /** Option label in the modal's Product Name select. The select now offers
+   * the full product label (it used to show the short "API Manager"; live
+   * 2026-10-22), so this matches the listed name. */
+  productName: "WSO2 API Manager",
+  /** The same product as the deployment's product list renders it — the row's
+   * control reads "Edit WSO2 API Manager". */
   listedProductName: "WSO2 API Manager",
-  version: "4.4.0",
+  /** Staging now offers only 3.0.0 / 2.0.0 / 1.0.0 for WSO2 API Manager in
+   * this modal (4.4.0 is gone; live 2026-10-22). */
+  version: "3.0.0",
   cores: "4",
   tps: "100",
   description: "Automation test add product.",
@@ -1288,3 +1289,18 @@ export const SUBSCRIPTION_SEVERITY_CASES: CaseInput[] = [
     severity: Severity.S3,
   },
 ];
+
+/** Settings → Registry Tokens → Service Tokens: the system (integration) user a
+ * generated service token is created for. Must be one of the project's
+ * integration users offered by the "System User (Created For)" select. */
+export const REGISTRY_SERVICE_TOKEN_INPUT = {
+  createdFor: "integrationuser@snauto.com",
+} as const;
+
+/** A case carrying an attachment uploaded by someone other than the signed-in
+ * user, so the delete control must not be usable on it. */
+export const FOREIGN_ATTACHMENT_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  caseId: "e7d723c6-ebc0-db50-fcf5-f5dabad0cd61",
+  fileName: "delete.png",
+} as const;

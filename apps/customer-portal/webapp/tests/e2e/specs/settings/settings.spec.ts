@@ -35,14 +35,19 @@
 // is.
 //
 
-import { test, expect, withSession } from "../../fixtures/test";
+import { test, expect, withSession, type Page } from "../../fixtures/test";
 import { SettingsPage } from "../../pages/SettingsPage";
 import {
   PROJECTS,
   SETTINGS_ADD_USER_INPUT,
   SETTINGS_USER_INPUT,
 } from "../../config/testData";
-import { GET_HELP_BUTTON, SETTINGS } from "../../utils/selectors";
+import {
+  GET_HELP_BUTTON,
+  SETTINGS,
+  SETTINGS_ROLE_BADGES,
+  SETTINGS_ROLE_LABELS,
+} from "../../utils/selectors";
 import { expectSuccess, isSuccess } from "../../utils/caseFlows";
 import { projectPathPattern } from "../../utils/ids";
 
@@ -308,27 +313,212 @@ test.describe("Settings", () => {
         "the new user should appear in the list",
       ).not.toHaveCount(0);
 
+      await expectRoleBadges(settings, email, {
+        shown: [SETTINGS_ROLE_BADGES.portalUser],
+        absent: [SETTINGS_ROLE_BADGES.admin, SETTINGS_ROLE_BADGES.securityUser],
+      });
+
       console.log(`Settings: added ${email}`);
     } finally {
       // Always cleaned up, including when an assertion above failed after the
       // contact was created. Without this the project accumulates a user per
       // run, and `DELETE /contacts/{email}` is the only way back.
-      if (created) {
-        const removal = await settings
-          .removeUser(email)
-          .catch(() => undefined);
-        expect(
-          removal && isSuccess(removal.status()),
-          `cleanup failed — ${email} is still a contact on this project and ` +
-            `must be removed by hand`,
-        ).toBe(true);
+      if (created) await removeAndConfirmGone(page, settings, email);
+    }
+  });
 
-        await expect(settings.userRow(email)).toHaveCount(0, {
-          timeout: 30_000,
-        });
-        console.log(`Settings: removed ${email}`);
+
+  /**
+   * Adds a user with one membership role ticked, checks the request carries it,
+   * then removes the user again.
+   *
+   * @param page - The page under test.
+   * @param role - Membership role checkbox label in the Add User modal.
+   * @param expected - Role flags the POST /contacts payload must carry.
+   * @param badges - Role badges the new row must show, and must not.
+   * @param untick - Roles to clear first (e.g. the default Portal User).
+   */
+  async function addUserWithRole(
+    page: Page,
+    role: string,
+    expected: Record<string, boolean>,
+    badges: { shown: string[]; absent?: string[] },
+    untick: string[] = [],
+  ): Promise<void> {
+    const settings = new SettingsPage(page);
+    await settings.openViaSideNav(project.id);
+    await settings.openTab(SETTINGS.tabs.userManagement);
+    await expect(settings.anyUserRows().first()).toBeVisible({ timeout: 60_000 });
+    await expect(
+      settings.addUserButton(),
+      "Add User is admin-only — if it is missing, the session is not an admin",
+    ).toBeVisible({ timeout: 60_000 });
+
+    const email = `${SETTINGS_ADD_USER_INPUT.emailPrefix}-${role
+      .toLowerCase()
+      .replace(/\s+/g, "")}-${Date.now()}@${SETTINGS_ADD_USER_INPUT.emailDomain}`;
+    await settings.openAddUserModal();
+    await settings.submitAddUserEmail(email);
+
+    // Membership Roles: tick the one under test. Labels carry a description,
+    // so they are matched by their leading role name.
+    const modal = settings.addUserModal();
+    const checkbox = modal.getByRole("checkbox", { name: new RegExp(`^${role}\\b`) });
+    await expect(checkbox).toBeEnabled({ timeout: 30_000 });
+    if (!(await checkbox.isChecked())) await checkbox.check();
+    await expect(checkbox).toBeChecked();
+    for (const label of untick) {
+      const box = modal.getByRole("checkbox", { name: new RegExp(`^${label}\\b`) });
+      if (await box.isChecked()) await box.uncheck();
+      await expect(box, `${label} should be cleared`).not.toBeChecked();
+    }
+
+    if (role === SETTINGS_ROLE_LABELS.systemUser) {
+      // System User is exclusive: every other role is cleared and locked.
+      for (const other of SETTINGS_ROLE_LABELS.others) {
+        const box = modal.getByRole("checkbox", { name: new RegExp(`^${other}\\b`) });
+        await expect(box, `${other} should be cleared`).not.toBeChecked();
+        await expect(box, `${other} should be locked`).toBeDisabled();
       }
     }
+
+    let created = false;
+    try {
+      const response = await settings.submitAddUserDetails(
+        SETTINGS_ADD_USER_INPUT.firstName,
+        SETTINGS_ADD_USER_INPUT.lastName,
+      );
+      created = isSuccess(response.status());
+      expect(
+        created,
+        `adding ${email} as ${role} failed (${response.status()}): ${await response.text()}`,
+      ).toBe(true);
+      const payload = response.request().postDataJSON() as Record<string, unknown>;
+      expect(payload.contactEmail).toBe(email);
+      expect(payload).toMatchObject(expected);
+
+      await expect(settings.addUserModal()).toBeHidden({ timeout: 30_000 });
+      await expect(
+        settings.userRow(email),
+        "the new user should appear in the list",
+      ).not.toHaveCount(0);
+      await expectRoleBadges(settings, email, badges);
+      console.log(`Settings: added ${email} as ${role}`);
+    } finally {
+      if (created) await removeAndConfirmGone(page, settings, email);
+    }
+  }
+
+  /**
+   * Checks the role badges on a user's row.
+   *
+   * @param settings - Settings page object.
+   * @param email - The user's email.
+   * @param badges - Badges that must be shown, and must not.
+   */
+  async function expectRoleBadges(
+    settings: SettingsPage,
+    email: string,
+    badges: { shown: string[]; absent?: string[] },
+  ): Promise<void> {
+    const row = settings.userRow(email).first();
+    for (const badge of badges.shown) {
+      await expect(
+        row.getByText(badge, { exact: true }),
+        `${email} should carry the ${badge} role`,
+      ).toBeVisible({ timeout: 30_000 });
+    }
+    for (const badge of badges.absent ?? []) {
+      await expect(
+        row.getByText(badge, { exact: true }),
+        `${email} should not carry the ${badge} role`,
+      ).toHaveCount(0);
+    }
+  }
+
+  /**
+   * Removes a test user, then reloads the user list and checks it is gone.
+   *
+   * @param page - The page under test.
+   * @param settings - Settings page object.
+   * @param email - The user to remove.
+   */
+  async function removeAndConfirmGone(
+    page: Page,
+    settings: SettingsPage,
+    email: string,
+  ): Promise<void> {
+    const removal = await settings.removeUser(email).catch(() => undefined);
+    expect(
+      removal && isSuccess(removal.status()),
+      `cleanup failed — ${email} is still a contact on this project and ` +
+        `must be removed by hand`,
+    ).toBe(true);
+    await expect(settings.userRow(email)).toHaveCount(0, { timeout: 30_000 });
+
+    // And from a fresh load, not just the in-memory list.
+    await page.reload();
+    await settings.openTab(SETTINGS.tabs.userManagement);
+    await expect(settings.anyUserRows().first()).toBeVisible({ timeout: 60_000 });
+    await expect(
+      settings.userRow(email),
+      `${email} should no longer be listed after removal`,
+    ).toHaveCount(0);
+    console.log(`Settings: removed ${email}; no longer listed`);
+  }
+
+  // ⚠️ WRITES a project contact, removed again in `finally`.
+  test("adds an Admin user from the Add User button, then removes it", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+    // Admin is added on top of the default Portal User role.
+    await addUserWithRole(
+      page,
+      SETTINGS_ROLE_LABELS.admin,
+      { isCsAdmin: true, isPortalUser: true, isCsIntegrationUser: false },
+      { shown: [SETTINGS_ROLE_BADGES.admin, SETTINGS_ROLE_BADGES.portalUser] },
+    );
+  });
+
+  // ⚠️ WRITES a project contact, removed again in `finally`.
+  test("adds a System User from the Add User button, then removes it", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+    await addUserWithRole(
+      page,
+      SETTINGS_ROLE_LABELS.systemUser,
+      {
+        isCsIntegrationUser: true,
+        isCsAdmin: false,
+        isLead: false,
+        isPortalUser: false,
+        isSecurityContact: false,
+      },
+      {
+        shown: [SETTINGS_ROLE_BADGES.systemUser],
+        absent: [SETTINGS_ROLE_BADGES.portalUser, SETTINGS_ROLE_BADGES.admin],
+      },
+    );
+  });
+
+  // ⚠️ WRITES a project contact, removed again in `finally`.
+  test("adds a Security Contact user from the Add User button, then removes it", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${SETTINGS_USER_INPUT.projectType} needs a project id.`);
+    // Security Contact only: the default Portal User role is cleared.
+    await addUserWithRole(
+      page,
+      SETTINGS_ROLE_LABELS.securityContact,
+      { isSecurityContact: true, isPortalUser: false, isCsAdmin: false, isCsIntegrationUser: false },
+      {
+        shown: [SETTINGS_ROLE_BADGES.securityUser],
+        absent: [SETTINGS_ROLE_BADGES.portalUser, SETTINGS_ROLE_BADGES.admin],
+      },
+      [SETTINGS_ROLE_LABELS.portalUser],
+    );
   });
 
   test("removes and restores a user's Lead role", async ({ page }) => {
