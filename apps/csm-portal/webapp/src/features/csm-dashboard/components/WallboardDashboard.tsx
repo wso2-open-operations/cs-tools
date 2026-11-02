@@ -28,8 +28,12 @@ import WallboardSecondaryStat from "@features/csm-dashboard/components/Wallboard
 import {
   CS_OVERVIEW_REFETCH_INTERVAL_MS,
   resolveDisplayNameAlias,
+  WALLBOARD_FONT_SIZE,
   type WallboardSection,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+
+/** The wallboard's own page title, centered in its top bar. */
+export const WALLBOARD_PAGE_TITLE = "Customer Success Monitor";
 
 export interface WallboardDashboardProps {
   dashboardId: string;
@@ -90,6 +94,63 @@ function WallboardPageFrame({
   return (
     <Box sx={[{ bgcolor: "#0f1420", minHeight: "100dvh", p: 2 }, ...(Array.isArray(sx) ? sx : [sx])]}>
       {children}
+    </Box>
+  );
+}
+
+/** "CUSTOMER SUCCESS MONITOR", centered between two thin rules with a small
+ * glowing accent underneath — the reference wallboard's own page title. */
+function WallboardPageTitle(): JSX.Element {
+  const rule = {
+    width: "clamp(2rem, 3vw, 4.5rem)",
+    height: "1px",
+    flexShrink: 0,
+  };
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+        <Box sx={{ ...rule, background: "linear-gradient(to right, transparent, #64748b)" }} />
+        <Typography
+          component="h1"
+          sx={{
+            m: 0,
+            fontSize: WALLBOARD_FONT_SIZE.pageTitle,
+            fontWeight: 800,
+            letterSpacing: "0.35em",
+            // `letter-spacing` also trails the last letter; pad the start by
+            // the same amount so the text stays optically centered.
+            pl: "0.35em",
+            textTransform: "uppercase",
+            lineHeight: 1.2,
+            color: "#f8fafc",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {WALLBOARD_PAGE_TITLE}
+        </Typography>
+        <Box sx={{ ...rule, background: "linear-gradient(to left, transparent, #64748b)" }} />
+      </Box>
+      <Box
+        sx={{
+          mt: 0.75,
+          width: "45%",
+          height: "1px",
+          background: "linear-gradient(to right, transparent, rgba(34,211,238,0.45), transparent)",
+          position: "relative",
+          "&::after": {
+            content: '""',
+            position: "absolute",
+            left: "50%",
+            top: "50%",
+            width: 5,
+            height: 5,
+            borderRadius: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "#22d3ee",
+            boxShadow: "0 0 6px #22d3ee",
+          },
+        }}
+      />
     </Box>
   );
 }
@@ -268,13 +329,29 @@ export default function WallboardDashboard({
 
   return (
     <WallboardPageFrame sx={{ minHeight: undefined, height: "100dvh", display: "flex", flexDirection: "column" }}>
-      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 1.5, flexShrink: 0 }}>
+      {/* Top bar, matching the reference wallboard: the page title centered,
+          "Last updated" on the right. A three-column grid with equal outer
+          columns keeps the title truly centered on the page regardless of
+          how wide the "Last updated" pill is. */}
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "1fr auto 1fr",
+          alignItems: "center",
+          columnGap: 2,
+          mb: 1.5,
+          flexShrink: 0,
+        }}
+      >
+        <Box />
+        <WallboardPageTitle />
         <Box
           sx={{
+            justifySelf: "end",
             display: "flex",
             alignItems: "center",
             gap: 0.75,
-            fontSize: "0.65rem",
+            fontSize: WALLBOARD_FONT_SIZE.lastUpdated,
             fontWeight: 600,
             letterSpacing: "0.05em",
             textTransform: "uppercase",
@@ -286,7 +363,7 @@ export default function WallboardDashboard({
             border: "1px solid #374151",
           }}
         >
-          <Clock size={13} />
+          <Clock size={15} />
           <span>Last updated: {lastUpdated ?? "—"}</span>
           <Box
             sx={{

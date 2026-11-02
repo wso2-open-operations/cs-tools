@@ -21,6 +21,7 @@ import type { BeDashboardDistinctByConfig, BeWidgetResourceType } from "@api/bac
 import { useWallboardTileData } from "@features/csm-dashboard/api/useWallboardTileData";
 import {
   getStatTileColors,
+  WALLBOARD_FONT_SIZE,
   type WallboardSection,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
@@ -103,8 +104,8 @@ export default function WallboardStatTile({
   // Value/label text size is now the same for every variant (by explicit
   // request) — only padding still differs between "primary" and "sre"
   // (see `px`/`py` below), not the text itself.
-  const valueFontSize = "1.9rem";
-  const labelFontSize = "0.68rem";
+  const valueFontSize = WALLBOARD_FONT_SIZE.value;
+  const labelFontSize = WALLBOARD_FONT_SIZE.label;
   const defaultPaddingY = variant === "sre" ? 1 : 1.5;
   const resolvedPaddingY = paddingY ?? defaultPaddingY;
 
@@ -126,19 +127,47 @@ export default function WallboardStatTile({
         borderColor: hasAlert ? colors.border : PLAIN_BORDER,
         bgcolor: hasAlert ? colors.bg : PLAIN_BG,
         transition: "border-color 0.2s ease, background-color 0.2s ease",
-        "@keyframes wallboard-pulse": {
-          "0%, 100%": { opacity: 1 },
-          "50%": { opacity: 0.72 },
+        // Layered like the original's StatCard: a faint white sheen on every
+        // tile, plus — on an alert tile — a colored gradient that blinks
+        // (the `::after` below). The tile itself never fades; only that
+        // colored layer does, so the tile stays fully saturated.
+        position: "relative",
+        overflow: "hidden",
+        boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          inset: 0,
+          background: "linear-gradient(to bottom right, rgba(255,255,255,0.05), transparent)",
+          pointerEvents: "none",
         },
-        ...(hasAlert ? { animation: "wallboard-pulse 2.4s ease-in-out infinite" } : {}),
+        ...(hasAlert
+          ? {
+              // Tailwind's own `animate-pulse`, the original's exact blink.
+              "@keyframes wallboard-pulse": {
+                "0%, 100%": { opacity: 1 },
+                "50%": { opacity: 0.5 },
+              },
+              "&::after": {
+                content: '""',
+                position: "absolute",
+                inset: 0,
+                background: colors.pulse,
+                pointerEvents: "none",
+                animation: "wallboard-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+              },
+            }
+          : {}),
+        // Value and label sit above both layers.
+        "& > *": { position: "relative", zIndex: 1 },
       }}
     >
       {state === "loading" ? (
         <Skeleton
           variant="rounded"
-          height={parseFloat(valueFontSize) * 16}
           width="60%"
-          sx={{ bgcolor: "rgba(255,255,255,0.08)" }}
+          // Same height as the number it stands in for (`lineHeight: 1.1`).
+          sx={{ bgcolor: "rgba(255,255,255,0.08)", height: `calc(${valueFontSize} * 1.1)` }}
         />
       ) : state === "error" ? (
         <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.5)" }}>
@@ -147,11 +176,13 @@ export default function WallboardStatTile({
       ) : (
         <Typography
           sx={{
-            fontWeight: 800,
+            // font-black/font-bold, as the original.
+            fontWeight: hasAlert ? 900 : 700,
             fontSize: valueFontSize,
             lineHeight: 1.1,
             color: hasAlert ? colors.value : "#fff",
-            textShadow: hasAlert ? `0 0 10px ${colors.shadow}` : "none",
+            // The original's `drop-shadow-[0_0_8px_…]` glow.
+            filter: hasAlert ? `drop-shadow(0 0 8px ${colors.shadow})` : "none",
           }}
         >
           {total.toLocaleString()}

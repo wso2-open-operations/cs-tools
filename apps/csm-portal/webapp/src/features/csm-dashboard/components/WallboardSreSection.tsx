@@ -23,6 +23,7 @@ import {
   SRE_SUBROW_ORDER,
   SRE_SUBSECTION_ORDER,
   sreSubsectionFor,
+  WALLBOARD_FONT_SIZE,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardSreSectionProps {
@@ -64,7 +65,7 @@ export default function WallboardSreSection({
           <Box key={subsection} sx={{ display: "flex", flexDirection: "column", gap: 0.5, flex: 1, minHeight: 0 }}>
             <Typography
               sx={{
-                fontSize: "0.55rem",
+                fontSize: WALLBOARD_FONT_SIZE.subsection,
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",

@@ -17,7 +17,7 @@
 import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX, ReactNode } from "react";
 import type { LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import { WALLBOARD_FONT_SIZE, type WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 interface PanelAccent {
   iconColor: string;
@@ -90,9 +90,9 @@ export default function WallboardPanel({ section, title, icon: Icon, children }:
             borderColor: accent.chipBorder,
           }}
         >
-          <Icon color={accent.iconColor} size={16} />
+          <Icon color={accent.iconColor} size={20} />
         </Box>
-        <Typography sx={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>
+        <Typography sx={{ fontSize: WALLBOARD_FONT_SIZE.panelTitle, fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>
           {title}
         </Typography>
       </Box>

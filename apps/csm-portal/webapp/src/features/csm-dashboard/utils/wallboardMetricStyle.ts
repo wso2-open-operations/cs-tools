@@ -26,6 +26,31 @@
 export const CS_OVERVIEW_REFETCH_INTERVAL_MS = 60_000;
 
 /**
+ * Text sizes for the `/cs-monitor-dashboard` wallboard, one place for all of
+ * them. Each is a `clamp(min, vw, max)`: the minimum is the size the
+ * wallboard used before (so a laptop-sized window looks unchanged), the
+ * middle term scales with the screen's width, and the maximum stops it
+ * growing without bound on a very wide display. At 1920px wide (the TV the
+ * wallboard actually runs on) this lands close to the reference digiops
+ * wallboard's own sizes — values ~48px, labels ~16px, panel titles ~21px —
+ * since text sized for a laptop was too small to read from across a room.
+ */
+export const WALLBOARD_FONT_SIZE = {
+  /** The page's own "CUSTOMER SUCCESS MONITOR" title. */
+  pageTitle: "clamp(0.95rem, 1.05vw, 1.5rem)",
+  /** The "Last updated" pill. */
+  lastUpdated: "clamp(0.65rem, 0.65vw, 0.95rem)",
+  /** A panel's own heading ("Customer Reliability Engineering (CRE)" etc.). */
+  panelTitle: "clamp(0.95rem, 1.1vw, 1.55rem)",
+  /** SRE's small sub-section headings (INCIDENTS, PROBLEMS, ...). */
+  subsection: "clamp(0.55rem, 0.6vw, 0.85rem)",
+  /** A tile's big number. */
+  value: "clamp(1.9rem, 2.5vw, 3.6rem)",
+  /** A tile's label under the number. */
+  label: "clamp(0.68rem, 0.85vw, 1.2rem)",
+} as const;
+
+/**
  * Per-metric glow colors for the CS Overview dashboard, ported field-for-
  * field from the reference wallboard implementation's `StatCard` — read
  * directly from its source (not approximated) to get two easy-to-miss
@@ -68,6 +93,12 @@ export interface StatTileColors {
   /** `drop-shadow`/`text-shadow` color for the glowing value — fixed per
    * `alertType`, independent of the label/bg/border color family. */
   shadow: string;
+  /** The blinking layer over an alert tile: the original's
+   * `bg-gradient-to-b from-<color>-500/<a> to-<color>-600/10 animate-pulse`
+   * overlay, fixed per `alertType` like `shadow`. This (not `bg`) is what
+   * makes an alert tile read as brightly colored — `bg` alone is only a
+   * faint 30% tint — and it's the part that blinks. */
+  pulse: string;
 }
 
 const CYAN: StatTileColors = {
@@ -76,6 +107,8 @@ const CYAN: StatTileColors = {
   bg: "rgba(22,78,99,0.3)",
   border: "#0e7490",
   shadow: "rgba(34,211,238,0.8)",
+  // from-cyan-500/40 to-cyan-600/10
+  pulse: "linear-gradient(to bottom, rgba(6,182,212,0.4), rgba(8,145,178,0.1))",
 };
 
 const AMBER: StatTileColors = {
@@ -84,6 +117,8 @@ const AMBER: StatTileColors = {
   bg: "rgba(120,53,15,0.3)",
   border: "#b45309",
   shadow: "rgba(251,191,36,0.8)",
+  // from-amber-500/40 to-amber-600/10
+  pulse: "linear-gradient(to bottom, rgba(245,158,11,0.4), rgba(217,119,6,0.1))",
 };
 
 // Tailwind `rose` family — CRE's own "SLA Violations" only.
@@ -93,6 +128,9 @@ const RED_ROSE: StatTileColors = {
   bg: "rgba(136,19,55,0.3)",
   border: "#be123c",
   shadow: "rgba(251,113,133,0.8)",
+  // from-rose-500/30 to-rose-600/10 — the original uses rose for every
+  // `alertType: "red"` overlay, `red`-family tiles included.
+  pulse: "linear-gradient(to bottom, rgba(244,63,94,0.3), rgba(225,29,72,0.1))",
 };
 
 // Tailwind `red` family — SRE's "SLA Violations" and Security's "SLA
@@ -104,6 +142,9 @@ const RED_RED: StatTileColors = {
   bg: "rgba(127,29,29,0.3)",
   border: "#b91c1c",
   shadow: "rgba(251,113,133,0.8)",
+  // from-rose-500/30 to-rose-600/10 — the original uses rose for every
+  // `alertType: "red"` overlay, `red`-family tiles included.
+  pulse: "linear-gradient(to bottom, rgba(244,63,94,0.3), rgba(225,29,72,0.1))",
 };
 
 const STAT_TILE_STYLES: Record<WallboardSection, Record<string, StatTileColors>> = {
