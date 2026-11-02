@@ -34,8 +34,8 @@ func NewKnowledgeBaseService(repo repository.KnowledgeBaseRepository) KnowledgeB
 }
 
 // ListKnowledgeBases implements KnowledgeBaseService.
-func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) (domain.ListKnowledgeBasesResponse, error) {
-	kbs, err := s.repo.ListKnowledgeBases(ctx)
+func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context, publicOnly bool) (domain.ListKnowledgeBasesResponse, error) {
+	kbs, err := s.repo.ListKnowledgeBases(ctx, publicOnly)
 	if err != nil {
 		return domain.ListKnowledgeBasesResponse{}, err
 	}

@@ -1471,7 +1471,7 @@ type KBManagerGroupService interface {
 
 // KnowledgeBaseService defines the operations available on the knowledge_base entity.
 type KnowledgeBaseService interface {
-	ListKnowledgeBases(ctx context.Context) (domain.ListKnowledgeBasesResponse, error)
+	ListKnowledgeBases(ctx context.Context, publicOnly bool) (domain.ListKnowledgeBasesResponse, error)
 	CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	UpdateKnowledgeBaseName(ctx context.Context, id string, req domain.UpdateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	SetKnowledgeBaseActive(ctx context.Context, id string, req domain.UpdateKnowledgeBaseActiveRequest) (domain.KnowledgeBase, error)
