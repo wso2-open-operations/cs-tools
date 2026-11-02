@@ -183,6 +183,8 @@ type salesforceEventService struct {
 	// lineItems is set by WithOpportunityLineItemIngest
 	// (salesforce_opportunity_line_item_ingest.go).
 	lineItems *OpportunityLineItemIngest
+	// acpReopen is set by WithACPReopen (acp_reopen.go).
+	acpReopen *ACPReopen
 }
 
 // NewSalesforceEventService constructs a SalesforceEventService that ingests

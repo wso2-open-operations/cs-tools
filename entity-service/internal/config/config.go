@@ -352,6 +352,18 @@ type Config struct {
 	// nothing refreshes partners and the route is not registered, because
 	// csm-sync-service still copies account_relationship from ServiceNow.
 	CSMMigrationSalesforcePartnerIngestEnabled bool
+	// ACPReopenEnabled turns on the ACP reopen check after Project__c and
+	// Invoice__c events (internal/service/acp_reopen.go), from
+	// CSM_ACP_REOPEN_ENABLED=true. Defaults to false: no project is reopened.
+	// It also needs a pool and the SALES_ENTITY_* client.
+	ACPReopenEnabled bool
+	// ACPReopenDryRun makes the reopen check decide and log only, writing
+	// nothing (CSM_ACP_REOPEN_DRY_RUN). Defaults to true; anything that does
+	// not parse as a boolean keeps it true.
+	ACPReopenDryRun bool
+	// ACPReopenTestProjectSfID limits the reopen check to one Salesforce
+	// project (CSM_ACP_REOPEN_TEST_PROJECT_SF_ID). Empty: every project.
+	ACPReopenTestProjectSfID string
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1057,6 +1069,9 @@ func Load() *Config {
 	cfg.CSMMigrationSalesforceProjectIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED")
 	cfg.CSMMigrationSalesforceProjectInsertEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED")
 	cfg.CSMMigrationSalesforcePartnerIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED")
+	cfg.ACPReopenEnabled = os.Getenv("CSM_ACP_REOPEN_ENABLED") == "true"
+	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
+	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))

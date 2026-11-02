@@ -1,0 +1,57 @@
+{
+  "_comment": "Cases ACP's rules (operations/csm-scheduled-tasks/internal/acp) and the reopen check's copy (acp_reopen_rules.go) must agree on. Both sides run this file: a disagreement means ACP would suspend a project the reopen check reopens. Dates are UTC; nulls are absent values.",
+  "daysBetween": [
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-30T00:00:00Z", "want": 1},
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-29T00:00:00Z", "want": 0},
+    {"now": "2026-10-29T00:00:00Z", "end": "2026-10-29T00:00:00Z", "want": 0},
+    {"now": "2026-10-29T09:30:00Z", "end": "2026-10-28T00:00:00Z", "want": -1},
+    {"now": "2026-10-29T00:00:00Z", "end": "2027-01-27T00:00:00Z", "want": 90},
+    {"now": "2026-10-29T23:59:00Z", "end": "2026-11-05T00:00:00Z", "want": 7}
+  ],
+  "opportunityCounts": [
+    {"stage": "50 - Closed Won", "eula": "EULA 3.3", "want": true},
+    {"stage": "50 - Closed Won", "eula": "", "want": true},
+    {"stage": "50 - Closed Won", "eula": "  ", "want": true},
+    {"stage": "50 - Closed Won", "eula": null, "want": false},
+    {"stage": "50 - Closed Won", "eula": "Customer contract", "want": false},
+    {"stage": "40 - Negotiation", "eula": "EULA 3.3", "want": false},
+    {"stage": null, "eula": "EULA 3.3", "want": false},
+    {"stage": "50 - closed won", "eula": "EULA 3.3", "want": false}
+  ],
+  "eulaVersionDecimal": [
+    {"eula": "EULA 3.2", "want": 3.2},
+    {"eula": "WSO2 EULA v3.4 (2024)", "want": 3.4},
+    {"eula": "", "want": 3.4},
+    {"eula": "   ", "want": 3.4},
+    {"eula": null, "want": 3.4},
+    {"eula": "Customer contract", "want": 0},
+    {"eula": "EULA 3", "want": 0}
+  ],
+  "usesGracePeriod": [
+    {"eula": 3.3, "primaryPartner": false, "want": true},
+    {"eula": 3.2, "primaryPartner": false, "want": true},
+    {"eula": 3.4, "primaryPartner": false, "want": false},
+    {"eula": 0, "primaryPartner": false, "want": false},
+    {"eula": 3.4, "primaryPartner": true, "want": true},
+    {"eula": 0, "primaryPartner": true, "want": true}
+  ],
+  "invoiceSuspendDate": [
+    {"invoiceDate": "2026-08-01", "dueDate": "2026-09-01", "eula": 3.4, "primaryPartner": false, "want": "2026-09-01"},
+    {"invoiceDate": "2026-08-01", "dueDate": "2026-09-01", "eula": 3.3, "primaryPartner": false, "want": "2026-09-30"},
+    {"invoiceDate": "2026-08-01", "dueDate": "2026-09-01", "eula": 3.4, "primaryPartner": true, "want": "2026-09-30"},
+    {"invoiceDate": "2026-08-01", "dueDate": "2026-11-01", "eula": 3.3, "primaryPartner": false, "want": "2026-11-01"},
+    {"invoiceDate": "2026-08-01", "dueDate": "2026-09-30", "eula": 3.3, "primaryPartner": false, "want": "2026-09-30"}
+  ],
+  "invoiceCounts": [
+    {"name": "US20268838", "classification": null, "dueDate": "2026-09-01", "paidDate": null, "projectStart": "2026-01-01", "want": true},
+    {"name": null, "classification": null, "dueDate": "2026-09-01", "paidDate": "2026-09-10", "projectStart": null, "want": false},
+    {"name": null, "classification": null, "dueDate": null, "paidDate": null, "projectStart": null, "want": false},
+    {"name": null, "classification": "PP", "dueDate": "2026-09-01", "paidDate": null, "projectStart": null, "want": false},
+    {"name": null, "classification": "CO", "dueDate": "2026-09-01", "paidDate": null, "projectStart": null, "want": false},
+    {"name": null, "classification": "TAM", "dueDate": "2026-09-01", "paidDate": null, "projectStart": null, "want": false},
+    {"name": null, "classification": "SUB", "dueDate": "2026-09-01", "paidDate": null, "projectStart": null, "want": true},
+    {"name": "Auto Created PS", "classification": null, "dueDate": "2026-09-01", "paidDate": null, "projectStart": null, "want": false},
+    {"name": null, "classification": null, "dueDate": "2025-12-31", "paidDate": null, "projectStart": "2026-01-01", "want": false},
+    {"name": null, "classification": null, "dueDate": "2026-01-01", "paidDate": null, "projectStart": "2026-01-01", "want": true}
+  ]
+}

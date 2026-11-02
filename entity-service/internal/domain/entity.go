@@ -10233,3 +10233,65 @@ type GetRiskActionItemsResponse struct {
 type GetActionItemCommentsResponse struct {
 	Comments []ActionItemComment `json:"comments"`
 }
+
+// ACPReopenActor is updated_by on a project the ACP reopen check sets back to
+// Open (internal/service/acp_reopen.go).
+const ACPReopenActor = "acp-reopen"
+
+// ACPReopenProject is what the ACP reopen check reads of a CSM project. The
+// three closure sub-states and ClosureState are the raw enum labels
+// ("CLOSED", "SUSPENDED", "OPEN"), nil when unset.
+type ACPReopenProject struct {
+	ID                              string
+	SfID                            string
+	Name                            string
+	Key                             string
+	EndDateClosureState             *string
+	InvoiceDueDateClosureState      *string
+	ComplianceViolationClosureState *string
+	ClosureState                    *string
+	SuspensionProcessState          json.RawMessage
+}
+
+// ACPReopenWrite is one reopen of an ACP-suspended project: which tracks go
+// back to OPEN and the suspensionProcessState to store with them.
+// SectionsOnly writes the suspensionProcessState with no track change: the
+// daily check finishing a project a person already set back to Open.
+type ACPReopenWrite struct {
+	ReopenEndDate          bool
+	ReopenInvoice          bool
+	SectionsOnly           bool
+	SuspensionProcessState json.RawMessage
+}
+
+// ACPReopenOutcome is the project after an ACPReopenWrite: Open reports that
+// the overall closure state (recomputed from the three sub-states) is OPEN.
+type ACPReopenOutcome struct {
+	ClosureState *string
+	Open         bool
+}
+
+// ACPReopenCheckRequest is the body of POST /acp/reopen-check, the daily
+// safety net over every project ACP suspended. Projects are taken in id
+// order after Cursor (empty: from the start), at most Limit of them (default
+// 10, at most 50); a call that runs short of time stops early.
+type ACPReopenCheckRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// ACPReopenCheckResponse reports one page of the daily check. Checked is
+// every project looked at; Reopened those with a track set back to Open;
+// Finished those a person had already set back to Open, now finished
+// (Salesforce Open, the email queued); FailedProjectIDs those whose check
+// failed (the error is logged). More is true while projects are left: call
+// again with NextCursor as the cursor. More false means every project is done.
+type ACPReopenCheckResponse struct {
+	Checked          int      `json:"checked"`
+	Reopened         int      `json:"reopened"`
+	Finished         int      `json:"finished"`
+	Failed           int      `json:"failed"`
+	FailedProjectIDs []string `json:"failedProjectIds"`
+	NextCursor       string   `json:"nextCursor"`
+	More             bool     `json:"more"`
+}
