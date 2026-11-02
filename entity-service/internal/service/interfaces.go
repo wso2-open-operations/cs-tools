@@ -400,7 +400,7 @@ type ScheduledTaskRunService interface {
 }
 
 // IncidentAutocloseService closes incidents that have been RESOLVED for a
-// given number of days, the port of ServiceNow's hourly auto-close. It is
+// given number of days (14 by default), as the system user. It is
 // driven by operations/csm-scheduled-tasks (incident_autoclose) and decides
 // nothing about scheduling itself.
 type IncidentAutocloseService interface {

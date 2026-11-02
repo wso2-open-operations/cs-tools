@@ -36,12 +36,12 @@ func TestIncidentAutocloseRouteIsInternalOnly(t *testing.T) {
 	}
 }
 
-// On the ServiceNow data source (no pool) the route still exists and lets an
+// On DATA_SOURCE=servicenow (no pool) the route still exists and lets an
 // internal caller through, but the unavailable stand-in answers 503 instead of
 // reaching a repository with no database behind it. The 400 for an unknown
 // field proves the request got past the gate to the handler, so the 503 is the
 // service's and not the gate's.
-func TestIncidentAutocloseRouteOnTheServiceNowDataSource(t *testing.T) {
+func TestIncidentAutocloseRouteWithoutThePostgresTables(t *testing.T) {
 	e := newSNRouteEnv(t)
 
 	if rec := e.do(t, http.MethodPost, incidentAutoclosePath, `{"resolvedForDays":14,"days":14}`, snRouteM2MClient, ""); rec.Code != http.StatusBadRequest {

@@ -7098,7 +7098,8 @@ type IncidentView struct {
 	// ClosedOn / ClosedBy are when the incident entered Closed and who it is
 	// attributed to (the closer's name), read from incident.closed_on /
 	// closed_by_id (migration 0255) on the Postgres data sources. Null for an
-	// incident closed before that migration, and on the ServiceNow data source.
+	// incident closed before that migration, and when incidents are not read from
+	// Postgres (DATA_SOURCE=servicenow).
 	ClosedOn *string `json:"closedOn"`
 	ClosedBy *string `json:"closedBy"`
 	// ResolvedWithParent is true when the incident was resolved because its

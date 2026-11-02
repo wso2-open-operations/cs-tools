@@ -17,9 +17,8 @@
 package domain
 
 // IncidentAutocloseRequest is POST /incidents/autoclose's body: close the
-// incidents that have been RESOLVED for at least ResolvedForDays days, the
-// way ServiceNow's hourly auto-close did (14 days after resolved_at, closed_by
-// = resolved_by, no comment or work note).
+// incidents that have been RESOLVED for at least ResolvedForDays days (the
+// platform closes them 14 days after resolution, with no comment or work note).
 type IncidentAutocloseRequest struct {
 	// ResolvedForDays is required and at least 1. An incident is due when its
 	// resolved_on (its last update when no resolved_on is recorded) is at

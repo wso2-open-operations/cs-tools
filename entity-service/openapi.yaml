@@ -14276,15 +14276,19 @@ paths:
     post:
       summary: >-
         Close the incidents that have been RESOLVED for at least resolvedForDays
-        days (the port of ServiceNow's hourly auto-close: 14 days after
-        resolved_at). Each due incident, oldest first, up to limit, is closed in
-        its own transaction: state CLOSED, closedOn now, closed by its resolver,
-        its open incident tasks closed as on a manual close, the work item
-        stamped by the system actor. No comment or work note is added and
-        nothing is mirrored to ServiceNow; the resolution code and notes are not
-        required. An incident with no resolvedOn is measured from its last
-        update. Internal callers only. Postgres data sources only. Backs
-        operations/csm-scheduled-tasks (incident_autoclose).
+        days (the platform's rule is 14 days after resolution). Each due
+        incident, oldest first, up to limit, is closed by the ordinary incident
+        update in its own transaction, after it is re-checked as still due under
+        its row lock: state CLOSED, closedOn now, closedBy the system user
+        (AUTOCLOSURE_SYSTEM_USER_EMAIL, the user case auto-closure closes as;
+        null when that user has no user record), its open incident tasks closed
+        as on a manual close. No comment or work note is added, and the
+        resolution code and notes are not required. With
+        DATA_SOURCE=postgres-servicenow-dual-write the close is written back to
+        the backing data source like any other incident update. An incident
+        with no resolvedOn is measured from its last update. Internal callers
+        only. Postgres data sources only. Backs operations/csm-scheduled-tasks
+        (incident_autoclose).
       operationId: autocloseIncidents
       requestBody:
         required: true
@@ -14303,8 +14307,14 @@ paths:
                 $ref: '#/components/schemas/IncidentAutocloseResponse'
         "400":
           description: >-
-            resolvedForDays missing or outside 1-3650, limit outside 1-1000, or an
+            resolvedForDays missing or outside 1-3650, limit outside 0-1000, or an
             unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid caller credential (the route is internal-only).
           content:
             application/json:
               schema:
@@ -32780,14 +32790,15 @@ components:
           nullable: true
           description: >-
             When the incident entered Closed (Postgres data sources, migration
-            0255). Null for an incident closed before that migration and on the
-            ServiceNow data source.
+            0255). Null for an incident closed before that migration, and when
+            incidents are not read from Postgres (DATA_SOURCE=servicenow).
         closedBy:
           type: string
           nullable: true
           description: >-
             Name of the user the close is attributed to: the closer on a manual
-            close, the resolver on an auto-close. Null when unknown.
+            close, the auto-close's system user on an auto-close. Null when
+            unknown, and on an auto-close whose system user has no user record.
         resolvedWithParent:
           type: boolean
           readOnly: true
@@ -37929,10 +37940,10 @@ components:
           type: integer
           minimum: 1
           maximum: 3650
-          description: How many days an incident must have been RESOLVED (ServiceNow used 14).
+          description: How many days an incident must have been RESOLVED (the platform uses 14).
         limit:
           type: integer
-          minimum: 1
+          minimum: 0
           maximum: 1000
           default: 200
           description: Most incidents one call selects, oldest first. 0 or absent means 200.
