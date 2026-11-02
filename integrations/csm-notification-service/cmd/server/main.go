@@ -38,6 +38,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
@@ -377,8 +378,10 @@ func main() {
 		WithIncidentChatFanout(incidentChatFanout).
 		WithIncidentRoutes(incidentRoutes).
 		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
-		// (project.reactivated), e.g. the customer lifecycle and billing lists.
-		WithACPReactivation(splitComma(os.Getenv("ACP_REACTIVATION_CC")))
+		// (project.reactivated), e.g. the customer lifecycle and billing lists;
+		// checked by acpReactivationCC, which stops startup on a bad entry.
+		// The email goes only to @wso2.com addresses: it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), "@wso2.com")
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -578,6 +581,9 @@ func main() {
 			redisOpts = &redis.Options{Addr: redisAddr, Password: os.Getenv("REDIS_PASSWORD")}
 		}
 		redisClient = redis.NewClient(redisOpts)
+		// The "Back to Open state" email's duplicate guard: a notice already
+		// sent is not sent again when its event is redelivered.
+		dispatcher.WithACPReactivationLedger(dispatch.NewRedisReactivationLedger(redisClient))
 
 		// slaengine.EntityClient talks to the exact same entity-service as
 		// customerEntityClient above — not a different backend — so it
@@ -1825,4 +1831,30 @@ func applyIncidentRoutes(sre paging.LadderConfig, chat *notifications.GoogleChat
 	if !fallback {
 		slog.Warn("incident cards: the SRE ladder has no shared room (sre.chat), so an incident whose group maps to no team room still gets no card")
 	}
+}
+
+// acpReactivationCC reads ACP_REACTIVATION_CC, the CC list of the "Back to
+// Open state" email, and stops startup when an entry is not an address: the
+// email service would reject every send, each one retried and then
+// dead-lettered.
+func acpReactivationCC() []string {
+	cc, err := parseACPReactivationCC(os.Getenv("ACP_REACTIVATION_CC"))
+	if err != nil {
+		slog.Error("invalid ACP_REACTIVATION_CC", "err", err)
+		os.Exit(1)
+	}
+	return cc
+}
+
+// parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries
+// trimmed, empty ones dropped) and refuses an entry that is not an address,
+// naming it by position, never by value.
+func parseACPReactivationCC(raw string) ([]string, error) {
+	cc := splitComma(raw)
+	for i, a := range cc {
+		if !events.LooksLikeEmail(a) {
+			return nil, fmt.Errorf("entry %d is not an email address", i+1)
+		}
+	}
+	return cc, nil
 }

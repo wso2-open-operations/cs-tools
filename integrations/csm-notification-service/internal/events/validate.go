@@ -33,6 +33,14 @@ import (
 // being dropped), without trying to be a real email validator.
 var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
+// LooksLikeEmail reports whether s passes emailPattern: the same loose
+// "local@domain.tld" check Validate applies, for callers that filter
+// addresses instead of rejecting an event (project.reactivated) and for
+// configuration checked at startup.
+func LooksLikeEmail(s string) bool {
+	return emailPattern.MatchString(s)
+}
+
 // e164Pattern matches E.164 phone numbers (e.g. "+14155552671") — a leading
 // "+", a non-zero first digit, then up to 14 more digits.
 var e164Pattern = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
@@ -463,11 +471,9 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if p.ProjectID != entityID {
 			return fmt.Errorf("events: payload projectId %q does not match entityId %q", p.ProjectID, entityID)
 		}
-		for _, r := range p.Recipients {
-			if !emailPattern.MatchString(r) {
-				return fmt.Errorf("events: invalid recipient for %s", t)
-			}
-		}
+		// Recipients are not checked here: one malformed address (the
+		// technical owner is free text upstream) must not dead-letter the
+		// email for everyone else. handleProjectReactivated drops it.
 		for _, reason := range p.Reasons {
 			if reason != ProjectReactivatedReasonRenewal && reason != ProjectReactivatedReasonInvoicePaid {
 				return fmt.Errorf("events: unknown reason %q for %s", reason, t)

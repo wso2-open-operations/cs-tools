@@ -300,6 +300,13 @@ type Dispatcher struct {
 	// state" email (project.reactivated); set via WithACPReactivation. Empty
 	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
 	acpReactivationCC []string
+	// acpInternalDomain is the only domain the "Back to Open state" email is
+	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
+	// is an internal notice. Empty means "@wso2.com".
+	acpInternalDomain string
+	// acpReactivationLedger, when set, records the "Back to Open state"
+	// emails already sent (Redis), so a redelivery never sends one twice.
+	acpReactivationLedger ReactivationLedger
 
 	// defaultOnCallNumber is handleIncidentCreated's fallback value for its
 	// payload's own CallTo when a publisher omits it — see that function's
@@ -402,9 +409,19 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 }
 
 // WithACPReactivation sets the CC list of the "Back to Open state" email
-// (project.reactivated) and returns d for chaining.
-func (d *Dispatcher) WithACPReactivation(cc []string) *Dispatcher {
+// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
+// in production), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
 	d.acpReactivationCC = cc
+	d.acpInternalDomain = internalDomain
+	return d
+}
+
+// WithACPReactivationLedger sets the durable record of "Back to Open state"
+// emails already sent and returns d for chaining. Without one only the
+// in-process claim guards against a second send.
+func (d *Dispatcher) WithACPReactivationLedger(l ReactivationLedger) *Dispatcher {
+	d.acpReactivationLedger = l
 	return d
 }
 

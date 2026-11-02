@@ -16,7 +16,10 @@
 
 package events
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 const reactivatedProjectID = "e3e87599-1bc7-6650-182c-0dc5604bcb68"
 
@@ -71,7 +74,6 @@ func TestValidate_ProjectReactivatedRefusals(t *testing.T) {
 	cases := map[string]string{
 		"another project":    base("projectId", `"11111111-1111-1111-1111-111111111111"`),
 		"no project name":    base("projectName", `"  "`),
-		"a bad recipient":    base("recipients", `["not-an-email"]`),
 		"an unknown reason":  base("reasons", `["refund"]`),
 		"no reactivatedOn":   base("reactivatedOn", ""),
 		"a bad reactivation": base("reactivatedOn", `"yesterday"`),
@@ -83,5 +85,24 @@ func TestValidate_ProjectReactivatedRefusals(t *testing.T) {
 				t.Errorf("Validate(%s) = nil, want an error", payload)
 			}
 		})
+	}
+}
+
+// A malformed recipient does not reject the event: the email still goes to
+// the others (handleProjectReactivated drops the bad one).
+func TestValidate_ProjectReactivatedAcceptsABadRecipient(t *testing.T) {
+	raw := json.RawMessage(`{"projectId":"` + reactivatedProjectID + `","projectSfId":"a0dE200000CZ9ZNIA1",` +
+		`"projectName":"ACP Test Project","projectKey":"APPSUB","reasons":[],` +
+		`"recipients":["owner@example.com","Tech Owner"],"reactivatedOn":"2026-10-29T09:30:00Z"}`)
+	if err := Validate(reactivatedProjectID, TypeProjectReactivated, raw); err != nil {
+		t.Errorf("Validate = %v, want nil", err)
+	}
+}
+
+func TestLooksLikeEmail(t *testing.T) {
+	for in, want := range map[string]bool{"a@example.com": true, "Tech Owner": false, "a@b": false, "": false, "a b@example.com": false} {
+		if got := LooksLikeEmail(in); got != want {
+			t.Errorf("LooksLikeEmail(%q) = %v, want %v", in, got, want)
+		}
 	}
 }
