@@ -772,6 +772,12 @@ type Config struct {
 	AttachmentChunkedUploadLinkTTL  time.Duration
 	AttachmentChunkSizeBytes        int64
 	AttachmentLargeReadLinkMaxUses  int
+	// AttachmentSharesPerCallerPerMinute is how many download, preview and upload
+	// links one caller may have created per minute
+	// (ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE, default 60, per pod); beyond it a
+	// call is a 429. Every image previewed on a page costs one, so a low value
+	// breaks image-heavy case pages.
+	AttachmentSharesPerCallerPerMinute int
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
@@ -1022,6 +1028,7 @@ func Load() *Config {
 	cfg.AttachmentChunkedUploadLinkTTL = envDuration("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", 5*time.Minute)
 	cfg.AttachmentChunkSizeBytes = envPositiveInt64("ATTACHMENT_CHUNK_SIZE_BYTES", 16<<20)
 	cfg.AttachmentLargeReadLinkMaxUses = int(envPositiveInt64("ATTACHMENT_LARGE_READ_LINK_MAX_USES", 10))
+	cfg.AttachmentSharesPerCallerPerMinute = int(envPositiveInt64("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", 60))
 	cfg.applySREEventHubTopic()
 	return cfg
 }

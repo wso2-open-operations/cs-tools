@@ -1522,3 +1522,25 @@ func TestInlineImageIDs_FindsEveryReferenceShape(t *testing.T) {
 		t.Errorf("ids = %v, want [%s %s %s]", got, a, b, c)
 	}
 }
+
+func TestResolveLinks_TheLinkBudgetPerCallerIsConfigurable(t *testing.T) {
+	repo, store := newFakeStoredRepo(), newFakeStore()
+	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.pdf"
+	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA0000001", Name: "a.pdf", Status: "COMPLETE", StorageKey: &key}
+	svc := newStoredSvc(repo, store)
+	svc.shares = newShareLimiter(sharesPerMinute(StoredAttachmentLimits{SharesPerCallerPerMinute: 2}), time.Minute)
+	ctx := saCtx(t, saEmail)
+	req := domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}
+	for i := 0; i < 2; i++ {
+		if _, err := svc.ResolveLinks(ctx, req); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+	}
+	var terr *apierror.TooManyRequestsError
+	if _, err := svc.ResolveLinks(ctx, req); !errors.As(err, &terr) {
+		t.Fatalf("third call err = %v, want a TooManyRequestsError at a budget of 2", err)
+	}
+	if got := sharesPerMinute(StoredAttachmentLimits{}); got != maxSharesPerCallerPerMinute {
+		t.Errorf("unset budget = %d, want the default %d", got, maxSharesPerCallerPerMinute)
+	}
+}

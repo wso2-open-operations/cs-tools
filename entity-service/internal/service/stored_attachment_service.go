@@ -114,6 +114,10 @@ type StoredAttachmentLimits struct {
 	ChunkedUploadLinkTTL  time.Duration
 	ChunkSizeBytes        int64
 	LargeReadLinkMaxUses  int
+
+	// SharesPerCallerPerMinute caps the links one caller may have created per
+	// minute; 0 uses maxSharesPerCallerPerMinute.
+	SharesPerCallerPerMinute int
 }
 
 // tusStagedName is the name a chunked upload is stored under in its staging
@@ -133,6 +137,14 @@ type storedAttachmentService struct {
 	shares *shareLimiter
 }
 
+// sharesPerMinute is the per-caller link budget: the configured one, else the default.
+func sharesPerMinute(l StoredAttachmentLimits) int {
+	if l.SharesPerCallerPerMinute > 0 {
+		return l.SharesPerCallerPerMinute
+	}
+	return maxSharesPerCallerPerMinute
+}
+
 // NewStoredAttachmentService constructs a StoredAttachmentService.
 //
 // There is no AccessService here on purpose. Who may see an attachment, or add
@@ -141,7 +153,7 @@ type storedAttachmentService struct {
 // needs to be a REGISTERED member of the parent's project, an internal one is
 // unrestricted, and a parent with no project is internal-only.
 func NewStoredAttachmentService(repo repository.StoredAttachmentRepository, store fileStore, limits StoredAttachmentLimits) StoredAttachmentService {
-	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute)}
+	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(sharesPerMinute(limits), time.Minute)}
 }
 
 // resolveActorEmail resolves the caller's email from x-user-id-token. It is
