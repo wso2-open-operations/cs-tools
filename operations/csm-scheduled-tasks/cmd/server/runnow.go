@@ -28,6 +28,8 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
 )
 
 // autoclosureDefaultSchedule is case_autoclosure's default cron: 02:30 UTC, which
@@ -45,7 +47,8 @@ type runNowArgs struct {
 	// Options are the narrowing arguments, zero when not given.
 	Options registry.RunNowOptions
 	// Given names the narrowing flags that were on the command line, in the
-	// order they are reported ("--dry-run", "--limit", "--states").
+	// order they are reported ("--dry-run", "--limit", "--states", "--from-date",
+	// "--to-date", "--recipients", "--cc").
 	Given []string
 }
 
@@ -63,6 +66,10 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	dryRun := fs.Bool("dry-run", false, "force a dry run (only with --run-now, only some tasks)")
 	limit := fs.Int("limit", 0, "daily limit for this run (only with --run-now, only some tasks)")
 	states := fs.String("states", "", "comma list of states to work (only with --run-now, only some tasks)")
+	fromDate := fs.String("from-date", "", "first day of the reporting window, YYYY-MM-DD (only with --run-now, only the CS Worklogs reports)")
+	toDate := fs.String("to-date", "", "last day of the reporting window, YYYY-MM-DD, inclusive (with --from-date)")
+	recipients := fs.String("recipients", "", "comma list of addresses that REPLACE the report's To audience for this run (only with --run-now, only the CS Worklogs reports)")
+	cc := fs.String("cc", "", "comma list of Cc addresses for the replaced audience (needs --recipients)")
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
 	}
@@ -73,7 +80,7 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
 	if !seen["run-now"] {
-		return nil, errors.New("--dry-run, --limit and --states are only valid together with --run-now")
+		return nil, errors.New("--dry-run, --limit, --states, --from-date, --to-date, --recipients and --cc are only valid together with --run-now")
 	}
 	name := strings.TrimSpace(*task)
 	if name == "" {
@@ -97,6 +104,43 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 			return nil, errors.New("--states is empty; give a comma list such as solution_proposed")
 		}
 		out.Given = append(out.Given, "--states")
+	}
+	if seen["from-date"] || seen["to-date"] {
+		if !seen["from-date"] || !seen["to-date"] {
+			return nil, errors.New("--from-date and --to-date must be given together")
+		}
+		from, err := worklogsreport.ParseDate("--from-date", *fromDate)
+		if err != nil {
+			return nil, err
+		}
+		to, err := worklogsreport.ParseDate("--to-date", *toDate)
+		if err != nil {
+			return nil, err
+		}
+		if err := worklogsreport.ValidateWindow(from, to); err != nil {
+			return nil, err
+		}
+		out.Options.FromDate, out.Options.ToDate = from, to
+		out.Given = append(out.Given, "--from-date", "--to-date")
+	}
+	if seen["cc"] && !seen["recipients"] {
+		return nil, errors.New("--cc needs --recipients: it only adds copies to a replaced audience")
+	}
+	if seen["recipients"] {
+		list, err := worklogsreport.ParseAddressList("--recipients", *recipients)
+		if err != nil {
+			return nil, err
+		}
+		out.Options.Recipients = list
+		out.Given = append(out.Given, "--recipients")
+	}
+	if seen["cc"] {
+		list, err := worklogsreport.ParseAddressList("--cc", *cc)
+		if err != nil {
+			return nil, err
+		}
+		out.Options.Cc = list
+		out.Given = append(out.Given, "--cc")
 	}
 	return out, nil
 }
@@ -129,10 +173,12 @@ func resolveRunNow(tasks []registry.Task, a runNowArgs) (func(ctx context.Contex
 		return nil, nil, fmt.Errorf("--run-now=%q is not a registered task: either the name is wrong or the task is not registered because its enable flag is off; registered: %s",
 			a.Task, strings.Join(names, ", "))
 	}
-	if task.RunNowNarrow == nil {
-		if len(a.Given) > 0 {
-			return nil, nil, fmt.Errorf("%s is not supported by task %s", a.Given[0], task.Name)
+	for _, g := range a.Given {
+		if task.RunNowNarrow == nil || !slices.Contains(task.RunNowFlags, g) {
+			return nil, nil, fmt.Errorf("%s is not supported by task %s", g, task.Name)
 		}
+	}
+	if task.RunNowNarrow == nil {
 		return task.Handler, nil, nil
 	}
 	handler, settings, err := task.RunNowNarrow(a.Options)
@@ -182,6 +228,38 @@ func describeStates(states []string) string {
 	return strings.Join(states, ",")
 }
 
+// worklogsRunNow is the RunNowNarrow hook of a CS Worklogs report task. build
+// makes the handler for a validated override. debug is the task's debug list
+// from SUB_CRON_RECIPIENTS: with one set every mail is redirected to it, so a
+// recipient override could never take effect and is refused rather than
+// silently ignored. With no override at all the task's own handler runs, so a
+// plain run-now is unchanged.
+func worklogsRunNow(cadence worklogreport.Cadence, debug []string, plain func(ctx context.Context) error,
+	build func(ov worklogsreport.Override) func(ctx context.Context) error,
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		ov := worklogsreport.Override{From: o.FromDate, To: o.ToDate, Recipients: o.Recipients, Cc: o.Cc}
+		if !ov.Active() {
+			return plain, nil, nil
+		}
+		if err := ov.Validate(cadence); err != nil {
+			return nil, nil, err
+		}
+		if ov.HasRecipients() && len(debug) > 0 {
+			return nil, nil, errors.New("--recipients cannot be used while this task has a debug list in SUB_CRON_RECIPIENTS: debug mail mode would redirect the mail and ignore the override; remove the debug list first")
+		}
+		var settings []any
+		if ov.HasWindow() {
+			settings = append(settings, "from", ov.From.Format("2006-01-02"), "to", ov.To.Format("2006-01-02"))
+		}
+		if ov.HasRecipients() {
+			// Counts only, like every other recipient log line here.
+			settings = append(settings, "recipientsReplaced", true, "toCount", len(ov.Recipients), "ccCount", len(ov.Cc))
+		}
+		return build(ov), settings, nil
+	}
+}
+
 // withoutTask returns tasks without the one named name: the engine's list when
 // AUTOCLOSURE_SCHEDULED=false keeps case_autoclosure off the schedule.
 func withoutTask(tasks []registry.Task, name string) []registry.Task {
@@ -207,3 +285,6 @@ func parseStrictBool(key, raw string, def bool) (bool, error) {
 	}
 	return b, nil
 }
+
+// worklogsRunNowFlags are the run-now flags the CS Worklogs report tasks take.
+var worklogsRunNowFlags = []string{"--from-date", "--to-date", "--recipients", "--cc"}

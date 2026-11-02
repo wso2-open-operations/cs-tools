@@ -113,6 +113,7 @@ func resolveFixture(simpleRan, hookedRan *int, gotOpts *registry.RunNowOptions) 
 	return []registry.Task{
 		{Name: "simple_task", Handler: func(context.Context) error { *simpleRan++; return nil }},
 		{Name: "hooked_task", Handler: func(context.Context) error { return errors.New("plain handler must not be used") },
+			RunNowFlags: []string{"--dry-run", "--limit", "--states"},
 			RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
 				*gotOpts = o
 				if o.Limit > 10 {
@@ -192,7 +193,8 @@ func TestAutoclosureHookNarrows(t *testing.T) {
 	cfg := autoclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
 	var got autoclosure.RunConfig
 	task := registry.Task{Name: "case_autoclosure",
-		Handler: func(context.Context) error { return nil },
+		Handler:     func(context.Context) error { return nil },
+		RunNowFlags: []string{"--dry-run", "--limit", "--states"},
 		RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
 			c, err := narrowAutoclosure(cfg, o)
 			got = c
