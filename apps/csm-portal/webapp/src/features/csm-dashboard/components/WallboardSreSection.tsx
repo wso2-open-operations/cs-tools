@@ -19,6 +19,7 @@ import type { JSX } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import WallboardStatTile from "@features/csm-dashboard/components/WallboardStatTile";
 import {
+  WALLBOARD_MODE_MEDIA,
   WALLBOARD_FILL,
   sortByFixedOrder,
   SRE_SUBROW_ORDER,
@@ -58,7 +59,19 @@ export default function WallboardSreSection({
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: wb(8), ...WALLBOARD_FILL }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: wb(8),
+        ...WALLBOARD_FILL,
+        // Lets each sub-row size its columns from this panel's own width
+        // (the `@container` rule below) rather than the screen's — between
+        // 900px and 1200px wide two panels sit side by side, so a wide
+        // screen can still mean a narrow SRE panel.
+        containerType: "inline-size",
+      }}
+    >
       {SRE_SUBSECTION_ORDER.map((subsection) => {
         const rawRowWidgets = groups.get(subsection);
         if (!rawRowWidgets || rawRowWidgets.length === 0) return null;
@@ -81,12 +94,21 @@ export default function WallboardSreSection({
             <Box
               sx={{
                 display: "grid",
-                // One row of every tile; on a phone at most 3 per row
-                // (the 5 change-request tiles wrap to 3 + 2).
+                // At most 3 tiles per row while the panel is narrow, so the 5
+                // change-request tiles wrap to 3 + 2 instead of squeezing a
+                // multi-digit count and a 3-line label into ~100px each. One
+                // row of every tile once the panel itself is >= 620px wide,
+                // and always in wall mode, whose sizes scale to fit.
                 gridTemplateColumns: `repeat(${Math.min(rowWidgets.length, 3)}, 1fr)`,
-                "@media (min-width: 600px)": { gridTemplateColumns: `repeat(${rowWidgets.length}, 1fr)` },
+                "@container (min-width: 620px)": { gridTemplateColumns: `repeat(${rowWidgets.length}, 1fr)` },
                 gap: wb(6),
                 ...WALLBOARD_FILL,
+                // Merged with WALLBOARD_FILL's own wall-mode rules (same media
+                // key), not a second key that would replace them.
+                [WALLBOARD_MODE_MEDIA]: {
+                  ...WALLBOARD_FILL[WALLBOARD_MODE_MEDIA],
+                  gridTemplateColumns: `repeat(${rowWidgets.length}, 1fr)`,
+                },
               }}
             >
               {rowWidgets.map((widget) => (
