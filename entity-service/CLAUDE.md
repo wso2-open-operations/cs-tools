@@ -4602,7 +4602,7 @@ scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need 
 The defaults and any override are **HTML**: comments are rendered as HTML where customers read them, so plain
 line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
 sign-off, signed `Thanks,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
-for contacting the Customer Success Team." No default may say "Support Team". An override is posted verbatim, never
+for contacting us." No default may say "Support Team". An override is posted verbatim, never
 transformed, so it must carry its own tags.
 Closing keeps the case's existing close notes when it has any (as the legacy process did, which never wrote its
 message there), and only when there are none does it set the plain-text form of the closure wording

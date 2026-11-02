@@ -149,10 +149,10 @@ func TestAutoclosureAdvance_StagesPostTheRightCommentAndStep(t *testing.T) {
 		wantStep string
 		wantText string
 	}{
-		{"SP first", domain.AutoclosureStageFirstReminder, domain.CaseStateSolutionProposed, nil, "FIRST_COMMENT", "solution has been proposed"},
-		{"AI first", domain.AutoclosureStageFirstReminder, domain.CaseStateAwaitingInfo, strp("DEFAULT"), "FIRST_COMMENT", "no further updates have been received. Please share"},
-		{"SP second", domain.AutoclosureStageSecondReminder, domain.CaseStateSolutionProposed, strp("FIRST_COMMENT"), "SECOND_COMMENT", "closed off after one week"},
-		{"AI second", domain.AutoclosureStageSecondReminder, domain.CaseStateAwaitingInfo, strp("FIRST_COMMENT"), "SECOND_COMMENT", "Gentle reminder"},
+		{"SP first", domain.AutoclosureStageFirstReminder, domain.CaseStateSolutionProposed, nil, "FIRST_COMMENT", "We proposed a solution for this case"},
+		{"AI first", domain.AutoclosureStageFirstReminder, domain.CaseStateAwaitingInfo, strp("DEFAULT"), "FIRST_COMMENT", "We are waiting for the details we requested"},
+		{"SP second", domain.AutoclosureStageSecondReminder, domain.CaseStateSolutionProposed, strp("FIRST_COMMENT"), "SECOND_COMMENT", "still waiting to hear whether the proposed solution worked"},
+		{"AI second", domain.AutoclosureStageSecondReminder, domain.CaseStateAwaitingInfo, strp("FIRST_COMMENT"), "SECOND_COMMENT", "This is a second reminder"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(tc.state, tc.from)}}
@@ -196,13 +196,13 @@ func TestAutoclosureAdvance_AwaitingInfoCloseSetsTheNonResponsivenessCode(t *tes
 	if u.ResolutionCode == nil || *u.ResolutionCode != domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness {
 		t.Errorf("an Awaiting Info close must carry the auto-closure resolution code, got %v", u.ResolutionCode)
 	}
-	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") || strings.Contains(*u.CloseNotes, "<") {
+	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive the requested details") || strings.Contains(*u.CloseNotes, "<") {
 		t.Errorf("closeNotes = %v, want the closure text as plain text", u.CloseNotes)
 	}
 	if email, ok := autoclosureActorFromContext(cases.updateCtx[0]); !ok || email != "system@example.com" {
 		t.Errorf("the close must be made as the system user, ctx actor = %q (%v)", email, ok)
 	}
-	if len(cases.comments) != 1 || !strings.Contains(cases.comments[0].Content, "did not receive an update") {
+	if len(cases.comments) != 1 || !strings.Contains(cases.comments[0].Content, "did not receive the requested details") {
 		t.Errorf("closure comment missing: %+v", cases.comments)
 	}
 }
@@ -411,8 +411,8 @@ func TestAutoclosurePlainTextTable(t *testing.T) {
 
 func TestAutoclosurePlainText(t *testing.T) {
 	got := autoclosurePlainText(autoclosureDefaultTemplates["awaiting_info.closure"])
-	want := "Hello,\n\nPlease note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Customer Success Team.\n\nThanks,\nCustomer Success Team"
+	want := "Hello,\n\nWe have closed this case because we did not receive the requested details. " +
+		"Thank you for contacting us.\n\nThanks,\nCustomer Success Team"
 	if got != want {
 		t.Errorf("plain text = %q, want %q", got, want)
 	}

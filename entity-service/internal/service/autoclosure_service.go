@@ -601,28 +601,22 @@ func (s *autoclosureService) commentText(state domain.CaseState, kind string, ov
 // of this service. Overrides are used verbatim, so they must be HTML too.
 var autoclosureDefaultTemplates = map[string]string{
 	"solution_proposed.first_reminder": "<p>Hello,</p>" +
-		"<p>This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
-		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.</p>" +
+		"<p>We proposed a solution for this case and have not heard back. Please let us know whether it worked by selecting Accept or Reject. If we do not hear back, we will follow up once more and then close the case.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 	"solution_proposed.second_reminder": "<p>Hello,</p>" +
-		"<p>Please let us know whether you need further support for this case. " +
-		"Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>We are still waiting to hear whether the proposed solution worked. If you need further support, please reply to this message. If we do not hear from you within a week, the case will be closed.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 	"solution_proposed.closure": "<p>Hello,</p>" +
-		"<p>Please note that this case has been closed due to inactivity after the solution was suggested. " +
-		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>We have closed this case due to inactivity after the proposed solution. Thank you for contacting us.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 	"awaiting_info.first_reminder": "<p>Hello,</p>" +
-		"<p>This case will be automatically closed as no further updates have been received. " +
-		"Please share the requested details to continue the investigation of the issue.</p>" +
+		"<p>We are waiting for the details we requested to continue the investigation of this case. Please reply with them when you can. If we do not hear back, we will follow up once more and then close the case.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 	"awaiting_info.second_reminder": "<p>Hello,</p>" +
-		"<p>Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.</p>" +
-		"<p>Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
+		"<p>This is a second reminder for the details we requested. If you can provide them, or want us to keep this case open, please reply to this message. If we do not hear from you within a week, the case will be closed.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 	"awaiting_info.closure": "<p>Hello,</p>" +
-		"<p>Please note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Customer Success Team.</p>" +
+		"<p>We have closed this case because we did not receive the requested details. Thank you for contacting us.</p>" +
 		"<p>Thanks,<br/>Customer Success Team</p>",
 }
 
