@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Integration tests for the port of ServiceNow's incident auto-close
-// (IncidentAutocloseRepository and the service over it) and for the
+// Integration tests for the incident auto-close (IncidentAutocloseRepository
+// and the incident service it closes through) and for the
 // closed_on / closed_by_id a manual close now records (migration 0255),
 // against a real Postgres with every migration applied. Skipped unless
 // INCIDENT_AUTOCLOSE_TEST_DSN is set.
@@ -29,6 +29,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -134,9 +135,19 @@ func acRead(t *testing.T, pool *pgxpool.Pool, id string) acRow {
 	return r
 }
 
+// acSweep runs the auto-close as routes.go wires it on the Postgres data
+// source: the listing, and the incident service's own update to close, as the
+// system user acSystemEmail ("" = the default "System user").
 func acSweep(t *testing.T, pool *pgxpool.Pool, req domain.IncidentAutocloseRequest) domain.IncidentAutocloseResponse {
 	t.Helper()
-	svc := service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(pool)))
+	return acSweepAs(t, pool, req, "")
+}
+
+func acSweepAs(t *testing.T, pool *pgxpool.Pool, req domain.IncidentAutocloseRequest, systemEmail string) domain.IncidentAutocloseResponse {
+	t.Helper()
+	scoped := repository.NewScoped(pool)
+	incidents := service.NewIncidentServiceWithPublisher(repository.NewIncidentRepository(scoped), repository.NewUserRepository(pool), nil)
+	svc := service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(scoped), incidents, systemEmail)
 	resp, err := svc.Autoclose(acCtx(), req)
 	if err != nil {
 		t.Fatalf("Autoclose: %v", err)
@@ -155,10 +166,13 @@ func acClosedIDs(resp domain.IncidentAutocloseResponse) map[string]bool {
 }
 
 // TestIncidentAutoclose_ClosesDueIncidentsOnly: a due RESOLVED incident is
-// closed with closed_on now and closed_by_id = resolved_by_id, by the system
-// actor, with one Resolved -> Closed activity row and no comment or work
-// note; a not-yet-due one, and incidents in other states, are untouched; an
-// incident with no resolved_on is measured from its last update.
+// closed through the incident service with closed_on now, by the system user
+// (the default "System user", which has no user row, so closed_by_id is NULL,
+// as case auto-closure leaves closed_by_user_id), with one Resolved -> Closed
+// activity row and no comment or work note; one with no close notes (synced
+// rows can lack them) closes too; a not-yet-due one, and incidents in other
+// states, are untouched; an incident with no resolved_on is measured from its
+// last update.
 func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 	pool := incidentAutoclosePool(t)
 	due := acResolved(t, pool, acDue, false)
@@ -169,12 +183,16 @@ func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 	if _, err := repository.NewScoped(pool).Exec(acCtx(), `UPDATE incident SET state = 'IN_PROGRESS' WHERE id = $1`, inProgress); err != nil {
 		t.Fatal(err)
 	}
+	noNotes := acResolved(t, pool, acDue, false)
+	if _, err := repository.NewScoped(pool).Exec(acCtx(), `UPDATE incident SET close_notes = NULL WHERE id = $1`, noNotes); err != nil {
+		t.Fatal(err)
+	}
 	before := acRead(t, pool, due)
 
 	start := time.Now()
 	resp := acSweep(t, pool, domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr()})
 	closed := acClosedIDs(resp)
-	if !closed[due] || !closed[nullDue] || closed[notDue] || closed[nullNotDue] || closed[inProgress] || len(resp.Failed) != 0 {
+	if !closed[due] || !closed[nullDue] || !closed[noNotes] || closed[notDue] || closed[nullNotDue] || closed[inProgress] || len(resp.Failed) != 0 {
 		t.Fatalf("closed = %v, failed = %+v", resp.Closed, resp.Failed)
 	}
 	for _, c := range resp.Closed {
@@ -187,11 +205,11 @@ func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 	if got.state != "CLOSED" || got.closedOn == nil || got.closedOn.Before(start.Add(-time.Minute)) {
 		t.Errorf("due incident: state %s closed_on %v", got.state, got.closedOn)
 	}
-	if deref(got.closedBy) != icEngineerID || deref(got.resolvedBy) != icEngineerID {
-		t.Errorf("closed_by_id = %s, resolved_by_id = %s, want both %s", deref(got.closedBy), deref(got.resolvedBy), icEngineerID)
+	if got.closedBy != nil || deref(got.resolvedBy) != icEngineerID {
+		t.Errorf("closed_by_id = %s, resolved_by_id = %s, want NULL / %s", deref(got.closedBy), deref(got.resolvedBy), icEngineerID)
 	}
-	if got.updatedBy != "system-m2m@wso2.com" {
-		t.Errorf("work_item.updated_by = %q, want the system actor", got.updatedBy)
+	if got.updatedBy != domain.AutoclosureDefaultActor {
+		t.Errorf("work_item.updated_by = %q, want the system user %q", got.updatedBy, domain.AutoclosureDefaultActor)
 	}
 	if got.comments != before.comments {
 		t.Errorf("comments %d -> %d: auto-close must add no comment or work note", before.comments, got.comments)
@@ -199,8 +217,10 @@ func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 	if n := len(got.activityNew); n == 0 || got.activityNew[n-1] != "Closed" {
 		t.Errorf("state activity = %v, want it to end with Closed", got.activityNew)
 	}
-	if r := acRead(t, pool, nullDue); r.state != "CLOSED" || deref(r.closedBy) != icEngineerID {
-		t.Errorf("null resolved_on incident: %+v", r)
+	for name, id := range map[string]string{"null resolved_on": nullDue, "no close notes": noNotes} {
+		if r := acRead(t, pool, id); r.state != "CLOSED" || r.closedBy != nil {
+			t.Errorf("%s incident: %+v, want closed by nobody", name, r)
+		}
 	}
 	for name, id := range map[string]string{"not due": notDue, "null not due": nullNotDue} {
 		if r := acRead(t, pool, id); r.state != "RESOLVED" || r.closedOn != nil || r.closedBy != nil {
@@ -211,9 +231,10 @@ func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 		t.Errorf("in progress: %+v, want untouched", r)
 	}
 
-	// Reading it back: the detail view carries closedOn and closedBy.
+	// Reading it back: the detail view carries closedOn, and no closedBy for a
+	// system user with no user row.
 	v, err := repository.NewIncidentRepository(repository.NewScoped(pool)).GetIncidentByID(acCtx(), due)
-	if err != nil || v.ClosedOn == nil || v.ClosedBy == nil {
+	if err != nil || v.ClosedOn == nil || v.ClosedBy != nil {
 		t.Errorf("GetIncidentByID closedOn %v closedBy %v err %v", v.ClosedOn, v.ClosedBy, err)
 	}
 
@@ -225,7 +246,7 @@ func TestIncidentAutoclose_ClosesDueIncidentsOnly(t *testing.T) {
 }
 
 // TestIncidentAutoclose_CascadesOpenTasks: the incident's open tasks are
-// closed as on a manual close (CLOSED_INCOMPLETE with ServiceNow's note); a
+// closed as on a manual close (CLOSED_INCOMPLETE with the cascade's work note); a
 // task already closed is left alone.
 func TestIncidentAutoclose_CascadesOpenTasks(t *testing.T) {
 	pool := incidentAutoclosePool(t)
@@ -287,20 +308,34 @@ func TestIncidentAutoclose_LimitAndMore(t *testing.T) {
 	}
 }
 
+// TestIncidentAutoclose_SystemUserWithARow: with AUTOCLOSURE_SYSTEM_USER_EMAIL
+// naming a user that has a row, the close is attributed to that user:
+// closed_by_id is theirs and updated_by their email.
+func TestIncidentAutoclose_SystemUserWithARow(t *testing.T) {
+	pool := incidentAutoclosePool(t)
+	inc := acResolved(t, pool, acDue, false)
+	acSweepAs(t, pool, domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr()}, "ic-caller@test.local")
+	if r := acRead(t, pool, inc); r.state != "CLOSED" || deref(r.closedBy) != acActorID || r.updatedBy != "ic-caller@test.local" {
+		t.Fatalf("closed by %s, updated_by %q, state %s; want %s / ic-caller@test.local / CLOSED", deref(r.closedBy), r.updatedBy, r.state, acActorID)
+	}
+}
+
 // TestIncidentAutoclose_RecheckSkipsAnIncidentNoLongerDue: an incident
-// re-opened after it was listed is not closed by AutocloseIncident.
+// re-opened after it was listed is left alone by the auto-close update: under
+// the row lock it is no longer due, and nothing is written.
 func TestIncidentAutoclose_RecheckSkipsAnIncidentNoLongerDue(t *testing.T) {
 	pool := incidentAutoclosePool(t)
 	inc := acResolved(t, pool, acDue, false)
-	repo := repository.NewIncidentAutocloseRepository(repository.NewScoped(pool))
+	repo := repository.NewIncidentRepository(repository.NewScoped(pool))
 	if _, err := repository.NewScoped(pool).Exec(acCtx(), `UPDATE incident SET state = 'IN_PROGRESS' WHERE id = $1`, inc); err != nil {
 		t.Fatal(err)
 	}
-	closed, err := repo.AutocloseIncident(acCtx(), inc, acDays, "system-m2m@wso2.com")
-	if err != nil || closed {
-		t.Fatalf("closed = %v, err = %v; want skipped", closed, err)
+	closedState, days := "CLOSED", acDays
+	_, err := repo.UpdateIncidentLifecycle(acCtx(), inc, repository.IncidentLifecycleUpdate{State: &closedState, AutocloseDueDays: &days}, "System user")
+	if !errors.Is(err, repository.ErrIncidentNotDueForAutoclose) {
+		t.Fatalf("err = %v, want ErrIncidentNotDueForAutoclose", err)
 	}
-	if r := acRead(t, pool, inc); r.state != "IN_PROGRESS" || r.closedOn != nil {
+	if r := acRead(t, pool, inc); r.state != "IN_PROGRESS" || r.closedOn != nil || r.updatedBy == "System user" {
 		t.Errorf("incident changed: %+v", r)
 	}
 }

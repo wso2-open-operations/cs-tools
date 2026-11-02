@@ -312,6 +312,12 @@ type IncidentLifecycleUpdate struct {
 	ResolutionNotes     *string // incident.close_notes
 	ResolvedByID        *string
 	DefaultResolvedByID *string // the acting user: resolved_by_id when entering Resolved without ResolvedByID, and closed_by_id when entering Closed
+	// AutocloseDueDays makes this update the incident auto-close: it is applied
+	// only while the incident is still due (incidentAutocloseDue, checked under
+	// the row lock; ErrIncidentNotDueForAutoclose otherwise), and the close
+	// needs no resolution code or notes. Set only by the incident service, for
+	// the auto-close workflow; never from a request.
+	AutocloseDueDays *int
 
 	// WorkNotes and AdditionalComments are written as comment rows in the same transaction as the
 	// state change, so a failed note leaves the state change unsaved too. Nil or blank writes nothing.
@@ -1503,7 +1509,7 @@ func (r *incidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u
 	}
 	var ve *apierror.ValidationError
 	var nfe *apierror.NotFoundError
-	if errors.As(err, &ve) || errors.As(err, &nfe) {
+	if errors.As(err, &ve) || errors.As(err, &nfe) || errors.Is(err, ErrIncidentNotDueForAutoclose) {
 		return nil, err
 	}
 	if IsRLSPolicyViolation(err) {
@@ -1766,7 +1772,21 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		return nil, fmt.Errorf("update incident: read current state: %w", err)
 	}
 
-	if u.State != nil && (*u.State == "RESOLVED" || *u.State == "CLOSED") {
+	if u.AutocloseDueDays != nil {
+		// The row is locked: an incident re-opened, closed or touched since it
+		// was listed is no longer due, and is left alone.
+		var due bool
+		if err := tx.QueryRow(ctx, `
+			SELECT `+incidentAutocloseDue+`
+			FROM incident inc
+			JOIN work_item wi ON wi.id = inc.id
+			WHERE inc.id = $2`, *u.AutocloseDueDays, id).Scan(&due); err != nil {
+			return nil, fmt.Errorf("update incident: check auto-close is due: %w", err)
+		}
+		if !due {
+			return nil, ErrIncidentNotDueForAutoclose
+		}
+	} else if u.State != nil && (*u.State == "RESOLVED" || *u.State == "CLOSED") {
 		code, notes := currentCode, currentNotes
 		if u.ResolutionCode != nil {
 			code = u.ResolutionCode
@@ -1831,8 +1851,8 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		// Resolved by this update itself, not by its parent's cascade.
 		incSets = append(incSets, "resolved_on = NOW()", "resolved_with_parent = FALSE")
 	}
-	// Entering Closed records when and by whom (migration 0255), as
-	// ServiceNow's closed_at / closed_by. A re-open leaves both as they were.
+	// Entering Closed records when and by whom (migration 0255). A re-open
+	// leaves both as they were.
 	if u.State != nil && *u.State == "CLOSED" && currentState != "CLOSED" {
 		incSets = append(incSets, "closed_on = NOW()")
 		if u.DefaultResolvedByID != nil {

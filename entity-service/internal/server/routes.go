@@ -1497,20 +1497,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	autoclosureHandler := handler.NewAutoclosureHandler(autoclosureSvc)
 
-	// Incident auto-close: the port of ServiceNow's hourly close of incidents
-	// left RESOLVED for 14 days (POST /incidents/autoclose, driven by
-	// operations/csm-scheduled-tasks' incident_autoclose task). Postgres only
-	// and never mirrored to ServiceNow. Always registered; without the
-	// Postgres incident tables it answers 503 (the reason is logged), like the
-	// case auto-closure routes above.
-	var incidentAutocloseSvc service.IncidentAutocloseService
-	if db == nil || cfg.DataSource == config.DataSourceServiceNow {
-		incidentAutocloseSvc = service.NewUnavailableIncidentAutocloseService("incident auto-close needs the Postgres incident tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
-	} else {
-		incidentAutocloseSvc = service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(db)))
-	}
-	incidentAutocloseHandler := handler.NewIncidentAutocloseHandler(incidentAutocloseSvc)
-
 	// Case feedback (CSAT submissions): the ServiceNow data source reads it
 	// from the backing system; both Postgres data sources read
 	// work_item_feedback (migration 0102). Dual write deliberately does NOT
@@ -1735,6 +1721,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		activeProblemSvc = service.NewProblemService(problemRepo)
 	}
 	problemHandler := handler.NewProblemHandler(activeProblemSvc)
+
+	// Incident auto-close: closes incidents left RESOLVED for 14 days
+	// (POST /incidents/autoclose, driven by operations/csm-scheduled-tasks'
+	// incident_autoclose task). Like case auto-closure above, it closes through
+	// the deployment's incident service, as the same system user
+	// (AUTOCLOSURE_SYSTEM_USER_EMAIL), so in dual-write the close is mirrored
+	// to the backing data source like any other incident update. Always
+	// registered; without the Postgres incident tables it answers 503 (the
+	// reason is logged), like the case auto-closure routes.
+	var incidentAutocloseSvc service.IncidentAutocloseService
+	if db == nil || cfg.DataSource == config.DataSourceServiceNow {
+		incidentAutocloseSvc = service.NewUnavailableIncidentAutocloseService("incident auto-close needs the Postgres incident tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
+	} else {
+		incidentAutocloseSvc = service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(db)),
+			activeIncidentSvc, cfg.AutoclosureSystemUserEmail)
+	}
+	incidentAutocloseHandler := handler.NewIncidentAutocloseHandler(incidentAutocloseSvc)
 
 	var alertHandler *handler.AlertHandler
 	if cfg.DataSource == config.DataSourceServiceNow {

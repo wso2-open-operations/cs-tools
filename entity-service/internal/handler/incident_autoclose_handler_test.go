@@ -38,21 +38,11 @@ func (r noAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, int)
 	return nil, nil
 }
 
-func (r noAutocloseRepo) AutocloseIncident(context.Context, string, int, string) (bool, error) {
-	r.t.Fatal("repository reached")
-	return false, nil
-}
-
-func (r noAutocloseRepo) RecordIncidentFieldChanges(context.Context, string, []repository.IncidentFieldChange, string) error {
-	r.t.Fatal("repository reached")
-	return nil
-}
-
 // TestIncidentAutocloseHandler_RefusesBadBodies: an unknown field, a missing
 // resolvedForDays or one outside 1..3650 and a limit over 1000 are 400s, and
 // nothing is selected.
 func TestIncidentAutocloseHandler_RefusesBadBodies(t *testing.T) {
-	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(noAutocloseRepo{t}))
+	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(noAutocloseRepo{t}, nil, ""))
 	for name, body := range map[string]string{
 		"unknown field":     `{"resolvedForDays":14,"days":14}`,
 		"missing days":      `{"limit":10}`,
@@ -75,7 +65,7 @@ func TestIncidentAutocloseHandler_RefusesBadBodies(t *testing.T) {
 	}
 }
 
-// TestIncidentAutocloseHandler_Unavailable: the ServiceNow stand-in answers 503
+// TestIncidentAutocloseHandler_Unavailable: the unavailable stand-in answers 503
 // (writeServiceError logs the reason and returns a generic message).
 func TestIncidentAutocloseHandler_Unavailable(t *testing.T) {
 	h := NewIncidentAutocloseHandler(service.NewUnavailableIncidentAutocloseService("needs postgres"))
@@ -93,19 +83,19 @@ type stubAutocloseRepo struct {
 func (r stubAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, int) ([]repository.IncidentAutocloseCandidate, error) {
 	return r.due, nil
 }
-func (stubAutocloseRepo) AutocloseIncident(context.Context, string, int, string) (bool, error) {
-	return true, nil
-}
-func (stubAutocloseRepo) RecordIncidentFieldChanges(context.Context, string, []repository.IncidentFieldChange, string) error {
-	return nil
+
+// UpdateIncident lets the stub stand in for the incident service that closes.
+func (stubAutocloseRepo) UpdateIncident(context.Context, domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
+	return domain.UpdateIncidentResponse{}, nil
 }
 
 // TestIncidentAutocloseHandler_ResponseShape: 200 with dryRun, closed, failed
 // (an empty array, not null) and more.
 func TestIncidentAutocloseHandler_ResponseShape(t *testing.T) {
-	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(stubAutocloseRepo{
+	stub := stubAutocloseRepo{
 		due: []repository.IncidentAutocloseCandidate{{ID: "a0000000-0000-0000-0000-000000000001", Number: "INC1"}},
-	}))
+	}
+	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(stub, stub, ""))
 	w := httptest.NewRecorder()
 	h.Autoclose(w, httptest.NewRequest(http.MethodPost, "/incidents/autoclose", strings.NewReader(`{"resolvedForDays":14,"limit":1}`)))
 	if w.Code != http.StatusOK {

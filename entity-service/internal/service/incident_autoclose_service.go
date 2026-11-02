@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -36,14 +37,32 @@ const (
 	incidentAutocloseMaxDays = 3650
 )
 
+// incidentCloser is the part of IncidentService the auto-close uses to close an
+// incident: the ordinary update, so the close is the same write (and the same
+// mirror to the backing data source in dual-write) as any other.
+type incidentCloser interface {
+	UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error)
+}
+
 type incidentAutocloseService struct {
-	repo repository.IncidentAutocloseRepository
+	repo        repository.IncidentAutocloseRepository
+	incidents   incidentCloser
+	systemEmail string
 }
 
 // NewIncidentAutocloseService constructs the Postgres-backed
-// IncidentAutocloseService.
-func NewIncidentAutocloseService(repo repository.IncidentAutocloseRepository) IncidentAutocloseService {
-	return &incidentAutocloseService{repo: repo}
+// IncidentAutocloseService. incidents is the deployment's incident service,
+// which closes each incident (as case auto-closure closes through the case
+// service). systemEmail is the system user the close is attributed to, the
+// same AUTOCLOSURE_SYSTEM_USER_EMAIL case auto-closure uses: optional, and
+// empty (or blank) acts as domain.AutoclosureDefaultActor ("System user")
+// with no user row, so closed_by_id stays NULL.
+func NewIncidentAutocloseService(repo repository.IncidentAutocloseRepository, incidents incidentCloser, systemEmail string) IncidentAutocloseService {
+	systemEmail = strings.TrimSpace(systemEmail)
+	if systemEmail == "" {
+		systemEmail = domain.AutoclosureDefaultActor
+	}
+	return &incidentAutocloseService{repo: repo, incidents: incidents, systemEmail: systemEmail}
 }
 
 // unavailableIncidentAutocloseService stands in where the feature cannot run
@@ -79,11 +98,13 @@ func validateIncidentAutocloseRequest(req domain.IncidentAutocloseRequest) (int,
 	return req.Limit, nil
 }
 
-// Autoclose implements IncidentAutocloseService. Each incident is closed in
-// its own transaction, so one that fails is reported in Failed and does not
-// stop the rest. Like ServiceNow's job it adds no comment or work note; the
-// one activity-feed row (state Resolved -> Closed, by the system actor) is
-// written after the close commits and only logged when it fails.
+// Autoclose implements IncidentAutocloseService. Each incident is closed by
+// the incident service's own update (state Closed, as the system user), in its
+// own transaction, so one that fails is reported in Failed and does not stop
+// the rest. The update re-checks under the row lock that the incident is still
+// due, and skips one that is not. It adds no comment or work note; the update
+// writes the activity entry and, in dual-write, mirrors the close to the
+// backing data source like any other incident update.
 func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.IncidentAutocloseRequest) (domain.IncidentAutocloseResponse, error) {
 	limit, err := validateIncidentAutocloseRequest(req)
 	if err != nil {
@@ -100,6 +121,8 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 		Failed: []domain.IncidentAutocloseFailed{},
 		More:   len(due) == limit,
 	}
+	closed := domain.IncidentStateClosed
+	closeCtx := withIncidentAutoclose(ctx, s.systemEmail, days)
 	for _, c := range due {
 		if req.DryRun {
 			resp.Closed = append(resp.Closed, autoclosedEntry(c))
@@ -110,22 +133,17 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 		if err := ctx.Err(); err != nil {
 			return domain.IncidentAutocloseResponse{}, err
 		}
-		closed, err := s.repo.AutocloseIncident(ctx, c.ID, days, incidentSystemActorEmail)
+		_, err := s.incidents.UpdateIncident(closeCtx, domain.UpdateIncidentRequest{ID: c.ID, State: &closed})
+		if errors.Is(err, repository.ErrIncidentNotDueForAutoclose) {
+			// Re-opened, closed or touched since it was listed: no longer due.
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "incident auto-close: close failed", "incidentId", c.ID, "number", c.Number, "error", err)
 			resp.Failed = append(resp.Failed, domain.IncidentAutocloseFailed{ID: c.ID, Number: c.Number, Error: autocloseFailureMessage(err)})
 			continue
 		}
-		if !closed {
-			// Re-opened, closed or touched since it was listed: no longer due.
-			continue
-		}
 		resp.Closed = append(resp.Closed, autoclosedEntry(c))
-		if err := s.repo.RecordIncidentFieldChanges(ctx, c.ID, []repository.IncidentFieldChange{{
-			Field: "state", OldValue: incidentEnumLabel(strPtr("RESOLVED")), NewValue: incidentEnumLabel(strPtr("CLOSED")),
-		}}, incidentSystemActorEmail); err != nil {
-			slog.ErrorContext(ctx, "incident auto-close: record state change activity failed", "incidentId", c.ID, "error", err)
-		}
 	}
 	slog.InfoContext(ctx, "incident auto-close run", "dryRun", req.DryRun, "resolvedForDays", days,
 		"selected", len(due), "closed", len(resp.Closed), "failed", len(resp.Failed), "more", resp.More)

@@ -30,16 +30,10 @@ import (
 )
 
 type fakeIncidentAutocloseRepo struct {
-	due        []repository.IncidentAutocloseCandidate
-	listErr    error
-	gotDays    int
-	gotLimit   int
-	closeErr   map[string]error
-	notDue     map[string]bool
-	closed     []string
-	actor      string
-	activities map[string][]repository.IncidentFieldChange
-	activityBy string
+	due      []repository.IncidentAutocloseCandidate
+	listErr  error
+	gotDays  int
+	gotLimit int
 }
 
 func (f *fakeIncidentAutocloseRepo) ListIncidentsDueForAutoclose(_ context.Context, days, limit int) ([]repository.IncidentAutocloseCandidate, error) {
@@ -47,25 +41,34 @@ func (f *fakeIncidentAutocloseRepo) ListIncidentsDueForAutoclose(_ context.Conte
 	return f.due, f.listErr
 }
 
-func (f *fakeIncidentAutocloseRepo) AutocloseIncident(_ context.Context, id string, _ int, actor string) (bool, error) {
-	f.actor = actor
-	if err := f.closeErr[id]; err != nil {
-		return false, err
-	}
-	if f.notDue[id] {
-		return false, nil
-	}
-	f.closed = append(f.closed, id)
-	return true, nil
+// fakeIncidentCloser stands in for the incident service: it records each
+// update and the auto-close mark on its context.
+type fakeIncidentCloser struct {
+	closeErr map[string]error
+	notDue   map[string]bool
+	closed   []string
+	states   []domain.IncidentState
+	actor    string
+	days     int
 }
 
-func (f *fakeIncidentAutocloseRepo) RecordIncidentFieldChanges(_ context.Context, id string, changes []repository.IncidentFieldChange, actor string) error {
-	if f.activities == nil {
-		f.activities = map[string][]repository.IncidentFieldChange{}
+func (f *fakeIncidentCloser) UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
+	email, days, ok := incidentAutocloseFromContext(ctx)
+	if !ok {
+		return domain.UpdateIncidentResponse{}, errors.New("closed without the auto-close mark")
 	}
-	f.activities[id] = changes
-	f.activityBy = actor
-	return nil
+	f.actor, f.days = email, days
+	if req.State != nil {
+		f.states = append(f.states, *req.State)
+	}
+	if err := f.closeErr[req.ID]; err != nil {
+		return domain.UpdateIncidentResponse{}, err
+	}
+	if f.notDue[req.ID] {
+		return domain.UpdateIncidentResponse{}, repository.ErrIncidentNotDueForAutoclose
+	}
+	f.closed = append(f.closed, req.ID)
+	return domain.UpdateIncidentResponse{}, nil
 }
 
 func autoclosePtr(v int) *int { return &v }
@@ -88,8 +91,8 @@ func TestIncidentAutoclose_Validation(t *testing.T) {
 		"max limit":       {req: domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(1), Limit: 1000}, wantLimit: 1000},
 	} {
 		t.Run(name, func(t *testing.T) {
-			repo := &fakeIncidentAutocloseRepo{}
-			_, err := NewIncidentAutocloseService(repo).Autoclose(context.Background(), tc.req)
+			repo, closer := &fakeIncidentAutocloseRepo{}, &fakeIncidentCloser{}
+			_, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), tc.req)
 			if tc.wantLimit == 0 {
 				var ve *apierror.ValidationError
 				if !errors.As(err, &ve) {
@@ -104,10 +107,11 @@ func TestIncidentAutoclose_Validation(t *testing.T) {
 	}
 }
 
-// TestIncidentAutoclose_ClosesEachAndReportsFailures: one failing incident
-// does not stop the others; a no-longer-due one is neither closed nor failed;
-// the system actor closes and records one Resolved -> Closed activity row per
-// close; a database error's text is not handed to the caller.
+// TestIncidentAutoclose_ClosesEachAndReportsFailures: each incident is closed
+// through the incident service (state Closed, marked as the auto-close with the
+// system user and the threshold); one failing incident does not stop the
+// others; a no-longer-due one is neither closed nor failed; a database
+// error's text is not handed to the caller.
 func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 	resolved := time.Date(2026, 10, 1, 8, 0, 0, 0, time.FixedZone("x", 19800))
 	repo := &fakeIncidentAutocloseRepo{
@@ -117,10 +121,12 @@ func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 			{ID: "c", Number: "INC-C"},
 			{ID: "d", Number: "INC-D"},
 		},
+	}
+	closer := &fakeIncidentCloser{
 		closeErr: map[string]error{"b": &pgconn.PgError{Code: "23503", Message: "insert or update on table \"incident\" violates foreign key"}},
 		notDue:   map[string]bool{"c": true},
 	}
-	resp, err := NewIncidentAutocloseService(repo).Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), Limit: 4})
+	resp, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), Limit: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,14 +145,27 @@ func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 	if !resp.More || resp.DryRun {
 		t.Errorf("more = %v, dryRun = %v", resp.More, resp.DryRun)
 	}
-	if repo.actor != incidentSystemActorEmail || repo.activityBy != incidentSystemActorEmail {
-		t.Errorf("actor = %q, activity by %q", repo.actor, repo.activityBy)
+	if closer.actor != domain.AutoclosureDefaultActor || closer.days != 14 {
+		t.Errorf("auto-close mark = %q / %d, want the default system actor and 14", closer.actor, closer.days)
 	}
-	if len(repo.activities) != 2 {
-		t.Fatalf("activity rows for %d incidents, want 2", len(repo.activities))
+	for _, st := range closer.states {
+		if st != domain.IncidentStateClosed {
+			t.Errorf("state sent = %q, want CLOSED", st)
+		}
 	}
-	if ch := repo.activities["a"]; len(ch) != 1 || ch[0] != (repository.IncidentFieldChange{Field: "state", OldValue: "Resolved", NewValue: "Closed"}) {
-		t.Errorf("activity = %+v", ch)
+}
+
+// TestIncidentAutoclose_SystemUserIsTheConfiguredOne: the close is marked with
+// AUTOCLOSURE_SYSTEM_USER_EMAIL when it is set, as case auto-closure's is.
+func TestIncidentAutoclose_SystemUserIsTheConfiguredOne(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
+	closer := &fakeIncidentCloser{}
+	if _, err := NewIncidentAutocloseService(repo, closer, "  autoclose@wso2.com ").Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err != nil {
+		t.Fatal(err)
+	}
+	if closer.actor != "autoclose@wso2.com" {
+		t.Fatalf("actor = %q, want the configured system user", closer.actor)
 	}
 }
 
@@ -154,19 +173,20 @@ func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 // closed and never closes or records anything.
 func TestIncidentAutoclose_DryRunChangesNothing(t *testing.T) {
 	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
-	resp, err := NewIncidentAutocloseService(repo).Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DryRun: true})
+	closer := &fakeIncidentCloser{}
+	resp, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resp.DryRun || len(resp.Closed) != 1 || len(repo.closed) != 0 || len(repo.activities) != 0 || resp.More {
-		t.Fatalf("resp = %+v, closed in repo = %v, activities = %v", resp, repo.closed, repo.activities)
+	if !resp.DryRun || len(resp.Closed) != 1 || len(closer.states) != 0 || resp.More {
+		t.Fatalf("resp = %+v, updates sent = %v", resp, closer.states)
 	}
 }
 
 // TestIncidentAutoclose_ListFailureIsAnError: nothing to report per incident when the listing fails.
 func TestIncidentAutoclose_ListFailureIsAnError(t *testing.T) {
-	repo := &fakeIncidentAutocloseRepo{listErr: errors.New("boom")}
-	if _, err := NewIncidentAutocloseService(repo).Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err == nil {
+	repo, closer := &fakeIncidentAutocloseRepo{listErr: errors.New("boom")}, &fakeIncidentCloser{}
+	if _, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err == nil {
 		t.Fatal("want an error")
 	}
 }
@@ -177,8 +197,9 @@ func TestIncidentAutoclose_CancelledRequestStops(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
-	_, err := NewIncidentAutocloseService(repo).Autoclose(ctx, domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
-	if !errors.Is(err, context.Canceled) || len(repo.closed) != 0 {
-		t.Fatalf("err = %v, closed = %v", err, repo.closed)
+	closer := &fakeIncidentCloser{}
+	_, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(ctx, domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
+	if !errors.Is(err, context.Canceled) || len(closer.closed) != 0 {
+		t.Fatalf("err = %v, closed = %v", err, closer.closed)
 	}
 }
