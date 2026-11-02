@@ -32,6 +32,8 @@ export interface ActiveSlaStatus {
   wso2CaseId?: string;
   caseTitle?: string;
   caseType?: string;
+  /** entity-service's word-form severity (e.g. "CRITICAL") -- see severityFromBe. */
+  priority?: string;
   clockType: string;
   businessElapsedPercent: number;
   hasBreached: boolean;
