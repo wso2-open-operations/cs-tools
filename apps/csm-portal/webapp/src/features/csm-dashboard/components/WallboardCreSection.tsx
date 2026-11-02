@@ -19,7 +19,9 @@ import type { JSX } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import WallboardStatGrid from "@features/csm-dashboard/components/WallboardStatGrid";
 import WallboardSecondaryStat from "@features/csm-dashboard/components/WallboardSecondaryStat";
-import { CRE_PRIMARY_ORDER, CRE_SECONDARY_ORDER, sortByFixedOrder } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import {
+  WALLBOARD_FILL,
+  wb, CRE_PRIMARY_ORDER, CRE_SECONDARY_ORDER, sortByFixedOrder } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardCreSectionProps {
   widgets: BeDashboardWidget[];
@@ -75,7 +77,7 @@ export default function WallboardCreSection({
   );
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: 1, minHeight: 0 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: wb(8), ...WALLBOARD_FILL }}>
       <WallboardStatGrid
         widgets={primary}
         section="cre"
@@ -94,7 +96,16 @@ export default function WallboardCreSection({
         selectedTeamSreGroupId={selectedTeamSreGroupId}
         selectedTeamLabel={selectedTeamLabel}
       />
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0.75, flex: 1, minHeight: 0 }}>
+      <Box
+        sx={{
+          display: "grid",
+          // 2 columns on a phone, 3 from 600px up.
+          gridTemplateColumns: "repeat(2, 1fr)",
+          "@media (min-width: 600px)": { gridTemplateColumns: "repeat(3, 1fr)" },
+          gap: wb(6),
+          ...WALLBOARD_FILL,
+        }}
+      >
         {secondary.map((widget) => (
           <WallboardSecondaryStat
             key={widget.widgetId}

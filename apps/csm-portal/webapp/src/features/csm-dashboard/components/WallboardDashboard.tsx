@@ -29,6 +29,9 @@ import {
   CS_OVERVIEW_REFETCH_INTERVAL_MS,
   resolveDisplayNameAlias,
   WALLBOARD_FONT_SIZE,
+  WALLBOARD_MODE_MEDIA,
+  WALLBOARD_UNIT,
+  wb,
   type WallboardSection,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
@@ -92,7 +95,21 @@ function WallboardPageFrame({
   // so the caller's `sx` always overrides these defaults exactly like the
   // spread did.
   return (
-    <Box sx={[{ bgcolor: "#0f1420", minHeight: "100dvh", p: 2 }, ...(Array.isArray(sx) ? sx : [sx])]}>
+    <Box
+      sx={[
+        {
+          bgcolor: "#0f1420",
+          minHeight: "100dvh",
+          p: wb(16),
+          // The one scale unit every wallboard size is written in — see `wb`
+          // and WALLBOARD_UNIT in wallboardMetricStyle.ts.
+          "--wb-u": WALLBOARD_UNIT.phone,
+          "@media (min-width: 600px)": { "--wb-u": WALLBOARD_UNIT.tablet },
+          [WALLBOARD_MODE_MEDIA]: { "--wb-u": WALLBOARD_UNIT.wall },
+        },
+        ...(Array.isArray(sx) ? sx : [sx]),
+      ]}
+    >
       {children}
     </Box>
   );
@@ -102,13 +119,16 @@ function WallboardPageFrame({
  * glowing accent underneath — the reference wallboard's own page title. */
 function WallboardPageTitle(): JSX.Element {
   const rule = {
-    width: "clamp(2rem, 3vw, 4.5rem)",
+    width: wb(58),
     height: "1px",
     flexShrink: 0,
+    // No room for the side rules beside the title below 900px wide.
+    display: "none",
+    "@media (min-width: 900px)": { display: "block" },
   };
   return (
     <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: wb(16) }}>
         <Box sx={{ ...rule, background: "linear-gradient(to right, transparent, #64748b)" }} />
         <Typography
           component="h1"
@@ -116,14 +136,17 @@ function WallboardPageTitle(): JSX.Element {
             m: 0,
             fontSize: WALLBOARD_FONT_SIZE.pageTitle,
             fontWeight: 800,
-            letterSpacing: "0.35em",
+            // Wide tracking like the original; tighter below 900px, where the
+            // title may also wrap rather than overflow the screen.
+            letterSpacing: "0.18em",
             // `letter-spacing` also trails the last letter; pad the start by
             // the same amount so the text stays optically centered.
-            pl: "0.35em",
+            pl: "0.18em",
+            textAlign: "center",
+            "@media (min-width: 900px)": { letterSpacing: "0.35em", pl: "0.35em", whiteSpace: "nowrap" },
             textTransform: "uppercase",
             lineHeight: 1.2,
             color: "#f8fafc",
-            whiteSpace: "nowrap",
           }}
         >
           {WALLBOARD_PAGE_TITLE}
@@ -132,7 +155,7 @@ function WallboardPageTitle(): JSX.Element {
       </Box>
       <Box
         sx={{
-          mt: 0.75,
+          mt: wb(6),
           width: "45%",
           height: "1px",
           background: "linear-gradient(to right, transparent, rgba(34,211,238,0.45), transparent)",
@@ -142,8 +165,8 @@ function WallboardPageTitle(): JSX.Element {
             position: "absolute",
             left: "50%",
             top: "50%",
-            width: 5,
-            height: 5,
+            width: wb(5),
+            height: wb(5),
             borderRadius: "50%",
             transform: "translate(-50%, -50%)",
             bgcolor: "#22d3ee",
@@ -158,7 +181,14 @@ function WallboardPageTitle(): JSX.Element {
 function LoadingSkeleton(): JSX.Element {
   return (
     <WallboardPageFrame>
-      <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "1fr",
+          "@media (min-width: 900px)": { gridTemplateColumns: "1fr 1fr" },
+          gap: wb(16),
+        }}
+      >
         {[0, 1, 2, 3].map((i) => (
           <Skeleton key={i} variant="rounded" height={260} sx={{ borderRadius: "16px", bgcolor: "rgba(255,255,255,0.06)" }} />
         ))}
@@ -174,7 +204,7 @@ function renderFallbackGrid(
   selectedTeamLabel: string | undefined,
 ): JSX.Element {
   return (
-    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0.75 }}>
+    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: wb(6) }}>
       {group.widgets.map((widget) => (
         <WallboardSecondaryStat
           key={widget.widgetId}
@@ -328,47 +358,63 @@ export default function WallboardDashboard({
   const groups = groupWidgetsBySection(aliasedWidgets);
 
   return (
-    <WallboardPageFrame sx={{ minHeight: undefined, height: "100dvh", display: "flex", flexDirection: "column" }}>
+    <WallboardPageFrame
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        // Wall mode: exactly one screen, no scrolling. Phone/tablet: the
+        // page grows and scrolls (the frame's own `minHeight` still fills
+        // the screen when the content is shorter).
+        [WALLBOARD_MODE_MEDIA]: { height: "100dvh" },
+      }}
+    >
       {/* Top bar, matching the reference wallboard: the page title centered,
           "Last updated" on the right. A three-column grid with equal outer
           columns keeps the title truly centered on the page regardless of
-          how wide the "Last updated" pill is. */}
+          how wide the "Last updated" pill is. Below 900px wide (phones, portrait tablets) the
+          two stack, both centered. */}
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: "1fr auto 1fr",
+          gridTemplateColumns: "1fr",
+          justifyItems: "center",
+          rowGap: wb(10),
+          "@media (min-width: 900px)": { gridTemplateColumns: "1fr auto 1fr", justifyItems: "stretch" },
           alignItems: "center",
-          columnGap: 2,
-          mb: 1.5,
+          columnGap: wb(16),
+          mb: wb(12),
           flexShrink: 0,
         }}
       >
-        <Box />
+        <Box sx={{ display: "none", "@media (min-width: 900px)": { display: "block" } }} />
         <WallboardPageTitle />
         <Box
           sx={{
-            justifySelf: "end",
+            justifySelf: "center",
+            "@media (min-width: 900px)": { justifySelf: "end" },
             display: "flex",
             alignItems: "center",
-            gap: 0.75,
+            gap: wb(6),
             fontSize: WALLBOARD_FONT_SIZE.lastUpdated,
             fontWeight: 600,
             letterSpacing: "0.05em",
             textTransform: "uppercase",
             color: "#cbd5e1",
             bgcolor: "#1f2937",
-            px: 1.5,
-            py: 0.5,
+            px: wb(12),
+            py: wb(4),
             borderRadius: "999px",
             border: "1px solid #374151",
+            whiteSpace: "nowrap",
+            "& svg": { width: wb(15), height: wb(15), flexShrink: 0 },
           }}
         >
-          <Clock size={15} />
+          <Clock />
           <span>Last updated: {lastUpdated ?? "—"}</span>
           <Box
             sx={{
-              width: 6,
-              height: 6,
+              width: wb(6),
+              height: wb(6),
               borderRadius: "50%",
               bgcolor: "#34d399",
               "@keyframes wallboard-live-pulse": {
@@ -383,24 +429,31 @@ export default function WallboardDashboard({
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          // Matches the original's own layout exactly: CRE/SRE (row 1) grow
+          // Phone: one panel per row. Tablet / portrait: two per row. Both
+          // just grow and scroll with the page.
+          gridTemplateColumns: "1fr",
+          gap: wb(16),
+          "@media (min-width: 900px)": { gridTemplateColumns: "1fr 1fr" },
+          // Wall mode — the original's layout. Matches the original's own layout exactly: CRE/SRE (row 1) grow
           // to fill whatever vertical space is left after Security
           // Report/FDE (row 2) take their own natural, compact height —
           // not an even 50/50 split, and not every panel filling the
           // viewport (which would just stretch Security/FDE's own sparse
           // 2x2 grid until it looked emptier, not fill the page more
           // sensibly).
-          gridTemplateRows: "1fr auto",
-          gap: 2,
-          flex: 1,
-          minHeight: 0,
+          [WALLBOARD_MODE_MEDIA]: {
+            gridTemplateRows: "1fr auto",
+            flex: 1,
+            minHeight: 0,
+          },
           // Explicit overflow policy: the four known families fit the 2x2
           // grid, but an unrecognized 5th+ section renders as an
           // unbounded, natural-height fallback row appended below it (see
-          // the `familyFor(...) === undefined` block). Inside this fixed
-          // `100dvh` frame that row has no height budget — scroll it
+          // the `familyFor(...) === undefined` block). Inside wall mode's
+          // fixed `100dvh` frame that row has no height budget — scroll it
           // rather than let it clip or push content off the kiosk screen.
+          // (Outside wall mode nothing caps this grid's height, so it never
+          // scrolls on its own — the page does.)
           overflowY: "auto",
         }}
       >

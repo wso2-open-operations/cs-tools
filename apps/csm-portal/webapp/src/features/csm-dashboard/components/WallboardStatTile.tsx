@@ -22,6 +22,7 @@ import { useWallboardTileData } from "@features/csm-dashboard/api/useWallboardTi
 import {
   getStatTileColors,
   WALLBOARD_FONT_SIZE,
+  wb,
   type WallboardSection,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
@@ -115,8 +116,10 @@ export default function WallboardStatTile({
       sx={{
         flex: 1,
         borderRadius: "12px",
-        px: variant === "sre" ? 1 : 1.5,
-        py: resolvedPaddingY,
+        // Spacing-unit props (8 design-px each), scaled with the screen like
+        // the text — see `wb` in wallboardMetricStyle.ts.
+        px: wb(variant === "sre" ? 8 : 12),
+        py: wb(resolvedPaddingY * 8),
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -190,7 +193,7 @@ export default function WallboardStatTile({
       )}
       <Typography
         sx={{
-          mt: valueLabelGap,
+          mt: wb(valueLabelGap * 8),
           fontSize: labelFontSize,
           fontWeight: 700,
           letterSpacing: "0.05em",

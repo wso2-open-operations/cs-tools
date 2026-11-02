@@ -19,7 +19,7 @@ import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import type { BeDashboardDistinctByConfig, BeWidgetResourceType } from "@api/backend/types";
 import { useWallboardTileData } from "@features/csm-dashboard/api/useWallboardTileData";
-import { WALLBOARD_FONT_SIZE } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import { WALLBOARD_FONT_SIZE, wb } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardSecondaryStatProps {
   widgetId: string;
@@ -72,7 +72,7 @@ export default function WallboardSecondaryStat({
       sx={{
         flex: 1,
         borderRadius: "8px",
-        p: 0.75,
+        p: wb(6),
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -102,7 +102,7 @@ export default function WallboardSecondaryStat({
       )}
       <Typography
         sx={{
-          mt: 0.4,
+          mt: wb(3.2),
           fontSize: WALLBOARD_FONT_SIZE.label,
           fontWeight: 700,
           letterSpacing: "0.04em",

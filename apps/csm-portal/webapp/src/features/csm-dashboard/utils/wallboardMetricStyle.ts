@@ -26,28 +26,69 @@
 export const CS_OVERVIEW_REFETCH_INTERVAL_MS = 60_000;
 
 /**
- * Text sizes for the `/cs-monitor-dashboard` wallboard, one place for all of
- * them. Each is a `clamp(min, vw, max)`: the minimum is the size the
- * wallboard used before (so a laptop-sized window looks unchanged), the
- * middle term scales with the screen's width, and the maximum stops it
- * growing without bound on a very wide display. At 1920px wide (the TV the
- * wallboard actually runs on) this lands close to the reference digiops
- * wallboard's own sizes — values ~48px, labels ~16px, panel titles ~21px —
- * since text sized for a laptop was too small to read from across a room.
+ * The wallboard's sizing system. Every text size, padding and gap on
+ * `/cs-monitor-dashboard` is written as "N pixels, as designed at
+ * 1920x1080" and multiplied by one CSS custom property, `--wb-u`, that the
+ * page frame sets per screen:
+ *
+ * - **Wall mode** (`WALLBOARD_MODE_MEDIA`: landscape and >= 1200px wide —
+ *   TVs, monitors, laptops): `--wb-u` follows the screen, limited by
+ *   whichever of width or height is tighter, so the full 2x2 wallboard
+ *   always fits one screen with no scrolling and keeps its proportions.
+ *   It's exactly 1px at 1920x1080, 2px on a 4K (3840x2160) screen, and
+ *   ~0.71px on a 1366x768 laptop.
+ * - **Phone / tablet / portrait**: panels stack and the page scrolls, so
+ *   the unit is a fixed, readable size instead (0.8px on phones, 0.9px
+ *   from 600px wide) — a tile's number is ~38-43px, not shrunk to fit.
+ *
+ * Because padding and gaps scale with the text, a smaller screen shrinks
+ * everything together rather than squeezing big text into fixed-size
+ * boxes, which is what clipped the bottom row on shorter screens before.
  */
+export const WALLBOARD_MODE_MEDIA = "@media (min-width: 1200px) and (orientation: landscape)";
+
+/** The `--wb-u` values the page frame sets — see the block comment above. */
+export const WALLBOARD_UNIT = {
+  phone: "0.8px",
+  tablet: "0.9px",
+  // 1px at 1920x1080: 1/1920 of the width (0.0520833vw) or 1/1080 of the
+  // height (0.0925926vh), whichever is smaller.
+  wall: "min(0.0520833vw, 0.0925926vh)",
+} as const;
+
+/** A length of `px` design-pixels (as at 1920x1080), scaled to this screen. */
+export function wb(px: number): string {
+  return `calc(${px} * var(--wb-u, 1px))`;
+}
+
+/** Wallboard text sizes, in design-pixels (see {@link wb}). Deliberately
+ * no fixed minimums: in wall mode everything must shrink in exact
+ * proportion for the 2x2 layout to keep fitting one screen (a `rem` floor
+ * on even one label made 1280x720 clip). Phones get legible sizes from
+ * their own larger `--wb-u` instead. */
 export const WALLBOARD_FONT_SIZE = {
   /** The page's own "CUSTOMER SUCCESS MONITOR" title. */
-  pageTitle: "clamp(0.95rem, 1.05vw, 1.5rem)",
+  pageTitle: wb(20),
   /** The "Last updated" pill. */
-  lastUpdated: "clamp(0.65rem, 0.65vw, 0.95rem)",
+  lastUpdated: wb(12.5),
   /** A panel's own heading ("Customer Reliability Engineering (CRE)" etc.). */
-  panelTitle: "clamp(0.95rem, 1.1vw, 1.55rem)",
+  panelTitle: wb(21),
   /** SRE's small sub-section headings (INCIDENTS, PROBLEMS, ...). */
-  subsection: "clamp(0.55rem, 0.6vw, 0.85rem)",
+  subsection: wb(11.5),
   /** A tile's big number. */
-  value: "clamp(1.9rem, 2.5vw, 3.6rem)",
+  value: wb(48),
   /** A tile's label under the number. */
-  label: "clamp(0.68rem, 0.85vw, 1.2rem)",
+  label: wb(16),
+} as const;
+
+/** "Stretch to fill the remaining screen height" — only in wall mode, where
+ * the page is exactly one screen tall. On a phone/tablet the page scrolls,
+ * so each block keeps its natural height instead; stretching there (flex
+ * basis 0 + `minHeight: 0`) squeezed rows that wrap, e.g. SRE's 5 change
+ * requests on a phone, until they overlapped the next block. */
+export const WALLBOARD_FILL = {
+  flex: "0 0 auto",
+  [WALLBOARD_MODE_MEDIA]: { flex: 1, minHeight: 0 },
 } as const;
 
 /**
