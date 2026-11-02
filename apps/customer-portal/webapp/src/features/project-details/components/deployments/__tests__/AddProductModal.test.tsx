@@ -371,6 +371,10 @@ describe("AddProductModal", () => {
       { id: "ver-tm", version: "4.6.0", deploymentProfile: "Traffic Manager" },
       { id: "ver-ug", version: "4.6.0", deploymentProfile: "Universal Gateway" },
       { id: "ver-none", version: "4.5.0", deploymentProfile: null },
+      // The default profiles keep the plain label they always had, so what
+      // already selects "4.4.0" by its exact text keeps working.
+      { id: "ver-aio", version: "4.4.0", deploymentProfile: "All In One" },
+      { id: "ver-std", version: "7.0.0", deploymentProfile: "Standard" },
     ];
     vi.mocked(useSearchProductVersions).mockImplementation(
       (productId: string) =>
@@ -419,7 +423,15 @@ describe("AddProductModal", () => {
       "4.6.0 \u00b7 Traffic Manager",
       "4.6.0 \u00b7 Universal Gateway",
       "4.5.0",
+      "4.4.0",
+      "7.0.0",
     ]);
+
+    // A whole-label lookup (a string `name` matches the full text) still
+    // finds the default-profile record.
+    expect(
+      screen.getByRole("option", { name: "4.4.0", hidden: true }),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole("option", {

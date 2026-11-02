@@ -38,3 +38,15 @@ export const UPDATE_STREAM_BY_DEPLOYMENT_PROFILE: Readonly<
     "traffic manager": "wso2am-tm",
   },
 };
+
+/**
+ * Deployment profiles that describe the ordinary, undivided deployment of a
+ * product (lower-cased). They are the profile of most version records, so they
+ * are not shown: a version with one of them keeps the plain label it has always
+ * had. Only the profiles that tell otherwise identical version records apart
+ * (API Control Plane, Traffic Manager, Key Manager, ...) are.
+ */
+export const DEFAULT_DEPLOYMENT_PROFILES: ReadonlySet<string> = new Set([
+  "all in one",
+  "standard",
+]);

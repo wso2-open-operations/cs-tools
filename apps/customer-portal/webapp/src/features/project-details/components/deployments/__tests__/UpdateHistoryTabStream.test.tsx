@@ -46,6 +46,12 @@ const streams = [
     ],
   },
   {
+    productName: "wso2am-universal-gw",
+    productUpdateLevels: [
+      { productBaseVersion: "4.6.0", channel: "full", updateLevels: [50, 51, 52] },
+    ],
+  },
+  {
     productName: "wso2am-tm",
     productUpdateLevels: [
       { productBaseVersion: "4.5.0", channel: "full", updateLevels: [40, 41, 42] },
@@ -132,5 +138,44 @@ describe("UpdateHistoryTab update-level streams", () => {
     render(<UpdateHistoryTab {...baseProps} productName="wso2am-acp" />);
 
     expect(offeredLevels()).toEqual(["56", "55", "54"]);
+  });
+
+  describe("for a row that already has a level recorded", () => {
+    const recorded = (level: number) => [
+      { updateLevel: level, date: "2026-11-04" },
+    ];
+    const gateway = {
+      productName: "wso2am-universal-gw",
+      fallbackProductName: "wso2am",
+    };
+
+    it("offers the profile stream's own next levels, not the product's", () => {
+      // Gateway at 51: its stream has 52 above it; wso2am's 53-55 are not
+      // offered, they are another numbering.
+      render(
+        <UpdateHistoryTab {...baseProps} updates={recorded(51)} {...gateway} />,
+      );
+
+      expect(offeredLevels()).toEqual(["52"]);
+    });
+
+    it("falls back to the product's stream when the profile's has nothing above the recorded level", () => {
+      // 53 was recorded from the product's numbering. The gateway stream stops
+      // at 52, so without a fallback this row could add nothing, though it
+      // could add 54 and 55 before profiles had streams of their own.
+      render(
+        <UpdateHistoryTab {...baseProps} updates={recorded(53)} {...gateway} />,
+      );
+
+      expect(offeredLevels()).toEqual(["55", "54"]);
+    });
+
+    it("offers nothing when neither stream has a level above the recorded one", () => {
+      render(
+        <UpdateHistoryTab {...baseProps} updates={recorded(55)} {...gateway} />,
+      );
+
+      expect(offeredLevels()).toEqual([]);
+    });
   });
 });

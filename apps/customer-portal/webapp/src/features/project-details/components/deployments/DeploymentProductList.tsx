@@ -42,7 +42,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { normalizeDeploymentProfile } from "@features/project-details/utils/deploymentProfile";
+import { getDisplayDeploymentProfile } from "@features/project-details/utils/deploymentProfile";
 import { usePostDeploymentProductsSearchAll } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import { usePatchDeploymentProduct } from "@features/project-details/api/usePatchDeploymentProduct";
 import { ApiQueryKeys } from "@constants/apiConstants";
@@ -348,7 +348,9 @@ function ProductItemRow({
       : typeof item.version === "string"
         ? item.version || null
         : (item.version as { label?: string })?.label || null;
-  const profileLabel = normalizeDeploymentProfile(versionRef?.deploymentProfile);
+  const profileLabel = getDisplayDeploymentProfile(
+    versionRef?.deploymentProfile,
+  );
   const releasedStr = versionRef?.releasedOn
     ? formatProjectDate(versionRef.releasedOn)
     : displayValue(null, emptyVal);

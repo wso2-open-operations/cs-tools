@@ -261,6 +261,32 @@ describe("DeploymentProductList", () => {
           deployment: { id: "dep-1", label: "Staging" },
           version: { id: "v-none", label: "4.5.0" },
         },
+        {
+          id: "prod-aio",
+          createdOn: "2026-01-17",
+          updatedOn: "2026-01-17",
+          description: "all in one",
+          product: { id: "p1", label: "WSO2 API Manager" },
+          deployment: { id: "dep-1", label: "Staging" },
+          version: {
+            id: "v-aio",
+            label: "4.4.0",
+            deploymentProfile: "All In One",
+          },
+        },
+        {
+          id: "prod-std",
+          createdOn: "2026-01-17",
+          updatedOn: "2026-01-17",
+          description: "standard",
+          product: { id: "p2", label: "WSO2 Identity Server" },
+          deployment: { id: "dep-1", label: "Staging" },
+          version: {
+            id: "v-std",
+            label: "7.0.0",
+            deploymentProfile: "Standard",
+          },
+        },
       ],
       isLoading: false,
       isError: false,
@@ -279,5 +305,9 @@ describe("DeploymentProductList", () => {
     // The profile-less version shows its version and no profile chip.
     expect(screen.getByText("4.5.0")).toBeInTheDocument();
     expect(screen.queryByText("All In One")).not.toBeInTheDocument();
+    // Default profiles are not worth a chip on every row.
+    expect(screen.getByText("4.4.0")).toBeInTheDocument();
+    expect(screen.getByText("7.0.0")).toBeInTheDocument();
+    expect(screen.queryByText("Standard")).not.toBeInTheDocument();
   });
 });

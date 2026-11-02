@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatVersionWithProfile,
+  getDisplayDeploymentProfile,
   getUpdateStreamKey,
   normalizeDeploymentProfile,
 } from "@features/project-details/utils/deploymentProfile";
@@ -33,6 +34,20 @@ describe("normalizeDeploymentProfile", () => {
   });
 });
 
+describe("getDisplayDeploymentProfile", () => {
+  it("returns the profile only when it distinguishes", () => {
+    expect(getDisplayDeploymentProfile("Traffic Manager")).toBe(
+      "Traffic Manager",
+    );
+    expect(getDisplayDeploymentProfile(" Key Manager ")).toBe("Key Manager");
+    expect(getDisplayDeploymentProfile("All In One")).toBeNull();
+    expect(getDisplayDeploymentProfile("Standard")).toBeNull();
+    expect(getDisplayDeploymentProfile("")).toBeNull();
+    expect(getDisplayDeploymentProfile(null)).toBeNull();
+    expect(getDisplayDeploymentProfile(undefined)).toBeNull();
+  });
+});
+
 describe("formatVersionWithProfile", () => {
   it("appends the profile so records sharing a version can be told apart", () => {
     expect(formatVersionWithProfile("4.6.0", "API Control Plane")).toBe(
@@ -41,6 +56,32 @@ describe("formatVersionWithProfile", () => {
     expect(formatVersionWithProfile("4.6.0", "Traffic Manager")).toBe(
       "4.6.0 · Traffic Manager",
     );
+  });
+
+  it("keeps the plain version label for the default profiles most records carry", () => {
+    // "All In One" and "Standard" are the profile of most version records;
+    // suffixing them would change every existing label (and what the e2e
+    // spec selects by exact text) for nothing.
+    expect(formatVersionWithProfile("4.4.0", "All In One")).toBe("4.4.0");
+    expect(formatVersionWithProfile("4.4.0", "all in one")).toBe("4.4.0");
+    expect(formatVersionWithProfile("7.0.0", "Standard")).toBe("7.0.0");
+    expect(formatVersionWithProfile("7.0.0", "  STANDARD ")).toBe("7.0.0");
+  });
+
+  it("still shows every profile that tells records apart", () => {
+    for (const profile of [
+      "Traffic Manager",
+      "Key Manager",
+      "API Publisher",
+      "Developer Portal",
+      "Gateway worker",
+      "Micro-Integrator",
+      "Universal Gateway",
+    ]) {
+      expect(formatVersionWithProfile("4.1.0", profile)).toBe(
+        `4.1.0 · ${profile}`,
+      );
+    }
   });
 
   it("is just the version when there is no profile", () => {

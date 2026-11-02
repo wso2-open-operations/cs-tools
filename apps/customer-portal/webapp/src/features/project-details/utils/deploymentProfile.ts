@@ -14,7 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { UPDATE_STREAM_BY_DEPLOYMENT_PROFILE } from "@features/project-details/constants/productConstants";
+import {
+  DEFAULT_DEPLOYMENT_PROFILES,
+  UPDATE_STREAM_BY_DEPLOYMENT_PROFILE,
+} from "@features/project-details/constants/productConstants";
 
 /**
  * Trims a deployment profile and treats blank as absent.
@@ -30,20 +33,38 @@ export function normalizeDeploymentProfile(
 }
 
 /**
+ * The profile to show next to a version, or null when there is nothing worth
+ * showing: no profile, or a default one (see DEFAULT_DEPLOYMENT_PROFILES) that
+ * most version records carry and that tells nothing apart.
+ *
+ * @param profile - Raw deployment profile from a version record.
+ * @returns {string | null} The profile to display, or null.
+ */
+export function getDisplayDeploymentProfile(
+  profile: string | null | undefined,
+): string | null {
+  const normalized = normalizeDeploymentProfile(profile);
+  if (!normalized) return null;
+  return DEFAULT_DEPLOYMENT_PROFILES.has(normalized.toLowerCase())
+    ? null
+    : normalized;
+}
+
+/**
  * Label for a product version that tells apart version records sharing one
- * version string, e.g. "4.6.0 · API Control Plane". A version with no profile
- * is just the version.
+ * version string, e.g. "4.6.0 · API Control Plane". A version with no profile,
+ * or only a default one, is just the version, as it always was.
  *
  * @param version - Version string (e.g. "4.6.0").
  * @param profile - Deployment profile of that version record, if any.
- * @returns {string} Version label, with the profile appended when present.
+ * @returns {string} Version label, with the profile appended when it distinguishes.
  */
 export function formatVersionWithProfile(
   version: string,
   profile?: string | null,
 ): string {
-  const normalized = normalizeDeploymentProfile(profile);
-  return normalized ? `${version} · ${normalized}` : version;
+  const display = getDisplayDeploymentProfile(profile);
+  return display ? `${version} · ${display}` : version;
 }
 
 /**

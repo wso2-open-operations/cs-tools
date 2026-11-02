@@ -88,6 +88,23 @@ export default function UpdateHistoryTab({
   const isAddUpdateSectionLoading = isLoadingProductUpdateLevels;
   const isEditInlineLoading = isLoadingProductUpdateLevels;
 
+  const sortedUpdates = useMemo(() => {
+    return [...updates].sort(
+      (a, b) => (b.updateLevel ?? 0) - (a.updateLevel ?? 0),
+    );
+  }, [updates]);
+
+  const sortedLevels = useMemo(() => {
+    return sortedUpdates
+      .map((u) => u.updateLevel)
+      .filter((l): l is number => typeof l === "number")
+      .sort((a, b) => b - a);
+  }, [sortedUpdates]);
+
+  const currentUpdateLevel = useMemo(() => {
+    return sortedLevels.length > 0 ? sortedLevels[0] : null;
+  }, [sortedLevels]);
+
   const availableUpdateLevels = useMemo(() => {
     if (!productName || !productVersion || productUpdateLevels.length === 0) {
       return [];
@@ -105,36 +122,32 @@ export default function UpdateHistoryTab({
 
       return [...new Set(allLevels)].sort((a, b) => b - a);
     };
+    const hasLevelAbove = (levels: number[]): boolean =>
+      levels.some((l) => currentUpdateLevel === null || l > currentUpdateLevel);
 
     const levels = levelsFor(productName);
-    // A profile's own stream may not carry this version; fall back to the
-    // product's stream rather than offering no levels at all.
-    if (
-      levels.length === 0 &&
-      fallbackProductName &&
-      fallbackProductName !== productName
-    ) {
-      return levelsFor(fallbackProductName);
+    if (!fallbackProductName || fallbackProductName === productName) {
+      return levels;
+    }
+    // The profile's own stream is preferred. Use the product's stream instead
+    // when the profile's has nothing for this version, or nothing above the
+    // level already recorded: that level came from the product's numbering,
+    // from before profiles had streams of their own, and the row must not end
+    // up unable to add an update it could add before.
+    if (levels.length === 0 || !hasLevelAbove(levels)) {
+      const fallback = levelsFor(fallbackProductName);
+      if (levels.length === 0 || hasLevelAbove(fallback)) {
+        return fallback;
+      }
     }
     return levels;
-  }, [productName, fallbackProductName, productVersion, productUpdateLevels]);
-
-  const sortedUpdates = useMemo(() => {
-    return [...updates].sort(
-      (a, b) => (b.updateLevel ?? 0) - (a.updateLevel ?? 0),
-    );
-  }, [updates]);
-
-  const sortedLevels = useMemo(() => {
-    return sortedUpdates
-      .map((u) => u.updateLevel)
-      .filter((l): l is number => typeof l === "number")
-      .sort((a, b) => b - a);
-  }, [sortedUpdates]);
-
-  const currentUpdateLevel = useMemo(() => {
-    return sortedLevels.length > 0 ? sortedLevels[0] : null;
-  }, [sortedLevels]);
+  }, [
+    productName,
+    fallbackProductName,
+    productVersion,
+    productUpdateLevels,
+    currentUpdateLevel,
+  ]);
 
   const secondHighestUpdateLevel = useMemo(() => {
     return sortedLevels.length > 1 ? sortedLevels[1] : null;
