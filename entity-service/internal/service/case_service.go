@@ -29,6 +29,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -75,6 +76,15 @@ type caseService struct {
 	// other mode (plain caseService never creates a case of its own that
 	// needs this — see NewCaseService).
 	slaEngine SLAEngineService
+	// slaDataSource is config.Config.SLADataSource -- zero value ("") behaves
+	// as config.SLADataSourcePostgres (today's synchronous behavior) via
+	// runSLAEngineTask, so every existing NewCaseService/
+	// NewCaseServiceWithSNWriteback call site (every test included) keeps its
+	// unchanged, synchronous ordering unless WithSLADataSource is also wired.
+	// See runSLAEngineTask's own doc comment (sla_engine_service.go) for why
+	// SLADataSourceServiceNow runs every slaEngine call in this file as a
+	// detached background task instead.
+	slaDataSource config.SLADataSource
 	// csEngineerRole is config.Config.CSEngineerRole (CS_ENGINEER_ROLE) --
 	// the same role name snCaseService's own csEngineerRole field uses,
 	// shared rather than duplicated: "CS engineer" and "support engineer"
@@ -212,6 +222,26 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
 	if cs, ok := svc.(*caseService); ok {
 		cs.slaEngine = slaEngine
+	}
+	return svc
+}
+
+// WithSLADataSource attaches config.Config.SLADataSource to an
+// already-constructed CaseService -- *caseService or *snCaseService, whichever
+// svc actually is (routes.go calls this once, unconditionally, after building
+// activeCaseSvc, regardless of which concrete type the DataSource switch
+// produced). Every slaEngine call site in both files routes through
+// runSLAEngineTask (sla_engine_service.go) keyed on this field: zero value
+// ("", unset) behaves as config.SLADataSourcePostgres, so every existing
+// construction path that never calls this (every test, every other
+// DataSource branch that predates this field) keeps today's synchronous
+// ordering completely unchanged. A no-op if svc is neither concrete type.
+func WithSLADataSource(svc CaseService, sladataSource config.SLADataSource) CaseService {
+	switch cs := svc.(type) {
+	case *caseService:
+		cs.slaDataSource = sladataSource
+	case *snCaseService:
+		cs.slaDataSource = sladataSource
 	}
 	return svc
 }
@@ -777,8 +807,14 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// tracking whatsoever from creation onward, regardless of severity,
 	// until/unless its severity happened to change later (which calls
 	// ReviseCaseClocks, registering clocks as a side effect).
+	// Deliberately NOT routed through runSLAEngineTask, unlike every other
+	// slaEngine call site in this file -- registration on CREATE always runs
+	// synchronously regardless of s.slaDataSource, by explicit request: only
+	// the SLA writes triggered by a later case UPDATE (state/severity/field
+	// effects) defer to the background under config.SLADataSourceServiceNow.
 	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
-		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
+		severity := req.Severity
+		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &severity, req.ProjectID)
 	}
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
@@ -966,6 +1002,13 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// has already committed by the time this runs, so the only remaining
 	// ordering constraint is "before the publish," which this now also
 	// satisfies -- see registerCaseSLAClocksEvent's own doc comment.
+	// Deliberately NOT routed through runSLAEngineTask, unlike every other
+	// slaEngine call site in this file -- registration on CREATE always runs
+	// synchronously regardless of s.slaDataSource, by explicit request: only
+	// the SLA writes triggered by a later case UPDATE (state/severity/field
+	// effects) defer to the background under config.SLADataSourceServiceNow.
+	// This keeps the "before the publish" ordering above exact, not just
+	// self-healing.
 	if slaClockEligibleCreateTypes[req.Type] {
 		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
 	}
@@ -1559,7 +1602,9 @@ func (s *caseService) completeResponseSLAOnComment(ctx context.Context, caseID s
 	if s.slaEngine == nil || !isSupportEngineerResponse {
 		return
 	}
-	s.slaEngine.CompleteResponseClock(ctx, caseID)
+	runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+		s.slaEngine.CompleteResponseClock(ctx, caseID)
+	})
 }
 
 // subscribeCommenterToWatchList adds actorEmail's resolved user as a watcher
@@ -2211,7 +2256,10 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	// Postgres/dual-write path never paused/resumed/completed workaround or
 	// resolution clocks on any state transition at all before now.
 	if s.slaEngine != nil && req.State != nil && c.State != nil {
-		s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *c.State)
+		state := *c.State
+		runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+			s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, state)
+		})
 	}
 
 	// Activity-feed logging follows the write, same as event publishing
@@ -2259,27 +2307,40 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 			// clocks and registered fresh ones on a severity change at all
 			// before now, so they kept running against durations that no
 			// longer applied to the case's real severity.
+			//
+			// Under config.SLADataSourceServiceNow this whole block runs in
+			// the background (runSLAEngineTask) and can land after the
+			// publish below -- accepted by explicit request, same reasoning
+			// registerCaseSLAClocksEvent's own call site gives: this mode's
+			// SLA reads stay on ServiceNow regardless, so no live reader
+			// depends on this ordering, and a reaction that does race ahead
+			// self-heals via Reconcile.
 			if s.slaEngine != nil {
+				newSeverity := c.Severity
 				projectID := ""
 				if cv.ProjectDetails != nil {
 					projectID = cv.ProjectDetails.ID
 				}
-				s.slaEngine.ReviseCaseClocks(ctx, req.ID, c.Severity, projectID)
-				// ReviseCaseClocks' own replacement clocks always start
-				// IN_PROGRESS, with no awareness of the case's current
-				// state -- a case already paused (Awaiting Info/Solution
-				// Proposed) at the moment its severity changes would
-				// otherwise get fresh workaround/resolution clocks that
-				// immediately start counting down unpaused, producing a
-				// false breach later. Re-applying ApplyCaseStateEffects
-				// against the case's already-known current state (State is
-				// mutually exclusive with Severity on one request, so cv's
-				// State here is unaffected by this update) re-pauses them
-				// to match reality; a harmless no-op when the case isn't
-				// currently paused.
-				if cv.State != nil {
-					s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *cv.State)
-				}
+				stateBeforeRevise := cv.State
+				runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+					s.slaEngine.ReviseCaseClocks(ctx, req.ID, newSeverity, projectID)
+					// ReviseCaseClocks' own replacement clocks always start
+					// IN_PROGRESS, with no awareness of the case's current
+					// state -- a case already paused (Awaiting Info/Solution
+					// Proposed) at the moment its severity changes would
+					// otherwise get fresh workaround/resolution clocks that
+					// immediately start counting down unpaused, producing a
+					// false breach later. Re-applying ApplyCaseStateEffects
+					// against the case's already-known current state (State is
+					// mutually exclusive with Severity on one request, so cv's
+					// State here is unaffected by this update) re-pauses them
+					// to match reality; a harmless no-op when the case isn't
+					// currently paused. Both calls run in the same task, not
+					// two separate ones -- see the ordering note just above.
+					if stateBeforeRevise != nil {
+						s.slaEngine.ApplyCaseStateEffects(ctx, req.ID, *stateBeforeRevise)
+					}
+				})
 			}
 			cv.WatchList = s.filterActiveWatchListUsers(ctx, cv, cv.WatchList)
 			publishSeverityChangedEvent(ctx, s.publisher, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req.ID, string(derefSeverity(oldSeverity)), string(*c.Severity), cv)
@@ -3173,7 +3234,9 @@ func (s *caseService) updateCaseFields(ctx context.Context, req domain.UpdateCas
 	// fresh read ApplyCaseFieldEffects makes is already correct (contrast
 	// snCaseService.UpdateCase's own call site, which does need one).
 	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
-		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, nil, nil)
+		runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+			s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, nil, nil)
+		})
 	}
 	// Deliberately independent of s.slaEngine above -- this is the signal
 	// csm-notification-service's own Redis-based SLA engine needs to

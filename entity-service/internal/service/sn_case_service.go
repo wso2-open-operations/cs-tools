@@ -30,6 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -902,6 +903,15 @@ type snCaseService struct {
 	// registerCaseSLAClocks), applyResponseSLAOnComment, and
 	// applyCaseStateSLAEffects. See internal/service/sla_engine_service.go.
 	slaEngine SLAEngineService
+	// slaDataSource is config.Config.SLADataSource -- see caseService's own
+	// identically-named field doc comment (case_service.go) and
+	// runSLAEngineTask (sla_engine_service.go) for what it changes. Set via
+	// WithSLADataSource, same as caseService; zero value ("") behaves as
+	// config.SLADataSourcePostgres, so a construction that never calls it
+	// (routes.go's two SLA-search/attachment-delegate-only
+	// NewServiceNowCaseService calls, and every test) keeps today's
+	// synchronous ordering unchanged.
+	slaDataSource config.SLADataSource
 	// srCatalog derives a service request's subject and description from its
 	// catalog answers when the caller sent none (fillServiceRequestText). nil
 	// unless wired via WithServiceRequestCatalog.
@@ -1136,6 +1146,11 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	// exposed to this call site) -- same "independent re-fetch" pattern
 	// every other best-effort hook in this file already uses
 	// (applyResponseSLAOnComment, applyCustomerReplyStateTransition).
+	// Deliberately NOT routed through runSLAEngineTask, unlike every other
+	// slaEngine call site in this file -- registration on CREATE always runs
+	// synchronously regardless of s.slaDataSource, by explicit request: only
+	// the SLA writes triggered by a later case UPDATE (state/severity/field
+	// effects) defer to the background under config.SLADataSourceServiceNow.
 	if slaClockEligibleCreateTypes[req.Type] {
 		s.registerCaseSLAClocks(ctx, resp.Case.ID)
 	}
@@ -2629,7 +2644,9 @@ func (s *snCaseService) CreateCaseComment(ctx context.Context, req domain.Create
 		},
 	}
 	s.publishCommentAdded(ctx, req, result.Comment.ID)
-	s.applyResponseSLAOnComment(ctx, req, result.Comment.ID)
+	runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+		s.applyResponseSLAOnComment(ctx, req, result.Comment.ID)
+	})
 	s.applyCustomerReplyStateTransition(ctx, req, result.Comment.ID)
 	return result, nil
 }
@@ -3759,7 +3776,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// ApplyCaseStateSLAEffects' default branch, which resumes both clocks
 	// for a case whose real new state was never actually established.
 	if s.slaEngine != nil && req.State != nil && resp.Case.State != nil {
-		s.applyCaseStateSLAEffects(ctx, req.ID, derefState(resp.Case.State))
+		state := derefState(resp.Case.State)
+		runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+			s.applyCaseStateSLAEffects(ctx, req.ID, state)
+		})
 	}
 	if publishStatusChange && snResp.Case.State != nil {
 		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
@@ -3794,7 +3814,10 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 			fixEtaShared := true
 			fixEtaSharedOverride = &fixEtaShared
 		}
-		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, req.WorkaroundProvided, fixEtaSharedOverride)
+		workaroundProvided := req.WorkaroundProvided
+		runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+			s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, workaroundProvided, fixEtaSharedOverride)
+		})
 	}
 	// Deliberately independent of s.slaEngine above and of s.publisher's
 	// usual EVENT_PUBLISHING_ENABLED gate (publishWorkaroundProvidedEvent
@@ -3844,25 +3867,35 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// block already fetched) since UpdateCase has no other project id in
 	// scope for an existing case.
 	if severityGenuinelyChanged && s.slaEngine != nil {
+		// Both calls below run inside the SAME runSLAEngineTask, not two
+		// separate ones -- reviseCaseSLAClocks' own replacement clocks must
+		// already exist before applyCaseStateSLAEffects re-pauses them (see
+		// the comment above the latter call), an ordering guarantee two
+		// independently-scheduled goroutines could not give under
+		// config.SLADataSourceServiceNow.
+		newSeverity := resp.Case.Severity
 		projectID := ""
 		if caseBeforeSeverity.ProjectDetails != nil {
 			projectID = caseBeforeSeverity.ProjectDetails.ID
 		}
-		s.reviseCaseSLAClocks(ctx, req.ID, resp.Case.Severity, projectID)
-		// reviseCaseSLAClocks' own replacement clocks always start
-		// IN_PROGRESS, with no awareness of the case's current state -- a
-		// case already paused (Awaiting Info/Solution Proposed) at the
-		// moment its severity changes would otherwise get fresh
-		// workaround/resolution clocks that immediately start counting
-		// down unpaused, producing a false breach later. Re-applying
-		// applyCaseStateSLAEffects against the case's already-known
-		// current state (State is mutually exclusive with Severity on one
-		// request, so caseBeforeSeverity's State here is unaffected by
-		// this update) re-pauses them to match reality; a harmless no-op
-		// when the case isn't currently paused.
-		if caseBeforeSeverity.State != nil {
-			s.applyCaseStateSLAEffects(ctx, req.ID, *caseBeforeSeverity.State)
-		}
+		stateBeforeSeverity := caseBeforeSeverity.State
+		runSLAEngineTask(ctx, s.slaDataSource, func(ctx context.Context) {
+			s.reviseCaseSLAClocks(ctx, req.ID, newSeverity, projectID)
+			// reviseCaseSLAClocks' own replacement clocks always start
+			// IN_PROGRESS, with no awareness of the case's current state -- a
+			// case already paused (Awaiting Info/Solution Proposed) at the
+			// moment its severity changes would otherwise get fresh
+			// workaround/resolution clocks that immediately start counting
+			// down unpaused, producing a false breach later. Re-applying
+			// applyCaseStateSLAEffects against the case's already-known
+			// current state (State is mutually exclusive with Severity on one
+			// request, so caseBeforeSeverity's State here is unaffected by
+			// this update) re-pauses them to match reality; a harmless no-op
+			// when the case isn't currently paused.
+			if stateBeforeSeverity != nil {
+				s.applyCaseStateSLAEffects(ctx, req.ID, *stateBeforeSeverity)
+			}
+		})
 	}
 	if severityGenuinelyChanged && s.publisher != nil {
 		s.publishSeverityChanged(ctx, req.ID, string(derefSeverity(caseBeforeSeverity.Severity)), string(derefSeverity(resp.Case.Severity)), caseBeforeSeverity)

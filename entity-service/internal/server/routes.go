@@ -1193,6 +1193,14 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// which WithSLAEngine (and every slaEngine call site) tolerates.
 		activeCaseSvc = service.WithSLAEngine(activeCaseSvc, slaEngineSvc)
 	}
+	// Applies regardless of which branch above built activeCaseSvc --
+	// WithSLADataSource type-switches on the concrete type itself (see its own
+	// doc comment, case_service.go). cfg.SLADataSource only ever changes
+	// whether every slaEngine call site above runs synchronously
+	// (SLADataSourcePostgres, today's behavior) or as a detached background
+	// task (SLADataSourceServiceNow) -- it is independent of, and does not
+	// replace, cfg.DataSource's own branch above.
+	activeCaseSvc = service.WithSLADataSource(activeCaseSvc, cfg.SLADataSource)
 	// Service requests: ServiceNow's "SR New Request - Acknowledge & Chat
 	// Alert" flow and the sr.* events, on the operations topic (sre-events)
 	// with the change-request and outage notices. Postgres-backed case

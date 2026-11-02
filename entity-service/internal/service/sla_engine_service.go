@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/slacondition"
@@ -45,6 +46,33 @@ var slaClockEligibleCreateTypes = map[string]bool{
 	"case":                     true,
 	"security_report_analysis": true,
 	"service_request":          true,
+}
+
+// runSLAEngineTask invokes fn against ctx directly when sladataSource is
+// config.SLADataSourcePostgres (today's behavior -- some callers' ordering
+// guarantees depend on this write having already landed by the time they
+// return; see registerCaseSLAClocks' own call site comment for the exact
+// reason). When sladataSource is config.SLADataSourceServiceNow, fn instead
+// runs in its own detached, timeout-bounded goroutine: ServiceNow stays the
+// trusted SLA source of truth while this engine's own Postgres rows are only
+// being built up in parallel, so a slow or failing Postgres write must never
+// add latency to, or risk, the ServiceNow-backed request it originated from.
+// context.WithoutCancel keeps the request's own values (correlation id, etc.)
+// without inheriting its cancellation/deadline, the same "detached + its own
+// bounded timeout" shape apps/csm-portal/backend's own cases.go establishes
+// for a best-effort write that must outlive the request -- entity-service had
+// no equivalent convention of its own until this.
+func runSLAEngineTask(ctx context.Context, sladataSource config.SLADataSource, fn func(context.Context)) {
+	if sladataSource != config.SLADataSourceServiceNow {
+		fn(ctx)
+		return
+	}
+	detached := context.WithoutCancel(ctx)
+	go func() {
+		ctx, cancel := context.WithTimeout(detached, applyCaseStateSLATimeout)
+		defer cancel()
+		fn(ctx)
+	}()
 }
 
 // SLAEngineService is this service's own in-process SLA clock engine: it
