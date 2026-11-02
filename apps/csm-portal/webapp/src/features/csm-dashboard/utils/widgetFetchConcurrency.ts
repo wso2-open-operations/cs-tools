@@ -173,15 +173,6 @@ function releaseWidgetFetchSlot(): void {
  * How many widget fetches are currently either running or still waiting for
  * a slot — `activeCount` (at most {@link WIDGET_FETCH_CONCURRENCY_LIMIT}, so
  * 1) plus every queued `waiters` entry.
- *
- * Read by `useWidgetData`'s auto-refetch scheduling (see
- * `resolveWidgetRefetchInterval`): the CS Overview wallboard has ~18 tiles
- * each polling on their own 60s timer, but they all drain through this one
- * FIFO queue — which was sized for a one-time mount burst, not steady-state
- * polling. A tile whose interval fires while this is still non-zero skips
- * that cycle instead of stacking another full poll wave behind the one
- * still draining, so a slow backend degrades the kiosk to "refreshes less
- * often" rather than an ever-growing backlog.
  */
 export function widgetFetchQueueDepth(): number {
   return activeCount + waiters.length;
