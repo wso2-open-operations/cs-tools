@@ -102,6 +102,10 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, sfOpportunityLinkLockKey(row.LinkSfID)); err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: lock: %w", err)
 	}
+	previous, err := previousIDs(ctx, q, previousLinkProjectsQuery, row.LinkSfID)
+	if err != nil {
+		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
+	}
 	args := []any{domain.SalesforceSyncActor, row.Number, row.OpportunityID, row.ProjectID, row.LinkSfID}
 	_, n, err := updateOneBySfID(ctx, q, updateSfOpportunityLinkQuery, "sf_opportunity_link", row.LinkSfID, args...)
 	if err != nil {
@@ -113,6 +117,12 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 			return false, fmt.Errorf("upsert opportunity link from salesforce: insert: %w", err)
 		}
 		created = true
+	}
+	if err := deriveProjectOnboarding(ctx, q, row.ProjectID); err != nil {
+		return false, err
+	}
+	if err := deriveMovedLinkProjects(ctx, q, previous, row.ProjectID); err != nil {
+		return false, err
 	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)

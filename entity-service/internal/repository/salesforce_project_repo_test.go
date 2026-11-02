@@ -164,6 +164,8 @@ func (r scanRow) Scan(dest ...any) error {
 			*d = v.(time.Time)
 		case **string:
 			*d = v.(*string)
+		case *[]string:
+			*d = v.([]string)
 		case *int:
 			*d = v.(int)
 		case *int64:
@@ -406,8 +408,10 @@ func TestSalesforceProjectSQL_ColumnList(t *testing.T) {
 		// hour counters
 		"consumed_duration", "remaining_onboarding_duration", "total_onboarding_duration", "total_query_duration",
 		"remaining_query_duration", "consumed_onboarding_duration",
-		// onboarding workflow
-		"onboarding_status", "onboarding_go_live_plan_date", "onboarding_expiry_date", "onboarding_owner_id",
+		// onboarding workflow (onboarding_status is allowed only as the INSERT's
+		// NOT_APPLICABLE default, checked below; derived values are written solely
+		// by deriveProjectOnboarding)
+		"onboarding_go_live_plan_date", "onboarding_expiry_date", "onboarding_start_date", "onboarding_owner_id",
 		// credentials and product consumption
 		"product_consumption_client_id", "product_consumption_client_secret", "product_consumption_primary_secret_key",
 		"product_consumption_secondary_secret_key", "product_consumption_license_secrets",
@@ -421,6 +425,12 @@ func TestSalesforceProjectSQL_ColumnList(t *testing.T) {
 				t.Errorf("project %s writes %q", name, col)
 			}
 		}
+	}
+	if regexp.MustCompile(`\bonboarding_status\b`).MatchString(updateSalesforceProjectQuery) {
+		t.Error("project UPDATE writes onboarding_status")
+	}
+	if !strings.Contains(insertSalesforceProjectQuery, "'NOT_APPLICABLE'::onboarding_status_enum") || !regexp.MustCompile(`\bonboarding_status\b`).MatchString(insertSalesforceProjectQuery) {
+		t.Error("project INSERT must default onboarding_status to NOT_APPLICABLE")
 	}
 	if regexp.MustCompile(`\bis_active\b`).MatchString(updateSalesforceProjectQuery) {
 		t.Error("project UPDATE writes is_active")

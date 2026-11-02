@@ -88,9 +88,13 @@ const resolveSalesforceProjectQuery = `
 // updateSalesforceProjectQuery lists ONLY the ten columns Salesforce owns
 // (SALESFORCE_SYNC_PLAN.md §6) plus the audit pair. The hour counters,
 // wso2_closure_state and the three CSM closure states, the onboarding
-// fields, the product-consumption credentials, number, is_active,
+// fields (except as below), the product-consumption credentials, number, is_active,
 // planned_end_date and assignment_group_id belong to ServiceNow or CSM and
-// must never appear here (TestSalesforceProjectSQL_ColumnList).
+// must never appear here (TestSalesforceProjectSQL_ColumnList). The one
+// exception is the INSERT below, which starts onboarding_status at
+// NOT_APPLICABLE so a new project is never NULL; every later change to the
+// onboarding fields is deriveProjectOnboarding's (project_onboarding_derive.go),
+// never this UPDATE.
 //
 // account_id keeps the stored value when Salesforce names no account, so a
 // record read without Account__c cannot orphan the project.
@@ -123,11 +127,13 @@ const insertSalesforceProjectQuery = `
 	INSERT INTO project (
 		id, created_on, updated_on, created_by, updated_by,
 		sf_id, key, name, account_id, start_date, end_date, description,
-		project_type_id, compliance_violation_date, onboarding_go_live_date, is_active
+		project_type_id, compliance_violation_date, onboarding_go_live_date, is_active,
+		onboarding_status
 	) VALUES (
 		COALESCE($12::uuid, gen_random_uuid()), now(), now(), $1, $1,
 		$2, $3, $4, $5::uuid, $6, $7, $8,
-		$9::uuid, $10, $11, TRUE
+		$9::uuid, $10, $11, TRUE,
+		'NOT_APPLICABLE'::onboarding_status_enum
 	)
 	RETURNING id::text`
 
@@ -175,6 +181,11 @@ func writeSalesforceProject(ctx context.Context, q querier, row domain.Salesforc
 		return res, fmt.Errorf("upsert project from salesforce: lock: %w", err)
 	}
 
+	// Before any project row is touched: see lockOnboardingDerive.
+	if err := lockOnboardingDerive(ctx, q); err != nil {
+		return res, fmt.Errorf("upsert project from salesforce: %w", err)
+	}
+
 	args := []any{
 		domain.SalesforceSyncActor,
 		row.SfID, row.Key, row.Name, row.AccountID, row.StartDate, row.EndDate, row.Description,
@@ -220,6 +231,13 @@ func writeSalesforceProject(ctx context.Context, q querier, row domain.Salesforc
 		if _, err := q.Exec(ctx, updateSalesforceProjectQuery, append(args, res.ProjectID)...); err != nil {
 			return res, fmt.Errorf("upsert project from salesforce: update: %w", err)
 		}
+	}
+
+	// A project ingested after its link (or one whose link already exists)
+	// picks up its onboarding window here; the link and line item writers
+	// cover the other order.
+	if err := deriveProjectOnboarding(ctx, q, res.ProjectID); err != nil {
+		return res, fmt.Errorf("upsert project from salesforce: %w", err)
 	}
 
 	reactivate := row.Reactivate
