@@ -53,7 +53,7 @@ type Config struct {
 	ClientID     string
 	ClientSecret string
 	// RefreshToken was obtained once, by logging in as the mailbox user (see
-	// cmd/gmail-auth). It grants access to that one mailbox only. The mailbox
+	// the server gmail-auth subcommand). It grants access to that one mailbox only. The mailbox
 	// must receive the group's mail.
 	RefreshToken string
 	// ProcessedLabel is applied to every handled message.

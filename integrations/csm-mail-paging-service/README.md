@@ -49,7 +49,7 @@ that mailbox only.
 1. In Google Cloud, enable the Gmail API and create an OAuth client of type
    "Desktop app". Set the consent screen to "Internal" so the refresh token
    does not expire after 7 days.
-2. Run `GMAIL_OAUTH_CLIENT_ID=... GMAIL_OAUTH_CLIENT_SECRET=... go run ./cmd/gmail-auth`,
+2. Run `GMAIL_OAUTH_CLIENT_ID=... GMAIL_OAUTH_CLIENT_SECRET=... go run ./cmd/server gmail-auth`,
    log in as the mailbox user (password and 2FA happen in the browser), and
    copy the printed refresh token.
 3. Store the client id, secret and refresh token as secrets (see `.env.example`).

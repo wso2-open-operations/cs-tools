@@ -14,9 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command gmail-auth runs the one-time OAuth consent for the mailbox user and
-// prints a refresh token. Run it by hand; the service itself never logs in.
-package main
+// Package gmailauth runs the one-time OAuth consent for the mailbox user and
+// prints a refresh token. It is run by hand through the server's gmail-auth
+// subcommand; the service itself never logs in.
+package gmailauth
 
 import (
 	"context"
@@ -34,14 +35,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/gmail"
 )
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "gmail-auth:", err)
-		os.Exit(1)
-	}
-}
-
-func run() error {
+// Run performs the consent flow and prints the refresh token to stdout.
+func Run() error {
 	id, secret := os.Getenv("GMAIL_OAUTH_CLIENT_ID"), os.Getenv("GMAIL_OAUTH_CLIENT_SECRET")
 	if id == "" || secret == "" {
 		return errors.New("GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET are required")
