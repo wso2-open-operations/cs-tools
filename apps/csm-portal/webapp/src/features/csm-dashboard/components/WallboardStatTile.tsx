@@ -158,6 +158,10 @@ export default function WallboardStatTile({
                 background: colors.pulse,
                 pointerEvents: "none",
                 animation: "wallboard-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+                // Viewers who've asked their OS/browser for less motion get a
+                // steady tile: the colored layer stays (at full strength), it
+                // just doesn't blink.
+                "@media (prefers-reduced-motion: reduce)": { animation: "none" },
               },
             }
           : {}),

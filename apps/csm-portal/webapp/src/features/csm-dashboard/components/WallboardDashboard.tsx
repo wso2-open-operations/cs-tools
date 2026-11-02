@@ -422,6 +422,7 @@ export default function WallboardDashboard({
                 "50%": { opacity: 0.4 },
               },
               animation: "wallboard-live-pulse 1.6s ease-in-out infinite",
+              "@media (prefers-reduced-motion: reduce)": { animation: "none" },
             }}
           />
         </Box>
