@@ -1458,7 +1458,7 @@ func TestConfig_Validate_SFTPGoURLsMustBeHTTP(t *testing.T) {
 func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	for _, k := range []string{"SFTPGO_URL", "SFTPGO_PUBLIC_URL", "SFTPGO_USER", "SFTPGO_PASSWORD",
 		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "ATTACHMENT_READ_LINK_TTL", "ATTACHMENT_UPLOAD_LINK_TTL",
-		"ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", "ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", "ATTACHMENT_CHUNK_SIZE_BYTES", "ATTACHMENT_LARGE_READ_LINK_MAX_USES"} {
+		"ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", "ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", "ATTACHMENT_CHUNK_SIZE_BYTES", "ATTACHMENT_LARGE_READ_LINK_MAX_USES", "ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE"} {
 		t.Setenv(k, "")
 	}
 	c := Load()
@@ -1528,5 +1528,19 @@ func TestLoad_ChunkedUploadSettings(t *testing.T) {
 	c := Load()
 	if c.AttachmentChunkedUploadLinkTTL != 2*time.Minute || c.AttachmentChunkSizeBytes != 8<<20 || c.AttachmentLargeReadLinkMaxUses != 3 {
 		t.Errorf("overrides not read: %s / %d / %d", c.AttachmentChunkedUploadLinkTTL, c.AttachmentChunkSizeBytes, c.AttachmentLargeReadLinkMaxUses)
+	}
+}
+
+func TestLoad_AttachmentSharesPerCallerPerMinute(t *testing.T) {
+	if got := Load().AttachmentSharesPerCallerPerMinute; got != 60 {
+		t.Errorf("default = %d, want 60", got)
+	}
+	t.Setenv("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", "10")
+	if got := Load().AttachmentSharesPerCallerPerMinute; got != 10 {
+		t.Errorf("override = %d, want 10", got)
+	}
+	t.Setenv("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", "0")
+	if got := Load().AttachmentSharesPerCallerPerMinute; got != 60 {
+		t.Errorf("0 = %d, want the default 60", got)
 	}
 }

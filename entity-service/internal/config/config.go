@@ -890,6 +890,12 @@ type Config struct {
 	AttachmentChunkedUploadLinkTTL  time.Duration
 	AttachmentChunkSizeBytes        int64
 	AttachmentLargeReadLinkMaxUses  int
+	// AttachmentSharesPerCallerPerMinute is how many download, preview and upload
+	// links one caller may have created per minute
+	// (ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE, default 60, per pod); beyond it a
+	// call is a 429. Every image previewed on a page costs one, so a low value
+	// breaks image-heavy case pages.
+	AttachmentSharesPerCallerPerMinute int
 
 	// Escalation* are the fixed EL1/EL2 case-escalation notification
 	// recipients EscalationService.CreateEscalation (Postgres data sources)
@@ -1147,6 +1153,7 @@ func Load() *Config {
 	cfg.AttachmentChunkedUploadLinkTTL = envDuration("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", 5*time.Minute)
 	cfg.AttachmentChunkSizeBytes = envPositiveInt64("ATTACHMENT_CHUNK_SIZE_BYTES", 16<<20)
 	cfg.AttachmentLargeReadLinkMaxUses = int(envPositiveInt64("ATTACHMENT_LARGE_READ_LINK_MAX_USES", 10))
+	cfg.AttachmentSharesPerCallerPerMinute = int(envPositiveInt64("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", 60))
 	cfg.applySREEventHubTopic()
 	return cfg
 }

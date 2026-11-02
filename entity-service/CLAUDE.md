@@ -72,6 +72,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 10 MiB / 1 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
 | `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `1m` / `15m` | How long a download / upload link stays valid |
 | `ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES` / `ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL` | no | 100 MiB / `5m` | A file this size or larger is uploaded in TUS chunks straight to SFTPGo (`0` = never) and its upload link only has to cover starting it (see "Large files upload in chunks") |
+| `ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE` | no | `60` | Links (download, preview, upload) one caller may have created per minute, per pod; beyond it a 429. Every image previewed on a page costs one (the customer portal's activity feed previews each image attachment as it renders, and refetches on refocus), so a value like 10 breaks image-heavy cases |
 | `ATTACHMENT_CHUNK_SIZE_BYTES` / `ATTACHMENT_LARGE_READ_LINK_MAX_USES` | no | 16 MiB / `10` | Chunk size the portal is told to send; requests the download link of such a large file serves (so a browser can resume it) |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
@@ -1968,7 +1969,7 @@ An image embedded in a comment is not deleted on its own (400). A repeated delet
 the activity feed skip it (`listedStoredAttachmentSQL`, which also hides `FAILED` rows and uploads
 still in flight). Each delete writes an `attachment deleted` audit line like the link lines.
 
-**Limits on links.** One download call takes exactly one id (one file per request), and one caller (`callerId`) may have 60 shares created per minute across download and upload links (`shareLimiter`, in memory and per pod); beyond that the call is a 429 and nothing is created. Every share is a stored record in SFTPGo, so a client should ask for a link only when a user opens, downloads or sees one attachment, never for a whole list.
+**Limits on links.** One download call takes exactly one id (one file per request), and one caller (`callerId`) may have `ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE` (default 60) shares created per minute across download, preview and upload links (`shareLimiter`, in memory and per pod); beyond that the call is a 429 and nothing is created. Every share is a stored record in SFTPGo, so a client should ask for a link only when a user opens, downloads or sees one attachment, never for a whole list.
 
 **Access is the caller's own.** The repository holds a `*Scoped`, so reads and the INSERT run
 under the attachment tables' RLS (migration 100026): an external caller needs to be a
