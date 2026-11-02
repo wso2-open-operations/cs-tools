@@ -187,13 +187,20 @@ export async function setNoveraViaApi(
   // above can be a stale copy (the replayed session bundle) that the backend
   // rejects with 401, while the app's own calls carry a current one — so take
   // the Authorization header off one of those, reloading to provoke a call.
-  const backendRequest = page.waitForRequest(
+  // Matched on a SUCCESSFUL response, not just a request carrying the header:
+  // the app's first call after a reload can itself go out with the stale token
+  // and be refused, and copying that header would reproduce the 401.
+  const backendResponse = page.waitForResponse(
     (r) =>
-      r.url().startsWith(context.baseUrl!) && !!r.headers()["authorization"],
+      r.ok() &&
+      r.url().startsWith(context.baseUrl!) &&
+      !!r.request().headers()["authorization"],
     { timeout: 60_000 },
   );
   await page.reload();
-  const authorization = (await backendRequest).headers()["authorization"];
+  const authorization = (await backendResponse).request().headers()[
+    "authorization"
+  ];
 
   // Skip the write when the project is already in the wanted state. Staging's
   // PATCH /projects/{id} has been answering 502 "Failed to resolve user roles"
