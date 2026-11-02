@@ -4601,7 +4601,7 @@ Needs a decision from the team before enabling under dual-write (not verifiable 
 scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
 The defaults and any override are **HTML**: comments are rendered as HTML where customers read them, so plain
 line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
-sign-off, signed `Thanks,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
+sign-off, opens with `Dear Customer,`, is signed `Kind regards,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
 for contacting us." No default may say "Support Team". An override is posted verbatim, never
 transformed, so it must carry its own tags.
 Closing keeps the case's existing close notes when it has any (as the legacy process did, which never wrote its
