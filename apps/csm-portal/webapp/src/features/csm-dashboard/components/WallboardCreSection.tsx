@@ -82,12 +82,14 @@ export default function WallboardCreSection({
         columns={2}
         // A smaller gap than the default (8px) between the 4 tiles
         // themselves, a larger gap between each tile's own value and
-        // label, and — the actual ask this time — more top/bottom padding
-        // inside each tile around that value/label block. All three per
-        // explicit request, in three separate follow-ups.
+        // label, and extra top/bottom padding inside each tile around that
+        // value/label block — all per explicit request. The padding was 3;
+        // it's 2 now so the secondary grid has room for a 4th row (10
+        // tiles once "SLA At Risk" was added) at 1920x1080 without the
+        // bottom row clipping, now that the text is larger.
         gap={0.5}
         valueLabelGap={1.2}
-        paddingY={3}
+        paddingY={2}
         selectedTeamCreGroupId={selectedTeamCreGroupId}
         selectedTeamSreGroupId={selectedTeamSreGroupId}
         selectedTeamLabel={selectedTeamLabel}

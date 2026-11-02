@@ -209,6 +209,9 @@ export const CRE_SECONDARY_ORDER = [
   "Created Today",
   "Resolved Today",
   "Awaiting Info",
+  // Not on the original wallboard — added later to the live config. Pinned
+  // last so it stays after "Awaiting Info" even if more tiles are added.
+  "SLA At Risk",
 ] as const;
 
 /** Sorts `items` by their `displayName`'s position in `order` — e.g.
