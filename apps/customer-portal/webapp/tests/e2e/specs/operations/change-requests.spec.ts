@@ -31,10 +31,15 @@
 // the dashboard's operations donut, and (once written) the Operations hub cards.
 //
 
+import { promises as fs } from "node:fs";
 import { test, expect, withSession } from "../../fixtures/test";
 import { ChangeRequestsPage } from "../../pages/ChangeRequestsPage";
+import { SideNavPage } from "../../pages/SideNavPage";
 import { PROJECTS, ProjectType } from "../../config/testData";
-import { CHANGE_REQUESTS_LIST } from "../../utils/selectors";
+import {
+  CHANGE_REQUESTS_LIST,
+  CHANGE_REQUEST_PDF,
+} from "../../utils/selectors";
 import {
   RECORD_ID_PATTERN,
   projectPathPattern,
@@ -156,6 +161,60 @@ test.describe("Change Requests", () => {
 
     console.log(
       `Change requests (${ProjectType.MANAGED_CLOUD_SUBSCRIPTION}): opened ${number}`,
+    );
+  });
+
+  // ✅ READ-ONLY. The PDF is generated in the browser from the loaded record.
+  test(`${ProjectType.MANAGED_CLOUD_SUBSCRIPTION} — downloads a change request as PDF`, async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${ProjectType.MANAGED_CLOUD_SUBSCRIPTION} needs a project id.`);
+
+    // Operations in the side menu, then the hub's "View all change requests".
+    await new SideNavPage(page).open(project.id);
+    await new SideNavPage(page).clickItem(
+      CHANGE_REQUEST_PDF.operationsNavItem,
+      projectPathPattern(project.id, "operations"),
+    );
+    await page
+      .getByTestId("app-main")
+      .getByRole("button", { name: CHANGE_REQUEST_PDF.viewAllButton })
+      .click();
+    await expect(page).toHaveURL(
+      projectPathPattern(project.id, `${CHANGE_REQUESTS_LIST.pathSegment}(\\?.*)?$`),
+      { timeout: 60_000 },
+    );
+
+    const changeRequests = new ChangeRequestsPage(page);
+    await changeRequests.waitForList();
+    test.skip(
+      (await changeRequests.rows().count()) === 0,
+      `${ProjectType.MANAGED_CLOUD_SUBSCRIPTION} has no change requests to open.`,
+    );
+    const number = await changeRequests.rowNumber(0);
+    await changeRequests.rows().first().click();
+    await expect(page).toHaveURL(
+      projectPathPattern(project.id, `${CHANGE_REQUESTS_LIST.pathSegment}/${RECORD_ID_PATTERN}$`),
+    );
+    await expect(
+      page.getByTestId("app-main").getByText(number as string, { exact: true }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Download: a real, non-empty PDF.
+    const button = page.getByRole("button", { name: CHANGE_REQUEST_PDF.downloadButton });
+    await expect(button).toBeEnabled({ timeout: 30_000 });
+    const [download] = await Promise.all([
+      page.waitForEvent("download", { timeout: 60_000 }),
+      button.click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/\.pdf$/i);
+    const bytes = await fs.readFile((await download.path())!);
+    expect(bytes.length, "the PDF should not be empty").toBeGreaterThan(1000);
+    expect(bytes.subarray(0, 5).toString(), "a PDF file").toBe("%PDF-");
+
+    console.log(
+      `Change requests (${ProjectType.MANAGED_CLOUD_SUBSCRIPTION}): downloaded ` +
+        `${download.suggestedFilename()} for ${number} (${bytes.length} bytes)`,
     );
   });
 });

@@ -226,7 +226,8 @@ func TestMapSalesEntityOpportunity_TruncatesToColumnLimits(t *testing.T) {
 	opp := sampleOpportunity()
 	opp.Name = sampleStr(strings.Repeat("é", 250))
 	opp.StageName = sampleStr(strings.Repeat("s", 41))
-	opp.SubscriptionLineItems[0].Product.Name = sampleStr(strings.Repeat("p", 150))
+	opp.SubscriptionLineItems[0].Product.Name = sampleStr(strings.Repeat("p", 300))
+	opp.SubscriptionLineItems[0].Classification = sampleStr(strings.Repeat("c", 41))
 	row := mapSalesEntityOpportunity(context.Background(), opp)
 	if n := utf8.RuneCountInString(derefString(row.Name)); n != 200 {
 		t.Errorf("name length = %d, want 200", n)
@@ -234,8 +235,47 @@ func TestMapSalesEntityOpportunity_TruncatesToColumnLimits(t *testing.T) {
 	if n := len(derefString(row.Stage)); n != 40 {
 		t.Errorf("stage length = %d, want 40", n)
 	}
-	if n := len(derefString(row.LineItems[0].ProductName)); n != 100 {
-		t.Errorf("product name length = %d, want 100", n)
+	if n := len(derefString(row.LineItems[0].ProductName)); n != 255 {
+		t.Errorf("product name length = %d, want 255", n)
+	}
+	if n := len(derefString(row.LineItems[0].Classification)); n != 40 {
+		t.Errorf("classification length = %d, want 40", n)
+	}
+}
+
+// The widened sf_opportunity_product columns (migration 0254) take values at
+// their new sizes untouched, and product_description (TEXT) is never cut.
+func TestMapSalesEntityOpportunity_WidenedLineItemColumns(t *testing.T) {
+	opp := sampleOpportunity()
+	p := opp.SubscriptionLineItems[0].Product
+	p.EngProductCode = sampleStr(strings.Repeat("e", 208))
+	p.Name = sampleStr(strings.Repeat("n", 255))
+	p.ProductCode = sampleStr(strings.Repeat("c", 255))
+	p.Description = sampleStr(strings.Repeat("d", 4000))
+	opp.SubscriptionLineItems[0].Name = sampleStr(strings.Repeat("l", 376))
+	li := mapSalesEntityOpportunity(context.Background(), opp).LineItems[0]
+	for col, c := range map[string]struct {
+		got  *string
+		want int
+	}{"name": {li.Name, 376}, "eng_product_code": {li.EngProductCode, 208}, "product_name": {li.ProductName, 255},
+		"product_code": {li.ProductCode, 255}, "product_description": {li.ProductDescription, 4000}} {
+		if n := utf8.RuneCountInString(derefString(c.got)); n != c.want {
+			t.Errorf("%s length = %d, want %d untouched", col, n, c.want)
+		}
+	}
+
+	p.EngProductCode = sampleStr(strings.Repeat("e", 300))
+	p.ProductUnit = sampleStr(strings.Repeat("u", 41))
+	opp.SubscriptionLineItems[0].Name = sampleStr(strings.Repeat("l", 400))
+	li = mapSalesEntityOpportunity(context.Background(), opp).LineItems[0]
+	if n := utf8.RuneCountInString(derefString(li.EngProductCode)); n != 255 {
+		t.Errorf("eng_product_code length = %d, want cut to 255", n)
+	}
+	if n := utf8.RuneCountInString(derefString(li.Name)); n != 376 {
+		t.Errorf("name length = %d, want cut to 376", n)
+	}
+	if n := utf8.RuneCountInString(derefString(li.ProductUnit)); n != 40 {
+		t.Errorf("product_unit length = %d, want cut to 40", n)
 	}
 }
 

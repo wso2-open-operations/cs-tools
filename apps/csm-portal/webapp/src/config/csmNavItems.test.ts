@@ -26,6 +26,7 @@ import {
   navSectionForPath,
   navViewForSearch,
 } from "@config/csmNavItems";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 
 describe("nav tree invariants", () => {
   it("gives every node a unique id", () => {
@@ -93,6 +94,34 @@ describe("top-level nav order", () => {
       "admin",
       "help",
     ]);
+  });
+});
+
+describe("Updates vs Time cards gating", () => {
+  it("gates Updates (nav and help) on canViewUpdates", () => {
+    expect(navNodeById("updates")?.requires).toBe("canViewUpdates");
+    expect(navNodeById("help.updates")?.requires).toBe("canViewUpdates");
+  });
+
+  it("keeps Time cards (nav and help) on canUseTimeCardsAndUpdates", () => {
+    expect(navNodeById("time-cards")?.requires).toBe("canUseTimeCardsAndUpdates");
+    expect(navNodeById("help.time-cards")?.requires).toBe("canUseTimeCardsAndUpdates");
+  });
+
+  it("shows a viewer Updates but not Time cards, and leaves other roles unchanged", () => {
+    const visible = (roles: string[], id: string): boolean => {
+      const key = navNodeById(id)?.requires;
+      return key ? getPortalAccess(roles)[key] : true;
+    };
+    expect(visible(["viewer"], "updates")).toBe(true);
+    expect(visible(["viewer"], "help.updates")).toBe(true);
+    expect(visible(["viewer"], "time-cards")).toBe(false);
+    expect(visible(["viewer"], "help.time-cards")).toBe(false);
+    for (const role of ["cs_engineer", "admin", "timecard_approver"]) {
+      expect(visible([role], "updates")).toBe(true);
+      expect(visible([role], "time-cards")).toBe(true);
+    }
+    expect(visible(["escalator"], "updates")).toBe(false);
   });
 });
 

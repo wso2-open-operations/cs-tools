@@ -122,6 +122,10 @@ func RenderAlertEmail(data AlertEmailData) string {
 type StaleCasesReportData struct {
 	ThresholdDays int
 	Cases         []entitycases.Case
+	// TotalCases is the true number of matching cases. When it exceeds
+	// len(Cases) the search hit its row cap and the email says so, rather
+	// than presenting the oldest-first slice as the whole backlog.
+	TotalCases int
 }
 
 // RenderStaleCasesReport fills in the "cases open too long" HTML email
@@ -131,12 +135,22 @@ type StaleCasesReportData struct {
 // RenderAlertEmail's own doc comment describes.
 func RenderStaleCasesReport(data StaleCasesReportData) string {
 	replacer := strings.NewReplacer(
-		"<!-- [CASE_COUNT] -->", strconv.Itoa(len(data.Cases)),
+		"<!-- [CASE_COUNT] -->", strconv.Itoa(max(data.TotalCases, len(data.Cases))),
+		"<!-- [TRUNCATION_NOTE] -->", staleCasesTruncationNote(len(data.Cases), data.TotalCases),
 		"<!-- [THRESHOLD_DAYS] -->", strconv.Itoa(data.ThresholdDays),
 		"<!-- [CASE_ROWS] -->", renderCaseRows(data.Cases),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
 	return replacer.Replace(staleCasesReportTemplate)
+}
+
+// staleCasesTruncationNote is the "showing the oldest N" line under the
+// stale-cases headline, or "" when the table is the whole result.
+func staleCasesTruncationNote(shown, total int) string {
+	if total <= shown {
+		return ""
+	}
+	return fmt.Sprintf(`<p style="margin:0 0 30px; color:#b3261e;"><strong>Showing only the oldest %d of %d.</strong> The rest are not listed; close or triage these to see newer ones.</p>`, shown, total)
 }
 
 // OpenCasesReportData holds every value substituted into the "cases still in

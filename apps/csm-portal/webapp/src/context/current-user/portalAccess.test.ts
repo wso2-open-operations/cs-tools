@@ -22,6 +22,7 @@ const NONE = {
   canDownloadAttachment: false,
   canUseOperations: false,
   canUseTimeCardsAndUpdates: false,
+  canViewUpdates: false,
   canWrite: false,
   canAddWorkNotes: false,
   canCreateUser: false,
@@ -66,6 +67,8 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["viewer"])).toEqual({
       ...NONE,
       hasAnyRole: true,
+      // Updates is read-only, so a viewer sees it; Time cards stay off.
+      canViewUpdates: true,
       isSplAudience: true,
       canViewCustomerHealth: true,
       // A viewer who is not also a CS engineer/admin finds Customer Health
@@ -134,6 +137,7 @@ describe("getPortalAccess", () => {
       ...NONE,
       hasAnyRole: true,
       canUseTimeCardsAndUpdates: true,
+      canViewUpdates: true,
       canViewWorkItemsStaffView: true,
     });
   });
@@ -144,6 +148,7 @@ describe("getPortalAccess", () => {
       canDownloadAttachment: true,
       canUseOperations: true,
       canUseTimeCardsAndUpdates: true,
+      canViewUpdates: true,
       canWrite: true,
       canAddWorkNotes: true,
       canUseSecurityCenter: true,
@@ -321,6 +326,24 @@ describe("getPortalAccess", () => {
     expect(getPortalAccess(["admin"]).canUseTimeCardsAndUpdates).toBe(true);
   });
 
+  it("the Updates section is also open to viewer, which still gets no Time cards", () => {
+    for (const role of ["viewer", "cs_engineer", "admin", "timecard_approver"]) {
+      expect(getPortalAccess([role]).canViewUpdates).toBe(true);
+    }
+    expect(getPortalAccess(["viewer"]).canUseTimeCardsAndUpdates).toBe(false);
+    expect(getPortalAccess(["viewer", "escalator"]).canUseTimeCardsAndUpdates).toBe(false);
+    for (const role of [
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "dashboard_designer",
+      "worknote_creator",
+    ]) {
+      expect(getPortalAccess([role]).canViewUpdates).toBe(false);
+    }
+    expect(getPortalAccess([]).canViewUpdates).toBe(false);
+  });
+
   it("only full-access roles and security_team get the Operations section", () => {
     for (const role of [
       "viewer",
@@ -344,6 +367,7 @@ describe("getPortalAccess", () => {
       hasAnyRole: true,
       canEscalate: true,
       canDownloadAttachment: true,
+      canViewUpdates: true,
       isSplAudience: true,
       canViewCustomerHealth: true,
       showCustomerHealthUnderCustomers: true,

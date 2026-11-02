@@ -130,4 +130,41 @@ describe("resolveRelativeDateFilters", () => {
       vi.useRealTimers();
     }
   });
+
+  describe("a time card's flat startDate / endDate", () => {
+    it("resolves both to plain local dates (whole days, no time)", () => {
+      const filters = { states: ["pending"], startDate: "__daysAgo:30__", endDate: "__today__" };
+      expect(resolveRelativeDateFilters(filters, NOW)).toEqual({
+        states: ["pending"],
+        startDate: "2026-07-16",
+        endDate: "2026-08-15",
+      });
+    });
+
+    it("resolves month and quarter bounds", () => {
+      expect(
+        resolveRelativeDateFilters({ startDate: "__startOfMonth:-1__", endDate: "__endOfMonth:-1__" }, NOW),
+      ).toEqual({ startDate: "2026-07-01", endDate: "2026-07-31" });
+      expect(
+        resolveRelativeDateFilters({ startDate: "__startOfQuarter:0__", endDate: "__endOfQuarter:0__" }, NOW),
+      ).toEqual({ startDate: "2026-07-01", endDate: "2026-09-30" });
+    });
+
+    it("leaves a literal date, a malformed placeholder and other keys alone", () => {
+      const filters = { startDate: "2026-01-01", endDate: "__daysAgo:abc__", userIds: ["__current_user__"] };
+      expect(resolveRelativeDateFilters(filters, NOW)).toBe(filters);
+    });
+
+    it("resolves a project's endDateFrom / endDateTo the same way", () => {
+      expect(
+        resolveRelativeDateFilters({ onboardingStatus: ["In-Progress"], endDateFrom: "__startOfQuarter:0__", endDateTo: "__endOfQuarter:0__" }, NOW),
+      ).toEqual({ onboardingStatus: ["In-Progress"], endDateFrom: "2026-07-01", endDateTo: "2026-09-30" });
+    });
+
+    it("does not touch a case_feedback widget's own dateFrom / dateTo", () => {
+      const filters = { dateFrom: "__daysAgo:7__", dateTo: "__today__" };
+      expect(resolveRelativeDateFilters(filters, NOW)).toBe(filters);
+    });
+  });
 });
+

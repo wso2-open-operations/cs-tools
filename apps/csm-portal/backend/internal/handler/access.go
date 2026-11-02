@@ -48,6 +48,13 @@ const (
 	// broader than approving one — see PermApproveTimeCard below, which is what's
 	// actually narrowed to the approver role.
 	PermTimeCardsAndUpdates
+	// PermViewUpdates is reading the Updates area: the update-level lookups
+	// (GET /updates/product-update-levels, POST /updates/levels/search). Held by
+	// everyone PermTimeCardsAndUpdates covers, plus Viewer. It is a separate
+	// permission rather than adding cfg.Viewer to PermTimeCardsAndUpdates because
+	// that one also gates every time-card route, and a read-only Viewer must not
+	// gain time cards. Both update routes are read-only lookups.
+	PermViewUpdates
 	// PermEscalate is escalating a case. Held by the CS engineer, the
 	// escalator role and admin. It is NOT a route permission: POST
 	// /cases/{id}/escalations only requires PermView, and
@@ -496,6 +503,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 				cfg.SecurityTeam),
 			PermViewOperations:      build(cfg.CsEngineer, cfg.Admin, cfg.SecurityTeam),
 			PermTimeCardsAndUpdates: build(cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover),
+			PermViewUpdates:         build(cfg.Viewer, cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover),
 			PermEscalate:            build(cfg.Escalator, cfg.CsEngineer, cfg.Admin),
 			PermDownloadAttachment:  build(cfg.AttachmentDownloader, cfg.CsEngineer, cfg.Admin),
 			PermWrite:               build(cfg.CsEngineer, cfg.Admin),
