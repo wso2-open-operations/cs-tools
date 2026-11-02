@@ -380,14 +380,15 @@ func main() {
 		}
 	}
 
-	// Incident auto-close: the port of ServiceNow's hourly job that closes an
-	// incident 14 days after it was resolved -- see internal/incidentautoclose's
-	// package doc and CLAUDE.md, "Incident auto-close". ON unless
-	// INCIDENT_AUTOCLOSE_ENABLED=false: the CSM database is the record of
-	// incidents now, and nothing else closes a resolved one. This component's
-	// client id must be in entity-service's M2M_CLIENT_IDS, and entity-service
-	// must run on Postgres (DATA_SOURCE=servicenow answers 503).
-	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", true)
+	// Incident auto-close: closes an incident 14 days after it was resolved --
+	// see internal/incidentautoclose's package doc and CLAUDE.md, "Incident
+	// auto-close". OFF unless INCIDENT_AUTOCLOSE_ENABLED=true, as for
+	// case_autoclosure: it closes incidents, so it is never on by accident, and
+	// the first run should be a dry run (INCIDENT_AUTOCLOSE_DRY_RUN=true) whose
+	// count is reviewed. This component's client id must be in entity-service's
+	// M2M_CLIENT_IDS, and entity-service must run on Postgres
+	// (DATA_SOURCE=servicenow answers 503).
+	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", false)
 	var incidentAutocloseClient *incidentautoclose.Client
 	var incidentAutocloseCfg incidentautoclose.Config
 	if incidentAutocloseEnabled {
@@ -1058,8 +1059,7 @@ func main() {
 		})
 	}
 
-	// Hourly, as ServiceNow ran it (at :00:01 there; here at whatever minute the
-	// Choreo trigger fires). A failed run is retried the next tick: closed
+	// Hourly, at whatever minute the Choreo trigger fires. A failed run is retried the next tick: closed
 	// incidents are no longer due, so only what is left is attempted.
 	if incidentAutocloseEnabled {
 		// A tryout runs against the real entity-service outside the ledger, so,

@@ -15,10 +15,10 @@
 // under the License.
 
 // Package incidentautoclose closes incidents that have been Resolved for a set
-// number of days: the Postgres port of ServiceNow's hourly incident auto-close.
-// On WSO2's instance that job ran at :00:01 every hour and closed an incident
-// 14 days after its resolved_at, as the incident's resolver, with no comment and
-// no work note.
+// number of days (14 by default), hourly, with no comment and no work note. It
+// follows case auto-closure (internal/autoclosure): off until enabled, a dry run
+// first, and the close is entity-service's own incident update, attributed to
+// the same system user.
 //
 // *** A TRIGGER, NOT A DECIDER. *** Which incidents are due, the row lock, the
 // re-check, the close itself and its task cascade all happen in entity-service

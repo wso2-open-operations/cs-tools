@@ -255,6 +255,7 @@ func TestConfigFromEnv_RejectsBadValues(t *testing.T) {
 		{"INCIDENT_AUTOCLOSE_DAYS": "0"},
 		{"INCIDENT_AUTOCLOSE_DAYS": "-3"},
 		{"INCIDENT_AUTOCLOSE_DAYS": "14d"},
+		{"INCIDENT_AUTOCLOSE_DAYS": "3651"},
 		{"INCIDENT_AUTOCLOSE_DRY_RUN": "yes please"},
 	} {
 		if _, err := ConfigFromEnv(env(m)); err == nil {

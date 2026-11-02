@@ -25,9 +25,13 @@ import (
 )
 
 const (
-	// DefaultDays is ServiceNow's threshold: 399 of 400 incidents it auto-closed
-	// were closed 336.1-336.8 hours (14 days) after resolved_at.
+	// DefaultDays is the threshold the measured close times showed: 399 of 400
+	// incidents auto-closed in the previous system were closed 336.1-336.8 hours
+	// (14 days) after they were resolved.
 	DefaultDays = 14
+	// MaxDays is the largest resolvedForDays entity-service accepts; a larger
+	// value refuses to start rather than failing and alerting every hour.
+	MaxDays = 3650
 	// PageSize is how many new incidents one call asks entity-service to close
 	// (its own default), on top of the ones that already failed this run. It
 	// is kept small enough to finish well inside entity-service's 60s
@@ -62,8 +66,8 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	cfg := Config{Days: DefaultDays}
 	if v := strings.TrimSpace(getenv("INCIDENT_AUTOCLOSE_DAYS")); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return Config{}, fmt.Errorf("INCIDENT_AUTOCLOSE_DAYS %q must be a whole number of days, at least 1", v)
+		if err != nil || n < 1 || n > MaxDays {
+			return Config{}, fmt.Errorf("INCIDENT_AUTOCLOSE_DAYS %q must be a whole number of days from 1 to %d", v, MaxDays)
 		}
 		cfg.Days = n
 	}

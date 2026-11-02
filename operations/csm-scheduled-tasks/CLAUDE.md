@@ -422,22 +422,31 @@ days. Set a hold on tickets that customers asked to keep open **before** enablin
 ## Incident auto-close
 
 `internal/incidentautoclose.Run`, registered as **`incident_autoclose`** (default schedule `0 * * * *`, hourly;
-TZ=UTC caveat as above), closes incidents that have been Resolved for `INCIDENT_AUTOCLOSE_DAYS` (default 14). It
-is the port of ServiceNow's hourly job, as measured on WSO2's instance: it ran at :00:01, closed an incident 14
-days after `resolved_at`, set `closed_by` to the incident's resolver, and added no comment and no work note. Here
-the minute is whenever the Choreo trigger fires. Nothing is sent back to ServiceNow.
-**On unless `INCIDENT_AUTOCLOSE_ENABLED=false`** (a decision of 2026-10-29: the CSM database is the record of
-incidents, and nothing else closes a resolved one). Deploying it therefore starts closing at once: the first run
-closes every incident Resolved for longer than `INCIDENT_AUTOCLOSE_DAYS`, oldest first, a page at a time. Deploy
-entity-service with migration 0255 first; until it has `POST /incidents/autoclose` every run fails (404) and
-alerts. This component's client id must be in entity-service's `M2M_CLIENT_IDS`, and entity-service must run on
-Postgres: under `DATA_SOURCE=servicenow` the endpoint answers 503 and every run fails and alerts, so set the flag
-to `false` there.
+TZ=UTC caveat as above), closes incidents that have been Resolved for `INCIDENT_AUTOCLOSE_DAYS` (default 14, the
+threshold measured in the previous system: 399 of 400 of its auto-closes came 14 days after resolution), with no
+comment and no work note. It follows the decisions made for "Case auto-closure" above rather than new ones:
+
+- **Off unless `INCIDENT_AUTOCLOSE_ENABLED=true`.** It closes incidents, so it is never on by accident. Run it once
+  per environment with `INCIDENT_AUTOCLOSE_DRY_RUN=true`, review the count (including the incidents with no
+  `resolved_on`, measured from their last update), then enable it. Deploy entity-service with migration 0255 first.
+- **The close is entity-service's own incident update**, as the system user `AUTOCLOSURE_SYSTEM_USER_EMAIL`
+  (optional; empty acts as "System user" with no user row, so `closed_by` stays empty), the same user case
+  auto-closure closes as. In dual-write the close is therefore mirrored to the backing data source like any other
+  incident update. The previous system's own auto-close job still closes its copy until it is retired; while both
+  run, a mirrored close of an incident that job already closed may be refused there, which is recorded in
+  `sn_writeback_failures` and never undoes the close in Postgres (not verified against the backing data source).
+  Switching that job off before enabling this under dual-write is a decision for the team, as it is for case
+  auto-closure. Once it is retired, this task is what closes both copies.
+- **Config is checked at startup**, as `autoclosure.RunConfig.Validate` is: a day count outside 1-3650 (what
+  entity-service accepts) refuses to start rather than failing and alerting every hour.
+
+This component's client id must be in entity-service's `M2M_CLIENT_IDS`, and entity-service must run on Postgres:
+under `DATA_SOURCE=servicenow` the endpoint answers 503 and every run fails and alerts, so leave the task off there.
 
 This task is a **trigger only**. entity-service's `POST /incidents/autoclose` picks what is due (oldest resolved
-first), closes each incident in its own transaction after re-checking it, closes its open tasks as a manual close
-would, and reports `closed`, `failed` and `more` (the page was full). entity-service's CLAUDE.md has no section on
-it yet; the code is `entity-service/internal/service/incident_autoclose_service.go`.
+first), closes each incident through its incident service (which re-checks it under the row lock and closes its
+open tasks as a manual close would), and reports `closed`, `failed` and `more` (the page was full). See
+entity-service's CLAUDE.md, "Incident auto-close".
 
 - **Paging.** Each call asks for 200 new incidents (`PageSize`); the handler asks again while `more` is true, at
   most 20 pages (`MaxPages`, 4,000 incidents) a run. Reaching the cap with `more` still true logs a WARN and the
@@ -459,8 +468,8 @@ it yet; the code is `entity-service/internal/service/incident_autoclose_service.
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `INCIDENT_AUTOCLOSE_ENABLED` | `true` | Register the task; `false` turns it off |
-| `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value below 1 or not a whole number refuses to start |
+| `INCIDENT_AUTOCLOSE_ENABLED` | `false` | Register the task |
+| `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value outside 1-3650 or not a whole number refuses to start |
 | `INCIDENT_AUTOCLOSE_DRY_RUN` | `false` | List what is due, close nothing. A malformed value refuses to start rather than falling back to a real run. **A `TRYOUT_TASK=incident_autoclose` is always forced to a dry run**, as for `case_autoclosure` |
 
 ## Usage rollups
@@ -606,7 +615,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
-| `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` | No (defaults `true` / `14` / `false`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
+| `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` | No (defaults `false` / `14` / `false`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
