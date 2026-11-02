@@ -29,6 +29,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -148,7 +149,9 @@ func (c *Client) EnsureLabel(ctx context.Context) error {
 		return err
 	}
 	for _, l := range list.Labels {
-		if l.Name == c.label {
+		// Gmail label names are case-insensitive, so an exact compare would miss
+		// an existing label and the create below would fail with 409.
+		if strings.EqualFold(l.Name, c.label) {
 			c.labelID = l.ID
 			return nil
 		}
