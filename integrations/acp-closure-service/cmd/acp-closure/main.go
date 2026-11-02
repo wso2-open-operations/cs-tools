@@ -73,6 +73,14 @@ func main() {
 		"standingRecipientsCount", len(standingRecipients),
 	)
 
+	// Superseded by csm-scheduled-tasks' acp_closure, which reads the same
+	// projects. Both running for real would send every due notice twice and
+	// race the same writes, so this one only decides and logs now.
+	if !dryRun || isEmailSendEnabled {
+		slog.Error("acp-closure-service is superseded by csm-scheduled-tasks' acp_closure and runs only as a log-only dry run: set DRY_RUN=true and IS_EMAIL_SEND_ENABLED=false", "runID", runID)
+		os.Exit(1)
+	}
+
 	if isWeekend(time.Now()) {
 		slog.Info("weekend: skipping run, no notices sent and no projects suspended", "runID", runID)
 		os.Exit(0)
@@ -219,7 +227,7 @@ func envBool(key string, def bool) bool {
 // parseExcludedProjectIDs parses EXCLUDED_PROJECT_IDS: a comma-separated
 // list of project IDs the sweep should skip entirely, never fetching or
 // evaluating them (backs sweep.Run's excludedProjectIDs parameter). Per
-// explicit design direction (Sajith Ekanayake): this is meant for
+// an explicit design decision: this is meant for
 // deliberate, verified business exclusions — expected to be
 // empty in production almost all the time, populated more often in
 // dev/staging to keep a known-broken project out of the way. Not a

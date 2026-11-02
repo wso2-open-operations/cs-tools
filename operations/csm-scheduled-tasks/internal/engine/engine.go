@@ -100,6 +100,11 @@ func (e *Engine) Tick(ctx context.Context, now time.Time) {
 // in progress.
 const staleClaimMargin = 2
 
+// noRetryDelay is the retry time given to a period that used its
+// registry.Task.MaxAttempts: later than any period lasts, so it is never
+// retried and the next period supersedes it.
+const noRetryDelay = 10 * 365 * 24 * time.Hour
+
 func (e *Engine) attempt(ctx context.Context, task registry.Task, now time.Time) {
 	period, err := schedule.PeriodKey(task.Schedule, now)
 	if err != nil {
@@ -144,6 +149,15 @@ func (e *Engine) recordFailure(ctx context.Context, task registry.Task, period t
 		backoff = e.DriverInterval
 	}
 	nextRetry := now.Add(backoff)
+	nextRetryText := nextRetry.Format(time.RFC3339)
+	if task.MaxAttempts > 0 && attemptCount >= task.MaxAttempts {
+		// The ledger has no "give up" state, so the retry is put past any
+		// period: the next period's claim supersedes this row long before.
+		nextRetry = now.Add(noRetryDelay)
+		nextRetryText = fmt.Sprintf("none: %d of %d attempts used for this period", attemptCount, task.MaxAttempts)
+		slog.WarnContext(ctx, "csm-scheduled-tasks: attempt limit reached, not retrying this period",
+			"task", task.Name, "period", period, "attempt", attemptCount, "maxAttempts", task.MaxAttempts)
+	}
 	if err := e.Ledger.Fail(ctx, runID, attemptCount, handlerErr.Error(), nextRetry); err != nil {
 		slog.ErrorContext(ctx, "csm-scheduled-tasks: failed to record failure in ledger", "task", task.Name, "runId", runID, "err", err)
 	}
@@ -171,7 +185,7 @@ func (e *Engine) recordFailure(ctx context.Context, task registry.Task, period t
 		TaskName:     task.Name,
 		Period:       period.Format(time.RFC3339),
 		AttemptCount: attemptCount,
-		NextRetry:    nextRetry.Format(time.RFC3339),
+		NextRetry:    nextRetryText,
 		Error:        handlerErr.Error(),
 	})
 	if err := e.Email.SendEmail(ctx, to, task.Cc, subject, body); err != nil {

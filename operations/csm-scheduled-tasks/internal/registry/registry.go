@@ -55,6 +55,12 @@ type Task struct {
 	// zero (see cmd/server/main.go) — there is no point backing off
 	// shorter than how often this process even runs.
 	RetryBackoff time.Duration
+	// MaxAttempts caps how many times one period is attempted, the first
+	// run included; 0 means no cap. Once a failed attempt reaches it, the
+	// engine schedules no further retry for that period (the next period
+	// supersedes it as usual). For a task whose retry repeats an outward
+	// effect, such as acp_closure re-sending a notice whose record failed.
+	MaxAttempts int
 	// To/Cc are additional recipients emailed when this specific task
 	// fails, on top of the standing ALERT_RECIPIENTS audience every task
 	// already alerts (see engine.Engine.AlertRecipients' own doc comment)

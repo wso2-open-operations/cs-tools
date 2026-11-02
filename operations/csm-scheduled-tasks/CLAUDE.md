@@ -88,6 +88,12 @@ sub-cron added here. `scheduleFor`/`recipientsFor` look up each task's override 
 when zero — there is no point backing off shorter than how often this process even runs. Set it
 explicitly only if a specific task needs to back off harder than "every tick."
 
+`registry.Task.MaxAttempts` (0, the default, is no cap) limits how many times one period is
+attempted, the first run included. A failed attempt that reaches it gets no retry: the ledger has
+no "give up" state, so the engine gives it a retry time ten years out, the next period's claim
+supersedes the row as usual, and the failure alert says no retry is coming. Only for a task whose
+retry repeats something outward (today `acp_closure`, 2: see "ACP closure").
+
 ## Housekeeping
 
 `internal/housekeeping.CleanupResolvedRuns`, registered as `"housekeeping_cleanup"`, is this
@@ -423,6 +429,126 @@ auto-closure". Each run works through four stages in order -- `release_hold`, `c
 First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
 days. Set a hold on tickets that customers asked to keep open **before** enabling.
 
+## ACP closure
+
+`internal/acp.Run`, registered as **`acp_closure`** (default `0 4 * * 1-5`, 09:30 Colombo on
+weekdays; TZ=UTC caveat as above), is the Account Closure Process, moved here from
+`integrations/acp-closure-service` (still in the repo until this task runs in production; it now
+refuses to start unless it is a log-only dry run, so the two can never both run for real, and its
+rules are frozen: change them here). **Off
+unless `ACP_ENABLED=true`**: it emails customers and suspends their projects, so it is never on by
+accident, and while it is off no `ACP_*` setting is read, so a deployment without them still starts.
+When it is on, a missing `ACP_SALES_ENTITY_*` setting stops startup.
+
+The rules came over unchanged in `internal/acp/...` (`closure`, `sweep`, `suspensionstate`,
+`recipients`, `notify` for the notice templates, `entity`, `salesentity`, and ACP's own `httpsec`
+and `apierror`, which differ in shape from this component's). The service's own `CLAUDE.md` and
+`README.md` describe the windows, recipients and invoice rules. entity-service's automatic reopen
+keeps a copy of the invoice rules (`internal/service/acp_reopen_rules.go`); a rule change goes in
+both places.
+
+- **Reads and writes.** CSM (entity-service, `CUSTOMER_ENTITY_SERVICE_BASE_URL` with the shared
+  `OAUTH2_*` client) gives the open-project list, closure states and notices sent, and takes the
+  notice and suspension writes (`PATCH /projects/{id}`): **this component's client id must be in
+  entity-service's `M2M_CLIENT_IDS`**. Salesforce, through sales-entity-service
+  (`ACP_SALES_ENTITY_*`, its own credentials), gives the dates, people, opportunities and invoices,
+  and takes `State__c=Suspended`. The standalone service reached the same entity-service endpoints
+  through csm-integration-service, which forwards them unchanged.
+- **Reopening is not here.** Until entity-service's ACP reopen (PR #3124) is deployed with
+  `CSM_ACP_REOPEN_ENABLED=true`, a renewed or paid project stays suspended until someone reopens
+  it by hand. Once it is, entity-service reopens an ACP-suspended project when a Salesforce
+  event shows it renewed or paid, and once a day over every ACP-suspended project (the
+  `acp_reopen_check` task below drives that); csm-notification-service sends the "Back to Open
+  state" email (each one's CLAUDE.md, "ACP reopen"). entity-service keeps a copy of the invoice and
+  date rules; `closure/rules_parity_test.go` and `sweep/rules_parity_test.go` run ACP's rules over
+  the cases in `entity-service/internal/service/testdata/acp_rules_parity.json`, which entity-service
+  runs over its copy too (skipped when that file is absent; `ACP_RULES_PARITY_FILE` points at
+  another path). A rule changed here and not there makes ACP suspend a project every day and the
+  reopen check reopen it, so change both and the file together.
+- **Salesforce first.** A suspension sets Salesforce `State__c` to Suspended before the CSM
+  suspension (`suspendInSalesforce`). A Salesforce failure then leaves the project Open in CSM, so
+  the next run tries again (CSM first used to leave it for someone to fix by hand); and a reopen
+  check running between the two writes finds nothing ACP-suspended yet instead of reopening a
+  project that Salesforce is then set back to Suspended on.
+- **Dry run by default** (`ACP_DRY_RUN`, unset or malformed is true): decide and log, write
+  nothing to CSM or Salesforce. Notices are only logged unless `ACP_EMAIL_SEND_ENABLED=true`
+  (which needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`). Addresses outside `@wso2.com` are
+  dropped unless `ACP_ALLOW_NON_WSO2_RECIPIENTS=true` (production only).
+  `ACP_STANDING_CC_RECIPIENTS` adds the distribution lists to every notice; leave it empty
+  outside production.
+- **Startup refuses the unsafe combinations** (`acpConfig`, `cmd/server/acp_config.go`, table
+  tests beside it), because each one either suspends customers who were never told or sends
+  them the same notice on every run (PR #3126 review):
+  - `ACP_DRY_RUN=false` without `ACP_EMAIL_SEND_ENABLED=true`. A real run records each notice and
+    suspends on day 0 whatever the notifier did, so with emails off it would record notices nobody
+    received and suspend customers who never got one. `acp.Run` refuses it again as a last guard.
+  - `ACP_DRY_RUN=true` with `ACP_EMAIL_SEND_ENABLED=true` and no `debug` list. A dry run records
+    nothing and windows are thresholds, so every run would send every due notice again (a project
+    90 days out would get the 90-day notice on about 30 weekdays). With a debug list the
+    repetition reaches only testers, which is the point.
+  - A `debug` list with `ACP_DRY_RUN=false` and no `ACP_TEST_PROJECT_ID`. Notices would reach only
+    the debug list while every project is recorded as notified and suspended on day 0.
+
+  **`ALERTS_ENABLED=false` (this component's switch for all email) turns `acp_closure` into a dry
+  run without emails** (logged at startup) instead of refusing: refusing would stop every other
+  task too, and a real run with emails silenced is the first case above. Nothing is written, so
+  nothing is lost; once alerts are back, the next real run sends what is due.
+- **Testing.** A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` sends every notice there
+  instead (`notify.ForReport`, `[Test copy]` subject), as for a report task. `ACP_TEST_PROJECT_ID`
+  scopes a run to one CSM project. A `TRYOUT_TASK=acp_closure` is forced to a dry run unless
+  `ACP_TEST_PROJECT_ID` is set, since a tryout talks to the real CSM and Salesforce, and it runs
+  on weekends too (it emails only its debug list). A `--run-now=acp_closure` is a real run with
+  the configured settings, the same as a scheduled one.
+- **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
+  (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
+  `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
+  (this component calls entity-service directly, not through csm-integration-service as the
+  standalone service did, so its write path is new).
+- **Weekends.** The schedule is weekdays only, and the handler also succeeds without doing anything
+  on a Colombo Saturday or Sunday, for a retry that lands there, logging a WARN that says the run
+  did nothing. Monday's run catches up: windows and suspension are thresholds. A tryout runs
+  anyway.
+- **Fresh read.** The open projects are all listed first, then each one is read again from CSM
+  (`GetProject`) right before it is decided: by the last project the listing is as old as the
+  run, and every record write sends the whole `suspensionProcessState` rebuilt from what was read,
+  so deciding from the listing could undo a change made since (entity-service's reopen, say). CSM
+  reads its own database, so the re-read sees every committed write. The write itself is not
+  conditional: entity-service has no version check on `PATCH /projects/{id}`.
+- **Failures.** A failed project never stops the others, with one exception: a CSM write failure
+  every project would hit (401/403, 429, 5xx, or no response; `writesFailingError` in
+  `sweep/writer.go`) stops the run. Notices go out before they are recorded, so carrying on would
+  send every remaining due notice unrecorded and the next run would send them all again. A project
+  whose own record is unusable (no Salesforce id, one Salesforce does not have, a date that does
+  not parse; `dataError`) is **skipped** with a WARN and does not fail the run: no retry can fix
+  it, and failing would retry and alert every weekday until someone fixed the record. Any other
+  failure makes the run return an error, so the engine alerts and retries. The error names the
+  run id and at most 20 failed project ids, never their errors (they can carry customer data); the
+  log has each one. `RetryBackoff` is **4 hours** and **`MaxAttempts` is 2** (one retry a day,
+  `registry.Task.MaxAttempts`): a retry repeats nothing already recorded in CSM, except a notice
+  whose email went out while its CSM record failed, which is sent again, so the rest waits for the
+  next weekday's run.
+
+## ACP reopen check
+
+`acp.RunReopenCheck`, registered as **`acp_reopen_check`** (default `30 3 * * *`, 09:00 Colombo every
+day, half an hour before `acp_closure`; TZ=UTC caveat as above), drives entity-service's daily safety
+net for ACP suspensions: `POST /acp/reopen-check`, `{cursor, limit: 5}`, page after page while
+the answer says `more` (a page short of time stops early, after at least one project, with `more`
+set). entity-service checks every project ACP's record still shows suspended,
+reopens the ones whose renewal or payment an event missed, and finishes a project a person set back
+to Open (Salesforce Open, the "Back to Open state" email); see its CLAUDE.md, "ACP reopen". This task
+decides nothing itself. **Off unless `ACP_REOPEN_CHECK_ENABLED=true`**, and it needs entity-service
+with `CSM_ACP_REOPEN_ENABLED=true` (the route is not registered otherwise: the run fails with a 404
+and alerts). Whether anything is written is entity-service's `CSM_ACP_REOPEN_DRY_RUN`, so after that
+is switched off the next run reopens everything that was only logged as "would reopen" during the
+dry run. Independent of `ACP_ENABLED`.
+
+- Calls entity-service with the shared `OAUTH2_*` client (its id in entity-service's
+  `M2M_CLIENT_IDS`, as for ACP), with a 2-minute timeout per page.
+- A run in which a project failed returns an error naming at most 20 project ids (the errors are in
+  entity-service's log); retried after 4 hours, like `acp_closure`. A page error, a page that makes no
+  progress, or more than 2,000 pages stops the run with an error.
+
 ## Running a task now (`--run-now`)
 
 `--run-now=<task name>` runs that task's handler once, right now, then exits (0 on success, 1 on failure), so an
@@ -459,7 +585,9 @@ that is **not idempotent** sends or does its work again. Safe to run now are the
 reading the handlers' code and doc comments (a judgement, not a test):
 
 - **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
-  daily limit); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  daily limit); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
+  them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
+  `acp_reopen_check` (entity-service records each reopen); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
   `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
   `rota_manual_reminder` (claims waiting requests, each reported once).
@@ -632,6 +760,10 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
+| `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
+| `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
+| `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
+| `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |

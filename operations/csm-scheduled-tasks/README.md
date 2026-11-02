@@ -84,6 +84,8 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `usage_rollup_daily` | `30 0 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild the daily usage rows of the last `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` days (default 2) before today from the hourly rows. The arithmetic runs in the database. |
 | `usage_rollup_monthly` | `30 1 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild last month's and the current month's monthly usage rows from the daily rows. |
 | `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
+| `acp_reopen_check` | `30 3 * * *` | Only if `ACP_REOPEN_CHECK_ENABLED=true` | Drives entity-service's daily ACP reopen check (`POST /acp/reopen-check`, page by page): reopens projects ACP suspended whose renewal or payment an event missed, and finishes ones a person set back to Open. Needs entity-service with `CSM_ACP_REOPEN_ENABLED=true`. See CLAUDE.md, "ACP reopen check". |
+| `acp_closure` | `0 4 * * 1-5` | Only if `ACP_ENABLED=true` | The Account Closure Process: sends the end-date and invoice notices that are due (90/60/30/15/7 days) and suspends projects at day 0 in CSM and Salesforce. Dry run by default (`ACP_DRY_RUN`). Skips weekends in Colombo time. Retried after 4 hours, not every tick. See CLAUDE.md, "ACP closure". |
 
 Effective promptness of any task is bounded by the shared driver cadence, not by its schedule
 string alone. Task names are API contracts: renaming one orphans its history and stops matching any
@@ -141,6 +143,7 @@ csm-scheduled-tasks/
 │   ├── migrationreport/          # Client + types for entity-service's migration case scan
 │   ├── worklogreport/            # Client, wire types and audience resolver for the CS Worklogs reports
 │   ├── worklogsreport/           # Handlers for cs_worklogs_daily_report and cs_worklogs_weekly_report
+│   ├── acp/                      # Handler for acp_closure, and the ACP rules and clients (closure, sweep, recipients, notify, entity, salesentity, ...)
 │   ├── notify/                   # Email client and HTML templates (alert, stale/open case reports, CS Worklogs, migration case scan)
 │   ├── httpsec/                  # Shared https-only URL guard and redirect guard for the HTTP clients
 │   └── apierror/                 # Typed upstream-error wrapper shared by the clients
@@ -249,6 +252,16 @@ treated as unset, except where noted. All example values are placeholders.
 | `AVAILABILITY_RECALC_ENABLED` | No | `false` | Registers `availability_recalculation`. Enable only once no other process writes the same availability data, otherwise rows can be duplicated. | `true` |
 | `USAGE_ROLLUP_ENABLED` | No | `false` | Registers `usage_rollup_daily` and `usage_rollup_monthly`. Enable only once ServiceNow's usage aggregation jobs and csm-sync-service's mirroring of the same tables are off, otherwise the rows are fought over. | `true` |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No | `2` | How many days before today the daily rollup rebuilds each night. | `3` |
+| `ACP_ENABLED` | No | `false` | Registers `acp_closure`. No other `ACP_*` setting is read while false. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. | `true` |
+| `ACP_DRY_RUN` | No | `true` | Decide and log, write nothing to CSM or Salesforce. A malformed value is true. `false` needs `ACP_EMAIL_SEND_ENABLED=true` (startup refuses otherwise). With `ACP_EMAIL_SEND_ENABLED=true` too, a dry run records nothing and would send the same notices on every run, so startup refuses it unless `acp_closure` has a `debug` list in `SUB_CRON_RECIPIENTS`. A `TRYOUT_TASK=acp_closure` without `ACP_TEST_PROJECT_ID` is always a dry run. | `false` |
+| `ACP_EMAIL_SEND_ENABLED` | No | `false` | Sends the notices for real (needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`); false logs them. `ALERTS_ENABLED=false` turns `acp_closure` into a dry run without emails. A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` redirects every notice; startup refuses one with `ACP_DRY_RUN=false` unless `ACP_TEST_PROJECT_ID` is set. | `true` |
+| `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No | `false` | Lets notices reach addresses outside `@wso2.com`. Production only. | `true` |
+| `ACP_STANDING_CC_RECIPIENTS` | No | empty | Comma-separated distribution lists added to every notice. Leave empty outside production. | `lifecycle@example.com,billing@example.com` |
+| `ACP_TEST_PROJECT_ID` | No | empty | Scopes a run to one CSM project id. | `<csm-project-id>` |
+| `ACP_EXCLUDED_PROJECT_IDS` | No | empty | Comma-separated CSM project ids a run skips. | `<id>,<id>` |
+| `ACP_SALES_ENTITY_BASE_URL` / `ACP_SALES_ENTITY_TOKEN_URL` / `ACP_SALES_ENTITY_CLIENT_ID` / `ACP_SALES_ENTITY_CLIENT_SECRET` | Yes, when `ACP_ENABLED` is true | none | sales-entity-service (Salesforce) and its own client credentials. Must be `https`. | `https://sales-entity.example.com` |
+| `ACP_SALES_ENTITY_SCOPES` | No | empty | Space-separated scopes for the sales-entity-service client. | `scope-a scope-b` |
+| `ACP_REOPEN_CHECK_ENABLED` | No | `false` | Registers `acp_reopen_check`. Needs entity-service with `CSM_ACP_REOPEN_ENABLED=true`; whether anything is written is entity-service's `CSM_ACP_REOPEN_DRY_RUN`. | `true` |
 | `CLOUD_STATUS_ENABLED` | No | `false` | Registers `cloud_status_webhooks`. Enable only once no other system posts the same status events, otherwise each event is published twice. | `true` |
 | `CLOUD_STATUS_WEBHOOK_URLS` | Yes, when `CLOUD_STATUS_ENABLED` is true | none | JSON object mapping a cloud slug to the status dashboard's base URL (`/api/v1/webhook` is appended). Empty or unparseable stops startup. | `{"cloud-a":"https://status-a.example.com"}` |
 | `CLOUD_STATUS_WEBHOOK_SECRETS` | Yes, when `CLOUD_STATUS_ENABLED` is true | none | JSON object of the full `X-Webhook-Signature` header value, per cloud slug, with a `default` key as fallback. The value is the whole header, including any scheme prefix the receiver expects. Empty or unparseable stops startup. | `{"default":"Secret <token>"}` |
