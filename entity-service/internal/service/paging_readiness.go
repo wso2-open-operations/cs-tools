@@ -57,7 +57,19 @@ const (
 	// The SRE rotas, as migration 0200 seeds them.
 	rotaSRESaaS = "SRE_SAAS"
 	rotaSREIaaS = "SRE_IAAS"
+	// U2 and B-Central's rotas keep the codes migration 0217 gave them as SME
+	// rotas; migration 0242 moved them to the SRE family.
+	rotaSREU2       = "SME_U2"
+	rotaSREBCentral = "SME_B_CENTRAL"
 )
+
+// sreGroupChains are the SRE chains named after an assignment group rather
+// than a sub-team: a chain of its own once its rota is an SRE rota, and none
+// while it is still an SME one (where the SME chain already covers it).
+var sreGroupChains = []struct{ chain, rota, label string }{
+	{"SRE_U2", rotaSREU2, "U2-SRE chain"},
+	{"SRE_B_CENTRAL", rotaSREBCentral, "B-Central-SRE chain"},
+}
 
 // rotaLocation is the clock rota dates are written in (the shifts'
 // authoring time zone), so "today" is the rota's today.
@@ -107,11 +119,16 @@ func computePagingReadiness(f repository.PagingReadinessFacts, handoff *Speciali
 		To:          dates[len(dates)-1].Format(time.DateOnly),
 		Chains: []domain.PagingReadinessChain{
 			finishChain(creReadiness(f, dates)),
-			finishChain(sreReadiness(f, rotaSRESaaS, "SaaS SRE chain", dates)),
-			finishChain(sreReadiness(f, rotaSREIaaS, "IaaS SRE chain", dates)),
-			finishChain(smeReadiness(f, handoff, dates)),
+			finishChain(sreReadiness(f, rotaSRESaaS, rotaSRESaaS, "SaaS SRE chain", dates)),
+			finishChain(sreReadiness(f, rotaSREIaaS, rotaSREIaaS, "IaaS SRE chain", dates)),
 		},
 	}
+	for _, g := range sreGroupChains {
+		if rotaFamily(f, g.rota) == familySRE {
+			resp.Chains = append(resp.Chains, finishChain(sreReadiness(f, g.chain, g.rota, g.label, dates)))
+		}
+	}
+	resp.Chains = append(resp.Chains, finishChain(smeReadiness(f, handoff, dates)))
 	// Whether each person has a number on their own profile, a paging-only
 	// number, and how the latter's last test went. Never the numbers.
 	for ci := range resp.Chains {
@@ -398,6 +415,16 @@ func appliesOn(dayScope string, date time.Time) bool {
 	return false
 }
 
+// rotaFamily is the family of an active rota, or "" when there is none.
+func rotaFamily(f repository.PagingReadinessFacts, code string) string {
+	for _, r := range f.Rotas {
+		if r.Code == code {
+			return r.Family
+		}
+	}
+	return ""
+}
+
 // rotaActive reports whether the rota exists and is active.
 func rotaActive(f repository.PagingReadinessFacts, code string) bool {
 	for _, r := range f.Rotas {
@@ -408,11 +435,11 @@ func rotaActive(f repository.PagingReadinessFacts, code string) bool {
 	return false
 }
 
-// sreReadiness checks one SRE rota: on every date, every zone it works that
+// sreReadiness checks one SRE rota, reported as chain: on every date, every zone it works that
 // day (a zone with a window whose day scope covers the date, so the weekend
 // folds TZ2 into TZ1) has an L1, an L2 and an L3 rostered.
-func sreReadiness(f repository.PagingReadinessFacts, rotaCode, label string, dates []time.Time) domain.PagingReadinessChain {
-	c := domain.PagingReadinessChain{Chain: rotaCode, Label: label}
+func sreReadiness(f repository.PagingReadinessFacts, chain, rotaCode, label string, dates []time.Time) domain.PagingReadinessChain {
+	c := domain.PagingReadinessChain{Chain: chain, Label: label}
 	var windows []repository.PagingReadinessWindow
 	for _, w := range f.Windows {
 		if w.RotaCode == rotaCode {

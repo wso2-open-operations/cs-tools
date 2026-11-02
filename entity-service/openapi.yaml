@@ -10670,7 +10670,7 @@ paths:
             default: 7
       responses:
         "200":
-          description: One entry per chain, in the order CRE, SRE_SAAS, SRE_IAAS, SME.
+          description: One entry per chain, in the order CRE, SRE_SAAS, SRE_IAAS, SRE_U2, SRE_B_CENTRAL, SME. SRE_U2 and SRE_B_CENTRAL appear only once their rotas are SRE rotas.
           content:
             application/json:
               schema:
@@ -29093,8 +29093,8 @@ components:
       type: object
       required: [chain, label, ready, gaps, people]
       properties:
-        chain: { type: string, enum: [CRE, SRE_SAAS, SRE_IAAS, SME] }
-        label: { type: string, enum: [CRE chain, SaaS SRE chain, IaaS SRE chain, SME page] }
+        chain: { type: string, enum: [CRE, SRE_SAAS, SRE_IAAS, SRE_U2, SRE_B_CENTRAL, SME] }
+        label: { type: string, enum: [CRE chain, SaaS SRE chain, IaaS SRE chain, U2-SRE chain, B-Central-SRE chain, SME chain] }
         ready:
           type: boolean
           description: True when the chain has no gap of severity error; a warning does not make it unready.
