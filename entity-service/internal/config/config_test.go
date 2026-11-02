@@ -1457,7 +1457,8 @@ func TestConfig_Validate_SFTPGoURLsMustBeHTTP(t *testing.T) {
 
 func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	for _, k := range []string{"SFTPGO_URL", "SFTPGO_PUBLIC_URL", "SFTPGO_USER", "SFTPGO_PASSWORD",
-		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "ATTACHMENT_READ_LINK_TTL", "ATTACHMENT_UPLOAD_LINK_TTL"} {
+		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "ATTACHMENT_READ_LINK_TTL", "ATTACHMENT_UPLOAD_LINK_TTL",
+		"ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", "ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", "ATTACHMENT_CHUNK_SIZE_BYTES", "ATTACHMENT_LARGE_READ_LINK_MAX_USES"} {
 		t.Setenv(k, "")
 	}
 	c := Load()
@@ -1469,6 +1470,11 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	}
 	if c.AttachmentReadLinkTTL != time.Minute || c.AttachmentUploadLinkTTL != 15*time.Minute {
 		t.Errorf("link TTLs = %s / %s, want 1m / 15m", c.AttachmentReadLinkTTL, c.AttachmentUploadLinkTTL)
+	}
+	if c.AttachmentChunkedThresholdBytes != 100<<20 || c.AttachmentChunkedUploadLinkTTL != 5*time.Minute ||
+		c.AttachmentChunkSizeBytes != 16<<20 || c.AttachmentLargeReadLinkMaxUses != 10 {
+		t.Errorf("chunked defaults = %d / %s / %d / %d, want 100 MiB / 5m / 16 MiB / 10",
+			c.AttachmentChunkedThresholdBytes, c.AttachmentChunkedUploadLinkTTL, c.AttachmentChunkSizeBytes, c.AttachmentLargeReadLinkMaxUses)
 	}
 
 	t.Setenv("SFTPGO_URL", " https://sftpgo.internal:8080/ ")
@@ -1496,5 +1502,31 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	c = Load()
 	if c.AttachmentMaxBytes != 10<<20 || c.AttachmentReadLinkTTL != time.Minute {
 		t.Errorf("bad values did not fall back to the defaults: %d / %s", c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
+	}
+}
+
+func TestLoad_ChunkedUploadSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name, threshold string
+		want            int64
+	}{
+		{"zero turns it off", "0", 0},
+		{"a value is read", "5242880", 5242880},
+		{"negative falls back", "-1", 100 << 20},
+		{"unparseable falls back", "big", 100 << 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", tc.threshold)
+			if got := Load().AttachmentChunkedThresholdBytes; got != tc.want {
+				t.Errorf("threshold = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	t.Setenv("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", "2m")
+	t.Setenv("ATTACHMENT_CHUNK_SIZE_BYTES", "8388608")
+	t.Setenv("ATTACHMENT_LARGE_READ_LINK_MAX_USES", "3")
+	c := Load()
+	if c.AttachmentChunkedUploadLinkTTL != 2*time.Minute || c.AttachmentChunkSizeBytes != 8<<20 || c.AttachmentLargeReadLinkMaxUses != 3 {
+		t.Errorf("overrides not read: %s / %d / %d", c.AttachmentChunkedUploadLinkTTL, c.AttachmentChunkSizeBytes, c.AttachmentLargeReadLinkMaxUses)
 	}
 }

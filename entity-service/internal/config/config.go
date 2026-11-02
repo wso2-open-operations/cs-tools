@@ -875,6 +875,21 @@ type Config struct {
 	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
 	AttachmentReadLinkTTL   time.Duration
 	AttachmentUploadLinkTTL time.Duration
+	// A file of AttachmentChunkedThresholdBytes or more
+	// (ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES, default 100 MiB, 0 = never) is
+	// uploaded in chunks with the TUS protocol, straight to SFTPGo, instead of
+	// as one request; a smaller file or an inline image never is. SFTPGo
+	// checks a share only when the upload is created, so
+	// AttachmentChunkedUploadLinkTTL (ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL,
+	// default 5m) only has to cover starting it. AttachmentChunkSizeBytes
+	// (ATTACHMENT_CHUNK_SIZE_BYTES, default 16 MiB) is the chunk size the portal
+	// is told to use. A download of a file that large gets a link good for
+	// AttachmentLargeReadLinkMaxUses requests (ATTACHMENT_LARGE_READ_LINK_MAX_USES,
+	// default 10), so a browser can resume it with range requests.
+	AttachmentChunkedThresholdBytes int64
+	AttachmentChunkedUploadLinkTTL  time.Duration
+	AttachmentChunkSizeBytes        int64
+	AttachmentLargeReadLinkMaxUses  int
 
 	// Escalation* are the fixed EL1/EL2 case-escalation notification
 	// recipients EscalationService.CreateEscalation (Postgres data sources)
@@ -1128,6 +1143,10 @@ func Load() *Config {
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 1<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
+	cfg.AttachmentChunkedThresholdBytes = envNonNegativeInt64("ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", 100<<20)
+	cfg.AttachmentChunkedUploadLinkTTL = envDuration("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", 5*time.Minute)
+	cfg.AttachmentChunkSizeBytes = envPositiveInt64("ATTACHMENT_CHUNK_SIZE_BYTES", 16<<20)
+	cfg.AttachmentLargeReadLinkMaxUses = int(envPositiveInt64("ATTACHMENT_LARGE_READ_LINK_MAX_USES", 10))
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1793,6 +1812,20 @@ func envPositiveInt64(key string, def int64) int64 {
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// envNonNegativeInt64 is envPositiveInt64 for a setting where 0 is a real value
+// (here "never"): unset, unparseable or negative returns def, "0" returns 0.
+func envNonNegativeInt64(key string, def int64) int64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
 		return def
 	}
 	return n

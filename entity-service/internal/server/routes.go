@@ -747,6 +747,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				InlineMaxBytes: cfg.InlineImageMaxBytes,
 				ReadLinkTTL:    cfg.AttachmentReadLinkTTL,
 				UploadLinkTTL:  cfg.AttachmentUploadLinkTTL,
+
+				ChunkedThresholdBytes: cfg.AttachmentChunkedThresholdBytes,
+				ChunkedUploadLinkTTL:  cfg.AttachmentChunkedUploadLinkTTL,
+				ChunkSizeBytes:        cfg.AttachmentChunkSizeBytes,
+				LargeReadLinkMaxUses:  cfg.AttachmentLargeReadLinkMaxUses,
 			},
 		)
 		// Comments created or edited from here on attach the images they show.

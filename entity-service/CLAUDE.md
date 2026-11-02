@@ -71,6 +71,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SFTPGO_ALLOW_INSECURE_HTTP` | no | `false` | `Validate` requires `SFTPGO_URL` and `SFTPGO_PUBLIC_URL` to be https (the service password and every share id would otherwise cross the wire in clear text, and an http public URL is blocked as mixed content on an https portal). `true` allows http, for local development only |
 | `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 10 MiB / 1 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
 | `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `1m` / `15m` | How long a download / upload link stays valid |
+| `ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES` / `ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL` | no | 100 MiB / `5m` | A file this size or larger is uploaded in TUS chunks straight to SFTPGo (`0` = never) and its upload link only has to cover starting it (see "Large files upload in chunks") |
+| `ATTACHMENT_CHUNK_SIZE_BYTES` / `ATTACHMENT_LARGE_READ_LINK_MAX_USES` | no | 16 MiB / `10` | Chunk size the portal is told to send; requests the download link of such a large file serves (so a browser can resume it) |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1925,6 +1927,21 @@ to a person on path and time. **The share id is never logged in full**: it is th
 link that was not created. It is a log line, not a table: add an audit table if retention beyond the
 log platform's is needed. The proxy's access log holds full share ids in its URLs, so access to it
 should be as restricted as the logs of any system holding live links.
+
+**Large files upload in chunks (TUS), straight to SFTPGo.** From `ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES`
+(default 100 MiB, `0` = never; a comment image never) `POST /attachments/upload` answers `uploadMethod: "tus"`:
+`uploadUrl` is SFTPGo's `/api/v2/shares-chunked-uploads`, `shareId` and `path` (`/upload.bin`, our own name, relative to
+the share's staging folder) go in the TUS `Upload-Metadata`, `chunkSize` is `ATTACHMENT_CHUNK_SIZE_BYTES`. It needs
+SFTPGo **Enterprise** with `upload_chunk_size` > 0 on the httpd binding (off = those endpoints 404) and the proxy passing
+`PATCH`/`HEAD`/`OPTIONS`, the `Tus-*`/`Upload-*` headers and `X-Forwarded-Proto`. Verified on staging (2026-11-02,
+`2.7.20260705`, directly, not yet through the proxy): the share is checked only when the upload is created, which also
+spends its one use, so the chunks and a resume after expiry still work and `ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL`
+(default 5m) only has to cover starting it; a second create on the same share fails with a 500 `unable to validate share`
+(a used-up or expired link, so the portal says the link is used or expired and asks for a new upload); an absolute
+`path` is joined to the share folder and fails with a 500; an unfinished upload leaves a partial file under its final
+name, which is why confirm compares the real size with the declared one and the abandoned-upload cleanup removes the
+folder. The download link of a file that large is issued with `ATTACHMENT_LARGE_READ_LINK_MAX_USES` (default 10) uses so
+a browser can resume with range requests (range support and nginx pass-through not yet verified).
 
 **Upload flow.** `POST /attachments/upload` checks the parent as the caller (a hidden parent is
 404), refuses a **closed work item for every caller, internal ones included** (409), checks size
