@@ -36,6 +36,8 @@ let detailState: DetailState;
 const detailIds: (string | undefined)[] = [];
 const deleteMock = vi.fn();
 let deletePending = false;
+const renameMock = vi.fn();
+let renamePending = false;
 const showSuccess = vi.fn();
 const showError = vi.fn();
 
@@ -46,6 +48,18 @@ vi.mock("@features/csm-custom-dashboards/api/useCustomDashboards", () => ({
     return detailState;
   },
   useDeleteCustomDashboard: () => ({ mutateAsync: deleteMock, isPending: deletePending }),
+  useRenameCustomDashboard: () => ({ mutateAsync: renameMock, isPending: renamePending }),
+}));
+// The real client reads runtime config at module load; the rename error
+// wording only needs the error class (same stand-in as saveErrorMessage.test.ts).
+vi.mock("@api/backend/client", () => ({
+  BackendApiError: class BackendApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({ useSuccessBanner: () => ({ showSuccess }) }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({ useErrorBanner: () => ({ showError }) }));
@@ -68,6 +82,7 @@ vi.mock("@features/csm-custom-dashboards/components/ShareCustomDashboardDialog",
 }));
 
 import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
+import { BackendApiError } from "@api/backend/client";
 
 const A = { id: "5e636a12-0000-4000-8000-00000000000a", name: "Alpha", createdOn: "x", updatedOn: "y" };
 const B = { id: "5e636a12-0000-4000-8000-00000000000b", name: "Beta", createdOn: "x", updatedOn: "y" };
@@ -96,6 +111,8 @@ describe("MyDashboardsPage", () => {
     detailIds.length = 0;
     deleteMock.mockReset();
     deletePending = false;
+    renameMock.mockReset();
+    renamePending = false;
     showSuccess.mockReset();
     showError.mockReset();
   });
@@ -314,6 +331,132 @@ describe("MyDashboardsPage", () => {
       const dialog = screen.getByRole("dialog");
       expect(within(dialog).getByRole("button", { name: "Deleting…" })).toBeDisabled();
       expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    });
+  });
+
+  describe("Rename, from the switcher's entries", () => {
+    // Opens the switcher and clicks the rename icon of the named entry.
+    function renameFromMenu(name: string) {
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: "Select dashboard" }));
+      fireEvent.click(screen.getByRole("button", { name: `Rename dashboard ${name}` }));
+    }
+    function nameField() {
+      return within(screen.getByRole("dialog")).getByRole("textbox", { name: "Name" });
+    }
+    function renameButton() {
+      return within(screen.getByRole("dialog")).getByRole("button", { name: "Rename" });
+    }
+
+    it("has a rename icon on each entry, beside the delete icon", () => {
+      renderAt(`/dashboard/my/${A.id}`);
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: "Select dashboard" }));
+      expect(screen.getByRole("button", { name: "Rename dashboard Alpha" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Rename dashboard Beta" })).toBeInTheDocument();
+    });
+
+    it("opens with the entry's name without switching, needs a change, and Cancel renames nothing", async () => {
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Beta");
+
+      expect(screen.getByText("Rename dashboard")).toBeInTheDocument();
+      expect(nameField()).toHaveValue("Beta");
+      expect(screen.getByRole("combobox", { name: "Select dashboard", hidden: true })).toHaveTextContent("Alpha");
+      // The same name, or only spaces added, is not a rename; an empty one is refused.
+      expect(renameButton()).toBeDisabled();
+      fireEvent.change(nameField(), { target: { value: "  Beta " } });
+      expect(renameButton()).toBeDisabled();
+      fireEvent.change(nameField(), { target: { value: "   " } });
+      expect(renameButton()).toBeDisabled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(renameMock).not.toHaveBeenCalled();
+    });
+
+    it("renames with the trimmed name, closes and shows the success banner", async () => {
+      renameMock.mockResolvedValue({});
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Beta");
+      fireEvent.change(nameField(), { target: { value: "  Gamma  " } });
+      fireEvent.click(renameButton());
+
+      await waitFor(() => expect(showSuccess).toHaveBeenCalledWith('"Beta" was renamed to "Gamma".'));
+      expect(renameMock).toHaveBeenCalledWith({ id: B.id, name: "Gamma" });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    });
+
+    it("Enter in the field renames", async () => {
+      renameMock.mockResolvedValue({});
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      fireEvent.change(nameField(), { target: { value: "Gamma" } });
+      fireEvent.submit(nameField());
+
+      await waitFor(() => expect(renameMock).toHaveBeenCalledWith({ id: A.id, name: "Gamma" }));
+    });
+
+    it("shows a taken name in the dialog, which stays open, and hides it once the name changes", async () => {
+      renameMock.mockRejectedValue(new BackendApiError(409, "you already have a dashboard named: Beta"));
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      fireEvent.change(nameField(), { target: { value: "Beta" } });
+      fireEvent.click(renameButton());
+
+      const taken = 'You already have a dashboard named "Beta". Choose a different name.';
+      expect(await within(screen.getByRole("dialog")).findByText(taken)).toBeInTheDocument();
+      expect(showSuccess).not.toHaveBeenCalled();
+      expect(showError).not.toHaveBeenCalled();
+
+      fireEvent.change(nameField(), { target: { value: "Beta 2" } });
+      expect(screen.queryByText(taken)).not.toBeInTheDocument();
+    });
+
+    it("shows the backend's message in the dialog for a dashboard that can't be saved again", async () => {
+      renameMock.mockRejectedValue(
+        new BackendApiError(422, "This saved dashboard can't be shown any more. Generate it again."),
+      );
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      fireEvent.change(nameField(), { target: { value: "Gamma" } });
+      fireEvent.click(renameButton());
+
+      expect(
+        await within(screen.getByRole("dialog")).findByText(
+          "This saved dashboard can't be shown any more. Generate it again.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("starts from the entry's name again the next time it opens", async () => {
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      fireEvent.change(nameField(), { target: { value: "Half typed" } });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      renameFromMenu("Alpha");
+      expect(nameField()).toHaveValue("Alpha");
+    });
+
+    it("refuses a name over 255 characters", () => {
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      fireEvent.change(nameField(), { target: { value: "x".repeat(256) } });
+      expect(renameButton()).toBeDisabled();
+      expect(screen.getByText("Use at most 255 characters.")).toBeInTheDocument();
+
+      fireEvent.change(nameField(), { target: { value: "x".repeat(255) } });
+      expect(renameButton()).toBeEnabled();
+    });
+
+    it("disables the field and the dialog's buttons while the rename is in flight", () => {
+      renamePending = true;
+      renderAt(`/dashboard/my/${A.id}`);
+      renameFromMenu("Alpha");
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByRole("button", { name: "Renaming…" })).toBeDisabled();
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+      expect(nameField()).toBeDisabled();
     });
   });
 });

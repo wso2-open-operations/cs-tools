@@ -22,7 +22,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import { useBackendApi } from "@api/backend/client";
+import { BackendApiError, useBackendApi } from "@api/backend/client";
 import type { BeDashboard } from "@api/backend/types";
 
 const BASE = "/dashboards/custom";
@@ -107,6 +107,41 @@ export function usePutCustomDashboard(): UseMutationResult<SavedCustomDashboard,
   return useMutation<SavedCustomDashboard, Error, BeDashboard>({
     mutationFn: (dashboard: BeDashboard) =>
       api.put<{ dashboard: BeDashboard }, SavedCustomDashboard>(detailPath(dashboard.id), { dashboard }),
+    onSuccess: (saved: SavedCustomDashboard) => {
+      qc.setQueryData([ApiQueryKeys.CSM_CUSTOM_DASHBOARD_DETAIL, saved.dashboard.id], saved);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_CUSTOM_DASHBOARD_LIST] });
+    },
+  });
+}
+
+/** What `useRenameCustomDashboard` takes: the saved dashboard's id and its new name. */
+export interface RenameCustomDashboard {
+  id: string;
+  name: string;
+}
+
+/**
+ * Renames one of the caller's saved dashboards: reads it, sets its
+ * `displayName` and saves it back under the same id, so its widgets, shares
+ * and creation time stay as they are. A dashboard that is gone is a 404, one
+ * saved under rules that have since changed is the read's 422 (it cannot be
+ * saved again as it is), and a name the caller already uses is the save's
+ * 409, each thrown as a BackendApiError.
+ */
+export function useRenameCustomDashboard(): UseMutationResult<SavedCustomDashboard, Error, RenameCustomDashboard> {
+  const api = useBackendApi();
+  const qc = useQueryClient();
+  return useMutation<SavedCustomDashboard, Error, RenameCustomDashboard>({
+    mutationFn: async ({ id, name }: RenameCustomDashboard) => {
+      const current = await api.get<SavedCustomDashboard>(detailPath(id));
+      if (current === null) {
+        throw new BackendApiError(404, "this dashboard no longer exists");
+      }
+      const dashboard = { ...current.dashboard, displayName: name };
+      return api.put<{ dashboard: BeDashboard }, SavedCustomDashboard>(detailPath(id), { dashboard });
+    },
     onSuccess: (saved: SavedCustomDashboard) => {
       qc.setQueryData([ApiQueryKeys.CSM_CUSTOM_DASHBOARD_DETAIL, saved.dashboard.id], saved);
     },

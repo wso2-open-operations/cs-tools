@@ -30,12 +30,12 @@ vi.mock("@api/backend/client", () => ({
 }));
 
 import { BackendApiError } from "@api/backend/client";
-import { saveErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
+import { renameErrorMessage, saveErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
 
 describe("saveErrorMessage", () => {
-  it("asks for another name when the name is taken", () => {
+  it("asks for another name, in the dialog, when the name is taken", () => {
     expect(saveErrorMessage(new BackendApiError(409, "you already have a dashboard named: My Cases"), "My Cases")).toBe(
-      'You already have a dashboard named "My Cases". Ask for a different name in the chat, then save again.',
+      'You already have a dashboard named "My Cases". Choose a different name.',
     );
   });
 
@@ -53,5 +53,28 @@ describe("saveErrorMessage", () => {
     expect(saveErrorMessage(new BackendApiError(500, "The dashboard couldn't be saved. Try again in a moment."), "X")).toBe(generic);
     expect(saveErrorMessage(new BackendApiError(503, "Service Unavailable"), "X")).toBe(generic);
     expect(saveErrorMessage(new Error("network down"), "X")).toBe(generic);
+  });
+});
+
+describe("renameErrorMessage", () => {
+  it("asks for another name, in the dialog, when the name is taken", () => {
+    expect(renameErrorMessage(new BackendApiError(409, "you already have a dashboard named: Taken"), "Taken")).toBe(
+      'You already have a dashboard named "Taken". Choose a different name.',
+    );
+  });
+
+  it("shows the backend's message for another 4xx, as a sentence", () => {
+    expect(renameErrorMessage(new BackendApiError(404, "this dashboard no longer exists"), "X")).toBe(
+      "This dashboard no longer exists.",
+    );
+    expect(
+      renameErrorMessage(new BackendApiError(422, "This saved dashboard can't be shown any more. Generate it again."), "X"),
+    ).toBe("This saved dashboard can't be shown any more. Generate it again.");
+  });
+
+  it("is generic for a server error or anything that is not a backend error", () => {
+    const generic = "The dashboard couldn't be renamed. Try again in a moment.";
+    expect(renameErrorMessage(new BackendApiError(500, "internal"), "X")).toBe(generic);
+    expect(renameErrorMessage(new Error("network down"), "X")).toBe(generic);
   });
 });

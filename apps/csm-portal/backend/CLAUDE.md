@@ -845,6 +845,15 @@ message asks the owner to generate it again), and the only repair is regeneratin
 anyway could run queries the current rules refuse. A change that would break saved dashboards needs
 its own plan: keep accepting the old form, or migrate the stored rows.
 
+**A save of a served dashboard must store it unchanged.** The webapp's "Edit with AI" Save and its
+Rename both PUT `/dashboards/custom/{id}` with the dashboard as `GET /dashboards/custom/{id}` served it
+(a rename changes only `displayName`); `SaveCustomDashboard` turns that back into the file format with
+`draftToDefinition` (widget ids renamed back, the injected `type` filters stripped). Saved dashboards are
+live in production, so that round trip is what keeps a rename from changing anything but the name:
+`TestDraftToDefinition_RoundTrip` pins it. A new served field, or a change to `widgetViews` /
+`widgetTemplates` / `StripImpliedTypeFilters`, must keep that test passing, or every rename and edit
+would rewrite the stored definition.
+
 **Who can reach what** (pinned by `cmd/server/custom_dashboard_routes_test.go`): generating, saving,
 deleting and sharing (`/dashboards/generate`, `/dashboards/custom/*`) are `PermWrite`, CS engineers and
 admins. Reading what was shared with you (`/dashboards/shared*`) is `PermView`, like the system

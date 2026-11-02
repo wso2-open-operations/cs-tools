@@ -40,9 +40,12 @@ import {
   useDeleteCustomDashboard,
   useGetCustomDashboard,
   useGetCustomDashboards,
+  useRenameCustomDashboard,
 } from "@features/csm-custom-dashboards/api/useCustomDashboards";
+import DashboardNameDialog from "@features/csm-custom-dashboards/components/DashboardNameDialog";
 import DeleteCustomDashboardDialog from "@features/csm-custom-dashboards/components/DeleteCustomDashboardDialog";
 import ShareCustomDashboardDialog from "@features/csm-custom-dashboards/components/ShareCustomDashboardDialog";
+import { renameErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
 
 const BASE_PATH = "/dashboard/my";
 
@@ -121,6 +124,13 @@ function SavedDashboardView({ id }: { id: string }): JSX.Element {
  * one left, or the empty state); deleting another keeps the open one. A failed
  * delete shows the error banner and leaves the dashboard as it is.
  *
+ * Beside it, a rename icon opens DashboardNameDialog with the entry's name
+ * (`useRenameCustomDashboard`: the dashboard is saved again under the same id,
+ * so its shares stay). A refused rename (a name the user already has, or a
+ * dashboard saved under rules that have since changed) shows in the dialog,
+ * which stays open; a rename that goes through closes it and shows the success
+ * banner, and the switcher and the heading show the new name.
+ *
  * The switcher's menu starts with a search box that filters the entries by
  * name as you type (case-insensitive; the list is the user's own, at most 50,
  * so it is filtered here, with no request). It takes focus when the menu
@@ -139,6 +149,7 @@ export default function MyDashboardsPage(): JSX.Element {
   const dashboardList = useGetCustomDashboards();
   const customDashboards = dashboardList.data ?? [];
   const deleteDashboard = useDeleteCustomDashboard();
+  const renameDashboard = useRenameCustomDashboard();
   const { showSuccess } = useSuccessBanner();
   const { showError } = useErrorBanner();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -147,6 +158,10 @@ export default function MyDashboardsPage(): JSX.Element {
   // so its name does not vanish during the closing animation.
   const [deleteTarget, setDeleteTarget] = useState<CustomDashboardSummary | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // The same for the rename dialog, with the reason the last rename was refused.
+  const [renameTarget, setRenameTarget] = useState<CustomDashboardSummary | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const currentUserEmail = useIdTokenClaims()?.email;
 
@@ -220,6 +235,17 @@ export default function MyDashboardsPage(): JSX.Element {
     }
   };
 
+  const handleRename = async (target: CustomDashboardSummary, name: string): Promise<void> => {
+    setRenameError(null);
+    try {
+      await renameDashboard.mutateAsync({ id: target.id, name });
+      setRenameOpen(false);
+      showSuccess(`"${target.name}" was renamed to "${name}".`);
+    } catch (err) {
+      setRenameError(renameErrorMessage(err, name));
+    }
+  };
+
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <Box
@@ -250,7 +276,7 @@ export default function MyDashboardsPage(): JSX.Element {
               // The search box takes focus, not the first entry.
               MenuProps={{ autoFocus: false, slotProps: { paper: { sx: { maxHeight: 400 } } } }}
               onChange={(e) => navigate(`${BASE_PATH}/${encodeURIComponent(e.target.value)}`)}
-              // The closed field shows the name only, not the entry's delete icon.
+              // The closed field shows the name only, not the entry's icons.
               renderValue={() => selected.name}
               // On the element screen readers announce: a plain aria-label
               // lands on Select's hidden input instead.
@@ -299,22 +325,40 @@ export default function MyDashboardsPage(): JSX.Element {
                   <Typography component="span" variant="inherit" noWrap>
                     {d.name}
                   </Typography>
-                  <Tooltip title="Delete dashboard">
-                    <IconButton
-                      size="small"
-                      edge="end"
-                      aria-label={`Delete dashboard ${d.name}`}
-                      onClick={(e) => {
-                        // Not a selection: keep the open dashboard.
-                        e.stopPropagation();
-                        setMenuOpen(false);
-                        setDeleteTarget(d);
-                        setDeleteOpen(true);
-                      }}
-                    >
-                      <Trash2 size={15} />
-                    </IconButton>
-                  </Tooltip>
+                  <Box sx={{ display: "flex", flexShrink: 0 }}>
+                    <Tooltip title="Rename dashboard">
+                      <IconButton
+                        size="small"
+                        aria-label={`Rename dashboard ${d.name}`}
+                        onClick={(e) => {
+                          // Not a selection: keep the open dashboard.
+                          e.stopPropagation();
+                          setMenuOpen(false);
+                          setRenameTarget(d);
+                          setRenameError(null);
+                          setRenameOpen(true);
+                        }}
+                      >
+                        <Pencil size={15} />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete dashboard">
+                      <IconButton
+                        size="small"
+                        edge="end"
+                        aria-label={`Delete dashboard ${d.name}`}
+                        onClick={(e) => {
+                          // Not a selection: keep the open dashboard.
+                          e.stopPropagation();
+                          setMenuOpen(false);
+                          setDeleteTarget(d);
+                          setDeleteOpen(true);
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 </MenuItem>
               ))}
             </Select>
@@ -339,6 +383,20 @@ export default function MyDashboardsPage(): JSX.Element {
         dashboard={{ id: selected.id, name: selected.name }}
         currentUserEmail={currentUserEmail}
         onClose={() => setShareOpen(false)}
+      />
+      <DashboardNameDialog
+        open={renameOpen}
+        title="Rename dashboard"
+        initialName={renameTarget?.name ?? ""}
+        confirmLabel="Rename"
+        busyLabel="Renaming…"
+        busy={renameDashboard.isPending}
+        error={renameError}
+        requireChange
+        onCancel={() => setRenameOpen(false)}
+        onConfirm={(name) => {
+          if (renameTarget) void handleRename(renameTarget, name);
+        }}
       />
       <DeleteCustomDashboardDialog
         open={deleteOpen}
