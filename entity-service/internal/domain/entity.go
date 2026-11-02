@@ -2408,6 +2408,13 @@ type DeployedProductVersionRef struct {
 	Name           string     `json:"name"`
 	ReleasedDate   *time.Time `json:"releasedDate"`
 	SupportEoLDate *time.Time `json:"supportEoLDate"`
+	// DeploymentProfile is product_version.deployment_profile (e.g. "All In
+	// One", "API Control Plane"); null when the version has none. Several
+	// version rows can share a Name and differ only by this, so without it a
+	// caller cannot tell which of them a deployed product points at.
+	// Postgres data source only -- the ServiceNow version record carries no
+	// profile, so it stays null there.
+	DeploymentProfile *string `json:"deploymentProfile"`
 }
 
 // DeployedProductView is the enriched search result for a deployed product.
