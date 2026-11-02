@@ -73,17 +73,17 @@ func main() {
 		"standingRecipientsCount", len(standingRecipients),
 	)
 
+	if isWeekend(time.Now()) {
+		slog.Info("weekend: skipping run, no notices sent and no projects suspended", "runID", runID)
+		os.Exit(0)
+	}
+
 	// Superseded by csm-scheduled-tasks' acp_closure, which reads the same
 	// projects. Both running for real would send every due notice twice and
 	// race the same writes, so this one only decides and logs now.
 	if !dryRun || isEmailSendEnabled {
 		slog.Error("acp-closure-service is superseded by csm-scheduled-tasks' acp_closure and runs only as a log-only dry run: set DRY_RUN=true and IS_EMAIL_SEND_ENABLED=false", "runID", runID)
 		os.Exit(1)
-	}
-
-	if isWeekend(time.Now()) {
-		slog.Info("weekend: skipping run, no notices sent and no projects suspended", "runID", runID)
-		os.Exit(0)
 	}
 
 	entityClient, err := entity.NewClient(entity.Config{

@@ -608,3 +608,45 @@ func TestEmailNotifier_Send_EveryCustomerGoesToTo(t *testing.T) {
 		t.Errorf("cc = %v, want [am@wso2.com]", call.cc)
 	}
 }
+
+// A customer-facing notice whose every customer is filtered out is not
+// delivered, even though the standing lists still get it: recording it as
+// sent would let day 0 suspend a customer who was never told. With a customer
+// left in To it is delivered.
+func TestEmailNotifier_Send_StandingListsAloneDoNotDeliverACustomerNotice(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		customer string
+		want     bool
+	}{
+		{"customer filtered out", "bob@customer.example", false},
+		{"customer kept", "customer@wso2.com", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sender := &mockEmailSender{}
+			n := &EmailNotifier{
+				Sender:                 sender,
+				Logger:                 discardLogger(),
+				AllowNonWSO2Recipients: false,
+				StandingRecipients:     []string{"customer-lifecycle-notification@wso2.com", "billing@wso2.com"},
+			}
+			delivered, err := n.Send(context.Background(), Notice{
+				Subject: "subject",
+				Body:    "body",
+				Recipients: Recipients{
+					AccountOwner: recipients.Contact{Email: "am@wso2.com"},
+					Customers:    []recipients.Contact{{Email: tc.customer}},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if delivered != tc.want {
+				t.Errorf("delivered = %v, want %v", delivered, tc.want)
+			}
+			if len(sender.calls) != 1 {
+				t.Errorf("sends = %d, want 1: the standing lists still get the email", len(sender.calls))
+			}
+		})
+	}
+}

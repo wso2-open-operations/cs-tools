@@ -95,4 +95,24 @@ func TestRunReopenCheck_StopsOnAnErrorOrNoProgress(t *testing.T) {
 	if err := RunReopenCheck(f)(context.Background()); err == nil || !strings.Contains(err.Error(), "no progress") {
 		t.Errorf("a page that made no progress: err = %v", err)
 	}
+	// A page that checked projects but left the cursor where it was, or
+	// empty, would repeat forever: an error, whatever it checked.
+	for _, next := range []string{"p3", ""} {
+		f = &fakeReopenChecker{pages: []reopenCheckResponse{{Checked: 3, NextCursor: "p3", More: true}, {Checked: 2, NextCursor: next, More: true}}}
+		if err := RunReopenCheck(f)(context.Background()); err == nil || !strings.Contains(err.Error(), "no progress") {
+			t.Errorf("more set, cursor %q after a page that checked projects: err = %v", next, err)
+		}
+	}
+}
+
+// more is the only end signal: a last page with a cursor but more unset ends
+// the run without another call.
+func TestRunReopenCheck_MoreUnsetEndsTheRun(t *testing.T) {
+	f := &fakeReopenChecker{pages: []reopenCheckResponse{{Checked: 5, NextCursor: "p5", More: true}, {Checked: 2, NextCursor: "p7"}}}
+	if err := RunReopenCheck(f)(context.Background()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if f.requests != 2 {
+		t.Errorf("pages requested = %d, want 2", f.requests)
+	}
 }

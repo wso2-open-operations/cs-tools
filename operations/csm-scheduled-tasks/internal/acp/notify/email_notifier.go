@@ -239,8 +239,15 @@ type EmailNotifier struct {
 // kind.
 func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	to, cc := recipientsToToCC(notice.Recipients)
+	customerFacing := notice.Recipients.IsCustomerFacing()
+	// A customer-facing notice is delivered only if a customer is still in
+	// To after the filter. The standing lists are added to To below, so
+	// without this a notice whose every customer was filtered out (staging,
+	// or AllowNonWSO2Recipients still false) would reach only the lists and
+	// be recorded as sent, and the project suspended on day 0 untold.
+	customerReached := customerFacing && len(n.filterRecipients(to)) > 0
 	to = append(to, n.StandingRecipients...)
-	if notice.Recipients.IsCustomerFacing() {
+	if customerFacing {
 		cc = append(cc, n.StandingRecipients...)
 	}
 	to = n.filterRecipients(to)
@@ -266,7 +273,7 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	// cause of a real symptom seen in a live test: the trailing "WSO2
 	// Team" signature line visually missing in the received email.
 	htmlBody := renderInternalEmailHTML(notice.Body, notice.ProjectSfID, notice.InvoiceSfIDs)
-	if notice.Recipients.IsCustomerFacing() {
+	if customerFacing {
 		htmlBody = renderEmailHTML(notice.Body)
 	}
 
@@ -277,6 +284,9 @@ func (n *EmailNotifier) Send(ctx context.Context, notice Notice) (bool, error) {
 	n.Logger.InfoContext(ctx, "email sent",
 		"projectID", notice.ProjectID, "window", notice.Window, "subject", notice.Subject,
 		"toCount", len(to), "ccCount", len(cc))
+	if customerFacing {
+		return customerReached, nil
+	}
 	return true, nil
 }
 

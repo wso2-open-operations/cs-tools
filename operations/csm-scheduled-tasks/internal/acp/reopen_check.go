@@ -86,11 +86,14 @@ func RunReopenCheck(client ReopenChecker) func(ctx context.Context) error {
 			total.Finished += r.Finished
 			total.Failed += r.Failed
 			total.FailedProjectIDs = append(total.FailedProjectIDs, r.FailedProjectIDs...)
-			if !r.More && r.NextCursor == "" {
+			// more is the only end signal: entity-service sets more and
+			// nextCursor together. While more is set the cursor must move on,
+			// or the next call would repeat this page until the page cap.
+			if !r.More {
 				break
 			}
-			if r.Checked == 0 && (r.NextCursor == cursor || r.NextCursor == "") {
-				return fmt.Errorf("acp reopen check: no progress after %q (entity-service ran out of time before the first project)", cursor)
+			if r.NextCursor == "" || r.NextCursor == cursor {
+				return fmt.Errorf("acp reopen check: no progress after %q (more is set but the cursor did not move)", cursor)
 			}
 			cursor = r.NextCursor
 		}
