@@ -207,7 +207,7 @@ export const OUTSTANDING_ENGAGEMENTS_CATEGORY_CHART_DATA = [
   {
     key: "new-feature-improvement",
     name: "New Feature Improvement",
-    color: colors.brown[500],
+    color: colors.pink[500],
   },
 ] as const;
 
