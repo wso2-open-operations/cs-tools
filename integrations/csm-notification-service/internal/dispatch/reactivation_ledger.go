@@ -46,12 +46,22 @@ type ReactivationLedger interface {
 // own after reactivationSendingTTL, so an attempt that died between Reserve
 // and MarkSent cannot block the notice for ever; a sent marker is kept for
 // reactivationSentTTL, far longer than any redelivery.
+//
+// The send is cut off after reactivationSendTimeout, well inside the
+// reservation, so a live attempt never outlasts its own reservation. A
+// delivery that finds a reservation held waits for it (polling every
+// reactivationWaitInterval) instead of failing: the consumer's retries and
+// the dead-letter topic's take seconds, so failing at once would exhaust
+// them while the reservation of an attempt that crashed is still live, and
+// the email would never be sent.
 const (
-	reactivationSending    = "sending"
-	reactivationSent       = "sent"
-	reactivationSendingTTL = 10 * time.Minute
-	reactivationSentTTL    = 30 * 24 * time.Hour
-	reactivationKeyPrefix  = "csm-notification:project-reactivated:"
+	reactivationSending      = "sending"
+	reactivationSent         = "sent"
+	reactivationSendingTTL   = 2 * time.Minute
+	reactivationSendTimeout  = time.Minute
+	reactivationWaitInterval = 5 * time.Second
+	reactivationSentTTL      = 30 * 24 * time.Hour
+	reactivationKeyPrefix    = "csm-notification:project-reactivated:"
 )
 
 // RedisReactivationLedger is the ReactivationLedger over the service's Redis

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
@@ -98,7 +99,7 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 
 	ledgerKey := p.ProjectID + "/" + p.ReactivatedOn
 	if d.acpReactivationLedger != nil {
-		reserved, sent, err := d.acpReactivationLedger.Reserve(ctx, ledgerKey)
+		reserved, sent, err := d.reserveReactivation(ctx, ledgerKey)
 		switch {
 		case err != nil:
 			return fmt.Errorf("dispatch: reserve back-to-open email for project %s: %w", p.ProjectID, err)
@@ -106,7 +107,7 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 			slog.InfoContext(ctx, "dispatch: back-to-open email already sent, not sending it again", logAttrs...)
 			return nil
 		case !reserved:
-			return fmt.Errorf("dispatch: back-to-open email for project %s is being sent by another attempt", p.ProjectID)
+			return fmt.Errorf("dispatch: back-to-open email for project %s is still being sent by another attempt", p.ProjectID)
 		}
 	}
 
@@ -122,7 +123,13 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 		IntendedFor:  intendedFor,
 	})
 	subject := "Back to Open state : " + p.ProjectName
-	if err := d.email.SendEmail(ctx, to, cc, nil, nil, subject, body, nil); err != nil {
+	// Bounded so the send ends well inside its reservation (see
+	// reactivationSendTimeout): a delivery waiting on the reservation must
+	// never see it expire while this attempt is still sending.
+	sendCtx, cancel := context.WithTimeout(ctx, reactivationSendTimeout)
+	err := d.email.SendEmail(sendCtx, to, cc, nil, nil, subject, body, nil)
+	cancel()
+	if err != nil {
 		if d.acpReactivationLedger != nil {
 			if relErr := d.acpReactivationLedger.Release(context.WithoutCancel(ctx), ledgerKey); relErr != nil {
 				slog.WarnContext(ctx, "dispatch: release back-to-open reservation failed; it expires on its own", append(logAttrs, "err", relErr)...)
@@ -140,6 +147,30 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 	}
 	slog.InfoContext(ctx, "dispatch: back-to-open email sent", append(logAttrs, "to", len(to), "cc", len(cc))...)
 	return nil
+}
+
+// reserveReactivation is ReactivationLedger.Reserve, waiting while another
+// attempt holds the reservation: until it is released (reserved), marked
+// sent (sent), or acpReactivationWaitFor has passed (neither, so the record
+// is retried). An attempt that crashed after Reserve leaves a reservation
+// only its expiry clears, and failing at once would spend the consumer's and
+// the dead-letter topic's retries, seconds in all, before it does: the
+// record would be dropped and the email never sent. The wait holds the
+// partition, at most about reactivationSendingTTL, and only after a crash or
+// while another replica is sending the same notice.
+func (d *Dispatcher) reserveReactivation(ctx context.Context, key string) (reserved, sent bool, err error) {
+	deadline := time.Now().Add(d.acpReactivationWaitFor)
+	for {
+		reserved, sent, err = d.acpReactivationLedger.Reserve(ctx, key)
+		if err != nil || reserved || sent || !time.Now().Before(deadline) {
+			return reserved, sent, err
+		}
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err()
+		case <-time.After(d.acpReactivationPoll):
+		}
+	}
 }
 
 // reactivationRecipients keeps the payload's recipients that are well-formed

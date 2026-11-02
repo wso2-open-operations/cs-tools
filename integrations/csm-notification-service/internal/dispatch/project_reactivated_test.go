@@ -23,8 +23,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 )
 
 const reactivatedTestProjectID = "e3e87599-1bc7-6650-182c-0dc5604bcb68"
@@ -178,6 +180,10 @@ type fakeReactivationLedger struct {
 	state    map[string]string // key -> "sending" | "sent"
 	err      error
 	released []string
+	// onHeld, when set, runs each time Reserve finds the notice reserved:
+	// a test uses it to let the reservation expire or be marked sent while
+	// the handler waits.
+	onHeld func(state map[string]string, key string)
 }
 
 func (l *fakeReactivationLedger) Reserve(_ context.Context, key string) (bool, bool, error) {
@@ -188,6 +194,9 @@ func (l *fakeReactivationLedger) Reserve(_ context.Context, key string) (bool, b
 	case reactivationSent:
 		return false, true, nil
 	case reactivationSending:
+		if l.onHeld != nil {
+			l.onHeld(l.state, key)
+		}
 		return false, false, nil
 	}
 	l.state[key] = reactivationSending
@@ -235,8 +244,10 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 		t.Errorf("a redelivery sent the email again: sent=%d", len(email.calls))
 	}
 
-	// Being sent by another attempt: retried, not sent.
+	// Still being sent by another attempt once the wait is over: retried,
+	// not sent.
 	ledger.state[key] = reactivationSending
+	d2.acpReactivationWaitFor, d2.acpReactivationPoll = 0, 0
 	if err := d2.Handle(context.Background(), rec); err == nil || len(email.calls) != 1 {
 		t.Errorf("err=%v sent=%d, want an error to retry and no send", err, len(email.calls))
 	}
@@ -263,6 +274,103 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 	if err := d3.Handle(context.Background(), rec); err == nil || len(email.calls) != before {
 		t.Errorf("err=%v sent=%d, want an error and no send", err, len(email.calls)-before)
 	}
+}
+
+// A delivery that finds the notice reserved waits for the reservation rather
+// than failing at once: after a crash between Reserve and MarkSent, the
+// consumer's and the dead-letter topic's retries would all be spent before
+// the reservation expired, and the email never sent.
+func TestDispatcher_ProjectReactivated_WaitsForAHeldReservation(t *testing.T) {
+	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)
+	key := reactivatedTestProjectID + "/2026-10-29T09:30:00Z"
+	newDispatcher := func(email *mockEmailSender, ledger *fakeReactivationLedger) *Dispatcher {
+		d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
+			WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+		d.acpReactivationWaitFor, d.acpReactivationPoll = time.Minute, time.Millisecond
+		return d
+	}
+	// heldFor lets the reservation be seen n times, then sets it to then.
+	heldFor := func(n int, then string) func(map[string]string, string) {
+		return func(state map[string]string, key string) {
+			if n--; n <= 0 {
+				if then == "" {
+					delete(state, key)
+				} else {
+					state[key] = then
+				}
+			}
+		}
+	}
+
+	t.Run("reservation of a crashed attempt expires: sent once", func(t *testing.T) {
+		email := &mockEmailSender{}
+		ledger := &fakeReactivationLedger{state: map[string]string{key: reactivationSending}, onHeld: heldFor(3, "")}
+		if err := newDispatcher(email, ledger).Handle(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+		if len(email.calls) != 1 || ledger.state[key] != reactivationSent {
+			t.Errorf("sent=%d state=%q, want one send recorded as sent", len(email.calls), ledger.state[key])
+		}
+	})
+
+	t.Run("the other attempt finishes: not sent again", func(t *testing.T) {
+		email := &mockEmailSender{}
+		ledger := &fakeReactivationLedger{state: map[string]string{key: reactivationSending}, onHeld: heldFor(2, reactivationSent)}
+		if err := newDispatcher(email, ledger).Handle(context.Background(), rec); err != nil {
+			t.Fatal(err)
+		}
+		if len(email.calls) != 0 {
+			t.Errorf("sent=%d, want none", len(email.calls))
+		}
+	})
+
+	t.Run("shutdown while waiting: retried, not sent", func(t *testing.T) {
+		email := &mockEmailSender{}
+		ctx, cancel := context.WithCancel(context.Background())
+		ledger := &fakeReactivationLedger{state: map[string]string{key: reactivationSending},
+			onHeld: func(map[string]string, string) { cancel() }}
+		if err := newDispatcher(email, ledger).Handle(ctx, rec); !errors.Is(err, context.Canceled) {
+			t.Errorf("err=%v, want context.Canceled", err)
+		}
+		if len(email.calls) != 0 || ledger.state[key] != reactivationSending {
+			t.Errorf("sent=%d state=%q, want no send and the reservation untouched", len(email.calls), ledger.state[key])
+		}
+	})
+}
+
+// The send is cut off well inside its reservation, so a delivery waiting on
+// that reservation never sees it expire while this attempt is still sending.
+func TestDispatcher_ProjectReactivated_SendIsBoundedInsideTheReservation(t *testing.T) {
+	if reactivationSendTimeout+reactivationWaitInterval >= reactivationSendingTTL {
+		t.Fatalf("send timeout %v (+ poll %v) must end before the reservation's %v expiry",
+			reactivationSendTimeout, reactivationWaitInterval, reactivationSendingTTL)
+	}
+	email := &deadlineEmailSender{mockEmailSender: &mockEmailSender{}}
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
+		WithACPReactivation(nil, "@example.com").
+		WithACPReactivationLedger(&fakeReactivationLedger{state: map[string]string{}})
+	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
+		t.Fatal(err)
+	}
+	latest := time.Now().Add(reactivationSendTimeout)
+	if len(email.calls) != 1 {
+		t.Fatalf("sent=%d", len(email.calls))
+	}
+	if !email.hasDeadline || email.deadline.After(latest) {
+		t.Errorf("send deadline=%v set=%v, want within %v", email.deadline, email.hasDeadline, reactivationSendTimeout)
+	}
+}
+
+// deadlineEmailSender records the deadline of the context each send got.
+type deadlineEmailSender struct {
+	*mockEmailSender
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func (s *deadlineEmailSender) SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	return s.mockEmailSender.SendEmail(ctx, to, cc, bcc, replyTo, subject, htmlBody, attachments)
 }
 
 // A concurrent delivery of the same record returns nil without sending: an

@@ -307,6 +307,11 @@ type Dispatcher struct {
 	// acpReactivationLedger, when set, records the "Back to Open state"
 	// emails already sent (Redis), so a redelivery never sends one twice.
 	acpReactivationLedger ReactivationLedger
+	// acpReactivationWaitFor and acpReactivationPoll bound how long, and how
+	// often, a delivery that finds the notice reserved waits for it to clear
+	// (see reserveReactivation). Set with the ledger; tests shorten them.
+	acpReactivationWaitFor time.Duration
+	acpReactivationPoll    time.Duration
 
 	// defaultOnCallNumber is handleIncidentCreated's fallback value for its
 	// payload's own CallTo when a publisher omits it — see that function's
@@ -422,6 +427,8 @@ func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Di
 // in-process claim guards against a second send.
 func (d *Dispatcher) WithACPReactivationLedger(l ReactivationLedger) *Dispatcher {
 	d.acpReactivationLedger = l
+	d.acpReactivationWaitFor = reactivationSendingTTL + reactivationWaitInterval
+	d.acpReactivationPoll = reactivationWaitInterval
 	return d
 }
 
