@@ -290,6 +290,9 @@ func (s *salesforceResyncService) newRun(ctx context.Context, scope, id string) 
 	if id == "" {
 		return nil, &apierror.ValidationError{Msg: "id is required"}
 	}
+	if !uuidRe.MatchString(id) {
+		return nil, &apierror.ValidationError{Msg: "id must be a UUID"}
+	}
 	var (
 		t   repository.SalesforceResyncTarget
 		err error

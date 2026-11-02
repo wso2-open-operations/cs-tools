@@ -40,10 +40,12 @@ type entitySalesforceResyncClient interface {
 // per-target lock. PermAdmin on the route is the gate here; authorization is
 // resolved from platform data, never from token claims.
 //
-// A resync is synchronous and can take about a minute, so it runs close to the
+// A resync is synchronous and can take about a minute, so it can exceed the
 // shared limits (ENTITY_SERVICE_TIMEOUT for the upstream call and
-// REST_WRITE_TIMEOUT for this response, both 60s by default); raise both
-// together if resyncs start timing out.
+// REST_WRITE_TIMEOUT for this response, both 60s by default). If the portal
+// gives up first, the admin gets an error while the upstream apply may already
+// have written some rows. Raise both limits above the expected resync time, and
+// keep entity-service REQUEST_TIMEOUT below them.
 type SalesforceResyncHandler struct {
 	entity entitySalesforceResyncClient
 }

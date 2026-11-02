@@ -546,6 +546,10 @@ func TestResyncValidation(t *testing.T) {
 			_, err := h.svc.Preview(resyncAdminCtx(), domain.SalesforceResyncRequest{Scope: "account"})
 			return err
 		},
+		"id that is not a UUID": func() error {
+			_, err := h.svc.Preview(resyncAdminCtx(), domain.SalesforceResyncRequest{Scope: "account", ID: "x"})
+			return err
+		},
 		"component of another scope": func() error {
 			_, err := h.svc.Apply(resyncAdminCtx(), domain.SalesforceResyncApplyRequest{Scope: "project", ID: "x", Components: []string{"contacts"}})
 			return err
