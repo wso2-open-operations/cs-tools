@@ -47,6 +47,7 @@ type incidentCloser interface {
 type incidentAutocloseService struct {
 	repo        repository.IncidentAutocloseRepository
 	incidents   incidentCloser
+	access      AccessService
 	systemEmail string
 }
 
@@ -56,13 +57,14 @@ type incidentAutocloseService struct {
 // service). systemEmail is the system user the close is attributed to, the
 // same AUTOCLOSURE_SYSTEM_USER_EMAIL case auto-closure uses: optional, and
 // empty (or blank) acts as domain.AutoclosureDefaultActor ("System user")
-// with no user row, so closed_by_id stays NULL.
-func NewIncidentAutocloseService(repo repository.IncidentAutocloseRepository, incidents incidentCloser, systemEmail string) IncidentAutocloseService {
+// with no user row, so closed_by_id stays NULL. access refuses anyone but an
+// internal caller, as case auto-closure's service does on top of its route gate.
+func NewIncidentAutocloseService(repo repository.IncidentAutocloseRepository, incidents incidentCloser, access AccessService, systemEmail string) IncidentAutocloseService {
 	systemEmail = strings.TrimSpace(systemEmail)
 	if systemEmail == "" {
 		systemEmail = domain.AutoclosureDefaultActor
 	}
-	return &incidentAutocloseService{repo: repo, incidents: incidents, systemEmail: systemEmail}
+	return &incidentAutocloseService{repo: repo, incidents: incidents, access: access, systemEmail: systemEmail}
 }
 
 // unavailableIncidentAutocloseService stands in where the feature cannot run
@@ -106,6 +108,12 @@ func validateIncidentAutocloseRequest(req domain.IncidentAutocloseRequest) (int,
 // writes the activity entry and, in dual-write, mirrors the close to the
 // backing data source like any other incident update.
 func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.IncidentAutocloseRequest) (domain.IncidentAutocloseResponse, error) {
+	// The route is internalOnly too; this is the second line case auto-closure
+	// also keeps (autoclosureService.requireInternal): the run closes incidents,
+	// and only an internal caller may start it.
+	if err := RequireInternalCaller(ctx, s.access, "this resource is only available to internal callers"); err != nil {
+		return domain.IncidentAutocloseResponse{}, err
+	}
 	limit, err := validateIncidentAutocloseRequest(req)
 	if err != nil {
 		return domain.IncidentAutocloseResponse{}, err

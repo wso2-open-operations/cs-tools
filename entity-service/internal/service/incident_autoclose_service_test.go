@@ -92,7 +92,7 @@ func TestIncidentAutoclose_Validation(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo, closer := &fakeIncidentAutocloseRepo{}, &fakeIncidentCloser{}
-			_, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), tc.req)
+			_, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(), tc.req)
 			if tc.wantLimit == 0 {
 				var ve *apierror.ValidationError
 				if !errors.As(err, &ve) {
@@ -126,7 +126,7 @@ func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 		closeErr: map[string]error{"b": &pgconn.PgError{Code: "23503", Message: "insert or update on table \"incident\" violates foreign key"}},
 		notDue:   map[string]bool{"c": true},
 	}
-	resp, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), Limit: 4})
+	resp, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), Limit: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestIncidentAutoclose_ClosesEachAndReportsFailures(t *testing.T) {
 func TestIncidentAutoclose_SystemUserIsTheConfiguredOne(t *testing.T) {
 	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
 	closer := &fakeIncidentCloser{}
-	if _, err := NewIncidentAutocloseService(repo, closer, "  autoclose@wso2.com ").Autoclose(context.Background(),
+	if _, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "  autoclose@wso2.com ").Autoclose(context.Background(),
 		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestIncidentAutoclose_SystemUserIsTheConfiguredOne(t *testing.T) {
 func TestIncidentAutoclose_DryRunChangesNothing(t *testing.T) {
 	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
 	closer := &fakeIncidentCloser{}
-	resp, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DryRun: true})
+	resp, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestIncidentAutoclose_DryRunChangesNothing(t *testing.T) {
 // TestIncidentAutoclose_ListFailureIsAnError: nothing to report per incident when the listing fails.
 func TestIncidentAutoclose_ListFailureIsAnError(t *testing.T) {
 	repo, closer := &fakeIncidentAutocloseRepo{listErr: errors.New("boom")}, &fakeIncidentCloser{}
-	if _, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err == nil {
+	if _, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(), domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)}); err == nil {
 		t.Fatal("want an error")
 	}
 }
@@ -198,8 +198,26 @@ func TestIncidentAutoclose_CancelledRequestStops(t *testing.T) {
 	cancel()
 	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
 	closer := &fakeIncidentCloser{}
-	_, err := NewIncidentAutocloseService(repo, closer, "").Autoclose(ctx, domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
+	_, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(ctx, domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
 	if !errors.Is(err, context.Canceled) || len(closer.closed) != 0 {
 		t.Fatalf("err = %v, closed = %v", err, closer.closed)
+	}
+}
+
+// TestIncidentAutoclose_RefusesANonInternalCaller: as case auto-closure's
+// service does, the service itself refuses a caller that is not internal with a
+// 403, before anything is listed or closed (the route's internalOnly gate is the
+// first line, this the second).
+func TestIncidentAutoclose_RefusesANonInternalCaller(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: []repository.IncidentAutocloseCandidate{{ID: "a", Number: "INC-A"}}}
+	closer := &fakeIncidentCloser{}
+	_, err := NewIncidentAutocloseService(repo, closer, customerAccess{}, "").Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
+	var fe *apierror.ForbiddenError
+	if !errors.As(err, &fe) {
+		t.Fatalf("err = %v, want ForbiddenError", err)
+	}
+	if repo.gotDays != 0 || len(closer.states) != 0 {
+		t.Fatalf("listed (days %d) or closed (%v) for a refused caller", repo.gotDays, closer.states)
 	}
 }

@@ -1735,7 +1735,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		incidentAutocloseSvc = service.NewUnavailableIncidentAutocloseService("incident auto-close needs the Postgres incident tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
 	} else {
 		incidentAutocloseSvc = service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(db)),
-			activeIncidentSvc, cfg.AutoclosureSystemUserEmail)
+			activeIncidentSvc, accessSvc, cfg.AutoclosureSystemUserEmail)
 	}
 	incidentAutocloseHandler := handler.NewIncidentAutocloseHandler(incidentAutocloseSvc)
 

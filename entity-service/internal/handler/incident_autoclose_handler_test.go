@@ -42,7 +42,7 @@ func (r noAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, int)
 // resolvedForDays or one outside 1..3650 and a limit over 1000 are 400s, and
 // nothing is selected.
 func TestIncidentAutocloseHandler_RefusesBadBodies(t *testing.T) {
-	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(noAutocloseRepo{t}, nil, ""))
+	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(noAutocloseRepo{t}, nil, unrestrictedAutocloseAccess{}, ""))
 	for name, body := range map[string]string{
 		"unknown field":     `{"resolvedForDays":14,"days":14}`,
 		"missing days":      `{"limit":10}`,
@@ -84,6 +84,14 @@ func (r stubAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, in
 	return r.due, nil
 }
 
+// unrestrictedAutocloseAccess resolves every caller as internal: these tests
+// are about the request and response, not the caller gate.
+type unrestrictedAutocloseAccess struct{ service.AccessService }
+
+func (unrestrictedAutocloseAccess) ResolveScope(context.Context) (service.AccessScope, error) {
+	return service.AccessScope{Unrestricted: true}, nil
+}
+
 // UpdateIncident lets the stub stand in for the incident service that closes.
 func (stubAutocloseRepo) UpdateIncident(context.Context, domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
 	return domain.UpdateIncidentResponse{}, nil
@@ -95,7 +103,7 @@ func TestIncidentAutocloseHandler_ResponseShape(t *testing.T) {
 	stub := stubAutocloseRepo{
 		due: []repository.IncidentAutocloseCandidate{{ID: "a0000000-0000-0000-0000-000000000001", Number: "INC1"}},
 	}
-	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(stub, stub, ""))
+	h := NewIncidentAutocloseHandler(service.NewIncidentAutocloseService(stub, stub, unrestrictedAutocloseAccess{}, ""))
 	w := httptest.NewRecorder()
 	h.Autoclose(w, httptest.NewRequest(http.MethodPost, "/incidents/autoclose", strings.NewReader(`{"resolvedForDays":14,"limit":1}`)))
 	if w.Code != http.StatusOK {

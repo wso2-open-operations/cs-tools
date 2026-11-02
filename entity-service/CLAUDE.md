@@ -4342,8 +4342,9 @@ that component's CLAUDE.md).
   (1) re-check under the row lock that the incident is still due (`incidentAutocloseDue`), returning
   `repository.ErrIncidentNotDueForAutoclose` and writing nothing when it was re-opened, closed or touched since it
   was listed, and (2) close without the resolution code and notes a manual close needs.
-- **Internal callers only** (`internalOnly`, as the case auto-closure routes; the scheduler's client id must be in
-  `M2M_CLIENT_IDS`).
+- **Internal callers only**, checked twice as case auto-closure does: `internalOnly` on the route, and
+  `RequireInternalCaller` in the service (403) before anything is listed. The scheduler's client id must be in
+  `M2M_CLIENT_IDS`.
 - **An incident with no `resolved_on`** (synced rows can lack it) is measured from `work_item.updated_on`, as case
   auto-closure's reference time falls back to it. Any later write to the work item pushes it back; review those in
   the first dry run.
@@ -4369,8 +4370,11 @@ page.
   published (a manual close publishes none either).
 - Tests: `incident_autoclose_integration_test.go` (`INCIDENT_AUTOCLOSE_TEST_DSN`: due / not due / NULL
   `resolved_on` / no close notes / other states, the default system user and one with a row, the task cascade,
-  dry run, limit and `more`, the re-check under the lock, no comment rows, the manual close's stamps),
-  `incident_autoclose_service_test.go`, `incident_autoclose_handler_test.go`.
+  dry run, limit and `more`, the re-check under the lock, no comment rows, the manual close's stamps, and under
+  dual-write, as case auto-closure's `TestAutoclosureIntegration_DualWrite*`: the close is mirrored as exactly
+  `{state: closed}` with no user token, and a failing mirror neither fails the close nor repeats it),
+  `incident_autoclose_service_test.go` (including the 403 for a caller that is not internal),
+  `incident_autoclose_handler_test.go`.
 
 ## Change requests
 

@@ -31,11 +31,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -147,7 +150,7 @@ func acSweepAs(t *testing.T, pool *pgxpool.Pool, req domain.IncidentAutocloseReq
 	t.Helper()
 	scoped := repository.NewScoped(pool)
 	incidents := service.NewIncidentServiceWithPublisher(repository.NewIncidentRepository(scoped), repository.NewUserRepository(pool), nil)
-	svc := service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(scoped), incidents, systemEmail)
+	svc := service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(scoped), incidents, rrUnrestrictedAccess{}, systemEmail)
 	resp, err := svc.Autoclose(acCtx(), req)
 	if err != nil {
 		t.Fatalf("Autoclose: %v", err)
@@ -384,5 +387,166 @@ func TestIncidentManualClose_RecordsClosedOnAndBy(t *testing.T) {
 	}
 	if r := acRead(t, pool, inc); !r.closedOn.Equal(*stamped) || r.closedBy != nil {
 		t.Errorf("resent close restamped: %+v", r)
+	}
+}
+
+// acMirror stands in for the backing data source's incident service under
+// DATA_SOURCE=postgres-servicenow-dual-write: it records each mirrored update
+// and whether it carried a user token, and fails every call with failWith.
+type acMirror struct {
+	service.IncidentService
+	mu       sync.Mutex
+	reqs     []domain.UpdateIncidentRequest
+	tokens   []string
+	failWith error
+}
+
+func (m *acMirror) UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reqs = append(m.reqs, req)
+	m.tokens = append(m.tokens, middleware.UserIDTokenFromContext(ctx))
+	return domain.UpdateIncidentResponse{}, m.failWith
+}
+
+func (m *acMirror) snapshot() ([]domain.UpdateIncidentRequest, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]domain.UpdateIncidentRequest(nil), m.reqs...), append([]string(nil), m.tokens...)
+}
+
+// acFailures records the write-back failures the dispatcher reports.
+type acFailures struct {
+	mu    sync.Mutex
+	calls []domain.CreateSNWritebackFailureRequest
+}
+
+func (f *acFailures) Create(_ context.Context, req domain.CreateSNWritebackFailureRequest) (domain.SNWritebackFailure, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, req)
+	return domain.SNWritebackFailure{ID: "f1"}, nil
+}
+
+func (f *acFailures) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
+// acDualWriteService wires the auto-close as routes.go does under dual-write:
+// the incident service with a mirror and a write-back dispatcher.
+func acDualWriteService(pool *pgxpool.Pool, failWith error) (service.IncidentAutocloseService, *acMirror, *acFailures) {
+	scoped := repository.NewScoped(pool)
+	mirror := &acMirror{failWith: failWith}
+	failures := &acFailures{}
+	incidents := service.NewIncidentServiceWithSNMirror(repository.NewIncidentRepository(scoped), repository.NewUserRepository(pool),
+		mirror, nil, service.NewSNWritebackDispatcher(failures))
+	return service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(scoped), incidents, rrUnrestrictedAccess{}, ""), mirror, failures
+}
+
+func acWaitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
+}
+
+// TestIncidentAutoclose_DualWriteMirrorsTheClose: under dual-write the close is
+// written back like any other incident update, as case auto-closure's is: the
+// mirror gets exactly {state: closed} for the incident, under no user token (so
+// as the integration's own user), and no write-back failure is recorded.
+func TestIncidentAutoclose_DualWriteMirrorsTheClose(t *testing.T) {
+	pool := incidentAutoclosePool(t)
+	inc := acResolved(t, pool, acDue, false)
+	svc, mirror, failures := acDualWriteService(pool, nil)
+
+	resp, err := svc.Autoclose(acCtx(), domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr()})
+	if err != nil {
+		t.Fatalf("Autoclose: %v", err)
+	}
+	if !acClosedIDs(resp)[inc] {
+		t.Fatalf("closed = %+v, want the due incident", resp.Closed)
+	}
+	if r := acRead(t, pool, inc); r.state != "CLOSED" {
+		t.Fatalf("Postgres state = %s, want CLOSED", r.state)
+	}
+	var mine []domain.UpdateIncidentRequest
+	var tokens []string
+	acWaitFor(t, func() bool {
+		reqs, toks := mirror.snapshot()
+		mine, tokens = nil, nil
+		for i, r := range reqs {
+			if r.ID == inc {
+				mine, tokens = append(mine, r), append(tokens, toks[i])
+			}
+		}
+		return len(mine) == 1
+	})
+	got := mine[0]
+	if got.State == nil || *got.State != domain.IncidentStateClosed {
+		t.Errorf("mirrored state = %v, want CLOSED", got.State)
+	}
+	got.ID, got.State = "", nil
+	if !reflect.DeepEqual(got, domain.UpdateIncidentRequest{}) {
+		t.Errorf("mirrored request carries more than the state: %+v", got)
+	}
+	if tokens[0] != "" {
+		t.Errorf("the mirrored close carried a user token; want none (the integration's own user)")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := failures.count(); n != 0 {
+		t.Errorf("write-back failures = %d, want none", n)
+	}
+}
+
+// TestIncidentAutoclose_DualWriteMirrorFailureNeitherFailsNorRepeats: a mirror
+// that fails does not fail the close, and the next run does not close (or
+// mirror) the incident again: Postgres is the record, and the failure is queued
+// for replay, as for case auto-closure.
+func TestIncidentAutoclose_DualWriteMirrorFailureNeitherFailsNorRepeats(t *testing.T) {
+	pool := incidentAutoclosePool(t)
+	inc := acResolved(t, pool, acDue, false)
+	svc, mirror, failures := acDualWriteService(pool, errors.New("the backing data source is down"))
+
+	resp, err := svc.Autoclose(acCtx(), domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr()})
+	if err != nil {
+		t.Fatalf("Autoclose: %v", err)
+	}
+	if !acClosedIDs(resp)[inc] {
+		t.Fatalf("closed = %+v, want the due incident closed although the mirror fails", resp.Closed)
+	}
+	for _, f := range resp.Failed {
+		if f.ID == inc {
+			t.Fatalf("the incident is reported failed: %+v", f)
+		}
+	}
+	acWaitFor(t, func() bool { return failures.count() >= 1 })
+
+	again, err := svc.Autoclose(acCtx(), domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr()})
+	if err != nil {
+		t.Fatalf("second Autoclose: %v", err)
+	}
+	if acClosedIDs(again)[inc] {
+		t.Fatalf("the second run closed the incident again")
+	}
+	time.Sleep(50 * time.Millisecond)
+	reqs, _ := mirror.snapshot()
+	n := 0
+	for _, r := range reqs {
+		if r.ID == inc {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("mirrored closes of the incident = %d, want 1", n)
+	}
+	if r := acRead(t, pool, inc); r.state != "CLOSED" {
+		t.Errorf("Postgres state = %s, want CLOSED", r.state)
 	}
 }
