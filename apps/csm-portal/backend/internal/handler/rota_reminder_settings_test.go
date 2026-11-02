@@ -147,7 +147,15 @@ func TestRotaReminderRequest_SendNow(t *testing.T) {
 	if w.Code != http.StatusCreated || fake.body["test"] != true {
 		t.Fatalf("a test: status %d body %v", w.Code, fake.body)
 	}
-	for _, bad := range []struct{ family, body string }{{"OPS", `{"kind":"weekend"}`}, {"CRE", `{"kind":"monthly"}`}, {"CRE", `{}`}, {"CRE", `{"kind":"weekend","test":"yes"}`}} {
+	for _, kind := range []string{"morning", "evening"} {
+		fake = &fakeReminderRequestClient{}
+		w = httptest.NewRecorder()
+		NewRotaReminderRequestHandler(fake).CreateRotaReminderRequest(w, reminderSettingsRequest(http.MethodPost, "CRE", `{"kind":"`+kind+`"}`))
+		if w.Code != http.StatusCreated || fake.body["kind"] != kind {
+			t.Fatalf("%s: status %d body %v", kind, w.Code, fake.body)
+		}
+	}
+	for _, bad := range []struct{ family, body string }{{"OPS", `{"kind":"weekend"}`}, {"CRE", `{"kind":"monthly"}`}, {"CRE", `{"kind":"Morning"}`}, {"CRE", `{}`}, {"CRE", `{"kind":"weekend","test":"yes"}`}} {
 		fake := &fakeReminderRequestClient{}
 		w := httptest.NewRecorder()
 		NewRotaReminderRequestHandler(fake).CreateRotaReminderRequest(w, reminderSettingsRequest(http.MethodPost, bad.family, bad.body))

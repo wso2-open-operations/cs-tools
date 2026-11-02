@@ -734,8 +734,13 @@ export type RotaReminderSettings = SaveRotaReminderSettings & {
   updatedOn: string;
 };
 
-/** Which reminder is asked for: the next working day's, or the weekend's. */
-export type RotaReminderKind = "weekday" | "weekend";
+/**
+ * Which reminder is asked for: the next working day's Morning (with its
+ * on-call) or Evening, or the weekend's. "weekday" is both of the next working
+ * day's at once: what the card asked for before it offered them apart, still
+ * found on older requests.
+ */
+export type RotaReminderKind = "morning" | "evening" | "weekend" | "weekday";
 
 /** Where a request is: waiting for the scheduled task, being sent, or done. */
 export type RotaReminderStatus = "QUEUED" | "SENDING" | "SENT" | "FAILED";

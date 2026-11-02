@@ -14348,7 +14348,7 @@ paths:
               type: object
               required: [kind]
               properties:
-                kind: { type: string, enum: [weekday, weekend] }
+                kind: { type: string, enum: [morning, evening, weekend, weekday] }
                 test:
                   type: boolean
                   description: Send it only to the person asking, as a test copy; their own queue, 2 minutes apart.

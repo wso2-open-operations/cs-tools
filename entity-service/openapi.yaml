@@ -10058,8 +10058,8 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [weekday, weekend]
-                  description: weekday is the next working day's Morning and Evening; weekend the coming weekend, sent even if not fully marked.
+                  enum: [morning, evening, weekend, weekday]
+                  description: morning is the next working day's Morning with its on-call; evening its Evening; weekday both at once; weekend the coming weekend, sent even if not fully marked.
                 test:
                   type: boolean
                   default: false
@@ -28862,7 +28862,7 @@ components:
           enum: [CRE, SRE, SME]
         kind:
           type: string
-          enum: [weekday, weekend]
+          enum: [morning, evening, weekend, weekday]
         status:
           type: string
           enum: [QUEUED, SENDING, SENT, FAILED]

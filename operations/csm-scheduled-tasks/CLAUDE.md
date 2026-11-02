@@ -187,7 +187,7 @@ a redeploy; a family that has never saved the card gets no scheduled reminder
 | `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
 | `rota_weekend_notice` | `30 14 * * 0-4` (20:00 Colombo, Sun–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once; until then the rota admins are asked every evening |
 | `rota_weekend_reminder` | `30 9 * * 5` (15:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
-| `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a weekday or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
+| `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
 
 The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
 (`NextWorkingDay`, `ComingWeekend`), counted in `ROTA_REMINDER_TIME_ZONE` (default
@@ -237,7 +237,9 @@ schedules assume `TZ=UTC` like every other here.
   CSM admin or the family's rota admin, refused while one of the same kind is waiting and within
   10 minutes of the last that did not fail). This task has no address to call, so at every run it claims the
   waiting requests (`POST .../reminder-requests/{family}/claim`, up to 5 a run) and sends each
-  with the code above: `weekday` is the next working day's windows, `weekend` the coming weekend
+  with the code above: `morning` is the next working day's Morning with its on-call, `evening` its
+  Evening (each found by its code ending `_MORNING` / `_EVENING` in `ROTA_REMINDER_WEEKDAY_SHIFTS`;
+  `windowRotations`), `weekday` both (what the card sent before it offered them apart), `weekend` the coming weekend
   (this one from a Saturday or a Sunday), sent even when not fully marked, as on Friday, and
   recorded like Friday's, so invitations update and cancellations follow. The saved on/off
   switches do not stop it; the saved minimums, hours, invitations switch and copy list apply.
