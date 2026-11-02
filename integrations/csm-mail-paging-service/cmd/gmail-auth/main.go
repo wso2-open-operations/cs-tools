@@ -83,11 +83,15 @@ func run() error {
 	// access_type=offline + prompt=consent make Google issue a refresh token.
 	fmt.Println("Open this URL and log in as the mailbox user:")
 	fmt.Println()
-	fmt.Println(oc.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent")))
+	// PKCE binds the returned code to this process.
+	verifier := oauth2.GenerateVerifier()
+	fmt.Println(oc.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"), oauth2.S256ChallengeOption(verifier)))
 
 	select {
 	case code := <-codes:
-		tok, err := oc.Exchange(context.Background(), code)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		tok, err := oc.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 		if err != nil {
 			return err
 		}
