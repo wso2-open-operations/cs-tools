@@ -261,6 +261,39 @@ func (s *Store) SetCaseAssignee(ctx context.Context, caseID, email string) error
 	return s.rdb.Set(ctx, caseAssigneePrefix+caseID, email, caseAssigneeTTL).Err()
 }
 
+// severityChangedKey is this ladder's record of a case's latest handled
+// severity change, beside its state keys (each ladder handles the event).
+func (s *Store) severityChangedKey(caseID string) string {
+	return strings.TrimSuffix(s.state, "state:") + "case:severity-changed:" + caseID
+}
+
+// SeverityChangedAt returns the latest severity change this ladder handled for
+// the case, or zero when none is recorded.
+func (s *Store) SeverityChangedAt(ctx context.Context, caseID string) (time.Time, error) {
+	v, err := s.rdb.Get(ctx, s.severityChangedKey(caseID)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, v).UTC(), nil
+}
+
+// SetSeverityChangedAt records at as the latest handled severity change,
+// never moving the record backwards. Events about one case arrive in order on
+// one partition, so the read-then-write needs no script.
+func (s *Store) SetSeverityChangedAt(ctx context.Context, caseID string, at time.Time) error {
+	last, err := s.SeverityChangedAt(ctx, caseID)
+	if err != nil {
+		return err
+	}
+	if !last.IsZero() && !at.After(last) {
+		return nil
+	}
+	return s.rdb.Set(ctx, s.severityChangedKey(caseID), at.UnixNano(), stateTTL).Err()
+}
+
 // Create stores a new ladder only if none is running for this incident, and
 // reports whether it actually created one.
 //

@@ -756,7 +756,20 @@ is keyed by the case id, and `Trigger.Record` is `case`.
   new chain, on both ladders (`cancelEngineerComment`). The assignee is known
   only from a `case.assigned` this service saw, so on a case assigned before
   that the assignee's own comment went unmatched and the calls ran on (seen on
-  prod, 2026-11-03). New-case chains keep the rule above.
+  prod, 2026-11-03). New-case chains keep the rule above. Three guards, each
+  off when its field is absent (older publishers):
+  - a comment whose `createdOn` is more than `commentClockSkew` (1m) before the
+    chain's `Trigger.ChangedAt` (`changedAt` on `case.severity_changed`) is a
+    redelivered old comment and does not stop it;
+  - `supportEngineerUnknown` (entity-service could not check the role) with a
+    `@wso2.com` author counts as an engineer's comment;
+  - each ladder keeps the latest handled `changedAt` per case in Redis
+    (`…case:severity-changed:<caseId>`, 7 days, `SetSeverityChangedAt` never
+    moves it back), so a replayed or older severity change is ignored even
+    after its chain stopped and its state was deleted. A failed read or write
+    of that record is logged and handled as before.
+  The new fields are decoded strictly: deploy this service before the
+  entity-service that sends them.
 - **SRE team**: an S0 case's SRE ladder pages its account's SRE team
   (`sreTeamName` on `case.created`/`case.severity_changed`, entity-service's
   `account.sre_team_id`), carried as `RoutingContext.SRETeam`; `Trigger.Team`

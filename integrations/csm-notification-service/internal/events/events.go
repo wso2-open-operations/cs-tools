@@ -353,6 +353,14 @@ type CommentAddedPayload struct {
 	// with no lookup here at all. See entity-service's own
 	// CommentAddedPayload.IsSupportEngineerResponse doc comment.
 	IsSupportEngineerResponse bool `json:"isSupportEngineerResponse,omitempty"`
+	// SupportEngineerUnknown is true when entity-service could not decide
+	// IsSupportEngineerResponse (no CS_ENGINEER_ROLE, or the author or role
+	// lookup failed), so a false there is not a confirmed non-engineer.
+	SupportEngineerUnknown bool `json:"supportEngineerUnknown,omitempty"`
+	// CreatedOn is when the comment was published (RFC 3339, UTC). The
+	// paging engine uses it to ignore a comment written before the severity
+	// change that started the running chain. Empty from older publishers.
+	CreatedOn string `json:"createdOn,omitempty"`
 	// CaseType/EngagementType let dispatch.checkFrustration route a
 	// frustration-detection Chat alert to the Migration audience instead of
 	// the usual team/Incident Monitor routing, when the comment landed on a
@@ -476,6 +484,10 @@ type SeverityChangedPayload struct {
 	SRETeamID   string   `json:"sreTeamId,omitempty"`
 	SRETeamName string   `json:"sreTeamName,omitempty"`
 	Recipients  []string `json:"recipients"`
+	// ChangedAt is when the severity changed (RFC 3339, UTC). The paging
+	// engine uses it to recognise a replay of a change it already handled.
+	// Empty from older publishers.
+	ChangedAt string `json:"changedAt,omitempty"`
 	// ProjectOnboardingStatus/IsEvaluationAccount are deprecated and
 	// unused — see CaseCreatedPayload's own doc comment for why this
 	// decode-compatibility pair exists.

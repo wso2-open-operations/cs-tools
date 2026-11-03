@@ -54,6 +54,8 @@ type memStore struct {
 	called map[string]time.Time
 	// assignees is each case's current assignee.
 	assignees map[string]string
+	// severityChanged is each case's latest handled severity change.
+	severityChanged map[string]time.Time
 	// claims are due calls a replica has taken.
 	claims map[string]bool
 	// smePages are the open SME pages, keyed by smeKey, holding the press
@@ -87,6 +89,20 @@ func (m *memStore) SetCaseAssignee(_ context.Context, caseID, email string) erro
 		m.assignees = map[string]string{}
 	}
 	m.assignees[caseID] = email
+	return nil
+}
+
+func (m *memStore) SeverityChangedAt(_ context.Context, caseID string) (time.Time, error) {
+	return m.severityChanged[caseID], nil
+}
+
+func (m *memStore) SetSeverityChangedAt(_ context.Context, caseID string, at time.Time) error {
+	if m.severityChanged == nil {
+		m.severityChanged = map[string]time.Time{}
+	}
+	if last := m.severityChanged[caseID]; at.After(last) {
+		m.severityChanged[caseID] = at
+	}
 	return nil
 }
 

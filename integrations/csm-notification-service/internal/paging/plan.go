@@ -53,6 +53,10 @@ type Trigger struct {
 	// this, never from plan time, so a delayed consume does not shift the
 	// ladder later than the specification intends.
 	At time.Time
+	// ChangedAt is when a case's severity changed, from the event, on a
+	// chain a severity change started; zero when the publisher sent none. A
+	// comment written before it does not stop the chain.
+	ChangedAt time.Time `json:",omitzero"`
 	// Routing selects recipients per level.
 	Routing RoutingContext
 	// Record is what the ladder pages about: a customer case (RecordCase) or
