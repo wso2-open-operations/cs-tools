@@ -94,7 +94,8 @@ fails before the call (an invalid body, `not_configured`) writes no usage line.
 
 The system prompt (the catalogue and the Teams section) is the same for every user and call of one
 deployment, so `Generate` marks it with `cache_control` (`ephemeral`, the default 5-minute lifetime, renewed
-by each hit). A call within that time reads it at a tenth of the input price; the first call after it
+by each hit). A call within that time reads it at the model's cache-hit price (0.05 times the input
+price on Sonnet 5.5, the default, and Opus 5.5; 0.1 times on most other models); the first call after it
 expires writes it at 1.25 times. Generation happens in short sessions (a prompt, then follow-ups), so the
 5-minute lifetime fits: a 1-hour cache would cost 2 times at the start of nearly every session. Anything
 that changes per request must stay after the system prompt (the prompt and the draft are in the user
