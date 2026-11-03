@@ -24540,6 +24540,16 @@ components:
           description: >-
             The case's current escalation level -- see CaseView.escalationLevel's
             description.
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Time the case moved to solution proposed (UTC, RFC 3339), null if never."
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Time the case was closed (UTC, RFC 3339), null if not closed."
 
     SearchCasesResponse:
       type: object
