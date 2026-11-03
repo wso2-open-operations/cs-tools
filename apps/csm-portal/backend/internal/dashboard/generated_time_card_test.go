@@ -202,6 +202,10 @@ func TestRelativeDate(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_RejectsTimeCardWidgetsItCannotRun: a time card widget the
+// entity service cannot answer is refused with the reason: another grouping or
+// a bucket, an unknown measure, and a per-day window that is missing, too long
+// on some day of the year, or mixes a plain and a relative date.
 func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 	tc := func(shape, rest string) string {
 		return timeCardDashboard(`{"id":"w","displayName":"W","resourceType":"time_card","shape":"` + shape + `","gridWidth":6` + rest + `}`)

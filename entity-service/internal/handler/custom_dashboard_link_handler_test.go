@@ -72,6 +72,9 @@ func serveLink(svc *stubCustomDashboardLinkService, method, path, body string) *
 	return rec
 }
 
+// TestCustomDashboardLinkHandler: get, enable and disable answer the owner's
+// link (no linkId when it is off, 204 on disable), and open takes the link id
+// from the body.
 func TestCustomDashboardLinkHandler(t *testing.T) {
 	link := domain.CustomDashboardLink{Enabled: true, LinkID: testLinkID, OpenedBy: 3}
 
@@ -128,6 +131,9 @@ func TestCustomDashboardLinkHandler(t *testing.T) {
 	})
 }
 
+// TestCustomDashboardLinkHandler_ServiceErrors: the service's errors map to
+// their statuses: no token, another owner's dashboard, a non-UUID dashboard or
+// link id, and a link that is off or unknown.
 func TestCustomDashboardLinkHandler_ServiceErrors(t *testing.T) {
 	openBody := `{"linkId":"` + testLinkID + `"}`
 	cases := []struct {

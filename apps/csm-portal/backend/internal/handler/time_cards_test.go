@@ -85,6 +85,9 @@ func TestCreateTimeCard(t *testing.T) {
 	})
 }
 
+// TestAggregateTimeCards: the totals route forwards the body and passes the
+// response through, refuses an unauthenticated request or malformed JSON
+// without an upstream call, and maps upstream errors.
 func TestAggregateTimeCards(t *testing.T) {
 	t.Run("rejects unauthenticated requests", func(t *testing.T) {
 		called := false

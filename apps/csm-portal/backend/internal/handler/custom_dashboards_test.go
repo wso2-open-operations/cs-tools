@@ -1072,6 +1072,9 @@ func serveLinkRoute(client *fakeCustomDashboardClient, method, path, body string
 	return w
 }
 
+// TestCustomDashboardLink_OwnerRoutes: GET and PUT answer the link (no linkId
+// when it is off) and DELETE is 204; a non-UUID id or no signed-in user is
+// refused without an upstream call.
 func TestCustomDashboardLink_OwnerRoutes(t *testing.T) {
 	link := entity.CustomDashboardLink{Enabled: true, LinkID: testDashboardLinkID, OpenedBy: 2}
 	path := "/dashboards/custom/" + strings.ToUpper(testCustomDashboardID) + "/link"
@@ -1133,6 +1136,10 @@ func TestCustomDashboardLink_OwnerRoutes(t *testing.T) {
 	})
 }
 
+// TestOpenDashboardLink: opening a link answers the dashboard and whether it
+// is the caller's own; a bad body is refused without an upstream call, a link
+// that is off or unknown says so, and an upstream failure shows the fixed
+// message.
 func TestOpenDashboardLink(t *testing.T) {
 	body := `{"linkId":"` + strings.ToUpper(testDashboardLinkID) + `"}`
 
