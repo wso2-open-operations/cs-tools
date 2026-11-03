@@ -237,6 +237,9 @@ export function useWidgetGroupByData(
   // query (which is `false`).
   const isLoading = !enabled || (!!groupBy && awaitingCurrentUser) || (!!groupBy && query.isLoading);
   const isError = !!groupBy && query.isError;
+  // Read from the status, not `instanceof BackendApiError`: a 403 is the
+  // caller's role, not a failure, and the tile says so instead of an error.
+  const isForbidden = isError && (query.error as { status?: unknown } | null)?.status === 403;
 
   const buckets = query.data?.groups ?? [];
   // A time card widget measuring hours shows each bucket's logged time, in
@@ -284,5 +287,5 @@ export function useWidgetGroupByData(
   // `totalRecords` and (groups + othersCount) could ever disagree upstream.
   const total = slices.reduce((sum, s) => sum + s.value, 0);
 
-  return { slices, total, isLoading, isError };
+  return { slices, total, isLoading, isError, isForbidden };
 }

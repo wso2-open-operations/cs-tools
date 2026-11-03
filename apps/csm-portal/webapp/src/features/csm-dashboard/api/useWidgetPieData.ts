@@ -58,6 +58,10 @@ export interface WidgetPieData {
   total: number;
   isLoading: boolean;
   isError: boolean;
+  /** The data was refused (403): the user's role may not read it, for
+   * example time card totals for anyone but CS engineers and admins. Only
+   * `useWidgetGroupByData` sets it. */
+  isForbidden?: boolean;
 }
 
 /**

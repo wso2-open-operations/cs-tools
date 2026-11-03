@@ -900,18 +900,26 @@ function DashboardWidgetTile({
             </Typography>
           )}
           <Box sx={{ pointerEvents: "auto" }}>
-            <ChartComponent
-              slices={pieData.slices}
-              total={pieData.total}
-              isLoading={pieData.isLoading}
-              isError={pieData.isError}
-              onSliceClick={handleSliceClick}
-              formatValue={formatValue}
-              // Only DashboardPieChart accepts this prop — shape "bar" never
-              // sets `inlineLabels` on its own widget config, but guard it
-              // here too rather than relying on that alone.
-              {...(shape === "pie" ? { inlineLabels } : {})}
-            />
+            {pieData.isForbidden ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
+                {resourceType === "time_card"
+                  ? "You don't have access to time card totals."
+                  : "You don't have access to this data."}
+              </Typography>
+            ) : (
+              <ChartComponent
+                slices={pieData.slices}
+                total={pieData.total}
+                isLoading={pieData.isLoading}
+                isError={pieData.isError}
+                onSliceClick={handleSliceClick}
+                formatValue={formatValue}
+                // Only DashboardPieChart accepts this prop — shape "bar" never
+                // sets `inlineLabels` on its own widget config, but guard it
+                // here too rather than relying on that alone.
+                {...(shape === "pie" ? { inlineLabels } : {})}
+              />
+            )}
           </Box>
         </Box>
       </Card>
