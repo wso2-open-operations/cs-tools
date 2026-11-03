@@ -213,7 +213,7 @@ func TestRungEmail_DayRecipientsPerRung(t *testing.T) {
 	} {
 		// One subject for the whole chain, so a case's emails group into one
 		// conversation; the rung is the body's first line.
-		if want := "[Case Alerts] S1 CS0099001 not acknowledged"; sent[i].subject != want {
+		if want := "[Attention needed] [Case Alerts] S1 CS0099001 Respond to avoid Response SLA breach"; sent[i].subject != want {
 			t.Errorf("L%d subject = %q, want %q", i+1, sent[i].subject, want)
 		}
 		if !strings.Contains(sent[i].body, `">`+line+"</p>") {
@@ -370,7 +370,7 @@ func TestRungEmail_NightAddsTheAmericas(t *testing.T) {
 		"S1 alert at L3 for CRE Head",
 		"S1 alert at L4 for CS Head",
 	} {
-		if want := "[Case Alerts] S1 CS0099001 not acknowledged"; sent[i].subject != want {
+		if want := "[Attention needed] [Case Alerts] S1 CS0099001 Respond to avoid Response SLA breach"; sent[i].subject != want {
 			t.Errorf("night L%d subject = %q, want %q", i+1, sent[i].subject, want)
 		}
 		if !strings.Contains(sent[i].body, `">`+line+"</p>") {
@@ -429,7 +429,7 @@ func TestRungEmail_SeverityChangeStartsANewSeries(t *testing.T) {
 	if len(rig.mail.sent) != 2 {
 		t.Fatalf("sent %d emails, want L1 of each chain", len(rig.mail.sent))
 	}
-	if !strings.HasPrefix(rig.mail.sent[1].subject, "[Case Alerts] S1 ") || rig.mail.sent[1].to[0] != "atlas.lead@example.com" {
+	if !strings.HasPrefix(rig.mail.sent[1].subject, "[Attention needed] [Case Alerts] S1 ") || rig.mail.sent[1].to[0] != "atlas.lead@example.com" {
 		t.Errorf("the new chain's first email = %q to %v; want an S1 L1 email", rig.mail.sent[1].subject, rig.mail.sent[1].to)
 	}
 }
@@ -455,7 +455,7 @@ func TestRungEmail_SeverityChangeDuringSendLeavesTheNewChainAlone(t *testing.T) 
 		t.Fatal("the old chain's send dropped the new chain's L1 wake entry")
 	}
 	rig.runUntil(t, fresh.Plan.Emails[0].At)
-	if len(rig.mail.sent) != 2 || !strings.HasPrefix(rig.mail.sent[1].subject, "[Case Alerts] S1 ") {
+	if len(rig.mail.sent) != 2 || !strings.HasPrefix(rig.mail.sent[1].subject, "[Attention needed] [Case Alerts] S1 ") {
 		t.Fatalf("sent %d emails; want the old chain's L1 and then the new chain's", len(rig.mail.sent))
 	}
 }
@@ -770,24 +770,27 @@ func TestRungEmail_OpeningCountsDownTheResponseSLA(t *testing.T) {
 		t    Trigger
 		now  time.Time
 		sla  map[string]map[string]time.Duration
-		want string
+		open string
+		part string
+		late bool
 	}{
 		{"S0 default, 14m left", s0, at.Add(time.Minute), nil,
-			"Case CS1 (S0) is still in open state and response SLA remaining time is 14m."},
+			"Case CS1 (S0) is still in open state", "response SLA remaining time is 14m", false},
 		{"S0 default, breached", s0, at.Add(18 * time.Minute), nil,
-			"Case CS1 (S0) is still in open state and the response SLA was breached 3m ago."},
+			"Case CS1 (S0) is still in open state", "the response SLA was breached 3m ago", true},
 		{"S1 fetched policy wins", Trigger{Number: "CS2", Priority: "CRITICAL", At: at}, at.Add(18 * time.Minute),
 			map[string]map[string]time.Duration{"CRITICAL": {"response": 2 * time.Hour}},
-			"Case CS2 (S1) is still in open state and response SLA remaining time is 1h42m."},
+			"Case CS2 (S1) is still in open state", "response SLA remaining time is 1h42m", false},
 		{"S3 default, hours", Trigger{Number: "CS3", Priority: "MEDIUM", At: at}, at.Add(90 * time.Minute), nil,
-			"Case CS3 (S3) is still in open state and response SLA remaining time is 4h30m."},
+			"Case CS3 (S3) is still in open state", "response SLA remaining time is 4h30m", false},
 		{"unknown severity", Trigger{Number: "CS4", Priority: "WHATEVER", At: at}, at, nil,
-			"Case CS4 (WHATEVER) is still in open state."},
+			"Case CS4 (WHATEVER) is still in open state", "", false},
 	} {
 		e.emailSending.SLADurations = tc.sla
 		code, _ := emailSeverity(tc.t.Priority)
-		if got := e.rungEmailOpening(tc.t, code, tc.now); got != tc.want {
-			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		open, sla, late := e.rungEmailOpening(tc.t, code, tc.now)
+		if open != tc.open || sla != tc.part || late != tc.late {
+			t.Errorf("%s: (%q, %q, %v), want (%q, %q, %v)", tc.name, open, sla, late, tc.open, tc.part, tc.late)
 		}
 	}
 }
@@ -804,5 +807,46 @@ func TestRungEmail_EveryRungOpensWithTheSLA(t *testing.T) {
 		if !strings.Contains(m.body, "Case CS0099001 (S1) is still in open state and ") {
 			t.Errorf("L%d does not open with the SLA sentence", i+1)
 		}
+	}
+}
+
+func TestCaseStillNeeded(t *testing.T) {
+	caseState := func(assigned, commented bool) LadderState {
+		return LadderState{
+			Plan:               Plan{Trigger: Trigger{Record: RecordCase}},
+			SawAssigned:        assigned,
+			SawAssigneeComment: commented,
+		}
+	}
+	for _, c := range []struct {
+		name                string
+		assigned, commented bool
+		requireBoth         bool
+		want                string
+	}{
+		{"open, both needed", false, false, true, "Current state: open, not assigned, no public comment. To stop the alerts: assign an engineer, who then adds a public comment."},
+		{"open, either stops", false, false, false, "Current state: open, not assigned. To stop the alerts: assign an engineer to the case."},
+		{"assigned, no comment", true, false, true, "Current state: assigned, but the assignee has not added a public comment yet. To stop the alerts: the assignee adds a public comment."},
+		{"commented, not assigned", false, true, true, "Current state: an engineer has commented, but the case is not assigned to them. To stop the alerts: assign the case."},
+		{"both done", true, true, true, ""},
+	} {
+		if got := caseStillNeeded(caseState(c.assigned, c.commented), c.requireBoth); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+	if got := caseStillNeeded(LadderState{}, true); got != "" {
+		t.Errorf("an incident got %q, want no line", got)
+	}
+}
+
+func TestRungEmail_SaysWhatIsStillNeeded(t *testing.T) {
+	rig := newEmailRig(dayResolver(), testClock)
+	rig.handle(t, caseCreatedAt(t, "CRITICAL", testClock))
+	rig.runUntil(t, testClock.Add(4*time.Hour))
+	if len(rig.mail.sent) == 0 {
+		t.Fatal("no rung email sent")
+	}
+	if body := rig.mail.sent[0].body; !strings.Contains(body, "Current state: open, not assigned") {
+		t.Errorf("L1 body does not say the case's state:\n%s", body)
 	}
 }

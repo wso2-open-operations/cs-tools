@@ -908,11 +908,15 @@ the CRE head Cc
 `creTeamList`, L4 To the CS head Cc `csTeamList`. Lists are
 `cre.email.teamLists` (team key -> address; the case team through
 `teams.aliases`); a list not configured sends with no Cc. Every rung of a chain
-shares one subject, `[Case Alerts] S0 CS0099001 not acknowledged`, so a case's
-emails group into one Gmail conversation (the email service sets no threading
+shares one subject, `[Attention needed] [Case Alerts] S0 CS0099001 Respond to
+avoid Response SLA breach`, so a case's emails group into one Gmail conversation (the email service sets no threading
 headers, and Gmail splits on a changed subject; agreed 2026-10-15); the body's
 first line names the rung (`S0 alert at L1 for Atlas ABT Team Lead`, night
-adding `and Americas Team Leads`), each email lists the rungs already emailed,
+adding `and Americas Team Leads`), the second says where the case stands and what is
+still missing to stop the chain, read from the ladder's state at send time
+(`caseStillNeeded`: e.g. `Current state: assigned, but the assignee has not
+added a public comment yet. To stop the alerts: the assignee adds a public
+comment.`; no line once both gestures are in), each email lists the rungs already emailed,
 and it signs off "CSM Case Alerts". It
 is not a notifier: a notifier delivers one attempt to one person (an L2 email
 would go once per lead), and a call plan drops people without a number and
@@ -935,7 +939,8 @@ notified, next escalation, and a "View case" button; tables and inline styles
 only, ASCII only. It never shows a customer escalation (`case.escalated` is a
 separate flow). Every rung's email opens "Case <n> (<sev>) is still in open
 state and response SLA remaining time is <t>" ("...was breached <t> ago" once
-past it), counted from the chain's start against the `response` clock of the
+past it), with the SLA part highlighted as a badge in the severity's colours (red
+once breached), counted from the chain's start against the `response` clock of the
 SLA duration policy the SLA engine fetches at startup (`RungEmailSending.SLADurations`),
 else WSO2's published defaults (S0 15m, S1 1h, S2 4h, S3 6h, S4 24h, as migration
 0192 seeds them). `cre.email` is set on the Alert Settings tab like any other

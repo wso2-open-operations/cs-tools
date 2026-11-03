@@ -44,8 +44,18 @@ type CasePagingEmailData struct {
 	// RungLine is the body's first line, CasePagingRungLine: the inbox
 	// preview shows it under the shared subject.
 	RungLine string
-	// Opening is the first sentence, which says why this reader is getting it.
+	// StillNeeded is the second line: the case's state now and what is still
+	// missing to stop the alerts ("Assigned, no public comment from the
+	// assignee yet. To stop the alerts: ..."). Empty renders no line.
+	StillNeeded string
+	// Opening is the first sentence, which says why this reader is getting it
+	// ("Case CS1 (S1) is still in open state"), with no closing full stop.
 	Opening string
+	// OpeningSLA ends that sentence, highlighted: "response SLA remaining time
+	// is 14m", or how long ago it was breached. Empty renders no SLA part.
+	OpeningSLA string
+	// SLABreached highlights OpeningSLA in red instead of the severity's colour.
+	SLABreached bool
 	// CaseNumber and WSO2CaseID identify the case; Title is its short
 	// description.
 	CaseNumber string
@@ -79,14 +89,14 @@ type CasePagingEmailData struct {
 
 // CasePagingSubject is the same for every rung of one chain --
 //
-//	[Case Alerts] S0 CS0099001 not acknowledged
+//	[Attention needed] [Case Alerts] S0 CS0099001 Respond to avoid Response SLA breach
 //
 // -- so a case's emails group into one conversation (Gmail groups by
 // subject; the email service sets no threading headers). Which rung this is
 // goes in the body's first line, CasePagingRungLine, which the inbox preview
 // shows. A severity change starts a new chain, and so a new conversation.
 func CasePagingSubject(severityCode, caseNumber string) string {
-	return "[Case Alerts] " + strings.TrimSpace(strings.TrimSpace(severityCode)+" "+strings.TrimSpace(caseNumber)) + " not acknowledged"
+	return "[Attention needed] [Case Alerts] " + strings.TrimSpace(strings.TrimSpace(severityCode)+" "+strings.TrimSpace(caseNumber)) + " Respond to avoid Response SLA breach"
 }
 
 // CasePagingRungLine says which rung an email is and who it is for:
@@ -124,11 +134,18 @@ var casePagingRungColours = map[int]string{1: "#1d4ed8", 2: "#b45309", 3: "#c241
 func RenderCasePagingEmail(d CasePagingEmailData) string {
 	tmpl := applyOptionalBlock(casePagingTemplate, "INTENDED_FOR", d.IntendedFor)
 	tmpl = applyOptionalBlock(tmpl, "RUNG_LINE", d.RungLine)
+	tmpl = applyOptionalBlock(tmpl, "STILL_NEEDED", d.StillNeeded)
+	tmpl = applyOptionalBlock(tmpl, "OPENING_SLA", d.OpeningSLA)
 	tmpl = applyOptionalBlock(tmpl, "CASE_URL", d.CaseURL)
 
 	colours, ok := casePagingSeverityColours[strings.ToUpper(strings.TrimSpace(d.SeverityCode))]
 	if !ok {
 		colours = casePagingNeutral
+	}
+	// The SLA part takes the severity's callout colours, S0's red once breached.
+	slaColours := colours
+	if d.SLABreached {
+		slaColours = casePagingSeverityColours["S0"]
 	}
 	const (
 		labelCell = `<td width="150" style="padding:6px 12px 6px 0; color:#5f6368; vertical-align:top; border-bottom:1px solid #f1f3f4;">`
@@ -179,7 +196,12 @@ func RenderCasePagingEmail(d CasePagingEmailData) string {
 		"<!-- [INTENDED_FOR] -->", escapeHTML(d.IntendedFor),
 		"<!-- [GREETING] -->", escapeHTML(d.Greeting),
 		"<!-- [RUNG_LINE] -->", escapeHTML(d.RungLine),
+		"<!-- [STILL_NEEDED] -->", escapeHTML(d.StillNeeded),
 		"<!-- [OPENING] -->", escapeHTML(d.Opening),
+		"<!-- [OPENING_SLA] -->", escapeHTML(d.OpeningSLA),
+		"<!-- [SLA_BG] -->", slaColours.tint,
+		"<!-- [SLA_BORDER] -->", slaColours.bar,
+		"<!-- [SLA_TEXT] -->", slaColours.tintText,
 		"<!-- [DETAIL_ROWS] -->\n", rows.String(),
 		"<!-- [CASE_URL] -->", escapeHTML(d.CaseURL),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
