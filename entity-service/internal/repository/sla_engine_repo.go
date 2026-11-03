@@ -904,11 +904,11 @@ func (r *slaEngineRepo) cancelClockFlat(ctx context.Context, workItemID, target,
 		UPDATE sla s
 		SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = NOW(),
 		    business_elapsed_percentage = GREATEST(0,
-		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM s.duration), 0) * 100
+		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM sp.duration), 0) * 100
 		    ),
 		    business_duration = ` + completedElapsedExpr + `,
-		    remaining_business_duration = GREATEST(s.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
-		    has_breached = (` + completedElapsedExpr + ` >= s.duration),
+		    remaining_business_duration = GREATEST(sp.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
+		    has_breached = (` + completedElapsedExpr + ` >= sp.duration),
 		    pause_duration = COALESCE(s.pause_duration, INTERVAL '0') +
 		        CASE WHEN s.paused_on IS NOT NULL THEN NOW() - s.paused_on ELSE INTERVAL '0' END,
 		    paused_on = NULL,
@@ -955,7 +955,7 @@ func (r *slaEngineRepo) cancelClockBusinessDays(ctx context.Context, workItemID,
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM s.duration)
+			       EXTRACT(EPOCH FROM sp.duration)
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
@@ -1328,11 +1328,11 @@ func (r *slaEngineRepo) completeClockFlat(ctx context.Context, workItemID, targe
 		UPDATE sla s
 		SET stage = 'ACHIEVED'::sla_stage_enum, end_on = NOW(), is_active = FALSE,
 		    business_elapsed_percentage = GREATEST(0,
-		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM s.duration), 0) * 100
+		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM sp.duration), 0) * 100
 		    ),
 		    business_duration = ` + completedElapsedExpr + `,
-		    remaining_business_duration = GREATEST(s.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
-		    has_breached = (` + completedElapsedExpr + ` >= s.duration),
+		    remaining_business_duration = GREATEST(sp.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
+		    has_breached = (` + completedElapsedExpr + ` >= sp.duration),
 		    pause_duration = COALESCE(s.pause_duration, INTERVAL '0') +
 		        CASE WHEN s.paused_on IS NOT NULL THEN NOW() - s.paused_on ELSE INTERVAL '0' END,
 		    paused_on = NULL,
@@ -1376,7 +1376,7 @@ func (r *slaEngineRepo) completeClockBusinessDays(ctx context.Context, workItemI
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM s.duration)
+			       EXTRACT(EPOCH FROM sp.duration)
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
@@ -1575,7 +1575,7 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		    paused_on = CASE WHEN $3 THEN COALESCE(s.paused_on, NOW()) ELSE NULL END,
 		    business_elapsed_percentage = CASE WHEN $3 THEN GREATEST(0,
 		            EXTRACT(EPOCH FROM (COALESCE(s.paused_on, NOW()) - s.start_on - COALESCE(s.pause_duration, INTERVAL '0')))
-		            / NULLIF(EXTRACT(EPOCH FROM s.duration), 0) * 100
+		            / NULLIF(EXTRACT(EPOCH FROM sp.duration), 0) * 100
 		        )
 		        ELSE s.business_elapsed_percentage
 		    END,
@@ -1585,7 +1585,7 @@ func (r *slaEngineRepo) setPausedFlat(ctx context.Context, workItemID, target, p
 		        ELSE s.business_duration
 		    END,
 		    remaining_business_duration = CASE WHEN $3 THEN GREATEST(
-		            s.duration - (COALESCE(s.paused_on, NOW()) - s.start_on - COALESCE(s.pause_duration, INTERVAL '0')), INTERVAL '0'
+		            sp.duration - (COALESCE(s.paused_on, NOW()) - s.start_on - COALESCE(s.pause_duration, INTERVAL '0')), INTERVAL '0'
 		        )
 		        ELSE s.remaining_business_duration
 		    END,
@@ -1627,7 +1627,7 @@ func (r *slaEngineRepo) setPausedBusinessDays(ctx context.Context, workItemID, t
 			SELECT s.id, s.start_on, s.paused_on,
 			       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 			       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-			       EXTRACT(EPOCH FROM s.duration)
+			       EXTRACT(EPOCH FROM sp.duration)
 			FROM sla s
 			JOIN sla_policy sp ON sp.id = s.sla_policy_id
 			WHERE s.work_item_id = $1::uuid
@@ -1779,11 +1779,11 @@ func (r *slaEngineRepo) ReviseClocks(ctx context.Context, workItemID string, pol
 		UPDATE sla s
 		SET stage = 'CANCELLED'::sla_stage_enum, is_active = FALSE, end_on = NOW(),
 		    business_elapsed_percentage = GREATEST(0,
-		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM s.duration), 0) * 100
+		        EXTRACT(EPOCH FROM ` + completedElapsedExpr + `) / NULLIF(EXTRACT(EPOCH FROM sp.duration), 0) * 100
 		    ),
 		    business_duration = ` + completedElapsedExpr + `,
-		    remaining_business_duration = GREATEST(s.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
-		    has_breached = (` + completedElapsedExpr + ` >= s.duration),
+		    remaining_business_duration = GREATEST(sp.duration - ` + completedElapsedExpr + `, INTERVAL '0'),
+		    has_breached = (` + completedElapsedExpr + ` >= sp.duration),
 		    pause_duration = COALESCE(s.pause_duration, INTERVAL '0') +
 		        CASE WHEN s.paused_on IS NOT NULL THEN NOW() - s.paused_on ELSE INTERVAL '0' END,
 		    paused_on = NULL,
@@ -1854,7 +1854,7 @@ func reviseClocksCancelBusinessDays(ctx context.Context, tx pgx.Tx, workItemID s
 		SELECT s.id, s.start_on, s.paused_on,
 		       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0),
 		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-		       EXTRACT(EPOCH FROM s.duration)
+		       EXTRACT(EPOCH FROM sp.duration)
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid
