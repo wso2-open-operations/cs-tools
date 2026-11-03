@@ -72,9 +72,17 @@ export default function GenerateChatPanel({
 
   // The box has the cursor when the chat opens and again when a reply arrives
   // (it is disabled while one is on its way, which drops the focus), so Enter
-  // sends without a click into it first.
+  // sends without a click into it first. A reply does not take the cursor from
+  // a control the user moved to while waiting (Discard, say): only from the
+  // page itself, where the disabled box left it.
+  const wasBusyRef = useRef(busy);
   useEffect(() => {
-    if (!busy) inputRef.current?.focus();
+    const replyArrived = wasBusyRef.current && !busy;
+    wasBusyRef.current = busy;
+    if (busy) return;
+    const active = document.activeElement;
+    const focusIsFree = active === null || active === document.body || active === inputRef.current;
+    if (!replyArrived || focusIsFree) inputRef.current?.focus();
   }, [busy]);
 
   // Keep the newest message (or the "Generating…" bubble) in view. Optional
