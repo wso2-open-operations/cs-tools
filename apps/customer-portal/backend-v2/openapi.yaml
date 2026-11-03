@@ -6897,6 +6897,10 @@ components:
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentType'
+        chunks:
+          type: integer
+          minimum: 1
+          description: Number of uploaded chunks to assemble. Required, and only accepted, with ATTACHMENT_STORAGE_MODE=backend.
     StoredAttachmentConfirmResponse:
       type: object
       properties:
