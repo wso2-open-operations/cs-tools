@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -171,6 +173,58 @@ func TestPutBlock_RejectsBadArguments(t *testing.T) {
 	}
 	if err := s.PutBlock(ctx, "a/b", 0, bytes.NewReader([]byte("too long")), 3); !errors.Is(err, ErrBlockSize) {
 		t.Errorf("long body: %v, want ErrBlockSize", err)
+	}
+}
+
+// errReader fails after handing out its data, the way a request body that hits
+// its size limit does.
+type errReader struct {
+	data []byte
+	err  error
+}
+
+func (r *errReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestPutBlock_PropagatesReadErrors(t *testing.T) {
+	s := offlineStore(t)
+
+	limit := &http.MaxBytesError{Limit: 4}
+	err := s.PutBlock(context.Background(), "a/b", 0, &errReader{data: []byte("abcd"), err: limit}, 10)
+	var got *http.MaxBytesError
+	if !errors.As(err, &got) {
+		t.Fatalf("PutBlock = %v, want the body's *http.MaxBytesError to be matchable", err)
+	}
+	if errors.Is(err, ErrBlockSize) {
+		t.Errorf("a failed read was reported as ErrBlockSize: %v", err)
+	}
+
+	boom := errors.New("connection reset")
+	if err := s.PutBlock(context.Background(), "a/b", 0, &errReader{err: boom}, 10); !errors.Is(err, boom) {
+		t.Errorf("PutBlock = %v, want the read error to be wrapped", err)
+	}
+}
+
+func TestPutBlock_DoesNotAllocateTheDeclaredSize(t *testing.T) {
+	s := offlineStore(t)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	// Declares the largest block and sends one byte.
+	err := s.PutBlock(context.Background(), "a/b", 0, strings.NewReader("x"), MaxBlockSize)
+	runtime.ReadMemStats(&after)
+
+	if !errors.Is(err, ErrBlockSize) {
+		t.Fatalf("PutBlock = %v, want ErrBlockSize", err)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 10<<20 {
+		t.Errorf("allocated %d bytes for a 1-byte body that declared %d", allocated, MaxBlockSize)
 	}
 }
 

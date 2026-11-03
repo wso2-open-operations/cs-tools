@@ -106,10 +106,13 @@ func (s *Store) EnsureContainer(ctx context.Context) error {
 }
 
 // PutBlock stores one block of the blob at key. Blocks are numbered from 0 and
-// are committed in number order. It reads exactly size bytes from body (at most
-// MaxBlockSize) into memory first, so a caller streaming a request should pass
-// an http.MaxBytesReader-limited body, and size must be the chunk's length.
-// Sending the same index again replaces that block, which makes a retry safe.
+// are committed in number order. It reads the block from body into memory, never
+// more than size+1 bytes, and stages it only if body held exactly size bytes
+// (size is the chunk's declared length, at most MaxBlockSize); any other length
+// gives ErrBlockSize. An error from reading body, such as http.MaxBytesError from
+// a size-limited request body, is returned wrapped so callers can match it with
+// errors.As. Sending the same index again replaces that block, which makes a
+// retry safe.
 func (s *Store) PutBlock(ctx context.Context, key string, index int, body io.Reader, size int64) error {
 	if err := validateKey(key); err != nil {
 		return err
@@ -122,15 +125,15 @@ func (s *Store) PutBlock(ctx context.Context, key string, index int, body io.Rea
 		return fmt.Errorf("%w: %d bytes", ErrBlockSize, size)
 	}
 
-	buf := make([]byte, size)
-	if _, err := io.ReadFull(body, buf); err != nil {
-		return fmt.Errorf("%w: %v", ErrBlockSize, err)
+	// Read one byte past size so a longer body is noticed, and let the buffer
+	// grow with what actually arrives: allocating size up front would let a
+	// caller that declares a large chunk and sends little hold that memory.
+	buf, err := io.ReadAll(io.LimitReader(body, size+1))
+	if err != nil {
+		return fmt.Errorf("azblobstore: read block %d of %s: %w", index, key, err)
 	}
-	// Reading one more byte must hit the end; a longer body is not the chunk
-	// the caller declared.
-	var extra [1]byte
-	if n, _ := body.Read(extra[:]); n > 0 {
-		return fmt.Errorf("%w: body is longer than %d bytes", ErrBlockSize, size)
+	if int64(len(buf)) != size {
+		return fmt.Errorf("%w: body is %d bytes, declared %d", ErrBlockSize, len(buf), size)
 	}
 
 	_, err = s.container.NewBlockBlobClient(key).StageBlock(ctx, id, streaming.NopCloser(bytes.NewReader(buf)), nil)
@@ -315,7 +318,14 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// isNotFound reports a missing blob. A missing container is not that: it means
+// the store is misconfigured, and treating it as an absent blob would let Delete
+// report success and UncommittedBlocks an empty list for a container that is not
+// there.
 func isNotFound(err error) bool {
+	if bloberror.HasCode(err, bloberror.ContainerNotFound) {
+		return false
+	}
 	return bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ResourceNotFound) ||
 		isStatus(err, http.StatusNotFound)
 }
