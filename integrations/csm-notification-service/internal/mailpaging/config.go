@@ -71,10 +71,14 @@ type Config struct {
 }
 
 // Load reads and validates the config file at path.
-func Load(path string) (Config, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 -- path is the operator-set MAIL_ESCALATION_CONFIG deployment env var, read once at startup, never request input
+func Load(value string) (Config, error) {
+	// The JSON itself may be set in the variable, like MAIL_TRIGGER_RULES, instead of a path to a mounted file.
+	if v := strings.TrimSpace(value); strings.HasPrefix(v, "{") {
+		return Parse([]byte(v))
+	}
+	raw, err := os.ReadFile(value) // #nosec G304 -- value is the operator-set MAIL_ESCALATION_CONFIG deployment env var, read once at startup, never request input
 	if err != nil {
-		return Config{}, fmt.Errorf("mailpaging: read %s: %w", path, err)
+		return Config{}, fmt.Errorf("mailpaging: read %s: %w", value, err)
 	}
 	return Parse(raw)
 }
