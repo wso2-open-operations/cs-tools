@@ -3988,7 +3988,8 @@ the search, or a different total from the search's `totalTime`; keep it that way
   `user` and `project` keys are ids. Their labels never come back empty or NULL: a user with
   no name falls back to their email, then their user name; a project with no name falls back
   to its key. A NULL `p.name` used to fail the scan. A card with no project has no
-  `project` bucket and is not in that grouping's totals.
+  `project` bucket: it is counted in `othersCount` / `othersMinutes`, so every grouping's
+  totals match the search's.
 - **`day`:** groups by `work_date` and needs both `startDate` and `endDate`, at most
   `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
   The query runs `generate_series` over the window, so every day comes back in date order,

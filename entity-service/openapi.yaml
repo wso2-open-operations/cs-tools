@@ -27300,7 +27300,8 @@ components:
           description: >-
             What to group by. "day" groups by work date and requires
             filters.startDate and filters.endDate (at most 31 days, both
-            inclusive). A card with no project has no "project" bucket.
+            inclusive). A card with no project has no "project" bucket;
+            it is counted in othersCount and othersMinutes.
         measure:
           type: string
           enum: [count, minutes]

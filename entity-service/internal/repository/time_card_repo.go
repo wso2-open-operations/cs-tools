@@ -441,7 +441,8 @@ func (r *timeCardRepo) SearchTimeCards(ctx context.Context, req domain.SearchTim
 
 // timeCardAggregateColumns maps an AggregateTimeCardsRequest.GroupBy value
 // (other than "day", which has its own query) to the key and label it
-// groups by. A card with no project has no "project" bucket. A label never
+// groups by. A card with no project has no "project" bucket; it is counted
+// in "others", so every grouping adds up to the same totals. A label never
 // reads empty or NULL: a user with no name falls back to their email, then
 // user name; a project with no name to its key.
 var timeCardAggregateColumns = map[string]struct{ key, label string }{
@@ -468,9 +469,9 @@ func (r *timeCardRepo) AggregateTimeCards(ctx context.Context, req domain.Aggreg
 	where, args := timeCardWhereClause(req.Filters)
 	query := fmt.Sprintf(`
 		SELECT %s AS bucket, %s AS bucket_label, COUNT(*) AS bucket_count, SUM(%s) AS bucket_minutes
-		%s %s AND %s IS NOT NULL
+		%s %s
 		GROUP BY 1, 2
-		ORDER BY %s, bucket_label, bucket`, col.key, col.label, timeCardMinutesExpr, timeCardFromJoins, where, col.key, rank)
+		ORDER BY %s, bucket_label, bucket`, col.key, col.label, timeCardMinutesExpr, timeCardFromJoins, where, rank)
 
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
@@ -478,7 +479,7 @@ func (r *timeCardRepo) AggregateTimeCards(ctx context.Context, req domain.Aggreg
 	}
 	defer rows.Close()
 
-	buckets, err := scanTimeCardBuckets(rows, req.GroupBy == domain.TimeCardGroupByState)
+	buckets, keyless, err := scanTimeCardBuckets(rows, req.GroupBy == domain.TimeCardGroupByState)
 	if err != nil {
 		return domain.AggregateResponse{}, err
 	}
@@ -492,6 +493,8 @@ func (r *timeCardRepo) AggregateTimeCards(ctx context.Context, req domain.Aggreg
 		othersCount += b.Count
 		othersMinutes += *b.TotalMinutes
 	}
+	othersCount += keyless.Count
+	othersMinutes += *keyless.TotalMinutes
 	resp.OthersCount = othersCount
 	resp.OthersMinutes = &othersMinutes
 	resp.TotalRecords += othersCount
@@ -528,7 +531,7 @@ func (r *timeCardRepo) aggregateTimeCardsByDay(ctx context.Context, req domain.A
 	}
 	defer rows.Close()
 
-	buckets, err := scanTimeCardBuckets(rows, false)
+	buckets, _, err := scanTimeCardBuckets(rows, false)
 	if err != nil {
 		return domain.AggregateResponse{}, err
 	}
@@ -542,23 +545,33 @@ func (r *timeCardRepo) aggregateTimeCardsByDay(ctx context.Context, req domain.A
 // bucket_count, bucket_minutes) rows. lower lower-cases key and label, for
 // the state grouping: time_card_state_enum's labels are UPPER_SNAKE_CASE,
 // domain.TimeCardState's values (what the states filter accepts) lowercase.
-func scanTimeCardBuckets(rows pgx.Rows, lower bool) ([]domain.AggregateBucket, error) {
+// A row with no key (the cards with no project) is no bucket: its count and
+// minutes come back as the second result, for the caller's "others".
+func scanTimeCardBuckets(rows pgx.Rows, lower bool) ([]domain.AggregateBucket, domain.AggregateBucket, error) {
 	var buckets []domain.AggregateBucket
+	keylessMinutes := 0
+	keyless := domain.AggregateBucket{TotalMinutes: &keylessMinutes}
 	for rows.Next() {
-		var key, label string
+		var key, label *string
 		var count, minutes int
 		if err := rows.Scan(&key, &label, &count, &minutes); err != nil {
-			return nil, fmt.Errorf("scan time card bucket: %w", err)
+			return nil, keyless, fmt.Errorf("scan time card bucket: %w", err)
 		}
+		if key == nil || label == nil {
+			keyless.Count += count
+			keylessMinutes += minutes
+			continue
+		}
+		k, l := *key, *label
 		if lower {
-			key, label = strings.ToLower(key), strings.ToLower(label)
+			k, l = strings.ToLower(k), strings.ToLower(l)
 		}
-		buckets = append(buckets, domain.AggregateBucket{Key: key, Label: label, Count: count, TotalMinutes: &minutes})
+		buckets = append(buckets, domain.AggregateBucket{Key: k, Label: l, Count: count, TotalMinutes: &minutes})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate time card buckets: %w", err)
+		return nil, keyless, fmt.Errorf("iterate time card buckets: %w", err)
 	}
-	return buckets, nil
+	return buckets, keyless, nil
 }
 
 // timeCardAggregateResponse is the response for buckets with nothing folded
