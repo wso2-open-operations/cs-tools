@@ -20,6 +20,7 @@ import (
 	"context"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -282,6 +283,70 @@ func TestCustomDashboardLinkIntegration_OpeningTheLinkSharesTheDashboard(t *test
 	}
 	if id, _ := f.open(t, cdbOwnerB, on.LinkID); id != "" {
 		t.Errorf("OpenLink on a link that is off = %q, want none", id)
+	}
+}
+
+// An open that overlaps the owner turning the link off must not leave an
+// access row behind: it would survive the switch-off and give the user the
+// dashboard again, without the new link, once the link is turned back on.
+// The owner's switch-off is held open here (DisableLink's two statements, not
+// yet committed) while the open runs on another connection.
+func TestCustomDashboardLinkIntegration_AnOpenDuringTheSwitchOffAddsNothing(t *testing.T) {
+	f := newLinkFixture(t)
+	f.userType(t, cdbOwnerB, "INTERNAL")
+	on := f.enable(t, cdbOwnerA, cdbDashboard1)
+
+	tx, err := f.pool.Begin(f.ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(f.ctx) //nolint:errcheck // no-op once Commit has succeeded
+	if _, err := tx.Exec(f.ctx,
+		`UPDATE custom_dashboard SET link_enabled = false, link_id = NULL WHERE id = $1`, cdbDashboard1); err != nil {
+		t.Fatalf("switch off: %v", err)
+	}
+	if _, err := tx.Exec(f.ctx,
+		`DELETE FROM custom_dashboard_link_access WHERE dashboard_id = $1`, cdbDashboard1); err != nil {
+		t.Fatalf("remove access: %v", err)
+	}
+
+	type result struct {
+		id  string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		id, _, err := f.links.OpenLink(f.ctx, cdbOwnerB, on.LinkID)
+		done <- result{id, err}
+	}()
+	// Let the open either finish or block on the dashboard row before the
+	// switch-off commits.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(done) == 0 {
+		var waiting bool
+		if err := f.pool.QueryRow(f.ctx,
+			`SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			                WHERE wait_event_type = 'Lock' AND query LIKE '%custom_dashboard_link_access%')`).Scan(&waiting); err != nil {
+			t.Fatalf("pg_stat_activity: %v", err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := tx.Commit(f.ctx); err != nil {
+		t.Fatalf("commit switch-off: %v", err)
+	}
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("OpenLink: %v", r.err)
+	}
+	if r.id != "" {
+		t.Errorf("OpenLink during the switch-off = %q, want none", r.id)
+	}
+	if n := f.accessRows(t, cdbDashboard1); n != 0 {
+		t.Errorf("access rows after the switch-off = %d, want 0", n)
 	}
 }
 

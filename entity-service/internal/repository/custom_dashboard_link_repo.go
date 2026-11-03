@@ -155,12 +155,20 @@ func (r *customDashboardLinkRepo) DisableLink(ctx context.Context, ownerID, dash
 // shows one entry per dashboard either way, see sharedWithUserFrom). Opening
 // it again adds nothing. "" when no dashboard has that link on, or the user
 // is not internal staff (internal only, as team shares).
+//
+// The dashboard row is read FOR SHARE so an open cannot overlap DisableLink:
+// the access row's foreign key only takes FOR KEY SHARE, which does not wait
+// for the switch-off's update, so without it an open that read the link as on
+// could commit its row after DisableLink removed the others. With it the open
+// waits for the switch-off and re-checks link_enabled (no row, ""), or locks
+// first and its row is removed by DisableLink's delete, which runs after.
 func (r *customDashboardLinkRepo) OpenLink(ctx context.Context, userID, linkID string) (string, bool, error) {
 	var dashboardID string
 	var own bool
 	err := r.db.QueryRow(ctx,
 		`WITH d AS (
 		   SELECT id, owner_user_id FROM custom_dashboard WHERE link_id = $2::uuid AND link_enabled
+		   FOR SHARE
 		 ), me AS (
 		   SELECT id FROM "user" WHERE id = $1::uuid AND user_type = 'INTERNAL'
 		 ), ins AS (
