@@ -1221,6 +1221,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		}
 		slog.Info("service request events enabled", "topic", cfg.SREEventHubTopic, "automatedTeams", len(cfg.SRAlertSRETeamIDs))
 	}
+	if githubSync != nil {
+		service.WithGithubCaseStates(githubSync, activeCaseSvc)
+	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
 	// activitiesHandler backs POST /cases/{id}/activities/search
 	// specifically -- see AttachmentDataSource's own doc comment for why

@@ -3465,6 +3465,28 @@ repositories over `ENTITY_TEST_DATABASE_URL`, run as the superuser and as
 a `work_item.type`/row mismatch moves, Open/Closed/already-waiting stay, a
 staff comment and a customer's work note change nothing).
 
+### A relayed GitHub comment moves an Awaiting Info case
+
+A customer-visible comment whose text starts with the GitHub relay header
+(`@user (GitHub Comment) https://github.com/...`, the link optionally in
+brackets; `IsGithubRelayedComment`) moves its case from **Awaiting Info** to
+**Waiting on WSO2**, whoever posted it. Only Awaiting Info: Solution Proposed
+is left alone. It runs from two places: `createCaseCommentAs` (in place of the
+customer check above) and `githubSyncService.handleComment`, which writes the
+comment through the mutation repository and so never reaches the case
+service (wired with `WithGithubCaseStates` in `routes.go`). Both call
+`caseService.MoveAwaitingInfoToWaitingOnWSO2`, which reads and moves the case
+under the system identity through the ordinary `UpdateCase`, so the
+activity entry, `case.status_changed`, SLA effects and the dual-write mirror
+happen as for a manual move. With a user token the move is that user's;
+without one (the webhook relay) the context carries `withSystemActor` ("System
+user"), so the activity entry is still written. Unlike `withAutoclosureActor`
+it grants no transition. When the move does not happen the customer-reply rule
+still runs. Best effort: a failure is logged and never fails
+the comment. A GitHub comment that reaches Postgres only through the
+ServiceNow sync does not pass through here. Tests:
+`github_comment_state_test.go`.
+
 ## Scheduled task runs
 
 `scheduled_task_run` (migration `0108`, `internal/domain/entity.go`'s
