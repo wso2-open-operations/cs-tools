@@ -99,6 +99,9 @@ func (f linkFixture) accessRows(t *testing.T, dashboard string) int {
 	return n
 }
 
+// TestCustomDashboardLinkIntegration_OffUntilTurnedOn: a saved dashboard's
+// link is off with no id and nobody; another owner's dashboard and an unknown
+// one have no link.
 func TestCustomDashboardLinkIntegration_OffUntilTurnedOn(t *testing.T) {
 	f := newLinkFixture(t)
 
@@ -115,6 +118,9 @@ func TestCustomDashboardLinkIntegration_OffUntilTurnedOn(t *testing.T) {
 	}
 }
 
+// TestCustomDashboardLinkIntegration_TurningOnTwiceKeepsTheLink: turning the
+// link on gives a random UUID that is not the dashboard id; turning it on
+// again keeps it, and each dashboard has its own.
 func TestCustomDashboardLinkIntegration_TurningOnTwiceKeepsTheLink(t *testing.T) {
 	f := newLinkFixture(t)
 
@@ -141,6 +147,9 @@ func TestCustomDashboardLinkIntegration_TurningOnTwiceKeepsTheLink(t *testing.T)
 	}
 }
 
+// TestCustomDashboardLinkIntegration_TurningOffRemovesEveryoneAndOnAgainIsANew
+// Link: turning the link off removes everyone who opened it, turning it off
+// again is not an error, and turning it on again gives a new link.
 func TestCustomDashboardLinkIntegration_TurningOffRemovesEveryoneAndOnAgainIsANewLink(t *testing.T) {
 	f := newLinkFixture(t)
 
@@ -170,6 +179,8 @@ func TestCustomDashboardLinkIntegration_TurningOffRemovesEveryoneAndOnAgainIsANe
 	}
 }
 
+// TestCustomDashboardLinkIntegration_OnlyTheOwnerTurnsItOnOrOff: another owner
+// can neither turn the link on nor off, and an unknown dashboard is not found.
 func TestCustomDashboardLinkIntegration_OnlyTheOwnerTurnsItOnOrOff(t *testing.T) {
 	f := newLinkFixture(t)
 
@@ -254,6 +265,9 @@ func (f linkFixture) withTeam(t *testing.T, user string) {
 	}
 }
 
+// TestCustomDashboardLinkIntegration_OpeningTheLinkSharesTheDashboard: opening
+// the link lists the dashboard as shared via the link, with its owner; opening
+// it again adds nothing.
 func TestCustomDashboardLinkIntegration_OpeningTheLinkSharesTheDashboard(t *testing.T) {
 	f := newLinkFixture(t)
 	f.userType(t, cdbOwnerB, "INTERNAL")
@@ -362,6 +376,9 @@ func TestCustomDashboardLinkIntegration_AnOpenDuringTheSwitchOffAddsNothing(t *t
 	}
 }
 
+// TestCustomDashboardLinkIntegration_TheOwnerAndUnknownLinksAddNothing: the
+// owner opening their own link gets it as their own and adds no row; an
+// unknown link, or the dashboard's own id, opens nothing.
 func TestCustomDashboardLinkIntegration_TheOwnerAndUnknownLinksAddNothing(t *testing.T) {
 	f := newLinkFixture(t)
 	f.userType(t, cdbOwnerA, "INTERNAL")
@@ -383,6 +400,9 @@ func TestCustomDashboardLinkIntegration_TheOwnerAndUnknownLinksAddNothing(t *tes
 	}
 }
 
+// TestCustomDashboardLinkIntegration_OnlyInternalStaffOpenALink: a user who is
+// not internal staff opens nothing and adds no row, and a row left from when
+// they were internal no longer lists the dashboard.
 func TestCustomDashboardLinkIntegration_OnlyInternalStaffOpenALink(t *testing.T) {
 	f := newLinkFixture(t)
 	on := f.enable(t, cdbOwnerA, cdbDashboard1)

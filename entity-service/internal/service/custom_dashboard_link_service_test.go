@@ -61,6 +61,9 @@ func linkSvc(t *testing.T, links *fakeDashboardLinkRepo) (CustomDashboardLinkSer
 	return NewCustomDashboardLinkService(links, users), contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
 }
 
+// TestCustomDashboardLinkService_GetLink: the owner's link is read as the
+// caller; another owner's dashboard is not found, and a non-UUID id or no
+// token is refused before the repository.
 func TestCustomDashboardLinkService_GetLink(t *testing.T) {
 	t.Run("the owner's link", func(t *testing.T) {
 		repo := &fakeDashboardLinkRepo{link: &domain.CustomDashboardLink{Enabled: true, LinkID: testLinkID, OpenedBy: 2}}
@@ -97,6 +100,9 @@ func TestCustomDashboardLinkService_GetLink(t *testing.T) {
 	})
 }
 
+// TestCustomDashboardLinkService_EnableLink: the link is turned on as the
+// caller; another owner's dashboard is not found and a non-UUID id is refused
+// before the repository.
 func TestCustomDashboardLinkService_EnableLink(t *testing.T) {
 	t.Run("turns the owner's link on", func(t *testing.T) {
 		repo := &fakeDashboardLinkRepo{link: &domain.CustomDashboardLink{Enabled: true, LinkID: testLinkID}}
@@ -125,6 +131,9 @@ func TestCustomDashboardLinkService_EnableLink(t *testing.T) {
 	})
 }
 
+// TestCustomDashboardLinkService_DisableLink: the link is turned off as the
+// caller; another owner's dashboard is not found and a non-UUID id is refused
+// before the repository.
 func TestCustomDashboardLinkService_DisableLink(t *testing.T) {
 	t.Run("turns the owner's link off", func(t *testing.T) {
 		repo := &fakeDashboardLinkRepo{disableFound: true}
@@ -150,6 +159,9 @@ func TestCustomDashboardLinkService_DisableLink(t *testing.T) {
 	})
 }
 
+// TestCustomDashboardLinkService_OpenLink: the link is opened as the caller,
+// also the owner's own; a link that is unknown or off is not found, and a non-
+// UUID link id is refused without quoting it.
 func TestCustomDashboardLinkService_OpenLink(t *testing.T) {
 	t.Run("opens the dashboard as the caller", func(t *testing.T) {
 		repo := &fakeDashboardLinkRepo{openDashboardID: testShareDashboardID}

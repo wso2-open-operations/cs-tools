@@ -376,6 +376,8 @@ func TestSharedCustomDashboards_DecodeTheTeam(t *testing.T) {
 	}
 }
 
+// TestSharedCustomDashboards_DecodeViaLink: the shared list and a shared
+// dashboard decode sharedViaLink.
 func TestSharedCustomDashboards_DecodeViaLink(t *testing.T) {
 	listClient, _ := newCustomDashboardTestClient(t, http.StatusOK,
 		`{"dashboards":[{"id":"`+testCustomDashboardID+`","name":"By link","owner":null,"sharedViaTeam":null,"sharedViaLink":true,"sharedOn":"a","updatedOn":"b"},`+
@@ -394,6 +396,8 @@ func TestSharedCustomDashboards_DecodeViaLink(t *testing.T) {
 
 const testLinkID = "5e636a12-0000-4000-8000-0000000000cc"
 
+// TestGetCustomDashboardLink: the client GETs the dashboard's link with the
+// caller's token and decodes it.
 func TestGetCustomDashboardLink(t *testing.T) {
 	client, got := newCustomDashboardTestClient(t, http.StatusOK, `{"enabled":true,"linkId":"`+testLinkID+`","openedBy":2}`)
 	l, err := client.GetCustomDashboardLink(userContext(), testCustomDashboardID)
@@ -408,6 +412,8 @@ func TestGetCustomDashboardLink(t *testing.T) {
 	}
 }
 
+// TestEnableCustomDashboardLink: the client turns the link on with a PUT and
+// no body, and decodes the link.
 func TestEnableCustomDashboardLink(t *testing.T) {
 	client, got := newCustomDashboardTestClient(t, http.StatusOK, `{"enabled":true,"linkId":"`+testLinkID+`","openedBy":0}`)
 	l, err := client.EnableCustomDashboardLink(userContext(), testCustomDashboardID)
@@ -422,6 +428,7 @@ func TestEnableCustomDashboardLink(t *testing.T) {
 	}
 }
 
+// TestDisableCustomDashboardLink: the client turns the link off with a DELETE.
 func TestDisableCustomDashboardLink(t *testing.T) {
 	client, got := newCustomDashboardTestClient(t, http.StatusNoContent, "")
 	if err := client.DisableCustomDashboardLink(userContext(), testCustomDashboardID); err != nil {
@@ -451,6 +458,9 @@ func TestOpenCustomDashboardLink(t *testing.T) {
 	}
 }
 
+// TestCustomDashboardLinkClient_PassesStatusErrorsThrough: the entity
+// service's 404 and 400 on the link routes reach the caller as an
+// apierror.Error with that status.
 func TestCustomDashboardLinkClient_PassesStatusErrorsThrough(t *testing.T) {
 	cases := []struct {
 		name   string

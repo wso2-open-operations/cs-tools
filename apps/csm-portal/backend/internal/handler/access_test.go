@@ -65,6 +65,9 @@ func serveWithRoles(g *AccessGuard, perm Permission, roles []string) (status int
 	return w.Code, reached
 }
 
+// TestAccessGuard_PermissionMatrix: each role, or set of roles, is let through
+// to exactly the route permissions listed for it and refused (403) every
+// other.
 func TestAccessGuard_PermissionMatrix(t *testing.T) {
 	// csEngineerPerms is every route permission cs_engineer holds, escalation
 	// included (any internal engineer may escalate, as in ServiceNow).
@@ -593,6 +596,9 @@ func TestAccessGuard_SecurityReportCasesAlsoAllowsViewer(t *testing.T) {
 	}
 }
 
+// TestAccessGuard_UnconfiguredRolesAreHeldByNobody: with no roles configured,
+// every permission is refused whatever role names the caller has, and RolesFor
+// names none.
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
 	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermViewTimeCardTotals} {
