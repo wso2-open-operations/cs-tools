@@ -174,7 +174,7 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 | `groupBy.field` | One bar / wedge per | Notes |
 |---|---|---|
 | `user` | engineer who logged the cards | "per user", "per engineer", "per person", "by team member"; `bar`, `maxGroups` 5 to 12 |
-| `project` | project the cards were logged on | "per project"; `bar`, `maxGroups` 5 to 12; cards with no project are left out |
+| `project` | project the cards were logged on | "per project"; `bar`, `maxGroups` 5 to 12; cards with no project count under "Others" |
 | `day` | work date, every day of the window in date order (days with nothing at 0) | "per day", "daily"; always `bar`, no `maxGroups`; the window rules below |
 | `state` | time card state, as stored (approved and processed apart) | only for **hours** by state; card **counts** by state use the state slices of section 8 |
 

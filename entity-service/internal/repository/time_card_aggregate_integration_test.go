@@ -196,7 +196,8 @@ func TestTimeCardAggregateIntegration_ByUserRanksByMeasure(t *testing.T) {
 }
 
 // TestTimeCardAggregateIntegration_ByProject: the card with no project has
-// no bucket (and is not in the totals); project B has no name, so its key.
+// no bucket but is counted in others and the totals; project B has no name,
+// so its key.
 func TestTimeCardAggregateIntegration_ByProject(t *testing.T) {
 	ctx, repo := seedTimeCardAggregate(t, caseStatsPool(t))
 	got, err := repo.AggregateTimeCards(ctx, domain.AggregateTimeCardsRequest{Filters: tcAggFilters(), GroupBy: "project"}, 10)
@@ -206,7 +207,7 @@ func TestTimeCardAggregateIntegration_ByProject(t *testing.T) {
 	checkTimeCardAggregate(t, got, []tcAggWant{
 		{tcAggProjectA, "Agg Alpha", 4, 135},
 		{tcAggProjectB, "TCAGGB", 1, 240},
-	}, 0, 0, 5, 375)
+	}, 1, 15, 6, 390)
 }
 
 // TestTimeCardAggregateIntegration_ByDay: every day of the window in date
@@ -247,29 +248,42 @@ func TestTimeCardAggregateIntegration_ByDay(t *testing.T) {
 	}, 0, 0, 2, 255)
 }
 
-// TestTimeCardAggregateIntegration_MatchesTheSearch: for the same filters the
-// aggregate counts exactly the cards the search returns, and sums exactly
-// their totalTime.
+// TestTimeCardAggregateIntegration_MatchesTheSearch: for the same filters
+// every grouping counts exactly the cards the search returns, and sums
+// exactly their totalTime (the card with no project included).
 func TestTimeCardAggregateIntegration_MatchesTheSearch(t *testing.T) {
 	ctx, repo := seedTimeCardAggregate(t, caseStatsPool(t))
-	f := tcAggFilters()
-	f.States = []domain.TimeCardState{"approved"}
-	f.StartDate, f.EndDate = ptrTo("2026-03-01"), ptrTo("2026-03-31")
+	for name, tc := range map[string]struct {
+		states       []domain.TimeCardState
+		cards, total int
+	}{
+		"approved":  {[]domain.TimeCardState{"approved"}, 3, 300},
+		"any state": {nil, 5, 345},
+	} {
+		f := tcAggFilters()
+		f.States = tc.states
+		f.StartDate, f.EndDate = ptrTo("2026-03-01"), ptrTo("2026-03-31")
 
-	views, total, err := repo.SearchTimeCards(ctx, domain.SearchTimeCardsRequest{Filters: f, Pagination: domain.Pagination{Limit: 50}}, "")
-	if err != nil {
-		t.Fatalf("SearchTimeCards: %v", err)
-	}
-	var searchMinutes float64
-	for _, v := range views {
-		searchMinutes += v.TotalTime
-	}
-	got, err := repo.AggregateTimeCards(ctx, domain.AggregateTimeCardsRequest{Filters: f, GroupBy: "user"}, 10)
-	if err != nil {
-		t.Fatalf("AggregateTimeCards: %v", err)
-	}
-	if total != 3 || got.TotalRecords != total || got.TotalMinutes == nil || float64(*got.TotalMinutes) != searchMinutes {
-		t.Errorf("search = %d cards / %v min, aggregate = %d / %s min; want both 3 cards / 300 min",
-			total, searchMinutes, got.TotalRecords, tcAggMinutes(got.TotalMinutes))
+		views, total, err := repo.SearchTimeCards(ctx, domain.SearchTimeCardsRequest{Filters: f, Pagination: domain.Pagination{Limit: 50}}, "")
+		if err != nil {
+			t.Fatalf("%s: SearchTimeCards: %v", name, err)
+		}
+		var searchMinutes float64
+		for _, v := range views {
+			searchMinutes += v.TotalTime
+		}
+		if total != tc.cards || searchMinutes != float64(tc.total) {
+			t.Fatalf("%s: search = %d cards / %v min, want %d / %d", name, total, searchMinutes, tc.cards, tc.total)
+		}
+		for _, groupBy := range []string{"user", "state", "project", "day"} {
+			got, err := repo.AggregateTimeCards(ctx, domain.AggregateTimeCardsRequest{Filters: f, GroupBy: groupBy}, 1)
+			if err != nil {
+				t.Fatalf("%s: AggregateTimeCards by %s: %v", name, groupBy, err)
+			}
+			if got.TotalRecords != total || got.TotalMinutes == nil || float64(*got.TotalMinutes) != searchMinutes {
+				t.Errorf("%s by %s: aggregate = %d cards / %s min, want the search's %d / %v",
+					name, groupBy, got.TotalRecords, tcAggMinutes(got.TotalMinutes), total, searchMinutes)
+			}
+		}
 	}
 }
