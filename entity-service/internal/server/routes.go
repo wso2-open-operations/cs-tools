@@ -1719,14 +1719,19 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 					RecipientTeamKeys: cfg.MigrationCaseReportTeamKeys,
 				}))
 		// Long-open cases report: the cases still being worked on after a
-		// given age, in two tables by their project's onboarding status.
-		longOpenCaseReportHandler = handler.NewLongOpenCaseReportHandler(
-			service.NewLongOpenCaseReportService(
-				repository.NewLongOpenCaseReportRepository(repository.NewScoped(db)),
-				service.LongOpenCaseReportConfig{
-					ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
-					ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
-				}))
+		// given age, in two tables by their project's onboarding status. It
+		// reads the Postgres case tables only, so it is not offered when cases
+		// are served from the other data source: a database pool can exist
+		// there too, and the report would be incomplete without saying so.
+		if cfg.DataSource != config.DataSourceServiceNow {
+			longOpenCaseReportHandler = handler.NewLongOpenCaseReportHandler(
+				service.NewLongOpenCaseReportService(
+					repository.NewLongOpenCaseReportRepository(repository.NewScoped(db)),
+					service.LongOpenCaseReportConfig{
+						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
+						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
+					}))
+		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))

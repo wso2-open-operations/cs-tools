@@ -46,8 +46,9 @@ func (h *LongOpenCaseReportHandler) GetLongOpenCaseReport(w http.ResponseWriter,
 	if raw := r.URL.Query().Get("olderThanDays"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > service.LongOpenCaseReportMaxOlderThanDays {
-			apierror.WriteJSON(w, http.StatusBadRequest,
-				"olderThanDays must be a whole number of days between 1 and "+strconv.Itoa(service.LongOpenCaseReportMaxOlderThanDays))
+			writeServiceError(w, r, &apierror.ValidationError{
+				Msg: "olderThanDays must be a whole number of days between 1 and " + strconv.Itoa(service.LongOpenCaseReportMaxOlderThanDays),
+			})
 			return
 		}
 		req.OlderThanDays = n
