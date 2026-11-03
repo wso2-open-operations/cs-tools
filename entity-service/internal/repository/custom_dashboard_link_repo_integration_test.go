@@ -320,19 +320,24 @@ func TestCustomDashboardLinkIntegration_AnOpenDuringTheSwitchOffAddsNothing(t *t
 		done <- result{id, err}
 	}()
 	// Let the open either finish or block on the dashboard row before the
-	// switch-off commits.
+	// switch-off commits. Neither within the deadline means the overlap was
+	// never set up, so the assertions below would prove nothing.
 	deadline := time.Now().Add(5 * time.Second)
+	blocked := false
 	for time.Now().Before(deadline) && len(done) == 0 {
-		var waiting bool
 		if err := f.pool.QueryRow(f.ctx,
 			`SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			                WHERE wait_event_type = 'Lock' AND query LIKE '%custom_dashboard_link_access%')`).Scan(&waiting); err != nil {
+			                WHERE datname = current_database() AND wait_event_type = 'Lock'
+			                  AND query LIKE '%custom_dashboard_link_access%')`).Scan(&blocked); err != nil {
 			t.Fatalf("pg_stat_activity: %v", err)
 		}
-		if waiting {
+		if blocked {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+	if !blocked && len(done) == 0 {
+		t.Fatal("OpenLink neither blocked on the dashboard row nor finished within 5s")
 	}
 	if err := tx.Commit(f.ctx); err != nil {
 		t.Fatalf("commit switch-off: %v", err)
