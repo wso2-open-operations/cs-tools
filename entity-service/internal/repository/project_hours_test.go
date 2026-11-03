@@ -37,6 +37,8 @@ type hoursQuerier struct {
 	billable  map[string]int
 	sql       []string
 	writeArgs []any
+	// shared is what the projects on both opportunity sets billed.
+	shared int
 	// priorInternal is what app.is_internal held before the hours work.
 	priorInternal string
 	// identity lists, in order, the values app.is_internal was set to.
@@ -113,6 +115,9 @@ func (q *hoursQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.
 	if sql == projectHoursReadInternalQuery {
 		return fakeRow{vals: []any{q.priorInternal}}
 	}
+	if sql == projectHoursSharedBillableQuery {
+		return fakeRow{vals: []any{q.shared}}
+	}
 	if sql == projectHoursBillableQuery {
 		// args[0] is the opportunity ids; the fixture keys billable by the
 		// first one.
@@ -160,6 +165,7 @@ func TestRecomputeProjectHours_LocksThenWritesBothPools(t *testing.T) {
 			{"o1", "WSO2 Onboarding Services", 1.0, hDate("2026-02-01"), hDate("2026-12-31")},
 		},
 		billable: map[string]int{"o1": 230 * 60},
+		shared:   230 * 60,
 	}
 	if err := recomputeProjectHours(context.Background(), q, "p1"); err != nil {
 		t.Fatal(err)

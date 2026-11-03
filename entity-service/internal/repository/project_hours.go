@@ -86,6 +86,28 @@ const projectHoursBillableQuery = `
 	  AND tc.work_date >= $2::date
 	  AND tc.work_date <= $3::date`
 
+// projectHoursSharedBillableQuery is projectHoursBillableQuery restricted to the
+// projects linked to BOTH opportunity sets ($1 and $2): the minutes that sit in
+// the onboarding sum and the query sum alike. Distinct projects, so a project
+// linked through several opportunities counts once.
+const projectHoursSharedBillableQuery = `
+	SELECT COALESCE(SUM(
+	           COALESCE(tc.analyzing_minutes, 0) + COALESCE(tc.setting_up_minutes, 0)
+	         + COALESCE(tc.reproducing_debugging_minutes, 0)
+	         + COALESCE(tc.providing_solution_minutes, 0)
+	         + COALESCE(tc.patching_minutes, 0)), 0)::int
+	FROM time_card tc
+	WHERE tc.customer_project_id IN (
+	        SELECT l.project_id FROM sf_opportunity_link l
+	         WHERE l.opportunity_id = ANY($1::uuid[]) AND l.project_id IS NOT NULL)
+	  AND tc.customer_project_id IN (
+	        SELECT l.project_id FROM sf_opportunity_link l
+	         WHERE l.opportunity_id = ANY($2::uuid[]) AND l.project_id IS NOT NULL)
+	  AND tc.state = 'APPROVED'
+	  AND tc.is_billable IS TRUE
+	  AND tc.work_date >= $3::date
+	  AND tc.work_date <= $4::date`
+
 // projectHoursWriteQuery writes both pools in one statement and is a no-op
 // when nothing changed. $5 says whether the onboarding columns are written at
 // all: when false they keep whatever they hold.
@@ -188,6 +210,12 @@ func recomputeProjectHoursMode(ctx context.Context, q querier, projectID string,
 		var mins int
 		if err := q.QueryRow(ctx, projectHoursBillableQuery, oppIDs, from, to).Scan(&mins); err != nil {
 			return 0, fmt.Errorf("recompute project hours: read time cards: %w", err)
+		}
+		return mins, nil
+	}, func(a, b []string, from, to time.Time) (int, error) {
+		var mins int
+		if err := q.QueryRow(ctx, projectHoursSharedBillableQuery, a, b, from, to).Scan(&mins); err != nil {
+			return 0, fmt.Errorf("recompute project hours: read shared time cards: %w", err)
 		}
 		return mins, nil
 	})

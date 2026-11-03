@@ -660,3 +660,79 @@ func TestIngestProjectHoursSeeApprovedTimeUnderRowLevelSecurity(t *testing.T) {
 		t.Errorf("app.is_internal on a later connection = %q, %v", setting, err)
 	}
 }
+
+// Onboarding opportunities link {pa, pb}, query opportunities {pa, pc}. Only pa
+// is on both and it has no time, so nothing taken by the onboarding pool is
+// deducted from the query pool: the 10h pc worked stay query consumption.
+func TestQueryHourOnboardingDeductionUsesProjectsOnBothOpportunities(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	saved := qhFixture
+	// The fixture opportunity (onboarding line, plus a product that grants no
+	// query hours) is the onboarding one, linked to pa.
+	qhFixture = []qhCase{{key: "ISECT", accountName: "Intersect Ltd", amEmail: "am-isect@example.com",
+		productName: "Some Unknown Product", quantity: 1, billableMins: 0, onboardingStatus: "IN_PROGRESS"}}
+	defer func() { qhFixture = saved }()
+	seedQueryHourFixture(ctx, t, pool)
+
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%q: %v", sql, err)
+		}
+	}
+	accID, itemID, amID := uuidFor(1000), uuidFor(6000), uuidFor(4000)
+	onbOpp, queryOpp := uuidFor(3000), uuidFor(3100)
+	pb, pc := uuidFor(2100), uuidFor(2200)
+	for _, p := range []struct{ id, key string }{{pb, "ISECTB"}, {pc, "ISECTC"}} {
+		exec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, name, key, sf_id, account_id, onboarding_status)
+		      VALUES ($1, NOW(), NOW(), 'qh-seed', 'qh-seed', $2::text, $2::text, 'a0'||$2::text, $3, 'NOT_APPLICABLE')`, p.id, p.key, accID)
+	}
+	exec(`INSERT INTO sf_opportunity (id, created_on, updated_on, created_by, updated_by, name, sf_id, account_id)
+	      VALUES ($1, NOW(), NOW(), 'qh-seed', 'qh-seed', 'ISECTQ', '006ISECTQ', $2)`, queryOpp, accID)
+	exec(`INSERT INTO sf_opportunity_product (id, created_on, updated_on, created_by, updated_by,
+	        opportunity_id, product_name, quantity, service_start_date, service_end_date)
+	      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, 'Development Support - 100 hours', 1,
+	              CURRENT_DATE - 30, CURRENT_DATE + 30)`, queryOpp)
+	link := func(opp, proj string) {
+		exec(`INSERT INTO sf_opportunity_link (id, created_on, updated_on, created_by, updated_by, opportunity_id, project_id)
+		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, $2)`, opp, proj)
+	}
+	link(onbOpp, pb)              // onboarding only (pa is linked by the fixture)
+	link(queryOpp, uuidFor(2000)) // pa on the query opportunity too
+	link(queryOpp, pc)            // query only
+	for _, proj := range []string{pb, pc} {
+		exec(`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
+		        case_id, customer_project_id, user_id, work_date, state, is_billable, analyzing_minutes)
+		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed',
+		              $1, $2, $3, CURRENT_DATE - 5, 'APPROVED', TRUE, 600)`, itemID, proj, amID)
+	}
+
+	ctx = repository.WithSystemIdentity(ctx)
+	svc := service.NewQueryHourService(repository.NewQueryHourRepository(repository.NewScoped(pool)), "@example.com")
+	if err := svc.RecomputeProjectHours(ctx, uuidFor(2000)); err != nil {
+		t.Fatal(err)
+	}
+	mins := func(col string) int {
+		var m int
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM `+col+`)/60),0)::int FROM project WHERE key = 'ISECT'`).Scan(&m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	if got := mins("consumed_onboarding_duration"); got != 600 {
+		t.Errorf("onboarding consumed = %d, want 600 (pb)", got)
+	}
+	if got := mins("consumed_duration"); got != 600 {
+		t.Errorf("query consumed = %d, want 600 (pc): pb's onboarding time is not in the query sum and must not be deducted", got)
+	}
+}

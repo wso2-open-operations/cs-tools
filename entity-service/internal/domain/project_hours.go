@@ -95,6 +95,12 @@ type ProjectHours struct {
 // projects, so consumption is opportunity-wide.
 type BillableMinutesFunc func(opportunityIDs []string, from, to time.Time) (int, error)
 
+// SharedBillableMinutesFunc returns the approved, billable minutes whose work
+// date falls in [from, to] inclusive, summed over the DISTINCT projects linked
+// to BOTH a project in opportunity set a and one in set b (a project linked to
+// both sets counts once; a project linked to only one of them counts nothing).
+type SharedBillableMinutesFunc func(a, b []string, from, to time.Time) (int, error)
+
 func dateOnly(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
@@ -138,9 +144,8 @@ func sortedKeys(m map[string]bool) []string {
 //   - query: from the earliest in-service query line start to today, less the
 //     onboarding minutes that fall inside that window, never below zero. The
 //     deduction is min(onboarding consumed, billable minutes in
-//     [max(onboarding start, query start), onboarding end], measured over the
-//     onboarding opportunities and over the query opportunities, the smaller
-//     of the two), so onboarding
+//     [max(onboarding start, query start), onboarding end] of the projects
+//     linked to both an onboarding and a query opportunity), so onboarding
 //     work done before a renewed query line starts costs the new line nothing.
 //     Edge case: the overlap minutes are capped at the onboarding consumed
 //     figure, not apportioned by when the pool filled, so if the pool was
@@ -153,7 +158,7 @@ func sortedKeys(m map[string]bool) []string {
 //
 // Remaining is total less consumed: the onboarding figure is never negative,
 // the query figure goes negative when the pool is overdrawn.
-func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc) (ProjectHours, error) {
+func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc, sharedBillable SharedBillableMinutesFunc) (ProjectHours, error) {
 	today := dateOnly(in.Today)
 	var out ProjectHours
 
@@ -238,21 +243,14 @@ func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc) (Pr
 				from = onbWindowStart
 			}
 			if !onbWindowEnd.Before(from) {
-				// Only minutes the query sum also contains may come off it, and
-				// only minutes the onboarding pool absorbed: the overlap is
-				// measured over both opportunity sets and the smaller figure
-				// wins. When the sets differ this is an upper bound of the
-				// minutes in both (a project linked to both sets), never more
-				// than the query figure it is subtracted from.
-				overlapOnb, err := billable(sortedKeys(onbOpps), from, onbWindowEnd)
+				// Only minutes in both sums come off the query figure: those
+				// of projects linked to an onboarding opportunity AND to a
+				// query opportunity, inside the overlap window.
+				shared, err := sharedBillable(sortedKeys(onbOpps), sortedKeys(queryOpps), from, onbWindowEnd)
 				if err != nil {
 					return ProjectHours{}, err
 				}
-				overlapQuery, err := billable(sortedKeys(queryOpps), from, onbWindowEnd)
-				if err != nil {
-					return ProjectHours{}, err
-				}
-				deduct = min(out.OnboardingConsumed, max(0, overlapOnb), max(0, overlapQuery))
+				deduct = min(out.OnboardingConsumed, max(0, shared))
 			}
 		}
 		out.QueryConsumed = max(0, mins-deduct)

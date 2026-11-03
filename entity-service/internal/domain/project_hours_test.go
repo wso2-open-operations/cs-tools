@@ -69,6 +69,38 @@ func billableFrom(links phLinks, cards ...phCard) BillableMinutesFunc {
 	}
 }
 
+// sharedFrom serves minutes of projects linked to BOTH opportunity sets.
+func sharedFrom(links phLinks, cards ...phCard) SharedBillableMinutesFunc {
+	projectsOf := func(opps []string) map[string]bool {
+		out := map[string]bool{}
+		for _, o := range opps {
+			ps, ok := links[o]
+			if !ok {
+				ps = []string{"pa"}
+			}
+			for _, p := range ps {
+				out[p] = true
+			}
+		}
+		return out
+	}
+	return func(a, b []string, from, to time.Time) (int, error) {
+		pa, pb := projectsOf(a), projectsOf(b)
+		total := 0
+		for _, c := range cards {
+			proj := c.project
+			if proj == "" {
+				proj = "pa"
+			}
+			d := *phDate(c.date)
+			if pa[proj] && pb[proj] && !d.Before(from) && !d.After(to) {
+				total += c.minutes
+			}
+		}
+		return total, nil
+	}
+}
+
 func devLine(product string, qty float64) ProjectHoursLine {
 	return ProjectHoursLine{OpportunityID: "o1", Product: product, Quantity: qty, Start: phDate("2026-01-01"), End: phDate("2026-12-31")}
 }
@@ -239,6 +271,19 @@ func TestComputeProjectHours(t *testing.T) {
 				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 110 * h, OnboardingRemaining: 90 * h},
 		},
 		{
+			// Onboarding opportunities link {pa, pb}, query opportunities {pa, pc}.
+			// Only pa is on both and has no time: nothing is deducted.
+			name: "disjoint onboarding-only and query-only projects: nothing deducted",
+			in: ProjectHoursInput{Today: today, OnboardingStatus: "IN_PROGRESS", OnboardingExpiry: phDate("2026-04-30"),
+				Lines: []ProjectHoursLine{
+					{OpportunityID: "o2", Product: "Development Support - 100 hours", Quantity: 1, Start: phDate("2026-02-01"), End: phDate("2026-12-31")},
+					onbLine("2026-02-01", "2026-12-31")}},
+			links: phLinks{"o1": {"pa", "pb"}, "o2": {"pa", "pc"}},
+			cards: []phCard{{"2026-03-01", 10 * h, "pb"}, {"2026-03-02", 10 * h, "pc"}},
+			want: ProjectHours{HasAllocation: true, QueryTotal: 100 * h, QueryConsumed: 10 * h, QueryRemaining: 90 * h,
+				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 10 * h, OnboardingRemaining: 190 * h},
+		},
+		{
 			name:  "lapsed allowance: linked lines, none in service, writes zeros",
 			in:    ProjectHoursInput{Today: today, OnboardingStatus: "NOT_APPLICABLE", HasLinkedLines: true},
 			cards: []phCard{{"2026-03-01", 10 * h, ""}},
@@ -274,7 +319,7 @@ func TestComputeProjectHours(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ComputeProjectHours(tc.in, billableFrom(tc.links, tc.cards...))
+			got, err := ComputeProjectHours(tc.in, billableFrom(tc.links, tc.cards...), sharedFrom(tc.links, tc.cards...))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -291,8 +336,8 @@ func TestComputeProjectHoursIsIdempotent(t *testing.T) {
 	in := ProjectHoursInput{Today: *phDate("2026-06-15"), OnboardingStatus: "IN_PROGRESS", OnboardingExpiry: phDate("2026-12-31"),
 		Lines: []ProjectHoursLine{devLine("Development Support - 100 hours", 1), onbLine("2026-02-01", "2026-12-31")}}
 	f := billableFrom(nil, phCard{"2026-03-01", 230 * 60, ""})
-	a, _ := ComputeProjectHours(in, f)
-	b, _ := ComputeProjectHours(in, f)
+	a, _ := ComputeProjectHours(in, f, sharedFrom(nil, phCard{"2026-03-01", 230 * 60, ""}))
+	b, _ := ComputeProjectHours(in, f, sharedFrom(nil, phCard{"2026-03-01", 230 * 60, ""}))
 	if a != b {
 		t.Errorf("%+v != %+v", a, b)
 	}
@@ -302,7 +347,7 @@ func TestComputeProjectHoursPropagatesError(t *testing.T) {
 	boom := errors.New("boom")
 	_, err := ComputeProjectHours(ProjectHoursInput{Today: *phDate("2026-06-15"), OnboardingStatus: "NOT_APPLICABLE",
 		Lines: []ProjectHoursLine{devLine("Development Support - 10 hours", 1)}},
-		func(_ []string, _, _ time.Time) (int, error) { return 0, boom })
+		func(_ []string, _, _ time.Time) (int, error) { return 0, boom }, nil)
 	if !errors.Is(err, boom) {
 		t.Errorf("err = %v", err)
 	}
@@ -317,9 +362,9 @@ func TestComputeProjectHoursExpiredOnboardingIsStable(t *testing.T) {
 			Lines: []ProjectHoursLine{devLine("Development Support - 100 hours", 1), onbLine("2026-02-01", "2026-04-30")}}
 	}
 	cards := []phCard{{"2026-03-01", 150 * h, ""}, {"2026-05-10", 25 * h, ""}}
-	first, _ := ComputeProjectHours(in("2026-06-15"), billableFrom(nil, cards...))
-	again, _ := ComputeProjectHours(in("2026-06-15"), billableFrom(nil, cards...))
-	later, _ := ComputeProjectHours(in("2026-09-01"), billableFrom(nil, cards...))
+	first, _ := ComputeProjectHours(in("2026-06-15"), billableFrom(nil, cards...), sharedFrom(nil, cards...))
+	again, _ := ComputeProjectHours(in("2026-06-15"), billableFrom(nil, cards...), sharedFrom(nil, cards...))
+	later, _ := ComputeProjectHours(in("2026-09-01"), billableFrom(nil, cards...), sharedFrom(nil, cards...))
 	if first != again || first != later {
 		t.Errorf("not stable: %+v, %+v, %+v", first, again, later)
 	}
