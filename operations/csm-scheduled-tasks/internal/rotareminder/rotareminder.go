@@ -101,6 +101,10 @@ type Config struct {
 	// Copy is copied on every email (a lead who wants to see them). Empty by
 	// default: the emails go to the people on the shift.
 	Copy []string
+	// WeekendCopy is copied on the weekend summary email only, beside Copy:
+	// somebody who wants to know who is on the weekend, not every weekday
+	// reminder or invitation. Set on the Rota Access tab.
+	WeekendCopy []string
 	// RedirectTo, when set, receives every email instead of its real
 	// recipients, who are listed in the body. For environments that hold the
 	// real rota but must not email real people.
@@ -111,6 +115,10 @@ type Config struct {
 	// Invites attaches a calendar invitation to each window's email, with
 	// everybody on the window as a guest.
 	Invites bool
+	// InvitesOff names the rotations (the shift code of a window: CRE_MORNING,
+	// CRE_WEEKEND_NIGHT) whose invitations are turned off on the Rota Access
+	// tab, while Invites stays on for the rest. Read through invitesFor.
+	InvitesOff map[string]bool
 	// OrganizerEmail is the invitations' organizer: the address the emails
 	// come from (EMAIL_FROM_ADDRESS).
 	OrganizerEmail string
@@ -285,7 +293,7 @@ func announce(ctx context.Context, rota RotaReader, sender EmailSender, cfg Conf
 			cfg.Tally.skipped("nobody on " + windowTitle(cfg, w.base) + " on " + longDay(w.day) + " has an email address")
 			continue
 		}
-		if cfg.Invites {
+		if cfg.invitesFor(w.base) {
 			inv := windowInvite(cfg, w, now)
 			email.attachments = []notify.Attachment{inviteAttachment(inv)}
 		}
@@ -328,6 +336,12 @@ func announce(ctx context.Context, rota RotaReader, sender EmailSender, cfg Conf
 	slog.ErrorContext(ctx, "rota reminder: some emails failed; not retried, so the rest are not sent twice", "err", err)
 	alertPartialFailure(ctx, sender, cfg, failed)
 	return nil
+}
+
+// invitesFor is whether the window whose shift code is base gets a calendar
+// invitation: invitations on, and not turned off for that rotation.
+func (cfg Config) invitesFor(base string) bool {
+	return cfg.Invites && !cfg.InvitesOff[base]
 }
 
 // span is when the window runs: its earliest start to its latest end.

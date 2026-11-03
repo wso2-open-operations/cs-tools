@@ -60,6 +60,42 @@ export function zoneAbbreviation(tz: string, at: Date = new Date()): string {
   }
 }
 
+/** The zone's UTC offset at `at`, as Intl writes it ("GMT-7"), or "" if unknown. */
+function utcOffset(tz: string, at: Date): string {
+  try {
+    return (
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" })
+        .formatToParts(at)
+        .find((p) => p.type === "timeZoneName")?.value ?? ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+/** Whether the zone changes its clocks during the year (Los Angeles does, Colombo does not). */
+export function observesDaylightSaving(tz: string, year: number = new Date().getFullYear()): boolean {
+  const winter = utcOffset(tz, new Date(Date.UTC(year, 0, 15, 12)));
+  const summer = utcOffset(tz, new Date(Date.UTC(year, 6, 15, 12)));
+  return winter !== "" && summer !== "" && winter !== summer;
+}
+
+/**
+ * A name for the zone that holds all year, for a setting rather than a moment:
+ * "PT" for Los Angeles (not PDT in summer and PST in winter), "IST" for Colombo.
+ */
+export function zoneNameAllYear(tz: string): string {
+  if (!observesDaylightSaving(tz)) return zoneAbbreviation(tz);
+  try {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortGeneric" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value;
+    return name ?? tz;
+  } catch {
+    return tz;
+  }
+}
+
 
 /**
  * An instant broken into the calendar date and minutes-past-midnight that a

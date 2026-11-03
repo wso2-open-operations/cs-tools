@@ -202,6 +202,17 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 		}
 		current := map[string]bool{}
 		for _, w := range pending {
+			// Turned off for this rotation: nothing is sent, and an invitation
+			// already sent is neither updated nor withdrawn (it stays in the
+			// record, so it is not taken for a window gone from the rota).
+			if !cfg.invitesFor(w.base) {
+				uid := cfg.inviteUID(w.date, w.base)
+				current[uid] = true
+				if old, ok := previous[uid]; ok {
+					invites = append(invites, old)
+				}
+				continue
+			}
 			email, inv, ok := buildInviteEmail(cfg, w, now)
 			if !ok {
 				continue
@@ -232,6 +243,25 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 			current[uid] = true
 			if old, ok := previous[uid]; ok {
 				invites = append(invites, old)
+			}
+		}
+		// A rotation turned off keeps what it was sent even when its window
+		// has since gone from the rota: turning invitations off never
+		// withdraws one.
+		offCodes := make([]string, 0, len(cfg.InvitesOff))
+		for code, off := range cfg.InvitesOff {
+			if off {
+				offCodes = append(offCodes, code)
+			}
+		}
+		sort.Strings(offCodes)
+		for _, code := range offCodes {
+			for _, d := range []time.Time{sat, sun} {
+				uid := cfg.inviteUID(d.Format(dateLayout), code)
+				if old, ok := previous[uid]; ok && !current[uid] {
+					current[uid] = true
+					invites = append(invites, old)
+				}
 			}
 		}
 		for uid, old := range previous {

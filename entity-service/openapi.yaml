@@ -10035,8 +10035,9 @@ paths:
       description: >
         "Send now" on the Rota Access tab. A CSM admin or a rota admin of the
         family, with a user token. Queued for csm-scheduled-tasks, which sends
-        it at its next run. Refused while one of the same kind is waiting (409)
-        and within 10 minutes of the last one (429).
+        it at its next run. Refused while one that sends any of the same emails is
+        waiting (409) and within 10 minutes of the last one (429): weekday is the
+        Morning and the Evening together, so it and either of them refuse each other.
       operationId: createRotaReminderRequest
       security:
         - clientAssertion: []
@@ -10058,8 +10059,8 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [weekday, weekend]
-                  description: weekday is the next working day's Morning and Evening; weekend the coming weekend, sent even if not fully marked.
+                  enum: [morning, evening, weekend, weekday]
+                  description: morning is the next working day's Morning with its on-call; evening its Evening; weekday both at once; weekend the coming weekend, sent even if not fully marked.
                 test:
                   type: boolean
                   default: false
@@ -10099,7 +10100,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: "One of the same kind is already waiting to be sent."
+          description: "One that sends any of the same emails is already waiting to be sent."
           content:
             application/json:
               schema:
@@ -28830,8 +28831,27 @@ components:
           description: A rotation's hours on its own clock, by shift code.
           additionalProperties:
             $ref: '#/components/schemas/ReminderWindow'
+        inviteRotations:
+          type: object
+          description: >-
+            Whether each rotation's reminders carry a calendar invitation, by the shift code of its
+            window (CRE_MORNING, CRE_EVENING, CRE_WEEKEND, CRE_WEEKEND_NIGHT). A rotation not named
+            does; invitesEnabled off turns them all off. Optional on a save: when absent, the stored
+            value is kept.
+          additionalProperties:
+            type: boolean
+          example: {CRE_MORNING: true, CRE_WEEKEND_NIGHT: false}
         copyTo:
           type: array
+          maxItems: 20
+          items:
+            type: string
+            format: email
+        weekendCopyTo:
+          type: array
+          description: >-
+            Copied (Cc) on the weekend summary email only; copyTo is copied on every reminder.
+            Optional on a save: when absent, the stored value is kept.
           maxItems: 20
           items:
             type: string
@@ -28862,7 +28882,7 @@ components:
           enum: [CRE, SRE, SME]
         kind:
           type: string
-          enum: [weekday, weekend]
+          enum: [morning, evening, weekend, weekday]
         status:
           type: string
           enum: [QUEUED, SENDING, SENT, FAILED]

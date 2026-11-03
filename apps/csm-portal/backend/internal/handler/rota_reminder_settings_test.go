@@ -68,6 +68,35 @@ func TestRotaReminderSettings_ForwardsTheKnownFields(t *testing.T) {
 	}
 }
 
+// The per-rotation invitation switches are forwarded as sent; a card that
+// sends none forwards null, which entity-service reads as "keep what is
+// stored", not an empty set that would turn every rotation back on.
+func TestRotaReminderSettings_ForwardsInviteRotations(t *testing.T) {
+	withSwitches := strings.Replace(goodReminderBody, `"copyTo"`, `"inviteRotations":{"CRE_MORNING":true,"CRE_WEEKEND":false},"copyTo"`, 1)
+	fake := &fakeReminderSettingsClient{reply: []byte(`{"family":"CRE"}`)}
+	NewRotaReminderSettingsHandler(fake).PutRotaReminderSettings(httptest.NewRecorder(), reminderSettingsRequest(http.MethodPut, "cre", withSwitches))
+	got, _ := fake.body["inviteRotations"].(map[string]any)
+	if got["CRE_MORNING"] != true || got["CRE_WEEKEND"] != false {
+		t.Errorf("forwarded inviteRotations %v", fake.body["inviteRotations"])
+	}
+
+	fake = &fakeReminderSettingsClient{reply: []byte(`{"family":"CRE"}`)}
+	NewRotaReminderSettingsHandler(fake).PutRotaReminderSettings(httptest.NewRecorder(), reminderSettingsRequest(http.MethodPut, "cre", goodReminderBody))
+	if v, ok := fake.body["inviteRotations"]; !ok || v != nil {
+		t.Errorf("an older card's save forwarded inviteRotations %v (present %v), want null", v, ok)
+	}
+	if v, ok := fake.body["weekendCopyTo"]; !ok || v != nil {
+		t.Errorf("an older card's save forwarded weekendCopyTo %v (present %v), want null", v, ok)
+	}
+
+	withCc := strings.Replace(goodReminderBody, `"copyTo"`, `"weekendCopyTo":["head@example.com"],"copyTo"`, 1)
+	fake = &fakeReminderSettingsClient{reply: []byte(`{"family":"CRE"}`)}
+	NewRotaReminderSettingsHandler(fake).PutRotaReminderSettings(httptest.NewRecorder(), reminderSettingsRequest(http.MethodPut, "cre", withCc))
+	if cc, _ := fake.body["weekendCopyTo"].([]any); len(cc) != 1 || cc[0] != "head@example.com" {
+		t.Errorf("forwarded weekendCopyTo %v", fake.body["weekendCopyTo"])
+	}
+}
+
 func TestRotaReminderSettings_RefusesABadRequestWithoutCallingOut(t *testing.T) {
 	for name, c := range map[string]struct{ family, body string }{
 		"unknown family": {"OPS", goodReminderBody},
@@ -147,7 +176,15 @@ func TestRotaReminderRequest_SendNow(t *testing.T) {
 	if w.Code != http.StatusCreated || fake.body["test"] != true {
 		t.Fatalf("a test: status %d body %v", w.Code, fake.body)
 	}
-	for _, bad := range []struct{ family, body string }{{"OPS", `{"kind":"weekend"}`}, {"CRE", `{"kind":"monthly"}`}, {"CRE", `{}`}, {"CRE", `{"kind":"weekend","test":"yes"}`}} {
+	for _, kind := range []string{"morning", "evening"} {
+		fake = &fakeReminderRequestClient{}
+		w = httptest.NewRecorder()
+		NewRotaReminderRequestHandler(fake).CreateRotaReminderRequest(w, reminderSettingsRequest(http.MethodPost, "CRE", `{"kind":"`+kind+`"}`))
+		if w.Code != http.StatusCreated || fake.body["kind"] != kind {
+			t.Fatalf("%s: status %d body %v", kind, w.Code, fake.body)
+		}
+	}
+	for _, bad := range []struct{ family, body string }{{"OPS", `{"kind":"weekend"}`}, {"CRE", `{"kind":"monthly"}`}, {"CRE", `{"kind":"Morning"}`}, {"CRE", `{}`}, {"CRE", `{"kind":"weekend","test":"yes"}`}} {
 		fake := &fakeReminderRequestClient{}
 		w := httptest.NewRecorder()
 		NewRotaReminderRequestHandler(fake).CreateRotaReminderRequest(w, reminderSettingsRequest(http.MethodPost, bad.family, bad.body))

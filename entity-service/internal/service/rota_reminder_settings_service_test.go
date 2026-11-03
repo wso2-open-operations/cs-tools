@@ -102,6 +102,57 @@ func TestRotaReminderSettings_SavesNormalised(t *testing.T) {
 	}
 }
 
+// The per-rotation invitation switches are stored as sent; a card that sends
+// none (one from before they existed) keeps what is stored instead of turning
+// every rotation's invitations back on.
+func TestRotaReminderSettings_InviteRotations(t *testing.T) {
+	repo := &fakeReminderSettingsRepo{}
+	svc := newReminderSettings(repo, "CRE")
+	req := goodReminderSettings()
+	req.InviteRotations = map[string]bool{"CRE_MORNING": true, "CRE_WEEKEND": false}
+	out, err := svc.Save(callerWithRoles("ann@example.com"), "CRE", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.InviteRotations) != 2 || !out.InviteRotations["CRE_MORNING"] || out.InviteRotations["CRE_WEEKEND"] {
+		t.Fatalf("saved %v", out.InviteRotations)
+	}
+
+	older := goodReminderSettings()
+	older.InviteRotations = nil
+	out, err = svc.Save(callerWithRoles("ann@example.com"), "CRE", older)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := out.InviteRotations["CRE_WEEKEND"]; !ok || v {
+		t.Errorf("an older card's save changed the switches to %v", out.InviteRotations)
+	}
+
+	cleared := goodReminderSettings()
+	cleared.InviteRotations = map[string]bool{}
+	if out, err = svc.Save(callerWithRoles("ann@example.com"), "CRE", cleared); err != nil || len(out.InviteRotations) != 0 {
+		t.Errorf("an empty map is a save of no exceptions: %v, %v", out.InviteRotations, err)
+	}
+}
+
+// The weekend-only copies are stored normalised; a card that sends none keeps
+// what is stored.
+func TestRotaReminderSettings_WeekendCopyTo(t *testing.T) {
+	repo := &fakeReminderSettingsRepo{}
+	svc := newReminderSettings(repo, "CRE")
+	req := goodReminderSettings()
+	req.WeekendCopyTo = []string{" Head@Example.com ", "head@example.com"}
+	out, err := svc.Save(callerWithRoles("ann@example.com"), "CRE", req)
+	if err != nil || len(out.WeekendCopyTo) != 1 || out.WeekendCopyTo[0] != "head@example.com" {
+		t.Fatalf("saved %v, %v", out.WeekendCopyTo, err)
+	}
+	older := goodReminderSettings()
+	older.WeekendCopyTo = nil
+	if out, err = svc.Save(callerWithRoles("ann@example.com"), "CRE", older); err != nil || len(out.WeekendCopyTo) != 1 {
+		t.Errorf("an older card's save changed the weekend copies to %v, %v", out.WeekendCopyTo, err)
+	}
+}
+
 func TestRotaReminderSettings_RefusesNonsense(t *testing.T) {
 	cases := map[string]func(r *domain.SaveRotaReminderSettingsRequest){
 		"missing switch":  func(r *domain.SaveRotaReminderSettingsRequest) { r.InvitesEnabled = nil },
@@ -120,7 +171,11 @@ func TestRotaReminderSettings_RefusesNonsense(t *testing.T) {
 		"server's own clock": func(r *domain.SaveRotaReminderSettingsRequest) {
 			r.Windows["X"] = domain.ReminderWindow{Start: "08:00", End: "18:00", TimeZone: "Local"}
 		},
-		"bad address": func(r *domain.SaveRotaReminderSettingsRequest) { r.CopyTo = []string{"not an address"} },
+		"bad address":         func(r *domain.SaveRotaReminderSettingsRequest) { r.CopyTo = []string{"not an address"} },
+		"bad weekend address": func(r *domain.SaveRotaReminderSettingsRequest) { r.WeekendCopyTo = []string{"nope"} },
+		"bad invite rotation": func(r *domain.SaveRotaReminderSettingsRequest) {
+			r.InviteRotations = map[string]bool{"cre morning": false}
+		},
 	}
 	for name, spoil := range cases {
 		req := goodReminderSettings()
