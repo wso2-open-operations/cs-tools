@@ -116,6 +116,20 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
+// AttachmentStorageMode says who stores work item, comment-image and deployment
+// attachment files (see Config.AttachmentStorageMode).
+type AttachmentStorageMode string
+
+const (
+	// AttachmentStorageModeSFTPGo: this service reaches SFTPGo and gives the
+	// browser short-lived share links. The default.
+	AttachmentStorageModeSFTPGo AttachmentStorageMode = "sftpgo"
+	// AttachmentStorageModeBackend: the portal backends store and serve the files
+	// themselves. This service keeps the access checks and the rows, authorizes each
+	// upload and read, and returns the storage key; it never touches a file.
+	AttachmentStorageModeBackend AttachmentStorageMode = "backend"
+)
+
 // AttachmentDataSource identifies which backend three case attachment reads
 // (GET /attachments/{id}, POST /attachments/search, GET
 // /attachments/{id}/content) and the case activity feed (POST
@@ -875,27 +889,25 @@ type Config struct {
 	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
 	AttachmentReadLinkTTL   time.Duration
 	AttachmentUploadLinkTTL time.Duration
-	// A file of AttachmentChunkedThresholdBytes or more
-	// (ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES, default 100 MiB, 0 = never) is
-	// uploaded in chunks with the TUS protocol, straight to SFTPGo, instead of
-	// as one request; a smaller file or an inline image never is. SFTPGo
-	// checks a share only when the upload is created, so
-	// AttachmentChunkedUploadLinkTTL (ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL,
-	// default 5m) only has to cover starting it. AttachmentChunkSizeBytes
-	// (ATTACHMENT_CHUNK_SIZE_BYTES, default 16 MiB) is the chunk size the portal
-	// is told to use. A download of a file that large gets a link good for
-	// AttachmentLargeReadLinkMaxUses requests (ATTACHMENT_LARGE_READ_LINK_MAX_USES,
-	// default 10), so a browser can resume it with range requests.
-	AttachmentChunkedThresholdBytes int64
-	AttachmentChunkedUploadLinkTTL  time.Duration
-	AttachmentChunkSizeBytes        int64
-	AttachmentLargeReadLinkMaxUses  int
-	// AttachmentSharesPerCallerPerMinute is how many download, preview and upload
-	// links one caller may have created per minute
-	// (ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE, default 60, per pod); beyond it a
-	// call is a 429. Every image previewed on a page costs one, so a low value
-	// breaks image-heavy case pages.
-	AttachmentSharesPerCallerPerMinute int
+	// AttachmentStorageMode (ATTACHMENT_STORAGE_MODE) says who holds the files.
+	// "sftpgo" (the default) keeps today's behaviour: this service reaches SFTPGo
+	// and hands the browser a share link. "backend" means the portal backends hold
+	// the files themselves (in Azure Blob Storage): this service then only decides
+	// who may upload or read what and which storage key each file has, and needs no
+	// SFTPGo settings at all. See AttachmentStorageModeBackend.
+	AttachmentStorageMode AttachmentStorageMode
+
+	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
+	// (POST /organizations/internal/users/search), used by the Salesforce
+	// Account ingest to auto-provision a CSM "user" row for an account person
+	// reference (owner, technical owner, etc.) that has no match by email yet.
+	// The four connection fields are all-or-nothing like SalesEntity*; Scopes
+	// is optional.
+	SCIMBaseURL      string
+	SCIMTokenURL     string
+	SCIMClientID     string
+	SCIMClientSecret string
+	SCIMScopes       string
 
 	// Escalation* are the fixed EL1/EL2 case-escalation notification
 	// recipients EscalationService.CreateEscalation (Postgres data sources)
@@ -1149,11 +1161,7 @@ func Load() *Config {
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 1<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
-	cfg.AttachmentChunkedThresholdBytes = envNonNegativeInt64("ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", 100<<20)
-	cfg.AttachmentChunkedUploadLinkTTL = envDuration("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", 5*time.Minute)
-	cfg.AttachmentChunkSizeBytes = envPositiveInt64("ATTACHMENT_CHUNK_SIZE_BYTES", 16<<20)
-	cfg.AttachmentLargeReadLinkMaxUses = int(envPositiveInt64("ATTACHMENT_LARGE_READ_LINK_MAX_USES", 10))
-	cfg.AttachmentSharesPerCallerPerMinute = int(envPositiveInt64("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", 60))
+	cfg.AttachmentStorageMode = AttachmentStorageMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("ATTACHMENT_STORAGE_MODE", string(AttachmentStorageModeSFTPGo)))))
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1162,6 +1170,13 @@ func Load() *Config {
 // the attachment link and upload routes.
 func (c *Config) HasSFTPGo() bool {
 	return c.SFTPGoURL != "" && c.SFTPGoUser != "" && c.SFTPGoPassword != ""
+}
+
+// HasBackendAttachmentStorage reports whether the portal backends hold the
+// attachment files (ATTACHMENT_STORAGE_MODE=backend). It turns on the attachment
+// routes without SFTPGo and turns the SFTPGo link routes off.
+func (c *Config) HasBackendAttachmentStorage() bool {
+	return c.AttachmentStorageMode == AttachmentStorageModeBackend
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1485,6 +1500,11 @@ func (c *Config) Validate() error {
 	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
+	}
+	switch c.AttachmentStorageMode {
+	case "", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend:
+	default:
+		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
 	}
 	// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
 	sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""

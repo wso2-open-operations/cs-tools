@@ -1505,42 +1505,57 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 	}
 }
 
-func TestLoad_ChunkedUploadSettings(t *testing.T) {
-	for _, tc := range []struct {
-		name, threshold string
-		want            int64
-	}{
-		{"zero turns it off", "0", 0},
-		{"a value is read", "5242880", 5242880},
-		{"negative falls back", "-1", 100 << 20},
-		{"unparseable falls back", "big", 100 << 20},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", tc.threshold)
-			if got := Load().AttachmentChunkedThresholdBytes; got != tc.want {
-				t.Errorf("threshold = %d, want %d", got, tc.want)
-			}
-		})
-	}
-	t.Setenv("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", "2m")
-	t.Setenv("ATTACHMENT_CHUNK_SIZE_BYTES", "8388608")
-	t.Setenv("ATTACHMENT_LARGE_READ_LINK_MAX_USES", "3")
+func TestLoad_AttachmentStorageMode(t *testing.T) {
+	t.Setenv("ATTACHMENT_STORAGE_MODE", "")
 	c := Load()
-	if c.AttachmentChunkedUploadLinkTTL != 2*time.Minute || c.AttachmentChunkSizeBytes != 8<<20 || c.AttachmentLargeReadLinkMaxUses != 3 {
-		t.Errorf("overrides not read: %s / %d / %d", c.AttachmentChunkedUploadLinkTTL, c.AttachmentChunkSizeBytes, c.AttachmentLargeReadLinkMaxUses)
+	if c.AttachmentStorageMode != AttachmentStorageModeSFTPGo || c.HasBackendAttachmentStorage() {
+		t.Errorf("default mode = %q (backend: %v), want sftpgo", c.AttachmentStorageMode, c.HasBackendAttachmentStorage())
+	}
+
+	// Case and surrounding space in the value do not matter.
+	for _, v := range []string{"backend", "BACKEND", "Backend", " backend "} {
+		t.Setenv("ATTACHMENT_STORAGE_MODE", v)
+		if c := Load(); !c.HasBackendAttachmentStorage() {
+			t.Errorf("ATTACHMENT_STORAGE_MODE=%q did not select backend storage", v)
+		}
+	}
+	t.Setenv("ATTACHMENT_STORAGE_MODE", "sftpgo")
+	if c := Load(); c.HasBackendAttachmentStorage() {
+		t.Error("ATTACHMENT_STORAGE_MODE=sftpgo selected backend storage")
 	}
 }
 
-func TestLoad_AttachmentSharesPerCallerPerMinute(t *testing.T) {
-	if got := Load().AttachmentSharesPerCallerPerMinute; got != 60 {
-		t.Errorf("default = %d, want 60", got)
+func TestConfig_Validate_AttachmentStorageMode(t *testing.T) {
+	for _, mode := range []AttachmentStorageMode{"", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend} {
+		c := baseValidConfig()
+		c.AttachmentStorageMode = mode
+		if err := c.Validate(); err != nil {
+			t.Errorf("mode %q refused: %v", mode, err)
+		}
 	}
-	t.Setenv("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", "10")
-	if got := Load().AttachmentSharesPerCallerPerMinute; got != 10 {
-		t.Errorf("override = %d, want 10", got)
+
+	// A typo must stop the service: silently falling back to sftpgo would leave the
+	// backends calling routes that are not registered.
+	for _, mode := range []AttachmentStorageMode{"blob", "azure", "backends", " backend"} {
+		c := baseValidConfig()
+		c.AttachmentStorageMode = mode
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "ATTACHMENT_STORAGE_MODE") {
+			t.Errorf("mode %q: err = %v, want an ATTACHMENT_STORAGE_MODE error", mode, err)
+		}
 	}
-	t.Setenv("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", "0")
-	if got := Load().AttachmentSharesPerCallerPerMinute; got != 60 {
-		t.Errorf("0 = %d, want the default 60", got)
+}
+
+// Backend storage needs no SFTPGo settings, and a deployment that still has them
+// set is not refused: the mode wins and they are ignored.
+func TestConfig_Validate_BackendModeNeedsNoSFTPGo(t *testing.T) {
+	c := baseValidConfig()
+	c.AttachmentStorageMode = AttachmentStorageModeBackend
+	if err := c.Validate(); err != nil {
+		t.Fatalf("backend mode without SFTPGo: %v", err)
+	}
+	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "https://sftpgo.internal", "svc", "p"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("backend mode with SFTPGo still set: %v", err)
 	}
 }
