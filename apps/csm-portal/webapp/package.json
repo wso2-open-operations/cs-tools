@@ -49,8 +49,7 @@
     "react-phone-number-input": "3.4.16",
     "react-router": "7.18.4",
     "recharts": "3.10.1",
-    "remark-gfm": "4.0.1",
-    "tus-js-client": "4.3.1"
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
