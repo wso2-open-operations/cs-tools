@@ -64,6 +64,7 @@ export default function DashboardLinkSection({ dashboardId }: DashboardLinkSecti
   const on = link.data?.enabled === true;
   const url = on && link.data?.linkId ? dashboardLinkUrl(link.data.linkId) : null;
 
+  /** Turns the link on or off; a failure keeps the switch as it was and says which way it failed. */
   const handleToggle = async (next: boolean): Promise<void> => {
     if (!dashboardId) return;
     setError(null);
@@ -79,6 +80,7 @@ export default function DashboardLinkSection({ dashboardId }: DashboardLinkSecti
     }
   };
 
+  /** Copies the link to the clipboard; if the browser refuses, asks the user to copy it by hand. */
   const handleCopy = async (): Promise<void> => {
     if (!url) return;
     try {

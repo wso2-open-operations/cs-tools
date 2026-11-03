@@ -182,21 +182,23 @@ export default function DashboardPieChart({
 
   const chartData = slices.map((slice) => ({ name: slice.label, value: slice.value }));
 
-  // `inlineLabels` mode's own custom outer-label renderer — standard
-  // recharts "customized pie label" recipe: compute the label's own point
-  // from the wedge's midAngle just past outerRadius, an elbowed leader line
-  // back to the ring, text-anchor flipped between "start"/"end" depending on
-  // which half of the circle the point falls on. No percentage in the
-  // visible text (just "{label} {value}") — that's this widget's own
-  // reference design, unlike the legend rows' "{value} ({pct}%)".
-  //
-  // This label is ALSO this slice's sole accessible/keyboard-operable
-  // target in this mode (role="button", tabIndex, Enter/Space) — there is
-  // no separate legend row to carry that in inlineLabels mode, and a
-  // recharts wedge's own <path> is not natively focusable. The leader
-  // line itself carries no semantics of its own (aria-hidden) so a screen
-  // reader announces the slice exactly once, via this label, rather than
-  // once per decorative line segment.
+  /**
+   * `inlineLabels` mode's own custom outer-label renderer — standard
+   * recharts "customized pie label" recipe: compute the label's own point
+   * from the wedge's midAngle just past outerRadius, an elbowed leader line
+   * back to the ring, text-anchor flipped between "start"/"end" depending on
+   * which half of the circle the point falls on. No percentage in the
+   * visible text (just "{label} {value}") — that's this widget's own
+   * reference design, unlike the legend rows' "{value} ({pct}%)".
+   *
+   * This label is ALSO this slice's sole accessible/keyboard-operable
+   * target in this mode (role="button", tabIndex, Enter/Space) — there is
+   * no separate legend row to carry that in inlineLabels mode, and a
+   * recharts wedge's own <path> is not natively focusable. The leader
+   * line itself carries no semantics of its own (aria-hidden) so a screen
+   * reader announces the slice exactly once, via this label, rather than
+   * once per decorative line segment.
+   */
   const renderOuterLabel = (props: RechartsPieLabelGeometry): JSX.Element | null => {
     const { index = -1 } = props;
     const slice = slices[index];

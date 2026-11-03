@@ -171,6 +171,11 @@ export function useWidgetGroupByData(
       resolvedFilters,
       groupBy,
     ],
+    /**
+     * Posts the widget's filters and `groupBy.field` to its resource's group-by
+     * endpoint (with the measure for a time card widget). No `groupBy` returns no
+     * buckets; an unsupported resource or a bucket-only `groupBy` throws.
+     */
     queryFn: async (): Promise<BeGroupByResponse> => {
       if (!groupBy) {
         return { groups: [], othersCount: 0, totalRecords: 0 };
@@ -238,6 +243,7 @@ export function useWidgetGroupByData(
   // hours, instead of its card count ("day" buckets keep the aggregate's own
   // date order, as every bucket list keeps the response's order).
   const hours = groupBy?.measure === "hours";
+  /** A bucket's value: its hours (from the aggregate's minutes) for an hours widget, else its count. */
   const bucketValue = (b: BeGroupByBucket): number => (hours ? (b.totalMinutes ?? 0) / 60 : b.count);
   const othersCount = hours ? (query.data?.othersMinutes ?? 0) / 60 : (query.data?.othersCount ?? 0);
 

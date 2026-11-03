@@ -619,12 +619,16 @@ function DashboardWidgetTile({
     </Tooltip>
   );
 
-  // Shared title row: icon + name, with an optional total-count badge sitting
-  // immediately after the name (ServiceNow-style "Title 42" rather than a
-  // number floated off to the card's far edge or stacked in its own line).
-  // `undefined` renders no badge — shape "pie" keeps its total in the donut
-  // hole instead, and list/bar themselves pass `undefined` while their own
-  // total is still loading or errored.
+  /**
+   * Shared title row: icon + name, with an optional total-count badge sitting
+   * immediately after the name (ServiceNow-style "Title 42" rather than a
+   * number floated off to the card's far edge or stacked in its own line).
+   * `undefined` renders no badge — shape "pie" keeps its total in the donut
+   * hole instead, and list/bar themselves pass `undefined` while their own
+   * total is still loading or errored. `formatTotal` words the badge (a bar
+   * measuring time card hours shows "12.5 h"); without it, the badge is the
+   * plain count.
+   */
   const renderHeader = (total?: number, formatTotal?: (value: number) => string): JSX.Element => (
     <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
       <Box
