@@ -428,6 +428,21 @@ type SLAEngineRepository interface {
 	// SQL concern. Ordered by id for a deterministic tie-break when more
 	// than one policy's start_condition matches the same case (see
 	// slaPolicyResolver.resolve's own doc comment).
+	//
+	// Excludes a policy whose duration is NULL *or* a real, stored zero --
+	// found live: 34 currently-active "sla" rows across production have a
+	// permanently-stuck duration of 0, because a NULL-only check here once let
+	// a policy with a genuinely-zero (not NULL) duration -- a transient data
+	// state at the moment a case happened to register or revise its clocks
+	// against it -- through as a valid candidate. RegisterClock/ReviseClocks
+	// copy policy.Duration into "sla".duration once, at registration time,
+	// and never revisit it, so that zero is then permanent for the clock's
+	// whole lifetime regardless of the policy being corrected afterward --
+	// and since sla_live's own live_elapsed_percentage/live_has_breached
+	// formulas read "sla".duration directly (not through this resolver), a
+	// clock stuck this way can never compute a real percentage or fire a
+	// breach alert. A policy with a zero duration is exactly as unusable as
+	// one with no duration at all, so both are excluded the same way.
 	ListCandidatePolicies(ctx context.Context, target string) ([]SLAPolicyRef, error)
 
 	// GetCaseFacts reads the current field values of workItemID needed to
@@ -676,6 +691,7 @@ func (r *slaEngineRepo) ListCandidatePolicies(ctx context.Context, target string
 		  AND source = 'SERVICENOW'
 		  AND (is_active IS NULL OR is_active)
 		  AND duration IS NOT NULL
+		  AND duration > INTERVAL '0'
 		ORDER BY id`
 
 	rows, err := r.db.Query(ctx, query, target)
