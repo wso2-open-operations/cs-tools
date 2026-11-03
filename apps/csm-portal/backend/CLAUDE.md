@@ -451,7 +451,7 @@ this process only: it is never put in a response, a header or a log.** The modul
 `AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the container only; or `AZURE_STORAGE_KEY` (the
 account's shared key, full control of the account); or `AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional
 `AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in the secret store, never in the repo or a log. With a
-container-scoped role the container must already exist. `libs/azblobstore` is a
+container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development). `libs/azblobstore` is a
 separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build with an uncommitted `go.work` listing this module
 and the library, and add the `require` line once the tag exists (with it present a workspace build fails while the
 tag is missing). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
