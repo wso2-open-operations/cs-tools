@@ -19,6 +19,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { IdleStateContext } from "@providers/IdleStateContext";
 import { useCaseActivityStream } from "@features/support/api/useCaseActivityStream";
 
 type Listener = () => void;
@@ -73,12 +74,17 @@ const INVALIDATED_KEYS = [
   ApiQueryKeys.PROJECT_STATS,
 ];
 
-function setup(caseId: string | undefined) {
+const idleRef = { current: false };
+
+function setup(caseId: string | undefined, idle = false) {
   const queryClient = new QueryClient();
   const spy = vi.spyOn(queryClient, "invalidateQueries");
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <IdleStateContext.Provider value={idleRef.current}>{children}</IdleStateContext.Provider>
+    </QueryClientProvider>
   );
+  idleRef.current = idle;
   const hook = renderHook(() => useCaseActivityStream(caseId), { wrapper });
   return { spy, ...hook };
 }
@@ -155,5 +161,44 @@ describe("useCaseActivityStream", () => {
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     unmount();
     expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+  });
+
+  it("does not connect while idle", async () => {
+    setup("case-1", true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(MockEventSource.instances).toHaveLength(0);
+    expect(mockGetIdToken).not.toHaveBeenCalled();
+  });
+
+  it("closes the open stream when idle starts and reconnects fresh when it clears", async () => {
+    const { rerender } = setup("case-1");
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const first = MockEventSource.instances[0];
+
+    idleRef.current = true;
+    rerender();
+    expect(first.close).toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    idleRef.current = false;
+    rerender();
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+  });
+
+  it("cancels a pending reconnect when idle starts", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { rerender } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("error");
+
+      idleRef.current = true;
+      rerender();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(MockEventSource.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
