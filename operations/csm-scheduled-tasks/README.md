@@ -109,6 +109,28 @@ task once by hand, confirm the mail in the debug inbox, then remove both. Leavin
 place silently keeps that report away from its audience, which is why startup names every report
 on trial in a warning.
 
+### Running a worklog report for a custom window or recipient list
+
+`--run-now=<task>` runs one registered task once and exits, without the ledger (see CLAUDE.md, "Running a task
+now"). For the two CS Worklogs reports it also takes a manual window and a replacement audience, for testing:
+
+| Flag | Meaning |
+|---|---|
+| `--from-date=YYYY-MM-DD --to-date=YYYY-MM-DD` | Inclusive window in Asia/Colombo, both required, at most 92 days. Weekly takes any such range; daily needs the two equal |
+| `--recipients=a@example.com,b@example.com` | Replace the To audience for this run (configured and derived audiences are ignored) |
+| `--cc=c@example.com` | Cc for the replaced audience; needs `--recipients` |
+
+```
+csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 --to-date=2030-01-15 \
+  --recipients=jane.doe@example.com
+```
+
+The subject is prefixed `[Test]` and/or `[Manual range]`, so it cannot be mistaken for the scheduled mail. These
+flags are valid only with `--run-now` for these two tasks and are refused with `TRYOUT_TASK`. `--recipients` is
+also refused while the task has a `debug` list, because debug mail mode would redirect the mail. A window alone
+is allowed, and its mail then goes to the debug list. An override run writes no ledger row, so it never marks a
+scheduled period done.
+
 ### Alerting
 
 - `ALERT_RECIPIENTS` is a standing audience emailed on every failed attempt of every task.

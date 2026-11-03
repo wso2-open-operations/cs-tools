@@ -739,6 +739,21 @@ func main() {
 				periodStart(worklogsDailySchedule),
 				worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceDaily,
+				debugFor(recipientOverrides, worklogsDailyTaskName),
+				worklogsreport.SendDaily(worklogReportClient, worklogsDailyEmail,
+					periodStart(worklogsDailySchedule),
+					worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
+					worklogCaseLinkBase, alertsEnabled),
+				func(ov worklogsreport.Override) func(ctx context.Context) error {
+					return worklogsreport.SendDailyWith(worklogReportClient, worklogsDailyEmail,
+						periodStart(worklogsDailySchedule),
+						worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, ov)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		{
 			Name:     worklogsWeeklyTaskName,
@@ -747,6 +762,21 @@ func main() {
 				periodStart(worklogsWeeklySchedule),
 				worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceWeekly,
+				debugFor(recipientOverrides, worklogsWeeklyTaskName),
+				worklogsreport.SendWeekly(worklogReportClient, worklogsWeeklyEmail,
+					periodStart(worklogsWeeklySchedule),
+					worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
+					worklogCaseLinkBase, alertsEnabled),
+				func(ov worklogsreport.Override) func(ctx context.Context) error {
+					return worklogsreport.SendWeeklyWith(worklogReportClient, worklogsWeeklyEmail,
+						periodStart(worklogsWeeklySchedule),
+						worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, ov)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		// Query-hour utilisation, ported from ServiceNow's two flows.
 		//
@@ -1071,6 +1101,7 @@ func main() {
 			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, autoclosureDefaultSchedule),
 			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
 			RunNowNarrow: runNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit", "--states"},
 			To:           autoclosureTo,
 			Cc:           autoclosureCc,
 		})
