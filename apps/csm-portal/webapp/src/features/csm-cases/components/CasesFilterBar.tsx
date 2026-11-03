@@ -457,7 +457,13 @@ function buildActiveFilterChips(
     if (!isCompleteAdvancedFilterRow(row)) return;
     const fieldMeta = getAdvancedFilterFieldMeta(row.field);
     const opMeta = getAdvancedFilterOpMeta(row.field, row.op);
-    const valueText = row.values.length > 0 ? ` ${row.values.join(", ")}` : "";
+    // A date bound's relative date in words ("30 days ago"), as on the typed
+    // date chips above; every other value as it is.
+    const shownValues =
+      row.op === "gte" || row.op === "lte"
+        ? row.values.map((v) => describeRelativeDatePlaceholder(v) ?? v)
+        : row.values;
+    const valueText = shownValues.length > 0 ? ` ${shownValues.join(", ")}` : "";
     chips.push({
       key: `advanced-${row.field}-${row.op}-${index}`,
       label: `${fieldMeta?.label ?? row.field} ${opMeta?.label ?? row.op}${valueText}`,

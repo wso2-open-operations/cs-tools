@@ -23,6 +23,11 @@ import CasesFilterBar, {
   type CasesFilters,
 } from "@features/csm-cases/components/CasesFilterBar";
 import { DEFAULT_CASES_FILTERS } from "@features/csm-cases/utils/casesFiltersUrl";
+import {
+  getAdvancedFilterFieldMeta,
+  getAdvancedFilterOpMeta,
+  type AdvancedFilterRow,
+} from "@features/csm-cases/utils/advancedFilters";
 import { useSearchTags } from "@features/csm-cases/api/useSearchTags";
 
 const postMock = vi.fn();
@@ -321,6 +326,41 @@ describe("CasesFilterBar — chips stay visible while the panel is collapsed", (
       screen.getByText(`Closed after ${new Date(2026, 6, 27).toLocaleDateString()}`),
     ).toBeInTheDocument();
     expect(screen.queryByText(/__/)).not.toBeInTheDocument();
+  });
+
+  // An Advanced-only date row (`resolvedOn` has no typed slot) from a
+  // dashboard link keeps its relative date too.
+  it("words a relative date on an Advanced row's chip", () => {
+    renderBar(
+      {
+        ...DEFAULT_CASES_FILTERS,
+        advancedFilters: [{ field: "resolvedOn", op: "gte", values: ["__daysAgo:30__"] }],
+      },
+      undefined,
+      { isFiltersOpen: false },
+    );
+    const label = `${getAdvancedFilterFieldMeta("resolvedOn")!.label} ${getAdvancedFilterOpMeta("resolvedOn", "gte")!.label}`;
+    expect(screen.getByText(`${label} 30 days ago`)).toBeInTheDocument();
+    expect(screen.queryByText(/__/)).not.toBeInTheDocument();
+  });
+
+  it("chips every other Advanced row value as before", () => {
+    const rows: AdvancedFilterRow[] = [
+      { field: "resolvedOn", op: "lte", values: ["2026-07-27"] },
+      { field: "resolvedOn", op: "gte", values: ["__daysAgo:-1__"] },
+      { field: "taskSLABusinessElapsedPercent", op: "gte", values: ["80"] },
+      { field: "slaBreached", op: "eq", values: ["true"] },
+      // Only a date bound is worded: the same text as a case number is not.
+      { field: "number", op: "eq", values: ["__today__"] },
+    ];
+    for (const row of rows) {
+      renderBar({ ...DEFAULT_CASES_FILTERS, advancedFilters: [row] }, undefined, {
+        isFiltersOpen: false,
+      });
+      const before = `${getAdvancedFilterFieldMeta(row.field)?.label ?? row.field} ${getAdvancedFilterOpMeta(row.field, row.op)?.label ?? row.op} ${row.values.join(", ")}`;
+      expect(screen.getByText(before)).toBeInTheDocument();
+      cleanup();
+    }
   });
 
   // Saved views and old links hold whatever the bar accepted before, so every
