@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
@@ -137,37 +138,37 @@ func TestWorklogFlagsAreRefusedWithTryout(t *testing.T) {
 }
 
 func TestWorklogsRunNowHook(t *testing.T) {
-	var plain, built int
+	var built int
 	var got worklogsreport.Override
-	hook := func(cadence worklogreport.Cadence, debug []string) func(registry.RunNowOptions) (func(context.Context) error, []any, error) {
-		return worklogsRunNow(cadence, debug,
-			func(context.Context) error { plain++; return nil },
-			func(ov worklogsreport.Override) func(context.Context) error {
-				got = ov
+	hook := func(cadence worklogreport.Cadence) func(registry.RunNowOptions) (func(context.Context) error, []any, error) {
+		raw := &recordingSender{}
+		return worklogsRunNow(cadence, raw, raw,
+			func(_ notify.Sender, win worklogsreport.Override, _ []string) func(context.Context) error {
+				got = win
 				return func(context.Context) error { built++; return nil }
 			})
 	}
 	ctx := context.Background()
 
-	// No override: the task's own handler, nothing built.
-	h, settings, err := hook(worklogreport.CadenceWeekly, nil)(registry.RunNowOptions{})
+	// No override: the handler is built with the zero window, like the scheduled one.
+	h, settings, err := hook(worklogreport.CadenceWeekly)(registry.RunNowOptions{})
 	if err != nil || len(settings) != 0 {
 		t.Fatalf("plain: %v %v", err, settings)
 	}
 	_ = h(ctx)
-	if plain != 1 || built != 0 {
-		t.Fatalf("plain=%d built=%d", plain, built)
+	if built != 1 || got.HasWindow() {
+		t.Fatalf("built=%d override=%+v", built, got)
 	}
 
 	// Weekly: any valid window passes as is.
 	opts := registry.RunNowOptions{FromDate: day("2030-01-07"), ToDate: day("2030-01-09"),
 		Recipients: []string{"jane.doe@example.com"}}
-	h, settings, err = hook(worklogreport.CadenceWeekly, nil)(opts)
+	h, settings, err = hook(worklogreport.CadenceWeekly)(opts)
 	if err != nil {
 		t.Fatalf("weekly: %v", err)
 	}
 	_ = h(ctx)
-	if built != 1 || !got.From.Equal(day("2030-01-07")) || !got.To.Equal(day("2030-01-09")) {
+	if built != 2 || !got.From.Equal(day("2030-01-07")) || !got.To.Equal(day("2030-01-09")) {
 		t.Fatalf("built=%d override=%+v", built, got)
 	}
 	// Addresses are never in the logged settings.
@@ -178,19 +179,10 @@ func TestWorklogsRunNowHook(t *testing.T) {
 	}
 
 	// Daily: a single day passes, a range is refused.
-	if _, _, err := hook(worklogreport.CadenceDaily, nil)(registry.RunNowOptions{FromDate: day("2030-01-07"), ToDate: day("2030-01-07")}); err != nil {
+	if _, _, err := hook(worklogreport.CadenceDaily)(registry.RunNowOptions{FromDate: day("2030-01-07"), ToDate: day("2030-01-07")}); err != nil {
 		t.Errorf("daily single day: %v", err)
 	}
-	if _, _, err := hook(worklogreport.CadenceDaily, nil)(opts); err == nil || !strings.Contains(err.Error(), "single day") {
+	if _, _, err := hook(worklogreport.CadenceDaily)(opts); err == nil || !strings.Contains(err.Error(), "single day") {
 		t.Errorf("daily range must be refused, got %v", err)
-	}
-
-	// A debug list would swallow a recipient override: refused. A window alone is fine.
-	debug := []string{"debug@example.com"}
-	if _, _, err := hook(worklogreport.CadenceWeekly, debug)(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}}); err == nil || !strings.Contains(err.Error(), "debug list") {
-		t.Errorf("recipients with a debug list must be refused, got %v", err)
-	}
-	if _, _, err := hook(worklogreport.CadenceWeekly, debug)(registry.RunNowOptions{FromDate: day("2030-01-07"), ToDate: day("2030-01-09")}); err != nil {
-		t.Errorf("window with a debug list: %v", err)
 	}
 }

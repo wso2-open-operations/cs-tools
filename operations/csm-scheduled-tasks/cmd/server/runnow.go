@@ -27,7 +27,9 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
 )
@@ -68,8 +70,8 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	states := fs.String("states", "", "comma list of states to work (only with --run-now, only some tasks)")
 	fromDate := fs.String("from-date", "", "first day of the reporting window, YYYY-MM-DD (only with --run-now, only the CS Worklogs reports)")
 	toDate := fs.String("to-date", "", "last day of the reporting window, YYYY-MM-DD, inclusive (with --from-date)")
-	recipients := fs.String("recipients", "", "comma list of addresses that REPLACE the report's To audience for this run (only with --run-now, only the CS Worklogs reports)")
-	cc := fs.String("cc", "", "comma list of Cc addresses for the replaced audience (needs --recipients)")
+	recipients := fs.String("recipients", "", "comma list of addresses that REPLACE the report's whole audience for this run (only with --run-now, only report tasks)")
+	cc := fs.String("cc", "", "comma list of Cc addresses, the only Cc of this run (needs --recipients)")
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
 	}
@@ -228,36 +230,133 @@ func describeStates(states []string) string {
 	return strings.Join(states, ",")
 }
 
-// worklogsRunNow is the RunNowNarrow hook of a CS Worklogs report task. build
-// makes the handler for a validated override. debug is the task's debug list
-// from SUB_CRON_RECIPIENTS: with one set every mail is redirected to it, so a
-// recipient override could never take effect and is refused rather than
-// silently ignored. With no override at all the task's own handler runs, so a
-// plain run-now is unchanged.
-func worklogsRunNow(cadence worklogreport.Cadence, debug []string, plain func(ctx context.Context) error,
-	build func(ov worklogsreport.Override) func(ctx context.Context) error,
+// reportRunNowFlags are the run-now flags every report task takes.
+var reportRunNowFlags = []string{"--recipients", "--cc"}
+
+// worklogsRunNowFlags are the run-now flags the CS Worklogs report tasks take:
+// the window flags as well.
+var worklogsRunNowFlags = []string{"--from-date", "--to-date", "--recipients", "--cc"}
+
+// orRecipients is the To a report handler is built with in a recipient
+// override run: the task's real To when it has one, so the test-copy notice
+// can name it, and the override list otherwise, so a task that skips or fails
+// on an empty audience still sends. The mail itself only ever goes to the
+// override, whatever this returns (see notify.ForRunNow).
+func orRecipients(realTo, recipients []string) []string {
+	if len(realTo) == 0 {
+		return recipients
+	}
+	return realTo
+}
+
+// reportRunNow is the RunNowNarrow hook of a report task that takes only
+// --recipients and --cc, and the one place that decides what an override run
+// is. build makes the task's handler for a sender and, when the run
+// overrides the audience, the override list (nil otherwise). normal is the
+// sender the scheduled handler uses (debug mail mode applied); raw is the
+// real mail client. With no --recipients the handler is built with normal and
+// nil, so a plain run-now behaves as today, debug list included. With
+// --recipients it is built with notify.ForRunNow over raw: the mail goes to
+// those addresses only (Cc is the --cc list or nothing), as a [Test copy]
+// whose notice names the real To and Cc, and the task's debug list is
+// ignored, because an explicit list wins over it.
+func reportRunNow(normal, raw notify.Sender, build func(email notify.Sender, recipients []string) func(ctx context.Context) error,
 ) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
 	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
-		ov := worklogsreport.Override{From: o.FromDate, To: o.ToDate, Recipients: o.Recipients, Cc: o.Cc}
-		if !ov.Active() {
-			return plain, nil, nil
+		if len(o.Recipients) == 0 {
+			if len(o.Cc) > 0 {
+				return nil, nil, errors.New("--cc needs --recipients: it only adds copies to a replaced audience")
+			}
+			return build(normal, nil), nil, nil
 		}
-		if err := ov.Validate(cadence); err != nil {
+		return build(notify.ForRunNow(raw, o.Recipients, o.Cc), o.Recipients), recipientSettings(o), nil
+	}
+}
+
+// recipientSettings is what the run-now WARN logs about a replaced audience:
+// counts only, like every other recipient log line here.
+func recipientSettings(o registry.RunNowOptions) []any {
+	return []any{"recipientsReplaced", true, "toCount", len(o.Recipients), "ccCount", len(o.Cc)}
+}
+
+// consumesCrossings wraps a run-now hook for a task that stores the state it
+// compares against (the query-hour notifications). A --recipients run of it
+// mails the crossings to the override list only, and the stored state moves on,
+// so the real owners never get those notices. The run-now WARN names that
+// before the operator can miss it.
+func consumesCrossings(hook func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error),
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		handler, settings, err := hook(o)
+		if err == nil && len(o.Recipients) > 0 {
+			settings = append(settings, "warning", "crossings found by this run are mailed to the override list only and are not sent to the real owners later")
+		}
+		return handler, settings, err
+	}
+}
+
+// worklogsRunNow is reportRunNow for a CS Worklogs report task, which also
+// takes a reporting window. build makes the handler for a sender, a validated
+// window (the zero Override for none) and the override list (nil for none).
+// With only a window the task's normal sender is used, so a window run still
+// honours the debug list; with --recipients the override sender is used and
+// the debug list is ignored. With nothing the task's own handler runs.
+func worklogsRunNow(cadence worklogreport.Cadence, normal, raw notify.Sender,
+	build func(email notify.Sender, win worklogsreport.Override, recipients []string) func(ctx context.Context) error,
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		win := worklogsreport.Override{From: o.FromDate, To: o.ToDate}
+		// Cc alone is caught by Validate below through the Override's own rule.
+		if err := (worklogsreport.Override{From: o.FromDate, To: o.ToDate, Recipients: o.Recipients, Cc: o.Cc}).Validate(cadence); err != nil {
 			return nil, nil, err
 		}
-		if ov.HasRecipients() && len(debug) > 0 {
-			return nil, nil, errors.New("--recipients cannot be used while this task has a debug list in SUB_CRON_RECIPIENTS: debug mail mode would redirect the mail and ignore the override; remove the debug list first")
-		}
 		var settings []any
-		if ov.HasWindow() {
-			settings = append(settings, "from", ov.From.Format("2006-01-02"), "to", ov.To.Format("2006-01-02"))
+		if win.HasWindow() {
+			settings = append(settings, "from", win.From.Format("2006-01-02"), "to", win.To.Format("2006-01-02"))
 		}
-		if ov.HasRecipients() {
-			// Counts only, like every other recipient log line here.
-			settings = append(settings, "recipientsReplaced", true, "toCount", len(ov.Recipients), "ccCount", len(ov.Cc))
+		email := normal
+		if len(o.Recipients) > 0 {
+			email = notify.ForRunNow(raw, o.Recipients, o.Cc)
+			settings = append(settings, recipientSettings(o)...)
 		}
-		return build(ov), settings, nil
+		return build(email, win, o.Recipients), settings, nil
 	}
+}
+
+// reportTaskNames are the report tasks that mail an audience and so take
+// --recipients and --cc. The failure alerts to ALERT_RECIPIENTS, the rota
+// reminders (which mail the rota's people, not a report audience) and the
+// tasks that send no report are not in it.
+func reportTaskNames() []string {
+	names := []string{
+		"cs_worklogs_daily_report", "cs_worklogs_weekly_report", "migration_case_report",
+		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
+		"query_hours_usage_notifications", "query_hours_weekly_report",
+	}
+	for _, v := range regressionscan.DefaultVariants() {
+		names = append(names, regressionscan.TaskName(v))
+	}
+	return names
+}
+
+// tasksMissingReportRunNow names the tasks among want that are not registered
+// or do not list both --recipients and --cc, so a report task added without
+// the override is caught at startup instead of being quietly left out.
+func tasksMissingReportRunNow(tasks []registry.Task, want []string) []string {
+	var missing []string
+	for _, name := range want {
+		ok := false
+		for _, t := range tasks {
+			if t.Name == name && t.RunNowNarrow != nil &&
+				slices.Contains(t.RunNowFlags, "--recipients") && slices.Contains(t.RunNowFlags, "--cc") {
+				ok = true
+			}
+		}
+		if !ok {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // withoutTask returns tasks without the one named name: the engine's list when
@@ -285,6 +384,3 @@ func parseStrictBool(key, raw string, def bool) (bool, error) {
 	}
 	return b, nil
 }
-
-// worklogsRunNowFlags are the run-now flags the CS Worklogs report tasks take.
-var worklogsRunNowFlags = []string{"--from-date", "--to-date", "--recipients", "--cc"}

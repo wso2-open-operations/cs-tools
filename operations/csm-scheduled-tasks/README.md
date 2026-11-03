@@ -117,19 +117,49 @@ now"). For the two CS Worklogs reports it also takes a manual window and a repla
 | Flag | Meaning |
 |---|---|
 | `--from-date=YYYY-MM-DD --to-date=YYYY-MM-DD` | Inclusive window in Asia/Colombo, both required, at most 92 days. Weekly takes any such range; daily needs the two equal |
-| `--recipients=a@example.com,b@example.com` | Replace the To audience for this run (configured and derived audiences are ignored) |
-| `--cc=c@example.com` | Cc for the replaced audience; needs `--recipients` |
+| `--recipients=a@example.com,b@example.com` | Replace the whole audience for this run (see "Mailing any report to a chosen list" below) |
+| `--cc=c@example.com` | The only Cc of that run; needs `--recipients` |
 
 ```
 csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 --to-date=2030-01-15 \
   --recipients=jane.doe@example.com
 ```
 
-The subject is prefixed `[Test]` and/or `[Manual range]`, so it cannot be mistaken for the scheduled mail. These
-flags are valid only with `--run-now` for these two tasks and are refused with `TRYOUT_TASK`. `--recipients` is
-also refused while the task has a `debug` list, because debug mail mode would redirect the mail. A window alone
-is allowed, and its mail then goes to the debug list. An override run writes no ledger row, so it never marks a
-scheduled period done.
+The subject is prefixed `[Manual range]` for a window and `[Test copy]` when recipients are replaced, so it cannot
+be mistaken for the scheduled mail. These flags are valid only with `--run-now` and are refused with `TRYOUT_TASK`.
+A window alone still goes to the task's `debug` list if it has one. An override run writes no ledger row, so it
+never marks a scheduled period done.
+
+### Mailing any report to a chosen list
+
+Every report task takes `--recipients` and `--cc` on `--run-now`, to preview the mail without its real audience
+receiving it:
+
+```
+csm-scheduled-tasks --run-now=migration_case_report --recipients=jane.doe@example.com
+csm-scheduled-tasks --run-now=stale_cases_report --recipients=jane.doe@example.com --cc=john.roe@example.com
+```
+
+Tasks: `cs_worklogs_daily_report`, `cs_worklogs_weekly_report`, `migration_case_report`, `open_cases_report`,
+`stale_cases_report`, `unresolved_products_digest`, `product_regression_report_apim`, `_iam`, `_integration`,
+`query_hours_usage_notifications` and `query_hours_weekly_report`. Failure alerts to `ALERT_RECIPIENTS` and the rota
+reminders are not affected.
+
+- `--recipients` replaces the whole audience for that one run: the real To and the real Cc are both never
+  addressed. `--cc` is the only Cc of the run, and without it the mail has no Cc at all. `--cc` needs `--recipients`.
+- The report is fetched as usual, with real data. Only the destination changes. A task that has no audience of its
+  own still sends.
+- The subject is prefixed `[Test copy]` and a notice at the top of the body names who the real To and Cc would have
+  been.
+- An explicit `--recipients` wins over the task's `debug` list: the debug inbox is not addressed. Without
+  `--recipients` a run-now still goes to the debug list, as before.
+- It needs the normal environment (entity-service, the email service, `ALERTS_ENABLED=true`) but no recipient
+  configuration, and no env var change. A report that sends nothing when it has nothing to report (for example the
+  unresolved products digest) still sends nothing. The query-hour notifications run reports only the threshold
+  crossings that exist, and skips one whose account has no internal owner. **Warning:** that task stores the
+  thresholds it recomputes, so a `--recipients` run of it consumes the crossings it finds: they go to your list only,
+  and the real account owners never get those notices later. The run-now log says so.
+- Refused without `--run-now`, and with `TRYOUT_TASK`. A plain `--run-now=<task>` and the scheduled run are unchanged.
 
 ### Alerting
 

@@ -604,12 +604,20 @@ func main() {
 		if len(to) > 0 {
 			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
 		}
+		v, to, cc := v, to, cc
 		regressionTasks = append(regressionTasks, registry.Task{
 			Name:     name,
 			Schedule: scheduleFor(scheduleOverrides, name, "30 3 1 * *"),
 			Handler: regressionscan.SendReport(regressionReportClient,
 				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
 				v, to, cc, regressionCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return regressionscan.SendReport(regressionReportClient, email,
+						v, orRecipients(to, rec), cc, regressionCaseLinkBase, alertsEnabled)
+				}),
 		})
 	}
 
@@ -661,6 +669,13 @@ func main() {
 				staleCaseThreshold, staleCasesTo, staleCasesCc, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(staleCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return stalecases.SendReport(entityCasesClient, email,
+						staleCaseThreshold, orRecipients(staleCasesTo, rec), staleCasesCc, alertsEnabled)
+				}),
 		},
 		// Products that deployment nodes report but the product catalogue does not
 		// know -- ServiceNow emailed one fixed address on every such miss. Daily, to
@@ -674,6 +689,13 @@ func main() {
 				24*time.Hour, unresolvedProductsTo, unresolvedProductsCc, alertsEnabled, time.Now),
 			To: unresolvedProductsTo,
 			Cc: unresolvedProductsCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(unresolvedProductsEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return unresolvedproducts.SendDigest(unresolvedProductsClient, email,
+						24*time.Hour, orRecipients(unresolvedProductsTo, rec), unresolvedProductsCc, alertsEnabled, time.Now)
+				}),
 		},
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
@@ -687,6 +709,12 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
 		// own doc comment. The audience is the mail groups of the teams
@@ -706,6 +734,14 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, migrationCaseReportTaskName, "30 22 * * 0"),
 			Handler: migrationscan.SendReport(migrationReportClient, migrationCaseEmail,
 				migrationCaseOlderThanDays, migrationCaseTo, migrationCaseCc, migrationCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. The
+			// scheduled handler above is untouched.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(migrationCaseEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return migrationscan.SendReport(migrationReportClient, email,
+						migrationCaseOlderThanDays, orRecipients(migrationCaseTo, rec), migrationCaseCc, migrationCaseLinkBase, alertsEnabled)
+				}),
 		},
 		// The CS Worklogs reports. Both default schedules are the times
 		// ServiceNow actually sends at, expressed in UTC because these
@@ -741,17 +777,12 @@ func main() {
 				worklogCaseLinkBase, alertsEnabled),
 			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
 			// scheduled handler above is untouched. See worklogsRunNow.
-			RunNowNarrow: worklogsRunNow(worklogreport.CadenceDaily,
-				debugFor(recipientOverrides, worklogsDailyTaskName),
-				worklogsreport.SendDaily(worklogReportClient, worklogsDailyEmail,
-					periodStart(worklogsDailySchedule),
-					worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
-					worklogCaseLinkBase, alertsEnabled),
-				func(ov worklogsreport.Override) func(ctx context.Context) error {
-					return worklogsreport.SendDailyWith(worklogReportClient, worklogsDailyEmail,
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceDaily, worklogsDailyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendDailyWith(worklogReportClient, email,
 						periodStart(worklogsDailySchedule),
-						worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
-						worklogCaseLinkBase, alertsEnabled, ov)
+						orRecipients(worklogsDailyTo, rec), worklogsDailyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
 				}),
 			RunNowFlags: worklogsRunNowFlags,
 		},
@@ -764,17 +795,12 @@ func main() {
 				worklogCaseLinkBase, alertsEnabled),
 			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
 			// scheduled handler above is untouched. See worklogsRunNow.
-			RunNowNarrow: worklogsRunNow(worklogreport.CadenceWeekly,
-				debugFor(recipientOverrides, worklogsWeeklyTaskName),
-				worklogsreport.SendWeekly(worklogReportClient, worklogsWeeklyEmail,
-					periodStart(worklogsWeeklySchedule),
-					worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
-					worklogCaseLinkBase, alertsEnabled),
-				func(ov worklogsreport.Override) func(ctx context.Context) error {
-					return worklogsreport.SendWeeklyWith(worklogReportClient, worklogsWeeklyEmail,
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceWeekly, worklogsWeeklyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendWeeklyWith(worklogReportClient, email,
 						periodStart(worklogsWeeklySchedule),
-						worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
-						worklogCaseLinkBase, alertsEnabled, ov)
+						orRecipients(worklogsWeeklyTo, rec), worklogsWeeklyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
 				}),
 			RunNowFlags: worklogsRunNowFlags,
 		},
@@ -794,12 +820,27 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, queryHoursNoticeTaskName, "15 * * * *"),
 			Handler: queryhoursreport.SendUsageNotifications(queryHourClient, queryHoursNoticeEmail,
 				queryHoursNoticeCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. A
+			// transition whose owners are unknown is still skipped.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: consumesCrossings(reportRunNow(queryHoursNoticeEmail, emailClient,
+				func(email notify.Sender, _ []string) func(ctx context.Context) error {
+					return queryhoursreport.SendUsageNotifications(queryHourClient, email,
+						queryHoursNoticeCc, queryHoursOverride, alertsEnabled)
+				})),
 		},
 		{
 			Name:     queryHoursWeeklyTaskName,
 			Schedule: scheduleFor(scheduleOverrides, queryHoursWeeklyTaskName, "0 4 * * 1"),
 			Handler: queryhoursreport.SendWeeklyReport(queryHourClient, queryHoursWeeklyEmail,
 				queryHoursWeeklyTo, queryHoursWeeklyCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(queryHoursWeeklyEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return queryhoursreport.SendWeeklyReport(queryHourClient, email,
+						orRecipients(queryHoursWeeklyTo, rec), queryHoursWeeklyCc, queryHoursOverride, alertsEnabled)
+				}),
 		},
 		// The first sub-cron here that does real, per-row, multi-step,
 		// partial-failure-tolerant work rather than a bulk delete or a
@@ -1132,6 +1173,14 @@ func main() {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
 			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+		os.Exit(1)
+	}
+
+	// Every report task takes --recipients/--cc on --run-now. A report task
+	// added to reportTaskNames without the hook is a code error: stop rather
+	// than leave it out quietly.
+	if missing := tasksMissingReportRunNow(tasks, reportTaskNames()); len(missing) > 0 {
+		slog.Error("report tasks without the run-now recipient override", "tasks", missing)
 		os.Exit(1)
 	}
 
