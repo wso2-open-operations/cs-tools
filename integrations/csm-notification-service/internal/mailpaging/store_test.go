@@ -19,6 +19,8 @@ package mailpaging
 import (
 	"context"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,10 +96,59 @@ func TestRedisStore_RoundTrip(t *testing.T) {
 	if !found {
 		t.Fatalf("Due() = %v, want it to include the scheduled step", due)
 	}
-	if won, err := s.Claim(ctx, member); err != nil || !won {
-		t.Fatalf("Claim() = %v, %v; want true", won, err)
+	if err := s.Ack(ctx, member); err != nil {
+		t.Fatalf("Ack() error = %v", err)
 	}
-	if won, err := s.Claim(ctx, member); err != nil || won {
-		t.Fatalf("second Claim() = %v, %v; want false", won, err)
+	if due, _ := s.Due(ctx, time.Now(), 100); contains(due, member) {
+		t.Fatal("Due() still returns an acknowledged step")
+	}
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
+// Replicas racing for one step: exactly one gets the lease, and the step is
+// due again only once the lease has run out.
+func TestRedisStore_LeaseIsExclusiveAndExpires(t *testing.T) {
+	s, rdb := redisStore(t)
+	ctx := context.Background()
+	member := `{"a":"mailpaging-test-lease-` + time.Now().Format("150405.000000000") + `","r":"x","s":"","l":0}`
+	defer func() { _ = rdb.ZRem(ctx, wakeKey, member) }()
+
+	now := time.Now().Truncate(time.Second)
+	if err := s.Schedule(ctx, member, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("Schedule() error = %v", err)
+	}
+
+	const replicas = 8
+	var wg sync.WaitGroup
+	var won atomic.Int32
+	for i := 0; i < replicas; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, err := s.Lease(ctx, member, now, 2*time.Minute); err == nil && ok {
+				won.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if won.Load() != 1 {
+		t.Fatalf("%d replicas got the lease, want exactly 1", won.Load())
+	}
+	if due, _ := s.Due(ctx, now.Add(time.Minute), 100); contains(due, member) {
+		t.Fatal("a leased step is due while its lease is held")
+	}
+	if due, _ := s.Due(ctx, now.Add(2*time.Minute), 100); !contains(due, member) {
+		t.Fatal("a step whose lease ran out is not due again")
+	}
+	if ok, err := s.Lease(ctx, member, now.Add(2*time.Minute), 2*time.Minute); err != nil || !ok {
+		t.Fatalf("Lease() after expiry = %v, %v; want true", ok, err)
 	}
 }

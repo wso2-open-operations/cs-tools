@@ -44,11 +44,16 @@ type Store interface {
 	MarkStarted(ctx context.Context, alertID string) error
 	// Schedule adds a step unless the identical step is already pending.
 	Schedule(ctx context.Context, member string, at time.Time) error
-	// Due returns up to limit steps due at or before now.
+	// Due returns up to limit steps due at or before now, including a leased
+	// step whose lease has run out.
 	Due(ctx context.Context, now time.Time, limit int64) ([]string, error)
-	// Claim removes a due step and reports whether this caller removed it, so
-	// only one replica acts on it.
-	Claim(ctx context.Context, member string) (bool, error)
+	// Lease takes a due step for ttl and reports whether this caller took it:
+	// the step stays stored, but is not due again until the lease runs out, so
+	// only one replica works on it at a time and a worker that dies mid-step
+	// leaves it to be picked up again.
+	Lease(ctx context.Context, member string, now time.Time, ttl time.Duration) (bool, error)
+	// Ack removes a step once its work is done.
+	Ack(ctx context.Context, member string) error
 }
 
 // RedisStore is Store over Redis.
@@ -80,8 +85,25 @@ func (s *RedisStore) Due(ctx context.Context, now time.Time, limit int64) ([]str
 	}).Result()
 }
 
-// Claim implements Store.
-func (s *RedisStore) Claim(ctx context.Context, member string) (bool, error) {
-	n, err := s.rdb.ZRem(ctx, wakeKey, member).Result()
+// leaseScript moves a due step's score to the lease expiry. It reads and
+// writes only the wake set, so it is one atomic single-key operation: of two
+// callers racing for the same step, the second sees a score in the future.
+var leaseScript = redis.NewScript(`
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score or tonumber(score) > tonumber(ARGV[2]) then
+	return 0
+end
+redis.call('ZADD', KEYS[1], 'XX', ARGV[3], ARGV[1])
+return 1
+`)
+
+// Lease implements Store.
+func (s *RedisStore) Lease(ctx context.Context, member string, now time.Time, ttl time.Duration) (bool, error) {
+	n, err := leaseScript.Run(ctx, s.rdb, []string{wakeKey}, member, now.Unix(), now.Add(ttl).Unix()).Int()
 	return n == 1, err
+}
+
+// Ack implements Store.
+func (s *RedisStore) Ack(ctx context.Context, member string) error {
+	return s.rdb.ZRem(ctx, wakeKey, member).Err()
 }

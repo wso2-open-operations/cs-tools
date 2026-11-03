@@ -125,14 +125,21 @@ func (s *fakeStore) Due(_ context.Context, now time.Time, limit int64) ([]string
 	sort.Strings(out)
 	return out, nil
 }
-func (s *fakeStore) Claim(_ context.Context, m string) (bool, error) {
+func (s *fakeStore) Lease(_ context.Context, m string, now time.Time, ttl time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.wake[m]; !ok {
+	at, ok := s.wake[m]
+	if !ok || at.After(now) {
 		return false, nil
 	}
-	delete(s.wake, m)
+	s.wake[m] = now.Add(ttl)
 	return true, nil
+}
+func (s *fakeStore) Ack(_ context.Context, m string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.wake, m)
+	return nil
 }
 
 type fakeLookup struct {
@@ -160,9 +167,17 @@ type fakeCaller struct {
 	calls []string
 	msgs  []string
 	fail  map[string]bool
+	// onCall runs at the start of every call, e.g. to cancel a context.
+	onCall func()
 }
 
-func (c *fakeCaller) MakeCall(_ context.Context, to, msg string) (notifications.Call, error) {
+func (c *fakeCaller) MakeCall(ctx context.Context, to, msg string) (notifications.Call, error) {
+	if c.onCall != nil {
+		c.onCall()
+	}
+	if err := ctx.Err(); err != nil {
+		return notifications.Call{}, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.fail[to] {
@@ -315,6 +330,40 @@ func TestLadder_LookupFailureSkipsTheLevelNotTheLadder(t *testing.T) {
 	_ = e.Tick(ctx)
 	if got := strings.Join(cl.calls, ","); got != "+15550000002,+15550000003" {
 		t.Fatalf("calls = %q, want R2 called once the lookup is back", got)
+	}
+}
+
+// A worker that stops while placing a level must not lose it: the level stays
+// stored under a lease and is placed again once the lease runs out. A
+// single-level ladder has no next level to cover for it.
+func TestLadder_InterruptedLevelIsPlacedAgainAfterTheLease(t *testing.T) {
+	cfg, err := Parse([]byte(`{"rules":{"sre":{"levels":[{"name":"R1","emails":["a@example.com"]}]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, cl := newFakeStore(), &fakeCaller{fail: map[string]bool{}}
+	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	e := NewEngine(cfg, st, &fakeLookup{numbers: map[string]string{"a@example.com": "+15550000001"}}, cl, true)
+	e.now = func() time.Time { return now }
+	e.lookupRetryDelay = time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cl.onCall = cancel // the worker is shut down as the call is being placed
+	_ = e.HandleAlert(context.Background(), alert)
+	_ = e.Tick(ctx)
+	if len(cl.calls) != 0 || len(st.wake) != 1 {
+		t.Fatalf("calls = %v, stored = %d; want no call placed and the level kept", cl.calls, len(st.wake))
+	}
+
+	cl.onCall = nil
+	_ = e.Tick(context.Background())
+	if len(cl.calls) != 0 {
+		t.Fatalf("calls = %v, want none while the lease is held", cl.calls)
+	}
+	now = now.Add(leaseTTL)
+	_ = e.Tick(context.Background())
+	if len(cl.calls) != 1 || len(st.wake) != 0 {
+		t.Fatalf("calls = %v, stored = %d; want the call placed after the lease and the level removed", cl.calls, len(st.wake))
 	}
 }
 

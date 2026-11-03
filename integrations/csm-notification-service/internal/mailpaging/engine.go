@@ -37,6 +37,10 @@ var e164 = regexp.MustCompile(`^\+[1-9]\d{7,14}$`)
 
 const (
 	tickBatch = 20
+	// leaseTTL is how long a worker holds a level before another may take it
+	// over. It must outlast placing a level's calls; a worker that dies leaves
+	// the level to be placed again after this long.
+	leaseTTL = 2 * time.Minute
 	// maxSpokenSubject keeps the spoken message short; the subject is
 	// email-supplied text.
 	maxSpokenSubject = 100
@@ -139,46 +143,61 @@ func (e *Engine) RunTicker(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// Tick places every level that is due.
+// Tick places every level that is due. A level is leased, not removed, while
+// its calls are placed, and removed only once that is done: a crash or
+// shutdown part-way leaves it to be placed again when the lease runs out
+// (so a person may be called twice, never zero times).
 func (e *Engine) Tick(ctx context.Context) error {
 	due, err := e.store.Due(ctx, e.now(), tickBatch)
 	if err != nil {
 		return fmt.Errorf("mailpaging: list due: %w", err)
 	}
 	for _, member := range due {
-		won, err := e.store.Claim(ctx, member)
+		won, err := e.store.Lease(ctx, member, e.now(), leaseTTL)
 		if err != nil {
-			slog.ErrorContext(ctx, "mailpaging: claim failed", "err", err)
+			slog.ErrorContext(ctx, "mailpaging: lease failed", "err", err)
 			continue
 		}
 		if !won {
 			continue
 		}
-		e.run(ctx, member)
+		if !e.run(ctx, member) {
+			slog.WarnContext(ctx, "mailpaging: level not finished; it will be placed again when its lease runs out")
+			continue
+		}
+		// Not the tick's own context: a shutdown must not stop the ack of a
+		// level whose calls were all placed.
+		if err := e.store.Ack(context.WithoutCancel(ctx), member); err != nil {
+			slog.ErrorContext(ctx, "mailpaging: could not remove a finished level; it may be called again", "err", err)
+		}
 	}
 	return nil
 }
 
-// run places one level's calls. The next level is scheduled before any call
-// is placed, so a crash part-way through this level still lets the ladder go
-// on; the cost is that a crash can leave part of this level uncalled, which
-// the next level then covers.
-func (e *Engine) run(ctx context.Context, member string) {
+// run places one level's calls and reports whether the step is finished and
+// may be removed. The next level is scheduled first (a no-op if it already
+// is), so a level that has to be retried does not schedule it twice. It is
+// not finished when the next level could not be scheduled or when ctx ended
+// while the calls were being placed; a failed call or an unreachable number
+// lookup is logged and counts as finished, so a broken dependency cannot make
+// one level repeat for ever.
+func (e *Engine) run(ctx context.Context, member string) bool {
 	var s step
 	if err := json.Unmarshal([]byte(member), &s); err != nil {
 		slog.ErrorContext(ctx, "mailpaging: dropping an unreadable step", "err", err)
-		return
+		return true
 	}
 	rule, ok := e.cfg.Rules[s.Rule]
 	if !ok || s.Level < 0 || s.Level >= len(rule.Levels) {
 		slog.WarnContext(ctx, "mailpaging: step no longer matches the config; dropping it", "rule", s.Rule, "level", s.Level)
-		return
+		return true
 	}
 	if s.Level+1 < len(rule.Levels) {
 		next := s
 		next.Level++
 		if err := e.schedule(ctx, next, e.now().Add(rule.Wait())); err != nil {
 			slog.ErrorContext(ctx, "mailpaging: could not schedule the next level", "rule", s.Rule, "level", rule.Levels[s.Level].Name, "err", err)
+			return false
 		}
 	}
 	level := rule.Levels[s.Level]
@@ -199,6 +218,7 @@ func (e *Engine) run(ctx context.Context, member string) {
 	}
 	slog.InfoContext(ctx, "mailpaging: level called", "rule", s.Rule, "level", level.Name,
 		"people", len(level.Emails), "noNumber", missing, "placed", placed, "failed", failed)
+	return ctx.Err() == nil
 }
 
 // lookupAttempts bounds a failing number lookup: this runs on the ticker, so
