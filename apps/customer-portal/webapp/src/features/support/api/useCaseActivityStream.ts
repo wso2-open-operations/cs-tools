@@ -21,6 +21,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiConfig } from "@config/apiConfig";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useLogger } from "@hooks/useLogger";
+import { useIsIdle } from "@providers/IdleStateContext";
 
 /** Base delay before the first reconnect attempt after the stream errors out or drops. */
 const RECONNECT_BASE_DELAY_MS = 3_000;
@@ -81,14 +82,19 @@ function reconnectDelay(attempt: number): number {
  * Reconnects by hand rather than letting the polyfill retry: its headers are
  * fixed at construction, so a token expiring mid-connection would have it
  * retry forever with the same stale one.
+ *
+ * Stays disconnected while the user is idle (the session warning is open), so
+ * an abandoned tab doesn't hold a long-lived stream open. Connects fresh when
+ * the user continues; the `open` handler refetches whatever was missed.
  */
 export function useCaseActivityStream(caseId: string | undefined): void {
   const queryClient = useQueryClient();
   const { getIdToken } = useAsgardeo();
   const logger = useLogger();
+  const isIdle = useIsIdle();
 
   useEffect(() => {
-    if (!caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    if (isIdle || !caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
 
     let cancelled = false;
     let source: EventSourcePolyfill | null = null;
@@ -165,5 +171,5 @@ export function useCaseActivityStream(caseId: string | undefined): void {
       clearTimeout(reconnectTimer);
       source?.close();
     };
-  }, [caseId, queryClient, getIdToken, logger]);
+  }, [caseId, isIdle, queryClient, getIdToken, logger]);
 }
