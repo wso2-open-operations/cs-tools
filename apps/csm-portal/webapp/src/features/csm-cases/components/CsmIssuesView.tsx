@@ -603,8 +603,17 @@ export default function CsmIssuesView({
     defaultVisibleIds: defaultVisibleOptionalColumns,
   });
   const exportSearch = queryFilters.search.trim();
+  // Relative dates resolved once per export, on its first page (offset 0;
+  // pages are fetched one after another), so an export running over the
+  // viewer's local midnight keeps one date window for every page instead of
+  // skipping or repeating cases at the page boundaries.
+  const exportDateFiltersRef = useRef<CasesFilters | null>(null);
   const fetchCasesExportPage = useCallback(
     async (offset: number, limit: number) => {
+      if (offset === 0 || exportDateFiltersRef.current === null) {
+        exportDateFiltersRef.current = resolveCaseFilterDates(queryFilters, new Date());
+      }
+      const exportDateFilters = exportDateFiltersRef.current;
       // Re-resolved per page when an assignee filter is active — a small,
       // deterministic, targeted `/users/search` by email, not a directory
       // scan — rather than caching it across pages, so the export can never
@@ -629,7 +638,7 @@ export default function CsmIssuesView({
           pagination: { offset, limit },
           sortBy: { field: sortField, order: sortOrder },
           filters: buildCaseSearchFilters(
-            resolveCaseFilterDates(queryFilters, new Date()),
+            exportDateFilters,
             exportSearch,
             assignedUserIds,
           ),
