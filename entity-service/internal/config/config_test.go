@@ -1517,3 +1517,58 @@ func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
 		t.Errorf("bad values did not fall back to the defaults: %d / %s", c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
 	}
 }
+
+func TestLoad_AttachmentStorageMode(t *testing.T) {
+	t.Setenv("ATTACHMENT_STORAGE_MODE", "")
+	c := Load()
+	if c.AttachmentStorageMode != AttachmentStorageModeSFTPGo || c.HasBackendAttachmentStorage() {
+		t.Errorf("default mode = %q (backend: %v), want sftpgo", c.AttachmentStorageMode, c.HasBackendAttachmentStorage())
+	}
+
+	// Case and surrounding space in the value do not matter.
+	for _, v := range []string{"backend", "BACKEND", "Backend", " backend "} {
+		t.Setenv("ATTACHMENT_STORAGE_MODE", v)
+		if c := Load(); !c.HasBackendAttachmentStorage() {
+			t.Errorf("ATTACHMENT_STORAGE_MODE=%q did not select backend storage", v)
+		}
+	}
+	t.Setenv("ATTACHMENT_STORAGE_MODE", "sftpgo")
+	if c := Load(); c.HasBackendAttachmentStorage() {
+		t.Error("ATTACHMENT_STORAGE_MODE=sftpgo selected backend storage")
+	}
+}
+
+func TestConfig_Validate_AttachmentStorageMode(t *testing.T) {
+	for _, mode := range []AttachmentStorageMode{"", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend} {
+		c := baseValidConfig()
+		c.AttachmentStorageMode = mode
+		if err := c.Validate(); err != nil {
+			t.Errorf("mode %q refused: %v", mode, err)
+		}
+	}
+
+	// A typo must stop the service: silently falling back to sftpgo would leave the
+	// backends calling routes that are not registered.
+	for _, mode := range []AttachmentStorageMode{"blob", "azure", "backends", " backend"} {
+		c := baseValidConfig()
+		c.AttachmentStorageMode = mode
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "ATTACHMENT_STORAGE_MODE") {
+			t.Errorf("mode %q: err = %v, want an ATTACHMENT_STORAGE_MODE error", mode, err)
+		}
+	}
+}
+
+// Backend storage needs no SFTPGo settings, and a deployment that still has them
+// set is not refused: the mode wins and they are ignored.
+func TestConfig_Validate_BackendModeNeedsNoSFTPGo(t *testing.T) {
+	c := baseValidConfig()
+	c.AttachmentStorageMode = AttachmentStorageModeBackend
+	if err := c.Validate(); err != nil {
+		t.Fatalf("backend mode without SFTPGo: %v", err)
+	}
+	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "https://sftpgo.internal", "svc", "p"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("backend mode with SFTPGo still set: %v", err)
+	}
+}

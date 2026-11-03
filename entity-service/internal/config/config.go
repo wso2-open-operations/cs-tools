@@ -116,6 +116,20 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
+// AttachmentStorageMode says who stores work item, comment-image and deployment
+// attachment files (see Config.AttachmentStorageMode).
+type AttachmentStorageMode string
+
+const (
+	// AttachmentStorageModeSFTPGo: this service reaches SFTPGo and gives the
+	// browser short-lived share links. The default.
+	AttachmentStorageModeSFTPGo AttachmentStorageMode = "sftpgo"
+	// AttachmentStorageModeBackend: the portal backends store and serve the files
+	// themselves. This service keeps the access checks and the rows, authorizes each
+	// upload and read, and returns the storage key; it never touches a file.
+	AttachmentStorageModeBackend AttachmentStorageMode = "backend"
+)
+
 // AttachmentDataSource identifies which backend three case attachment reads
 // (GET /attachments/{id}, POST /attachments/search, GET
 // /attachments/{id}/content) and the case activity feed (POST
@@ -757,6 +771,13 @@ type Config struct {
 	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
 	AttachmentReadLinkTTL   time.Duration
 	AttachmentUploadLinkTTL time.Duration
+	// AttachmentStorageMode (ATTACHMENT_STORAGE_MODE) says who holds the files.
+	// "sftpgo" (the default) keeps today's behaviour: this service reaches SFTPGo
+	// and hands the browser a share link. "backend" means the portal backends hold
+	// the files themselves (in Azure Blob Storage): this service then only decides
+	// who may upload or read what and which storage key each file has, and needs no
+	// SFTPGo settings at all. See AttachmentStorageModeBackend.
+	AttachmentStorageMode AttachmentStorageMode
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
@@ -1003,6 +1024,7 @@ func Load() *Config {
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
+	cfg.AttachmentStorageMode = AttachmentStorageMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("ATTACHMENT_STORAGE_MODE", string(AttachmentStorageModeSFTPGo)))))
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1011,6 +1033,13 @@ func Load() *Config {
 // the attachment link and upload routes.
 func (c *Config) HasSFTPGo() bool {
 	return c.SFTPGoURL != "" && c.SFTPGoUser != "" && c.SFTPGoPassword != ""
+}
+
+// HasBackendAttachmentStorage reports whether the portal backends hold the
+// attachment files (ATTACHMENT_STORAGE_MODE=backend). It turns on the attachment
+// routes without SFTPGo and turns the SFTPGo link routes off.
+func (c *Config) HasBackendAttachmentStorage() bool {
+	return c.AttachmentStorageMode == AttachmentStorageModeBackend
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1322,6 +1351,11 @@ func (c *Config) Validate() error {
 	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
+	}
+	switch c.AttachmentStorageMode {
+	case "", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend:
+	default:
+		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
 	}
 	// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
 	sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
