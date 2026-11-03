@@ -736,7 +736,24 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// reach SFTPGo half configured.
 	var storedAttachmentHandler *handler.StoredAttachmentHandler
 	var inlineImageLinker service.InlineImageLinker
-	if db != nil && cfg.HasSFTPGo() {
+	// storedAttachmentBackend is ATTACHMENT_STORAGE_MODE=backend: the portal
+	// backends hold the files, so there is no SFTPGo client at all and the routes
+	// that hand out SFTPGo links are not registered; authorize and locate are.
+	storedAttachmentBackend := db != nil && cfg.HasBackendAttachmentStorage()
+	if storedAttachmentBackend {
+		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
+		storedAttachmentSvc := service.NewBackendStoredAttachmentService(
+			storedAttachmentRepo,
+			service.StoredAttachmentLimits{
+				MaxBytes:       cfg.AttachmentMaxBytes,
+				InlineMaxBytes: cfg.InlineImageMaxBytes,
+			},
+		)
+		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
+		// A nil store: nothing here holds a file, so the cleanup only marks rows.
+		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
+			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, nil, accessSvc))
+	} else if db != nil && cfg.HasSFTPGo() {
 		sftpgoClient := filestore.NewClient(cfg.SFTPGoURL, cfg.SFTPGoPublicURL, cfg.SFTPGoUser, cfg.SFTPGoPassword)
 		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
 		storedAttachmentSvc := service.NewStoredAttachmentService(
@@ -2160,13 +2177,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /onboarding-steps/search", onboardingStepHandler.SearchOnboardingSteps)
 	}
 	if storedAttachmentHandler != nil {
-		mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
 		mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
-		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
-		mux.HandleFunc("POST /attachments/shares/cleanup", storedAttachmentHandler.CleanupShares)
 		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
+		if storedAttachmentBackend {
+			// The portal backends hold the files: they ask which key to use and read.
+			mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
+			mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
+			mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
+		} else {
+			mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
+			mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
+			mux.HandleFunc("POST /attachments/shares/cleanup", storedAttachmentHandler.CleanupShares)
+		}
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and
