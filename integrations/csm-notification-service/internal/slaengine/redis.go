@@ -19,6 +19,7 @@ package slaengine
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -316,53 +317,98 @@ func (s *Store) SetShiftedPauseSeconds(ctx context.Context, caseID, clockType st
 	return s.rdb.Expire(ctx, key, clockTTL).Err()
 }
 
-// shiftWakeScript pushes a clock's own tier members forward by deltaSeconds
-// — but only members that currently EXIST in the wake-index ZSET. A bare
+// claimBaselineScript moves a clock's shifted-pause baseline from the value
+// the caller diffed against to the new one, and reports whether it did. It
+// touches only the clock hash, so it is a single-key script.
+//
+// Wake-index shifts must never use a script that names both sla:wake and a
+// clock hash: those keys hash to different slots, and a Redis that shards
+// keys (a cluster, or a managed Redis under an OSS clustering policy)
+// refuses the call with CROSSSLOT. So a shift is two single-key steps,
+// ordered baseline first: a crash or error between them leaves the baseline
+// advanced and the entries unshifted (a tier alerts slightly early, the
+// same posture resumeShift already takes when it cannot read the pause), and
+// never the reverse (entries shifted but the baseline stale, which made the
+// next resume shift them a second time and delay every remaining tier).
+// Comparing against the expected old value also makes a redelivered or
+// racing resume a no-op: only the call that moves the baseline goes on to
+// shift the entries.
+var claimBaselineScript = redis.NewScript(`
+local current = redis.call('HGET', KEYS[1], 'shiftedPauseSeconds')
+if (current or '0') ~= ARGV[1] then
+	return 0
+end
+redis.call('HSET', KEYS[1], 'shiftedPauseSeconds', ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 1
+`)
+
+// claimBaseline runs claimBaselineScript: true when the baseline was
+// oldSeconds and is now newSeconds.
+func (s *Store) claimBaseline(ctx context.Context, key string, oldSeconds, newSeconds int64) (bool, error) {
+	res, err := claimBaselineScript.Run(ctx, s.rdb, []string{key},
+		strconv.FormatInt(oldSeconds, 10), strconv.FormatInt(newSeconds, 10), int64(clockTTL.Seconds())).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
+}
+
+// shiftWakeScript pushes the given wake members forward by delta seconds --
+// but only members that currently EXIST in the wake-index ZSET. A bare
 // ZINCRBY on a sorted set creates the member (at score = the increment) if
 // it's absent, which would wrongly resurrect a tier whose wake entry was
 // already removed after it was alerted on (see processDueMember); checking
-// ZSCORE first is what keeps an already-handled tier untouched. The new
-// shifted-pause baseline is recorded on the same clock hash in the same
-// script (KEYS[2]/ARGV[2]) — a CodeRabbit-caught gap in an earlier version
-// did these as two separate Redis calls, which left a real failure window: a
-// crash or error between them left the wake entries already shifted but the
-// baseline still stale, so the very next resume would see the same old
-// baseline, recompute the identical delta, and shift the same entries a
-// second time — silently delaying every remaining tier by one extra pause
-// segment's length, with no later reconciliation pass to catch it (Reconcile
-// only runs once, at process startup).
+// ZSCORE first is what keeps an already-handled tier untouched. It names
+// only sla:wake, so it is safe on a sharded Redis (see claimBaselineScript).
 var shiftWakeScript = redis.NewScript(`
 local delta = tonumber(ARGV[1])
-local baseline = ARGV[2]
-local ttl = ARGV[3]
-for i = 4, #ARGV do
+for i = 2, #ARGV do
 	local member = ARGV[i]
 	if redis.call('ZSCORE', KEYS[1], member) then
 		redis.call('ZINCRBY', KEYS[1], delta, member)
 	end
 end
-redis.call('HSET', KEYS[2], 'shiftedPauseSeconds', baseline)
-redis.call('EXPIRE', KEYS[2], ttl)
 return 1
 `)
 
 // ShiftWake pushes every still-pending wake-index entry of one
-// (caseID, clockType) clock forward by deltaSeconds, and atomically records
-// newBaselineSeconds as the clock's new ClockMeta.ShiftedPauseSeconds in the
-// same Redis operation — called once a just-completed pause segment's true
-// length is known (Engine.resumeShift), so a tier whose original due time
-// fell during the pause is rescheduled for sometime after it resumes, rather
-// than firing immediately (an un-shifted due time already in the past) the
-// moment the next tick runs. See shiftWakeScript's own doc comment for why
-// the baseline write can't be a separate call.
-func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, newBaselineSeconds int64) error {
+// (caseID, clockType) clock forward by deltaSeconds and records
+// newBaselineSeconds as the clock's new ClockMeta.ShiftedPauseSeconds --
+// called once a just-completed pause segment's true length is known
+// (Engine.resumeShift), so a tier whose original due time fell during the
+// pause is rescheduled for sometime after it resumes, rather than firing
+// immediately (an un-shifted due time already in the past) the moment the
+// next tick runs. oldBaselineSeconds is the baseline the caller diffed
+// against; when the stored baseline has already moved, another resume got
+// there first and nothing is shifted. See claimBaselineScript for the
+// ordering and why the two writes are separate calls.
+func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, oldBaselineSeconds, newBaselineSeconds int64) error {
 	key := clockKey(caseID, clockType)
-	args := make([]any, 0, 3+len(tierSequence))
-	args = append(args, deltaSeconds, strconv.FormatInt(newBaselineSeconds, 10), int64(clockTTL.Seconds()))
+	claimed, err := s.claimBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+	if err != nil || !claimed {
+		return err
+	}
+	args := make([]any, 0, 1+len(tierSequence))
+	args = append(args, deltaSeconds)
 	for _, tier := range tierSequence {
 		args = append(args, wakeMember(caseID, clockType, tier))
 	}
-	return shiftWakeScript.Run(ctx, s.rdb, []string{wakeKey, key}, args...).Err()
+	if err := shiftWakeScript.Run(ctx, s.rdb, []string{wakeKey}, args...).Err(); err != nil {
+		s.releaseBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+		return err
+	}
+	return nil
+}
+
+// releaseBaseline puts a claimed baseline back after the wake-index write
+// that followed it failed, so a retry of the same resume can shift again.
+// Best effort: if it fails too, the entries stay unshifted (see
+// claimBaselineScript).
+func (s *Store) releaseBaseline(ctx context.Context, key string, oldSeconds, newSeconds int64) {
+	if _, err := s.claimBaseline(context.WithoutCancel(ctx), key, newSeconds, oldSeconds); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to restore shifted-pause baseline after a failed wake shift", "key", key, "err", err)
+	}
 }
 
 // setWakeAbsoluteScript writes an absolute score for each given wake member
@@ -370,22 +416,16 @@ func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSe
 // the index. A bare ZADD on an absent member creates it (at the given
 // score), which would wrongly resurrect a tier processDueMember already
 // alerted on and removed; checking ZSCORE first is what keeps an
-// already-handled tier untouched. The clock hash's own shiftedPauseSeconds
-// is updated in the same script for the identical reason
-// shiftWakeScript's own doc comment gives: a crash between the two writes
-// must never leave the wake entries recomputed but the baseline stale.
+// already-handled tier untouched. It names only sla:wake (see
+// claimBaselineScript).
 var setWakeAbsoluteScript = redis.NewScript(`
-local baseline = ARGV[1]
-local ttl = ARGV[2]
-for i = 3, #ARGV, 2 do
+for i = 1, #ARGV, 2 do
 	local member = ARGV[i]
 	local score = ARGV[i + 1]
 	if redis.call('ZSCORE', KEYS[1], member) then
 		redis.call('ZADD', KEYS[1], score, member)
 	end
 end
-redis.call('HSET', KEYS[2], 'shiftedPauseSeconds', baseline)
-redis.call('EXPIRE', KEYS[2], ttl)
 return 1
 `)
 
@@ -396,19 +436,26 @@ return 1
 // instant from scratch (via businessdays.AddBusinessDuration) rather than
 // incrementing a flat delta the way ShiftWake does for a 24x7 clock.
 // newBaselineSeconds is recorded as the clock's new
-// ClockMeta.ShiftedPauseSeconds in the same Redis operation, same reasoning
-// as ShiftWake's own baseline write.
-func (s *Store) SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error {
+// ClockMeta.ShiftedPauseSeconds, claimed against oldBaselineSeconds first,
+// same as ShiftWake.
+func (s *Store) SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, oldBaselineSeconds, newBaselineSeconds int64) error {
 	if len(wakes) == 0 {
 		return nil
 	}
 	key := clockKey(caseID, clockType)
-	args := make([]any, 0, 2+2*len(wakes))
-	args = append(args, strconv.FormatInt(newBaselineSeconds, 10), int64(clockTTL.Seconds()))
+	claimed, err := s.claimBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+	if err != nil || !claimed {
+		return err
+	}
+	args := make([]any, 0, 2*len(wakes))
 	for tier, at := range wakes {
 		args = append(args, wakeMember(caseID, clockType, tier), float64(at.Unix()))
 	}
-	return setWakeAbsoluteScript.Run(ctx, s.rdb, []string{wakeKey, key}, args...).Err()
+	if err := setWakeAbsoluteScript.Run(ctx, s.rdb, []string{wakeKey}, args...).Err(); err != nil {
+		s.releaseBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+		return err
+	}
+	return nil
 }
 
 // SetState refreshes one clock's own display State field — called from
