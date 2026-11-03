@@ -211,4 +211,29 @@ func TestRotaReminderRequestIntegration_OverlappingKinds(t *testing.T) {
 	if _, err := repo.Create(ctx, "ben@example.com", "SME", "morning", false, 10*time.Minute); !errors.As(err, &tooMany) {
 		t.Errorf("morning within a sent weekday request's cooldown: %v", err)
 	}
+
+	// A morning still being sent behind an evening already sent and past its
+	// cooldown: the newest request is the evening one, but the waiting
+	// morning still refuses a weekday request.
+	clear()
+	morning, err := repo.Create(ctx, "ann@example.com", "SME", "morning", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err := repo.Claim(ctx, "csm-scheduled-tasks", "SME", 2*time.Hour); err != nil || c == nil || c.ID != morning.ID {
+		t.Fatalf("claim the morning request: %+v, %v", c, err)
+	}
+	evening, err := repo.Create(ctx, "ben@example.com", "SME", "evening", false, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err := repo.Claim(ctx, "csm-scheduled-tasks", "SME", 2*time.Hour); err != nil || c == nil || c.ID != evening.ID {
+		t.Fatalf("claim the evening request: %+v, %v", c, err)
+	}
+	if _, err := repo.Report(ctx, "csm-scheduled-tasks", "SME", evening.ID, "SENT", "Sent 1 email."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Create(ctx, "cid@example.com", "SME", "weekday", false, 0); !errors.As(err, &conflict) {
+		t.Errorf("weekday while an older morning request is still being sent: %v", err)
+	}
 }

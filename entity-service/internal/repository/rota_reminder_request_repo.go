@@ -119,21 +119,35 @@ func (r *rotaReminderRequestRepository) Create(ctx context.Context, actor, famil
 			family, reminderRequestLockKind(kind), strconv.FormatBool(test), owner); err != nil {
 			return fmt.Errorf("lock: %w", err)
 		}
+		kinds := overlappingReminderKinds(kind)
+		// Any overlapping request still waiting refuses this one, not only the
+		// latest: with several kinds in play an older one (a Morning still
+		// being sent) can sit behind a newer one already sent.
+		waiting, err := scanRotaReminderRequest(tx.QueryRow(ctx, `SELECT `+rotaReminderRequestColumns+`
+			FROM team_schedule_reminder_request
+			WHERE family = $1 AND kind = ANY($2::text[]) AND test = $3 AND ($4 = '' OR LOWER(requested_by) = LOWER($4))
+			  AND status IN ('QUEUED', 'SENDING')
+			ORDER BY requested_on LIMIT 1`, family, kinds, test, owner))
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return fmt.Errorf("read the waiting requests: %w", err)
+		default:
+			what := "a " + waiting.Kind + " reminder"
+			if test {
+				what = "your " + waiting.Kind + " test"
+			}
+			return &apierror.ConflictError{Msg: fmt.Sprintf("%s asked for by %s is already waiting to be sent", what, waiting.RequestedBy)}
+		}
 		last, err := scanRotaReminderRequest(tx.QueryRow(ctx, `SELECT `+rotaReminderRequestColumns+`
 			FROM team_schedule_reminder_request
 			WHERE family = $1 AND kind = ANY($2::text[]) AND test = $3 AND ($4 = '' OR LOWER(requested_by) = LOWER($4))
 			  AND status <> 'FAILED'
-			ORDER BY requested_on DESC LIMIT 1`, family, overlappingReminderKinds(kind), test, owner))
+			ORDER BY requested_on DESC LIMIT 1`, family, kinds, test, owner))
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return fmt.Errorf("read the last request: %w", err)
-		case last.Status == "QUEUED" || last.Status == "SENDING":
-			what := "a " + last.Kind + " reminder"
-			if test {
-				what = "your " + last.Kind + " test"
-			}
-			return &apierror.ConflictError{Msg: fmt.Sprintf("%s asked for by %s is already waiting to be sent", what, last.RequestedBy)}
 		case time.Since(last.RequestedOn) < cooldown:
 			what := "a " + last.Kind + " reminder was"
 			if test {
