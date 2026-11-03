@@ -194,6 +194,7 @@ func TestBlobConfirm_RefusalDeletesTheFileButARetryableFailureKeepsIt(t *testing
 	}{
 		"refused": {400, true}, "forbidden": {403, true},
 		"rate": {429, false}, "conflict": {409, false}, "upstream": {503, false},
+		"unauthorized": {401, false}, "timeout": {408, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, s := &fakeBlobEntity{target: blobTarget, confirmErr: &apierror.Error{StatusCode: tc.code}}, &fakeBlobStore{data: []byte("x")}

@@ -41,6 +41,10 @@ const ChunkBytes = 16 << 20
 // maxChunkBodyBytes is the most one chunk request may carry.
 const maxChunkBodyBytes = ChunkBytes
 
+// attachmentChunkDeadline is how long one chunk may take to arrive and be stored,
+// beyond the server's global read and write timeouts: 16 MiB over a slow link.
+const attachmentChunkDeadline = 10 * time.Minute
+
 // attachmentStreamWriteDeadline is how long a file download may take to write,
 // beyond the server's global WriteTimeout: 100 MiB over a slow link.
 const attachmentStreamWriteDeadline = 30 * time.Minute
@@ -191,6 +195,12 @@ func (h *BlobAttachmentHandler) PutChunk(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusRequestEntityTooLarge, "The upload is larger than allowed.")
 		return
 	}
+	// A slow link can need longer than the server's global timeouts for one
+	// chunk. Best effort: a ResponseWriter that cannot extend them keeps them.
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(attachmentChunkDeadline)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
 	body := http.MaxBytesReader(w, r.Body, maxChunkBodyBytes)
 	if err := h.store.PutBlock(r.Context(), target.StorageKey, index, body, size); err != nil {
 		h.storeError(w, r, "PutBlock", id, err, "Failed to store the chunk.")
@@ -294,11 +304,11 @@ func (h *BlobAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Req
 		slog.ErrorContext(ctx, "entity ConfirmStoredAttachmentUpload failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
 		// A refusal (the file does not match what was declared, the upload is no
 		// longer pending) is final: the file is no use to anyone, so it goes. A
-		// failure that may pass (a 409 conflict, a 429, a 5xx) leaves the file for
+		// failure that may pass (a 401, 408, 409, 429 or a 5xx) leaves the file for
 		// the browser to confirm again.
 		var apiErr *apierror.Error
 		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 &&
-			apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusConflict {
+			!retryableConfirmStatus(apiErr.StatusCode) {
 			h.discard(ctx, id, target.StorageKey)
 		}
 		mapStoredAttachmentError(w, err, "Failed to confirm the attachment upload.")
@@ -306,6 +316,17 @@ func (h *BlobAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
+}
+
+// retryableConfirmStatus reports a 4xx from entity-service that may pass on a
+// second try (an expired token, a timeout, a conflict, a rate limit), so the
+// committed file stays for the browser to confirm again.
+func retryableConfirmStatus(code int) bool {
+	switch code {
+	case http.StatusUnauthorized, http.StatusRequestTimeout, http.StatusConflict, http.StatusTooManyRequests:
+		return true
+	}
+	return false
 }
 
 // discard removes a file that must not stay, best effort: one that cannot be
