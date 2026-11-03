@@ -35,8 +35,41 @@ import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 import {
   advancedFilterRowToFieldFilter,
   isCompleteAdvancedFilterRow,
+  resolveAdvancedFilterDateValues,
 } from "@features/csm-cases/utils/advancedFilters";
 import { anyOfBranchToPayload } from "@features/csm-cases/utils/anyOfFilters";
+import { resolveRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
+
+/**
+ * Resolves `createdOnGte`/`createdOnLte`/`updatedOnGte`/`updatedOnLte`/
+ * `closedOnGte`/`closedOnLte` relative-date placeholders (`__today__`,
+ * `__daysAgo:N__`, ... -- same grammar and resolver as the dashboard
+ * widgets' own `resolveRelativeDateFilters`) against the viewer's own
+ * browser-local `now`, and the same for any `createdOn`/`updatedOn`/
+ * `closedOn` row from the "Advanced filters" builder (see
+ * `resolveAdvancedFilterDateValues`). Run at query-build time, so "today"
+ * means whatever moment the link is opened, not a moment baked into the URL.
+ * Anything that isn't a recognized placeholder (a literal `YYYY-MM-DD`, or
+ * garbage) passes through unchanged.
+ *
+ * Shared by `useGetCsmCases` (the listing) and the "Export CSV" action, so an
+ * export never sends a placeholder the listing resolved (entity-service would
+ * resolve it in UTC, not the viewer's local time).
+ */
+export function resolveCaseFilterDates(filters: CasesFilters, now: Date): CasesFilters {
+  const resolveBound = (raw: string | null, op: "gte" | "lte"): string | null =>
+    raw === null ? null : (resolveRelativeDatePlaceholder(raw, op, now) ?? raw);
+  return {
+    ...filters,
+    createdOnGte: resolveBound(filters.createdOnGte, "gte"),
+    createdOnLte: resolveBound(filters.createdOnLte, "lte"),
+    updatedOnGte: resolveBound(filters.updatedOnGte, "gte"),
+    updatedOnLte: resolveBound(filters.updatedOnLte, "lte"),
+    closedOnGte: resolveBound(filters.closedOnGte, "gte"),
+    closedOnLte: resolveBound(filters.closedOnLte, "lte"),
+    advancedFilters: resolveAdvancedFilterDateValues(filters.advancedFilters, now),
+  };
+}
 
 /**
  * Builds the `/cases/search` `filters` object for the given UI filter state

@@ -84,6 +84,7 @@ import {
   updateUnifiedRow,
   type UnifiedFilterRow,
 } from "@features/csm-cases/utils/filterFieldAdapters";
+import { describeRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
 
 
 /**
@@ -269,9 +270,12 @@ const WORK_STATE_LABEL: Record<BeCaseWorkState, string> = {
 };
 
 /** Formats a `createdOn`/`updatedOn`/`closedOn` bound for a chip label — a
- * locale date when parseable, the raw string otherwise (never throws on a
- * malformed value; this is a display fallback, not validation). */
+ * relative-date placeholder in words ("30 days ago"), a locale date when
+ * parseable, the raw string otherwise (never throws on a malformed value;
+ * this is a display fallback, not validation). */
 function formatDateBound(raw: string): string {
+  const relative = describeRelativeDatePlaceholder(raw);
+  if (relative) return relative;
   // A bare `YYYY-MM-DD` is parsed as UTC midnight by `Date`, which renders as
   // the previous day for any locale behind UTC — pin it to local midnight.
   const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
