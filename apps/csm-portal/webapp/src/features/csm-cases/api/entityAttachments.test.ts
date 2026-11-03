@@ -14,45 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
-// A scripted stand-in for tus-js-client: tests drive its callbacks by hand.
-interface FakeTusOptions {
-  endpoint: string;
-  metadata: Record<string, string>;
-  chunkSize: number;
-  retryDelays: number[];
-  storeFingerprintForResuming: boolean;
-  removeFingerprintOnSuccess: boolean;
-  uploadDataDuringCreation?: boolean;
-  headers?: Record<string, string>;
-  onUploadUrlAvailable: () => void;
-  onProgress: (sent: number, total: number) => void;
-  onError: (err: Error) => void;
-  onSuccess: () => void;
-  onShouldRetry: (err: Error) => boolean;
-}
-const tusInstances: { file: Blob; options: FakeTusOptions; started: boolean; aborted: boolean }[] = [];
-vi.mock("tus-js-client", () => ({
-  Upload: class {
-    file: Blob;
-    options: FakeTusOptions;
-    started = false;
-    aborted = false;
-    constructor(file: Blob, options: FakeTusOptions) {
-      this.file = file;
-      this.options = options;
-      tusInstances.push(this);
-    }
-    start() {
-      this.started = true;
-    }
-    abort() {
-      this.aborted = true;
-      return Promise.resolve();
-    }
-  },
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@api/backend/client", () => {
   class BackendApiError extends Error {
@@ -74,8 +36,7 @@ import {
   entityAttachmentErrorMessage,
   EntityAttachmentUnavailableError,
   EntityUploadConfirmError,
-  TUS_CREATE_FAILED_MESSAGE,
-  TUS_INTERRUPTED_MESSAGE,
+  UPLOAD_CHUNK_BYTES,
   UPLOAD_CANCELLED_MESSAGE,
   fetchEntityAttachmentBlob,
   fetchEntityInlineImage,
@@ -361,207 +322,180 @@ describe("entityAttachmentErrorMessage", () => {
   });
 });
 
-describe("downloadEntityAttachment, large files", () => {
-  it("does not fetch a largeFile link: it hands the URL to the browser downloader", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link({ largeFile: true })] });
-    const fetchImpl = vi.fn();
-    const save = vi.fn();
-    const navigate = vi.fn();
-    const done = await downloadEntityAttachment(
-      fakeApi(post),
-      { type: "work_item", id: ID },
-      fetchImpl as unknown as FetchLike,
-      save,
-      navigate,
-    );
-    expect(done).toBe(true);
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(save).not.toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledWith(link().url);
-    expect(post).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps fetching when largeFile is false, using the one link it asked for", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link({ largeFile: false })] });
-    const navigate = vi.fn();
-    const save = vi.fn();
-    await downloadEntityAttachment(fakeApi(post), { type: "work_item", id: ID }, okFetch(), save, navigate);
-    expect(navigate).not.toHaveBeenCalled();
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledTimes(1);
-  });
-
-  it("never hands a preview link to the browser downloader", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link({ largeFile: true })] });
-    const fetchImpl = okFetch();
-    const got = await fetchEntityAttachmentBlob(
-      fakeApi(post),
-      { type: "work_item", id: ID, purpose: "preview" },
-      fetchImpl,
-    );
-    expect(got?.link.largeFile).toBe(true);
-    expect(fetchImpl).toHaveBeenCalledTimes(1); // still fetched, as before
-  });
-});
-
-describe("uploadEntityAttachment over TUS", () => {
-  const SHARE = "secret-share-id-123";
+describe("uploadEntityAttachment, size limit message", () => {
+  const start = { attachmentId: "att-1", number: "WIA0000001", expiresAt: "2026-10-27T10:15:00Z", maxBytes: 100 };
   const file = new File(["12345"], "big.bin", { type: "application/octet-stream" });
-  const start = {
-    attachmentId: "att-9",
-    number: "WIA0000009",
-    uploadUrl: "https://files.test/api/v2/shares-chunked-uploads",
-    fieldName: "",
-    expiresAt: "2026-10-27T10:15:00Z",
-    maxBytes: 10 * 1024 * 1024 * 1024,
-    uploadMethod: "tus" as const,
-    shareId: SHARE,
-    path: "/upload.bin",
-    chunkSize: 8 * 1024 * 1024,
-  };
-  const confirmed = { id: "att-9", number: "WIA0000009", name: "big.bin", sizeBytes: 5, status: "COMPLETE" };
   const args = { type: "work_item" as const, parentId: "wi-1", file };
-
-  beforeEach(() => {
-    tusInstances.length = 0;
-  });
-
-  /** Lets the async start call finish so the tus Upload exists. */
-  async function tusUpload() {
-    await vi.waitFor(() => expect(tusInstances.length).toBe(1));
-    return tusInstances[0];
-  }
-
-  it("configures tus from the start response, then confirms after success", async () => {
-    const post = vi.fn().mockResolvedValueOnce(start).mockResolvedValueOnce(confirmed);
-    const fetchImpl = vi.fn();
-    const progress: number[] = [];
-    const promise = uploadEntityAttachment(
-      fakeApi(post),
-      { ...args, onProgress: (p) => progress.push(p) },
-      { fetchImpl: fetchImpl as unknown as FetchLike },
-    );
-    const up = await tusUpload();
-    expect(up.started).toBe(true);
-    expect(up.file).toBe(file);
-    expect(up.options.endpoint).toBe(start.uploadUrl);
-    expect(up.options.metadata).toEqual({ path: "/upload.bin", share_id: SHARE });
-    expect(Object.keys(up.options.metadata)).toEqual(["path", "share_id"]);
-    expect(up.options.chunkSize).toBe(start.chunkSize);
-    expect(up.options.retryDelays).toEqual([0, 1000, 3000, 5000, 10000]);
-    expect(up.options.storeFingerprintForResuming).toBe(false);
-    expect(up.options.removeFingerprintOnSuccess).toBe(true);
-    expect(up.options.uploadDataDuringCreation).toBeUndefined();
-    expect(up.options.headers).toBeUndefined();
-    expect(post).toHaveBeenCalledTimes(1); // not confirmed before the last chunk
-
-    up.options.onUploadUrlAvailable();
-    up.options.onProgress(2, 5);
-    up.options.onSuccess();
-    const out = await promise;
-
-    expect(out.status).toBe("COMPLETE");
-    expect(post.mock.calls[1]).toEqual(["/attachments/upload/att-9/confirm", { type: "work_item" }]);
-    expect(fetchImpl).not.toHaveBeenCalled(); // no multipart POST
-    expect(progress).toContain(36);
-    expect(progress[progress.length - 1]).toBe(100);
-  });
-
-  it("uses tus only when uploadMethod is 'tus'", async () => {
-    for (const method of [undefined, "multipart" as const]) {
-      tusInstances.length = 0;
-      const post = vi
-        .fn()
-        .mockResolvedValueOnce({ ...start, uploadMethod: method, shareId: undefined })
-        .mockResolvedValueOnce(confirmed);
-      const fetchImpl = vi.fn(async () => new Response("", { status: 201 }));
-      await uploadEntityAttachment(fakeApi(post), args, { fetchImpl: fetchImpl as unknown as FetchLike });
-      expect(tusInstances).toHaveLength(0);
-      expect(fetchImpl).toHaveBeenCalledTimes(1);
-    }
-  });
-
-  it("shows the exact 'link used or expired' message when creating the upload fails, without leaking the share id", async () => {
-    const post = vi.fn().mockResolvedValueOnce(start);
-    const promise = uploadEntityAttachment(fakeApi(post), args);
-    const up = await tusUpload();
-    const err = Object.assign(new Error(`tus: unexpected response ${start.uploadUrl} ${SHARE}`), {
-      originalResponse: { getStatus: () => 500 },
-    });
-    expect(up.options.onShouldRetry(err)).toBe(false); // a second create can never work
-    up.options.onError(err);
-    const thrown = await promise.then(() => new Error("resolved"), (e: unknown) => e as Error);
-    expect(thrown.message).toBe(
-      "The upload link has been used or has expired. Please start the upload again.",
-    );
-    expect(thrown.message).toBe(TUS_CREATE_FAILED_MESSAGE);
-    expect(entityAttachmentErrorMessage(thrown, "fallback")).toBe(TUS_CREATE_FAILED_MESSAGE);
-    expect(JSON.stringify(thrown, Object.getOwnPropertyNames(thrown))).not.toContain(SHARE);
-    expect(String((thrown as { cause?: unknown }).cause ?? "")).not.toContain(SHARE);
-    expect(post).toHaveBeenCalledTimes(1); // never confirmed
-  });
-
-  it("shows the 'interrupted' message when a failure comes after the upload started", async () => {
-    const post = vi.fn().mockResolvedValueOnce(start);
-    const promise = uploadEntityAttachment(fakeApi(post), args);
-    const up = await tusUpload();
-    up.options.onUploadUrlAvailable();
-    up.options.onProgress(1, 5);
-    expect(up.options.onShouldRetry(new Error("network"))).toBe(true);
-    expect(
-      up.options.onShouldRetry(Object.assign(new Error("x"), { originalResponse: { getStatus: () => 502 } })),
-    ).toBe(true);
-    expect(
-      up.options.onShouldRetry(Object.assign(new Error("x"), { originalResponse: { getStatus: () => 403 } })),
-    ).toBe(false);
-    up.options.onError(new Error(`boom ${SHARE}`));
-    const thrown = await promise.then(() => new Error("resolved"), (e: unknown) => e as Error);
-    expect(thrown.message).toBe("The upload was interrupted. Please try again.");
-    expect(thrown.message).toBe(TUS_INTERRUPTED_MESSAGE);
-    expect(JSON.stringify(thrown, Object.getOwnPropertyNames(thrown))).not.toContain(SHARE);
-    expect(post).toHaveBeenCalledTimes(1);
-  });
-
-  it("aborts the tus upload when the signal fires, and does not confirm", async () => {
-    const post = vi.fn().mockResolvedValueOnce(start);
-    const controller = new AbortController();
-    const promise = uploadEntityAttachment(fakeApi(post), { ...args, signal: controller.signal });
-    const up = await tusUpload();
-    up.options.onUploadUrlAvailable();
-    controller.abort();
-    const thrown = await promise.then(() => new Error("resolved"), (e: unknown) => e as Error);
-    expect(up.aborted).toBe(true);
-    expect(thrown.message).toBe(UPLOAD_CANCELLED_MESSAGE);
-    expect(thrown.name).toBe("AbortError");
-    expect(post).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not start tus when already aborted", async () => {
-    const post = vi.fn().mockResolvedValueOnce(start);
-    const controller = new AbortController();
-    controller.abort();
-    await expect(uploadEntityAttachment(fakeApi(post), { ...args, signal: controller.signal })).rejects.toThrow(
-      UPLOAD_CANCELLED_MESSAGE,
-    );
-    expect(tusInstances).toHaveLength(0);
-  });
-
-  it("keeps the confirm-pending error when confirm keeps answering 503", async () => {
-    const post = vi
-      .fn()
-      .mockResolvedValueOnce(start)
-      .mockRejectedValue(apiError(503));
-    const promise = uploadEntityAttachment(fakeApi(post), args, { confirmDelayMs: 0 });
-    const up = await tusUpload();
-    up.options.onUploadUrlAvailable();
-    up.options.onSuccess();
-    await expect(promise).rejects.toBeInstanceOf(EntityUploadConfirmError);
-    expect(post).toHaveBeenCalledTimes(4);
-  });
-
   it("states the size limit in GB for a big maxBytes", async () => {
     const post = vi.fn().mockResolvedValueOnce({ ...start, maxBytes: 3 * 1024 * 1024 * 1024 });
     const big = { size: 4 * 1024 * 1024 * 1024, name: "huge.bin", type: "" } as unknown as File;
     await expect(uploadEntityAttachment(fakeApi(post), { ...args, file: big })).rejects.toThrow(/3 GB/);
+  });
+});
+
+describe("with the files held by the portal backend", () => {
+  const CHUNK = UPLOAD_CHUNK_BYTES;
+  const started = { attachmentId: "att-1", number: "WIA0000001", expiresAt: "2026-10-27T10:15:00Z", maxBytes: 100 * 1024 * 1024 };
+  const confirmed = { id: "att-1", number: "WIA0000001", name: "big.bin", sizeBytes: 0, status: "COMPLETE" };
+  const bigFile = (size: number) =>
+    ({
+      size,
+      name: "big.bin",
+      type: "application/octet-stream",
+      slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
+    }) as unknown as File;
+  const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
+
+  beforeEach(() => {
+    (window as unknown as { config?: unknown }).config = { CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend" };
+  });
+  afterEach(() => {
+    (window as unknown as { config?: unknown }).config = undefined;
+    vi.useRealTimers();
+  });
+
+  const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
+    ({ post, putBinary, getResponse }) as unknown as BackendApi;
+
+  it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    const progress: number[] = [];
+    await uploadEntityAttachment(apiWith(putBinary, post), {
+      ...args(bigFile(2 * CHUNK + 5)),
+      onProgress: (p) => progress.push(p),
+    });
+    const paths = putBinary.mock.calls.map((c) => String(c[0]));
+    expect(paths.map((p) => p.match(/chunks\/(\d+)/)?.[1]).sort()).toEqual(["0", "1", "2"]);
+    expect(paths.every((p) => p.endsWith("?type=work_item"))).toBe(true);
+    expect(post.mock.calls[1][0]).toBe("/attachments/upload/att-1/confirm");
+    expect(post.mock.calls[1][1]).toEqual({ type: "work_item", chunks: 3 });
+    expect(progress[progress.length - 1]).toBe(100);
+  });
+
+  it("tries a chunk again after a passing failure", async () => {
+    vi.useFakeTimers();
+    const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
+    const putBinary = vi.fn().mockRejectedValueOnce(apiError(503)).mockResolvedValue(undefined);
+    const done = uploadEntityAttachment(apiWith(putBinary, post), args(bigFile(10)));
+    await vi.runAllTimersAsync();
+    await expect(done).resolves.toMatchObject({ status: "COMPLETE" });
+    expect(putBinary).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a refusal, and stops taking new chunks after a failure", async () => {
+    const post = vi.fn().mockResolvedValueOnce(started);
+    const sent: number[] = [];
+    const putBinary = vi.fn(async (path: string) => {
+      const index = Number(path.match(/chunks\/(\d+)/)?.[1]);
+      sent.push(index);
+      if (index === 0) throw apiError(403, "Only the person who started the upload can send it.");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await expect(
+      uploadEntityAttachment(apiWith(putBinary as unknown as ReturnType<typeof vi.fn>, post), args(bigFile(6 * CHUNK))),
+    ).rejects.toThrow("Only the person who started the upload can send it.");
+    expect(sent.length).toBeLessThanOrEqual(3);
+    expect(post).toHaveBeenCalledTimes(1); // never confirmed
+  });
+
+  it("stops with the cancelled error when the signal fires", async () => {
+    const post = vi.fn().mockResolvedValueOnce(started);
+    const controller = new AbortController();
+    const putBinary = vi.fn(async () => {
+      controller.abort();
+      throw Object.assign(new Error("aborted"), { name: "AbortError" });
+    });
+    await expect(
+      uploadEntityAttachment(apiWith(putBinary as unknown as ReturnType<typeof vi.fn>, post), {
+        ...args(bigFile(10)),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow(UPLOAD_CANCELLED_MESSAGE);
+  });
+
+  it("downloads through the backend route and saves it under the name it suggests", async () => {
+    const getResponse = vi.fn().mockResolvedValue(
+      new Response("0123456789", {
+        status: 200,
+        headers: { "Content-Length": "10", "Content-Disposition": 'attachment; filename="report.pdf"' },
+      }),
+    );
+    const post = vi.fn();
+    const save = vi.fn();
+    const done = await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, undefined, save);
+    expect(done).toBe(true);
+    expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
+    expect(save.mock.calls[0][1]).toBe("report.pdf");
+    expect(post).not.toHaveBeenCalled(); // no link is requested
+  });
+
+  // A response that delivers `text` and then breaks, like a dropped connection.
+  const brokenResponse = (text: string, total: number) => {
+    let sentFirst = false;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        // Deliver the bytes on the first read and fail on the next, as a dropped
+        // connection does (erroring straight after enqueue would drop the bytes).
+        pull(controller) {
+          if (sentFirst) controller.error(new Error("connection reset"));
+          else controller.enqueue(new TextEncoder().encode(text));
+          sentFirst = true;
+        },
+      }),
+      { status: 200, headers: { "Content-Length": String(total), "Content-Disposition": 'attachment; filename="r.bin"' } },
+    );
+  };
+  const blobText = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+
+  it("resumes a broken download with a Range request and joins the bytes", async () => {
+    const getResponse = vi
+      .fn()
+      .mockResolvedValueOnce(brokenResponse("0123", 10))
+      .mockResolvedValueOnce(new Response("456789", { status: 206 }));
+    const save = vi.fn();
+    const done = await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    expect(done).toBe(true);
+    expect(getResponse).toHaveBeenCalledTimes(2);
+    expect(getResponse.mock.calls[1][1]).toEqual({ headers: { Range: "bytes=4-" } });
+    expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
+    expect(save.mock.calls[0][1]).toBe("r.bin");
+  });
+
+  it("starts over when the resumed response is a 200 instead of a 206", async () => {
+    const getResponse = vi
+      .fn()
+      .mockResolvedValueOnce(brokenResponse("0123", 10))
+      .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+    const save = vi.fn();
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
+  });
+
+  it("gives up with an interruption error after three failed attempts", async () => {
+    const getResponse = vi.fn().mockImplementation(async () => brokenResponse("01", 10));
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(getResponse).toHaveBeenCalledTimes(3);
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reports false on a 404 so the older flow can be tried, and throws for a removed file", async () => {
+    const save = vi.fn();
+    const missing = vi.fn().mockRejectedValue(apiError(404));
+    expect(await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, undefined, save)).toBe(false);
+    const gone = vi.fn().mockRejectedValue(apiError(410, "This attachment was removed."));
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), gone), { type: "work_item", id: ID }, undefined, save),
+    ).rejects.toThrow("This attachment was removed.");
+    expect(save).not.toHaveBeenCalled();
   });
 });

@@ -15,7 +15,7 @@
 // under the License.
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
-import { Upload } from "tus-js-client";
+import { isBackendAttachmentStorage } from "@config/entityAttachmentsConfig";
 import { formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 
@@ -55,30 +55,24 @@ export interface EntityAttachmentLink {
   reason?: string;
   url?: string;
   expiresAt?: string;
-  /**
-   * The file is too big to read into memory: hand `url` to the browser's own
-   * downloader instead of fetching it.
-   */
-  largeFile?: boolean;
 }
 
 interface EntityAttachmentLinksResponse {
   links: EntityAttachmentLink[];
 }
 
+/**
+ * Response of `POST /attachments/upload`. With the files held by the portal
+ * backend (see `isBackendAttachmentStorage`) there is no `uploadUrl`: the file
+ * is sent to the backend in chunks instead.
+ */
 export interface EntityUploadStart {
   attachmentId: string;
   number: string;
-  uploadUrl: string;
-  fieldName: string;
+  uploadUrl?: string;
+  fieldName?: string;
   expiresAt: string;
   maxBytes: number;
-  /** "multipart" (one POST, the default when absent) or "tus" (resumable chunks). */
-  uploadMethod?: "multipart" | "tus";
-  /** TUS only. `shareId` is a secret: never log it or put it in a message. */
-  shareId?: string;
-  path?: string;
-  chunkSize?: number;
 }
 
 export interface EntityConfirmedAttachment {
@@ -202,41 +196,96 @@ export async function fetchEntityAttachmentBlob(
   return undefined;
 }
 
+/** Resumes of a download that broke part-way, before giving up. */
+const DOWNLOAD_RESUME_ATTEMPTS = 3;
+
+/** The file name a download response suggests, if it names one. */
+function fileNameFromDisposition(headers: Headers): string | undefined {
+  const value = headers.get("Content-Disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(value);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 /**
- * Hands a URL to the browser's own downloader (a plain link click, no new tab),
- * so a big file streams to disk, can resume, and never sits in memory. The saved
- * name is the one SFTPGo stores the file under.
+ * Downloads an attachment through the portal backend, which checks access and
+ * streams the file. The bytes are read as they arrive, so a break part-way
+ * resumes with a Range request instead of starting again. Resolves `false` on a
+ * 404 so the caller can use the older flow.
  */
-export function startBrowserDownload(url: string): void {
-  const a = document.createElement("a");
-  a.href = url;
-  a.rel = "noopener noreferrer";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+async function downloadFromBackend(
+  api: BackendApi,
+  args: { type: EntityAttachmentType; id: string },
+  save: (blob: Blob, name: string) => void,
+): Promise<boolean> {
+  const path = `/attachments/download/${encodeURIComponent(args.id)}/content?type=${encodeURIComponent(args.type)}`;
+  const parts: Uint8Array[] = [];
+  let received = 0;
+  let total: number | undefined;
+  let fileName: string | undefined;
+  for (let attempt = 0; ; attempt += 1) {
+    let response: Response;
+    try {
+      response = await api.getResponse(path, received > 0 ? { headers: { Range: `bytes=${received}-` } } : undefined);
+    } catch (err) {
+      if (err instanceof BackendApiError && err.status === 404) return false;
+      if (err instanceof BackendApiError || attempt + 1 >= DOWNLOAD_RESUME_ATTEMPTS) throw err;
+      continue; // a dropped connection before any answer: try again
+    }
+    if (received === 0) {
+      fileName = fileNameFromDisposition(response.headers);
+      const length = Number(response.headers.get("Content-Length"));
+      total = Number.isFinite(length) && length > 0 ? length : undefined;
+    } else if (response.status !== 206) {
+      // The server ignored the range: start over rather than glue the wrong bytes.
+      parts.length = 0;
+      received = 0;
+    }
+    try {
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        parts.push(bytes);
+        received += bytes.length;
+      } else {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          received += value.length;
+        }
+      }
+      if (total === undefined || received >= total) break;
+      throw new Error("The download ended early.");
+    } catch {
+      if (attempt + 1 >= DOWNLOAD_RESUME_ATTEMPTS) {
+        throw new Error("The download was interrupted. Please try again.");
+      }
+    }
+  }
+  save(new Blob(parts as BlobPart[]), fileName || "attachment");
+  return true;
 }
 
 /**
  * Downloads an attachment under its own name (SFTPGo names the file after its
  * stored path, which carries the attachment number). Resolves `false` when
  * entity-service does not hold the file, so the caller can use the older flow.
- *
- * A link flagged `largeFile` is not fetched: the URL goes to the browser's
- * downloader (`navigate`), which streams it to disk under SFTPGo's stored name.
+ * With the backend holding the files it streams through the backend instead of
+ * using a link.
  */
 export async function downloadEntityAttachment(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string },
   fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
-  navigate: (url: string) => void = startBrowserDownload,
 ): Promise<boolean> {
+  if (isBackendAttachmentStorage()) return downloadFromBackend(api, args, save);
   const first = await requestDownloadLink(api, args.type, args.id, "download");
-  if (first?.available && first.url && first.largeFile) {
-    navigate(first.url);
-    return true;
-  }
   const got = await fetchEntityAttachmentBlob(api, { ...args, purpose: "download" }, fetchImpl, first);
   if (!got) return false;
   save(got.blob, got.link.name);
@@ -248,10 +297,12 @@ export async function confirmEntityAttachment(
   api: BackendApi,
   type: EntityAttachmentType,
   attachmentId: string,
+  /** Number of chunks sent, when the portal backend holds the files. */
+  chunks?: number,
 ): Promise<EntityConfirmedAttachment> {
-  return api.post<{ type: EntityAttachmentType }, EntityConfirmedAttachment>(
+  return api.post<{ type: EntityAttachmentType; chunks?: number }, EntityConfirmedAttachment>(
     `/attachments/upload/${encodeURIComponent(attachmentId)}/confirm`,
-    { type },
+    chunks !== undefined ? { type, chunks } : { type },
   );
 }
 
@@ -269,33 +320,15 @@ export interface UploadEntityAttachmentArgs {
   name?: string;
   /** Overall progress, 0-100. */
   onProgress?: (percent: number) => void;
-  /** Aborts a running upload (a TUS upload stops; a multipart POST is not interrupted). */
+  /** Aborts a running chunked upload (a single multipart POST is not interrupted). */
   signal?: AbortSignal;
 }
-
-/** Shown when SFTPGo refused to create a TUS upload (the link was used or has run out). */
-export const TUS_CREATE_FAILED_MESSAGE =
-  "The upload link has been used or has expired. Please start the upload again.";
-
-/** Shown when a TUS upload broke off after it had started and retries ran out. */
-export const TUS_INTERRUPTED_MESSAGE = "The upload was interrupted. Please try again.";
 
 /** Shown when the user cancels an upload. */
 export const UPLOAD_CANCELLED_MESSAGE = "The upload was cancelled.";
 
-/** A failed TUS upload. The message never holds the share id or the upload URL. */
-export class EntityTusUploadError extends Error {
-  /** HTTP status of the refused request, when there was a response. */
-  status?: number;
-  /** True when the upload could not even be created (no chunk was sent). */
-  duringCreate: boolean;
-  constructor(duringCreate: boolean, status?: number) {
-    super(duringCreate ? TUS_CREATE_FAILED_MESSAGE : TUS_INTERRUPTED_MESSAGE);
-    this.name = "EntityTusUploadError";
-    this.duringCreate = duringCreate;
-    this.status = status;
-  }
-}
+/** Shown when a chunk could not be stored and the retries ran out. */
+export const UPLOAD_INTERRUPTED_MESSAGE = "The upload was interrupted. Please try again.";
 
 /** The user (or the app) aborted an upload. */
 export class EntityUploadAbortedError extends Error {
@@ -305,79 +338,110 @@ export class EntityUploadAbortedError extends Error {
   }
 }
 
-export const TUS_RETRY_DELAYS_MS = [0, 1000, 3000, 5000, 10000];
+/** Bytes in every upload chunk but the last. Must match the backend's chunk size. */
+export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 
-function tusStatus(err: unknown): number | undefined {
-  const response = (err as { originalResponse?: { getStatus?: () => number } } | null)?.originalResponse;
-  const status = response?.getStatus?.();
-  return typeof status === "number" && status > 0 ? status : undefined;
-}
+/** Chunks sent at the same time, and tries per chunk. */
+const UPLOAD_CHUNK_CONCURRENCY = 3;
+const UPLOAD_CHUNK_ATTEMPTS = 4;
 
-/**
- * Sends `file` to SFTPGo's TUS endpoint in chunks, with no Authorization header
- * (the share id in the metadata is the credential). Resolves when the last chunk
- * is stored; the caller then confirms.
- *
- * Creating the upload is what uses the one-use share, so a failure before the
- * upload exists is never retried (a second create always fails) and reported as
- * {@link TUS_CREATE_FAILED_MESSAGE}. Once it exists, network drops and 5xx
- * answers are retried; when those run out the error is
- * {@link TUS_INTERRUPTED_MESSAGE}.
- */
-export function uploadFileViaTus(args: {
-  file: Blob;
-  endpoint: string;
-  shareId: string;
-  path: string;
-  chunkSize: number;
-  onProgress?: (bytesSent: number, bytesTotal: number) => void;
-  signal?: AbortSignal;
-}): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (args.signal?.aborted) {
+/** Waits `ms`, or throws as soon as the upload is cancelled. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
       reject(new EntityUploadAbortedError());
       return;
     }
-    let created = false;
-    let settled = false;
-    const finish = (fn: () => void): void => {
-      if (settled) return;
-      settled = true;
-      args.signal?.removeEventListener("abort", onAbort);
-      fn();
-    };
-    const upload = new Upload(args.file, {
-      endpoint: args.endpoint,
-      metadata: { path: args.path, share_id: args.shareId },
-      chunkSize: args.chunkSize,
-      retryDelays: TUS_RETRY_DELAYS_MS,
-      storeFingerprintForResuming: false,
-      removeFingerprintOnSuccess: true,
-      onUploadUrlAvailable: () => {
-        created = true;
-      },
-      onShouldRetry: (err) => {
-        const status = tusStatus(err);
-        if (!created) return status === undefined; // only a dropped connection may retry a create
-        if (status === undefined) return true;
-        return status >= 500 || status === 408 || status === 409 || status === 423 || status === 429;
-      },
-      onProgress: (sent, total) => args.onProgress?.(sent, total),
-      onError: (err) => finish(() => reject(new EntityTusUploadError(!created, tusStatus(err)))),
-      onSuccess: () => finish(resolve),
-    });
     const onAbort = (): void => {
-      void upload.abort();
-      finish(() => reject(new EntityUploadAbortedError()));
+      clearTimeout(timer);
+      reject(new EntityUploadAbortedError());
     };
-    args.signal?.addEventListener("abort", onAbort, { once: true });
-    upload.start();
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
+/** True for a chunk failure worth trying again (not a refusal of the request). */
+function chunkFailureIsTransient(err: unknown): boolean {
+  if (err instanceof BackendApiError) {
+    return err.status === 408 || err.status === 429 || err.status >= 500;
+  }
+  return true; // a network error
+}
+
+/** Sends one chunk, trying again with a short pause when it fails in passing. */
+async function sendChunk(
+  api: BackendApi,
+  args: { type: EntityAttachmentType; attachmentId: string; index: number; body: Blob; signal?: AbortSignal },
+): Promise<void> {
+  const path = `/attachments/upload/${encodeURIComponent(args.attachmentId)}/chunks/${args.index}?type=${encodeURIComponent(args.type)}`;
+  for (let attempt = 1; ; attempt += 1) {
+    if (args.signal?.aborted) throw new EntityUploadAbortedError();
+    try {
+      await api.putBinary(path, args.body, { signal: args.signal });
+      return;
+    } catch (err) {
+      if (args.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        throw new EntityUploadAbortedError();
+      }
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || !chunkFailureIsTransient(err)) {
+        throw err instanceof BackendApiError ? err : new Error(UPLOAD_INTERRUPTED_MESSAGE);
+      }
+      await pause(500 * 2 ** (attempt - 1), args.signal);
+    }
+  }
+}
+
 /**
- * The three steps of an upload: ask entity-service for a one-use upload link,
- * post the file to SFTPGo with it, then confirm. The file's exact size is sent
+ * Sends `file` to the portal backend in {@link UPLOAD_CHUNK_BYTES} chunks, a few
+ * at a time, each retried on a passing failure. Once one chunk fails for good the
+ * others stop taking new chunks (one already in flight finishes) and that first
+ * failure is thrown. Returns the number of chunks, which the confirm step needs.
+ */
+export async function sendFileInChunks(
+  api: BackendApi,
+  args: {
+    type: EntityAttachmentType;
+    attachmentId: string;
+    file: Blob;
+    signal?: AbortSignal;
+    onProgress?: (bytesSent: number, bytesTotal: number) => void;
+  },
+): Promise<number> {
+  const { type, attachmentId, file, signal, onProgress } = args;
+  const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+  let next = 0;
+  let sent = 0;
+  let failure: { error: unknown } | undefined;
+  const worker = async (): Promise<void> => {
+    while (!failure) {
+      const index = next;
+      next += 1;
+      if (index >= count) return;
+      const from = index * UPLOAD_CHUNK_BYTES;
+      const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
+      try {
+        await sendChunk(api, { type, attachmentId, index, body, signal });
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+      sent += body.size;
+      onProgress?.(sent, file.size);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) }, worker));
+  if (failure) throw failure.error;
+  return count;
+}
+
+/**
+ * The three steps of an upload: ask entity-service to record the attachment,
+ * send the file (to SFTPGo with a one-use link, or to the portal backend in
+ * chunks), then confirm. The file's exact size is sent
  * up front; entity-service checks the stored file against it.
  *
  * A confirm answered 503 (storage busy) is retried a few times without sending
@@ -416,20 +480,16 @@ export async function uploadEntityAttachment(
   }
   if (args.signal?.aborted) throw new EntityUploadAbortedError();
 
-  if (start.uploadMethod === "tus") {
-    if (!start.shareId || !start.chunkSize || start.chunkSize <= 0) {
-      throw new Error("The upload could not be started. Please try again.");
-    }
-    // Straight to SFTPGo in resumable chunks; bytes sent map to 0-90 %.
-    await uploadFileViaTus({
+  let chunks: number | undefined;
+  if (!start.uploadUrl) {
+    // The portal backend holds the files: chunks go to it (bytes sent map to 10-90 %).
+    chunks = await sendFileInChunks(api, {
+      type: args.type,
+      attachmentId: start.attachmentId,
       file: args.file,
-      endpoint: start.uploadUrl,
-      shareId: start.shareId,
-      path: start.path || "/upload.bin",
-      chunkSize: start.chunkSize,
       signal: args.signal,
       onProgress: (sent, total) =>
-        args.onProgress?.(total > 0 ? Math.min(90, Math.floor((sent / total) * 90)) : 0),
+        args.onProgress?.(total > 0 ? 10 + Math.min(80, Math.floor((sent / total) * 80)) : 10),
     });
     args.onProgress?.(90);
   } else {
@@ -451,7 +511,7 @@ export async function uploadEntityAttachment(
   let lastError: unknown;
   for (let attempt = 0; attempt < CONFIRM_ATTEMPTS; attempt += 1) {
     try {
-      const confirmed = await confirmEntityAttachment(api, args.type, start.attachmentId);
+      const confirmed = await confirmEntityAttachment(api, args.type, start.attachmentId, chunks);
       args.onProgress?.(100);
       return confirmed;
     } catch (err) {
