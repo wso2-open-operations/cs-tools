@@ -17,18 +17,28 @@
 -- When a user is deleted, migration 0255's trigger deletes their dashboards
 -- that are shared with nobody (no row in custom_dashboard_share or
 -- custom_dashboard_team_share) and keeps the rest, with no owner. A dashboard
--- whose link is on (migration 0269) is shared too: with anyone who has the
--- link, opened or not yet. So it is kept as well, and its link keeps working;
--- with no owner nobody can turn it off, edit it or delete it.
+-- whose link is on (migration 0269) has its link turned off first: with no
+-- owner nobody could turn it off, so offboarding a user must not leave a link
+-- to their dashboard working. The people who had it only through the link
+-- lose it (their custom_dashboard_link_access rows are deleted, as when the
+-- owner turns the link off); people it is shared with directly or through a
+-- team keep it, as before. So a dashboard whose link was on is then kept or
+-- deleted by 0255's rule, exactly like one whose link was off.
 --
--- Only the function changes; the trigger and when it fires are 0255's. A
--- dashboard whose link is off is decided exactly as before.
+-- Turning the link off also fires migration 0271's trigger for an ownerless
+-- dashboard, which applies the same rule; the delete below finds nothing left
+-- to do in that case.
+--
+-- Only the function changes; the trigger and when it fires are 0255's.
 --
 -- Safe to re-run: the function is replaced.
 CREATE OR REPLACE FUNCTION custom_dashboard_delete_unshared_orphan() RETURNS trigger AS $$
 BEGIN
-    IF NOT NEW.link_enabled
-       AND NOT EXISTS (SELECT 1 FROM custom_dashboard_share WHERE dashboard_id = NEW.id)
+    IF NEW.link_enabled THEN
+        DELETE FROM custom_dashboard_link_access WHERE dashboard_id = NEW.id;
+        UPDATE custom_dashboard SET link_enabled = FALSE, link_id = NULL WHERE id = NEW.id;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM custom_dashboard_share WHERE dashboard_id = NEW.id)
        AND NOT EXISTS (SELECT 1 FROM custom_dashboard_team_share WHERE dashboard_id = NEW.id) THEN
         DELETE FROM custom_dashboard WHERE id = NEW.id;
     END IF;

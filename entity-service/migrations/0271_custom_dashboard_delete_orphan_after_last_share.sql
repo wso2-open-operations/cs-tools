@@ -15,18 +15,20 @@
 -- under the License.
 
 -- A dashboard whose owner was deleted is kept while somebody can still see it
--- (migrations 0255 and 0270): a person or a team it is shared with, or its
--- link being on. With no owner, nobody can unshare it through the API; its
--- shares go when the person or the team is deleted (both cascade). Once the
--- last of them goes and its link is off, nobody can see it any more, so it is
--- deleted here, as 0255 does for one shared with nobody when its owner goes.
+-- (migrations 0255 and 0270): a person or a team it is shared with. Its link
+-- is off (0270 turns it off as the owner goes). With no owner, nobody can
+-- unshare it through the API; its shares go when the person or the team is
+-- deleted (both cascade). Once the last of them goes, nobody can see it any
+-- more, so it is deleted here, as 0255 does for one shared with nobody when
+-- its owner goes.
 --
 -- custom_dashboard_delete_if_orphaned(id) deletes the dashboard only when it
 -- has no owner, its link is off and it has no person or team share left.
 -- It runs:
 --   * after a person share or a team share row is deleted;
---   * after a dashboard with no owner has its link turned off (no API does
---     that today: turning a link off needs the owner).
+--   * after a dashboard with no owner has its link turned off: 0270 does
+--     that as the owner is deleted (no API can, turning a link off needs the
+--     owner).
 -- A dashboard that still has its owner is never touched.
 --
 -- When the dashboard itself is being deleted, its share rows cascade and the
