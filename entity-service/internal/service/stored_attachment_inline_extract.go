@@ -67,6 +67,13 @@ var embeddedImageSrc = regexp.MustCompile(`(?is)(<img\b[^>]*?\bsrc\s*=\s*["'])da
 // the comment is not saved with a half-converted body. Comments that are
 // already saved are never touched.
 func (s *storedAttachmentService) ExtractInlineImages(ctx context.Context, workItemID, authorEmail, content string) (string, error) {
+	if s.backend {
+		// This service holds no files in this mode, so it cannot store an embedded
+		// image; the comment keeps it as written. The portals upload a pasted image
+		// as a comment attachment before the comment is saved, so this is only a
+		// client that still embeds one.
+		return content, nil
+	}
 	if !strings.Contains(content, "base64,") || authorEmail == "" || !validate.IsUUID(workItemID) {
 		return content, nil
 	}

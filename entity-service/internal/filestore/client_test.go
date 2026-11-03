@@ -123,9 +123,6 @@ func TestURLs_UseThePublicAddressAndAskForTheRawFile(t *testing.T) {
 	if got, want := c.UploadURL("abc"), "https://files.example.com/api/v2/shares/abc"; got != want {
 		t.Errorf("UploadURL = %q, want %q", got, want)
 	}
-	if got, want := c.ChunkedUploadURL(), "https://files.example.com/api/v2/shares-chunked-uploads"; got != want {
-		t.Errorf("ChunkedUploadURL = %q, want %q", got, want)
-	}
 	// With no public address the internal one is used.
 	if got := NewClient("http://internal:8080/", "", "u", "p").UploadURL("z"); got != "http://internal:8080/api/v2/shares/z" {
 		t.Errorf("fallback UploadURL = %q", got)

@@ -80,11 +80,6 @@ type AttachmentLink struct {
 	// URL is where the browser fetches the file, valid until ExpiresAt.
 	URL       string     `json:"url,omitempty"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
-	// LargeFile is set on a download link for a file big enough that the
-	// browser should hand the URL to its own downloader (it can then stream to
-	// disk and resume) instead of reading the whole file into memory. Such a
-	// link serves several requests, so a resume works.
-	LargeFile bool `json:"largeFile,omitempty"`
 }
 
 // AttachmentLinksResponse is the body returned by POST /attachments/download.
@@ -104,40 +99,35 @@ type InitiateAttachmentUploadRequest struct {
 	SizeBytes   int64  `json:"sizeBytes"`
 }
 
-// Upload methods an InitiateAttachmentUploadResponse can ask for.
-const (
-	UploadMethodMultipart = "multipart"
-	UploadMethodTUS       = "tus"
-)
-
 // InitiateAttachmentUploadResponse tells the browser where to send the file.
+// The browser POSTs a multipart form with the file in the FieldName field to
+// UploadURL, exactly once, before ExpiresAt, then calls confirm.
 //
-// With UploadMethod "multipart" the browser POSTs a multipart form with the file
-// in the FieldName field to UploadURL, exactly once, before ExpiresAt.
-//
-// With "tus" (a large file) it uses the TUS resumable-upload protocol against
-// UploadURL: create the upload with Upload-Length and an Upload-Metadata of
-// share_id=ShareID and path=Path, send the chunks (ChunkSize bytes each), and
-// resume from the server's offset after a break. ExpiresAt only bounds starting
-// it. Either way the browser then calls confirm.
+// With ATTACHMENT_STORAGE_MODE=backend there is no UploadURL or FieldName: the
+// portal backend holds the file, so the browser sends it there, in chunks, using
+// AttachmentID. ExpiresAt is then when a still-unconfirmed upload may be cleaned
+// up, not a deadline on a link.
 type InitiateAttachmentUploadResponse struct {
 	AttachmentID string    `json:"attachmentId"`
 	Number       string    `json:"number"`
-	UploadMethod string    `json:"uploadMethod"`
-	UploadURL    string    `json:"uploadUrl"`
+	UploadURL    string    `json:"uploadUrl,omitempty"`
 	FieldName    string    `json:"fieldName,omitempty"`
-	ShareID      string    `json:"shareId,omitempty"`
-	Path         string    `json:"path,omitempty"`
-	ChunkSize    int64     `json:"chunkSize,omitempty"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
 }
 
 // ConfirmAttachmentUploadRequest is the body of
 // POST /attachments/upload/{id}/confirm. ID comes from the path.
+//
+// With ATTACHMENT_STORAGE_MODE=backend this service cannot look at the file, so
+// the portal backend that committed it says what it stored: SizeBytes is
+// required, and ContentType is the type it found by reading the file's leading
+// bytes (required for a comment image, where it must be a real image type).
 type ConfirmAttachmentUploadRequest struct {
-	Kind StoredAttachmentKind `json:"type"`
-	ID   string               `json:"-"`
+	Kind        StoredAttachmentKind `json:"type"`
+	ID          string               `json:"-"`
+	SizeBytes   *int64               `json:"sizeBytes,omitempty"`
+	ContentType string               `json:"contentType,omitempty"`
 }
 
 // ConfirmAttachmentUploadResponse is the stored attachment once its file has
@@ -149,6 +139,53 @@ type ConfirmAttachmentUploadResponse struct {
 	ContentType *string `json:"contentType,omitempty"`
 	SizeBytes   int64   `json:"sizeBytes"`
 	Status      string  `json:"status"`
+}
+
+// AuthorizeAttachmentUploadRequest is the body of
+// POST /attachments/upload/{id}/authorize. ID comes from the path. It exists only
+// with ATTACHMENT_STORAGE_MODE=backend.
+type AuthorizeAttachmentUploadRequest struct {
+	Kind StoredAttachmentKind `json:"type"`
+	ID   string               `json:"-"`
+}
+
+// AttachmentUploadTarget says where the portal backend may write an upload it has
+// been authorized to receive. StorageKey is internal: it is for the backend that
+// asked and must never reach a browser.
+type AttachmentUploadTarget struct {
+	AttachmentID string `json:"attachmentId"`
+	Number       string `json:"number"`
+	Name         string `json:"name"`
+	// ContentType is the type declared when the upload started.
+	ContentType string `json:"contentType"`
+	// SizeBytes is the size declared when the upload started; MaxBytes is the most
+	// a file of this kind may be.
+	SizeBytes  int64  `json:"sizeBytes"`
+	MaxBytes   int64  `json:"maxBytes"`
+	StorageKey string `json:"storageKey"`
+}
+
+// LocateAttachmentRequest is the body of POST /attachments/locate. It exists only
+// with ATTACHMENT_STORAGE_MODE=backend.
+type LocateAttachmentRequest struct {
+	Kind StoredAttachmentKind `json:"type"`
+	ID   string               `json:"id"`
+}
+
+// AttachmentLocation is where an attachment's file is, for the portal backend
+// that will read it, once this service has checked the caller may see it.
+// StorageKey is internal: it is for the backend that asked and must never reach a
+// browser. When the file cannot be read, Available is false and Reason is one of
+// the AttachmentUnavailable* values.
+type AttachmentLocation struct {
+	ID          string  `json:"id"`
+	Number      string  `json:"number"`
+	Name        string  `json:"name"`
+	ContentType *string `json:"contentType,omitempty"`
+	SizeBytes   *int64  `json:"sizeBytes,omitempty"`
+	Available   bool    `json:"available"`
+	Reason      string  `json:"reason,omitempty"`
+	StorageKey  string  `json:"storageKey,omitempty"`
 }
 
 // DeleteStoredAttachmentRequest is the body of POST /attachments/delete.
@@ -234,4 +271,33 @@ type UploadCleanupResult struct {
 	// uploaded and never linked to a comment.
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
+	// Orphans is set only with ATTACHMENT_STORAGE_MODE=backend, where this service
+	// holds no files: the unlinked comment images whose files the caller must
+	// remove from storage. They are NOT yet marked DELETED, so every run lists
+	// them again until the caller removes the files and acknowledges them
+	// (AcknowledgeOrphansRequest). A lost response therefore loses nothing.
+	Orphans []OrphanedImage `json:"orphans,omitempty"`
+}
+
+// OrphanedImage is an unlinked comment image whose file is in storage this
+// service cannot reach. StorageKey is internal: it is for the caller that removes
+// the file and must never reach a browser.
+type OrphanedImage struct {
+	ID         string `json:"id"`
+	StorageKey string `json:"storageKey"`
+}
+
+// AcknowledgeOrphansRequest is the body of POST /attachments/uploads/cleanup/acknowledge:
+// the ids of orphaned images whose files the caller has removed from storage. It
+// exists only with ATTACHMENT_STORAGE_MODE=backend.
+type AcknowledgeOrphansRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// AcknowledgeOrphansResult says how many of the acknowledged images were marked
+// DELETED, and how many were skipped because they are no longer orphans (already
+// acknowledged, or linked to a comment since).
+type AcknowledgeOrphansResult struct {
+	Acknowledged int `json:"acknowledged"`
+	Skipped      int `json:"skipped"`
 }

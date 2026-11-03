@@ -92,7 +92,6 @@ type fileStore interface {
 	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
 	DownloadURL(shareID string) string
 	UploadURL(shareID string) string
-	ChunkedUploadURL() string
 }
 
 // StoredAttachmentLimits are the settings the service runs under.
@@ -104,29 +103,6 @@ type StoredAttachmentLimits struct {
 	// stay valid.
 	ReadLinkTTL   time.Duration
 	UploadLinkTTL time.Duration
-
-	// ChunkedThresholdBytes is the size from which a file (never a comment
-	// image) is uploaded in TUS chunks; 0 turns that off. ChunkedUploadLinkTTL
-	// is how long such a link may wait to be used, ChunkSizeBytes the chunk size
-	// the browser is told to send, and LargeReadLinkMaxUses how many requests the
-	// download link of a file that large serves, so it can be resumed.
-	ChunkedThresholdBytes int64
-	ChunkedUploadLinkTTL  time.Duration
-	ChunkSizeBytes        int64
-	LargeReadLinkMaxUses  int
-
-	// SharesPerCallerPerMinute caps the links one caller may have created per
-	// minute; 0 uses maxSharesPerCallerPerMinute.
-	SharesPerCallerPerMinute int
-}
-
-// tusStagedName is the name a chunked upload is stored under in its staging
-// folder. It is ours, not the browser's, so no file name can reach the path.
-const tusStagedName = "upload.bin"
-
-// chunked reports whether a file of this kind and size goes up in TUS chunks.
-func (l StoredAttachmentLimits) chunked(kind domain.StoredAttachmentKind, size int64) bool {
-	return kind != domain.StoredAttachmentComment && l.ChunkedThresholdBytes > 0 && size >= l.ChunkedThresholdBytes
 }
 
 type storedAttachmentService struct {
@@ -135,14 +111,10 @@ type storedAttachmentService struct {
 	limits StoredAttachmentLimits
 	now    func() time.Time
 	shares *shareLimiter
-}
-
-// sharesPerMinute is the per-caller link budget: the configured one, else the default.
-func sharesPerMinute(l StoredAttachmentLimits) int {
-	if l.SharesPerCallerPerMinute > 0 {
-		return l.SharesPerCallerPerMinute
-	}
-	return maxSharesPerCallerPerMinute
+	// backend is true with ATTACHMENT_STORAGE_MODE=backend: the portal backends
+	// hold the files, store is nil, and nothing here may touch a file. See
+	// NewBackendStoredAttachmentService.
+	backend bool
 }
 
 // NewStoredAttachmentService constructs a StoredAttachmentService.
@@ -153,7 +125,7 @@ func sharesPerMinute(l StoredAttachmentLimits) int {
 // needs to be a REGISTERED member of the parent's project, an internal one is
 // unrestricted, and a parent with no project is internal-only.
 func NewStoredAttachmentService(repo repository.StoredAttachmentRepository, store fileStore, limits StoredAttachmentLimits) StoredAttachmentService {
-	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(sharesPerMinute(limits), time.Minute)}
+	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute)}
 }
 
 // resolveActorEmail resolves the caller's email from x-user-id-token. It is
@@ -259,6 +231,10 @@ func shareRef(id string) string {
 
 // ResolveLinks implements StoredAttachmentService.
 func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error) {
+	if s.backend {
+		// No share links exist in this mode; LocateAttachment is the way to a file.
+		return domain.AttachmentLinksResponse{}, &apierror.NotFoundError{Msg: "download links are not issued; locate the attachment instead"}
+	}
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return domain.AttachmentLinksResponse{}, err
 	}
@@ -344,12 +320,6 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 		return l
 	}
 	expires := s.now().Add(s.limits.ReadLinkTTL)
-	// A browser resumes a big download with a second, ranged request, which a
-	// one-use link would refuse.
-	large := false
-	if uses == downloadLinkMaxUses && s.limits.chunked(kind, sizeOrZero(row.SizeBytes)) && s.limits.LargeReadLinkMaxUses > uses {
-		uses, large = s.limits.LargeReadLinkMaxUses, true
-	}
 	shareID, err := s.store.CreateShare(ctx, filestore.ShareSpec{
 		Name: "dl", Scope: filestore.ShareRead, Path: *row.StorageKey,
 		MaxUses: uses, ExpiresAt: expires,
@@ -363,7 +333,6 @@ func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.Store
 	l.Available = true
 	l.URL = s.store.DownloadURL(shareID)
 	l.ExpiresAt = &expires
-	l.LargeFile = large
 	return l
 }
 
@@ -426,15 +395,25 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
 
+	if s.backend {
+		// The portal backend holds the file: nothing to open here. It asks to
+		// authorize each chunk, so the row is all that is recorded.
+		slog.InfoContext(ctx, "attachment upload started",
+			"audit", true, "action", "upload", "callerId", auditCaller(ctx),
+			"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
+			"attachmentId", row.ID)
+		return domain.InitiateAttachmentUploadResponse{
+			AttachmentID: row.ID,
+			Number:       row.Number,
+			ExpiresAt:    s.now().Add(abandonedUploadAge),
+			MaxBytes:     limit,
+		}, nil
+	}
+
 	// One folder per upload, and a share on just that folder that accepts one
 	// request: the browser can put one file there and reach nothing else.
 	staging := filestore.StagingDir(row.ID)
-	tus := s.limits.chunked(req.Kind, req.SizeBytes)
-	ttl := s.limits.UploadLinkTTL
-	if tus && s.limits.ChunkedUploadLinkTTL > 0 {
-		ttl = s.limits.ChunkedUploadLinkTTL
-	}
-	expires := s.now().Add(ttl)
+	expires := s.now().Add(s.limits.UploadLinkTTL)
 	shareID, err := s.openUploadShare(ctx, staging, expires)
 	if err != nil {
 		// The row would sit PENDING forever; record that it never got a link.
@@ -442,26 +421,14 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, storageUnavailable(ctx, "open upload share", err)
 	}
 	auditLink(ctx, "upload", req.Kind, row.ID, staging, shareID, expires)
-	resp := domain.InitiateAttachmentUploadResponse{
+	return domain.InitiateAttachmentUploadResponse{
 		AttachmentID: row.ID,
 		Number:       row.Number,
+		UploadURL:    s.store.UploadURL(shareID),
+		FieldName:    "filenames",
 		ExpiresAt:    expires,
 		MaxBytes:     limit,
-	}
-	if tus {
-		// Creating the TUS upload spends the share's one use; the chunks that
-		// follow do not need the share, so a resume after expiry still works.
-		resp.UploadMethod = domain.UploadMethodTUS
-		resp.UploadURL = s.store.ChunkedUploadURL()
-		resp.ShareID = shareID
-		resp.Path = "/" + tusStagedName
-		resp.ChunkSize = s.limits.ChunkSizeBytes
-		return resp, nil
-	}
-	resp.UploadMethod = domain.UploadMethodMultipart
-	resp.UploadURL = s.store.UploadURL(shareID)
-	resp.FieldName = "filenames"
-	return resp, nil
+	}, nil
 }
 
 func (s *storedAttachmentService) openUploadShare(ctx context.Context, staging string, expires time.Time) (string, error) {
@@ -503,6 +470,9 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 	case "PENDING":
 	default:
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "this upload was rejected; start a new upload"}
+	}
+	if s.backend {
+		return s.confirmFromBackend(ctx, req, row)
 	}
 
 	staging := filestore.StagingDir(row.ID)
@@ -587,42 +557,50 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 	return confirmResponse(row, file.Size), nil
 }
 
-// OpenInlineImage implements StoredAttachmentService. It is how a comment's
-// image is shown: entity-service reads it from SFTPGo and streams it, so access is
-// checked on every request and no link that could be forwarded ever exists.
+// inlineImage is the stored row an inline image id names, with the type it is
+// served as.
+type inlineImage struct {
+	kind      domain.StoredAttachmentKind
+	row       domain.StoredAttachmentRow
+	mediaType string
+	isImage   bool
+}
+
+// findInlineImage resolves the id of a comment's inline image to a stored row the
+// caller may see, for OpenInlineImage and LocateInlineImage alike.
 //
 // An image pasted into a comment here is a comment_attachment row. One migrated
 // from the previous system is a work_item_attachment row (its comment images were
 // stored as the work item's own attachments), so when there is no comment row the
-// work item's own is tried, and streamed only when it really is an image.
-func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
+// work item's own is tried, and used only when it really is an image.
+func (s *storedAttachmentService) findInlineImage(ctx context.Context, id string) (inlineImage, error) {
 	if !validate.IsUUID(id) {
-		return domain.StoredAttachmentContent{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
+		return inlineImage{}, &apierror.ValidationError{Msg: "id must be a valid UUID"}
 	}
 	// Only a row the caller may see comes back; anything else is not found.
 	kind := domain.StoredAttachmentComment
 	rows, err := s.repo.GetByIDs(ctx, kind, []string{id})
 	if err != nil {
-		return domain.StoredAttachmentContent{}, err
+		return inlineImage{}, err
 	}
 	if len(rows) == 0 {
 		kind = domain.StoredAttachmentWorkItem
 		rows, err = s.repo.GetByIDs(ctx, kind, []string{id})
 		if err != nil {
-			return domain.StoredAttachmentContent{}, err
+			return inlineImage{}, err
 		}
 	}
 	notFound := &apierror.NotFoundError{Msg: "attachment not found"}
 	if len(rows) != 1 {
-		return domain.StoredAttachmentContent{}, notFound
+		return inlineImage{}, notFound
 	}
 	row := rows[0]
 	if row.Status == "DELETED" {
 		// The caller could see this row, so saying it was removed reveals nothing.
-		return domain.StoredAttachmentContent{}, &apierror.GoneError{Msg: "this image was removed", Code: apierror.CodeAttachmentRemoved}
+		return inlineImage{}, &apierror.GoneError{Msg: "this image was removed", Code: apierror.CodeAttachmentRemoved}
 	}
 	if row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "" {
-		return domain.StoredAttachmentContent{}, notFound
+		return inlineImage{}, notFound
 	}
 	// A migrated type may carry parameters ("image/png; charset=binary"); only the
 	// media type decides, and only it is sent back.
@@ -633,22 +611,38 @@ func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string
 	imageType := inlineImageTypes[mediaType]
 	if kind == domain.StoredAttachmentWorkItem && !imageType {
 		// Files of a work item are downloaded through a link, never shown here.
-		return domain.StoredAttachmentContent{}, notFound
+		return inlineImage{}, notFound
 	}
+	return inlineImage{kind: kind, row: row, mediaType: mediaType, isImage: imageType}, nil
+}
+
+// OpenInlineImage implements StoredAttachmentService. It is how a comment's
+// image is shown: entity-service reads it from SFTPGo and streams it, so access is
+// checked on every request and no link that could be forwarded ever exists.
+func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
+	if s.backend {
+		// The portal backend streams the image itself; LocateInlineImage is the way here.
+		return domain.StoredAttachmentContent{}, &apierror.NotFoundError{Msg: "attachment not found"}
+	}
+	img, err := s.findInlineImage(ctx, id)
+	if err != nil {
+		return domain.StoredAttachmentContent{}, err
+	}
+	row := img.row
 	body, size, err := s.store.Open(ctx, *row.StorageKey)
 	if err != nil {
 		if errors.Is(err, filestore.ErrNotFound) {
-			return domain.StoredAttachmentContent{}, notFound
+			return domain.StoredAttachmentContent{}, &apierror.NotFoundError{Msg: "attachment not found"}
 		}
 		return domain.StoredAttachmentContent{}, storageUnavailable(ctx, "open inline image", err)
 	}
 	slog.InfoContext(ctx, "attachment content served",
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
-		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(kind),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(img.kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
 	contentType := "application/octet-stream"
-	if imageType {
-		contentType = mediaType
+	if img.isImage {
+		contentType = img.mediaType
 	}
 	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
 }
@@ -757,7 +751,9 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return &apierror.ConflictError{Msg: closedParentDeleteMessage}
 	}
 
-	if row.StorageKey != nil && *row.StorageKey != "" {
+	// With backend storage the file is not here to remove: the portal backend
+	// removes it from storage after this succeeds.
+	if !s.backend && row.StorageKey != nil && *row.StorageKey != "" {
 		if err := s.store.RemoveFile(ctx, strings.TrimLeft(*row.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
 			return storageUnavailable(ctx, "delete attachment file", err)
 		}

@@ -116,6 +116,20 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
+// AttachmentStorageMode says who stores work item, comment-image and deployment
+// attachment files (see Config.AttachmentStorageMode).
+type AttachmentStorageMode string
+
+const (
+	// AttachmentStorageModeSFTPGo: this service reaches SFTPGo and gives the
+	// browser short-lived share links. The default.
+	AttachmentStorageModeSFTPGo AttachmentStorageMode = "sftpgo"
+	// AttachmentStorageModeBackend: the portal backends store and serve the files
+	// themselves. This service keeps the access checks and the rows, authorizes each
+	// upload and read, and returns the storage key; it never touches a file.
+	AttachmentStorageModeBackend AttachmentStorageMode = "backend"
+)
+
 // AttachmentDataSource identifies which backend three case attachment reads
 // (GET /attachments/{id}, POST /attachments/search, GET
 // /attachments/{id}/content) and the case activity feed (POST
@@ -746,8 +760,8 @@ type Config struct {
 	// in clear text over http, and an http public URL puts share ids on the wire.
 	SFTPGoAllowInsecureHTTP bool
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
-	// (ATTACHMENT_MAX_BYTES, default 10 MiB) and one inline comment image
-	// (INLINE_IMAGE_MAX_BYTES, default 1 MiB). The declared size is checked
+	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
+	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
 	// when an upload starts and the real size when it is confirmed. Provisional
 	// defaults, to be set from the real size distribution.
 	AttachmentMaxBytes  int64
@@ -757,27 +771,13 @@ type Config struct {
 	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
 	AttachmentReadLinkTTL   time.Duration
 	AttachmentUploadLinkTTL time.Duration
-	// A file of AttachmentChunkedThresholdBytes or more
-	// (ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES, default 100 MiB, 0 = never) is
-	// uploaded in chunks with the TUS protocol, straight to SFTPGo, instead of
-	// as one request; a smaller file or an inline image never is. SFTPGo
-	// checks a share only when the upload is created, so
-	// AttachmentChunkedUploadLinkTTL (ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL,
-	// default 5m) only has to cover starting it. AttachmentChunkSizeBytes
-	// (ATTACHMENT_CHUNK_SIZE_BYTES, default 16 MiB) is the chunk size the portal
-	// is told to use. A download of a file that large gets a link good for
-	// AttachmentLargeReadLinkMaxUses requests (ATTACHMENT_LARGE_READ_LINK_MAX_USES,
-	// default 10), so a browser can resume it with range requests.
-	AttachmentChunkedThresholdBytes int64
-	AttachmentChunkedUploadLinkTTL  time.Duration
-	AttachmentChunkSizeBytes        int64
-	AttachmentLargeReadLinkMaxUses  int
-	// AttachmentSharesPerCallerPerMinute is how many download, preview and upload
-	// links one caller may have created per minute
-	// (ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE, default 60, per pod); beyond it a
-	// call is a 429. Every image previewed on a page costs one, so a low value
-	// breaks image-heavy case pages.
-	AttachmentSharesPerCallerPerMinute int
+	// AttachmentStorageMode (ATTACHMENT_STORAGE_MODE) says who holds the files.
+	// "sftpgo" (the default) keeps today's behaviour: this service reaches SFTPGo
+	// and hands the browser a share link. "backend" means the portal backends hold
+	// the files themselves (in Azure Blob Storage): this service then only decides
+	// who may upload or read what and which storage key each file has, and needs no
+	// SFTPGo settings at all. See AttachmentStorageModeBackend.
+	AttachmentStorageMode AttachmentStorageMode
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
@@ -1020,15 +1020,11 @@ func Load() *Config {
 	cfg.SFTPGoUser = strings.TrimSpace(os.Getenv("SFTPGO_USER"))
 	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
 	cfg.SFTPGoAllowInsecureHTTP = os.Getenv("SFTPGO_ALLOW_INSECURE_HTTP") == "true"
-	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 10<<20)
-	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 1<<20)
+	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
+	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
 	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
 	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
-	cfg.AttachmentChunkedThresholdBytes = envNonNegativeInt64("ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES", 100<<20)
-	cfg.AttachmentChunkedUploadLinkTTL = envDuration("ATTACHMENT_CHUNKED_UPLOAD_LINK_TTL", 5*time.Minute)
-	cfg.AttachmentChunkSizeBytes = envPositiveInt64("ATTACHMENT_CHUNK_SIZE_BYTES", 16<<20)
-	cfg.AttachmentLargeReadLinkMaxUses = int(envPositiveInt64("ATTACHMENT_LARGE_READ_LINK_MAX_USES", 10))
-	cfg.AttachmentSharesPerCallerPerMinute = int(envPositiveInt64("ATTACHMENT_SHARES_PER_CALLER_PER_MINUTE", 60))
+	cfg.AttachmentStorageMode = AttachmentStorageMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("ATTACHMENT_STORAGE_MODE", string(AttachmentStorageModeSFTPGo)))))
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1037,6 +1033,13 @@ func Load() *Config {
 // the attachment link and upload routes.
 func (c *Config) HasSFTPGo() bool {
 	return c.SFTPGoURL != "" && c.SFTPGoUser != "" && c.SFTPGoPassword != ""
+}
+
+// HasBackendAttachmentStorage reports whether the portal backends hold the
+// attachment files (ATTACHMENT_STORAGE_MODE=backend). It turns on the attachment
+// routes without SFTPGo and turns the SFTPGo link routes off.
+func (c *Config) HasBackendAttachmentStorage() bool {
+	return c.AttachmentStorageMode == AttachmentStorageModeBackend
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1349,22 +1352,32 @@ func (c *Config) Validate() error {
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
 	}
-	// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
-	sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
-	if sftpgoSet && !c.HasSFTPGo() {
-		return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
+	switch c.AttachmentStorageMode {
+	case "", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend:
+	default:
+		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
 	}
-	if c.HasSFTPGo() {
-		for _, u := range []struct{ name, val string }{
-			{"SFTPGO_URL", c.SFTPGoURL},
-			{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
-		} {
-			parsed, err := url.Parse(u.val)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-				return fmt.Errorf("%s must be an https URL", u.name)
-			}
-			if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
-				return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
+	// With ATTACHMENT_STORAGE_MODE=backend the SFTPGO_* settings are ignored, so a
+	// partial or insecure leftover from before the cutover must not stop the
+	// service starting. They are checked in every other mode.
+	if !c.HasBackendAttachmentStorage() {
+		// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
+		sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
+		if sftpgoSet && !c.HasSFTPGo() {
+			return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
+		}
+		if c.HasSFTPGo() {
+			for _, u := range []struct{ name, val string }{
+				{"SFTPGO_URL", c.SFTPGoURL},
+				{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
+			} {
+				parsed, err := url.Parse(u.val)
+				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+					return fmt.Errorf("%s must be an https URL", u.name)
+				}
+				if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
+					return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
+				}
 			}
 		}
 	}
@@ -1659,20 +1672,6 @@ func envPositiveInt64(key string, def int64) int64 {
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
 	if err != nil || n <= 0 {
-		return def
-	}
-	return n
-}
-
-// envNonNegativeInt64 is envPositiveInt64 for a setting where 0 is a real value
-// (here "never"): unset, unparseable or negative returns def, "0" returns 0.
-func envNonNegativeInt64(key string, def int64) int64 {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n < 0 {
 		return def
 	}
 	return n

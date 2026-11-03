@@ -267,7 +267,6 @@ func (f *fakeStore) Open(_ context.Context, p string) (io.ReadCloser, int64, err
 func (f *fakeStore) ReadHead(_ context.Context, _ string, _ int) ([]byte, error) { return f.head, nil }
 func (f *fakeStore) DownloadURL(id string) string                                { return "https://files.test/dl/" + id }
 func (f *fakeStore) UploadURL(id string) string                                  { return "https://files.test/up/" + id }
-func (f *fakeStore) ChunkedUploadURL() string                                    { return "https://files.test/tus" }
 
 var saNow = time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
 
@@ -629,100 +628,8 @@ func TestInitiateUpload_RecordsAPendingRowAndOpensAOneUseUploadShare(t *testing.
 		t.Errorf("share = %+v: want a write share on the staging folder, one use, 15 minute expiry", sh)
 	}
 	if resp.AttachmentID != saAttID || resp.Number != "WIA0000042" || resp.UploadURL != "https://files.test/up/share-up" ||
-		resp.FieldName != "filenames" || resp.MaxBytes != 1000 || resp.UploadMethod != domain.UploadMethodMultipart || resp.ShareID != "" {
+		resp.FieldName != "filenames" || resp.MaxBytes != 1000 {
 		t.Errorf("response = %+v", resp)
-	}
-}
-
-// chunkedSvc is newStoredSvc with chunked uploads on from 800 bytes.
-func chunkedSvc(repo *fakeStoredRepo, store *fakeStore) *storedAttachmentService {
-	svc := newStoredSvc(repo, store)
-	svc.limits.ChunkedThresholdBytes = 800
-	svc.limits.ChunkedUploadLinkTTL = 5 * time.Minute
-	svc.limits.ChunkSizeBytes = 16 << 20
-	svc.limits.LargeReadLinkMaxUses = 10
-	return svc
-}
-
-func TestInitiateUpload_ALargeFileUploadsInChunks(t *testing.T) {
-	repo, store := newFakeStoredRepo(), newFakeStore()
-	req := initReq()
-	req.SizeBytes = 900
-	resp, err := chunkedSvc(repo, store).InitiateUpload(saCtx(t, saEmail), req)
-	if err != nil {
-		t.Fatalf("InitiateUpload: %v", err)
-	}
-	if resp.UploadMethod != domain.UploadMethodTUS || resp.UploadURL != "https://files.test/tus" ||
-		resp.ShareID != "share-up" || resp.Path != "/upload.bin" || resp.ChunkSize != 16<<20 || resp.FieldName != "" {
-		t.Errorf("response = %+v, want a TUS upload to a fixed staged name", resp)
-	}
-	sh := store.shares[0]
-	if sh.Scope != filestore.ShareWrite || sh.Path != filestore.StagingDir(saAttID) || sh.MaxUses != 1 || !sh.ExpiresAt.Equal(saNow.Add(5*time.Minute)) {
-		t.Errorf("share = %+v: want a one-use write share on the staging folder, expiring after the chunked TTL", sh)
-	}
-	if !resp.ExpiresAt.Equal(saNow.Add(5 * time.Minute)) {
-		t.Errorf("expiresAt = %v", resp.ExpiresAt)
-	}
-}
-
-func TestInitiateUpload_BelowTheThresholdOrOffStaysOneRequest(t *testing.T) {
-	for name, tc := range map[string]struct {
-		size      int64
-		threshold int64
-	}{
-		"below the threshold": {799, 800},
-		"threshold 0 is off":  {900, 0},
-	} {
-		t.Run(name, func(t *testing.T) {
-			svc := chunkedSvc(newFakeStoredRepo(), newFakeStore())
-			svc.limits.ChunkedThresholdBytes = tc.threshold
-			req := initReq()
-			req.SizeBytes = tc.size
-			resp, err := svc.InitiateUpload(saCtx(t, saEmail), req)
-			if err != nil || resp.UploadMethod != domain.UploadMethodMultipart || resp.UploadURL != "https://files.test/up/share-up" {
-				t.Fatalf("resp = %+v err = %v, want the multipart upload", resp, err)
-			}
-		})
-	}
-}
-
-func TestInitiateUpload_ACommentImageNeverUploadsInChunks(t *testing.T) {
-	svc := chunkedSvc(newFakeStoredRepo(), newFakeStore())
-	svc.limits.ChunkedThresholdBytes = 50
-	resp, err := svc.InitiateUpload(saCtx(t, saEmail), domain.InitiateAttachmentUploadRequest{
-		Kind: domain.StoredAttachmentComment, ParentID: saParentID, Name: "shot.png", ContentType: "image/png", SizeBytes: 90,
-	})
-	if err != nil || resp.UploadMethod != domain.UploadMethodMultipart {
-		t.Fatalf("resp = %+v err = %v, want the multipart upload for an image", resp, err)
-	}
-}
-
-func TestResolveLinks_ALargeDownloadCanBeResumed(t *testing.T) {
-	for name, tc := range map[string]struct {
-		size    int64
-		purpose string
-		want    int
-	}{
-		"large download":    {900, "", 10},
-		"small download":    {100, "", downloadLinkMaxUses},
-		"large preview":     {900, domain.AttachmentPurposePreview, previewLinkMaxUses},
-		"explicit large dl": {900, domain.AttachmentPurposeDownload, 10},
-	} {
-		t.Run(name, func(t *testing.T) {
-			repo, store := newFakeStoredRepo(), newFakeStore()
-			key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.bin"
-			size := tc.size
-			repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA0000001", Name: "a.bin", Status: "COMPLETE", StorageKey: &key, SizeBytes: &size}
-			resp, err := chunkedSvc(repo, store).ResolveLinks(saCtx(t, saEmail), domain.AttachmentLinksRequest{
-				Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}, Purpose: tc.purpose,
-			})
-			if err != nil || len(store.shares) != 1 || store.shares[0].MaxUses != tc.want {
-				t.Fatalf("shares = %+v err = %v, want MaxUses %d", store.shares, err, tc.want)
-			}
-			if wantLarge := tc.want == 10; resp.Links[0].LargeFile != wantLarge {
-				t.Errorf("largeFile = %v, want %v", resp.Links[0].LargeFile, wantLarge)
-			}
-		})
 	}
 }
 
@@ -1520,27 +1427,5 @@ func TestInlineImageIDs_FindsEveryReferenceShape(t *testing.T) {
 	got := inlineImageIDs(html)
 	if len(got) != 3 || got[0] != a || got[1] != b || got[2] != c {
 		t.Errorf("ids = %v, want [%s %s %s]", got, a, b, c)
-	}
-}
-
-func TestResolveLinks_TheLinkBudgetPerCallerIsConfigurable(t *testing.T) {
-	repo, store := newFakeStoredRepo(), newFakeStore()
-	key := "csm/projects/prj_9/workitems/cs0001/attachments/wia0000001_a.pdf"
-	repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "WIA0000001", Name: "a.pdf", Status: "COMPLETE", StorageKey: &key}
-	svc := newStoredSvc(repo, store)
-	svc.shares = newShareLimiter(sharesPerMinute(StoredAttachmentLimits{SharesPerCallerPerMinute: 2}), time.Minute)
-	ctx := saCtx(t, saEmail)
-	req := domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}}
-	for i := 0; i < 2; i++ {
-		if _, err := svc.ResolveLinks(ctx, req); err != nil {
-			t.Fatalf("call %d: %v", i+1, err)
-		}
-	}
-	var terr *apierror.TooManyRequestsError
-	if _, err := svc.ResolveLinks(ctx, req); !errors.As(err, &terr) {
-		t.Fatalf("third call err = %v, want a TooManyRequestsError at a budget of 2", err)
-	}
-	if got := sharesPerMinute(StoredAttachmentLimits{}); got != maxSharesPerCallerPerMinute {
-		t.Errorf("unset budget = %d, want the default %d", got, maxSharesPerCallerPerMinute)
 	}
 }
