@@ -143,4 +143,33 @@ describe("CsmIssuesView Export CSV and relative dates", () => {
     expect(new Date(lte).getTime()).toBeLessThan(endOfToday.getTime());
     expect(new Date(lte).getTime()).toBeGreaterThanOrEqual(endOfToday.getTime() - 1000);
   });
+
+  it("keeps one date window for every page of an export that runs over local midnight", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 3, 23, 59, 59));
+      render(
+        <MemoryRouter initialEntries={["/cases?createdFrom=__today__"]}>
+          <Routes>
+            <Route path="/cases" element={<CsmIssuesView title="Cases" />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      const createdFrom = (call: number): string =>
+        (postMock.mock.calls[call][1].filters.filters as { field: string; op: string; values: string[] }[])
+          .find((f) => f.field === "createdOn" && f.op === "gte")!.values[0];
+
+      await exportFetchPage!(0, 50);
+      vi.setSystemTime(new Date(2026, 10, 4, 0, 0, 1));
+      await exportFetchPage!(50, 50);
+      expect(createdFrom(1)).toBe(createdFrom(0));
+      expect(new Date(createdFrom(0)).getTime()).toBe(new Date(2026, 10, 3).getTime());
+
+      // A new export starts a new window.
+      await exportFetchPage!(0, 50);
+      expect(new Date(createdFrom(2)).getTime()).toBe(new Date(2026, 10, 4).getTime());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
