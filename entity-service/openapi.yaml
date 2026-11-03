@@ -28830,8 +28830,27 @@ components:
           description: A rotation's hours on its own clock, by shift code.
           additionalProperties:
             $ref: '#/components/schemas/ReminderWindow'
+        inviteRotations:
+          type: object
+          description: >-
+            Whether each rotation's reminders carry a calendar invitation, by the shift code of its
+            window (CRE_MORNING, CRE_EVENING, CRE_WEEKEND, CRE_WEEKEND_NIGHT). A rotation not named
+            does; invitesEnabled off turns them all off. Optional on a save: when absent, the stored
+            value is kept.
+          additionalProperties:
+            type: boolean
+          example: {CRE_MORNING: true, CRE_WEEKEND_NIGHT: false}
         copyTo:
           type: array
+          maxItems: 20
+          items:
+            type: string
+            format: email
+        weekendCopyTo:
+          type: array
+          description: >-
+            Copied (Cc) on the weekend summary email only; copyTo is copied on every reminder.
+            Optional on a save: when absent, the stored value is kept.
           maxItems: 20
           items:
             type: string

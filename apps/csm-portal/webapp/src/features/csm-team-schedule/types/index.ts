@@ -724,7 +724,19 @@ export type SaveRotaReminderSettings = {
   invitesEnabled: boolean;
   weekendRequired: Record<string, number>;
   windows: Record<string, ReminderWindow>;
+  /**
+   * Whether each rotation's reminders carry a calendar invitation, by the
+   * shift code of its window (CRE_MORNING, CRE_EVENING, CRE_WEEKEND,
+   * CRE_WEEKEND_NIGHT). A rotation not named does. Absent on settings saved
+   * before the per-rotation switches.
+   */
+  inviteRotations?: Record<string, boolean>;
   copyTo: string[];
+  /**
+   * Copied (Cc) on the weekend summary email only; copyTo is copied on every
+   * reminder. Absent on settings saved before it existed.
+   */
+  weekendCopyTo?: string[];
 };
 
 /** The saved settings of one group, with who last changed them. */

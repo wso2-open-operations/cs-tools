@@ -221,11 +221,18 @@ schedules assume `TZ=UTC` like every other here.
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
   is saved: `weekdayEnabled` / `weekendEnabled` turn that task off (the run succeeds and
   sends nothing), `invitesEnabled` can turn invitations off but never on where the deployment
-  has them off (`ROTA_REMINDER_INVITES_ENABLED`, or no organizer), `weekendRequired` and
+  has them off (`ROTA_REMINDER_INVITES_ENABLED`, or no organizer), `inviteRotations`
+  (migration 0271) turns them off for one rotation at a time, by its window's code
+  (`CRE_MORNING`, `CRE_EVENING`, `CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`; a code not named keeps
+  them, `Config.invitesFor`): that rotation's reminder goes out without its invitation, the
+  weekend summary mentions invitations only while one still follows, and an invitation already
+  sent is neither updated nor withdrawn (it stays in the weekend record, so it is not cancelled
+  as a window gone from the rota), `weekendRequired` and
   `windows` override `ROTA_REMINDER_WEEKEND_REQUIRED` / `ROTA_REMINDER_WINDOWS` code by code
   (a code the saved settings do not name keeps the configured value; the card saves a code
   only once somebody changes it there), and `copyTo` is copied on top of the configured copy
-  list. So saving one field never replaces a deployment setting nobody changed. **Nothing
+  list, `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
+  a weekday reminder, an invitation email or a cancellation). So saving one field never replaces a deployment setting nobody changed. **Nothing
   saved (a 404, also from an entity-service without the route) sends no scheduled reminder**:
   only the card's switches turn them on. Send now still goes out, with the environment's values.
   A failed read fails the run, so it is retried

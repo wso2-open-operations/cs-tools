@@ -14169,7 +14169,9 @@ paths:
         The Rota Reminders card on the Rota access tab. The entity service's payload, forwarded
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
-        by shift code), copyTo, updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        by shift code), inviteRotations (whether each rotation's reminders carry a calendar
+        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
+        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14248,8 +14250,23 @@ paths:
                       start: { type: string, example: "08:00" }
                       end: { type: string, example: "18:00" }
                       timeZone: { type: string, example: America/Los_Angeles }
+                inviteRotations:
+                  type: object
+                  description: >-
+                    Whether each rotation's reminders carry a calendar invitation, by the shift code
+                    of its window. A rotation not named does. Optional: when absent the stored value
+                    is kept.
+                  additionalProperties: { type: boolean }
+                  example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  maxItems: 20
+                  items: { type: string, format: email }
+                weekendCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the weekend summary email only. Optional: when absent the stored
+                    value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:

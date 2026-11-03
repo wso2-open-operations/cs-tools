@@ -42,6 +42,8 @@ vi.mock("./RotaReminderSendNow", () => ({ default: () => null }));
 type Callbacks ={ onSuccess?: (s: Settings) => void; onError?: (e: Error) => void };
 
 const LA = { start: "08:00", end: "18:00", timeZone: "America/Los_Angeles" };
+const ALL_INVITES_ON = { CRE_MORNING: true, CRE_EVENING: true, CRE_WEEKEND: true, CRE_WEEKEND_NIGHT: true };
+const invitesFor = () => screen.getByRole("group", { name: "Calendar invitations for" });
 
 const LOADED: Settings = {
   family: "CRE",
@@ -64,7 +66,7 @@ const americasField = () => screen.getByLabelText("People needed on Americas Wee
 const startField = () => screen.getByLabelText("Start");
 const endField = () => screen.getByLabelText("End");
 const zoneField = () => screen.getByLabelText("Time zone");
-const copyField = () => screen.getByLabelText("Also copy every reminder to");
+const copyField = () => screen.getByLabelText("Cc on every reminder");
 const saveButton = () => screen.getByRole("button", { name: /^(Save reminder settings|Saving…)$/ });
 const discardButton = () => screen.getByRole("button", { name: "Discard changes" });
 
@@ -115,7 +117,7 @@ describe("RotaReminderSettings", () => {
     expect(screen.getByRole("checkbox", { name: "Send weekend reminders" })).not.toBeChecked();
   });
 
-  it("groups the settings under Settings, in Automatic reminders, Weekend rota and Copies", () => {
+  it("groups the settings under Settings, in Automatic reminders, Weekend rota and Cc", () => {
     render(<RotaReminderSettings />);
     expect(screen.getByRole("heading", { name: "Settings", level: 4 })).toBeInTheDocument();
 
@@ -132,8 +134,8 @@ describe("RotaReminderSettings", () => {
     expect(hours.getByLabelText("End")).toBeInTheDocument();
     expect(hours.getByLabelText("Time zone")).toBeInTheDocument();
 
-    const copies = within(screen.getByRole("group", { name: "Copies" }));
-    expect(copies.getByLabelText("Also copy every reminder to")).toBeInTheDocument();
+    const copies = within(screen.getByRole("group", { name: "Cc" }));
+    expect(copies.getByLabelText("Cc on every reminder")).toBeInTheDocument();
     expect(copyField()).toHaveAttribute("rows", "3");
   });
 
@@ -163,7 +165,9 @@ describe("RotaReminderSettings", () => {
         CRE_WEEKEND_NIGHT_OC: hours,
         OTHER_WINDOW: { start: "06:00", end: "07:00", timeZone: "UTC" },
       },
+      inviteRotations: ALL_INVITES_ON,
       copyTo: ["a@x.test", "B@x.test"],
+      weekendCopyTo: [],
     });
   });
 
@@ -177,7 +181,78 @@ describe("RotaReminderSettings", () => {
       invitesEnabled: false,
       weekendRequired: {},
       windows: {},
+      inviteRotations: ALL_INVITES_ON,
       copyTo: [],
+      weekendCopyTo: [],
+    });
+  });
+
+  it("saves the weekend-only Cc apart from the every-reminder Cc", () => {
+    settings.data = { ...LOADED, copyTo: ["lead@x.test"] };
+    render(<RotaReminderSettings />);
+    fireEvent.change(screen.getByLabelText("Cc on weekend reminders only"), {
+      target: { value: " head@x.test\nHEAD@x.test " },
+    });
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({ copyTo: ["lead@x.test"], weekendCopyTo: ["head@x.test"] });
+  });
+
+  it("shows the saved weekend-only Cc, and refuses an address that is not an email there", () => {
+    settings.data = { ...LOADED, weekendCopyTo: ["head@x.test"] };
+    render(<RotaReminderSettings />);
+    const field = screen.getByLabelText("Cc on weekend reminders only");
+    expect(field).toHaveValue("head@x.test");
+    fireEvent.change(field, { target: { value: "not an address" } });
+    fireEvent.click(saveButton());
+    expect(mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent('"not an address" is not an email address.');
+  });
+
+  it("offers a calendar invitation switch per rotation, all on until one is turned off", () => {
+    render(<RotaReminderSettings />);
+    const group = invitesFor();
+    for (const name of ["Morning", "Evening", "LK Weekend (IST)", "Americas Weekend (PT)"]) {
+      expect(within(group).getByRole("checkbox", { name })).toBeChecked();
+    }
+  });
+
+  it("names the Americas Weekend switch and explains daylight saving by the zone its hours are kept on", () => {
+    render(<RotaReminderSettings />);
+    const hours = () => screen.getByRole("group", { name: "Americas Weekend and LK On-call hours" });
+    expect(within(invitesFor()).getByRole("checkbox", { name: "Americas Weekend (PT)" })).toBeInTheDocument();
+    expect(hours()).toHaveTextContent(/daylight saving/);
+
+    fireEvent.change(zoneField(), { target: { value: "Asia/Colombo" } });
+    expect(within(invitesFor()).getByRole("checkbox", { name: "Americas Weekend (IST)" })).toBeInTheDocument();
+    expect(hours()).not.toHaveTextContent(/daylight saving/);
+    expect(hours()).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("saves a rotation's invitations turned off, sending every switch and keeping other saved codes", () => {
+    settings.data = { ...LOADED, inviteRotations: { OTHER_CODE: false } };
+    render(<RotaReminderSettings />);
+    fireEvent.click(within(invitesFor()).getByRole("checkbox", { name: "Americas Weekend (PT)" }));
+    fireEvent.click(saveButton());
+    expect(lastBody().inviteRotations).toEqual({ ...ALL_INVITES_ON, CRE_WEEKEND_NIGHT: false, OTHER_CODE: false });
+  });
+
+  it("shows a rotation saved with its invitations off as off", () => {
+    settings.data = { ...LOADED, inviteRotations: { CRE_MORNING: false } };
+    render(<RotaReminderSettings />);
+    expect(within(invitesFor()).getByRole("checkbox", { name: "Morning" })).not.toBeChecked();
+    expect(within(invitesFor()).getByRole("checkbox", { name: "Evening" })).toBeChecked();
+  });
+
+  it("disables the per-rotation switches while calendar invitations are off, and keeps their choice", () => {
+    settings.data = { ...LOADED, inviteRotations: { CRE_EVENING: false } };
+    render(<RotaReminderSettings />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Attach calendar invitations" }));
+    expect(invitesFor()).toBeDisabled();
+    expect(within(invitesFor()).getByRole("checkbox", { name: "Morning" })).not.toBeChecked();
+    fireEvent.click(saveButton());
+    expect(lastBody()).toMatchObject({
+      invitesEnabled: false,
+      inviteRotations: { ...ALL_INVITES_ON, CRE_EVENING: false },
     });
   });
 

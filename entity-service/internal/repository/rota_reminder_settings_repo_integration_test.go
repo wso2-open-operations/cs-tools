@@ -56,14 +56,18 @@ func TestRotaReminderSettingsIntegration_SaveAndRead(t *testing.T) {
 		Family: "SME", WeekdayEnabled: true, WeekendEnabled: false, InvitesEnabled: true,
 		WeekendRequired: map[string]int{"SME_WEEKEND": 2},
 		Windows:         map[string]domain.ReminderWindow{"SME_NIGHT": {Start: "22:00", End: "06:00", TimeZone: "Asia/Colombo"}},
+		InviteRotations: map[string]bool{"SME_NIGHT": false},
 		CopyTo:          []string{"lead@example.com"},
+		WeekendCopyTo:   []string{"head@example.com"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := repo.Get(ctx, "SME")
 	if err != nil || got == nil || got.WeekendEnabled || got.WeekendRequired["SME_WEEKEND"] != 2 ||
-		got.Windows["SME_NIGHT"].End != "06:00" || got.CopyTo[0] != "lead@example.com" || got.UpdatedBy != "ann@example.com" {
+		got.Windows["SME_NIGHT"].End != "06:00" || got.CopyTo[0] != "lead@example.com" || got.UpdatedBy != "ann@example.com" ||
+		len(got.InviteRotations) != 1 || got.InviteRotations["SME_NIGHT"] ||
+		len(got.WeekendCopyTo) != 1 || got.WeekendCopyTo[0] != "head@example.com" {
 		t.Fatalf("read back %+v, %v", got, err)
 	}
 	second, err := repo.Save(ctx, "ben@example.com", domain.RotaReminderSettings{Family: "SME", WeekdayEnabled: false, WeekendEnabled: true})
@@ -71,6 +75,7 @@ func TestRotaReminderSettingsIntegration_SaveAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	if second.WeekdayEnabled || !second.WeekendEnabled || len(second.WeekendRequired) != 0 || len(second.CopyTo) != 0 ||
+		len(second.InviteRotations) != 0 || len(second.WeekendCopyTo) != 0 ||
 		second.UpdatedBy != "ben@example.com" || second.UpdatedOn.Before(first.UpdatedOn) {
 		t.Fatalf("replaced with %+v", second)
 	}

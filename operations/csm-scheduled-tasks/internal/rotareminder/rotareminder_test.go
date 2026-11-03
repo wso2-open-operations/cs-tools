@@ -543,3 +543,46 @@ func TestWeekdayReminder_ARejectedInvitationStillSendsTheEmail(t *testing.T) {
 		t.Fatalf("sent %+v after a 503, want nothing", mail.sent)
 	}
 }
+
+// A rotation whose invitations are turned off on the Rota Access tab still
+// gets its reminder, without the invitation or the sentence about it; the
+// other rotation keeps its invitation.
+func TestWeekdayReminder_InvitesTurnedOffForOneRotation(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+		assignment("Dee", "dee@example.com", "nova", "CRE_EVENING", "2026-10-19", "2026-10-19 18:00", "2026-10-19 21:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites, cfg.OrganizerEmail = true, "rota@example.com"
+	cfg.InvitesOff = map[string]bool{"CRE_MORNING": true}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 2 {
+		t.Fatalf("sent %d emails, want Morning and Evening", len(mail.sent))
+	}
+	morning, evening := mail.sent[0], mail.sent[1]
+	if len(morning.attachments) != 0 || strings.Contains(morning.body, "calendar invitation is attached") {
+		t.Errorf("Morning carries an invitation although it is turned off: %d attachments\n%s", len(morning.attachments), morning.body)
+	}
+	if len(evening.attachments) != 1 || !strings.Contains(evening.body, "calendar invitation is attached") {
+		t.Errorf("Evening lost its invitation: %d attachments\n%s", len(evening.attachments), evening.body)
+	}
+}
+
+// A weekend-only copy is never on a weekday reminder.
+func TestWeekdayReminder_WeekendCopyIsNotCopied(t *testing.T) {
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-19", "2026-10-19 06:00", "2026-10-19 09:00"),
+	}}
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.WeekendCopy = []string{"head@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekdayReminder(rota, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || len(mail.sent[0].cc) != 0 {
+		t.Fatalf("sent %+v, want the Morning email with no copy", mail.sent)
+	}
+}

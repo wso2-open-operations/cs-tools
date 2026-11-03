@@ -19,6 +19,7 @@ package rotareminder
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -551,5 +552,82 @@ func TestWeekendReminder_AdminsAreToldOnlyAfterTheSummary(t *testing.T) {
 			subjects = append(subjects, m.subject)
 		}
 		t.Fatalf("order: %v", subjects)
+	}
+}
+
+// Americas Weekend's invitations turned off after Sunday's went out: Friday
+// sends the summary and the two LK invitations only, neither updates nor
+// withdraws the Americas event already sent, and keeps it in the record.
+func TestWeekendReminder_InvitesTurnedOffForOneRotationKeepsWhatWasSent(t *testing.T) {
+	const americasSat = "cre-rota-2026-10-24-cre_weekend_night@csm-team-schedule"
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: americasSat, Sequence: 1, Attendees: []string{"ivy@example.com", "jay@example.com"}},
+		}},
+	}}
+	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var subjects []string
+	for _, m := range mail.sent {
+		subjects = append(subjects, m.subject)
+		if strings.Contains(m.subject, "Americas Weekend") || strings.Contains(m.subject, "Cancelled:") {
+			t.Errorf("sent %q although Americas Weekend's invitations are off", m.subject)
+		}
+	}
+	if len(mail.sent) != 3 {
+		t.Fatalf("sent %d emails, want the summary and the two LK invitations:\n%s", len(mail.sent), strings.Join(subjects, "\n"))
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if !strings.Contains(summary.body, "follows in a separate email") {
+		t.Errorf("the summary no longer mentions the LK invitations:\n%s", summary.body)
+	}
+	kept := false
+	for _, inv := range store.recorded[0].invites {
+		if inv.UID == americasSat && inv.Sequence == 1 && len(inv.Attendees) == 2 {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("the Americas invitation already sent is not kept in the record: %+v", store.recorded[0].invites)
+	}
+}
+
+// Every weekend rotation's invitations off: the summary alone, and it does not
+// promise an invitation.
+func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND": true, "CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Contains(mail.sent[0].body, "follows in a separate email") {
+		t.Fatalf("sent %d emails; summary:\n%s", len(mail.sent), mail.sent[0].body)
+	}
+}
+
+// A weekend-only copy is on the Cc of the summary and nothing else: not the
+// invitation emails. The every-reminder copy is on both, and an address on
+// both lists is copied once.
+func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.WeekendCopy = []string{"head@example.com", "Lead@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if strings.Join(summary.cc, ",") != "lead@example.com,head@example.com" {
+		t.Errorf("summary cc = %v, want the lead and the head once each", summary.cc)
+	}
+	for _, m := range mail.sent {
+		if strings.Contains(m.subject, "Calendar invitation") && slices.Contains(m.cc, "head@example.com") {
+			t.Errorf("the weekend-only copy is on %q", m.subject)
+		}
 	}
 }

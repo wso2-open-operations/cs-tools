@@ -18,6 +18,7 @@ package rotareminder
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,7 +90,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 	if w.day.Equal(today.AddDate(0, 0, 1)) {
 		notice = fmt.Sprintf("This is a reminder that you are rostered for the %s tomorrow, %s, %s.", inSentence, date, when)
 	}
-	if cfg.Invites {
+	if cfg.invitesFor(w.base) {
 		notice += " The calendar invitation is attached; everybody on this rotation is a guest, and no reply is needed."
 	}
 
@@ -206,11 +207,13 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 	if len(gaps) > 0 {
 		data.AfterTable = append(data.AfterTable, "Not yet fully marked: "+gapList(cfg, gaps)+".")
 	}
-	if cfg.Invites {
+	if slices.ContainsFunc(pending, func(w *window) bool { return cfg.invitesFor(w.base) }) {
 		data.AfterTable = append(data.AfterTable, "A calendar invitation for your team's rotation follows in a separate email, "+
 			"with everybody on that rotation as a guest.")
 	}
-	email := shiftEmail{to: to, cc: without(cfg.Copy, to), subject: fmt.Sprintf("[%s Operations] Weekend Rotation – %s", cfg.Family, dayList(days))}
+	// The summary is the one email the weekend-only copies get.
+	cc := without(append(append([]string{}, cfg.Copy...), cfg.WeekendCopy...), to)
+	email := shiftEmail{to: to, cc: cc, subject: fmt.Sprintf("[%s Operations] Weekend Rotation – %s", cfg.Family, dayList(days))}
 	if len(cfg.RedirectTo) > 0 {
 		data.IntendedFor = append(append([]string{}, email.to...), email.cc...)
 	}
