@@ -277,7 +277,10 @@ func (s *productCatalogService) ListCarbonKernelReleases(ctx context.Context) (d
 
 // ----- writes -----
 
-// write validates one change and applies it at once. It returns the ids of
+// write validates one change and applies it at once. The rules that span
+// fields (date order, an abbreviation when public, joining a listing) are
+// checked by the repository inside the write transaction, on the rows as
+// written. It returns the ids of
 // the rows written; updated_by / retired_by name the person.
 func (s *productCatalogService) write(ctx context.Context, entityType, operation, entityID string, payload json.RawMessage) ([]string, error) {
 	actor, err := s.requireManager(ctx)
@@ -297,46 +300,7 @@ func (s *productCatalogService) write(ctx context.Context, entityType, operation
 			return nil, &apierror.NotFoundError{Msg: strings.ReplaceAll(entityType, "_", " ") + " not found"}
 		}
 	}
-	if entityType == domain.CatalogEntityProductVersion && operation == repository.CatalogOpUpdate {
-		if err := s.checkStoredVersionDates(ctx, entityID, payload); err != nil {
-			return nil, err
-		}
-	}
 	return s.repo.ApplyChange(ctx, actor, apply)
-}
-
-// checkStoredVersionDates applies the EOL-after-release rule when an UPDATE
-// sets only one of the two dates (the Edit dialog sends the EOL date alone):
-// prepareCatalogChange sees only the payload, so the other date is read from
-// the stored row.
-func (s *productCatalogService) checkStoredVersionDates(ctx context.Context, id string, payload json.RawMessage) error {
-	var raw map[string]json.RawMessage
-	if json.Unmarshal(normalizePayload(payload), &raw) != nil {
-		return nil // prepareCatalogChange has already rejected it
-	}
-	releaseRaw, hasRelease := raw["releaseDate"]
-	eolRaw, hasEOL := raw["supportEolDate"]
-	if hasRelease == hasEOL {
-		return nil // both or neither: prepareCatalogChange decided
-	}
-	release, eol, found, err := s.repo.StoredVersionDates(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return &apierror.NotFoundError{Msg: "product version not found"}
-	}
-	if hasRelease {
-		release = nil
-		_ = json.Unmarshal(releaseRaw, &release)
-	} else {
-		eol = nil
-		_ = json.Unmarshal(eolRaw, &eol)
-	}
-	if release != nil && eol != nil && *eol < *release {
-		return &apierror.ValidationError{Msg: "supportEolDate must not be before releaseDate"}
-	}
-	return nil
 }
 
 // validateVersionSearch checks the filters both version searches share.
@@ -427,7 +391,7 @@ var (
 		"isPublic":                       {column: "is_public", cast: "%s::boolean", kind: kindBool, notNull: true},
 		"showInSupportMatrix":            {column: "show_in_support_matrix", cast: "%s::boolean", kind: kindBool, notNull: true},
 		"tags":                           {column: "tags", cast: "%s::text[]", kind: kindTags},
-		"legacyStatus":                   {column: "legacy_status", cast: "%s::boolean", kind: kindBool},
+		"legacyStatus":                   {column: "legacy_status", cast: "%s::boolean", kind: kindBool, notNull: true},
 		"releaseLineId":                  {column: "release_line_id", cast: "%s::uuid", kind: kindUUID},
 	}
 
@@ -507,7 +471,6 @@ func prepareCatalogChange(entityType, operation, entityID string, payload json.R
 	}
 	sort.Strings(keys)
 
-	var releaseDate, eolDate *string
 	for _, key := range keys {
 		value := raw[key]
 		isNull := bytes.Equal(bytes.TrimSpace(value), []byte("null"))
@@ -532,12 +495,6 @@ func prepareCatalogChange(entityType, operation, entityID string, payload json.R
 		if err != nil {
 			return a, err
 		}
-		if key == "releaseDate" {
-			releaseDate, _ = v.(*string)
-		}
-		if key == "supportEolDate" {
-			eolDate, _ = v.(*string)
-		}
 		set := repository.CatalogSet{Column: f.column, Cast: f.cast, Value: v}
 		if f.rowOnly {
 			a.RowSets = append(a.RowSets, set)
@@ -555,9 +512,6 @@ func prepareCatalogChange(entityType, operation, entityID string, payload json.R
 				return a, &apierror.ValidationError{Msg: key + ": is required"}
 			}
 		}
-	}
-	if releaseDate != nil && eolDate != nil && *eolDate < *releaseDate {
-		return a, &apierror.ValidationError{Msg: "supportEolDate must not be before releaseDate"}
 	}
 	return a, nil
 }

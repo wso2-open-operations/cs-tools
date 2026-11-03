@@ -33,7 +33,8 @@
 -- is_public / show_in_support_matrix default to false so versions that only
 -- CSM knows about stay off the public feeds until someone opts them in.
 -- legacy_status is the legacy "status" bit, carried as is (its meaning is
--- unknown and it cannot be derived from current_support_status).
+-- unknown and it cannot be derived from current_support_status). It defaults
+-- to true, as the legacy API published a missing value.
 --
 -- retired_on replaces deletion. A version is referenced by deployments,
 -- work items and change requests, and deleting it cascades into some of
@@ -46,8 +47,9 @@
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
--- Legacy ids end at 1085.
-CREATE SEQUENCE IF NOT EXISTS product_version_public_id_seq START WITH 1086;
+-- Legacy ids end at 1085. New listings start at 1100, leaving room for rows
+-- created in the legacy database during the parallel run.
+CREATE SEQUENCE IF NOT EXISTS product_version_public_id_seq START WITH 1100;
 
 ALTER TABLE product_version
     ADD COLUMN IF NOT EXISTS public_id                     BIGINT,
@@ -59,7 +61,7 @@ ALTER TABLE product_version
     ADD COLUMN IF NOT EXISTS show_in_support_matrix        BOOLEAN NOT NULL DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS tags                          TEXT[]  NOT NULL DEFAULT '{}',
     ADD COLUMN IF NOT EXISTS release_links                 VARCHAR(255),
-    ADD COLUMN IF NOT EXISTS legacy_status                 BOOLEAN,
+    ADD COLUMN IF NOT EXISTS legacy_status                 BOOLEAN NOT NULL DEFAULT TRUE,
     ADD COLUMN IF NOT EXISTS retired_on                    TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS retired_by                    VARCHAR(255);
 
@@ -73,7 +75,7 @@ COMMENT ON COLUMN product_version.public_name IS
 COMMENT ON COLUMN product_version.public_abbreviation IS
     'Abbreviation the public feeds publish for this version. NULL falls back to product.code.';
 COMMENT ON COLUMN product_version.legacy_status IS
-    'The legacy Product API status bit, imported as is. NULL is published as true.';
+    'The legacy Product API status bit, imported as is. Defaults to true.';
 COMMENT ON COLUMN product_version.retired_on IS
     'Set when the version is retired from the catalogue. Retired versions leave the public feeds but stay referenceable.';
 

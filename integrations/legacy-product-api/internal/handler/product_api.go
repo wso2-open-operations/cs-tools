@@ -23,19 +23,23 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
 )
 
 // This file is the Legacy Product API: the read contract (v1) of the retired
-// wso2-product-service (digiops-cs/operations/wso2-product-service, a Spring
-// Boot service on its own MySQL database), served from the CSM product
+// Spring Boot product service (wso2-product-service, on its own MySQL
+// database), served from the CSM product
 // catalogue (entity-service's products API, edited in the CSM Portal). Every
 // legacy path is served at the root, exactly as before, so a consumer moves by
 // changing the base URL. The consumers are
@@ -44,7 +48,7 @@ import (
 //     wso2_marketing_services): /products/support-matrix,
 //     /products/release-matrix, /carbon-platform-history,
 //     /carbon-kernel-releases;
-//   - security-advisory-automations (digiops-cs): /products,
+//   - the security advisory automations: /products,
 //     /productNameForAbbreviation;
 //   - UMT (endpoints unconfirmed, so every read is kept).
 //
@@ -451,19 +455,36 @@ func normalizeReleaseLines(lines []lpReleaseLine) {
 func boolPtr(b bool) *bool { return &b }
 
 // legacyUpstreamError answers a failed entity-service call the way legacy
-// answered a failure of its own database: 503 when the upstream is down or
-// timed out, otherwise 500. Upstream 401/403/404/400 are never passed through,
-// since a legacy caller would read them as a problem with its own request.
+// answered a failure of its own database: 503 when the upstream is down,
+// overloaded or timed out, otherwise 500. Upstream 401/403/404/400 are never
+// passed through, since a legacy caller would read them as a problem with its
+// own request.
 func legacyUpstreamError(w http.ResponseWriter, err error, fallback string) {
+	if upstreamUnavailable(err) {
+		writeError(w, http.StatusServiceUnavailable, fallback)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, fallback)
+}
+
+// upstreamUnavailable reports whether err means entity-service could not be
+// reached or could not answer: an upstream 429/502/503/504, a network error
+// (connection refused, DNS, the client timeout), a cancelled or expired
+// context, or a failed token fetch.
+func upstreamUnavailable(err error) bool {
 	var apiErr *apierror.Error
 	if errors.As(err, &apiErr) {
 		switch apiErr.StatusCode {
-		case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			writeError(w, http.StatusServiceUnavailable, fallback)
-			return
+		case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
 		}
+		return false
 	}
-	writeError(w, http.StatusInternalServerError, fallback)
+	var netErr net.Error
+	var urlErr *url.Error
+	var tokenErr *oauth2.RetrieveError
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
+		errors.As(err, &netErr) || errors.As(err, &urlErr) || errors.As(err, &tokenErr)
 }
 
 // readUpstream calls fetch and decodes its body into out. On failure it writes

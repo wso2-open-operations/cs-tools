@@ -30,7 +30,7 @@ import { useCatalogWrite } from "@features/csm-products/api/useCatalogWrite";
 import VersionSupportFields from "@features/csm-products/components/VersionSupportFields";
 import type { CatalogProduct, CatalogVersion } from "@features/csm-products/types/productCatalog";
 import {
-  buildVersionUpdatePayload,
+  buildVersionSupportPayload,
   validateVersionForm,
   versionToForm,
   type VersionFormValues,
@@ -49,13 +49,12 @@ interface VersionEditDialogProps {
 }
 
 /**
- * Edit a version's support status, type and dates. Saving applies the change
- * at once and sends only the fields that differ from the live row. Every
- * deployment profile of the listing moves together: the backend propagates a
- * published listing's change itself, and an unpublished version's other
- * profiles get the same change one by one. Retiring is here too, behind an
- * in-dialog confirmation step, and retires every profile. Retired rows are
- * not listed, so there is no Restore.
+ * Edit a version's support status and end-of-life dates. Saving applies the
+ * change at once: one PATCH to the row shown, with only the support fields
+ * that differ from it, which entity-service applies to every live deployment
+ * profile of the version in one transaction. Retiring is here too, behind an
+ * in-dialog confirmation step: one call that retires every profile. Retired
+ * rows are not listed, so there is no Restore.
  */
 export default function VersionEditDialog({
   product,
@@ -72,25 +71,19 @@ export default function VersionEditDialog({
   const save = useCatalogWrite();
   const pending = save.isPending;
   const errors = validateVersionForm(form, "update");
-  // A published listing's profiles move with the row; an unpublished version's do not.
-  const targets = version.publicId !== null ? [version] : rows;
   const name = `${productDisplayCode(product)} ${version.version}${listingName ? ` (${listingName})` : ""}`;
 
   const handleSave = async (): Promise<void> => {
     setSubmitted(true);
     if (Object.keys(errors).length > 0) return;
     setError(null);
-    const changes = targets
-      .map((row) => ({ row, payload: buildVersionUpdatePayload(row, form) }))
-      .filter(({ payload }) => Object.keys(payload).length > 0);
-    if (changes.length === 0) {
+    const payload = buildVersionSupportPayload(version, form);
+    if (Object.keys(payload).length === 0) {
       setError("Nothing has changed.");
       return;
     }
     try {
-      for (const { row, payload } of changes) {
-        await save.mutateAsync({ kind: "updateVersion", id: row.id, payload });
-      }
+      await save.mutateAsync({ kind: "updateVersion", id: version.id, payload });
       onSaved(`Saved ${name}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save the change.");
@@ -100,11 +93,8 @@ export default function VersionEditDialog({
   const handleRetire = async (): Promise<void> => {
     setError(null);
     try {
-      // A published listing is retired in one call (every profile); an
-      // unpublished version's rows one by one.
-      for (const row of targets) {
-        await save.mutateAsync({ kind: "retireVersion", id: row.id });
-      }
+      // One call: entity-service retires every live profile of the version.
+      await save.mutateAsync({ kind: "retireVersion", id: version.id });
       onSaved(`Retired ${name}.`);
     } catch (err) {
       setConfirmingRetire(false);

@@ -20,9 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+
+	"golang.org/x/oauth2"
 
 	"github.com/wso2-open-operations/cs-tools/operations/legacy-product-api/internal/apierror"
 )
@@ -122,7 +127,13 @@ func upstreamErrors(string) []upstreamErrorCase {
 		{"apierror 502", &apierror.Error{StatusCode: http.StatusBadGateway}, http.StatusServiceUnavailable},
 		{"apierror 503", &apierror.Error{StatusCode: http.StatusServiceUnavailable}, http.StatusServiceUnavailable},
 		{"apierror 504", &apierror.Error{StatusCode: http.StatusGatewayTimeout}, http.StatusServiceUnavailable},
+		{"apierror 429", &apierror.Error{StatusCode: http.StatusTooManyRequests}, http.StatusServiceUnavailable},
 		{"apierror unmapped (418)", &apierror.Error{StatusCode: http.StatusTeapot}, http.StatusInternalServerError},
-		{"non-apierror error", errors.New("upstream connection refused"), http.StatusInternalServerError},
+		{"connection refused", fmt.Errorf("entity: GET /x: %w", &url.Error{Op: "Get", URL: "http://entity", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}), http.StatusServiceUnavailable},
+		{"dns failure", &net.DNSError{Err: "no such host", Name: "entity", IsNotFound: true}, http.StatusServiceUnavailable},
+		{"client timeout", fmt.Errorf("entity: GET /x: %w", context.DeadlineExceeded), http.StatusServiceUnavailable},
+		{"cancelled", fmt.Errorf("entity: GET /x: %w", context.Canceled), http.StatusServiceUnavailable},
+		{"token fetch failed", fmt.Errorf("entity: %w", &oauth2.RetrieveError{ErrorCode: "invalid_client"}), http.StatusServiceUnavailable},
+		{"other error", errors.New("unexpected end of JSON input"), http.StatusInternalServerError},
 	}
 }

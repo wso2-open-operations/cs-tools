@@ -50,6 +50,7 @@ import {
 } from "@features/csm-products/utils/catalogChange";
 import { CARBON_FIELD_LABEL } from "@features/csm-products/utils/catalogFormat";
 import {
+  DEFAULT_PROFILE,
   latestLiveVersion,
   listingFormFrom,
   normalizeProfiles,
@@ -57,8 +58,6 @@ import {
   summarizeListing,
   type ListingFormValues,
 } from "@features/csm-products/utils/catalogProducts";
-
-const DEFAULT_PROFILE = "All In One";
 
 interface AddVersionDialogProps {
   /** The products a version can be added to (cloud and retired products already left out). */
@@ -92,10 +91,12 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
   const add = useAddCatalogVersion();
 
   const product = products.find((p) => p.id === productId) ?? null;
-  // No product picked: nothing to copy the advanced settings from.
+  // No product picked, or its versions failed to load: nothing to copy the
+  // advanced settings from (the dialog says so rather than prefilling blanks).
+  const sourceFailed = Boolean(productId) && versions.isError;
   const latest = useMemo(
-    () => (productId ? latestLiveVersion(versions.data ?? []) : null),
-    [productId, versions.data],
+    () => (productId && !sourceFailed ? latestLiveVersion(versions.data ?? []) : null),
+    [productId, sourceFailed, versions.data],
   );
   const prefilled = useMemo(() => listingFormFrom(latest), [latest]);
   const advanced = advancedEdits ?? prefilled;
@@ -123,7 +124,9 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
     [versions.data],
   );
   const cleanProfiles = normalizeProfiles(profiles);
-  const errors: Record<string, string> = { ...validateVersionForm({ ...form, ...advanced }, "create") };
+  const errors: Record<string, string> = {
+    ...validateVersionForm({ ...form, ...advanced }, "create", { productCode: product?.code ?? null }),
+  };
   if (!productId) errors.product = "Pick a product.";
   if (cleanProfiles.length === 0) errors.profiles = "Add at least one deployment profile.";
   const loadingSource = Boolean(productId) && versions.isLoading;
@@ -204,6 +207,11 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
             errors={errors}
             showErrors={submitted}
           />
+          {sourceFailed && (
+            <Alert severity="warning">
+              Could not load this product&apos;s versions to copy settings from; check the advanced settings.
+            </Alert>
+          )}
           <Accordion disableGutters variant="outlined" sx={{ "&::before": { display: "none" } }}>
             <AccordionSummary expandIcon={<ChevronDown size={16} />}>
               <Typography variant="body2">

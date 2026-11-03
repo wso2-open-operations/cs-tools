@@ -5358,7 +5358,7 @@ paths:
     post:
       summary: Add a version of a product.
       description: >
-        Creates one row per deployment profile in profiles, all on one public listing (a new public id, or the one given to join). A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+        Creates one row per deployment profile in profiles, all on one public listing (a new public id, or publicId to join a live listing of the same product and version). A profile the version already has is refused. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
       operationId: createProductVersions
       tags: [Products]
       parameters:
@@ -5511,7 +5511,7 @@ paths:
     patch:
       summary: Change a product version.
       description: >
-        Listing fields apply to every live row of its public listing (all deployment profiles); deploymentProfile and publicId to this row only. The EOL date must not be before the release date (the stored value is used for the one not sent). A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+        Listing fields apply to every live row of the version (its public listing, or the unpublished rows of the same product and version); deploymentProfile and publicId to this row only. On a retired row the change applies to that row alone. Dates must keep release <= earliest possible EOL <= EOL and EOL announcement <= EOL, and a version on a public feed needs a public abbreviation or a product code; both are checked on the row as written (the body over the stored values). publicId may only name a live listing of the same product and version. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
       operationId: updateProductVersion
       tags: [Products]
       parameters:
@@ -5569,7 +5569,7 @@ paths:
     post:
       summary: Retire a product version.
       description: >
-        Retires every live row of its public listing (the row alone when it has none). Retired rows leave the catalogue and both public feeds; the product version searches still return them unless excludeRetired is set. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+        Retires every live row of the version: its public listing, or, when the row has no public id, the unpublished rows of the same product and version. Retired rows leave the catalogue and both public feeds; the product version searches still return them unless excludeRetired is set. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
       operationId: retireProductVersion
       tags: [Products]
       parameters:
@@ -22501,7 +22501,7 @@ components:
           nullable: true
         legacyStatus:
           type: boolean
-          nullable: true
+          description: The legacy status bit; defaults to true.
         releaseLineId:
           type: string
           format: uuid
@@ -30249,7 +30249,7 @@ components:
           type: array
           nullable: true
           items: {type: string, maxLength: 50}
-        legacyStatus: {type: boolean, nullable: true}
+        legacyStatus: {type: boolean}
         releaseLineId: {type: string, format: uuid, nullable: true}
         carbon:
           $ref: '#/components/schemas/CatalogCarbon'

@@ -43,6 +43,9 @@ const CLOUD_UNITS: ReadonlySet<string> = new Set(["choreo", "asgardeo", "devant"
  * one in a cloud unit. The catalogue never lists these; they are not on the
  * on-premise Support Matrix.
  */
+/** The deployment profile a new version gets by default, and the one a listing is shown by. */
+export const DEFAULT_PROFILE = "All In One";
+
 export function isCloudProduct(product: CatalogProduct): boolean {
   return (
     product.class === "service" ||
@@ -126,7 +129,7 @@ export function catalogListings(
   }
   const listings: CatalogListing[] = [];
   for (const [key, rows] of groups) {
-    const main = rows.find((row) => row.deploymentProfile === "All In One") ?? rows[0];
+    const main = rows.find((row) => row.deploymentProfile === DEFAULT_PROFILE) ?? rows[0];
     listings.push({
       key,
       product: byId.get(main.productId) as CatalogProduct,
@@ -161,15 +164,27 @@ export function latestLiveVersion(versions: readonly CatalogVersion[]): CatalogV
   let latest: CatalogVersion | null = null;
   for (const version of versions) {
     if (version.retiredOn) continue;
-    if (!latest) {
-      latest = version;
-      continue;
-    }
-    const a = version.releaseDate ?? "";
-    const b = latest.releaseDate ?? "";
-    if (a > b) latest = version;
+    if (!latest || isBetterSource(version, latest)) latest = version;
   }
   return latest;
+}
+
+/**
+ * Whether `a` is a better row to copy settings from than `b`: the later
+ * release date; on a tie the "All In One" profile, then the lowest public id,
+ * then the id. That keeps a profile that is its own listing (with its own
+ * public name, as APIM 4.5+ gateways are) from being copied onto a new version.
+ */
+function isBetterSource(a: CatalogVersion, b: CatalogVersion): boolean {
+  const ra = a.releaseDate ?? "";
+  const rb = b.releaseDate ?? "";
+  if (ra !== rb) return ra > rb;
+  const aio = (v: CatalogVersion) => (v.deploymentProfile ?? "").toLowerCase() === DEFAULT_PROFILE.toLowerCase();
+  if (aio(a) !== aio(b)) return aio(a);
+  const pa = a.publicId ?? Number.POSITIVE_INFINITY;
+  const pb = b.publicId ?? Number.POSITIVE_INFINITY;
+  if (pa !== pb) return pa < pb;
+  return a.id < b.id;
 }
 
 /**

@@ -230,6 +230,20 @@ export function sameWireValue(a: unknown, b: unknown): boolean {
 }
 
 /** An UPDATE payload holding only the keys whose value differs from the live row. */
+/**
+ * The Edit dialog's PATCH body: only the support fields it shows
+ * (VERSION_SUPPORT_KEYS) that differ from the live row. entity-service applies
+ * them to every live row of the version, so nothing row-specific is sent.
+ */
+export function buildVersionSupportPayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
+  const payload: CatalogChangePayload = {};
+  for (const key of VERSION_SUPPORT_KEYS) {
+    const next = formWireValue(form, key);
+    if (!sameWireValue(next, liveWireValue(live, key))) payload[key] = next;
+  }
+  return payload;
+}
+
 export function buildVersionUpdatePayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
   const payload: CatalogChangePayload = {};
   for (const key of VERSION_UPDATE_KEYS) {
@@ -263,7 +277,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * Client-side checks that save a round trip; entity-service repeats them (and
  * more) when it applies the change. Returns field key -> message for each problem.
  */
-export function validateVersionForm(form: VersionFormValues, mode: "create" | "update"): Record<string, string> {
+export function validateVersionForm(
+  form: VersionFormValues,
+  mode: "create" | "update",
+  context: { productCode?: string | null } = {},
+): Record<string, string> {
   const errors: Record<string, string> = {};
   if (mode === "create") {
     if (!form.version.trim()) errors.version = "Version is required.";
@@ -272,12 +290,36 @@ export function validateVersionForm(form: VersionFormValues, mode: "create" | "u
   for (const key of ["releaseDate", "earliestPossibleSupportEolDate", "supportEolDate", "supportEolAnnouncementDate"] as const) {
     if (form[key] && !DATE_RE.test(form[key])) errors[key] = "Use YYYY-MM-DD.";
   }
-  if (!errors.supportEolDate && form.releaseDate && form.supportEolDate && form.supportEolDate < form.releaseDate) {
+  // Date order, as entity-service enforces it: release <= earliest EOL <= EOL,
+  // and the announcement no later than the EOL. Each rule needs both dates.
+  const ok = (key: keyof VersionFormValues) => Boolean(form[key]) && !errors[key];
+  if (ok("releaseDate") && ok("earliestPossibleSupportEolDate") && form.earliestPossibleSupportEolDate < form.releaseDate) {
+    errors.earliestPossibleSupportEolDate = "Earliest possible EOL cannot be before the release date.";
+  }
+  if (ok("releaseDate") && ok("supportEolDate") && form.supportEolDate < form.releaseDate) {
     errors.supportEolDate = "EOL date cannot be before the release date.";
+  } else if (
+    ok("earliestPossibleSupportEolDate") &&
+    ok("supportEolDate") &&
+    form.supportEolDate < form.earliestPossibleSupportEolDate
+  ) {
+    errors.supportEolDate = "EOL date cannot be before the earliest possible EOL.";
+  }
+  if (ok("supportEolAnnouncementDate") && ok("supportEolDate") && form.supportEolAnnouncementDate > form.supportEolDate) {
+    errors.supportEolAnnouncementDate = "EOL announcement cannot be after the EOL date.";
   }
   if (form.publicId.trim() && !/^\d+$/.test(form.publicId.trim())) errors.publicId = "A whole number.";
   if (form.publicName.trim().length > 150) errors.publicName = "At most 150 characters.";
   if (form.publicAbbreviation.trim().length > 64) errors.publicAbbreviation = "At most 64 characters.";
+  else if (
+    context.productCode !== undefined &&
+    (form.isPublic || form.showInSupportMatrix) &&
+    !form.publicAbbreviation.trim() &&
+    !context.productCode?.trim()
+  ) {
+    // The public feeds sort by abbreviation; it falls back to the product code.
+    errors.publicAbbreviation = "Needed on the public feeds: this product has no code.";
+  }
   if (form.releaseLinks.trim().length > 255) errors.releaseLinks = "At most 255 characters.";
   return errors;
 }

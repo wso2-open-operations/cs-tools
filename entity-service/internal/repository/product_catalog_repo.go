@@ -70,9 +70,6 @@ type ProductCatalogRepository interface {
 	GetReleaseLine(ctx context.Context, id string) (*domain.ReleaseLine, error)
 	ListCarbonPlatformHistory(ctx context.Context) ([]domain.CarbonPlatformHistory, error)
 	ListCarbonKernelReleases(ctx context.Context) ([]domain.CarbonKernelRelease, error)
-	// StoredVersionDates returns a version's release and support EOL dates
-	// ("YYYY-MM-DD" or nil); found is false when there is no such row.
-	StoredVersionDates(ctx context.Context, id string) (release, eol *string, found bool, err error)
 
 	// EntityExists reports whether the row a change targets exists.
 	EntityExists(ctx context.Context, entityType, id string) (bool, error)
@@ -92,7 +89,7 @@ func NewProductCatalogRepository(db *pgxpool.Pool) ProductCatalogRepository {
 	return &productCatalogRepo{db: db}
 }
 
-const releaseLineSelect = `SELECT rl.id::text, rl.name, rl.start_date::timestamptz, rl.status, rl.legacy_id,
+const releaseLineSelect = `SELECT rl.id::text, rl.name, rl.start_date, rl.status, rl.legacy_id,
 	(SELECT count(*) FROM product_version pv WHERE pv.release_line_id = rl.id AND pv.retired_on IS NULL),
 	rl.retired_on, rl.created_on, rl.updated_on
 	FROM release_line rl`
@@ -135,19 +132,6 @@ func (r *productCatalogRepo) GetReleaseLine(ctx context.Context, id string) (*do
 		return nil, fmt.Errorf("get release line: %w", err)
 	}
 	return &l, nil
-}
-
-func (r *productCatalogRepo) StoredVersionDates(ctx context.Context, id string) (*string, *string, bool, error) {
-	var release, eol *string
-	err := r.db.QueryRow(ctx, `SELECT to_char(release_date, 'YYYY-MM-DD'), to_char(support_eol_date, 'YYYY-MM-DD')
-		FROM product_version WHERE id = $1::uuid`, id).Scan(&release, &eol)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, false, nil
-	}
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("stored version dates: %w", err)
-	}
-	return release, eol, true, nil
 }
 
 func (r *productCatalogRepo) ListCarbonPlatformHistory(ctx context.Context) ([]domain.CarbonPlatformHistory, error) {
@@ -240,8 +224,34 @@ func (r *productCatalogRepo) ApplyChange(ctx context.Context, actor string, a Ca
 	if err != nil {
 		return nil, changeError(a, err)
 	}
+	// The rules are checked on the rows as written, so the body is always
+	// judged together with the stored values it did not change.
+	switch a.EntityType {
+	case domain.CatalogEntityProductVersion:
+		if a.Operation != CatalogOpRetire {
+			// The abbreviation rule applies when a write publishes a row or
+			// changes its abbreviation, so legacy rows already published
+			// without one can still be edited.
+			abbr := a.Operation == CatalogOpCreate || setsColumn(a.Sets, "is_public") ||
+				setsColumn(a.Sets, "show_in_support_matrix") || setsColumn(a.Sets, "public_abbreviation")
+			if err := checkVersionRules(ctx, tx, ids, abbr); err != nil {
+				return nil, err
+			}
+		}
+	case domain.CatalogEntityProduct:
+		if a.Operation == CatalogOpUpdate && setsColumn(a.Sets, "code") {
+			if err := checkProductListings(ctx, tx, ids[0]); err != nil {
+				return nil, err
+			}
+		}
+	}
+	cols := listingColumns
+	if a.Operation == CatalogOpUpdate && !setsColumn(a.RowSets, "public_id") {
+		// A row moving to another listing must agree with it on everything.
+		cols = changedListingColumns(a.Sets)
+	}
 	for _, publicID := range publicIDs {
-		if err := checkListingAgrees(ctx, tx, publicID); err != nil {
+		if err := checkListingAgrees(ctx, tx, publicID, cols); err != nil {
 			return nil, err
 		}
 	}
@@ -251,13 +261,46 @@ func (r *productCatalogRepo) ApplyChange(ctx context.Context, actor string, a Ca
 	return ids, nil
 }
 
+// listingColumns are the fields the feeds publish once per listing, so the
+// live rows of a listing must agree on them. Constants, safe to interpolate.
+var listingColumns = []string{"current_support_status", "release_date", "earliest_possible_support_eol_date",
+	"support_eol_date", "support_eol_announcement_date", "public_name", "public_abbreviation",
+	"is_public", "show_in_support_matrix"}
+
+func setsColumn(sets []CatalogSet, column string) bool {
+	for _, s := range sets {
+		if s.Column == column {
+			return true
+		}
+	}
+	return false
+}
+
+// changedListingColumns are the listing columns an UPDATE sets.
+func changedListingColumns(sets []CatalogSet) []string {
+	var out []string
+	for _, c := range listingColumns {
+		for _, s := range sets {
+			if s.Column == c {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // checkListingAgrees refuses a change that leaves the live rows of one public
-// listing disagreeing on a field the feeds publish once per listing.
-func checkListingAgrees(ctx context.Context, tx pgx.Tx, publicID int64) error {
+// listing disagreeing on one of cols. An UPDATE checks only the columns it
+// sets, so a listing the import left split on another field can still be
+// edited.
+func checkListingAgrees(ctx context.Context, tx pgx.Tx, publicID int64, cols []string) error {
+	if len(cols) == 0 {
+		return nil
+	}
+	// The trailing constant keeps a one-column list a row.
 	var split bool
-	if err := tx.QueryRow(ctx, `SELECT count(DISTINCT (current_support_status, release_date, earliest_possible_support_eol_date,
-			support_eol_date, support_eol_announcement_date, public_name, public_abbreviation,
-			is_public, show_in_support_matrix)) > 1
+	if err := tx.QueryRow(ctx, `SELECT count(DISTINCT (`+strings.Join(cols, ", ")+`, 0)) > 1
 		FROM product_version WHERE public_id = $1 AND retired_on IS NULL`, publicID).Scan(&split); err != nil {
 		return fmt.Errorf("apply catalog change: check listing: %w", err)
 	}
@@ -313,6 +356,28 @@ func applyCatalogChange(ctx context.Context, tx pgx.Tx, actor string, a CatalogA
 			}
 			return []string{id}, nil, nil
 		}
+		productID, version := setString(a.Sets, "product_id"), setString(a.Sets, "version")
+		// Lock the product so two saves of the same new version cannot both
+		// pass the duplicate check (NULL profiles are distinct to the unique
+		// constraint, so it would not stop them).
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM product WHERE id = $1::uuid FOR UPDATE`, productID); err != nil {
+			return nil, nil, err
+		}
+		for _, profile := range a.Profiles {
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_version WHERE product_id = $1::uuid
+				AND version = $2 AND deployment_profile IS NOT DISTINCT FROM NULLIF($3, ''))`,
+				productID, version, profile).Scan(&exists); err != nil {
+				return nil, nil, err
+			}
+			if exists {
+				label := profile
+				if label == "" {
+					label = "no deployment profile"
+				}
+				return nil, nil, &apierror.ValidationError{Msg: fmt.Sprintf("version %s already has a row for %s", version, label)}
+			}
+		}
 		// The first profile takes the listing's public id (the one joined, or
 		// the next in the sequence); the others reuse it.
 		rowSets := append([]CatalogSet{}, a.RowSets...)
@@ -320,6 +385,9 @@ func applyCatalogChange(ctx context.Context, tx pgx.Tx, actor string, a CatalogA
 		for _, s := range rowSets {
 			if s.Column == "public_id" {
 				publicIDExpr = ""
+				if err := checkJoinListing(ctx, tx, s.Value, productID, version, ""); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 		for i, profile := range a.Profiles {
@@ -372,6 +440,15 @@ func applyCatalogChange(ctx context.Context, tx pgx.Tx, actor string, a CatalogA
 		if len(ids) == 0 {
 			return nil, nil, &apierror.NotFoundError{Msg: fmt.Sprintf("this %s no longer exists", entityNoun(a.EntityType))}
 		}
+		if isVersion {
+			for _, s := range a.RowSets {
+				if s.Column == "public_id" {
+					if err := checkJoinListing(ctx, tx, s.Value, "", "", a.EntityID); err != nil {
+						return nil, nil, err
+					}
+				}
+			}
+		}
 		if err := updateCatalogRows(ctx, tx, table, target, a.EntityID, actor, a.Sets); err != nil {
 			return nil, nil, err
 		}
@@ -422,10 +499,105 @@ func applyCatalogChange(ctx context.Context, tx pgx.Tx, actor string, a CatalogA
 	return ids, publicIDs, nil
 }
 
-// versionListingTarget selects a version row ($1) and the other live rows of
-// its public listing.
-const versionListingTarget = `(id = $1::uuid OR (public_id IS NOT NULL AND retired_on IS NULL
-	AND public_id = (SELECT public_id FROM product_version WHERE id = $1::uuid)))`
+// versionListingTarget selects a version row ($1) and, when that row is live,
+// the other live rows of the same version: those sharing its public listing,
+// or, when it has none, the unpublished rows of the same product and version.
+// A retired row is only ever itself.
+const versionListingTarget = `(id = $1::uuid OR (retired_on IS NULL AND EXISTS (
+	SELECT 1 FROM product_version t WHERE t.id = $1::uuid AND t.retired_on IS NULL
+	  AND ((t.public_id IS NOT NULL AND product_version.public_id = t.public_id)
+	    OR (t.public_id IS NULL AND product_version.public_id IS NULL
+	        AND product_version.product_id = t.product_id AND product_version.version = t.version)))))`
+
+// setString returns the string a CREATE sets on column ("" when absent).
+func setString(sets []CatalogSet, column string) string {
+	for _, s := range sets {
+		if s.Column == column {
+			if v, ok := s.Value.(*string); ok && v != nil {
+				return *v
+			}
+		}
+	}
+	return ""
+}
+
+// checkJoinListing allows setting public_id only to null or to an existing
+// live listing of the same product and version. For a CREATE, productID and
+// version are the new row's; for an UPDATE, rowID names the row and its own
+// product and version are used (keeping its current public id is fine).
+func checkJoinListing(ctx context.Context, tx pgx.Tx, value any, productID, version, rowID string) error {
+	pid, _ := value.(*int64)
+	if pid == nil {
+		return nil
+	}
+	if rowID != "" {
+		var current *int64
+		if err := tx.QueryRow(ctx, `SELECT public_id, product_id::text, version FROM product_version WHERE id = $1::uuid`,
+			rowID).Scan(&current, &productID, &version); err != nil {
+			return err
+		}
+		if current != nil && *current == *pid {
+			return nil
+		}
+	}
+	var ok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_version WHERE public_id = $1 AND retired_on IS NULL
+		AND product_id = $2::uuid AND version = $3 AND id IS DISTINCT FROM NULLIF($4, '')::uuid)`,
+		*pid, productID, version, rowID).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return &apierror.ValidationError{Msg: fmt.Sprintf(
+			"publicId %d is not a live listing of this product and version; leave it out to start a new listing", *pid)}
+	}
+	return nil
+}
+
+// checkVersionRules applies the date order and, when abbr is set, the
+// public-abbreviation rule to the version rows a write left behind.
+func checkVersionRules(ctx context.Context, tx pgx.Tx, ids []string, abbr bool) error {
+	var label string
+	var rule *string
+	err := tx.QueryRow(ctx, `SELECT p.name || ' ' || pv.version || COALESCE(' (' || pv.deployment_profile || ')', ''),
+		CASE
+			WHEN pv.earliest_possible_support_eol_date < pv.release_date THEN 'the earliest possible EOL date is before the release date'
+			WHEN pv.support_eol_date < pv.release_date THEN 'the EOL date is before the release date'
+			WHEN pv.support_eol_date < pv.earliest_possible_support_eol_date THEN 'the EOL date is before the earliest possible EOL date'
+			WHEN pv.support_eol_announcement_date > pv.support_eol_date THEN 'the EOL announcement date is after the EOL date'
+			WHEN $2 AND pv.retired_on IS NULL AND (pv.is_public OR pv.show_in_support_matrix)
+				AND COALESCE(NULLIF(pv.public_abbreviation, ''), NULLIF(p.code, '')) IS NULL
+				THEN 'it is on a public feed but has no public abbreviation and its product has no code'
+		END AS rule
+		FROM product_version pv JOIN product p ON p.id = pv.product_id
+		WHERE pv.id = ANY($1::uuid[])
+		ORDER BY rule NULLS LAST LIMIT 1`, ids, abbr).Scan(&label, &rule)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("apply catalog change: check version rules: %w", err)
+	}
+	if rule != nil {
+		return &apierror.ValidationError{Msg: label + ": " + *rule}
+	}
+	return nil
+}
+
+// checkProductListings refuses clearing a product's code while a published
+// version relies on it for its abbreviation.
+func checkProductListings(ctx context.Context, tx pgx.Tx, productID string) error {
+	var n int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM product_version pv JOIN product p ON p.id = pv.product_id
+		WHERE p.id = $1::uuid AND pv.retired_on IS NULL AND (pv.is_public OR pv.show_in_support_matrix)
+		  AND COALESCE(NULLIF(pv.public_abbreviation, ''), NULLIF(p.code, '')) IS NULL`, productID).Scan(&n); err != nil {
+		return fmt.Errorf("apply catalog change: check product listings: %w", err)
+	}
+	if n > 0 {
+		return &apierror.ValidationError{Msg: fmt.Sprintf(
+			"%d published version row(s) of this product would have no abbreviation; set their public abbreviation first", n)}
+	}
+	return nil
+}
 
 // insertCatalogRow inserts one row from sets. publicIDExpr, when set, is the
 // constant SQL expression that fills public_id.

@@ -37,21 +37,14 @@ const (
 type fakeCatalogRepo struct {
 	repository.ProductCatalogRepository // unused methods panic
 
-	exists         bool
-	release, eol   *string
-	applied        *repository.CatalogApply
-	actor          string
-	appliedIDs     []string
-	storedDatesHit bool
+	exists     bool
+	applied    *repository.CatalogApply
+	actor      string
+	appliedIDs []string
 }
 
 func (r *fakeCatalogRepo) EntityExists(context.Context, string, string) (bool, error) {
 	return r.exists, nil
-}
-
-func (r *fakeCatalogRepo) StoredVersionDates(context.Context, string) (*string, *string, bool, error) {
-	r.storedDatesHit = true
-	return r.release, r.eol, true, nil
 }
 
 func (r *fakeCatalogRepo) ApplyChange(_ context.Context, actor string, a repository.CatalogApply) ([]string, error) {
@@ -227,8 +220,8 @@ func TestPrepareCatalogChangeRejectsBadChanges(t *testing.T) {
 		{"bad status", "product_version", "UPDATE", catalogVersionID, `{"currentSupportStatus":"eol"}`},
 		{"support type is not a field yet", "product_version", "UPDATE", catalogVersionID, `{"supportType":"lts"}`},
 		{"bad date", "product_version", "UPDATE", catalogVersionID, `{"releaseDate":"2026-13-01"}`},
-		{"eol before release", "product_version", "UPDATE", catalogVersionID, `{"releaseDate":"2026-05-01","supportEolDate":"2026-04-30"}`},
 		{"null flag", "product_version", "UPDATE", catalogVersionID, `{"isPublic":null}`},
+		{"null legacy status", "product_version", "UPDATE", catalogVersionID, `{"legacyStatus":null}`},
 		{"version too long", "product_version", "CREATE", "", `{"productId":"` + catalogVersionID + `","version":"123456789012345678901","profiles":["A"]}`},
 		{"negative public id", "product_version", "UPDATE", catalogVersionID, `{"publicId":-4}`},
 		{"tags not strings", "product_version", "UPDATE", catalogVersionID, `{"tags":[1]}`},
@@ -307,30 +300,5 @@ func TestProductCatalogSearchAllVersions(t *testing.T) {
 		SearchProductVersionsRequest: domain.SearchProductVersionsRequest{Feed: domain.CatalogFeedSupportMatrix, Pagination: domain.Pagination{Limit: 1000}}})
 	if err != nil || versions.search == nil || versions.search.ProductID != catalogProductID || versions.search.Pagination.Limit != 1000 {
 		t.Fatalf("err = %v search = %+v", err, versions.search)
-	}
-}
-
-func TestProductCatalogUpdateChecksTheStoredDates(t *testing.T) {
-	release, eol := "2026-11-01", "2030-01-31"
-	cases := []struct {
-		name    string
-		payload string
-		wantErr bool
-	}{
-		{"EOL before the stored release date", `{"supportEolDate":"2020-01-01"}`, true},
-		{"EOL after the stored release date", `{"supportEolDate":"2031-01-01"}`, false},
-		{"release date after the stored EOL", `{"releaseDate":"2031-01-01"}`, true},
-		{"clearing the EOL date", `{"supportEolDate":null}`, false},
-		{"neither date", `{"currentSupportStatus":"deprecated"}`, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &fakeCatalogRepo{exists: true, release: &release, eol: &eol}
-			_, err := newCatalogService(repo).UpdateProductVersion(catalogCtx(manager), catalogVersionID, json.RawMessage(tc.payload))
-			var verr *apierror.ValidationError
-			if tc.wantErr != errors.As(err, &verr) || (tc.wantErr && repo.applied != nil) {
-				t.Fatalf("err = %v, applied = %v", err, repo.applied != nil)
-			}
-		})
 	}
 }

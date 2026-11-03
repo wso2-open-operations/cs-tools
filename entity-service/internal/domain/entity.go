@@ -2227,7 +2227,7 @@ type ProductVersion struct {
 	ShowInSupportMatrix        bool           `json:"showInSupportMatrix"`
 	Tags                       []string       `json:"tags"`
 	ReleaseLinks               *string        `json:"releaseLinks"`
-	LegacyStatus               *bool          `json:"legacyStatus"`
+	LegacyStatus               bool           `json:"legacyStatus"`
 	ReleaseLineID              *string        `json:"releaseLineId"`
 	ReleaseLineName            *string        `json:"releaseLineName"`
 	Carbon                     *CatalogCarbon `json:"carbon"`

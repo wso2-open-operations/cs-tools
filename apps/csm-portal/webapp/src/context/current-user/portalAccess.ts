@@ -71,7 +71,7 @@ export const PORTAL_ROLE = {
 // onboarding_lead is excluded too: the backend gives it no read permission,
 // only the one onboarding PATCH. product_catalog_manager likewise: catalogue
 // managers are staff who also hold a viewing role, and on its own it grants
-// only the draft routes.
+// only the catalogue write routes.
 // comment_updater is excluded for the identical reason: on its own it grants
 // only editing/deleting someone else's comment (canUpdateDeleteAnyComment),
 // and reaching a comment at all first requires being able to view the case

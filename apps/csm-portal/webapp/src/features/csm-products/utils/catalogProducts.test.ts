@@ -211,6 +211,15 @@ describe("latestLiveVersion", () => {
     expect(latestLiveVersion(rows)?.id).toBe("new");
     expect(latestLiveVersion([])).toBeNull();
   });
+
+  it("breaks a release-date tie by All In One, then the lowest public id", () => {
+    const day = "2025-06-01";
+    const gateway = version({ id: "gw", releaseDate: day, deploymentProfile: "Universal Gateway", publicId: 1070 });
+    const aio = version({ id: "aio", releaseDate: day, deploymentProfile: "All In One", publicId: 1080 });
+    const other = version({ id: "km", releaseDate: day, deploymentProfile: "Key Manager", publicId: 1060 });
+    expect(latestLiveVersion([gateway, aio, other])?.id).toBe("aio");
+    expect(latestLiveVersion([gateway, other])?.id).toBe("km");
+  });
 });
 
 describe("copying the publishing settings from the latest version", () => {

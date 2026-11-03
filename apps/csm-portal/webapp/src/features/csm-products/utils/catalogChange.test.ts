@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReleaseLinePayload,
   buildVersionCreatePayload,
+  buildVersionSupportPayload,
   buildVersionUpdatePayload,
   emptyVersionForm,
   parseTags,
@@ -113,6 +114,20 @@ describe("buildVersionUpdatePayload", () => {
   });
 });
 
+describe("buildVersionSupportPayload", () => {
+  it("sends only the support fields that changed, never row-specific ones", () => {
+    const live = liveVersion();
+    const form = {
+      ...versionToForm(live),
+      supportEolDate: "2031-01-31",
+      deploymentProfile: "Something else",
+      description: "changed",
+    };
+    expect(buildVersionSupportPayload(live, form)).toEqual({ supportEolDate: "2031-01-31" });
+    expect(buildVersionSupportPayload(live, versionToForm(live))).toEqual({});
+  });
+});
+
 describe("buildVersionCreatePayload", () => {
   it("sends the version and only the fields that are set, never a profile", () => {
     const form = {
@@ -149,6 +164,35 @@ describe("validateVersionForm", () => {
     );
     expect(errors.supportEolDate).toMatch(/before the release date/);
     expect(errors.publicId).toBeTruthy();
+  });
+
+  it("applies every date-order rule", () => {
+    const base = { ...emptyVersionForm(), releaseDate: "2026-01-01" };
+    expect(validateVersionForm({ ...base, earliestPossibleSupportEolDate: "2025-12-31" }, "update").earliestPossibleSupportEolDate).toMatch(
+      /before the release date/,
+    );
+    expect(
+      validateVersionForm({ ...base, earliestPossibleSupportEolDate: "2030-01-01", supportEolDate: "2029-01-01" }, "update")
+        .supportEolDate,
+    ).toMatch(/before the earliest possible EOL/);
+    expect(
+      validateVersionForm({ ...base, supportEolDate: "2029-01-01", supportEolAnnouncementDate: "2029-06-01" }, "update")
+        .supportEolAnnouncementDate,
+    ).toMatch(/after the EOL date/);
+    expect(
+      validateVersionForm(
+        { ...base, earliestPossibleSupportEolDate: "2028-01-01", supportEolDate: "2029-01-01", supportEolAnnouncementDate: "2028-06-01" },
+        "update",
+      ),
+    ).toEqual({});
+  });
+
+  it("needs an abbreviation on the public feeds when the product has no code", () => {
+    const form = { ...emptyVersionForm(), version: "1.0.0", isPublic: true };
+    expect(validateVersionForm(form, "create", { productCode: null }).publicAbbreviation).toMatch(/no code/);
+    expect(validateVersionForm(form, "create", { productCode: "ex" }).publicAbbreviation).toBeUndefined();
+    expect(validateVersionForm({ ...form, publicAbbreviation: "ex" }, "create", { productCode: null })).toEqual({});
+    expect(validateVersionForm({ ...form, isPublic: false }, "create", { productCode: null })).toEqual({});
   });
 
   it("accepts a well-formed form", () => {

@@ -10781,12 +10781,20 @@ pool and not in the ServiceNow data source (there the two searches read ServiceN
 - **Wire formats.** Reads keep the existing conventions: dates are RFC 3339 timestamps, `currentSupportStatus`
   the uppercase enum text. Writes take `YYYY-MM-DD` and either case.
 - **Public listings.** The feeds publish one row per version, but `product_version` has one row per
-  deployment profile, so the profile rows of one listing share `public_id` (legacy ids kept; new versions take
-  `product_version_public_id_seq`). `POST /products/{id}/versions` creates every profile (`profiles`) of a new
-  version in one transaction on one listing. A PATCH of a version applies every field except
-  `deploymentProfile` and `publicId` (row-only) to all live rows of its listing; a write that would still leave
-  them disagreeing on status, the four dates, public name/abbreviation or the feed flags is refused. An EOL date
-  before the release date is refused, comparing with the stored date when only one is sent.
+  deployment profile, so the profile rows of one listing share `public_id` (legacy ids kept; new listings take
+  `product_version_public_id_seq`, from 1100). `POST /products/{id}/versions` creates every profile
+  (`profiles`) of a new version in one transaction on one listing, under a row lock on the product, and refuses a
+  profile the version already has (NULL profiles are distinct to the unique constraint, so it would not). A PATCH
+  or retire of a live version row applies to all live rows of the version: its listing, or, without a
+  `public_id`, the unpublished rows of the same product and version; on a retired row it touches only that row.
+  `deploymentProfile` and `publicId` are row-only, and `publicId` may only name a live listing of the same
+  product and version.
+- **Rules, checked in the write transaction on the rows as written** (`checkVersionRules`), so a body is always
+  judged with the stored values it leaves alone: release <= earliest possible EOL <= EOL, announcement <= EOL, and
+  a row on a public feed needs `public_abbreviation` or a product `code`, checked when a write publishes a row or
+  sets its abbreviation (five legacy rows are published without one and stay editable); a product PATCH that
+  clears the code is refused while it has published rows that rely on it. A listing's live rows must agree on the listing fields a write sets (all of
+  them when a row joins a listing), so a listing split by the import on another field can still be edited.
 - **Never delete a version.** Deployments, work items and change requests reference it (change requests by
   cascade). Retire sets `retired_on` on every live row of the listing; retired rows leave the feeds. A product
   cannot be retired.
