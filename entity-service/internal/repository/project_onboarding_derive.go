@@ -111,6 +111,28 @@ const previousLinkProjectsQuery = `
 	SELECT COALESCE(array_agg(DISTINCT project_id::text) FILTER (WHERE project_id IS NOT NULL), '{}'::text[])
 	FROM sf_opportunity_link WHERE link_sf_id = $1`
 
+// previousLinkOpportunitiesQuery reads the opportunities a link joins now.
+const previousLinkOpportunitiesQuery = `
+	SELECT COALESCE(array_agg(DISTINCT opportunity_id::text) FILTER (WHERE opportunity_id IS NOT NULL), '{}'::text[])
+	FROM sf_opportunity_link WHERE link_sf_id = $1`
+
+// previousOpportunityProjectsQuery reads, by Salesforce id, the projects linked
+// to an opportunity before it is deleted.
+const previousOpportunityProjectsQuery = `
+	SELECT COALESCE(array_agg(DISTINCT l.project_id::text) FILTER (WHERE l.project_id IS NOT NULL), '{}'::text[])
+	FROM sf_opportunity o JOIN sf_opportunity_link l ON l.opportunity_id = o.id WHERE o.sf_id = $1`
+
+// without returns ids minus the one given.
+func without(ids []string, drop string) []string {
+	var out []string
+	for _, id := range ids {
+		if id != drop {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 const previousLineItemOpportunitiesQuery = `
 	SELECT COALESCE(array_agg(DISTINCT opportunity_id::text) FILTER (WHERE opportunity_id IS NOT NULL), '{}'::text[])
 	FROM sf_opportunity_product WHERE line_item_sf_id = $1`

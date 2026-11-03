@@ -115,10 +115,42 @@ func projectHoursProducts() []string {
 	return names
 }
 
+// projectHoursClearQueryPoolQuery zeroes the query pool of a project that has
+// lost every linked line. Only a project that already holds a query total is
+// touched, so one that never had an allocation keeps its NULL columns, and the
+// onboarding columns are never written.
+const projectHoursClearQueryPoolQuery = `
+	UPDATE project SET
+	  total_query_duration     = make_interval(mins => 0),
+	  consumed_duration        = make_interval(mins => 0),
+	  remaining_query_duration = make_interval(mins => 0)
+	WHERE id = $1::uuid
+	  AND total_query_duration IS NOT NULL
+	  AND (total_query_duration <> make_interval(mins => 0)
+	    OR consumed_duration IS DISTINCT FROM make_interval(mins => 0)
+	    OR remaining_query_duration IS DISTINCT FROM make_interval(mins => 0))`
+
 // recomputeProjectHours recomputes and stores one project's hours on q, which
 // must be a transaction (the advisory lock lasts until it ends) running under
 // the system identity. A blank or unknown project id is a no-op.
+//
+// When the project has no allocation and no linked lines at all nothing is
+// written: its stored figures may be values synced from the previous platform,
+// which this calculation cannot vouch for.
 func recomputeProjectHours(ctx context.Context, q querier, projectID string) error {
+	return recomputeProjectHoursMode(ctx, q, projectID, false)
+}
+
+// recomputeLostProjectHours is recomputeProjectHours for a project known to
+// have just lost lines (its link moved away, or the link, line or opportunity
+// was deleted). If it is left with no allocation and no linked lines, its
+// query pool is zeroed (when it holds a total), so a lapsed allocation does not
+// linger. Onboarding columns are never touched by that.
+func recomputeLostProjectHours(ctx context.Context, q querier, projectID string) error {
+	return recomputeProjectHoursMode(ctx, q, projectID, true)
+}
+
+func recomputeProjectHoursMode(ctx context.Context, q querier, projectID string, lost bool) error {
 	if projectID == "" {
 		return nil
 	}
@@ -163,6 +195,11 @@ func recomputeProjectHours(ctx context.Context, q querier, projectID string) err
 		return err
 	}
 	if !res.HasAllocation {
+		if lost {
+			if _, err := q.Exec(ctx, projectHoursClearQueryPoolQuery, projectID); err != nil {
+				return fmt.Errorf("recompute project hours: clear query pool: %w", err)
+			}
+		}
 		return nil
 	}
 	if _, err := q.Exec(ctx, projectHoursWriteQuery, projectID,
@@ -173,33 +210,72 @@ func recomputeProjectHours(ctx context.Context, q querier, projectID string) err
 	return nil
 }
 
-// recomputeOpportunityProjectHours recomputes every project linked to an
-// opportunity, in id order. A blank id is a no-op. The ids are read to the end
-// before any recompute runs, because a transaction serves one statement at a
-// time.
-func recomputeOpportunityProjectHours(ctx context.Context, q querier, opportunityID string) error {
-	if opportunityID == "" {
-		return nil
-	}
+// listOpportunityProjects returns the projects linked to an opportunity, in id
+// order. The ids are read to the end before any recompute runs, because a
+// transaction serves one statement at a time.
+func listOpportunityProjects(ctx context.Context, q querier, opportunityID string) ([]string, error) {
 	rows, err := q.Query(ctx, `SELECT DISTINCT project_id::text FROM sf_opportunity_link
 		WHERE opportunity_id = $1::uuid AND project_id IS NOT NULL ORDER BY 1`, opportunityID)
 	if err != nil {
-		return fmt.Errorf("recompute project hours: list opportunity projects: %w", err)
+		return nil, fmt.Errorf("recompute project hours: list opportunity projects: %w", err)
 	}
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return fmt.Errorf("recompute project hours: scan project: %w", err)
+			return nil, fmt.Errorf("recompute project hours: scan project: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("recompute project hours: list opportunity projects: %w", err)
+		return nil, fmt.Errorf("recompute project hours: list opportunity projects: %w", err)
+	}
+	return ids, nil
+}
+
+// recomputeOpportunityProjectHours recomputes every project linked to an
+// opportunity, in id order. A blank id is a no-op.
+func recomputeOpportunityProjectHours(ctx context.Context, q querier, opportunityID string) error {
+	return recomputeOpportunityProjectHoursMode(ctx, q, opportunityID, false)
+}
+
+func recomputeOpportunityProjectHoursMode(ctx context.Context, q querier, opportunityID string, lost bool) error {
+	if opportunityID == "" {
+		return nil
+	}
+	ids, err := listOpportunityProjects(ctx, q, opportunityID)
+	if err != nil {
+		return err
 	}
 	for _, id := range ids {
+		if err := recomputeProjectHoursMode(ctx, q, id, lost); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recomputeProjectSet recomputes each project once, in order. Projects in lost
+// are recomputed as having lost lines, the rest normally; a project in both is
+// treated as lost.
+func recomputeProjectSet(ctx context.Context, q querier, lost, others []string) error {
+	seen := map[string]bool{}
+	for _, id := range lost {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if err := recomputeLostProjectHours(ctx, q, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range others {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
 		if err := recomputeProjectHours(ctx, q, id); err != nil {
 			return err
 		}
@@ -215,7 +291,7 @@ func recomputeMovedProjectHours(ctx context.Context, q querier, previous []strin
 		if id == newProjectID {
 			continue
 		}
-		if err := recomputeProjectHours(ctx, q, id); err != nil {
+		if err := recomputeLostProjectHours(ctx, q, id); err != nil {
 			return err
 		}
 	}
@@ -227,12 +303,17 @@ func recomputeMovedOpportunityProjectHours(ctx context.Context, q querier, previ
 		if id == newOpportunityID {
 			continue
 		}
-		if err := recomputeOpportunityProjectHours(ctx, q, id); err != nil {
+		if err := recomputeOpportunityProjectHoursMode(ctx, q, id, true); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+const (
+	projectHoursReadInternalQuery = `SELECT COALESCE(current_setting('app.is_internal', true), '')`
+	projectHoursSetInternalQuery  = `SELECT set_config('app.is_internal', $1, true)`
+)
 
 // txBeginner is what a pgx.Tx offers to open a savepoint.
 type txBeginner interface {
@@ -259,11 +340,32 @@ func bestEffortProjectHours(ctx context.Context, q querier, scope string, fn fun
 		slog.WarnContext(ctx, "project hours recompute skipped: savepoint failed", "scope", scope, "error", err)
 		return
 	}
+	// time_card is row-level secured and an ingest transaction carries no
+	// caller identity, so without this the calculation would see no approved
+	// time and persist a wrong, too-low consumption. The setting is local to
+	// the transaction: it is put back before the savepoint is released (a
+	// rollback undoes it by itself).
+	var prevInternal string
+	if err := sp.QueryRow(ctx, projectHoursReadInternalQuery).Scan(&prevInternal); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.WarnContext(ctx, "project hours recompute skipped: read system identity setting failed", "scope", scope, "error", err)
+		return
+	}
+	if _, err := sp.Exec(ctx, projectHoursSetInternalQuery, "true"); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.WarnContext(ctx, "project hours recompute skipped: system identity failed", "scope", scope, "error", err)
+		return
+	}
 	if err := fn(sp); err != nil {
 		if rbErr := sp.Rollback(ctx); rbErr != nil {
 			slog.WarnContext(ctx, "project hours recompute: savepoint rollback failed", "scope", scope, "error", rbErr)
 		}
 		slog.WarnContext(ctx, "project hours recompute failed, ingest continues", "scope", scope, "error", err)
+		return
+	}
+	if _, err := sp.Exec(ctx, projectHoursSetInternalQuery, prevInternal); err != nil {
+		_ = sp.Rollback(ctx)
+		slog.WarnContext(ctx, "project hours recompute: restoring identity setting failed", "scope", scope, "error", err)
 		return
 	}
 	if err := sp.Commit(ctx); err != nil {

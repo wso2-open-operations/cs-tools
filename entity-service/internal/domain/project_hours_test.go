@@ -227,6 +227,18 @@ func TestComputeProjectHours(t *testing.T) {
 				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 100 * h, OnboardingRemaining: 100 * h},
 		},
 		{
+			name: "onboarding and query on different opportunities: only minutes the query sum holds are deducted",
+			in: ProjectHoursInput{Today: today, OnboardingStatus: "IN_PROGRESS", OnboardingExpiry: phDate("2026-04-30"),
+				Lines: []ProjectHoursLine{
+					{OpportunityID: "o2", Product: "Development Support - 100 hours", Quantity: 1, Start: phDate("2026-02-01"), End: phDate("2026-12-31")},
+					onbLine("2026-02-01", "2026-12-31")}},
+			// pa is on both opportunities, pb only on the onboarding one.
+			links: phLinks{"o1": {"pa", "pb"}, "o2": {"pa"}},
+			cards: []phCard{{"2026-03-01", 10 * h, "pa"}, {"2026-03-02", 100 * h, "pb"}, {"2026-05-10", 30 * h, "pa"}},
+			want: ProjectHours{HasAllocation: true, QueryTotal: 100 * h, QueryConsumed: 30 * h, QueryRemaining: 70 * h,
+				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 110 * h, OnboardingRemaining: 90 * h},
+		},
+		{
 			name:  "lapsed allowance: linked lines, none in service, writes zeros",
 			in:    ProjectHoursInput{Today: today, OnboardingStatus: "NOT_APPLICABLE", HasLinkedLines: true},
 			cards: []phCard{{"2026-03-01", 10 * h, ""}},

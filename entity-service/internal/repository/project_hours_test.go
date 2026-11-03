@@ -37,6 +37,12 @@ type hoursQuerier struct {
 	billable  map[string]int
 	sql       []string
 	writeArgs []any
+	// priorInternal is what app.is_internal held before the hours work.
+	priorInternal string
+	// identity lists, in order, the values app.is_internal was set to.
+	identity []string
+	// clearedArgs is set when the query pool was zeroed.
+	cleared bool
 }
 
 type fakeRow struct {
@@ -75,6 +81,12 @@ func (q *hoursQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.
 	if sql == projectHoursWriteQuery {
 		q.writeArgs = args
 	}
+	if sql == projectHoursSetInternalQuery {
+		q.identity = append(q.identity, args[0].(string))
+	}
+	if sql == projectHoursClearQueryPoolQuery {
+		q.cleared = true
+	}
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
@@ -97,6 +109,9 @@ func (q *hoursQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.
 			return fakeRow{err: pgx.ErrNoRows}
 		}
 		return fakeRow{vals: q.state}
+	}
+	if sql == projectHoursReadInternalQuery {
+		return fakeRow{vals: []any{q.priorInternal}}
 	}
 	if sql == projectHoursBillableQuery {
 		// args[0] is the opportunity ids; the fixture keys billable by the
@@ -185,6 +200,41 @@ func TestRecomputeProjectHours_LapsedAllowanceWritesZeros(t *testing.T) {
 	want := []any{"p1", 0, 0, 0, false, 0, 0, 0}
 	if !reflect.DeepEqual(q.writeArgs, want) {
 		t.Errorf("write args = %v, want %v", q.writeArgs, want)
+	}
+}
+
+// A project that lost its last link (or line) is zeroed, but only through the
+// "lost" entry point: the generic path leaves a project nothing is linked to
+// alone, since its figures may be values synced earlier.
+func TestRecomputeLostProjectHours_ZeroesQueryPoolOfProjectWithNoLinks(t *testing.T) {
+	q := &hoursQuerier{state: stateRow("NOT_APPLICABLE")}
+	if err := recomputeLostProjectHours(context.Background(), q, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if !q.cleared || q.writeArgs != nil {
+		t.Errorf("cleared=%v writeArgs=%v, want the query pool cleared and no full write", q.cleared, q.writeArgs)
+	}
+	g := &hoursQuerier{state: stateRow("NOT_APPLICABLE")}
+	if err := recomputeProjectHours(context.Background(), g, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if g.cleared || g.writeArgs != nil {
+		t.Errorf("the generic path wrote: cleared=%v writeArgs=%v", g.cleared, g.writeArgs)
+	}
+	if !strings.Contains(projectHoursClearQueryPoolQuery, "total_query_duration IS NOT NULL") ||
+		strings.Contains(projectHoursClearQueryPoolQuery, "onboarding") {
+		t.Errorf("clear query must be guarded by a non-null total and leave onboarding alone: %s", projectHoursClearQueryPoolQuery)
+	}
+}
+
+// The previous owner of a moved link is recomputed as having lost lines.
+func TestRecomputeMovedProjectHours_PreviousOwnerIsZeroedWhenEmpty(t *testing.T) {
+	q := &hoursQuerier{state: stateRow("NOT_APPLICABLE")}
+	if err := recomputeMovedProjectHours(context.Background(), q, []string{"old"}, "new"); err != nil {
+		t.Fatal(err)
+	}
+	if !q.cleared {
+		t.Error("previous owner's query pool was not cleared")
 	}
 }
 
@@ -287,6 +337,7 @@ func (q *failingQuerier) Exec(ctx context.Context, sql string, args ...any) (pgc
 // transaction aborted: it runs in a savepoint that is rolled back.
 func TestBestEffortProjectHours_FailureRollsBackSavepointAndContinues(t *testing.T) {
 	q := &failingQuerier{failOn: "pg_advisory_xact_lock"}
+	q.priorInternal = ""
 	ran := false
 	bestEffortProjectHours(context.Background(), q, "test", func(tx querier) error {
 		ran = true
@@ -308,6 +359,12 @@ func TestBestEffortProjectHours_SuccessReleasesSavepoint(t *testing.T) {
 	})
 	if q.sp == nil || !q.sp.committed || q.sp.rolledBack {
 		t.Errorf("savepoint %+v, want released", q.sp)
+	}
+	// The hours work runs as the system identity (time_card is row-level
+	// secured and an ingest transaction carries no caller identity), and the
+	// previous setting is put back before the savepoint is released.
+	if want := []string{"true", ""}; !reflect.DeepEqual(q.identity, want) {
+		t.Errorf("app.is_internal set to %v, want %v", q.identity, want)
 	}
 }
 

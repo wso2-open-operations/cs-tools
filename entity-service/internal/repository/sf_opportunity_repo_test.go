@@ -45,6 +45,10 @@ type oppQuerier struct {
 	nextID     int
 	// hoursFor lists the opportunities the project hours hook ran for.
 	hoursFor []string
+	// linkedProjects are the projects linked to the opportunity being deleted;
+	// projectsRecomputed lists the projects the hours hook ran for.
+	linkedProjects     []string
+	projectsRecomputed []string
 }
 
 func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -92,6 +96,11 @@ func (q *oppQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows
 func (q *oppQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case projectHoursStateQuery:
+		q.projectsRecomputed = append(q.projectsRecomputed, args[0].(string))
+		return scanRow{err: pgx.ErrNoRows}
+	case previousOpportunityProjectsQuery:
+		return scanRow{vals: []any{q.linkedProjects}}
 	case previousLineItemOpportunitiesQuery:
 		prev := []string{}
 		if owner, ok := q.products[args[0].(string)]; ok {
@@ -280,6 +289,18 @@ func TestDeleteSfOpportunity_CascadeIntent(t *testing.T) {
 	n, err = deleteSfOpportunity(context.Background(), q, "006xx", oppState("DELETED"))
 	if err != nil || n != 0 || len(q.ledger) != 2 {
 		t.Errorf("second delete = %d, %v, ledger rows %d; want 0, nil, 2", n, err, len(q.ledger))
+	}
+}
+
+// Deleting an opportunity recomputes the projects that were linked to it.
+func TestDeleteSfOpportunity_RecomputesItsProjects(t *testing.T) {
+	q := &oppQuerier{opportunities: map[string]string{"006xx": "opp-a"}, products: map[string]string{},
+		linkedProjects: []string{"p1", "p2"}}
+	if _, err := deleteSfOpportunity(context.Background(), q, "006xx", oppState("DELETED")); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(q.projectsRecomputed, []string{"p1", "p2"}) {
+		t.Errorf("projects recomputed = %v, want [p1 p2]", q.projectsRecomputed)
 	}
 }
 

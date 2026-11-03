@@ -269,10 +269,19 @@ func deleteSfOpportunity(ctx context.Context, q querier, sfID string, state doma
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, sfOpportunityLockKey(sfID)); err != nil {
 		return 0, fmt.Errorf("delete opportunity by sf_id: lock: %w", err)
 	}
+	ownerProjects, err := previousIDs(ctx, q, previousOpportunityProjectsQuery, sfID)
+	if err != nil {
+		return 0, fmt.Errorf("delete opportunity by sf_id: %w", err)
+	}
 	tag, err := q.Exec(ctx, deleteSfOpportunityQuery, sfID)
 	if err != nil {
 		return 0, fmt.Errorf("delete opportunity by sf_id: %w", err)
 	}
+	// The projects linked to it (the links and lines went with it) lose its
+	// allocation. Best-effort, durations only.
+	bestEffortProjectHours(ctx, q, "opportunity delete", func(q querier) error {
+		return recomputeProjectSet(ctx, q, ownerProjects, nil)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return 0, err
 	}

@@ -19,10 +19,13 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -573,5 +576,87 @@ func TestQueryHourLapsedAllowanceAndSiblingsAgainstPostgres(t *testing.T) {
 	none, err := repo.SiblingProjectIDs(ctx, lapsedID)
 	if err != nil || len(none) != 0 {
 		t.Errorf("siblings of a lone project = %v, %v", none, err)
+	}
+}
+
+// The ingest runs on a raw transaction with no caller identity, and time_card
+// is row-level secured: under an application role that does not bypass RLS the
+// hours calculation would see no approved time and persist a consumption of
+// zero. The ingest must run it as the system identity.
+func TestIngestProjectHoursSeeApprovedTimeUnderRowLevelSecurity(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	admin, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer admin.Close()
+
+	saved := qhFixture
+	qhFixture = []qhCase{{key: "RLSING", accountName: "Rls Ltd", amEmail: "am-rls@example.com",
+		productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000, onboardingStatus: "NOT_APPLICABLE"}}
+	defer func() { qhFixture = saved }()
+	seedQueryHourFixture(ctx, t, admin)
+
+	// An application role that does not bypass row-level security.
+	for _, stmt := range []string{
+		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qh_rls_app') THEN
+		     CREATE ROLE qh_rls_app LOGIN NOSUPERUSER NOBYPASSRLS; END IF; END $$`,
+		`GRANT ALL ON ALL TABLES IN SCHEMA public TO qh_rls_app`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%.40s: %v", stmt, err)
+		}
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.User("qh_rls_app")
+	app, err := pgxpool.New(ctx, u.String())
+	if err != nil {
+		t.Fatalf("connect as app role: %v", err)
+	}
+	defer app.Close()
+
+	// Sanity: as the app role, with no identity, the approved card is invisible.
+	var visible int
+	if err := app.QueryRow(ctx, `SELECT count(*) FROM time_card WHERE created_by = 'qh-seed'`).Scan(&visible); err != nil {
+		t.Fatal(err)
+	}
+	if visible != 0 {
+		t.Fatalf("the app role sees %d seeded time cards without an identity; the test cannot show the problem", visible)
+	}
+
+	var oppID string
+	if err := admin.QueryRow(ctx, `SELECT id::text FROM sf_opportunity WHERE name = 'RLSING'`).Scan(&oppID); err != nil {
+		t.Fatal(err)
+	}
+	name, product, qty := "RLS line", "Development Support - 100 hours", 1.0
+	start, end := time.Now().AddDate(0, 0, -10), time.Now().AddDate(0, 0, 10)
+	li := domain.SalesforceOpportunityLineItemUpsert{LineItemSfID: "00kRLS", Name: &name, ProductName: &product,
+		Quantity: &qty, ServiceStartDate: &start, ServiceEndDate: &end}
+	state := domain.UpsertSalesforceIngestStateRequest{Entity: domain.SalesforceIngestEntityOpportunityLineItem, SfID: "00kRLS",
+		EventModifiedOn: time.Now().UTC(), EventType: "CREATED", Status: domain.SalesforceIngestSucceeded}
+	repo := repository.NewSalesforceOpportunityLineItemRepository(app)
+	if _, err := repo.UpsertFromSalesforce(ctx, "006RLSING", oppID, li, state); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	defer admin.Exec(ctx, `DELETE FROM sf_opportunity_product WHERE line_item_sf_id = '00kRLS'`)
+
+	var consumed int
+	if err := admin.QueryRow(ctx, `SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM consumed_duration)/60),0)::int FROM project WHERE key = 'RLSING'`).Scan(&consumed); err != nil {
+		t.Fatal(err)
+	}
+	if consumed != 3000 {
+		t.Errorf("consumed after an ingest under RLS = %d, want 3000: the approved time was not visible to the calculation", consumed)
+	}
+	// The identity setting must not leak out of the ingest transaction.
+	var setting string
+	if err := app.QueryRow(ctx, `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&setting); err != nil || setting == "true" {
+		t.Errorf("app.is_internal on a later connection = %q, %v", setting, err)
 	}
 }
