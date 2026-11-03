@@ -2708,6 +2708,41 @@ the Query/SecReport Analysis family) on no severity at all.
   (`sla_engine_repo.go`) for a live business-day row and leave every other
   row (24x7, or `PAUSED`/terminal regardless of schedule) reading
   `sla_live`'s own value unchanged, since those are already correct.
+- **`sla_live` computes live figures from `sla_policy.duration` (joined on
+  `sla_policy_id`), not from `sla.duration` (migration `0272`) — a real
+  production incident, not a preemptive change.** `sla.duration` used to be
+  the only input: a one-time snapshot of `sla_policy.duration`, copied in by
+  `registerClockExec` at clock registration and never re-read after. That
+  was only as safe as `sla_policy.duration` being trustworthy at the exact
+  instant a clock registered — and it wasn't: the external sync job that
+  populates `sla_policy` intermittently wrote a transient, wrong duration
+  into it (the previous system has no real value configured for this field
+  on several policies at all, and parsing its placeholder encoding can yield
+  a small non-zero number instead of NULL), and any clock that happened to
+  register during that window permanently baked the wrong number into its
+  own `sla.duration`, with no way to self-correct once `sla_policy.duration`
+  was right again moments later — confirmed against real production rows
+  across more than a day of ordinary case/incident creation, not a single
+  bulk event. Migration `0267`'s own fix (excluding a zero/NULL duration
+  from `ListCandidatePolicies`' own candidate matching) only ever prevented
+  a clock from registering AT ALL against a zero-duration policy; it did
+  nothing for a transient NON-zero-but-wrong value, which is exactly what
+  kept recurring. `sla.duration` itself is unchanged by this fix — still
+  written at registration, still a useful historical record of what a clock's
+  target was understood to be — it's simply no longer trusted for any LIVE
+  calculation (`sla_engine_repo.go`'s own `cancelClock`/`completeClock`/
+  `setPaused`/`ReviseClocks`, flat and business-day branches alike, read
+  `sp.duration` the same way, everywhere `sla_policy` is already joined).
+  Fixing only `sla_live` and leaving the rest reading the stale column would
+  have left every one of those write paths free to keep baking in a
+  wrong value read moments before a sync correction. A live join can never
+  itself go stale the way a snapshot can: a future recurrence of the same
+  upstream sync bug can only be wrong for as long as `sla_policy.duration`
+  itself is wrong, and self-corrects the moment that's fixed — no backfill
+  of already-registered clocks is ever needed again for this specific
+  failure mode. (Already-broken clocks from before this fix still needed a
+  one-time manual backfill of their stored `sla.duration` — not a migration,
+  since it's data, not schema.)
 - **`sla.source` is gone (migration `0268`) — this engine's clocks used to be
   tagged `source='CSM'`, kept apart from a separate, continuously-running
   external sync job's own `'SERVICENOW'`-tagged rows in the same table.**

@@ -100,7 +100,11 @@ const activeSLAStatusCTE = `
 		SELECT DISTINCT ON (s.work_item_id, sp.target)
 			s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
 			s.live_has_breached AS has_breached, s.live_stage AS stage, s.start_on,
-			s.paused_on, s.pause_duration, s.duration,
+			s.paused_on, s.pause_duration, sp.duration,
+			-- sp.duration, not s.duration: see migration 0272's own doc
+			-- comment -- the stored sla.duration snapshot can be permanently
+			-- wrong, sla_policy.duration can't stay wrong for more than the
+			-- window of whatever corrupted it.
 			COALESCE(sp.schedule, '') AS schedule, s.business_pause_duration
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
@@ -367,7 +371,7 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target st
 		SELECT s.is_active, s.live_stage::TEXT, s.live_has_breached, s.start_on,
 		       s.paused_on, EXTRACT(EPOCH FROM s.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-		       COALESCE(EXTRACT(EPOCH FROM s.duration), 0),
+		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
 		       COALESCE(sp.schedule, ''),
 		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
