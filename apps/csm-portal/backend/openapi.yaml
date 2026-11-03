@@ -1634,6 +1634,12 @@ paths:
   /attachments/upload/{id}/confirm:
     post:
       summary: Finish an upload after the file was sent to the upload link. Only the uploader can confirm.
+      description: >
+        With ATTACHMENT_STORAGE_MODE=backend the body also carries `chunks`, the
+        number of 16 MiB chunks sent with `PUT /attachments/upload/{id}/chunks/{index}`
+        (at least 1, and at most the number a file of the allowed size can have);
+        the backend assembles them into the file and confirms its stored size and
+        type. In sftpgo mode the body is just `type`.
       operationId: postStoredAttachmentsUploadConfirm
       parameters:
         - name: id
@@ -1656,6 +1662,10 @@ paths:
                   type: string
                   enum: [work_item, comment, deployment]
                   description: Which kind of attachment (the table it lives in).
+                chunks:
+                  type: integer
+                  minimum: 1
+                  description: Number of uploaded chunks to assemble. Required, and only accepted, with ATTACHMENT_STORAGE_MODE=backend.
       responses:
         "200":
           description: The completed attachment (id, number, name, contentType, sizeBytes, status).
