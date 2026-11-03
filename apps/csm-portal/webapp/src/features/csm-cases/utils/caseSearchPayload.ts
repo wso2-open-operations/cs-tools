@@ -360,6 +360,8 @@ export function mapCaseSearchViewToRow(
     hasSla: false,
     createdAt: c.createdOn ?? "",
     updatedAt: c.updatedOn ?? c.createdOn ?? "",
+    resolvedAt: c.resolvedOn ?? undefined,
+    closedAt: c.closedOn ?? undefined,
     escalationLevel: c.escalationLevel ?? null,
   };
 }

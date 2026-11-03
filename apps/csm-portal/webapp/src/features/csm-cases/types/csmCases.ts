@@ -128,6 +128,10 @@ export interface CsmCaseRow {
   /** Falls back to {@link createdAt} when the backend hasn't returned
    * `updatedOn` for this row; rendered unprefixed either way. */
   updatedAt: string;
+  /** Set once the case reached solution proposed (kept through closure). */
+  resolvedAt?: string;
+  /** Set only once the case is closed. */
+  closedAt?: string;
   /**
    * The case's current escalation level: one of the raw escalation-level ids
    * `"0"` through `"5"` (EL0 "not escalated" through EL5 "CEO"), carried
