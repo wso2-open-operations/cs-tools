@@ -58,6 +58,7 @@ import {
   buildCaseSearchFilters,
   mapCaseSearchViewToRow,
   resolveAssignedUserIds,
+  resolveCaseFilterDates,
 } from "@features/csm-cases/utils/caseSearchPayload";
 import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
@@ -627,7 +628,11 @@ export default function CsmIssuesView({
         {
           pagination: { offset, limit },
           sortBy: { field: sortField, order: sortOrder },
-          filters: buildCaseSearchFilters(queryFilters, exportSearch, assignedUserIds),
+          filters: buildCaseSearchFilters(
+            resolveCaseFilterDates(queryFilters, new Date()),
+            exportSearch,
+            assignedUserIds,
+          ),
         },
       );
       const items = (res.cases ?? []).map((c) => mapCaseSearchViewToRow(c, currentUserEmail));

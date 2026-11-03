@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -300,6 +300,60 @@ describe("CasesFilterBar — chips stay visible while the panel is collapsed", (
       { isFiltersOpen: false },
     );
     expect(screen.getByText("Escalation level: 2")).toBeInTheDocument();
+  });
+
+  // A dashboard click-through carries relative dates (`createdFrom=__daysAgo:30__`),
+  // so the collapsed summary must word them, not show the placeholder.
+  it("words a relative date bound on its chip, and still shows a literal date as a date", () => {
+    renderBar(
+      {
+        ...DEFAULT_CASES_FILTERS,
+        createdOnGte: "__daysAgo:30__",
+        createdOnLte: "__today__",
+        closedOnGte: "2026-07-27",
+      },
+      undefined,
+      { isFiltersOpen: false },
+    );
+    expect(screen.getByText("Created after 30 days ago")).toBeInTheDocument();
+    expect(screen.getByText("Created before Today")).toBeInTheDocument();
+    expect(
+      screen.getByText(`Closed after ${new Date(2026, 6, 27).toLocaleDateString()}`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/__/)).not.toBeInTheDocument();
+  });
+
+  // Saved views and old links hold whatever the bar accepted before, so every
+  // value that is not a relative date the resolver accepts must chip exactly
+  // as the formatter did before relative dates were worded (copied here as
+  // the reference).
+  it("chips every other date value exactly as before, including values it cannot parse", () => {
+    const before = (raw: string): string => {
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw);
+      return Number.isNaN(d.getTime()) ? raw : d.toLocaleDateString();
+    };
+    const values = [
+      "2026-07-27",
+      "2026-07-27T00:00:00Z",
+      "2026-07-27T18:30:00.000Z",
+      "2026-07-27T10:30:00+05:30",
+      "not a date",
+      "",
+      "__unknown__",
+      "__today:5__",
+      "__daysAgo__",
+      "__daysAgo:-1__",
+      "__startOfMonth__",
+      "__daysAgo:x__",
+    ];
+    for (const value of values) {
+      renderBar({ ...DEFAULT_CASES_FILTERS, createdOnGte: value }, undefined, {
+        isFiltersOpen: false,
+      });
+      // The default text normalizer trims, so an empty value's chip reads "Created after".
+      expect(screen.getByText(`Created after ${before(value)}`.trim())).toBeInTheDocument();
+      cleanup();
+    }
   });
 });
 
