@@ -440,8 +440,10 @@ func (s *rotaAccessService) UpdateTeamMember(ctx context.Context, teamKey, userI
 // as the same engineer or sub_lead, without a tier, and their rota manager
 // grant for teamKey goes with the move. Refused, with nothing changed, under
 // the same conditions as a removal: upcoming turns or an alert tier on
-// teamKey (409), and a lead is never moved (409). Already on toTeamKey and
-// off teamKey changes nothing.
+// teamKey (409), and a lead is never moved (409). Someone a move tag already
+// puts on toTeamKey today or later (a Brazil rotation, Migration) is not moved
+// either (409): the tag is the move, and membership stays with their own team.
+// Already on toTeamKey and off teamKey changes nothing.
 func (s *rotaAccessService) MoveTeamMember(ctx context.Context, teamKey, userID, toTeamKey string) (domain.TeamMembership, error) {
 	if strings.TrimSpace(teamKey) == "" {
 		return domain.TeamMembership{}, &apierror.ValidationError{Msg: "teamKey is required"}
@@ -485,6 +487,14 @@ func (s *rotaAccessService) MoveTeamMember(ctx context.Context, teamKey, userID,
 		return domain.TeamMembership{}, &apierror.ConflictError{Msg: fmt.Sprintf(
 			"this person is a %s of %s, which decides who Case Alerts calls: a lead is not moved",
 			strings.ReplaceAll(res.Role, "_", " "), teamKey)}
+	case res.SpanUntil != "":
+		until := "until " + res.SpanUntil
+		if res.SpanUntil == "open" {
+			until = "with no end date"
+		}
+		return domain.TeamMembership{}, &apierror.ConflictError{Msg: fmt.Sprintf(
+			"this person is already moved to %s %s by a tag on the roster, and stays a member of %s: "+
+				"change the dates of that move on the roster instead", toTeamKey, until, teamKey)}
 	case !res.Moved:
 		return domain.TeamMembership{}, teamMemberRemovalRefusal(teamKey, domain.TeamMemberRemoval{
 			Member: true, Role: res.Role, AlertTier: res.AlertTier, UpcomingTurns: res.UpcomingTurns})

@@ -576,7 +576,22 @@ func (r *rotaAccessRepository) MoveTeamMember(ctx context.Context, userID, fromT
 			userID, fromKey).Scan(&out.UpcomingTurns); err != nil {
 			return fmt.Errorf("count upcoming turns: %w", err)
 		}
-		if out.Lead || out.AlertTier != "" || out.UpcomingTurns > 0 {
+		// A move span already puts them on the target for its days, and their
+		// membership stays with their own team (the span's end is the move
+		// back). Moving the membership too left their own team's rows with
+		// nobody to change them.
+		if err := tx.QueryRow(ctx, `
+			SELECT COALESCE(MAX(CASE WHEN ab.ends_on IS NULL THEN 'open' ELSE ab.ends_on::text END), '')
+			  FROM team_schedule_absence ab
+			  JOIN team_schedule_absence_kind k ON k.id = ab.kind_id
+			 WHERE ab.user_id = $1::uuid
+			   AND lower(k.moves_to_team_key) = $2
+			   AND lower(ab.team_key) = $2
+			   AND (ab.ends_on IS NULL OR ab.ends_on >= CURRENT_DATE)`,
+			userID, toKey).Scan(&out.SpanUntil); err != nil {
+			return fmt.Errorf("read move spans onto the target team: %w", err)
+		}
+		if out.Lead || out.AlertTier != "" || out.UpcomingTurns > 0 || out.SpanUntil != "" {
 			return nil
 		}
 		newRole := "engineer"

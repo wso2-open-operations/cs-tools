@@ -22,7 +22,7 @@ import "@testing-library/jest-dom/vitest";
 import CellPicker, { type CellPickerTarget } from "./CellPicker";
 import type { CellAbsence } from "../types";
 import type { ScheduleAbsenceKind } from "../types";
-import { ANNUAL_LEAVE, EVENING, LIEU_LEAVE, REGULAR, RND, TZ1, TZ1_L1, TZ2, TZ3, WEEKEND, shift } from "../test/fixtures";
+import { ANNUAL_LEAVE, EVENING, LIEU_LEAVE, REGULAR, REGULAR_IND, RND, TZ1, TZ1_L1, TZ2, TZ3, WEEKEND, shift } from "../test/fixtures";
 
 const ANCHOR = { top: 100, left: 100, bottom: 130, right: 144 };
 
@@ -786,5 +786,58 @@ describe("CellPicker: moving somebody to another team", () => {
     renderMoves("americas");
     expect(screen.getByRole("button", { name: /Americas cover/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Move to Americas Team/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("CellPicker: moving somebody to the India team", () => {
+  const AEST = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", isRotation: false, sortOrder: 92 });
+  const INDIA_MOVE: ScheduleAbsenceKind = {
+    id: "k-ind",
+    code: "ALLO_IND",
+    shortCode: "IND",
+    label: "India team rotation",
+    bucket: "ALLOCATION",
+    colourToken: "IND",
+    sortOrder: 72,
+    movesToTeamKey: "phoenix",
+    worksRotaThere: true,
+    showsAsShiftCode: "CRE_REGULAR_IND",
+  };
+
+  function renderFor(teamKey: string, onApply = vi.fn()) {
+    render(
+      <CellPicker
+        target={target({ teamKey })}
+        shifts={[REGULAR, REGULAR_IND, AEST, EVENING]}
+        awayKinds={[ANNUAL_LEAVE]}
+        allKinds={[ANNUAL_LEAVE, INDIA_MOVE]}
+        moveKinds={[]}
+        onApply={onApply}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    return { onApply };
+  }
+
+  it("offers the India region shift as a move to the India team, not as standing hours", () => {
+    const { onApply } = renderFor("draco");
+    const rota = screen.getByRole("region", { name: /^Rota/ });
+    expect(within(rota).queryByRole("button", { name: /India region shift/ })).not.toBeInTheDocument();
+    expect(within(rota).getByRole("button", { name: /Regular hours/ })).toBeInTheDocument();
+    expect(within(rota).getByRole("button", { name: /AEST regular hours/ })).toBeInTheDocument();
+    const away = screen.getByRole("region", { name: "Leave & allocations" });
+    fireEvent.click(within(away).getByRole("button", { name: /Move to India Team \(Phoenix\)/ }));
+    expect(onApply).toHaveBeenCalledWith("CRE_REGULAR_IND", "2026-09-23", "2026-09-23");
+  });
+
+  it("gives somebody already on the India team Regular hours only, and no move to it", () => {
+    renderFor("phoenix");
+    const rota = screen.getByRole("region", { name: /^Rota/ });
+    expect(within(rota).getByRole("button", { name: /Regular hours/ })).toBeInTheDocument();
+    expect(within(rota).queryByRole("button", { name: /India region shift/ })).not.toBeInTheDocument();
+    expect(within(rota).queryByRole("button", { name: /AEST regular hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move to India Team/ })).not.toBeInTheDocument();
   });
 });
