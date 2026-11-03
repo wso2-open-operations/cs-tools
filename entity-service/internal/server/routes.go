@@ -2042,9 +2042,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /salesforce/events", salesforceEventHandler.HandleEvent)
 	}
 	if acpReopenCheckHandler != nil {
-		// The daily ACP reopen check (csm-scheduled-tasks): its service
-		// credential only. A user token, internal or not, is refused: the
-		// check writes to every ACP-suspended project and queues emails.
+		// The daily ACP reopen check, called by csm-scheduled-tasks: any
+		// internal service credential (a client in M2M_CLIENT_IDS), as for
+		// the team schedule reminders. A user token, internal or not, is
+		// refused: the check writes to every ACP-suspended project and
+		// queues emails.
 		mux.HandleFunc("POST /acp/reopen-check", serviceOnly(accessSvc, acpReopenCheckHandler.Check))
 	}
 	if salesforcePartnerHandler != nil {

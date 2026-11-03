@@ -2246,10 +2246,10 @@ paths:
         check it, reopening a track whose reason is gone and finishing a
         project a person already set back to Open. One page per call, in
         project id order; call again with nextCursor while more is true. A
-        page short of time stops early, after at least one project. For
-        csm-scheduled-tasks' service credential only (a user token, internal or
-        not, is refused). Registered only when CSM_ACP_REOPEN_ENABLED is true.
-        Backs operations/csm-scheduled-tasks.
+        page short of time stops early, after at least one project. For any
+        internal service credential (a client in M2M_CLIENT_IDS); a user token,
+        internal or not, is refused. Its caller is csm-scheduled-tasks.
+        Registered only when CSM_ACP_REOPEN_ENABLED is true.
       operationId: checkACPReopen
       security:
         - clientAssertion: []

@@ -994,8 +994,9 @@ reopen logs a WARN at every start as the reminder.
 - **Two ways it runs.** (1) After a `Project__c` or `Invoice__c` envelope on `POST /salesforce/events`
   (CREATED / UPDATED / RESTORED, never DELETED), once the ingest returned no error, whether or not the
   Project / Opportunity ingest flags are on (it reads Salesforce itself). (2) **The daily check**,
-  `POST /acp/reopen-check` (csm-scheduled-tasks' service credential only, `serviceOnly`: a user token,
-  internal or not, gets 403; its `acp_reopen_check` sub-cron calls it
+  `POST /acp/reopen-check` (any internal service credential, a client in `M2M_CLIENT_IDS`, via
+  `serviceOnly`: a user token, internal or not, gets 403; csm-scheduled-tasks' `acp_reopen_check`
+  sub-cron calls it
   page by page): every project whose `suspension_process_state` still records an ACP suspension is
   checked the same way (the caller calls again from `nextCursor` while `more` is true). It catches what an event missed (lost, dead-lettered, or sent while the check
   was off or in a dry run: switching the dry run off is followed by the next daily check reopening
