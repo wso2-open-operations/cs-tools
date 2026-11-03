@@ -1765,9 +1765,11 @@ paths:
     get:
       summary: Download an attachment (ATTACHMENT_STORAGE_MODE=backend only).
       description: >
-        Streams the file as an attachment of an opaque type. Supports a single
-        `Range: bytes=a-b` so an interrupted download can resume (206, 416 when
-        past the end). Access is checked by entity-service on every request.
+        Streams the file as an attachment of an opaque type: always sent with
+        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
+        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
+        so an interrupted download can resume (206, 416 when past the end). Access
+        is checked by entity-service on every request.
       operationId: getAttachmentsDownloadIdContent
       parameters:
         - name: id
@@ -1797,6 +1799,12 @@ paths:
               schema:
                 type: string
                 format: binary
+        "503":
+          description: The file store could not be reached (STORAGE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
         "410":
           description: Gone
           content:

@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
@@ -36,6 +37,10 @@ import (
 // ChunkBytes is the size of every upload chunk but the last. The browser sends
 // 16 MiB at a time, which stays well under the gateway's 50 MB request limit.
 const ChunkBytes = 16 << 20
+
+// attachmentStreamWriteDeadline is how long a file download may take to write,
+// beyond the server's global WriteTimeout: 100 MiB over a slow link.
+const attachmentStreamWriteDeadline = 30 * time.Minute
 
 // maxChunkBodyBytes is the most one chunk request may carry.
 const maxChunkBodyBytes = ChunkBytes
@@ -295,9 +300,11 @@ func (h *BlobAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Req
 		slog.ErrorContext(ctx, "entity ConfirmStoredAttachmentUpload failed", "attachmentID", id, "err", summarizeErr(err))
 		// A refusal (the file does not match what was declared, the upload is no
 		// longer pending) is final: the file is no use to anyone, so it goes. A
-		// failure that may pass leaves the file for the browser to confirm again.
+		// failure that may pass (a 409 conflict, a 429, a 5xx) leaves the file for the
+		// browser to confirm again.
 		var apiErr *apierror.Error
-		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != http.StatusTooManyRequests {
+		if errors.As(err, &apiErr) && apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 &&
+			apiErr.StatusCode != http.StatusTooManyRequests && apiErr.StatusCode != http.StatusConflict {
 			h.discard(ctx, id, target.StorageKey)
 		}
 		mapStoredAttachmentError(w, err, "Failed to confirm the upload.")
@@ -310,7 +317,7 @@ func (h *BlobAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Req
 // removed now is left to the orphan cleanup.
 func (h *BlobAttachmentHandler) discard(ctx context.Context, id, key string) {
 	if err := h.store.Delete(ctx, key); err != nil {
-		slog.WarnContext(ctx, "could not remove a refused upload", "attachmentID", id, "err", err)
+		slog.WarnContext(ctx, "could not remove a refused upload", "attachmentID", id, "err", summarizeErr(err))
 	}
 }
 
@@ -494,6 +501,10 @@ func (h *BlobAttachmentHandler) stream(w http.ResponseWriter, r *http.Request, l
 		hd.Set("Content-Range", obj.ContentRange)
 		status = http.StatusPartialContent
 	}
+	// A large file takes longer than the server's global write timeout; extend it
+	// as ProcessLicenseDownload does. Best effort: a ResponseWriter that cannot
+	// keeps the server default.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(attachmentStreamWriteDeadline))
 	w.WriteHeader(status)
 	_, _ = io.Copy(w, obj.Body) // #nosec G705 -- opaque type or one of four image types, with nosniff and a sandboxing CSP
 }
@@ -531,7 +542,7 @@ func (h *BlobAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.
 	}
 	if key != "" {
 		if err := h.store.Delete(ctx, key); err != nil {
-			slog.WarnContext(ctx, "could not remove a deleted attachment's file", "err", err)
+			slog.WarnContext(ctx, "could not remove a deleted attachment's file", "err", summarizeErr(err))
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -547,7 +558,7 @@ func (h *BlobAttachmentHandler) storeError(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, azblobstore.ErrBlockSize), errors.Is(err, azblobstore.ErrBlockIndex), errors.Is(err, azblobstore.ErrBlockCount):
 		writeError(w, http.StatusBadRequest, "Invalid chunk.")
 	default:
-		slog.ErrorContext(r.Context(), "blob storage failed", "op", op, "attachmentID", id, "err", err)
+		slog.ErrorContext(r.Context(), "blob storage failed", "op", op, "attachmentID", id, "err", summarizeErr(err))
 		writeError(w, http.StatusBadGateway, msg)
 	}
 }
