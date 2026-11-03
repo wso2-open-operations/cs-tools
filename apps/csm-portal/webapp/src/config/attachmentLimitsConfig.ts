@@ -22,11 +22,11 @@ const BYTES_PER_MB = 1024 * 1024;
 /** Largest file of the older (ServiceNow) attachment flow, which the backend caps at 10 MB. */
 export const LEGACY_ATTACHMENT_MAX_BYTES = 10 * BYTES_PER_MB;
 
-/** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 10 MiB). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
+/** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 100 MiB). */
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
 
-/** Largest comment image (entity-service `INLINE_IMAGE_MAX_BYTES` default, 1 MiB). */
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
+/** Largest comment image (entity-service `INLINE_IMAGE_MAX_BYTES` default, 10 MiB). */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = 10;
 
 /** A positive number of megabytes from a number or numeric string, else `fallback`. */
 function megabytes(raw: unknown, fallback: number): number {
