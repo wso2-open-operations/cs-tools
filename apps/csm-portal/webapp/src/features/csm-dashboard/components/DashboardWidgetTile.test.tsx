@@ -525,6 +525,34 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("f")).toBeNull();
   });
 
+  it("list shape: 'View more' carries a `from` location.state pointing back to this dashboard page, for the preview page's Back", async () => {
+    postMock.mockResolvedValue({
+      total: 6,
+      cases: [{ id: "11111111-1111-1111-1111-111111111111", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 5,
+      offset: 0,
+      hasMore: true,
+    });
+
+    renderWithRoutes(
+      <DashboardWidgetTile
+        widgetId="my_critical_open_back"
+        displayName="My Critical & High Cases"
+        resourceType="case"
+        shape="list"
+        filters={{}}
+        listLimit={5}
+      />,
+      "/dashboard/preview/cases",
+    );
+
+    fireEvent.click(await screen.findByRole("link", { name: /view more/i }));
+    await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+    expect(screen.getByTestId("location-state-probe").textContent).toBe(
+      JSON.stringify({ from: "/" }),
+    );
+  });
+
   it("masks the signed-in user's own id in the 'View more' link's filter query params", async () => {
     postMock.mockResolvedValue({
       total: 6,

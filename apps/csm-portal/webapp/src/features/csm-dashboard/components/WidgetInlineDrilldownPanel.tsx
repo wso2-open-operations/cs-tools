@@ -17,7 +17,7 @@
 import { Box, Button, Card, IconButton, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import { ArrowRight, X } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type ReactNode } from "react";
-import { Link as RouterLink } from "react-router";
+import { Link as RouterLink, useLocation } from "react-router";
 import type { BeDashboardWidgetColumn, BeWidgetResourceType } from "@api/backend/types";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
@@ -90,6 +90,7 @@ export default function WidgetInlineDrilldownPanel({
   onClose,
 }: WidgetInlineDrilldownPanelProps): JSX.Element {
   const { user } = useCurrentUser();
+  const location = useLocation();
   const currentUserId = user?.id;
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
   const ListRenderer = WIDGET_LIST_RENDERERS[resourceType];
@@ -218,6 +219,9 @@ export default function WidgetInlineDrilldownPanel({
                   resourceType,
                   currentUserId,
                 })}
+                // The preview page's Back returns to this dashboard, as from
+                // the tile's own click-throughs (`dashboardReturnState`).
+                state={{ from: `${location.pathname}${location.search}` }}
                 size="small"
                 variant="text"
                 endIcon={<ArrowRight size={14} />}

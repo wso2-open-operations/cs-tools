@@ -753,6 +753,8 @@ function DashboardWidgetTile({
                     resourceType,
                     currentUserId,
                   })}
+                  // The preview page's Back returns here.
+                  state={dashboardReturnState}
                   size="small"
                   variant="text"
                   endIcon={<ArrowRight size={14} />}
