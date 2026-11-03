@@ -220,7 +220,7 @@ paths:
         link is an SFTPGo share on exactly that one file: the browser fetches the
         file straight from SFTPGo, and no SFTPGo credential ever reaches it. An
         id the caller may not see is left out of the response, the same as one
-        that does not exist. Not registered (404) unless SFTPGO_URL,
+        that does not exist. Not registered (404) with ATTACHMENT_STORAGE_MODE=backend, or unless SFTPGO_URL,
         SFTPGO_USER and SFTPGO_PASSWORD are set. The response is never cacheable.
       operationId: resolveAttachmentLinks
       security:
@@ -273,9 +273,13 @@ paths:
         PENDING attachment and returns a one-use link: the browser POSTs a
         multipart form with the file in the field named by fieldName to uploadUrl
         before expiresAt, then calls confirm. A comment image (type comment) may
-        only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
-        before its comment exists. Not registered (404) without the SFTPGo
-        settings. The response is never cacheable.
+        only be a PNG, JPEG or WebP; it is uploaded against the work item
+        before its comment exists. With ATTACHMENT_STORAGE_MODE=backend there is no
+        link: the response has no uploadUrl or fieldName, expiresAt is when an
+        unconfirmed upload may be cleaned up, and the browser sends the file to the
+        portal backend (which calls authorize for each chunk). Otherwise not
+        registered (404) without the SFTPGo settings. The response is never
+        cacheable.
       operationId: initiateAttachmentUpload
       security:
         - clientAssertion: []
@@ -346,7 +350,12 @@ paths:
         the person who started the upload can confirm it. A rejected upload is
         thrown away and cannot be confirmed again. Repeating a confirm that
         already succeeded answers the same. A 503 leaves the upload in place, so
-        confirm can be retried.
+        confirm can be retried. With ATTACHMENT_STORAGE_MODE=backend this service
+        cannot look at the file, so the portal backend that committed it says what
+        it stored (sizeBytes, required, and for a comment image the contentType it
+        found by reading the file); both are checked against what the upload
+        declared, and a refused upload is recorded FAILED, after which the backend
+        removes the file it committed.
       operationId: confirmAttachmentUpload
       security:
         - clientAssertion: []
@@ -409,6 +418,181 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/upload/{id}/authorize:
+    post:
+      summary: >-
+        Authorize receiving data for a started upload. Only with
+        ATTACHMENT_STORAGE_MODE=backend, where the portal backends hold the files:
+        the backend calls it for every chunk it receives, so the caller's access is
+        checked again each time. Checks, as the caller, that the upload is theirs,
+        still PENDING and its work item still open, and returns the storage key to
+        write to. The key is internal: it is for the calling backend and must never
+        be sent to a browser. The response is never cacheable. Not registered (404)
+        unless ATTACHMENT_STORAGE_MODE=backend.
+      operationId: authorizeAttachmentUpload
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The attachmentId returned by the upload start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeAttachmentUploadRequest'
+      responses:
+        "200":
+          description: Where the file is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentUploadTarget'
+        "400":
+          description: The type or id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such upload, it is not the caller's, its parent is not visible to the caller, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The upload was already confirmed or rejected, or the work item is closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/locate:
+    post:
+      summary: >-
+        Find where an attachment's file is, for a portal backend that will read it.
+        Only with ATTACHMENT_STORAGE_MODE=backend. Checks, as the caller, that they
+        may see the attachment and returns its storage key, or a reason there is no
+        file (available false, reason NOT_STORED, FAILED or DELETED). An attachment
+        the caller cannot see is 404. The key is internal: it is for the calling
+        backend and must never be sent to a browser. Counts against the caller's
+        per-minute allowance (60). The response is never cacheable. Not registered
+        (404) unless ATTACHMENT_STORAGE_MODE=backend.
+      operationId: locateAttachment
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocateAttachmentRequest'
+      responses:
+        "200":
+          description: The attachment's location, or why it has none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentLocation'
+        "400":
+          description: The type or id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such attachment, or the caller may not see it, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller asked for too many locations in a minute; retry shortly.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/inline/{id}/location:
+    get:
+      summary: >-
+        Find where a comment's inline image is stored, for a portal backend that
+        will stream it. Only with ATTACHMENT_STORAGE_MODE=backend. The same lookup
+        and refusals as GET /attachments/inline/{id}/content: an image the caller
+        cannot see or that is not stored is 404, one the caller can see that was
+        deleted is 410 (errorCode attachment_removed), and a work item file that is
+        not an image is 404. The key is internal: it is for the calling backend and
+        must never be sent to a browser. Not charged against the caller's
+        allowance. The response is never cacheable. Not registered (404) unless
+        ATTACHMENT_STORAGE_MODE=backend.
+      operationId: getInlineImageLocation
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Where the image is stored. contentType is only ever one of the four image types, else application/octet-stream.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentLocation'
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, not stored, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/inline/{id}/content:
     get:
       summary: >-
@@ -419,7 +603,8 @@ paths:
         can see that was deleted is 410 (errorCode attachment_removed). The id is a comment image, or an image-typed work item attachment
         (how comment images migrated from the previous system are stored); a
         work item file that is not an image is 404 here. Not registered (404)
-        unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
+        with ATTACHMENT_STORAGE_MODE=backend (use /attachments/inline/{id}/location),
+        or unless SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD are set.
       operationId: getInlineImageContent
       security:
         - clientAssertion: []
@@ -540,6 +725,25 @@ paths:
                     type: integer
                     description: Comment images stored but never linked to a comment within 24 hours, removed.
                   imagesFailed: {type: integer}
+                  orphans:
+                    type: array
+                    description: >-
+                      Only with ATTACHMENT_STORAGE_MODE=backend, where this
+                      service holds no files: the unlinked comment images whose
+                      files the caller must remove from storage. They are not
+                      marked DELETED yet, so every run lists them again until the
+                      caller removes the files and acknowledges them with
+                      POST /attachments/uploads/cleanup/acknowledge. The storage
+                      keys are internal and must never reach a browser.
+                    items:
+                      type: object
+                      required: [id, storageKey]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        storageKey:
+                          type: string
         "403":
           description: The caller is not an internal service.
           content:
@@ -554,6 +758,78 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: Storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/uploads/cleanup/acknowledge:
+    post:
+      summary: >-
+        Acknowledge orphaned comment images whose files the caller has removed from
+        storage. Only with ATTACHMENT_STORAGE_MODE=backend, where
+        POST /attachments/uploads/cleanup hands the orphans over without marking
+        them DELETED. An id is marked DELETED only if it is still an orphan (an
+        unlinked comment image past the cleanup age); one that was linked to a
+        comment since, was already acknowledged, or never was an orphan is skipped,
+        so this cannot delete an arbitrary image and repeating a call is safe. Internal
+        callers only. At most 200 ids. Not registered (404) unless
+        ATTACHMENT_STORAGE_MODE=backend.
+      operationId: acknowledgeOrphanedImages
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              additionalProperties: false
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged, skipped]
+                properties:
+                  acknowledged:
+                    type: integer
+                    description: Images marked DELETED.
+                  skipped:
+                    type: integer
+                    description: Images that are no longer orphans.
+        "400":
+          description: No ids, more than 200, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The route is not registered (not ATTACHMENT_STORAGE_MODE=backend).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:
@@ -36788,9 +37064,8 @@ components:
         contentType:
           type: string
           description: >-
-            Required for type comment, where it must be image/png, image/jpeg,
-            image/gif or image/webp. Defaults to application/octet-stream
-            otherwise.
+            Required for type comment, where it must be image/png, image/jpeg
+            or image/webp. Defaults to application/octet-stream otherwise.
         sizeBytes:
           type: integer
           format: int64
@@ -36801,7 +37076,7 @@ components:
 
     InitiateAttachmentUploadResponse:
       type: object
-      required: [attachmentId, number, uploadUrl, fieldName, expiresAt, maxBytes]
+      required: [attachmentId, number, expiresAt, maxBytes]
       properties:
         attachmentId:
           type: string
@@ -36811,13 +37086,19 @@ components:
         uploadUrl:
           type: string
           format: uri
-          description: POST a multipart form here, once, before expiresAt.
+          description: >-
+            POST a multipart form here, once, before expiresAt. Absent with
+            ATTACHMENT_STORAGE_MODE=backend, where the browser sends the file to
+            the portal backend instead.
         fieldName:
           type: string
-          description: The multipart field the file goes in (filenames).
+          description: The multipart field the file goes in (filenames). Absent with ATTACHMENT_STORAGE_MODE=backend.
         expiresAt:
           type: string
           format: date-time
+          description: >-
+            The deadline for using uploadUrl. With ATTACHMENT_STORAGE_MODE=backend,
+            when an unconfirmed upload may be cleaned up.
         maxBytes:
           type: integer
           format: int64
@@ -36843,6 +37124,100 @@ components:
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >-
+            Required with ATTACHMENT_STORAGE_MODE=backend: the size of the file the
+            portal backend committed. Ignored otherwise.
+        contentType:
+          type: string
+          description: >-
+            With ATTACHMENT_STORAGE_MODE=backend and type comment: the type the
+            portal backend found by reading the file's leading bytes; it must be
+            image/png, image/jpeg or image/webp. Ignored otherwise.
+
+    AuthorizeAttachmentUploadRequest:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+
+    AttachmentUploadTarget:
+      type: object
+      required: [attachmentId, number, name, contentType, sizeBytes, maxBytes, storageKey]
+      description: >-
+        Where the portal backend may write an upload it has been authorized to
+        receive. storageKey is internal: it must never be sent to a browser.
+      properties:
+        attachmentId:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
+          description: The type declared when the upload started.
+        sizeBytes:
+          type: integer
+          format: int64
+          description: The size declared when the upload started.
+        maxBytes:
+          type: integer
+          format: int64
+          description: The most a file of this kind may be.
+        storageKey:
+          type: string
+          description: Where to write the file, for example csm/projects/<project>/workitems/<n>/attachments/<number>_<name>.
+
+    LocateAttachmentRequest:
+      type: object
+      required: [type, id]
+      additionalProperties: false
+      properties:
+        type:
+          $ref: '#/components/schemas/StoredAttachmentKind'
+        id:
+          type: string
+          format: uuid
+          description: The attachment's id.
+
+    AttachmentLocation:
+      type: object
+      required: [id, number, name, available]
+      description: >-
+        Where an attachment's file is, once the caller's access has been checked.
+        storageKey is internal: it must never be sent to a browser.
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        name:
+          type: string
+        contentType:
+          type: string
+          nullable: true
+        sizeBytes:
+          type: integer
+          format: int64
+          nullable: true
+        available:
+          type: boolean
+          description: True when storageKey names a file that can be read.
+        reason:
+          type: string
+          enum: [NOT_STORED, FAILED, DELETED]
+          description: Why there is no file when available is false.
+        storageKey:
+          type: string
+          description: Where the file is stored. Absent when available is false.
 
     ConfirmAttachmentUploadResponse:
       type: object
