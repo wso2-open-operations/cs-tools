@@ -15,7 +15,10 @@
 // under the License.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
+import {
+  isBackendAttachmentStorage,
+  isEntityAttachmentsEnabled,
+} from "@/config/entityAttachmentsConfig";
 
 describe("isEntityAttachmentsEnabled", () => {
   afterEach(() => {
@@ -37,5 +40,26 @@ describe("isEntityAttachmentsEnabled", () => {
     expect(isEntityAttachmentsEnabled()).toBe(true);
     set(false);
     expect(isEntityAttachmentsEnabled()).toBe(false);
+  });
+});
+
+describe("isBackendAttachmentStorage", () => {
+  afterEach(() => {
+    (window as unknown as { config?: unknown }).config = undefined;
+  });
+
+  it("is on only for the mode `backend`, ignoring case and spaces", () => {
+    const set = (value: unknown) => {
+      (window as unknown as { config?: unknown }).config = {
+        CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: value,
+      };
+    };
+    expect(isBackendAttachmentStorage()).toBe(false);
+    set("sftpgo");
+    expect(isBackendAttachmentStorage()).toBe(false);
+    set(true);
+    expect(isBackendAttachmentStorage()).toBe(false);
+    set(" Backend ");
+    expect(isBackendAttachmentStorage()).toBe(true);
   });
 });

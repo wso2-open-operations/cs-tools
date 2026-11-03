@@ -91,14 +91,20 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean;
   /**
+   * Where attachment files live: "sftpgo" (default) or "backend", where the
+   * portal backend stores them in Azure Blob Storage (chunked uploads, streamed
+   * downloads). Must match the backend's `ATTACHMENT_STORAGE_MODE`.
+   */
+  CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE?: string;
+  /**
    * Largest work item or deployment file offered for upload, in MB (a number or
-   * numeric string). Defaults to 10, entity-service's own default; set it to
+   * numeric string). Defaults to 100, entity-service's own default; set it to
    * match the service's `ATTACHMENT_MAX_BYTES`. The service stays authoritative.
    */
   CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
   /**
    * Largest pasted or inserted comment image, in MB (a number or numeric
-   * string). Defaults to 1, entity-service's `INLINE_IMAGE_MAX_BYTES` default.
+   * string). Defaults to 10, entity-service's `INLINE_IMAGE_MAX_BYTES` default.
    */
   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
 }

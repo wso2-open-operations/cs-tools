@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Upload } from "tus-js-client";
+import { isBackendAttachmentStorage } from "@config/entityAttachmentsConfig";
 import {
   entityAttachmentMaxBytes,
   formatLimit,
@@ -43,26 +43,20 @@ export interface StoredAttachmentLink {
   reason?: AttachmentUnavailableReason | string;
   url?: string;
   expiresAt?: string;
-  /** True for a file too big to hold in memory: let the browser stream it to disk. */
-  largeFile?: boolean;
 }
 
-/** Response of POST /attachments/upload. */
+/**
+ * Response of POST /attachments/upload. With the files held by the portal
+ * backend (see `isBackendAttachmentStorage`) there is no `uploadUrl`: the file
+ * is sent to the backend in chunks instead.
+ */
 export interface StoredAttachmentUploadStart {
   attachmentId: string;
   number?: string;
-  uploadUrl: string;
-  fieldName: string;
+  uploadUrl?: string;
+  fieldName?: string;
   expiresAt?: string;
   maxBytes: number;
-  /** Absent means "multipart". */
-  uploadMethod?: "multipart" | "tus";
-  /** TUS only. A secret: never log it or put it in a message. */
-  shareId?: string;
-  /** TUS only: the path to upload to ("/upload.bin"). */
-  path?: string;
-  /** TUS only: bytes per PATCH request. */
-  chunkSize?: number;
 }
 
 /** Response of POST /attachments/upload/{id}/confirm. */
@@ -109,12 +103,15 @@ export class UploadConfirmPendingError extends Error {
   }
 }
 
-/** Shown when the TUS upload could not even be created (link used, expired or refused). */
-export const TUS_CREATE_FAILED_MESSAGE =
-  "The upload link has been used or has expired. Please start the upload again.";
+/** Bytes in every upload chunk but the last. Must match the backend's chunk size. */
+export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
 
-/** Shown when a TUS upload failed after it had started, once retries ran out. */
-export const TUS_INTERRUPTED_MESSAGE =
+/** Chunks sent at the same time, and tries per chunk. */
+const UPLOAD_CHUNK_CONCURRENCY = 3;
+const UPLOAD_CHUNK_ATTEMPTS = 4;
+
+/** Shown when a chunked upload failed after its retries ran out. */
+export const UPLOAD_INTERRUPTED_MESSAGE =
   "The upload was interrupted. Please try again.";
 
 function getBackendBaseUrl(): string {
@@ -211,14 +208,81 @@ export function saveBlobAs(blob: Blob, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 }
 
-/** Hands a URL to the browser's downloader (a plain navigation, no fetch). */
-function startBrowserDownload(url: string): void {
-  const link = document.createElement("a");
-  link.href = url;
-  link.rel = "noopener noreferrer";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+/** Tries to read a download in, and how many times to resume it after a break. */
+const DOWNLOAD_RESUME_ATTEMPTS = 3;
+
+/**
+ * Downloads one attachment through the portal backend, which checks access and
+ * streams the file. The bytes are read as they arrive, so a break part-way
+ * resumes with a Range request instead of starting again.
+ *
+ * Throws an ApiError with status 404 when there is no such stored attachment,
+ * which a caller still on the older flow can fall back from.
+ */
+async function downloadFromBackend(
+  authFetch: AuthFetch,
+  input: { type: StoredAttachmentType; id: string; name?: string },
+): Promise<void> {
+  const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
+    toHyphenatedUuid(input.id),
+  )}/content?type=${encodeURIComponent(input.type)}`;
+  const parts: Uint8Array[] = [];
+  let received = 0;
+  let total: number | undefined;
+  let fileName = input.name;
+  for (let attempt = 0; ; attempt++) {
+    const response = await authFetch(url, {
+      method: "GET",
+      headers: received > 0 ? { Range: `bytes=${received}-` } : undefined,
+    });
+    if (!response.ok) throw await toApiError(response);
+    if (received === 0) {
+      fileName = fileName || fileNameFromDisposition(response.headers);
+      const length = Number(response.headers.get("Content-Length"));
+      total = Number.isFinite(length) && length > 0 ? length : undefined;
+    } else if (response.status !== 206) {
+      // The server ignored the range: start over rather than glue the wrong bytes.
+      parts.length = 0;
+      received = 0;
+    }
+    try {
+      const reader = response.body?.getReader();
+      if (!reader) {
+        parts.push(new Uint8Array(await response.arrayBuffer()));
+        received += parts[parts.length - 1].length;
+      } else {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          parts.push(value);
+          received += value.length;
+        }
+      }
+      if (total === undefined || received >= total) break;
+      throw new Error("The download ended early.");
+    } catch (error) {
+      if (attempt + 1 >= DOWNLOAD_RESUME_ATTEMPTS || isAbortError(error)) {
+        throw new ApiError(
+          0,
+          "Download failed",
+          "The download was interrupted. Please try again.",
+        );
+      }
+    }
+  }
+  saveBlobAs(new Blob(parts as BlobPart[]), fileName || "attachment");
+}
+
+/** The file name a download response suggests, if it names one. */
+function fileNameFromDisposition(headers: Headers): string | undefined {
+  const value = headers.get("Content-Disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(value);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 /**
@@ -234,6 +298,10 @@ export async function downloadStoredAttachment(
   authFetch: AuthFetch,
   input: { type: StoredAttachmentType; id: string; name?: string },
 ): Promise<void> {
+  if (isBackendAttachmentStorage()) {
+    await downloadFromBackend(authFetch, input);
+    return;
+  }
   const link = await requestAttachmentLink(authFetch, {
     type: input.type,
     id: input.id,
@@ -248,13 +316,6 @@ export async function downloadStoredAttachment(
       "Unavailable",
       unavailableMessage(link.reason),
     );
-  }
-
-  if (link.largeFile) {
-    // Too big to hold in memory: the browser's own downloader streams it to
-    // disk and can resume it. It saves under SFTPGo's stored name.
-    startBrowserDownload(link.url);
-    return;
   }
 
   let blob: Blob;
@@ -304,7 +365,7 @@ export async function startStoredUpload(
  * one file in `fieldName`. No app credentials or auth headers go with it.
  */
 export async function sendFileToUploadLink(
-  start: Pick<StoredAttachmentUploadStart, "uploadUrl" | "fieldName">,
+  start: { uploadUrl: string; fieldName?: string },
   file: File,
 ): Promise<void> {
   const form = new FormData();
@@ -326,19 +387,28 @@ export async function sendFileToUploadLink(
 /** Step 3: entity-service checks what arrived and makes the attachment visible. Safe to repeat. */
 export async function confirmStoredUpload(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; attachmentId: string },
+  input: {
+    type: StoredAttachmentType;
+    attachmentId: string;
+    /** Number of chunks sent, when the files are held by the portal backend. */
+    chunks?: number;
+  },
 ): Promise<StoredAttachmentConfirmed> {
   const response = await postJson(
     authFetch,
     `/attachments/upload/${encodeURIComponent(input.attachmentId)}/confirm`,
-    { type: input.type },
+    {
+      type: input.type,
+      ...(input.chunks !== undefined ? { chunks: input.chunks } : {}),
+    },
   );
   return (await response.json()) as StoredAttachmentConfirmed;
 }
 
-/** Options of a TUS upload. */
-export interface TusUploadOptions {
+/** Options of a chunked upload. */
+export interface ChunkUploadOptions {
   signal?: AbortSignal;
+  /** Called after each chunk is stored, with the bytes stored so far. */
   onProgress?: (bytesSent: number, bytesTotal: number) => void;
 }
 
@@ -353,79 +423,116 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-/**
- * Step 2 for a large file: resumable chunks (TUS) straight to SFTPGo, with no
- * Authorization header. Failing to create the upload (before any chunk) and a
- * later failure get different messages. The share id and the upload URL are
- * never put in a message.
- */
-export function sendFileWithTus(
-  start: Pick<
-    StoredAttachmentUploadStart,
-    "uploadUrl" | "shareId" | "path" | "chunkSize"
-  >,
-  file: File,
-  options: TusUploadOptions = {},
-): Promise<void> {
-  const { signal, onProgress } = options;
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(abortError());
-      return;
-    }
-    const upload: Upload = new Upload(file, {
-      endpoint: start.uploadUrl,
-      metadata: { path: start.path ?? "/upload.bin", share_id: start.shareId ?? "" },
-      ...(start.chunkSize && start.chunkSize > 0
-        ? { chunkSize: start.chunkSize }
-        : {}),
-      retryDelays: [0, 1000, 3000, 5000, 10000],
-      storeFingerprintForResuming: false,
-      removeFingerprintOnSuccess: true,
-      // The share is spent when the upload is created, so a creation the server
-      // answered (even with a 5xx) is never retried: a second one cannot succeed.
-      onShouldRetry: (error) => {
-        const status = error.originalResponse?.getStatus();
-        if (!upload.url && status !== undefined) return false;
-        return (
-          status === undefined ||
-          status >= 500 ||
-          status === 409 ||
-          status === 423
-        );
-      },
-      onProgress: (sent, total) => onProgress?.(sent, total),
-      onError: () => {
-        signal?.removeEventListener("abort", onAbort);
-        const created = !!upload.url;
-        reject(
-          new ApiError(
-            0,
-            "Upload failed",
-            created ? TUS_INTERRUPTED_MESSAGE : TUS_CREATE_FAILED_MESSAGE,
-          ),
-        );
-      },
-      onSuccess: () => {
-        signal?.removeEventListener("abort", onAbort);
-        resolve();
-      },
-    });
+/** Waits `ms`, or throws as soon as the upload is cancelled. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortError());
     const onAbort = () => {
-      // Leave the partial file to the server's cleanup rather than terminating it.
-      void upload.abort(false);
+      window.clearTimeout(timer);
       reject(abortError());
     };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
-    upload.start();
   });
+}
+
+/** True for a chunk failure worth trying again (not a refusal of the request). */
+function chunkFailureIsTransient(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status === 0 || error.status >= 500 || error.status === 408 || error.status === 429;
+  }
+  return true; // a network error
+}
+
+/** Sends one chunk, trying again with a short pause when it fails in passing. */
+async function sendChunk(
+  authFetch: AuthFetch,
+  input: {
+    type: StoredAttachmentType;
+    attachmentId: string;
+    index: number;
+    body: Blob;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
+  const path = `/attachments/upload/${encodeURIComponent(input.attachmentId)}/chunks/${input.index}?type=${encodeURIComponent(input.type)}`;
+  for (let attempt = 1; ; attempt++) {
+    if (input.signal?.aborted) throw abortError();
+    try {
+      const response = await authFetch(`${getBackendBaseUrl()}${path}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: input.body,
+        signal: input.signal,
+      });
+      if (!response.ok) throw await toApiError(response);
+      return;
+    } catch (error) {
+      if (input.signal?.aborted || isAbortError(error)) throw abortError();
+      if (attempt >= UPLOAD_CHUNK_ATTEMPTS || !chunkFailureIsTransient(error)) {
+        throw error instanceof ApiError && error.status !== 0
+          ? error
+          : new ApiError(0, "Upload failed", UPLOAD_INTERRUPTED_MESSAGE);
+      }
+      await pause(500 * 2 ** (attempt - 1), input.signal);
+    }
+  }
+}
+
+/**
+ * Step 2 when the portal backend holds the files: the file is cut into
+ * {@link UPLOAD_CHUNK_BYTES} chunks, sent a few at a time (each one retried on
+ * a passing failure), and its confirm step names how many there were. Returns
+ * that count.
+ */
+export async function sendFileInChunks(
+  authFetch: AuthFetch,
+  input: {
+    type: StoredAttachmentType;
+    attachmentId: string;
+    file: File;
+  } & ChunkUploadOptions,
+): Promise<number> {
+  const { type, attachmentId, file, signal, onProgress } = input;
+  const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+  let next = 0;
+  let sent = 0;
+  // The first failure, kept so it is the one thrown, and so the other workers
+  // stop taking new chunks. A chunk already in flight is left to finish.
+  let failure: { error: unknown } | undefined;
+  const worker = async () => {
+    while (!failure) {
+      const index = next++;
+      if (index >= count) return;
+      const from = index * UPLOAD_CHUNK_BYTES;
+      const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
+      try {
+        await sendChunk(authFetch, { type, attachmentId, index, body, signal });
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
+      sent += body.size;
+      onProgress?.(sent, file.size);
+    }
+  };
+  const workers = Array.from(
+    { length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) },
+    worker,
+  );
+  await Promise.all(workers);
+  if (failure) throw failure.error;
+  return count;
 }
 
 export type StoredUploadStep = "preparing" | "uploading" | "finishing";
 
 /**
- * Uploads one file in three steps (start, send to SFTPGo, confirm), reporting
- * each step. If only the confirm step fails, an UploadConfirmPendingError is
+ * Uploads one file in three steps (start, send, confirm), reporting each step:
+ * to SFTPGo as one request, or to the portal backend in chunks. If only the confirm step fails, an UploadConfirmPendingError is
  * thrown: the file is already in place, so retry with confirmStoredUpload and
  * do not upload again.
  */
@@ -437,9 +544,9 @@ export async function uploadStoredAttachment(
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
-    /** Cancels a large (TUS) upload. */
+    /** Cancels a chunked upload. */
     signal?: AbortSignal;
-    /** Bytes sent so far, for a large (TUS) upload only. */
+    /** Bytes stored so far, for a chunked upload only. */
     onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
@@ -468,16 +575,24 @@ export async function uploadStoredAttachment(
   }
   if (signal?.aborted) throw abortError();
   onStep?.("uploading");
-  if (start.uploadMethod === "tus") {
-    await sendFileWithTus(start, file, { signal, onProgress });
+  let chunks: number | undefined;
+  if (start.uploadUrl) {
+    await sendFileToUploadLink({ ...start, uploadUrl: start.uploadUrl }, file);
   } else {
-    await sendFileToUploadLink(start, file);
+    chunks = await sendFileInChunks(authFetch, {
+      type,
+      attachmentId: start.attachmentId,
+      file,
+      signal,
+      onProgress,
+    });
   }
   onStep?.("finishing");
   try {
     return await confirmStoredUpload(authFetch, {
       type,
       attachmentId: start.attachmentId,
+      chunks,
     });
   } catch (error) {
     throw new UploadConfirmPendingError(

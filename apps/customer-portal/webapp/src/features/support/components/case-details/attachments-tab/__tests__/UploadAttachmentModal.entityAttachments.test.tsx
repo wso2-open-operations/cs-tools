@@ -86,16 +86,16 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     });
   });
 
-  it("allows a file up to the 10 MB default and refuses one over it", () => {
+  it("allows a file up to the 100 MB default and refuses one over it", () => {
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 99 * 1024 * 1024 });
     pick(big);
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
     const tooBig = new File(["x"], "huge.bin");
-    Object.defineProperty(tooBig, "size", { value: 11 * 1024 * 1024 });
+    Object.defineProperty(tooBig, "size", { value: 101 * 1024 * 1024 });
     pick(tooBig);
-    expect(screen.getByText(/exceeds 10 MB limit/i)).toBeInTheDocument();
+    expect(screen.getByText(/exceeds 100 MB limit/i)).toBeInTheDocument();
   });
 
   it("uses the configured file size limit in the check and the message", () => {
@@ -147,7 +147,7 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     };
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 101 * 1024 * 1024 * 1024 });
     pick(big);
     expect(screen.getByText(/exceeds 10 GB limit/i)).toBeInTheDocument();
     pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
