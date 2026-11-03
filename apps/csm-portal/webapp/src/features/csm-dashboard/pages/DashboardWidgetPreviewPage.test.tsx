@@ -431,6 +431,7 @@ describe("DashboardWidgetPreviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /back/i }));
     expect(screen.getByText("Dashboard landing")).toBeInTheDocument();
   });
+
 });
 
 /**
@@ -620,6 +621,30 @@ describe("DashboardWidgetPreviewPage — a case-family widget with anyOf skips t
     postMock.mockReset();
   });
 
+  it("lists its date bounds in words in the filter summary", async () => {
+    postMock.mockResolvedValue({ cases: [], total: 0, limit: 10, offset: 0 });
+
+    renderAt(
+      buildWidgetPreviewHref({
+        previewSlug: "cases",
+        resourceType: "case",
+        widgetId: "wow_p0p1",
+        displayName: "WOW P0/P1",
+        filters: {
+          filters: [
+            { field: "createdOn", op: "gte", values: ["__daysAgo:30__"] },
+            { field: "state", op: "notIn", values: ["closed"] },
+          ],
+          anyOf: [{ filters: [{ field: "severity", op: "in", values: ["critical"] }] }],
+        },
+      }),
+    );
+
+    const group = await screen.findByRole("group", { name: "Active filters" });
+    expect(group).toHaveTextContent("createdOn on or after 30 days ago");
+    expect(group).toHaveTextContent("state not in closed");
+  });
+
   it("posts the widget's anyOf branches verbatim to /cases/search instead of seeding CasesFilterBar", async () => {
     postMock.mockResolvedValue({
       cases: [{ id: "c1", number: "CS-1", subject: "Disk full", state: "open" }],
@@ -760,6 +785,57 @@ describe("DashboardWidgetPreviewPage — which case-family widgets get the edita
  * `CasesFilterBar` + `useGetCsmCases` + `CasesList` from the widget's own
  * filters instead.
  */
+describe("DashboardWidgetPreviewPage — a case widget's relative dates", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  const href = buildWidgetPreviewHref({
+    previewSlug: "cases",
+    resourceType: "case",
+    widgetId: "cases_by_severity",
+    displayName: "Cases by severity",
+    filters: {
+      filters: [
+        { field: "createdOn", op: "gte", values: ["__daysAgo:30__"] },
+        { field: "createdOn", op: "lte", values: ["__today__"] },
+        { field: "severity", op: "in", values: ["critical"] },
+      ],
+    },
+  });
+
+  it("shows them in the Advanced date rows as the relative choices, not as an empty date", async () => {
+    mockPost({});
+    renderAt(href);
+
+    await waitFor(() => expect(screen.getByText("Cases by severity")).toBeInTheDocument());
+    expect(await screen.findByText("30 days ago")).toBeInTheDocument();
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Exact date")).not.toBeInTheDocument();
+  });
+
+  it("queries them resolved in the viewer's local time, the same instants the widget counted with", async () => {
+    mockPost({});
+    renderAt(href);
+
+    await waitFor(() =>
+      expect(postMock.mock.calls.some((c) => c[0] === "/cases/search")).toBe(true),
+    );
+    const sent = postMock.mock.calls.filter((c) => c[0] === "/cases/search").at(-1)?.[1] as {
+      filters: { filters: { field: string; op: string; values: string[] }[] };
+    };
+    const bound = (op: string) =>
+      sent.filters.filters.find((f) => f.field === "createdOn" && f.op === op)?.values[0];
+    const now = new Date();
+    expect(bound("gte")).toBe(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30).toISOString(),
+    );
+    expect(bound("lte")).toBe(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString(),
+    );
+  });
+});
+
 describe("DashboardWidgetPreviewPage — case-family widgets get the real, editable Cases filter bar", () => {
   beforeEach(() => {
     postMock.mockReset();
@@ -1011,6 +1087,40 @@ describe("DashboardWidgetPreviewPage — grouped by account", () => {
       { signal: expect.any(AbortSignal) },
     );
     expect(screen.queryByRole("combobox", { name: "Severity" })).not.toBeInTheDocument();
+  });
+
+  it("resolves a relative date the link carries before posting", async () => {
+    mockPost({ cases: { cases: [caseRow(1, acme)], total: 1, limit: 50, offset: 0 } });
+    renderAt(
+      buildWidgetPreviewHref({
+        previewSlug: "cases",
+        resourceType: "case",
+        widgetId: "cre_escalations",
+        displayName: "Escalated Accounts",
+        filters: { filters: [...filters, { field: "createdOn", op: "gte", values: ["__today__"] }] },
+        groupBy: "account",
+      }),
+    );
+
+    await screen.findByRole("button", { name: "Acme, 1 case" });
+    const now = new Date();
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/search",
+      {
+        filters: {
+          filters: [
+            ...filters,
+            {
+              field: "createdOn",
+              op: "gte",
+              values: [new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()],
+            },
+          ],
+        },
+        pagination: { offset: 0, limit: 50 },
+      },
+      { signal: expect.any(AbortSignal) },
+    );
   });
 
   it("expands an account to show its cases and collapses again", async () => {

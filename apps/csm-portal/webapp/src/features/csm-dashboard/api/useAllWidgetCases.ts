@@ -19,6 +19,7 @@ import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type { BeWidgetResourceType } from "@api/backend/types";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
+import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 
 /** Most records the grouped-by-account preview loads. A widget that groups by
  * account is a narrow, operational slice (open cases with an active
@@ -37,7 +38,7 @@ export interface AllWidgetCases {
 
 /**
  * Pages through a case-family widget's whole result set (`POST
- * /cases/search` with the widget's own, already-resolved filters, at the
+ * /cases/search` with the widget's own filters, at the
  * backend's page-size cap) so the caller can group it client-side. Used only
  * by the grouped-by-account preview; every other preview pages server-side.
  */
@@ -59,12 +60,16 @@ export function useAllWidgetCases({
     queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, widgetId, resourceType, "all", filters],
     queryFn: async ({ signal }): Promise<AllWidgetCases> => {
       if (!config) throw new Error(`Unsupported widget resourceType: ${resourceType}`);
+      // A case-family link keeps its relative dates (`__daysAgo:30__`; see
+      // `DashboardWidgetTile`'s `resolvePlaceholders`), so they are resolved
+      // here, browser-local, as every other case search on this page does.
+      const resolvedFilters = resolveRelativeDateFilters(filters);
       const items: Record<string, unknown>[] = [];
       let total = 0;
       while (items.length < MAX_GROUPED_WIDGET_RECORDS) {
         const res = await api.post<Record<string, unknown>, Record<string, unknown>>(
           config.searchEndpoint,
-          { filters, pagination: { offset: items.length, limit: BE_MAX_PAGE_LIMIT } },
+          { filters: resolvedFilters, pagination: { offset: items.length, limit: BE_MAX_PAGE_LIMIT } },
           { signal },
         );
         total = typeof res.total === "number" ? res.total : 0;
