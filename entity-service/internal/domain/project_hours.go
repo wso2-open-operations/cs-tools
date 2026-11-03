@@ -59,13 +59,20 @@ type ProjectHoursInput struct {
 	// Lines are the product lines of the opportunities linked to the project:
 	// query lines not yet ended, and every onboarding line, ended or not.
 	Lines []ProjectHoursLine
+	// HasLinkedLines is true when the project is linked to an opportunity that
+	// has any product line at all, ended ones included. It tells a project
+	// whose allowance has lapsed (zeros are correct) from one nothing is
+	// linked to (the stored figures are not ours to vouch for).
+	HasLinkedLines bool
 }
 
 // ProjectHours is the result, in minutes.
 type ProjectHours struct {
-	// HasAllocation is false when nothing allocates hours to the project.
-	// Nothing should be written then: the stored figures are not ones this
-	// calculation can vouch for.
+	// HasAllocation is false only when nothing allocates hours to the project
+	// and it has no linked lines at all. Nothing should be written then: the
+	// stored figures are not ones this calculation can vouch for. A project
+	// whose linked lines have all ended is written with zeros for the query
+	// pool (HasAllocation true, OnboardingApplicable false).
 	HasAllocation bool
 
 	QueryTotal     int
@@ -129,7 +136,18 @@ func sortedKeys(m map[string]bool) []string {
 //     first. The window closes, so the figure is stable after expiry and keeps
 //     being deducted from the query pool;
 //   - query: from the earliest in-service query line start to today, less the
-//     onboarding consumed, never below zero.
+//     onboarding minutes that fall inside that window, never below zero. The
+//     deduction is min(onboarding consumed, billable minutes in
+//     [max(onboarding start, query start), onboarding end]), so onboarding
+//     work done before a renewed query line starts costs the new line nothing.
+//     Edge case: the overlap minutes are capped at the onboarding consumed
+//     figure, not apportioned by when the pool filled, so if the pool was
+//     already exhausted before the query line started the deduction can still
+//     be up to the overlap minutes.
+//
+// A project with linked lines but none in service and no applicable onboarding
+// gets HasAllocation true and zeros, as the previous platform wrote. A project
+// with no linked lines at all gets HasAllocation false.
 //
 // Remaining is total less consumed: the onboarding figure is never negative,
 // the query figure goes negative when the pool is overdrawn.
@@ -140,6 +158,8 @@ func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc) (Pr
 	queryOpps := map[string]bool{}
 	onbOpps := map[string]bool{}
 	var qStart, onStart, onLastEnd *time.Time
+	var onbWindowStart, onbWindowEnd time.Time
+	onbWindow := false
 	for _, l := range in.Lines {
 		if l.Product == OnboardingProductName {
 			onbOpps[l.OpportunityID] = true
@@ -194,6 +214,7 @@ func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc) (Pr
 			end = minTime(end, dateOnly(*in.GoLive))
 		}
 		if !end.Before(start) {
+			onbWindowStart, onbWindowEnd, onbWindow = start, end, true
 			mins, err := billable(sortedKeys(onbOpps), start, end)
 			if err != nil {
 				return ProjectHours{}, err
@@ -208,7 +229,24 @@ func ComputeProjectHours(in ProjectHoursInput, billable BillableMinutesFunc) (Pr
 		if err != nil {
 			return ProjectHours{}, err
 		}
-		out.QueryConsumed = max(0, mins-out.OnboardingConsumed)
+		deduct := 0
+		if onbWindow && out.OnboardingConsumed > 0 {
+			from := *qStart
+			if onbWindowStart.After(from) {
+				from = onbWindowStart
+			}
+			if !onbWindowEnd.Before(from) {
+				overlap, err := billable(sortedKeys(onbOpps), from, onbWindowEnd)
+				if err != nil {
+					return ProjectHours{}, err
+				}
+				deduct = min(out.OnboardingConsumed, max(0, overlap))
+			}
+		}
+		out.QueryConsumed = max(0, mins-deduct)
+	}
+	if !out.HasAllocation && in.HasLinkedLines {
+		out.HasAllocation = true
 	}
 	out.QueryRemaining = out.QueryTotal - out.QueryConsumed
 	return out, nil

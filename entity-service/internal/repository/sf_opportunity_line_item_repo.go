@@ -114,13 +114,14 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 	if err := deriveMovedLineItemOpportunities(ctx, q, previous, opportunityID); err != nil {
 		return false, err
 	}
-	// Allocated hours follow the line just written. Durations only.
-	if err := recomputeOpportunityProjectHours(ctx, q, opportunityID); err != nil {
-		return false, err
-	}
-	if err := recomputeMovedOpportunityProjectHours(ctx, q, previous, opportunityID); err != nil {
-		return false, err
-	}
+	// Allocated hours follow the line just written. Durations only, and
+	// best-effort: a failure here must not fail the ingest.
+	bestEffortProjectHours(ctx, q, "line item", func(q querier) error {
+		if err := recomputeOpportunityProjectHours(ctx, q, opportunityID); err != nil {
+			return err
+		}
+		return recomputeMovedOpportunityProjectHours(ctx, q, previous, opportunityID)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, err
 	}

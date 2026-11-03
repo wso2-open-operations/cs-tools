@@ -17,9 +17,12 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,8 +65,11 @@ func (f *fakeQueryHourRepo) RecomputeProjectHours(_ context.Context, id string) 
 	f.recomputed = append(f.recomputed, id)
 	return f.recomputeErr[id]
 }
-func (f *fakeQueryHourRepo) ProjectIDsWithActiveLines(context.Context) ([]string, error) {
+func (f *fakeQueryHourRepo) ProjectIDsWithLinkedLines(context.Context) ([]string, error) {
 	return f.projectIDs, nil
+}
+func (f *fakeQueryHourRepo) SiblingProjectIDs(context.Context, string) ([]string, error) {
+	return nil, nil
 }
 
 func qhLine(product string, qty float64) repository.QueryHourLineRow {
@@ -136,6 +142,41 @@ func TestQueryHourRecomputeDelegatesProjectHours(t *testing.T) {
 
 // Recompute alone detects crossings: it writes the state, the per-project
 // function (used by the other triggers) must not.
+// The hourly job logs a summary and keeps going past a failing project; the
+// summary line carries the project count, failures and the slowest project.
+func TestQueryHourRecomputeSummaryLogsCountsAndSlowest(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(old)
+
+	repo := &fakeQueryHourRepo{projectIDs: []string{"p1", "p2", "p3"}, recomputeErr: map[string]error{"p2": errors.New("boom")}}
+	if _, err := service.NewQueryHourService(repo, "@example.com").Recompute(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(repo.recomputed, []string{"p1", "p2", "p3"}) {
+		t.Errorf("recomputed = %v, a failing project must not stop the rest", repo.recomputed)
+	}
+	out := buf.String()
+	for _, want := range []string{"projects=3", "failures=1", "slowestProjectId=", "totalMs=", "durationMs="} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A request context that is already done stops the loop instead of failing
+// every remaining project one by one.
+func TestQueryHourRecomputeStopsWhenContextDone(t *testing.T) {
+	repo := &fakeQueryHourRepo{projectIDs: []string{"p1", "p2"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = service.NewQueryHourService(repo, "@example.com").Recompute(ctx)
+	if len(repo.recomputed) != 0 {
+		t.Errorf("recomputed %v after the context was done", repo.recomputed)
+	}
+}
+
 func TestQueryHourRecomputeProjectHoursDoesNotTouchState(t *testing.T) {
 	repo := &fakeQueryHourRepo{}
 	svc := service.NewQueryHourService(repo, "@example.com")

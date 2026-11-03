@@ -81,8 +81,13 @@ type QueryHourRepository interface {
 	// consumed and remaining hours for both pools. Durations only: it never
 	// touches an opportunity's state.
 	RecomputeProjectHours(ctx context.Context, projectID string) error
-	// ProjectIDsWithActiveLines lists the projects the hourly recompute covers.
-	ProjectIDsWithActiveLines(ctx context.Context) ([]string, error)
+	// ProjectIDsWithLinkedLines lists the projects the hourly recompute covers:
+	// every project linked to an opportunity that has any product line, ended
+	// ones included, so a lapsed allowance is written down to zero.
+	ProjectIDsWithLinkedLines(ctx context.Context) ([]string, error)
+	// SiblingProjectIDs lists the other projects linked to any opportunity the
+	// given project is linked to. They share its pools.
+	SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error)
 }
 
 type queryHourRepo struct {
@@ -270,17 +275,27 @@ func (r *queryHourRepo) RecomputeProjectHours(ctx context.Context, projectID str
 	})
 }
 
-// ProjectIDsWithActiveLines returns every project linked to an opportunity
-// with a product line that has not ended.
-func (r *queryHourRepo) ProjectIDsWithActiveLines(ctx context.Context) ([]string, error) {
-	rows, err := r.db.Query(WithSystemIdentity(ctx), `
+// ProjectIDsWithLinkedLines returns every project linked to an opportunity
+// with at least one product line, ended or not. Ended lines count so that a
+// project whose allowance has lapsed is still recomputed (to zero).
+func (r *queryHourRepo) ProjectIDsWithLinkedLines(ctx context.Context) ([]string, error) {
+	return r.projectIDs(ctx, "list projects with linked lines", `
 		SELECT DISTINCT l.project_id::text
 		FROM sf_opportunity_link l
-		JOIN sf_opportunity_product pr ON pr.opportunity_id = l.opportunity_id
-		WHERE l.project_id IS NOT NULL AND pr.service_end_date >= CURRENT_DATE
+		WHERE l.project_id IS NOT NULL
+		  AND EXISTS (SELECT 1 FROM sf_opportunity_product pr WHERE pr.opportunity_id = l.opportunity_id)
 		ORDER BY 1`)
+}
+
+// SiblingProjectIDs implements QueryHourRepository.
+func (r *queryHourRepo) SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error) {
+	return r.projectIDs(ctx, "list sibling projects", siblingProjectsQuery, projectID)
+}
+
+func (r *queryHourRepo) projectIDs(ctx context.Context, what, sql string, args ...any) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), sql, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list projects with active lines: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer rows.Close()
 	var out []string

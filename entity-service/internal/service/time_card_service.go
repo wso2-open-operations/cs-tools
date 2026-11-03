@@ -93,6 +93,9 @@ type timeCardService struct {
 // remaining hours. QueryHourService implements it.
 type ProjectHoursRecomputer interface {
 	RecomputeProjectHours(ctx context.Context, projectID string) error
+	// SiblingProjectIDs lists the other projects that share an opportunity
+	// with projectID: the pools are shared, so they change together.
+	SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error)
 }
 
 // WithTimeCardProjectHours makes svc refresh a project's hours after each
@@ -108,15 +111,32 @@ func WithTimeCardProjectHours(svc TimeCardService, r ProjectHoursRecomputer) Tim
 
 // refreshProjectHours is best-effort and runs after the transition has
 // committed and the mirror has been dispatched: a failure is logged and the
-// approval still succeeds, the hourly recompute heals the project. Only the
-// project id is logged.
+// approval still succeeds, the hourly recompute heals the project. The card's
+// own project is refreshed first, then every sibling project (one linked to
+// any of the same opportunities, which shares the pools), deduplicated, each
+// best-effort on its own. Only project ids are logged.
 func (s *timeCardService) refreshProjectHours(ctx context.Context, view domain.TimeCardView) {
 	if s.projectHours == nil || view.Project == nil || view.Project.ID == "" {
 		return
 	}
-	if err := s.projectHours.RecomputeProjectHours(ctx, view.Project.ID); err != nil {
-		slog.ErrorContext(ctx, "time card state change: project hours recompute failed",
+	ids := []string{view.Project.ID}
+	siblings, err := s.projectHours.SiblingProjectIDs(ctx, view.Project.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "time card state change: sibling projects lookup failed",
 			"projectId", view.Project.ID, "timeCardId", view.ID, "error", err)
+	}
+	seen := map[string]bool{view.Project.ID: true}
+	for _, id := range siblings {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		if err := s.projectHours.RecomputeProjectHours(ctx, id); err != nil {
+			slog.ErrorContext(ctx, "time card state change: project hours recompute failed",
+				"projectId", id, "timeCardId", view.ID, "error", err)
+		}
 	}
 }
 

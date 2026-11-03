@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -42,7 +43,10 @@ import (
 func projectHoursLockKey(projectID string) string { return "project-hours:" + projectID }
 
 const projectHoursStateQuery = `
-	SELECT COALESCE(onboarding_status::text, ''), onboarding_expiry_date, onboarding_go_live_date, CURRENT_DATE
+	SELECT COALESCE(onboarding_status::text, ''), onboarding_expiry_date, onboarding_go_live_date, CURRENT_DATE,
+	       EXISTS (SELECT 1 FROM sf_opportunity_link k
+	                 JOIN sf_opportunity_product op ON op.opportunity_id = k.opportunity_id
+	                WHERE k.project_id = project.id)
 	FROM project WHERE id = $1::uuid`
 
 // Lines that can matter: query lines not yet ended, and every onboarding
@@ -123,7 +127,7 @@ func recomputeProjectHours(ctx context.Context, q querier, projectID string) err
 	}
 
 	in := domain.ProjectHoursInput{}
-	err := q.QueryRow(ctx, projectHoursStateQuery, projectID).Scan(&in.OnboardingStatus, &in.OnboardingExpiry, &in.GoLive, &in.Today)
+	err := q.QueryRow(ctx, projectHoursStateQuery, projectID).Scan(&in.OnboardingStatus, &in.OnboardingExpiry, &in.GoLive, &in.Today, &in.HasLinkedLines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -229,3 +233,51 @@ func recomputeMovedOpportunityProjectHours(ctx context.Context, q querier, previ
 	}
 	return nil
 }
+
+// txBeginner is what a pgx.Tx offers to open a savepoint.
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// bestEffortProjectHours runs fn, a project hours recompute, as a side effect
+// of an ingest write that must not fail because of it. A failed statement
+// aborts a Postgres transaction, so when q can open a nested transaction (a
+// pgx.Tx can) fn runs inside a savepoint that is rolled back on error and the
+// ingest transaction carries on. A q that cannot (a test double) runs fn
+// directly. Either way the error is logged and swallowed: the hourly recompute
+// heals the project.
+func bestEffortProjectHours(ctx context.Context, q querier, scope string, fn func(q querier) error) {
+	b, ok := q.(txBeginner)
+	if !ok {
+		if err := fn(q); err != nil {
+			slog.WarnContext(ctx, "project hours recompute failed, ingest continues", "scope", scope, "error", err)
+		}
+		return
+	}
+	sp, err := b.Begin(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "project hours recompute skipped: savepoint failed", "scope", scope, "error", err)
+		return
+	}
+	if err := fn(sp); err != nil {
+		if rbErr := sp.Rollback(ctx); rbErr != nil {
+			slog.WarnContext(ctx, "project hours recompute: savepoint rollback failed", "scope", scope, "error", rbErr)
+		}
+		slog.WarnContext(ctx, "project hours recompute failed, ingest continues", "scope", scope, "error", err)
+		return
+	}
+	if err := sp.Commit(ctx); err != nil {
+		slog.WarnContext(ctx, "project hours recompute: savepoint release failed", "scope", scope, "error", err)
+	}
+}
+
+// siblingProjectsQuery lists the other projects linked to any opportunity the
+// given project is linked to: they share its pools, so they change with it.
+const siblingProjectsQuery = `
+	SELECT DISTINCT l2.project_id::text
+	FROM sf_opportunity_link l1
+	JOIN sf_opportunity_link l2 ON l2.opportunity_id = l1.opportunity_id
+	WHERE l1.project_id = $1::uuid
+	  AND l2.project_id IS NOT NULL
+	  AND l2.project_id <> l1.project_id
+	ORDER BY 1`

@@ -112,7 +112,14 @@ func hDate(s string) *time.Time {
 }
 
 func stateRow(status string) []any {
-	return []any{status, hDate("2026-12-31"), (*time.Time)(nil), *hDate("2026-06-15")}
+	return []any{status, hDate("2026-12-31"), (*time.Time)(nil), *hDate("2026-06-15"), false}
+}
+
+// linkedStateRow is a project that has linked opportunity lines, ended or not.
+func linkedStateRow(status string) []any {
+	r := stateRow(status)
+	r[4] = true
+	return r
 }
 
 func TestRecomputeProjectHours_BlankAndUnknownProjectAreNoOps(t *testing.T) {
@@ -168,6 +175,19 @@ func TestRecomputeProjectHours_NoActiveLineWritesNothing(t *testing.T) {
 	}
 }
 
+// A project whose linked lines have all ended is written down to zero, and its
+// onboarding columns are left alone.
+func TestRecomputeProjectHours_LapsedAllowanceWritesZeros(t *testing.T) {
+	q := &hoursQuerier{state: linkedStateRow("NOT_APPLICABLE")}
+	if err := recomputeProjectHours(context.Background(), q, "p1"); err != nil {
+		t.Fatal(err)
+	}
+	want := []any{"p1", 0, 0, 0, false, 0, 0, 0}
+	if !reflect.DeepEqual(q.writeArgs, want) {
+		t.Errorf("write args = %v, want %v", q.writeArgs, want)
+	}
+}
+
 func TestRecomputeProjectHours_NotApplicableLeavesOnboardingColumnsAlone(t *testing.T) {
 	q := &hoursQuerier{
 		state: stateRow("NOT_APPLICABLE"),
@@ -220,4 +240,78 @@ func TestRecomputeMovedProjectHours_SkipsTheNewOwner(t *testing.T) {
 	if locks != 1 {
 		t.Errorf("recomputed %d projects, want only the previous owner", locks)
 	}
+}
+
+// failingQuerier fails every statement that mentions the marker, and offers a
+// savepoint the way a pgx.Tx does.
+type failingQuerier struct {
+	hoursQuerier
+	failOn string
+	began  int
+	sp     *fakeSavepoint
+}
+
+type fakeSavepoint struct {
+	pgx.Tx
+	q          *failingQuerier
+	rolledBack bool
+	committed  bool
+}
+
+func (s *fakeSavepoint) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return s.q.Exec(ctx, sql, args...)
+}
+func (s *fakeSavepoint) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return s.q.Query(ctx, sql, args...)
+}
+func (s *fakeSavepoint) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return s.q.QueryRow(ctx, sql, args...)
+}
+func (s *fakeSavepoint) Rollback(context.Context) error { s.rolledBack = true; return nil }
+func (s *fakeSavepoint) Commit(context.Context) error   { s.committed = true; return nil }
+
+func (q *failingQuerier) Begin(context.Context) (pgx.Tx, error) {
+	q.began++
+	q.sp = &fakeSavepoint{q: q}
+	return q.sp, nil
+}
+
+func (q *failingQuerier) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, q.failOn) {
+		return pgconn.CommandTag{}, errors.New("statement failed")
+	}
+	return q.hoursQuerier.Exec(ctx, sql, args...)
+}
+
+// A failing hours recompute must neither propagate nor leave the ingest
+// transaction aborted: it runs in a savepoint that is rolled back.
+func TestBestEffortProjectHours_FailureRollsBackSavepointAndContinues(t *testing.T) {
+	q := &failingQuerier{failOn: "pg_advisory_xact_lock"}
+	ran := false
+	bestEffortProjectHours(context.Background(), q, "test", func(tx querier) error {
+		ran = true
+		return recomputeProjectHours(context.Background(), tx, "p1")
+	})
+	if !ran || q.began != 1 {
+		t.Fatalf("ran=%v savepoints=%d", ran, q.began)
+	}
+	if !q.sp.rolledBack || q.sp.committed {
+		t.Errorf("rolledBack=%v committed=%v, want rollback only", q.sp.rolledBack, q.sp.committed)
+	}
+}
+
+func TestBestEffortProjectHours_SuccessReleasesSavepoint(t *testing.T) {
+	q := &failingQuerier{failOn: "never"}
+	q.state = stateRow("NOT_APPLICABLE")
+	bestEffortProjectHours(context.Background(), q, "test", func(tx querier) error {
+		return recomputeProjectHours(context.Background(), tx, "p1")
+	})
+	if q.sp == nil || !q.sp.committed || q.sp.rolledBack {
+		t.Errorf("savepoint %+v, want released", q.sp)
+	}
+}
+
+// Through a querier that cannot open a savepoint the error is still swallowed.
+func TestBestEffortProjectHours_NoSavepointSupportStillSwallowsError(t *testing.T) {
+	bestEffortProjectHours(context.Background(), &hoursQuerier{}, "test", func(querier) error { return errors.New("boom") })
 }

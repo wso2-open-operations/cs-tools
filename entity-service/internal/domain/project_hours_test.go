@@ -207,6 +207,38 @@ func TestComputeProjectHours(t *testing.T) {
 			want: ProjectHours{HasAllocation: true, QueryTotal: 10 * h, QueryRemaining: 10 * h},
 		},
 		{
+			name: "renewal: onboarding ended before the new query line starts, nothing deducted",
+			in: ProjectHoursInput{Today: today, OnboardingStatus: "IN_PROGRESS", OnboardingExpiry: phDate("2026-12-31"),
+				Lines: []ProjectHoursLine{
+					{OpportunityID: "o1", Product: "Development Support - 100 hours", Quantity: 1, Start: phDate("2026-05-01"), End: phDate("2026-12-31")},
+					onbLine("2026-02-01", "2026-04-30")}},
+			cards: []phCard{{"2026-03-01", 150 * h, ""}, {"2026-05-10", 25 * h, ""}},
+			want: ProjectHours{HasAllocation: true, QueryTotal: 100 * h, QueryConsumed: 25 * h, QueryRemaining: 75 * h,
+				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 150 * h, OnboardingRemaining: 50 * h},
+		},
+		{
+			name: "onboarding overlaps the start of the query line: only the overlap is deducted",
+			in: ProjectHoursInput{Today: today, OnboardingStatus: "IN_PROGRESS", OnboardingExpiry: phDate("2026-12-31"),
+				Lines: []ProjectHoursLine{
+					{OpportunityID: "o1", Product: "Development Support - 100 hours", Quantity: 1, Start: phDate("2026-04-01"), End: phDate("2026-12-31")},
+					onbLine("2026-02-01", "2026-12-31")}},
+			cards: []phCard{{"2026-03-01", 50 * h, ""}, {"2026-04-10", 30 * h, ""}, {"2026-05-10", 20 * h, ""}},
+			want: ProjectHours{HasAllocation: true, QueryTotal: 100 * h, QueryConsumed: 0, QueryRemaining: 100 * h,
+				OnboardingApplicable: true, OnboardingTotal: 200 * h, OnboardingConsumed: 100 * h, OnboardingRemaining: 100 * h},
+		},
+		{
+			name:  "lapsed allowance: linked lines, none in service, writes zeros",
+			in:    ProjectHoursInput{Today: today, OnboardingStatus: "NOT_APPLICABLE", HasLinkedLines: true},
+			cards: []phCard{{"2026-03-01", 10 * h, ""}},
+			want:  ProjectHours{HasAllocation: true},
+		},
+		{
+			name:  "linked-lines flag changes nothing when a line is in service",
+			in:    ProjectHoursInput{Today: today, OnboardingStatus: "IN_PROGRESS", HasLinkedLines: true, Lines: []ProjectHoursLine{devLine("Development Support - 10 hours", 1)}},
+			cards: nil,
+			want:  ProjectHours{HasAllocation: true, QueryTotal: 10 * h, QueryRemaining: 10 * h},
+		},
+		{
 			name:  "zero allocation: nothing to write",
 			in:    ProjectHoursInput{Today: today, OnboardingStatus: "NOT_APPLICABLE"},
 			cards: []phCard{{"2026-03-01", 10 * h, ""}},

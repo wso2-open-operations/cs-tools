@@ -235,13 +235,14 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 		return res, err
 	}
 	// Allocated hours follow the lines just written, after the onboarding
-	// window they depend on has been derived. Durations only.
-	if err := recomputeOpportunityProjectHours(ctx, q, res.OpportunityID); err != nil {
-		return res, err
-	}
-	if err := recomputeMovedOpportunityProjectHours(ctx, q, moved, res.OpportunityID); err != nil {
-		return res, err
-	}
+	// window they depend on has been derived. Durations only, and best-effort:
+	// a failure here must not fail the ingest.
+	bestEffortProjectHours(ctx, q, "opportunity", func(q querier) error {
+		if err := recomputeOpportunityProjectHours(ctx, q, res.OpportunityID); err != nil {
+			return err
+		}
+		return recomputeMovedOpportunityProjectHours(ctx, q, moved, res.OpportunityID)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}

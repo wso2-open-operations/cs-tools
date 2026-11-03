@@ -685,15 +685,26 @@ func strPtrTC(s string) *string { return &s }
 
 // recordingProjectHours records which projects were asked to recompute.
 type recordingProjectHours struct {
-	mu  sync.Mutex
-	ids []string
-	err error
+	mu       sync.Mutex
+	ids      []string
+	err      error
+	siblings []string
+	sibErr   error
+	// failFor makes the recompute of these projects fail, others succeed.
+	failFor map[string]bool
+}
+
+func (r *recordingProjectHours) SiblingProjectIDs(context.Context, string) ([]string, error) {
+	return r.siblings, r.sibErr
 }
 
 func (r *recordingProjectHours) RecomputeProjectHours(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ids = append(r.ids, id)
+	if r.failFor[id] {
+		return errors.New("recompute failed")
+	}
 	return r.err
 }
 
@@ -789,6 +800,41 @@ func TestTimeCardService_UpdateTimeCard_ProjectHoursFailureKeepsApprovalAndMirro
 	case <-called:
 	case <-time.After(2 * time.Second):
 		t.Fatal("mirror.UpdateTimeCard was never dispatched")
+	}
+}
+
+// An approval also refreshes every sibling project (one sharing an opportunity
+// with the card's project), once each even when listed twice or when the list
+// repeats the card's own project, and one failing project does not stop the
+// others or the approval.
+func TestTimeCardService_UpdateTimeCard_RefreshesSiblingProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	hours := &recordingProjectHours{
+		siblings: []string{"sib-b", testHoursProjectUUID, "sib-a", "sib-b", ""},
+		failFor:  map[string]bool{"sib-b": true},
+	}
+	svc, _ := projectHoursTestService(t, hours, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("approval must succeed: %v", err)
+	}
+	want := []string{testHoursProjectUUID, "sib-b", "sib-a"}
+	if got := hours.calls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("recomputed = %v, want %v", got, want)
+	}
+}
+
+// A failed sibling lookup still refreshes the card's own project.
+func TestTimeCardService_UpdateTimeCard_SiblingLookupFailureStillRefreshesOwnProject(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	hours := &recordingProjectHours{sibErr: errors.New("lookup failed")}
+	svc, _ := projectHoursTestService(t, hours, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("approval must succeed: %v", err)
+	}
+	if got := hours.calls(); !reflect.DeepEqual(got, []string{testHoursProjectUUID}) {
+		t.Errorf("recomputed = %v", got)
 	}
 }
 

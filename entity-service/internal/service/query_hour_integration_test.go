@@ -177,6 +177,9 @@ type qhCase struct {
 	// sharedBillableMins, when non-zero, adds a second project linked to the
 	// same opportunity with that much approved billable time.
 	sharedBillableMins int
+	// lineEnded makes the query line end yesterday (and start 90 days ago)
+	// instead of running through the next 30 days.
+	lineEnded bool
 }
 
 // Three accounts, one per outcome. OVER is overdrawn, NEAR sits at 92%
@@ -261,13 +264,17 @@ func seedQueryHourFixture(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 		exec(`INSERT INTO sf_opportunity_link (id, created_on, updated_on, created_by, updated_by,
 		        opportunity_id, project_id)
 		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, $2)`, oppID, projID)
+		lineStart, lineEnd := 30, 30
+		if c.lineEnded {
+			lineStart, lineEnd = 90, -1
+		}
 		exec(`INSERT INTO sf_opportunity_product
 		        (id, created_on, updated_on, created_by, updated_by,
 		         opportunity_id, product_name, quantity,
 		         service_start_date, service_end_date)
 		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, $2, $3,
-		              CURRENT_DATE - 30, CURRENT_DATE + 30)`,
-			oppID, c.productName, c.quantity)
+		              CURRENT_DATE - $4::int, CURRENT_DATE + $5::int)`,
+			oppID, c.productName, c.quantity, lineStart, lineEnd)
 		if status != "NOT_APPLICABLE" {
 			// The onboarding pool is derived from this line, not read from
 			// the stored consumed figure.
@@ -470,5 +477,101 @@ func TestQueryHourOnboardingPoolFillsFirst(t *testing.T) {
 	}
 	if got := mins("SPILL", "consumed_duration"); got != 10000 {
 		t.Errorf("SPILL consumed after more approved time = %d, want 10000", got)
+	}
+}
+
+// A project whose only linked line has ended is written down to zero (the
+// previous platform did the same), a project nothing is linked to keeps what
+// it holds, and the siblings lookup finds projects sharing an opportunity.
+func TestQueryHourLapsedAllowanceAndSiblingsAgainstPostgres(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	saved := qhFixture
+	qhFixture = []qhCase{
+		{key: "LAPSED", accountName: "Lapsed Ltd", amEmail: "am-lapsed@example.com",
+			productName: "Development Support - 100 hours", quantity: 1, billableMins: 600,
+			onboardingStatus: "NOT_APPLICABLE", lineEnded: true},
+		{key: "SHARE", accountName: "Shared Ltd", amEmail: "am-share@example.com",
+			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
+			sharedBillableMins: 2000, onboardingStatus: "NOT_APPLICABLE"},
+	}
+	defer func() { qhFixture = saved }()
+	seedQueryHourFixture(ctx, t, pool)
+	ctx = repository.WithSystemIdentity(ctx)
+
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%q: %v", sql, err)
+		}
+	}
+	// Stale stored figures on the lapsed project, and a project with no links
+	// at all that carries figures this calculation cannot vouch for.
+	exec(`UPDATE project SET total_query_duration = make_interval(mins => 6000),
+	        consumed_duration = make_interval(mins => 100), remaining_query_duration = make_interval(mins => 5900)
+	      WHERE key = 'LAPSED'`)
+	exec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, name, key, sf_id, account_id,
+	        total_query_duration)
+	      SELECT $1, NOW(), NOW(), 'qh-seed', 'qh-seed', 'Unlinked', 'UNLINKED', 'a0UNLINKED', account_id,
+	             make_interval(mins => 7777)
+	        FROM project WHERE key = 'LAPSED'`, uuidFor(2900))
+
+	repo := repository.NewQueryHourRepository(repository.NewScoped(pool))
+	ids, err := repo.ProjectIDsWithLinkedLines(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(id string) bool {
+		for _, x := range ids {
+			if x == id {
+				return true
+			}
+		}
+		return false
+	}
+	lapsedID, shareID, share2ID := uuidFor(2000), uuidFor(2001), uuidFor(7001)
+	if !has(lapsedID) || !has(shareID) || has(uuidFor(2900)) {
+		t.Errorf("projects with linked lines = %v: want lapsed and shared, not the unlinked one", ids)
+	}
+
+	svc := service.NewQueryHourService(repo, "@example.com")
+	if _, err := svc.Recompute(ctx); err != nil {
+		t.Fatalf("Recompute: %v", err)
+	}
+	mins := func(key, col string) int {
+		var m int
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM `+col+`)/60),0)::int FROM project WHERE key = $1`, key).Scan(&m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	for _, col := range []string{"total_query_duration", "consumed_duration", "remaining_query_duration"} {
+		if got := mins("LAPSED", col); got != 0 {
+			t.Errorf("LAPSED %s = %d, want 0", col, got)
+		}
+	}
+	if got := mins("UNLINKED", "total_query_duration"); got != 7777 {
+		t.Errorf("UNLINKED total = %d, want 7777 left untouched", got)
+	}
+
+	sib, err := repo.SiblingProjectIDs(ctx, shareID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sib) != 1 || sib[0] != share2ID {
+		t.Errorf("siblings of the shared project = %v, want [%s]", sib, share2ID)
+	}
+	none, err := repo.SiblingProjectIDs(ctx, lapsedID)
+	if err != nil || len(none) != 0 {
+		t.Errorf("siblings of a lone project = %v, %v", none, err)
 	}
 }

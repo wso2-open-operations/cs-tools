@@ -77,6 +77,9 @@ type QueryHourService interface {
 	// and the opportunity ingest all run it. It writes durations only, never an
 	// opportunity's state, and sends nothing.
 	RecomputeProjectHours(ctx context.Context, projectID string) error
+	// SiblingProjectIDs lists the other projects that share an opportunity
+	// with projectID, whose figures move when projectID's time changes.
+	SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error)
 	// WeeklyReport returns the exceeded and close-to-exceeding accounts,
 	// with the audience their owners imply.
 	WeeklyReport(ctx context.Context) (domain.QueryHourReport, error)
@@ -216,21 +219,52 @@ func (s *queryHourService) RecomputeProjectHours(ctx context.Context, projectID 
 	return s.repo.RecomputeProjectHours(ctx, projectID)
 }
 
+// SiblingProjectIDs implements QueryHourService.
+func (s *queryHourService) SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error) {
+	return s.repo.SiblingProjectIDs(ctx, projectID)
+}
+
 func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTransition, error) {
 	// Durations first, through the same per-project function the time card
 	// and ingest hooks use, so the onboarding figure the state arithmetic
 	// below subtracts is the freshly derived one. A project that fails is
 	// logged and left for the next run: it must not stop the state
 	// comparison, and so the notifications, for everyone else.
-	projectIDs, err := s.repo.ProjectIDsWithActiveLines(ctx)
+	projectIDs, err := s.repo.ProjectIDsWithLinkedLines(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range projectIDs {
-		if err := s.RecomputeProjectHours(ctx, id); err != nil {
+	var (
+		started     = time.Now()
+		failures    int
+		slowestID   string
+		slowestTook time.Duration
+	)
+	for i, id := range projectIDs {
+		if ctx.Err() != nil {
+			// The request budget is spent: the rest would each fail at once.
+			// Leave them for the next run.
+			slog.WarnContext(ctx, "query hours: recompute project hours stopped, request context done",
+				"done", i, "remaining", len(projectIDs)-i, "error", ctx.Err())
+			failures += len(projectIDs) - i
+			break
+		}
+		t0 := time.Now()
+		err := s.RecomputeProjectHours(ctx, id)
+		took := time.Since(t0)
+		if took > slowestTook {
+			slowestID, slowestTook = id, took
+		}
+		slog.DebugContext(ctx, "query hours: project hours recomputed", "projectId", id, "durationMs", took.Milliseconds(), "ok", err == nil)
+		if err != nil {
+			failures++
 			slog.ErrorContext(ctx, "query hours: recompute project hours failed", "projectId", id, "error", err)
 		}
 	}
+	slog.InfoContext(ctx, "query hours: project hours recomputed",
+		"projects", len(projectIDs), "failures", failures,
+		"totalMs", time.Since(started).Milliseconds(),
+		"slowestProjectId", slowestID, "slowestMs", slowestTook.Milliseconds())
 
 	all, err := s.computeAll(ctx)
 	if err != nil {
