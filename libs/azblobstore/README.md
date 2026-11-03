@@ -31,16 +31,29 @@ seven days, so an upload that is never finished leaves nothing in the container.
 
 ## Reading and deleting
 
-```go
-// Either the whole blob...
-obj, err := store.Open(ctx, key, nil)
-// ...or one range of it (Length 0 reads to the end).
-obj, err = store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 16 << 20})
-if err != nil { /* ErrNotFound, ErrRangeNotSatisfiable, ... */ }
-defer obj.Body.Close()                                         // obj.Partial, obj.ContentRange for a range
+The whole blob:
 
-info, err := store.Stat(ctx, key)                              // ErrNotFound if absent
-err = store.Delete(ctx, key)                                   // already gone is not an error
+```go
+obj, err := store.Open(ctx, key, nil)
+if err != nil { /* ErrNotFound, ... */ }
+defer obj.Body.Close()
+```
+
+Or one range of it, as a separate read (Length 0 reads to the end). A range read
+sets `obj.Partial` and `obj.ContentRange`; a range past the end of the blob is
+`ErrRangeNotSatisfiable`:
+
+```go
+obj, err := store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 16 << 20})
+if err != nil { /* ErrNotFound, ErrRangeNotSatisfiable, ... */ }
+defer obj.Body.Close()
+```
+
+Size and type without reading the body, and delete:
+
+```go
+info, err := store.Stat(ctx, key)   // ErrNotFound if absent
+err = store.Delete(ctx, key)        // already gone is not an error
 ```
 
 A missing container is an error, not `ErrNotFound`: only a missing blob is.
