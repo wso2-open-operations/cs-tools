@@ -344,7 +344,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "updates",
     label: "Updates",
     href: "/updates",
-    requires: "canUseTimeCardsAndUpdates",
+    requires: "canViewUpdates",
     icon: RefreshCw,
   },
   {
@@ -528,7 +528,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         id: "help.updates",
         label: "Updates",
         href: "/help#updates",
-        requires: "canUseTimeCardsAndUpdates",
+        requires: "canViewUpdates",
       },
       {
         id: "help.time-cards",

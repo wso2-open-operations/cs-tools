@@ -105,6 +105,13 @@ export interface PortalAccess {
    * flag — mirroring the backend's own narrower `PermApproveTimeCard`.
    */
   canUseTimeCardsAndUpdates: boolean;
+  /**
+   * The Updates section alone (update levels and the update report). Everyone
+   * who {@link canUseTimeCardsAndUpdates} has it, and so does plain `viewer`,
+   * which is read-only and has no Time Cards. Mirrors the backend's
+   * `PermViewUpdates`, which guards the two read-only update-level calls.
+   */
+  canViewUpdates: boolean;
   /** Every other state-changing action (create/update cases, tasks, ...). */
   canWrite: boolean;
   /**
@@ -329,6 +336,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canDownloadAttachment: true,
       canUseOperations: true,
       canUseTimeCardsAndUpdates: true,
+      canViewUpdates: true,
       canWrite: true,
       canAddWorkNotes: true,
       canCreateUser: true,
@@ -365,6 +373,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canDownloadAttachment: full || has(PORTAL_ROLE.attachmentDownloader),
     canUseOperations: full || has(PORTAL_ROLE.securityTeam),
     canUseTimeCardsAndUpdates: full || has(PORTAL_ROLE.timecardApprover),
+    canViewUpdates: full || has(PORTAL_ROLE.timecardApprover) || has(PORTAL_ROLE.viewer),
     canWrite: full,
     canAddWorkNotes: full || has(PORTAL_ROLE.worknoteCreator),
     canCreateUser: isAdmin,

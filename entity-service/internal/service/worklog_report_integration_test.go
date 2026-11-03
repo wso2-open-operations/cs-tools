@@ -454,9 +454,9 @@ func TestWorklogWeeklyReportDerivedQuantities(t *testing.T) {
 	// again, since that is how the data is stored.
 	seedWorklogWeekdayTime(ctx, t, pool)
 
-	// asha@ leads Americas. The weekly average must then drop both
-	// their hours and one off the divisor, leaving bruno@'s 1.00 hour
-	// over one person.
+	// asha@ is given the 'lead' role. A 'lead' is left out of the roster
+	// entirely, so their 270 minutes and their member-days vanish from
+	// both reports, as do the five standing leads the fixture seeds.
 	if _, err := pool.Exec(ctx,
 		`UPDATE team_member SET role = 'lead' WHERE user_id = $1`,
 		"00000000-0000-0000-0000-000000000001"); err != nil {
@@ -501,12 +501,14 @@ func TestWorklogWeeklyReportDerivedQuantities(t *testing.T) {
 		t.Errorf("dara@ worked days = %v, hours = %v; want 5 and 0", d.WorkedDays, d.TotalHours)
 	}
 	// lumbini logged 390 minutes on the Sunday plus 90 and 200 in the
-	// week: 680 minutes, 11.33 hours, over five worked days.
-	if d := byEmail["farid@example.com"]; d.TotalHours != 11.33 {
-		t.Errorf("lumbini total hours = %v, want 11.33", d.TotalHours)
+	// week. The weekly attributes time per date and a weekend date has no
+	// team, so the Sunday's 390 vanish: 290 minutes, 4.83 hours, over five
+	// worked days.
+	if d := byEmail["farid@example.com"]; d.TotalHours != 4.83 {
+		t.Errorf("lumbini total hours = %v, want 4.83 (the Sunday card is not counted)", d.TotalHours)
 	}
-	if d := byEmail["farid@example.com"]; d.AvgTimePerDay != 2.27 {
-		t.Errorf("lumbini avg hrs/day = %v, want 2.27 (11.33 over 5 days)", d.AvgTimePerDay)
+	if d := byEmail["farid@example.com"]; d.AvgTimePerDay != 0.97 {
+		t.Errorf("lumbini avg hrs/day = %v, want 0.97 (4.83 over 5 days)", d.AvgTimePerDay)
 	}
 	// mihaly logged 60 minutes and lost the Wednesday to leave, so the
 	// average is over four days, not five.
@@ -515,61 +517,56 @@ func TestWorklogWeeklyReportDerivedQuantities(t *testing.T) {
 	}
 	// Average people per day counts AVAILABILITY, not activity:
 	// summerizeTimeReport pushes one entry per (member, day still in
-	// teamInfo). Five members are available all five weekdays and
-	// bruno@ four, so 29 member-days, over a span of 6 -- ServiceNow
+	// teamInfo). The weekly roster is every team member -- no rota gate --
+	// so that is the fixture people except asha@ (a lead, removed), the five
+	// standing leads (removed) and the two managers: seven people, all
+	// available all five weekdays except bruno@ who has four. 34
+	// member-days, over a span of 6 -- the previous system
 	// divides by getRoundedDayPart(from, to), the gap between Monday and
 	// Sunday, not by the seven days of the range nor its five weekdays.
-	if got.Totals.AveragePeoplePerDay != 4.83 {
-		t.Errorf("average people per day = %v, want 4.83 (29 member-days over a span of 6)",
+	if got.Totals.Members != 7 {
+		t.Errorf("weekly members = %d, want 7 (leads are not on the roster)", got.Totals.Members)
+	}
+	if got.Totals.AveragePeoplePerDay != 5.67 {
+		t.Errorf("average people per day = %v, want 5.67 (34 member-days over a span of 6)",
 			got.Totals.AveragePeoplePerDay)
 	}
-	// 2145 minutes in all.
-	if got.Totals.TotalHours != 35.75 {
-		t.Errorf("weekly total hours = %.2f, want 35.75", got.Totals.TotalHours)
+	// 830 minutes in all: the weekday entries only (1100) less asha@'s 270,
+	// who is a lead. The Sunday's ten issues are weekend cards, dropped.
+	if got.Totals.TotalHours != 13.83 {
+		t.Errorf("weekly total hours = %.2f, want 13.83", got.Totals.TotalHours)
 	}
-	if got.Totals.AvgHoursPerPerson != 5.96 {
-		t.Errorf("weekly avg hrs/person = %.2f, want 5.96", got.Totals.AvgHoursPerPerson)
+	if got.Totals.AvgHoursPerPerson != 1.98 {
+		t.Errorf("weekly avg hrs/person = %.2f, want 1.98", got.Totals.AvgHoursPerPerson)
 	}
-	// Ten issues on the Sunday plus eight more across the week.
-	if got.Totals.Issues != 18 {
-		t.Errorf("weekly issues = %d, want 18", got.Totals.Issues)
+	// Six issues across the week; asha@'s two are gone with her.
+	if got.Totals.Issues != 6 {
+		t.Errorf("weekly issues = %d, want 8", got.Totals.Issues)
 	}
 
-	// --- Lead exclusion, the weekly report's defining quirk -----------
-	// ServiceNow's nMembers_Cal / time_exclude_lead: the per-team average
-	// drops leads from BOTH the divisor and the hours. Americas has two
-	// members -- asha@ who leads it and logged 5.92 hours, and bruno@
-	// who logged 1.00 -- so the average is 1.00 over one person, not
-	// 6.92 over two.
+	// --- Leads are not on the roster -------------------------------------
+	// Americas is bruno@ alone now: asha@ (role lead) and the team's
+	// standing lead are both gone. One member, less one, is no divisor, so
+	// the average divides by the one member, bruno@'s 1.00 hour over 1;
+	// Castor is dara@ alone with nothing logged.
 	byTeam := map[string]domain.WorklogTeamReport{}
 	for _, tr := range got.Teams {
 		byTeam[tr.TeamName] = tr
 	}
 	americas := byTeam["Americas CS Team - Integraion"]
-	if americas.Members != 2 {
-		t.Errorf("Americas members = %d, want 2 (leads still COUNT as members)", americas.Members)
+	if americas.Members != 1 || americas.MembersForAverage != 1 {
+		t.Errorf("Americas members = %d, forAvg = %v, want 1 and 1 (leads are not on the roster, nothing more is subtracted)",
+			americas.Members, americas.MembersForAverage)
 	}
-	if americas.MembersForAverage != 1 {
-		t.Errorf("Americas membersForAverage = %v, want 1 (nMembers - 1, flat)", americas.MembersForAverage)
-	}
-	if americas.TotalHours != 6.92 {
-		t.Errorf("Americas total hours = %.2f, want 6.92 (the lead's hours still COUNT)", americas.TotalHours)
+	if americas.TotalHours != 1.00 {
+		t.Errorf("Americas total hours = %.2f, want 1.00 (bruno@ only; asha@'s hours go with her)", americas.TotalHours)
 	}
 	if americas.AvgTotalHoursPerPerson != 1.00 {
-		t.Errorf("Americas avg total hrs/person = %.2f, want 1.00 (mihaly's 1.00 over one non-lead)",
-			americas.AvgTotalHoursPerPerson)
+		t.Errorf("Americas avg = %.2f, want 1.00", americas.AvgTotalHoursPerPerson)
 	}
-
-	// Castor is dara@ alone, and they lead it. Excluding the only
-	// member leaves nothing to divide by -- this is the row that prints
-	// NaN and Infinity in the delivered mail. We report 0.00 instead,
-	// the one place we knowingly differ.
 	castor := byTeam["Castor"]
-	if castor.MembersForAverage != 0 {
-		t.Errorf("Castor membersForAverage = %v, want 0 (one member, less one)", castor.MembersForAverage)
-	}
-	if castor.AvgTotalHoursPerPerson != 0 {
-		t.Errorf("Castor avg = %v, want 0 rather than Infinity", castor.AvgTotalHoursPerPerson)
+	if castor.Members != 1 || castor.MembersForAverage != 1 || castor.AvgTotalHoursPerPerson != 0 {
+		t.Errorf("Castor = %+v, want one member dividing by 1, average 0.00", castor)
 	}
 }
 
@@ -607,9 +604,8 @@ func TestWorklogDailyDoesNotExcludeLeads(t *testing.T) {
 		}
 	}
 
-	// Marking one of them a lead must drop both the divisor and their
-	// hours, which is what summerizeTimeReport's nMembers_Cal and
-	// time_wl do on the daily report too.
+	// Marking one of them a lead takes them off the roster entirely, so
+	// the team has one member left and their hours go with them.
 	if _, err := pool.Exec(ctx,
 		`UPDATE team_member SET role = 'lead' WHERE user_id = $1`,
 		"00000000-0000-0000-0000-000000000001"); err != nil {
@@ -624,9 +620,9 @@ func TestWorklogDailyDoesNotExcludeLeads(t *testing.T) {
 		if tr.TeamName != "Americas CS Team - Integraion" {
 			continue
 		}
-		if tr.MembersForAverage != 1 {
-			t.Errorf("Americas membersForAverage = %v, want 1 (two present, one now a lead)",
-				tr.MembersForAverage)
+		if tr.Members != 1 || tr.MembersForAverage != 1 {
+			t.Errorf("Americas members = %d, forAvg = %v, want 1 and 1 (asha@ is a lead, off the roster)",
+				tr.Members, tr.MembersForAverage)
 		}
 		// asha@ held all 1.42 of the team's hours, so excluding them
 		// leaves bruno@'s nothing.
@@ -895,13 +891,28 @@ func TestWorklogTypeCountsAreCaseDaysNotCases(t *testing.T) {
 		return n
 	}
 
+	// The first day, on a weekday: the weekly drops weekend cards, so the
+	// fixture's own Sunday card for this case is not counted at all.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
+		   case_id, user_id, work_date, state, analyzing_minutes)
+		 SELECT gen_random_uuid(), NOW(), NOW(), 'seed', 'seed',
+		        wi.id, $1, DATE '2026-10-14', 'SUBMITTED', 60
+		   FROM work_item wi WHERE wi.wso2_id = 'ACME-515'`,
+		"00000000-0000-0000-0000-000000000001"); err != nil {
+		t.Fatalf("seed first weekday: %v", err)
+	}
+
 	before := week()
+	if before.Totals.Issues != 1 {
+		t.Fatalf("baseline issues = %d, want 1 (the one weekday card)", before.Totals.Issues)
+	}
 	if sum(before) != before.Totals.Issues {
 		t.Fatalf("with one day per case the counters should agree: byType %d, issues %d",
 			sum(before), before.Totals.Issues)
 	}
 
-	// A SECOND day on a case asha@ already logged against on the 18th.
+	// A SECOND day on a case asha@ already logged against on the 14th.
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
 		   case_id, user_id, work_date, state, analyzing_minutes)
@@ -1217,5 +1228,105 @@ func TestWorklogAllocationsRemoveMembers(t *testing.T) {
 	// that fails to exclude also inflates every average.
 	if got.Totals.Members != 4 {
 		t.Errorf("Members = %d, want 4 (six less the two allocated)", got.Totals.Members)
+	}
+}
+
+// The allocation table, not the schedule absences, is what the previous
+// system's reports consult: only a CONFIRMED allocation at 100% or more
+// utilization blanks days, and it blanks every day it covers whatever the
+// engagement is. Asserted on both cadences: the weekly loses the covered
+// weekdays, the daily drops the person.
+func TestWorklogConfirmedEngagementAllocationBlanksDays(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	seedWorklogDailyFixture(ctx, t, pool)
+	seedWorklogWeekdayTime(ctx, t, pool)
+	if _, err := pool.Exec(ctx,
+		`DELETE FROM customer_engagement_allocation_resource WHERE created_by = 'seed'`); err != nil {
+		t.Fatalf("clear allocations: %v", err)
+	}
+	alloc := func(userID, state string, util float64, from, to string) {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO customer_engagement_allocation_resource
+			   (created_on, updated_on, created_by, updated_by, resource_id, state, utilization, start_date, end_date)
+			 VALUES (NOW(), NOW(), 'seed', 'seed', $1, $2::engagement_allocation_state_enum, $3, $4::date, $5::date)`,
+			userID, state, util, from, to); err != nil {
+			t.Fatalf("seed allocation: %v", err)
+		}
+	}
+	defer pool.Exec(ctx, `DELETE FROM customer_engagement_allocation_resource WHERE created_by = 'seed'`)
+	// elif@ (5): confirmed, full, Mon-Tue. chen@ (3): confirmed but 50%.
+	// dara@ (4): full but only tentative. farid@ (6): confirmed, full, but
+	// ending before the week.
+	alloc("00000000-0000-0000-0000-000000000005", "CONFIRMED", 100, "2026-10-12", "2026-10-13")
+	alloc("00000000-0000-0000-0000-000000000003", "CONFIRMED", 50, "2026-10-12", "2026-10-18")
+	alloc("00000000-0000-0000-0000-000000000004", "TENTATIVE", 100, "2026-10-12", "2026-10-18")
+	alloc("00000000-0000-0000-0000-000000000006", "CONFIRMED", 100, "2026-09-01", "2026-10-11")
+
+	got, err := svcWeekly(ctx, pool)
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	byEmail := map[string]domain.WorklogDeveloper{}
+	for _, tr := range got.Teams {
+		for _, d := range tr.Developers {
+			byEmail[d.Email] = d
+		}
+	}
+	// elif@ logged 180 minutes on Tue the 13th and 240 on Wed the 14th.
+	// The allocation takes Mon-Tue out of Worked Days, but time logged on
+	// an absent day is counted: all 420 minutes stay.
+	if d := byEmail["elif@example.com"]; d.WorkedDays != 3 || d.TotalHours != 7 {
+		t.Errorf("elif@ worked days = %v, hours = %v; want 3 and 7.00", d.WorkedDays, d.TotalHours)
+	}
+	for _, e := range []string{"chen@example.com", "dara@example.com", "farid@example.com"} {
+		if d := byEmail[e]; d.WorkedDays != 5 {
+			t.Errorf("%s worked days = %v, want 5 (allocation does not qualify)", e, d.WorkedDays)
+		}
+	}
+
+	// The type breakdown covers exactly the listed members.
+	{
+		var h float64
+		for _, b := range got.ByType {
+			h += b.TotalHours
+		}
+		if d := h - got.Totals.TotalHours; d > 0.02 || d < -0.02 {
+			t.Errorf("weekly byType hours = %v, total hours = %v, want them equal", h, got.Totals.TotalHours)
+		}
+	}
+
+	// The daily for Tuesday the 13th drops elif@ altogether.
+	tue := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	svc := service.NewWorklogReportService(
+		repository.NewWorklogReportRepository(repository.NewScoped(pool)), nil, nil)
+	daily, err := svc.BuildReport(repository.WithSystemIdentity(ctx), domain.WorklogReportRequest{
+		Cadence: domain.WorklogReportCadenceDaily, From: tue, To: tue})
+	if err != nil {
+		t.Fatalf("daily BuildReport: %v", err)
+	}
+	for _, tr := range daily.Teams {
+		for _, d := range tr.Developers {
+			if d.Email == "elif@example.com" {
+				t.Error("elif@ is on a confirmed full allocation and must not be on the daily")
+			}
+		}
+	}
+	// ...and neither may their cards reach the daily's type breakdown.
+	var dh float64
+	for _, b := range daily.ByType {
+		dh += b.TotalHours
+	}
+	if d := dh - daily.Totals.TotalHours; d > 0.02 || d < -0.02 {
+		t.Errorf("daily byType hours = %v, total hours = %v, want them equal", dh, daily.Totals.TotalHours)
 	}
 }

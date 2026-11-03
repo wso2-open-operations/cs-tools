@@ -190,6 +190,8 @@ type githubSyncService struct {
 	// for the Chat card. Nil (no SRE_EVENT_HUB_TOPIC) runs none. Set with
 	// WithGithubSRNotices.
 	srNotices srNotifier
+	// caseStates moves a case that is Awaiting Info to Waiting on WSO2 once a GitHub comment lands on it. Set with WithGithubCaseStates.
+	caseStates githubCaseStateMover
 	// integrationLogin is our own GitHub account. Events it sent are our own
 	// writes coming back and are dropped -- identity, not string-matching the
 	// comment body the way the case webhook does.
@@ -255,6 +257,23 @@ func (s *githubSyncService) WithMutations(m repository.GithubMutationRepository)
 func WithGithubSRNotices(svc GithubSyncService, n *SRNoticeService) GithubSyncService {
 	if s, ok := svc.(*githubSyncService); ok && n != nil {
 		s.srNotices = n
+	}
+	return svc
+}
+
+// githubCaseStateMover is the part of the case service a relayed GitHub comment needs.
+type githubCaseStateMover interface {
+	MoveAwaitingInfoToWaitingOnWSO2(ctx context.Context, caseID string)
+}
+
+// WithGithubCaseStates lets a relayed GitHub comment move its Awaiting Info case to Waiting on WSO2. A no-op unless both sides are the Postgres services.
+func WithGithubCaseStates(svc GithubSyncService, cases CaseService) GithubSyncService {
+	s, ok := svc.(*githubSyncService)
+	if !ok {
+		return svc
+	}
+	if m, ok := cases.(githubCaseStateMover); ok {
+		s.caseStates = m
 	}
 	return svc
 }
@@ -598,6 +617,9 @@ func (s *githubSyncService) handleComment(ctx context.Context, p IssuePayload, m
 
 	if err := s.mutate.AddComment(ctx, caseID, text, author); err != nil {
 		return Outcome{}, err
+	}
+	if s.caseStates != nil {
+		s.caseStates.MoveAwaitingInfoToWaitingOnWSO2(ctx, caseID)
 	}
 	// The case's ServiceNow journal gets it too, as github_comment_to_sn.yml
 	// wrote it. After the Postgres write and best effort; a record ServiceNow

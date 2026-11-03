@@ -11,7 +11,7 @@ Gmail (group mail) -> poll -> rules -> event bus (Envelope) -> consumer
 
 ## How it works
 
-1. Every `MAIL_POLL_INTERVAL` it lists messages in the delegated mailbox that
+1. Every `MAIL_POLL_INTERVAL` it lists messages in the mailbox user's inbox that
    were sent to a rule's `recipient` (To, Cc or Delivered-To), are newer than
    `MAIL_LOOKBACK` and do not carry the processed label.
 2. It reads only the headers (From, To, Cc, Subject, Message-ID), never the body.
@@ -42,8 +42,17 @@ A new source is another entry in the array.
 
 ## Google setup
 
-A service account with domain-wide delegation for the `gmail.modify` scope, and
-a delegated user that is a member of the group. See `.env.example`.
+No domain-wide delegation. The service uses an OAuth refresh token for one
+dedicated mailbox user that is a member of the group, so a leaked token exposes
+that mailbox only.
+
+1. In Google Cloud, enable the Gmail API and create an OAuth client of type
+   "Desktop app". Set the consent screen to "Internal" so the refresh token
+   does not expire after 7 days.
+2. Run `GMAIL_OAUTH_CLIENT_ID=... GMAIL_OAUTH_CLIENT_SECRET=... go run ./cmd/server gmail-auth`,
+   log in as the mailbox user (password and 2FA happen in the browser), and
+   copy the printed refresh token.
+3. Store the client id, secret and refresh token as secrets (see `.env.example`).
 
 ## Deployment (Choreo)
 

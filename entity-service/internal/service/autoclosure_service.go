@@ -600,30 +600,24 @@ func (s *autoclosureService) commentText(state domain.CaseState, kind string, ov
 // reads them from its configuration), so wording can change without a deploy
 // of this service. Overrides are used verbatim, so they must be HTML too.
 var autoclosureDefaultTemplates = map[string]string{
-	"solution_proposed.first_reminder": "<p>Hello,</p>" +
-		"<p>This case will be automatically closed as a solution has been proposed and no further updates have been received. " +
-		"Please let us know whether you were able to try out the proposed solution by either selecting Accept or Reject.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
-	"solution_proposed.second_reminder": "<p>Hello,</p>" +
-		"<p>Please let us know whether you need further support for this case. " +
-		"Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
-	"solution_proposed.closure": "<p>Hello,</p>" +
-		"<p>Please note that this case has been closed due to inactivity after the solution was suggested. " +
-		"Thank you for contacting the Customer Success Team.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
-	"awaiting_info.first_reminder": "<p>Hello,</p>" +
-		"<p>This case will be automatically closed as no further updates have been received. " +
-		"Please share the requested details to continue the investigation of the issue.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
-	"awaiting_info.second_reminder": "<p>Hello,</p>" +
-		"<p>Gentle reminder for the requested details. If you are able to provide the information or wish to keep this case open, please reply to this message.</p>" +
-		"<p>Please note that if you are unable to respond, the case will be closed off after one week.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
-	"awaiting_info.closure": "<p>Hello,</p>" +
-		"<p>Please note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Customer Success Team.</p>" +
-		"<p>Thanks,<br/>Customer Success Team</p>",
+	"solution_proposed.first_reminder": "<p>Dear Customer,</p>" +
+		"<p>A solution has been proposed for this case, and we have not yet received your feedback. Please confirm whether the proposed solution resolved your issue by selecting Accept or Reject. If we do not receive a response, we will send one further reminder and the case will then be closed.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
+	"solution_proposed.second_reminder": "<p>Dear Customer,</p>" +
+		"<p>We are still awaiting your feedback on the solution proposed for this case. If you require further assistance, please reply to this message. If we do not receive a response within one week, the case will be closed.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
+	"solution_proposed.closure": "<p>Dear Customer,</p>" +
+		"<p>This case has now been closed due to inactivity following the proposed solution. Thank you for contacting us.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
+	"awaiting_info.first_reminder": "<p>Dear Customer,</p>" +
+		"<p>We are writing to follow up on this case, which is awaiting the information we requested from you. To allow us to continue the investigation, please reply with the requested details at your earliest convenience. If we do not receive a response, we will send one further reminder and the case will then be closed.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
+	"awaiting_info.second_reminder": "<p>Dear Customer,</p>" +
+		"<p>This is a further reminder that we are still awaiting the information requested on this case. If you are able to provide it, or wish to keep the case open, please reply to this message. If we do not receive a response within one week, the case will be closed.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
+	"awaiting_info.closure": "<p>Dear Customer,</p>" +
+		"<p>As we have not received the information requested, this case has now been closed. Thank you for contacting us.</p>" +
+		"<p>Kind regards,<br/>Customer Success Team</p>",
 }
 
 var (

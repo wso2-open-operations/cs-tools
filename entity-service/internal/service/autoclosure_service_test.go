@@ -149,10 +149,10 @@ func TestAutoclosureAdvance_StagesPostTheRightCommentAndStep(t *testing.T) {
 		wantStep string
 		wantText string
 	}{
-		{"SP first", domain.AutoclosureStageFirstReminder, domain.CaseStateSolutionProposed, nil, "FIRST_COMMENT", "solution has been proposed"},
-		{"AI first", domain.AutoclosureStageFirstReminder, domain.CaseStateAwaitingInfo, strp("DEFAULT"), "FIRST_COMMENT", "no further updates have been received. Please share"},
-		{"SP second", domain.AutoclosureStageSecondReminder, domain.CaseStateSolutionProposed, strp("FIRST_COMMENT"), "SECOND_COMMENT", "closed off after one week"},
-		{"AI second", domain.AutoclosureStageSecondReminder, domain.CaseStateAwaitingInfo, strp("FIRST_COMMENT"), "SECOND_COMMENT", "Gentle reminder"},
+		{"SP first", domain.AutoclosureStageFirstReminder, domain.CaseStateSolutionProposed, nil, "FIRST_COMMENT", "A solution has been proposed for this case"},
+		{"AI first", domain.AutoclosureStageFirstReminder, domain.CaseStateAwaitingInfo, strp("DEFAULT"), "FIRST_COMMENT", "which is awaiting the information we requested"},
+		{"SP second", domain.AutoclosureStageSecondReminder, domain.CaseStateSolutionProposed, strp("FIRST_COMMENT"), "SECOND_COMMENT", "still awaiting your feedback on the solution proposed"},
+		{"AI second", domain.AutoclosureStageSecondReminder, domain.CaseStateAwaitingInfo, strp("FIRST_COMMENT"), "SECOND_COMMENT", "This is a further reminder"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeAutoclosureRepo{claimWins: true, candidates: []repository.AutoclosureCandidateRow{dueCandidate(tc.state, tc.from)}}
@@ -196,13 +196,13 @@ func TestAutoclosureAdvance_AwaitingInfoCloseSetsTheNonResponsivenessCode(t *tes
 	if u.ResolutionCode == nil || *u.ResolutionCode != domain.CaseResolutionCodeAbruptlyClosedDueToNonResponsiveness {
 		t.Errorf("an Awaiting Info close must carry the auto-closure resolution code, got %v", u.ResolutionCode)
 	}
-	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "did not receive an update") || strings.Contains(*u.CloseNotes, "<") {
+	if u.CloseNotes == nil || !strings.Contains(*u.CloseNotes, "have not received the information requested") || strings.Contains(*u.CloseNotes, "<") {
 		t.Errorf("closeNotes = %v, want the closure text as plain text", u.CloseNotes)
 	}
 	if email, ok := autoclosureActorFromContext(cases.updateCtx[0]); !ok || email != "system@example.com" {
 		t.Errorf("the close must be made as the system user, ctx actor = %q (%v)", email, ok)
 	}
-	if len(cases.comments) != 1 || !strings.Contains(cases.comments[0].Content, "did not receive an update") {
+	if len(cases.comments) != 1 || !strings.Contains(cases.comments[0].Content, "have not received the information requested") {
 		t.Errorf("closure comment missing: %+v", cases.comments)
 	}
 }
@@ -370,7 +370,7 @@ func TestAutoclosureDefaultTemplatesAreHTMLSignedByCustomerSuccess(t *testing.T)
 		if !strings.HasPrefix(text, "<p>") || !strings.HasSuffix(text, "</p>") {
 			t.Errorf("%s: not wrapped in <p>...</p>: %q", key, text)
 		}
-		if !strings.Contains(text, "Thanks,<br/>Customer Success Team") {
+		if !strings.Contains(text, "Kind regards,<br/>Customer Success Team") {
 			t.Errorf("%s: missing the Customer Success Team sign-off: %q", key, text)
 		}
 		if strings.Contains(strings.ToLower(text), "support team") {
@@ -403,7 +403,7 @@ func TestAutoclosurePlainTextTable(t *testing.T) {
 	}
 	for key, text := range autoclosureDefaultTemplates {
 		got := autoclosurePlainText(text)
-		if strings.Contains(got, "<") || strings.Contains(got, "\n\n\n") || !strings.HasSuffix(got, "Thanks,\nCustomer Success Team") || !strings.HasPrefix(got, "Hello,\n\n") {
+		if strings.Contains(got, "<") || strings.Contains(got, "\n\n\n") || !strings.HasSuffix(got, "Kind regards,\nCustomer Success Team") || !strings.HasPrefix(got, "Dear Customer,\n\n") {
 			t.Errorf("%s: plain text = %q", key, got)
 		}
 	}
@@ -411,8 +411,8 @@ func TestAutoclosurePlainTextTable(t *testing.T) {
 
 func TestAutoclosurePlainText(t *testing.T) {
 	got := autoclosurePlainText(autoclosureDefaultTemplates["awaiting_info.closure"])
-	want := "Hello,\n\nPlease note that this case is closed as we did not receive an update. " +
-		"Thank you for contacting the Customer Success Team.\n\nThanks,\nCustomer Success Team"
+	want := "Dear Customer,\n\nAs we have not received the information requested, this case has now been closed. " +
+		"Thank you for contacting us.\n\nKind regards,\nCustomer Success Team"
 	if got != want {
 		t.Errorf("plain text = %q, want %q", got, want)
 	}

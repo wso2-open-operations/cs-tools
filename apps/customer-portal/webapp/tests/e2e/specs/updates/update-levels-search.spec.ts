@@ -353,6 +353,93 @@ test.describe("Update Levels", () => {
     }
   });
 
+  // ✅ READ-ONLY. The All / Security / Regular buttons filter the level's
+  // update cards client-side; a type the level has none of shows an empty
+  // message, which is expected rather than a failure.
+  test(`${UPDATES_SEARCH_INPUT.projectType} — filters an update level's details by All, Security and Regular`, async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${UPDATES_SEARCH_INPUT.projectType} needs a project id.`);
+
+    const updates = new UpdatesPage(page);
+    await updates.openViaSideNav(project.id);
+    await updates.fillSearch(
+      UPDATES_SEARCH_INPUT.productName,
+      UPDATES_SEARCH_INPUT.productVersion,
+      UPDATES_SEARCH_INPUT.startLevel,
+      UPDATES_SEARCH_INPUT.endLevel,
+    );
+    await expectSuccess(await updates.search(), "search update levels");
+    await updates.waitForResults();
+
+    const level = UPDATES_SEARCH_INPUT.viewLevel;
+    const view = updates.viewLevelButton(level);
+    test.skip(
+      (await view.count()) === 0,
+      `Level ${level} is not among the results, so there is no row to open.`,
+    );
+    await view.first().click();
+    await expect(page).toHaveURL(
+      new RegExp(`/projects/${project.id}/${UPDATES.levelDetails.pathSegment}/${level}\\?`),
+    );
+
+    const details = UPDATES.levelDetails;
+    const [all, ...types] = details.filterButtons;
+    const main = page.getByTestId("app-main");
+    const cards = main
+      .locator(".MuiCard-root")
+      .filter({ hasText: details.updateCardText });
+
+    // Default: All is selected and lists the level's updates.
+    await expect(updates.levelFilterButton(all)).toHaveClass(details.activeFilterClass);
+    for (const type of types) {
+      await expect(updates.levelFilterButton(type)).not.toHaveClass(
+        details.activeFilterClass,
+      );
+    }
+    await expect(cards.first()).toBeVisible({ timeout: 30_000 });
+    const total = await cards.count();
+
+    const counts: Record<string, number> = {};
+    for (const type of types) {
+      await updates.levelFilterButton(type).click();
+      await expect(updates.levelFilterButton(type)).toHaveClass(details.activeFilterClass);
+      await expect(updates.levelFilterButton(all)).not.toHaveClass(details.activeFilterClass);
+
+      const empty = main.getByText(details.emptyFilterMessage(type), { exact: true });
+      await expect(cards.first().or(empty)).toBeVisible();
+      counts[type] = await cards.count();
+
+      if (counts[type] === 0) {
+        // Expected for a level without updates of this type.
+        await expect(empty).toBeVisible();
+        test.info().annotations.push({
+          type: "empty-filter",
+          description: `Level ${level} has no ${type.toLowerCase()} updates.`,
+        });
+      } else {
+        await expect(empty).toHaveCount(0);
+        // Every card shown is of this type, by its type chip.
+        for (const chip of await cards.locator(".MuiChip-label").allInnerTexts()) {
+          expect(chip.trim(), `a ${type} card`).toBe(type);
+        }
+      }
+    }
+
+    // The typed views partition All.
+    expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(total);
+
+    // Back to All restores the full list.
+    await updates.levelFilterButton(all).click();
+    await expect(updates.levelFilterButton(all)).toHaveClass(details.activeFilterClass);
+    await expect(cards).toHaveCount(total);
+
+    console.log(
+      `Update level ${level}: All ${total}, ` +
+        types.map((t) => `${t} ${counts[t]}`).join(", "),
+    );
+  });
+
   test(`${UPDATES_SEARCH_INPUT.projectType} — goes back from an update level to the search`, async ({
     page,
   }) => {

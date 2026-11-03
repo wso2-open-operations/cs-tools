@@ -208,7 +208,9 @@ schedules assume `TZ=UTC` like every other here.
   to everybody on the weekend, LK and Americas (with the LK on-call person) alike, in the layout the
   CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
   ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call"), the zone
+  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
+  window longer than 10 hours that has 2+ people every day asking them to split it into morning
+  and evening shifts), the zone
   legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the LK On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
@@ -305,8 +307,8 @@ schedules assume `TZ=UTC` like every other here.
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
   (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
   Definitions table, the zone note and the handover paragraphs. Rotation names come from config
-  (`CODE=Name`). Names are escaped. Every subject starts `[<family> Operations]`
-  (`[CRE Operations] Weekend Rotation – …`; a test adds `[Test] ` in front).
+  (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
+  (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
   tick until the next period, which for `rota_weekend_notice` is days later. So the rota days are
   counted from the run's period key (`Config.Anchor`, from `schedule.PeriodKey`), not the clock:
@@ -452,11 +454,34 @@ task", and the message lists the registered names.
 | `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure`) |
 | `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
 | `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
+| `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
+| `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's audience for this one run: the configured lists and the registry-derived audience are both ignored, never merged. Same two tasks. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
 
 `--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
 implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
 supported by task <name>`. The hook can only tighten the task's configured values, never loosen them. Do not add
 per-task flags to a task that does not need them.
+
+The window and recipient flags are valid only with `--run-now` and only for the two CS Worklogs report tasks
+(each lists them in `registry.Task.RunNowFlags`; any other task exits non-zero with `<flag> is not supported by
+task <name>`, and the two worklog tasks refuse `--dry-run`, `--limit` and `--states` the same way). They are
+refused together with `TRYOUT_TASK`, like every run-now, so they cannot weaken the tryout's debug-recipients rule.
+`--recipients` is also refused when the task has a `debug` list in `SUB_CRON_RECIPIENTS`: debug mail mode would
+redirect the mail and ignore the override. `ALERTS_ENABLED=false` still silences the mail (logged as a WARN). The
+subject of an override run is prefixed `[Test]` (recipients replaced) and/or `[Manual range]` (window given); a
+scheduled run's subject is unchanged. The log carries counts of replaced recipients, never the addresses.
+
+Example (test a custom week to one inbox, nothing reaches the real audience):
+
+```
+csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 --to-date=2030-01-15 \
+  --recipients=jane.doe@example.com --cc=john.roe@example.com
+```
+
+**Ledger.** An override run writes **no ledger row**, like every run-now: `runOnDemand` runs the handler and exits
+without the engine, so `ledger.Attempt`, `Complete` and `Fail` are never called (`cmd/server/main.go`, the run-now
+branch returns before `engine.New`). It therefore cannot mark a scheduled period done or take its claim, and the
+next scheduled run is unaffected. The flip side is the one stated below: the report mails are not idempotent.
 
 **Email.** A run-now of a task that sends email sends to its real recipients, or to its `debug` list in
 `SUB_CRON_RECIPIENTS` if it has one, exactly as a scheduled run does. `ALERTS_ENABLED=false` still silences the
