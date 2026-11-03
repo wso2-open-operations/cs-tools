@@ -828,8 +828,10 @@ everything past the cap rolls into a response `othersCount`).
   click-through (`bucketQuery`) opens the time card preview list filtered the way the time card search
   takes it: `states`, `userIds` or `projectIds` as one-item lists, and a day as `startDate` = `endDate` =
   that day (it wins over the widget's own window when merged). The route is CS engineer and admin
-  only, so for any other role (time card approver and viewer included) the widget shows its normal
-  error.
+  only (`PermViewTimeCardTotals`), so for any other role (time card approver and viewer included) the
+  backend answers 403, `useWidgetGroupByData` reports it as `isForbidden`, and the tile says "You don't
+  have access to time card totals." in place of the chart, not the error. Any other failure is still
+  the normal error.
 - **`DashboardBarChart`'s x-axis category labels (account/bucket names) always render horizontally,
   word-wrapped onto up to two lines — never rotated.** Found live: recharts' own default `<XAxis>`
   tick silently drops a label it decides doesn't fit at the tile's rendered width — with several real,

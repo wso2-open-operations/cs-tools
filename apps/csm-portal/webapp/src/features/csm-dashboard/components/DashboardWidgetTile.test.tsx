@@ -2388,6 +2388,43 @@ describe("DashboardWidgetTile", () => {
       expect(screen.getByRole("button", { name: "Bob: 4.3 h (53%)" })).toBeInTheDocument();
     });
 
+    it("a role that may not read time card totals sees no access, not an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="bar"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      expect(await screen.findByText("You don't have access to time card totals.")).toBeInTheDocument();
+      expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    });
+
+    it("any other failure is still an error", async () => {
+      postMock.mockRejectedValue(Object.assign(new Error("bad gateway"), { status: 502 }));
+
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="hours-per-user"
+          displayName="Hours per User"
+          resourceType="time_card"
+          shape="pie"
+          filters={{}}
+          groupBy={{ field: "user", measure: "hours" }}
+        />,
+      );
+
+      // The widget retries once before it shows the error.
+      expect(await screen.findByText("Could not load this widget.", {}, { timeout: 5000 })).toBeInTheDocument();
+      expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+    });
+
     it("a day grouping labels its bars as short dates, in date order", async () => {
       postMock.mockResolvedValue({
         groups: [
