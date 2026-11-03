@@ -135,7 +135,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
-	if summary.subject != "[CRE Operations] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
+	if summary.subject != "[CRE] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
 		strings.Join(summary.to, ",") != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com" ||
 		len(summary.attachments) != 0 ||
 		!strings.Contains(summary.body, "A calendar invitation for your team&#39;s rotation follows in a separate email") {
@@ -146,7 +146,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 		"allocated for weekend support the coming weekend (2026-10-24 and 2026-10-25)",
 		"<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>",
 		"<b>Sunday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)</p>",
-		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support</td></tr>",
+		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support<br/><span style=\"color:#666666; font-size:12px;\">The 15-hour window is shared: the 3 members can divide the 15 hours into morning and evening shifts, so support is covered from start to end.</span></td></tr>",
 		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
 		"<tr><td>LK On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
 		"IST = Asia/Colombo (UTC+5:30) &#8226; PDT = America/Los_Angeles (UTC&#8722;7)<br/>Local times are fixed. The Americas Weekend Rotation UTC window moves by one hour on 01 Nov 2026, when daylight saving ends.",
@@ -166,7 +166,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := emailWith(t, mail.sent, c.subject)
-		if !strings.HasPrefix(m.subject, "[CRE Operations] "+c.subject) || strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
+		if !strings.HasPrefix(m.subject, "[CRE] "+c.subject) || strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
 			t.Errorf("%q to %v with %d attachments", c.subject, m.to, len(m.attachments))
 			continue
 		}
@@ -221,7 +221,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	}
 	m := mail.sent[0]
 	if strings.Join(m.to, ",") != "zoe@example.com" ||
-		m.subject != "[CRE Operations] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
+		m.subject != "[CRE] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
 		!strings.Contains(m.body, "<p>Dear Zoe Admin,</p>") ||
 		!strings.Contains(m.body, row("Saturday, 24 October", "LK Weekend Rotation", "2", "3")) ||
 		!strings.Contains(m.body, row("Sunday, 25 October", "Americas Weekend Rotation", "0", "1")) ||
