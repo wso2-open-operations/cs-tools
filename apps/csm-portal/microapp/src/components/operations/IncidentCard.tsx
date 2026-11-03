@@ -67,7 +67,7 @@ export function IncidentCard({ item }: { item: IncidentSummary }) {
             "Unassigned" when no team has it yet; long names truncate rather than wrap. */}
         <Stack direction="row" alignItems="center" gap={0.5} sx={{ minWidth: 0 }}>
           <Users size={pxToRem(13)} color={theme.vars.palette.text.secondary} style={{ flexShrink: 0 }} />
-          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ fontSize: pxToRem(12) }}>
+          <Typography variant="subtitle2" color="text.secondary" noWrap sx={{ fontSize: pxToRem(12), minWidth: 0 }}>
             {item.assignmentGroup?.name || "Unassigned"}
           </Typography>
         </Stack>
