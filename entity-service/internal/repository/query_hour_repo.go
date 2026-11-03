@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
@@ -75,9 +77,17 @@ type QueryHourRepository interface {
 	OpportunityStates(ctx context.Context) (map[string]*domain.QueryHourState, error)
 	// SetOpportunityState writes one opportunity's state, or clears it.
 	SetOpportunityState(ctx context.Context, opportunityID string, state *domain.QueryHourState) error
-	// SetProjectDurations writes the three figures the notification
-	// prints back onto the project row.
-	SetProjectDurations(ctx context.Context, projectID string, totalMinutes, consumedMinutes, remainingMinutes int) error
+	// RecomputeProjectHours recomputes and stores one project's allocated,
+	// consumed and remaining hours for both pools. Durations only: it never
+	// touches an opportunity's state.
+	RecomputeProjectHours(ctx context.Context, projectID string) error
+	// ProjectIDsWithLinkedLines lists the projects the hourly recompute covers:
+	// every project linked to an opportunity that has any product line, ended
+	// ones included, so a lapsed allowance is written down to zero.
+	ProjectIDsWithLinkedLines(ctx context.Context) ([]string, error)
+	// SiblingProjectIDs lists the other projects linked to any opportunity the
+	// given project is linked to. They share its pools.
+	SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error)
 }
 
 type queryHourRepo struct {
@@ -255,17 +265,49 @@ func (r *queryHourRepo) SetOpportunityState(ctx context.Context, opportunityID s
 	return nil
 }
 
-// Minutes are stored back as INTERVAL, which is what the three columns
-// already are -- they hold ServiceNow's mirrored figures today.
-func (r *queryHourRepo) SetProjectDurations(ctx context.Context, projectID string, totalMinutes, consumedMinutes, remainingMinutes int) error {
-	if _, err := r.db.Exec(ctx,
-		`UPDATE project
-		    SET total_query_duration     = make_interval(mins => $2),
-		        consumed_duration        = make_interval(mins => $3),
-		        remaining_query_duration = make_interval(mins => $4)
-		  WHERE id = $1`,
-		projectID, totalMinutes, consumedMinutes, remainingMinutes); err != nil {
-		return fmt.Errorf("set project %s query durations: %w", projectID, err)
+// RecomputeProjectHours implements QueryHourRepository: one transaction, under
+// the system identity because time_card carries row-level security and the
+// caller (an approving engineer) must not narrow what is counted.
+func (r *queryHourRepo) RecomputeProjectHours(ctx context.Context, projectID string) error {
+	ctx = WithSystemIdentity(ctx)
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		return recomputeProjectHours(ctx, tx, projectID)
+	})
+}
+
+// ProjectIDsWithLinkedLines returns every project linked to an opportunity
+// with at least one product line, ended or not. Ended lines count so that a
+// project whose allowance has lapsed is still recomputed (to zero).
+func (r *queryHourRepo) ProjectIDsWithLinkedLines(ctx context.Context) ([]string, error) {
+	return r.projectIDs(ctx, "list projects with linked lines", `
+		SELECT DISTINCT l.project_id::text
+		FROM sf_opportunity_link l
+		WHERE l.project_id IS NOT NULL
+		  AND EXISTS (SELECT 1 FROM sf_opportunity_product pr WHERE pr.opportunity_id = l.opportunity_id)
+		ORDER BY 1`)
+}
+
+// SiblingProjectIDs implements QueryHourRepository.
+func (r *queryHourRepo) SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error) {
+	return r.projectIDs(ctx, "list sibling projects", siblingProjectsQuery, projectID)
+}
+
+func (r *queryHourRepo) projectIDs(ctx context.Context, what, sql string, args ...any) ([]string, error) {
+	rows, err := r.db.Query(WithSystemIdentity(ctx), sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
-	return nil
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan project id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project ids: %w", err)
+	}
+	return out, nil
 }

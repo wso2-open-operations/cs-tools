@@ -84,6 +84,60 @@ type timeCardService struct {
 	// NULL.
 	snWriteback *SNWritebackDispatcher
 	snMirror    TimeCardService
+	// projectHours, when set, refreshes the card's project hours after a
+	// state transition commits. Optional: nil keeps the old behaviour.
+	projectHours ProjectHoursRecomputer
+}
+
+// ProjectHoursRecomputer recomputes one project's allocated, consumed and
+// remaining hours. QueryHourService implements it.
+type ProjectHoursRecomputer interface {
+	RecomputeProjectHours(ctx context.Context, projectID string) error
+	// SiblingProjectIDs lists the other projects that share an opportunity
+	// with projectID: the pools are shared, so they change together.
+	SiblingProjectIDs(ctx context.Context, projectID string) ([]string, error)
+}
+
+// WithTimeCardProjectHours makes svc refresh a project's hours after each
+// time card state transition (approve, reject). svc must be what
+// NewTimeCardService or NewTimeCardServiceWithSNWriteback returned; any other
+// value, or a nil recomputer, returns svc unchanged.
+func WithTimeCardProjectHours(svc TimeCardService, r ProjectHoursRecomputer) TimeCardService {
+	if s, ok := svc.(*timeCardService); ok && r != nil {
+		s.projectHours = r
+	}
+	return svc
+}
+
+// refreshProjectHours is best-effort and runs after the transition has
+// committed and the mirror has been dispatched: a failure is logged and the
+// approval still succeeds, the hourly recompute heals the project. The card's
+// own project is refreshed first, then every sibling project (one linked to
+// any of the same opportunities, which shares the pools), deduplicated, each
+// best-effort on its own. Only project ids are logged.
+func (s *timeCardService) refreshProjectHours(ctx context.Context, view domain.TimeCardView) {
+	if s.projectHours == nil || view.Project == nil || view.Project.ID == "" {
+		return
+	}
+	ids := []string{view.Project.ID}
+	siblings, err := s.projectHours.SiblingProjectIDs(ctx, view.Project.ID)
+	if err != nil {
+		slog.ErrorContext(ctx, "time card state change: sibling projects lookup failed",
+			"projectId", view.Project.ID, "timeCardId", view.ID, "error", err)
+	}
+	seen := map[string]bool{view.Project.ID: true}
+	for _, id := range siblings {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		if err := s.projectHours.RecomputeProjectHours(ctx, id); err != nil {
+			slog.ErrorContext(ctx, "time card state change: project hours recompute failed",
+				"projectId", id, "timeCardId", view.ID, "error", err)
+		}
+	}
 }
 
 // NewTimeCardService constructs a TimeCardService backed by Postgres.
@@ -369,6 +423,7 @@ func (s *timeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateT
 			return domain.TimeCardMutationResponse{}, err
 		}
 		s.dispatchTimeCardUpdateMirror(ctx, req)
+		s.refreshProjectHours(ctx, view)
 		return domain.TimeCardMutationResponse{Message: "Time card updated successfully", TimeCard: &view}, nil
 	}
 

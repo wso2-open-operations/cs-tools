@@ -106,6 +106,10 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 	if err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
 	}
+	previousOpps, err := previousIDs(ctx, q, previousLinkOpportunitiesQuery, row.LinkSfID)
+	if err != nil {
+		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
+	}
 	args := []any{domain.SalesforceSyncActor, row.Number, row.OpportunityID, row.ProjectID, row.LinkSfID}
 	_, n, err := updateOneBySfID(ctx, q, updateSfOpportunityLinkQuery, "sf_opportunity_link", row.LinkSfID, args...)
 	if err != nil {
@@ -124,6 +128,26 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 	if err := deriveMovedLinkProjects(ctx, q, previous, row.ProjectID); err != nil {
 		return false, err
 	}
+	// Allocated hours follow the link just written. Durations only, and
+	// best-effort: a failure here must not fail the ingest.
+	// The pools are shared, so the link's own and previous owners are not
+	// enough: every project on the current and the previous opportunities moves
+	// with it.
+	bestEffortProjectHours(ctx, q, "link", func(q querier) error {
+		lost := without(previous, row.ProjectID)
+		others := []string{row.ProjectID}
+		for _, oppID := range append([]string{row.OpportunityID}, previousOpps...) {
+			if oppID == "" {
+				continue
+			}
+			ids, err := listOpportunityProjects(ctx, q, oppID)
+			if err != nil {
+				return err
+			}
+			others = append(others, ids...)
+		}
+		return recomputeProjectSet(ctx, q, lost, others)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
 	}
@@ -150,10 +174,31 @@ func deleteSfOpportunityLink(ctx context.Context, q querier, linkSfID string, st
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, sfOpportunityLinkLockKey(linkSfID)); err != nil {
 		return 0, fmt.Errorf("delete opportunity link: lock: %w", err)
 	}
+	ownerProjects, err := previousIDs(ctx, q, previousLinkProjectsQuery, linkSfID)
+	if err != nil {
+		return 0, fmt.Errorf("delete opportunity link: %w", err)
+	}
+	ownerOpps, err := previousIDs(ctx, q, previousLinkOpportunitiesQuery, linkSfID)
+	if err != nil {
+		return 0, fmt.Errorf("delete opportunity link: %w", err)
+	}
 	tag, err := q.Exec(ctx, deleteSfOpportunityLinkQuery, linkSfID)
 	if err != nil {
 		return 0, fmt.Errorf("delete opportunity link: %w", err)
 	}
+	// The projects that lost the link, and every project still on its
+	// opportunities, follow. Best-effort, durations only.
+	bestEffortProjectHours(ctx, q, "link delete", func(q querier) error {
+		var others []string
+		for _, oppID := range ownerOpps {
+			ids, err := listOpportunityProjects(ctx, q, oppID)
+			if err != nil {
+				return err
+			}
+			others = append(others, ids...)
+		}
+		return recomputeProjectSet(ctx, q, ownerProjects, others)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return 0, fmt.Errorf("delete opportunity link: %w", err)
 	}

@@ -35,7 +35,8 @@ func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
 	want := []string{"pg_advisory_xact_lock", previousLineItemOpportunitiesQuery, updateSfOpportunityProductQuery, insertSfOpportunityProductQuery,
-		"pg_advisory_xact_lock", deriveOnboardingForOpportunityQuery, "salesforce_ingest_state"}
+		"pg_advisory_xact_lock", deriveOnboardingForOpportunityQuery,
+		"SELECT DISTINCT project_id::text FROM sf_opportunity_link", "salesforce_ingest_state"}
 	if len(q.statements) != len(want) {
 		t.Fatalf("statements = %d, want %d", len(q.statements), len(want))
 	}
@@ -65,5 +66,15 @@ func TestWriteSfOpportunityLineItem_MoveDerivesPreviousOpportunity(t *testing.T)
 	}
 	if len(derived) != 2 || derived[0] != "opp-row" || derived[1] != "old-opp" {
 		t.Errorf("derived opportunities = %v, want [opp-row old-opp]", derived)
+	}
+	// Project hours are recomputed for the same two opportunities, in the same order.
+	var hours []any
+	for i, s := range q.statements {
+		if strings.Contains(s, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+			hours = append(hours, q.args[i][0])
+		}
+	}
+	if len(hours) != 2 || hours[0] != "opp-row" || hours[1] != "old-opp" {
+		t.Errorf("project hours recomputed for opportunities %v, want [opp-row old-opp]", hours)
 	}
 }

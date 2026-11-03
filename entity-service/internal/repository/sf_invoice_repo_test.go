@@ -34,6 +34,17 @@ type updateTagQuerier struct {
 	prevOpps []string // answer to previousLineItemOpportunitiesQuery
 }
 
+// Query answers the opportunity-to-projects listing the project hours hook
+// issues: no linked projects, so nothing further is recomputed.
+func (q *updateTagQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+		q.statements = append(q.statements, sql)
+		q.args = append(q.args, args)
+		return &fakeRows{}, nil
+	}
+	return q.partnerQuerier.Query(ctx, sql, args...)
+}
+
 func (q *updateTagQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if sql == previousLineItemOpportunitiesQuery {
 		q.statements = append(q.statements, sql)
