@@ -765,9 +765,16 @@ is keyed by the case id, and `Trigger.Record` is `case`.
     `@wso2.com` author counts as an engineer's comment;
   - each ladder keeps the latest handled `changedAt` per case in Redis
     (`…case:severity-changed:<caseId>`, 7 days, `SetSeverityChangedAt` never
-    moves it back), so a replayed or older severity change is ignored even
-    after its chain stopped and its state was deleted. A failed read or write
-    of that record is logged and handled as before.
+    moves it back, in one compare-and-set script), so a replayed or older
+    severity change is ignored even after its chain stopped and its state was
+    deleted. A failed read or write of that record is logged and handled as
+    before.
+  - the check, the new chain and the record run under a per-case lock for the
+    ladder (`…case:severity-lock:<caseId>`, 30s, released by token), because
+    the live and dead-letter consumers can each hold a change for one case:
+    unlocked, an older change could pass the check and replace the newer
+    chain. A change that finds it held waits up to `severityLockWait` (10s),
+    then errors so the consumer retries; a Redis error proceeds unlocked.
   The new fields are decoded strictly: deploy this service before the
   entity-service that sends them.
 - **SRE team**: an S0 case's SRE ladder pages its account's SRE team

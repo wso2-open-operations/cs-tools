@@ -56,6 +56,8 @@ type memStore struct {
 	assignees map[string]string
 	// severityChanged is each case's latest handled severity change.
 	severityChanged map[string]time.Time
+	// severityLocks holds each locked case's lock token.
+	severityLocks map[string]string
 	// claims are due calls a replica has taken.
 	claims map[string]bool
 	// smePages are the open SME pages, keyed by smeKey, holding the press
@@ -89,6 +91,24 @@ func (m *memStore) SetCaseAssignee(_ context.Context, caseID, email string) erro
 		m.assignees = map[string]string{}
 	}
 	m.assignees[caseID] = email
+	return nil
+}
+
+func (m *memStore) LockCaseSeverity(_ context.Context, caseID, token string, _ time.Duration) (bool, error) {
+	if m.severityLocks == nil {
+		m.severityLocks = map[string]string{}
+	}
+	if _, held := m.severityLocks[caseID]; held {
+		return false, nil
+	}
+	m.severityLocks[caseID] = token
+	return true, nil
+}
+
+func (m *memStore) UnlockCaseSeverity(_ context.Context, caseID, token string) error {
+	if m.severityLocks[caseID] == token {
+		delete(m.severityLocks, caseID)
+	}
 	return nil
 }
 

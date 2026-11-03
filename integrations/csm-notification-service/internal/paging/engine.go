@@ -63,6 +63,10 @@ type ladderStore interface {
 	// replay of it is recognised. Zero when none is recorded.
 	SeverityChangedAt(ctx context.Context, caseID string) (time.Time, error)
 	SetSeverityChangedAt(ctx context.Context, caseID string, at time.Time) error
+	// LockCaseSeverity and UnlockCaseSeverity hold one case's severity
+	// handling for this ladder, shared by its live and dead-letter consumers.
+	LockCaseSeverity(ctx context.Context, caseID, token string, ttl time.Duration) (bool, error)
+	UnlockCaseSeverity(ctx context.Context, caseID, token string) error
 	// ClaimCall takes one due call for this replica for ttl, so two replicas
 	// ticking together cannot both dial it; ReleaseCall gives it back.
 	ClaimCall(ctx context.Context, member string, ttl time.Duration) (bool, error)

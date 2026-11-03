@@ -18,6 +18,8 @@ package paging
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -116,13 +118,20 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 		}
 		t := triggerFromSeverityChanged(caseID, p, e.now())
 		t.CardThread = notifications.CaseS0ThreadKey(caseID, record)
+		// The live and dead-letter consumers can each hold a severity change
+		// for this case; the check, the new chain and the record below must
+		// not interleave, or an older change could replace a newer chain.
+		unlock, err := e.lockCaseSeverity(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		if e.severityChangeHandled(ctx, caseID, t.ChangedAt) {
 			slog.InfoContext(ctx, "escalation: severity change already handled; ignoring the replay",
 				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "priority", t.Priority,
 				"changedAt", t.ChangedAt.Format(time.RFC3339Nano))
 			return nil
 		}
-		var err error
 		switch {
 		case e.admit(ctx, &t):
 			// A new chain for the new severity, replacing whatever runs.
@@ -398,6 +407,52 @@ func (e *Engine) severityChangeHandled(ctx context.Context, caseID string, chang
 		return false
 	}
 	return !last.IsZero() && !changedAt.After(last)
+}
+
+// severityLockTTL bounds one case's severity lock: far longer than the few
+// Redis writes the handling takes, short enough that a holder that died delays
+// the next change by at most this.
+const severityLockTTL = 30 * time.Second
+
+// severityLockPoll is how often a waiting severity change retries the lock.
+const severityLockPoll = 100 * time.Millisecond
+
+// severityLockWait is how long a severity change waits for another handler of
+// the same case before returning an error, so the consumer retries it.
+var severityLockWait = 10 * time.Second
+
+// lockCaseSeverity takes the case's severity lock for this ladder, waiting up
+// to severityLockWait, and returns the function that releases it. A Redis
+// error leaves the change unlocked, logged, as it was handled before the lock.
+func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (func(), error) {
+	buf := make([]byte, 8)
+	_, _ = rand.Read(buf)
+	token := hex.EncodeToString(buf)
+	deadline := time.Now().Add(severityLockWait)
+	for {
+		ok, err := e.store.LockCaseSeverity(ctx, caseID, token, severityLockTTL)
+		if err != nil {
+			slog.WarnContext(ctx, "escalation: could not take the case's severity lock; handling without it",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+			return func() {}, nil
+		}
+		if ok {
+			return func() {
+				if err := e.store.UnlockCaseSeverity(context.WithoutCancel(ctx), caseID, token); err != nil {
+					slog.WarnContext(ctx, "escalation: could not release the case's severity lock; it expires on its own",
+						"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+				}
+			}, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, fmt.Errorf("escalation: another severity change for case %s is still being handled", caseID)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(severityLockPoll):
+		}
+	}
 }
 
 // rememberSeverityChange records the severity change this ladder just handled,
