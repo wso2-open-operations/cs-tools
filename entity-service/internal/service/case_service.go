@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -1648,7 +1649,42 @@ func (s *caseService) applyCustomerReplyStateTransition(ctx context.Context, req
 	if req.Type != domain.CommentTypeComment {
 		return
 	}
+	if IsGithubRelayedComment(req.Content) && s.moveAwaitingInfoToWaitingOnWSO2(ctx, req.CaseID) {
+		return
+	}
 	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, req.CaseID, "customer reply")
+}
+
+// githubRelayedCommentPattern matches the "@user (GitHub Comment) <issue url>" header the GitHub relay stamps on a comment.
+var githubRelayedCommentPattern = regexp.MustCompile(`^\s*@\S+ \(GitHub Comment\) \[?https://github\.com/\S+`)
+
+// IsGithubRelayedComment reports whether a comment is a GitHub comment relayed onto a case.
+func IsGithubRelayedComment(content string) bool {
+	return githubRelayedCommentPattern.MatchString(content)
+}
+
+// MoveAwaitingInfoToWaitingOnWSO2 moves a case that is Awaiting Info to Waiting on WSO2 as the system, best effort.
+func (s *caseService) MoveAwaitingInfoToWaitingOnWSO2(ctx context.Context, caseID string) {
+	s.moveAwaitingInfoToWaitingOnWSO2(ctx, caseID)
+}
+
+// moveAwaitingInfoToWaitingOnWSO2 reports whether the case was moved; a request without a user token is attributed to the system.
+func (s *caseService) moveAwaitingInfoToWaitingOnWSO2(ctx context.Context, caseID string) bool {
+	ctx = withSystemActor(repository.WithSystemIdentity(ctx), domain.AutoclosureDefaultActor)
+	cv, err := s.GetCaseByID(ctx, caseID)
+	if err != nil {
+		slog.ErrorContext(ctx, "github comment state transition not evaluated, get case failed", "caseId", caseID)
+		return false
+	}
+	if derefState(cv.State) != domain.CaseStateAwaitingInfo {
+		return false
+	}
+	waitingOnWSO2 := domain.CaseStateWaitingOnWSO2
+	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, State: &waitingOnWSO2}); err != nil {
+		slog.ErrorContext(ctx, "move case to waiting on wso2 after github comment failed", "caseId", caseID)
+		return false
+	}
+	return true
 }
 
 // applyCustomerAttachmentStateTransition is the attachment counterpart of
@@ -2181,6 +2217,8 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 		if u, uErr := s.userRepo.GetUserByEmail(ctx, systemEmail); uErr == nil && u.ID != "" {
 			actorID = &u.ID
 		}
+	} else if systemName, ok := systemActorFromContext(ctx); ok {
+		actorEmail = systemName
 	}
 
 	// oldSeverity is the case's severity immediately before this update —
