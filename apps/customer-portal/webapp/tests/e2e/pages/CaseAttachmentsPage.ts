@@ -180,11 +180,13 @@ export class CaseAttachmentsPage {
    * @param fileName - Name of the image attachment.
    */
   async expandImage(fileName: string): Promise<void> {
+    // The fixture case accumulates copies of the image from repeated upload
+    // runs (6 on 2026-10-27), so act on the first rather than requiring one.
     await expect(
-      this.expandImageButton(),
-      "expected exactly one image attachment to expand",
-    ).toHaveCount(1);
-    await this.expandImageButton().click();
+      this.expandImageButton().first(),
+      "expected an image attachment to expand",
+    ).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+    await this.expandImageButton().first().click();
 
     const image = this.previewImage(fileName);
     await expect(image).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
@@ -218,7 +220,7 @@ export class CaseAttachmentsPage {
     // The preview is unmounted rather than hidden, so the image should leave the
     // DOM entirely and the toggle should offer to expand again.
     await expect(this.previewImage(fileName)).toHaveCount(0);
-    await expect(this.expandImageButton()).toBeVisible();
+    await expect(this.expandImageButton().first()).toBeVisible();
   }
 
   /** The per-row download control, whose accessible name embeds the file name. */
@@ -243,7 +245,8 @@ export class CaseAttachmentsPage {
   async download(fileName: string): Promise<Download> {
     const [download] = await Promise.all([
       this.page.waitForEvent("download", { timeout: LOAD_TIMEOUT_MS }),
-      this.downloadButton(fileName).click(),
+      // First of possibly several same-named copies — see expandImage.
+      this.downloadButton(fileName).first().click(),
     ]);
     return download;
   }

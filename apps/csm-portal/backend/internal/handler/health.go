@@ -92,6 +92,7 @@ type HealthHandler struct {
 	notification HealthPinger // nil when CSM_NOTIFICATION_SERVICE_BASE_URL is unset
 	integration  HealthPinger // nil when CSM_INTEGRATION_SERVICE_BASE_URL is unset
 	engineering  HealthPinger // nil when ENGINEERING_ENTITY_BASE_URL is unset
+	ai           HealthPinger // nil when CSM_AI_INTEGRATION_SERVICE_BASE_URL is unset
 
 	// mu guards the cached result below and is held for the full duration of
 	// a cache-miss recomputation, not just the read/write of the cached
@@ -122,6 +123,14 @@ func NewHealthHandler(scim, updates, notification, integration, engineering Heal
 	}
 }
 
+// WithAIIntegration adds integrations/csm-ai-integration-service to the
+// checks. ai may be nil (an untyped nil, as for NewHealthHandler's own
+// optional pingers): it then reports not_configured.
+func (h *HealthHandler) WithAIIntegration(ai HealthPinger) *HealthHandler {
+	h.ai = ai
+	return h
+}
+
 // GetHealthDependencies serves the cached result when it's younger than
 // dependencyHealthCacheTTL, else recomputes it (see HealthHandler.mu's own
 // doc comment for why recomputation holds the lock for its full duration).
@@ -149,6 +158,9 @@ func (h *HealthHandler) GetHealthDependencies(w http.ResponseWriter, r *http.Req
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// computeHealthDependencies checks every listed dependency at the same time,
+// each under its own timeout. The status is "degraded" (503) when any is
+// down; one that is not configured does not count as down.
 func computeHealthDependencies(ctx context.Context, h *HealthHandler) (HealthDependenciesResponse, int) {
 	checks := []struct {
 		name   string
@@ -159,6 +171,7 @@ func computeHealthDependencies(ctx context.Context, h *HealthHandler) (HealthDep
 		{"CSM Notification Service", h.notification},
 		{"CSM Integration Service", h.integration},
 		{"Engineering Entity Service", h.engineering},
+		{"CSM AI Integration Service", h.ai},
 	}
 
 	deps := make([]DependencyHealth, len(checks))

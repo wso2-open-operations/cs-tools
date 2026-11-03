@@ -80,6 +80,81 @@ func TestCaseService_CreateCase_RegistersSLAClocks(t *testing.T) {
 	}
 }
 
+// TestCaseService_CreateCase_SecurityReportAnalysisRegistersSLAClocks and
+// TestCaseService_CreateCase_ServiceRequestRegistersSLAClocks cover
+// slaClockEligibleCreateTypes (sla_engine_service.go) actually including
+// these two types -- a real, reported gap: both had confirmed, working
+// sla_policy coverage (security_report_analysis's own duplicate RESPONSE
+// branch fixed by migration 0267, service_request given a RESOLUTION policy
+// by migration 0266) but registered zero clocks at creation regardless,
+// because this gate only ever checked req.Type == "case".
+func TestCaseService_CreateCase_SecurityReportAnalysisRegistersSLAClocks(t *testing.T) {
+	repo := &stubCaseRepo{
+		createCase: func(_ context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
+			return domain.Case{ID: "case-1"}, nil
+		},
+	}
+	slaEngine := &fakeSLAEngineService{}
+	svc := WithSLAEngine(
+		NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil),
+		slaEngine,
+	)
+
+	req := domain.CreateCaseRequest{
+		Type:              "security_report_analysis",
+		CreatedBy:         "system",
+		ProjectID:         testProjectUUID,
+		DeploymentID:      testDeploymentUUID,
+		DeployedProductID: testDeployedProdID,
+		Subject:           "Potential XSS in login form",
+		Description:       "Reported via responsible disclosure",
+	}
+	if _, err := svc.CreateCase(context.Background(), req); err != nil {
+		t.Fatalf("CreateCase() error = %v", err)
+	}
+
+	if len(slaEngine.registerCalls) != 1 {
+		t.Fatalf("RegisterCaseClocks calls = %d, want 1 for security_report_analysis", len(slaEngine.registerCalls))
+	}
+	if slaEngine.registerCalls[0].caseID != "case-1" {
+		t.Errorf("caseID = %q, want %q", slaEngine.registerCalls[0].caseID, "case-1")
+	}
+}
+
+func TestCaseService_CreateCase_ServiceRequestRegistersSLAClocks(t *testing.T) {
+	repo := &stubCaseRepo{
+		createCase: func(_ context.Context, req domain.CreateCaseRequest) (domain.Case, error) {
+			return domain.Case{ID: "case-1"}, nil
+		},
+	}
+	slaEngine := &fakeSLAEngineService{}
+	svc := WithSLAEngine(
+		NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil),
+		slaEngine,
+	)
+
+	req := domain.CreateCaseRequest{
+		Type:              "service_request",
+		CreatedBy:         "system",
+		ProjectID:         testProjectUUID,
+		DeploymentID:      testDeploymentUUID,
+		DeployedProductID: testDeployedProdID,
+		CatalogID:         "catalog-1",
+		CatalogItemID:     "catalog-item-1",
+		Variables:         []domain.Variable{{ID: "reason", Value: "test"}},
+	}
+	if _, err := svc.CreateCase(context.Background(), req); err != nil {
+		t.Fatalf("CreateCase() error = %v", err)
+	}
+
+	if len(slaEngine.registerCalls) != 1 {
+		t.Fatalf("RegisterCaseClocks calls = %d, want 1 for service_request", len(slaEngine.registerCalls))
+	}
+	if slaEngine.registerCalls[0].caseID != "case-1" {
+		t.Errorf("caseID = %q, want %q", slaEngine.registerCalls[0].caseID, "case-1")
+	}
+}
+
 func TestCaseService_CreateCase_NonCaseTypeSkipsSLARegistration(t *testing.T) {
 	repo := &stubCaseRepo{
 		createCase: func(_ context.Context, req domain.CreateCaseRequest) (domain.Case, error) {

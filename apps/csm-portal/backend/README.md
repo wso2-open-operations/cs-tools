@@ -475,6 +475,11 @@ differ.
 | `CSM_NOTIFICATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `notify.read` |
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | No | unset | Integration service, used only by `GET /health/dependencies` today. `https` base URL | `https://integration.example.com` |
 | `CSM_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `integration.read` |
+| `CSM_AI_INTEGRATION_SERVICE_BASE_URL` | No | unset | AI integration service: makes the dashboard generator's model calls; unset, the generate page answers with a sample. `https`, or `http` for a local host only | `https://ai.example.com` |
+| `CSM_AI_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `ai.generate` |
+| `CSM_AI_INTEGRATION_SERVICE_TIMEOUT` | No | `55s` | One generate call's timeout (Go duration, > 0, shorter than `REST_WRITE_TIMEOUT`) | `55s` |
+| `DASHBOARD_GENERATE_LIMIT_PER_MINUTE` | No | `10` | Most `POST /dashboards/generate` calls one user may start in any minute (whole number > 0); over it answers 429 with `Retry-After`. Counted per backend instance | `10` |
+| `DASHBOARD_GENERATE_LIMIT_PER_DAY` | No | `100` | The same over any 24 hours; not below the per-minute limit | `100` |
 | `SALES_ENTITY_BASE_URL` | No | unset | Sales entity GraphQL service backing `POST /scan-user`; unset makes only those lookups fail at call time. `https` base URL. Not listed in `.env.example` as active | `https://sales-entity.example.com` |
 | `GOOGLE_DRIVE_CLIENT_ID` | No | unset | OAuth2 client id for the Drive folder-browsing routes (`/files`) | `your-drive-client-id` |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | No | unset | Matching client secret | `your-drive-client-secret` |

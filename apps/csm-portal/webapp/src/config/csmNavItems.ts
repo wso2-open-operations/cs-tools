@@ -35,6 +35,7 @@ import {
   Headset,
   HeartPulse,
   KeyRound,
+  LayoutDashboard,
   LifeBuoy,
   Megaphone,
   RefreshCw,
@@ -129,10 +130,39 @@ export interface CsmNavSection extends CsmNavNode {
  */
 export const CSM_NAV_ITEMS: CsmNavSection[] = [
   {
+    // Route-backed tabs (the Customers shape): CsmDashboardsLayout draws them.
+    // System Dashboards shares the section's own path, so it is the landing
+    // tab and owns every /dashboard/:dashboardId(/:teamId) page. My
+    // Dashboards (generating and saving) is for CS engineers and admins
+    // (canWrite is exactly that group); Shared Dashboards is for every portal
+    // role, like System, since anyone a dashboard is shared with must be able
+    // to open it. Their static paths outrank /dashboard/:dashboardId in React
+    // Router.
     id: "dashboard",
-    label: "Dashboard",
+    label: "Dashboards",
     href: "/dashboard",
     icon: ChartColumn,
+    children: [
+      {
+        id: "dashboard.system",
+        label: "System Dashboards",
+        href: "/dashboard",
+        icon: ChartColumn,
+      },
+      {
+        id: "dashboard.my",
+        label: "My Dashboards",
+        href: "/dashboard/my",
+        requires: "canWrite",
+        icon: LayoutDashboard,
+      },
+      {
+        id: "dashboard.shared",
+        label: "Shared Dashboards",
+        href: "/dashboard/shared",
+        icon: UsersRound,
+      },
+    ],
   },
   {
     id: "support",
@@ -314,7 +344,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "updates",
     label: "Updates",
     href: "/updates",
-    requires: "canUseTimeCardsAndUpdates",
+    requires: "canViewUpdates",
     icon: RefreshCw,
   },
   {
@@ -450,6 +480,17 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         icon: Megaphone,
         requires: "isAdmin",
       },
+      // Admin only, same reasoning as Banners above: recalculating SLA
+      // tracking is a real backend action (POST /sla-engine/recalculate,
+      // PermAdmin on both this backend and entity-service — see
+      // apps/csm-portal/backend's own CLAUDE.md), not a display-only page.
+      {
+        id: "admin.sla-engine",
+        label: "SLA Engine",
+        href: "/admin/sla-engine",
+        icon: RefreshCw,
+        requires: "isAdmin",
+      },
     ],
   },
   {
@@ -487,7 +528,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         id: "help.updates",
         label: "Updates",
         href: "/help#updates",
-        requires: "canUseTimeCardsAndUpdates",
+        requires: "canViewUpdates",
       },
       {
         id: "help.time-cards",

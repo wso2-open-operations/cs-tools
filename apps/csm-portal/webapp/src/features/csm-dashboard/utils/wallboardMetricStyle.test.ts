@@ -237,6 +237,12 @@ describe("sortByFixedOrder", () => {
     ]);
   });
 
+  it("places 'SLA At Risk' after 'Awaiting Info', wherever it appears in the input", () => {
+    const input = [item("SLA At Risk"), item("Awaiting Info"), item("At WSO2 Incidents")];
+    const sorted = sortByFixedOrder(input, CRE_SECONDARY_ORDER);
+    expect(sorted.map((i) => i.displayName)).toEqual(["At WSO2 Incidents", "Awaiting Info", "SLA At Risk"]);
+  });
+
   it("keeps an unrecognized item in its original relative position, appended after every named one", () => {
     const input = [item("Some New Metric"), item("Migration"), item("At WSO2 Incidents")];
     const sorted = sortByFixedOrder(input, CRE_SECONDARY_ORDER);

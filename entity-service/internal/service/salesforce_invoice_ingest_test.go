@@ -206,14 +206,30 @@ func TestInvoiceIngest_OriginalDueDateFallsBackToDueDate(t *testing.T) {
 	}
 }
 
-func TestInvoiceIngest_TruncatesVarchar40Columns(t *testing.T) {
+// name is VARCHAR(80), description VARCHAR(255) and classification VARCHAR(40):
+// values at the new limits pass through whole, values past them are cut.
+func TestInvoiceIngest_TextColumnLimits(t *testing.T) {
 	inv := sampleInvoice()
-	long := strings.Repeat("é", 45)
-	inv.Name, inv.Description, inv.Classification = &long, &long, &long
+	name, desc, class := strings.Repeat("n", 80), strings.Repeat("d", 255), strings.Repeat("c", 40)
+	inv.Name, inv.Description, inv.Classification = &name, &desc, &class
 	row := mapSalesEntityInvoice(context.Background(), testInvoiceSfID, inv)
-	for name, v := range map[string]*string{"name": row.Name, "description": row.Description, "classification": row.Classification} {
-		if v == nil || len([]rune(*v)) != 40 {
-			t.Errorf("%s = %v, want 40 characters", name, v)
+	for col, c := range map[string]struct {
+		got  *string
+		want int
+	}{"name": {row.Name, 80}, "description": {row.Description, 255}, "classification": {row.Classification, 40}} {
+		if c.got == nil || len([]rune(*c.got)) != c.want {
+			t.Errorf("%s = %v, want %d characters untouched", col, c.got, c.want)
+		}
+	}
+
+	name, desc, class = strings.Repeat("é", 85), strings.Repeat("é", 300), strings.Repeat("é", 41)
+	row = mapSalesEntityInvoice(context.Background(), testInvoiceSfID, inv)
+	for col, c := range map[string]struct {
+		got  *string
+		want int
+	}{"name": {row.Name, 80}, "description": {row.Description, 255}, "classification": {row.Classification, 40}} {
+		if c.got == nil || len([]rune(*c.got)) != c.want {
+			t.Errorf("%s = %v, want cut to %d characters", col, c.got, c.want)
 		}
 	}
 }

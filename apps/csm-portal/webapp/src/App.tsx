@@ -65,6 +65,11 @@ import { useAppMountedSignal } from "@utils/appMountedEvent";
  * already eager (tiny, immediate fallbacks) and are unaffected.
  */
 import CsmDashboardPage from "@features/csm-dashboard/pages/CsmDashboardPage";
+import CsmDashboardsLayout from "@features/csm-dashboard/pages/CsmDashboardsLayout";
+import MyDashboardsPage from "@features/csm-custom-dashboards/pages/MyDashboardsPage";
+import SharedDashboardsPage from "@features/csm-custom-dashboards/pages/SharedDashboardsPage";
+import GenerateDashboardPage from "@features/csm-custom-dashboards/pages/GenerateDashboardPage";
+import EditCustomDashboardPage from "@features/csm-custom-dashboards/pages/EditCustomDashboardPage";
 import CsMonitorDashboardPage from "@features/csm-dashboard/pages/CsMonitorDashboardPage";
 import DashboardWidgetPreviewPage from "@features/csm-dashboard/pages/DashboardWidgetPreviewPage";
 import CsmCasesPage from "@features/csm-cases/pages/CsmCasesPage";
@@ -94,6 +99,8 @@ import CsmDashboardBuilderEditorPage from "@features/csm-admin/dashboards/pages/
 import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/CsmDashboardSharedConfigPage";
 import CsmBannersRouteGuard from "@features/csm-admin/banners/CsmBannersRouteGuard";
 import CsmBannersPage from "@features/csm-admin/banners/CsmBannersPage";
+import CsmSlaEngineRouteGuard from "@features/csm-admin/sla-engine/CsmSlaEngineRouteGuard";
+import CsmSlaEnginePage from "@features/csm-admin/sla-engine/CsmSlaEnginePage";
 import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
 import CsmAccountsPage from "@features/csm-accounts/pages/CsmAccountsPage";
 import CsmAccountDetailPage from "@features/csm-accounts/pages/CsmAccountDetailPage";
@@ -397,6 +404,9 @@ export default function App(): JSX.Element {
                     <Route path="banners" element={<CsmBannersRouteGuard />}>
                       <Route index element={<CsmBannersPage />} />
                     </Route>
+                    <Route path="sla-engine" element={<CsmSlaEngineRouteGuard />}>
+                      <Route index element={<CsmSlaEnginePage />} />
+                    </Route>
                   </Route>
 
                   {/* Legacy Settings paths kept alive so a pinned/deep link to
@@ -464,12 +474,29 @@ export default function App(): JSX.Element {
                       comment — so it resolves that itself and then replaces
                       the URL with the canonical one-or-two-segment path once
                       it can, rather than a synchronous route redirect here. */}
-                  <Route path="dashboard" element={<CsmDashboardPage />} />
-                  <Route path="dashboard/:dashboardId" element={<CsmDashboardPage />} />
-                  <Route
-                    path="dashboard/:dashboardId/:teamId"
-                    element={<CsmDashboardPage />}
-                  />
+                  {/* The Dashboards tab strip (CsmDashboardsLayout) sits above
+                      these as a pathless layout, so every URL stays the same.
+                      The static "my"/"shared" segments outrank
+                      ":dashboardId" in React Router. Who may open My and
+                      Shared Dashboards is their nav nodes' `requires`,
+                      applied by FeatureRouteGuard. */}
+                  <Route element={<CsmDashboardsLayout />}>
+                    <Route path="dashboard" element={<CsmDashboardPage />} />
+                    <Route path="dashboard/:dashboardId" element={<CsmDashboardPage />} />
+                    <Route
+                      path="dashboard/:dashboardId/:teamId"
+                      element={<CsmDashboardPage />}
+                    />
+                    <Route path="dashboard/my" element={<MyDashboardsPage />} />
+                    <Route path="dashboard/my/:dashboardId" element={<MyDashboardsPage />} />
+                    <Route path="dashboard/shared" element={<SharedDashboardsPage />} />
+                    <Route path="dashboard/shared/:dashboardId" element={<SharedDashboardsPage />} />
+                  </Route>
+                  {/* Generating a dashboard is its own page, outside the tab
+                      strip (its Back button goes first); static "new"
+                      outranks "my/:dashboardId". */}
+                  <Route path="dashboard/my/new" element={<GenerateDashboardPage />} />
+                  <Route path="dashboard/my/:dashboardId/edit" element={<EditCustomDashboardPage />} />
                   {/* Dashboard widget "View more" preview — :previewSlug is
                       one of WIDGET_RESOURCE_CONFIG's own previewSlug values
                       (e.g. "cases"), resolved back to a resourceType by

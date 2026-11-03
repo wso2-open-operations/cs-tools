@@ -207,4 +207,43 @@ test.describe("Security Center — Component Analysis", () => {
         `${restored} after clearing filters`,
     );
   });
+
+  // ✅ READ-ONLY. Opens one vulnerability and follows its NVD link to the
+  // external NVD site; passes once that page loads.
+  test("opens a vulnerability's NVD link", async ({ page, context }) => {
+    const security = new SecurityCenterPage(page);
+    const total = await security.openComponentAnalysis();
+    test.skip(total === 0, "Component Analysis lists no vulnerabilities.");
+
+    const row = security.componentRows().first();
+    const cve = components.cvePattern.exec(await row.innerText())?.[0];
+    expect(cve, "the row should carry a CVE").toBeTruthy();
+    await row.click();
+
+    // The vulnerability's details page, with its NVD link for that CVE.
+    await expect(page).toHaveURL(
+      new RegExp(`/projects/${project.id}/${SECURITY_CENTER.pathSegment}/[^/?]+$`),
+      { timeout: 60_000 },
+    );
+    const nvd = page.getByRole("link", { name: components.nvdLinkLabel, exact: true });
+    await expect(nvd).toBeVisible({ timeout: 60_000 });
+    const href = await nvd.getAttribute("href");
+    expect(href).toMatch(components.nvdUrlPattern);
+    expect(href).toContain(cve!);
+
+    // It opens in a new tab; the test passes once NVD's page loads.
+    const [nvdPage] = await Promise.all([context.waitForEvent("page"), nvd.click()]);
+    await nvdPage.waitForLoadState("domcontentloaded", { timeout: 60_000 });
+    // NVD canonicalises the CVE to lower case in its URL, so compare loosely.
+    await expect(nvdPage).toHaveURL(
+      new RegExp(`^${href!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"),
+    );
+    await expect(nvdPage.locator("body")).toContainText(cve!, {
+      ignoreCase: true,
+      timeout: 60_000,
+    });
+
+    console.log(`Component Analysis: opened NVD for ${cve} → ${nvdPage.url()}`);
+    await nvdPage.close();
+  });
 });

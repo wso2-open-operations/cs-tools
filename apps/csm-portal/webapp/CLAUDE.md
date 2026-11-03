@@ -124,6 +124,47 @@ failed role(s) still checked for a quick retry rather than clearing the whole fo
 ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
 itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
 
+## `useRouteTabs`: must read `PortalAccess`/Feature Preview itself, not rely on its caller to
+
+`useSectionTabs.ts`'s shared `tabsFor` helper used to call `visibleNavChildren(section)`/`featureState(node.id)`
+with **no `access` and no Feature Preview overrides at all** — not even for `useRouteTabs`, the flavour behind
+every route-backed tab strip (Customers, Settings, Dashboards, Knowledge). A `requires`-gated tab (e.g.
+`dashboard.my`, `requires: "canWrite"`) was therefore dropped from `allTabs.tabs` purely on the deployment's
+`CSM_PORTAL_FEATURE_OVERRIDES` state, before any capability check or admin preview promotion ever ran — so
+marking a tab `"hidden"` to preview it later (the intended Feature Preview workflow) silently never worked:
+an admin who switched it on in their own Feature Preview dialog still couldn't see it, because the tab was
+excluded one layer up, inside `tabsFor` itself, before `CsmDashboardsLayout`'s own (separate, and in practice
+redundant) capability filter ever ran. Reported live as "I enabled it in Feature Preview but still can't see
+it". Fixed by having `useRouteTabs` read `usePortalAccess()`/`useFeaturePreviewOverrides(useSafeCurrentUserId())`
+itself (mirroring how `CsmSideBar.tsx`/`QuickNav.tsx` already do it) and thread both into `tabsFor`, which now
+also exposes `isPreviewedOnly` (`featureFlags.ts`) so each resolved `SectionTab` carries `previewedOnly: boolean`.
+`CsmDashboardsLayout.tsx` was simplified in the same change — its own post-filter re-deriving `activeKey` is
+now redundant, since `useRouteTabs` already returns the fully-resolved, capability-and-preview-aware list.
+
+**Deliberately scoped to `useRouteTabs` only** — `useQueryTabs`/`usePathSectionTabs` (Operations, Security
+Center) still resolve tabs from `CSM_PORTAL_FEATURE_OVERRIDES` alone, with no `access`/preview wiring, same as
+before this fix. Operations/Security Center have no `requires`-gated child tabs today, so this wasn't a live
+bug there yet — widening it to those two flavours too, if they ever need it, is a separate, deliberate change,
+not an oversight.
+
+**A tab visible only via an admin's own Feature Preview toggle now gets a distinct, filled "Preview" chip**
+(`SectionTabs.tsx`, `tab.previewedOnly`) — solid, in the theme's own primary (button) colour
+(`color="primary" variant="filled"`), deliberately different from the WIP tab's outlined `color="warning"`
+chip, so an admin previewing a still-restricted feature is never left thinking "I can see this" means "this
+shipped for everyone." The tab itself stays fully enabled and clickable (unlike a WIP tab, which is
+`disabled`) — only the chip marks it as preview-only. `isPreviewedOnly` (`featureFlags.ts`) compares `id`'s
+resolved state WITH the real preview overrides against its state with none, rather than checking
+`previewOverrides[id]` directly — a parent node can be promoted purely because one of its own DESCENDANTS was
+previewed (`featureState`'s own `hasPreviewedDescendant` promotion), with no override on the parent itself,
+and the direct check misses that case entirely (found by a CodeRabbit review on the PR that introduced this).
+
+**The sidebar carries the identical badge** (`CsmSideBar.tsx`, `Sidebar.ItemBadge color="primary"`) on a
+top-level item, a submenu parent (the same descendant-promotion case), and a submenu child — the same
+`isPreviewedOnly` call, same three render paths `featureState(..., "wip")` already has its own WIP badge/dim
+treatment in. A sibling descendant that is not itself previewed, under a still-hidden ancestor, is not
+rendered at all (not a bug — it inherits "hidden" the same as it always did); only the admin's own previewed
+node(s) get resurrected.
+
 ## Code organization
 
 Feature-based: each `src/features/<name>/` folder owns its own `api/` (React Query hooks), `components/`, `pages/`, `types/`, `utils/`. Tests are colocated as `<File>.test.tsx` next to the file under test, not in a separate `__tests__` tree.
@@ -602,6 +643,7 @@ pnpm run lint      # eslint .
 
 ## Security
 
+- **Sign-in/sign-out redirect URLs are optional.** `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` / `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` are not required in `public/config.js`; `authConfig.ts` passes `undefined` (blank counts as unset) and `AsgardeoProvider` then defaults both to `window.location.origin`, so the app signs in on whatever host and port it is served from. The origin must still be a registered redirect URI on the IdP application. Set a key only to override it (e.g. a proxy whose public origin differs from the browser's).
 - **Never commit secrets or runtime config** — `public/config.js` (the real, per-deployment file copied from `public/config.js.example`) is git-ignored on purpose. It only ever holds *public* runtime values (IdP base URL, OAuth **client id** — not a secret, this is a PKCE/SPA flow with no client secret — backend base URL, theme, log level, feature flags); if a value you're adding isn't safe to ship to a browser, it doesn't belong in `window.config` at all.
 - **Auth is Asgardeo's job, not ours** — `AsgardeoProvider` (`AppWithConfig.tsx`) and `useAsgardeo()`/`AuthGuard.tsx` own the whole auth lifecycle; the app **never reads or writes auth tokens itself** (no token in `localStorage`/`sessionStorage` anywhere in this codebase — the SDK manages that internally). Don't add code that pulls a token out of storage or a hook return value to attach it manually; use the existing API client wiring instead. The `sessionStorage` keys outside the SDK are `POST_LOGIN_REDIRECT_KEY` (a post-login redirect **path**) and `csm.sidebar.lastSection` (`CsmSideBar.tsx` — the last-resolved nav section id, so a reload on a route with no owning section, e.g. `/people/:id`, re-highlights it instead of resetting to Dashboard) — neither ever holds a token.
 - **Sanitize before `dangerouslySetInnerHTML`, always** — every current use (case-comment rendering, rich-text description/plan fields, product-update content, the admin-configured top banner/announcement HTML) goes through `DOMPurify.sanitize` first (`src/utils/sanitizeHtml.ts` for the shared cases). `sanitizeHtml.ts` also force-hardens every sanitized `target="_blank"` link with `rel="noopener noreferrer"` against reverse tabnabbing — match that when adding any other `target="_blank"` link by hand. Never add a new `dangerouslySetInnerHTML` call that skips sanitization, even for content that looks like it's "our own" (e.g. admin-authored) — an admin-configured field is still attacker-controlled if that admin account is ever compromised.

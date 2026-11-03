@@ -32,26 +32,30 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/jwt"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/rules"
 )
 
 const (
 	defaultAPIBase = "https://gmail.googleapis.com/gmail/v1"
-	scopeModify    = "https://www.googleapis.com/auth/gmail.modify"
-	maxBodyBytes   = 4 << 20
-	pageSize       = 50
+	// ScopeModify is the only scope the service needs: list, read headers, label.
+	ScopeModify = "https://www.googleapis.com/auth/gmail.modify"
+	// OAuthEndpoint is Google's OAuth token endpoint.
+	OAuthEndpoint = "https://oauth2.googleapis.com/token" // #nosec G101 -- public URL, not a credential
+	maxBodyBytes  = 4 << 20
+	pageSize      = 50
 )
 
 // Config configures a Client.
 type Config struct {
-	// CredentialsJSON is a Google service-account key (JSON) with
-	// domain-wide delegation granted for gmail.modify.
-	CredentialsJSON string
-	// DelegatedUser is the mailbox the service account acts as; it must
-	// receive the group's mail.
-	DelegatedUser string
+	// ClientID and ClientSecret identify the OAuth client the refresh token
+	// was issued to.
+	ClientID     string
+	ClientSecret string
+	// RefreshToken was obtained once, by logging in as the mailbox user (see
+	// the server gmail-auth subcommand). It grants access to that one mailbox only. The mailbox
+	// must receive the group's mail.
+	RefreshToken string
 	// ProcessedLabel is applied to every handled message.
 	ProcessedLabel string
 	// APIBaseURL overrides the Gmail API base (tests).
@@ -78,28 +82,19 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		return nil, errors.New("gmail: processed label is required")
 	}
 	if c.http == nil {
-		var key struct {
-			ClientEmail string `json:"client_email"`
-			PrivateKey  string `json:"private_key"`
-			TokenURI    string `json:"token_uri"`
+		if cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RefreshToken == "" {
+			return nil, errors.New("gmail: client id, client secret and refresh token are required")
 		}
-		if err := json.Unmarshal([]byte(cfg.CredentialsJSON), &key); err != nil {
-			return nil, fmt.Errorf("gmail: parse credentials: %w", err)
-		}
-		if key.ClientEmail == "" || key.PrivateKey == "" || cfg.DelegatedUser == "" {
-			return nil, errors.New("gmail: credentials need client_email, private_key and a delegated user")
-		}
-		jc := &jwt.Config{
-			Email:      key.ClientEmail,
-			PrivateKey: []byte(key.PrivateKey),
-			Scopes:     []string{scopeModify},
-			TokenURL:   key.TokenURI,
-			Subject:    cfg.DelegatedUser,
+		oc := &oauth2.Config{
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			Scopes:       []string{ScopeModify},
+			Endpoint:     oauth2.Endpoint{TokenURL: OAuthEndpoint},
 		}
 		// The same timeout-bound context serves the token exchange and the
 		// API calls, so a stalled token endpoint cannot hang the poll loop.
 		tokenCtx := context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: 30 * time.Second})
-		c.http = oauth2.NewClient(tokenCtx, jc.TokenSource(tokenCtx))
+		c.http = oauth2.NewClient(tokenCtx, oc.TokenSource(tokenCtx, &oauth2.Token{RefreshToken: cfg.RefreshToken}))
 		c.http.Timeout = 30 * time.Second
 	}
 	return c, nil

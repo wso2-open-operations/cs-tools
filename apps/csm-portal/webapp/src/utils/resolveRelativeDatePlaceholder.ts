@@ -109,6 +109,26 @@ export function resolveRelativeDatePlaceholder(
   op: string,
   now: Date,
 ): string | undefined {
+  const day = relativeDay(value, now);
+  return day === undefined ? undefined : dayToBoundInstant(day, op);
+}
+
+/**
+ * Resolves a relative-date placeholder to a plain local calendar date,
+ * `YYYY-MM-DD`, for a flat date filter whose bounds are whole days (a time
+ * card's `startDate`/`endDate`, both inclusive on the work date). Same
+ * grammar and the same "today" as {@link resolveRelativeDatePlaceholder};
+ * `undefined` for anything that is not a placeholder it resolves.
+ */
+export function resolveRelativeDatePlaceholderToDate(value: string, now: Date): string | undefined {
+  const day = relativeDay(value, now);
+  if (day === undefined || !Number.isFinite(day.getTime())) return undefined;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
+}
+
+/** The local calendar day a placeholder names, or `undefined` when `value` is not one. */
+function relativeDay(value: string, now: Date): Date | undefined {
   const match = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value);
   if (!match) return undefined;
   const [, name, argStr] = match;
@@ -118,36 +138,34 @@ export function resolveRelativeDatePlaceholder(
     case "today":
       // Takes no argument — a shape match with one (`__today:5__`) is not
       // ours to resolve; leave it for the backend's own rejection.
-      return argStr === undefined ? dayToBoundInstant(refToday, op) : undefined;
+      return argStr === undefined ? refToday : undefined;
 
     case "daysAgo": {
       if (argStr === undefined) return undefined;
       const n = Number(argStr);
       // Same non-negative constraint as the backend's own daysAgo.
       if (n < 0) return undefined;
-      return dayToBoundInstant(addDays(refToday, -n), op);
+      return addDays(refToday, -n);
     }
 
     case "startOfMonth": {
       if (argStr === undefined) return undefined;
-      return dayToBoundInstant(startOfRelativeMonth(now, Number(argStr)), op);
+      return startOfRelativeMonth(now, Number(argStr));
     }
 
     case "endOfMonth": {
       if (argStr === undefined) return undefined;
-      const lastDay = addDays(startOfRelativeMonth(now, Number(argStr) + 1), -1);
-      return dayToBoundInstant(lastDay, op);
+      return addDays(startOfRelativeMonth(now, Number(argStr) + 1), -1);
     }
 
     case "startOfQuarter": {
       if (argStr === undefined) return undefined;
-      return dayToBoundInstant(startOfRelativeQuarter(now, Number(argStr)), op);
+      return startOfRelativeQuarter(now, Number(argStr));
     }
 
     case "endOfQuarter": {
       if (argStr === undefined) return undefined;
-      const lastDay = addDays(startOfRelativeQuarter(now, Number(argStr) + 1), -1);
-      return dayToBoundInstant(lastDay, op);
+      return addDays(startOfRelativeQuarter(now, Number(argStr) + 1), -1);
     }
 
     default:

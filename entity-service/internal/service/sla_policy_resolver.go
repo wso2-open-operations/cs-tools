@@ -156,6 +156,67 @@ func isCasePolicy(conditions ...string) bool {
 	return false
 }
 
+// slaPolicyIncidentFieldMarkers names condition fields confirmed, against
+// the real sla_policy table, to appear ONLY on an incident-targeting row --
+// "business_service" is the one marker every real incident policy carries
+// today (ServiceNow's own business-service picklist has no case-policy
+// equivalent at all). Mirrors slaPolicyCaseFieldMarkers' own role for
+// isCasePolicy. A future incident policy conditioned purely on
+// "priority"/"state"/"category" with no "business_service" clause at all
+// would NOT be classified as an incident policy by this check -- those three
+// field names are shared with case policies (see this package's own
+// translateIncidentSLACondition doc comment) and are deliberately not
+// treated as incident-exclusive markers for the same reason
+// isCasePolicy's own doc comment gives for excluding "priority"/"state"
+// there: a generic field name alone is not enough to classify a policy's
+// entity type. If that shape of policy is ever added for real, this list
+// (and isIncidentPolicy) needs a new, genuinely incident-exclusive marker to
+// go with it, not a guess at "priority"/"state" alone.
+var slaPolicyIncidentFieldMarkers = []string{
+	"business_service",
+}
+
+// slaPolicyIncidentSkipFieldMarkers names condition fields confirmed to
+// appear only on an account-escalation (never incident, never case)
+// sla_policy row -- the subset of slaPolicySkipFieldMarkers that is NOT
+// "business_service"/"category=": those two ARE legitimate incident-policy
+// fields (the one real incident policy carries both), so slaPolicySkipFieldMarkers
+// cannot be reused wholesale here the way an earlier revision's doc comment
+// incorrectly claimed -- doing so would exclude every real incident policy
+// outright. A row carrying "business_service" alongside one of these,
+// though not confirmed in the real table today, is an escalation row that
+// happens to also reference a service, not a genuine incident policy this
+// engine should evaluate.
+var slaPolicyIncidentSkipFieldMarkers = []string{
+	"escalation_severity",
+	"source_table",
+	"active_escalation",
+}
+
+// isIncidentPolicy decides whether an sla_policy row's conditions describe
+// an incident, the same strict-inclusion shape as isCasePolicy: it must
+// carry at least one slaPolicyIncidentFieldMarkers token and none of
+// slaPolicyCaseFieldMarkers or slaPolicyIncidentSkipFieldMarkers.
+func isIncidentPolicy(conditions ...string) bool {
+	all := strings.Join(conditions, "^")
+	for _, marker := range slaPolicyCaseFieldMarkers {
+		if strings.Contains(all, marker) {
+			return false
+		}
+	}
+	for _, marker := range slaPolicyIncidentSkipFieldMarkers {
+		if strings.Contains(all, marker) {
+			return false
+		}
+	}
+	for _, marker := range slaPolicyIncidentFieldMarkers {
+		if strings.Contains(all, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // caseConditionFacts adapts a repository.CaseFacts into the
 // slacondition.Facts interface -- the one bridge between "what a case's
 // fields currently are" and "what sla_policy's own decoded condition
@@ -203,6 +264,55 @@ func (f caseConditionFacts) Date(name string) (time.Time, bool) {
 	switch name {
 	case "opened_at", "sys_created_on":
 		return f.c.CreatedOn, !f.c.CreatedOn.IsZero()
+	default:
+		return time.Time{}, false
+	}
+}
+
+// incidentConditionFacts adapts a repository.IncidentFacts into
+// slacondition.Facts -- caseConditionFacts' incident counterpart.
+type incidentConditionFacts struct {
+	i repository.IncidentFacts
+}
+
+func (f incidentConditionFacts) Field(name string) (string, bool) {
+	switch name {
+	case "state":
+		return f.i.State, f.i.State != ""
+	case "priority":
+		return f.i.Priority, f.i.Priority != ""
+	case "category":
+		return f.i.Category, f.i.Category != ""
+	case "business_service":
+		// sla_policy's own "business_service=" clauses embed ServiceNow's
+		// raw, undashed sys_id -- never translated (see
+		// translateIncidentSLACondition's own doc comment) -- so this
+		// converts the incident's own dashed-UUID service_id back to that
+		// same raw form before comparing. uuidToSysid returns its input
+		// unchanged for anything that isn't a canonical UUID, so an empty
+		// ServiceID (no service) correctly stays "".
+		return uuidToSysid(f.i.ServiceID), f.i.ServiceID != ""
+	default:
+		return "", false
+	}
+}
+
+func (f incidentConditionFacts) Present(name string) bool {
+	switch name {
+	case "business_service":
+		return f.i.ServiceID != ""
+	case "category":
+		return f.i.Category != ""
+	default:
+		v, ok := f.Field(name)
+		return ok && v != ""
+	}
+}
+
+func (f incidentConditionFacts) Date(name string) (time.Time, bool) {
+	switch name {
+	case "opened_at", "sys_created_on":
+		return f.i.CreatedOn, !f.i.CreatedOn.IsZero()
 	default:
 		return time.Time{}, false
 	}
@@ -315,6 +425,72 @@ func (r *slaPolicyResolver) resolve(ctx context.Context, target string, facts re
 			names[i] = m.Name
 		}
 		slog.InfoContext(ctx, "sla policy resolver: more than one policy matched the same case, registering/evaluating each independently",
+			"target", target, "matches", names)
+	}
+	return matches, nil
+}
+
+// slaIncidentPolicyConditionText is slaPolicyConditionText for an
+// incident-targeting candidate -- translateIncidentSLACondition, never
+// translateSLACondition (see that function's own doc comment on why the two
+// must never be interchanged).
+func slaIncidentPolicyConditionText(candidate repository.SLAPolicyRef, raw string) string {
+	if candidate.Source == "SERVICENOW" {
+		return translateIncidentSLACondition(raw)
+	}
+	return raw
+}
+
+// resolveIncident is resolve()'s incident counterpart: returns every
+// sla_policy row whose start_condition currently matches facts for target,
+// classifying candidates with isIncidentPolicy and translating their
+// condition text with slaIncidentPolicyConditionText instead of resolve()'s
+// own isCasePolicy/slaPolicyConditionText. See that method's own doc comment
+// for the "more than one match, no fallback duration, error vs. no-match"
+// semantics, identical here.
+func (r *slaPolicyResolver) resolveIncident(ctx context.Context, target string, facts repository.IncidentFacts) ([]repository.SLAPolicyRef, error) {
+	candidates, err := r.repo.ListCandidatePolicies(ctx, target)
+	if err != nil {
+		slog.ErrorContext(ctx, "sla policy resolver: list candidate policies failed", "target", target, "err", err)
+		return nil, err
+	}
+
+	f := incidentConditionFacts{i: facts}
+	var matches []repository.SLAPolicyRef
+	var skippedNonIncident []string
+	for _, candidate := range candidates {
+		if !isIncidentPolicy(candidate.StartCondition, candidate.StopCondition, candidate.PauseCondition, candidate.ResumeCondition, candidate.CancelCondition) {
+			skippedNonIncident = append(skippedNonIncident, candidate.Name)
+			continue
+		}
+		if candidate.Schedule != "" && candidate.Schedule != "24 x 7" && candidate.Schedule != slaScheduleWSO2BusinessDaysLabel {
+			slog.WarnContext(ctx, "sla policy resolver: unsupported schedule, evaluating with flat wall-clock time anyway",
+				"policy", candidate.Name, "schedule", candidate.Schedule)
+		}
+		startCondition := slaIncidentPolicyConditionText(candidate, candidate.StartCondition)
+		parsed := slacondition.Parse(startCondition)
+		if unknown := parsed.UnknownClauses(); len(unknown) > 0 {
+			slog.WarnContext(ctx, "sla policy resolver: start condition has unknown/untranslated clauses, they evaluate false",
+				"policy", candidate.Name, "target", target, "unknownClauses", unknown)
+		}
+		if parsed.Evaluate(f) {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(skippedNonIncident) > 0 {
+		slog.DebugContext(ctx, "sla policy resolver: skipped non-incident policy candidates", "target", target, "skipped", skippedNonIncident)
+	}
+
+	switch len(matches) {
+	case 0:
+		slog.InfoContext(ctx, "sla policy resolver: no incident policy matched", "target", target)
+	case 1:
+	default:
+		names := make([]string, len(matches))
+		for i, m := range matches {
+			names[i] = m.Name
+		}
+		slog.InfoContext(ctx, "sla policy resolver: more than one policy matched the same incident, registering/evaluating each independently",
 			"target", target, "matches", names)
 	}
 	return matches, nil

@@ -3237,6 +3237,10 @@ export interface BeGroupSearchPayload {
      * groups an incident may be assigned to on create. Omitted (not `false`)
      * when unset, so older callers send the same body as before. */
     supportGroupsOnly?: boolean;
+    /** Only the extra groups an incident may be assigned to besides the
+     * support groups (the security operations group). Wins over
+     * `supportGroupsOnly`. Omitted when unset. */
+    incidentExtraGroupsOnly?: boolean;
   };
   pagination: BePagination;
 }

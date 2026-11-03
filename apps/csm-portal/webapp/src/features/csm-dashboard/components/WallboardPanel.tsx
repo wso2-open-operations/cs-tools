@@ -17,7 +17,8 @@
 import { Box, Typography } from "@wso2/oxygen-ui";
 import type { JSX, ReactNode } from "react";
 import type { LucideIcon } from "@wso2/oxygen-ui-icons-react";
-import type { WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import {
+  WALLBOARD_FILL, WALLBOARD_FONT_SIZE, wb, type WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 interface PanelAccent {
   iconColor: string;
@@ -62,7 +63,7 @@ export default function WallboardPanel({ section, title, icon: Icon, children }:
         bgcolor: "#1f2937",
         border: "1px solid #374151",
         borderRadius: "16px",
-        p: "12px",
+        p: wb(12),
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -79,24 +80,25 @@ export default function WallboardPanel({ section, title, icon: Icon, children }:
           background: `linear-gradient(to right, transparent, ${accent.lineColor}, transparent)`,
         }}
       />
-      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1.5, position: "relative", zIndex: 1 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: wb(12), mb: wb(12), position: "relative", zIndex: 1 }}>
         <Box
           sx={{
             display: "flex",
-            p: "6px",
+            p: wb(6),
+            "& svg": { width: wb(20), height: wb(20) },
             bgcolor: accent.chipBg,
             borderRadius: "8px",
             border: "1px solid",
             borderColor: accent.chipBorder,
           }}
         >
-          <Icon color={accent.iconColor} size={16} />
+          <Icon color={accent.iconColor} size={20} />
         </Box>
-        <Typography sx={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>
+        <Typography sx={{ fontSize: WALLBOARD_FONT_SIZE.panelTitle, fontWeight: 700, color: "#fff", letterSpacing: "0.01em" }}>
           {title}
         </Typography>
       </Box>
-      <Box sx={{ position: "relative", zIndex: 1, flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <Box sx={{ position: "relative", zIndex: 1, ...WALLBOARD_FILL, display: "flex", flexDirection: "column" }}>
         {children}
       </Box>
     </Box>
