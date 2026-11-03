@@ -55,6 +55,10 @@ type fakeGateway struct {
 	lastBody   atomic.Value
 }
 
+// ServeHTTP records the request body, waits out delay (unless the caller
+// gives up first), then answers with status/body when status is set, or with
+// one text block and fixed usage: input 5000, cache write 700, cache read 9000,
+// output 400.
 func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls.Add(1)
 	raw, _ := io.ReadAll(r.Body)
@@ -120,6 +124,9 @@ func newTestGenerator(t *testing.T, gw *fakeGateway, cat Catalogue, timeout time
 	return NewGenerator(client, "claude-sonnet-5-5", timeout, cat)
 }
 
+// TestGenerateSendsTheCatalogueWithTeamsAndThePrompt: the system prompt is the
+// catalogue with the Teams section, the user message is the prompt, and the
+// result carries the candidate and all four token counts.
 func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	gw := &fakeGateway{text: validGenerated}
 	team := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}
