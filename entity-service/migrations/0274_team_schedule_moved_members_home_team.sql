@@ -32,7 +32,10 @@
 --   * a span onto T naming H runs today or later, or something is filed under
 --     H after their last span onto T ended (leave, a turn);
 --   * the membership on T is an engineer or sub_lead (a lead decides who Case
---     Alerts calls and is never moved).
+--     Alerts calls and is never moved);
+--   * T and H are CRE teams (a team whose type is neither SRE nor SME, as the
+--     schedule decides a team's family). SRE's SaaS Night cover and every SME
+--     team are left as they are.
 -- The membership on T stays when it carries an alert tier, a rota manager
 -- grant, or a turn on T from today on that a lead placed by hand (a MOVE turn
 -- is the span's own and goes with it); they are then on both teams, which a
@@ -69,6 +72,8 @@ SELECT m.id AS member_id, m.user_id, m.role, m.alert_tier,
   JOIN span s ON s.user_id = m.user_id AND s.target_key = lower(tt.key) AND s.latest = 1
   JOIN team ht ON lower(ht.key) = s.home_key
  WHERE m.role IN ('engineer', 'sub_lead')
+   AND lower(COALESCE(tt.type, '')) NOT LIKE 'sre%' AND lower(COALESCE(tt.type, '')) NOT LIKE 'sme%'
+   AND lower(COALESCE(ht.type, '')) NOT LIKE 'sre%' AND lower(COALESCE(ht.type, '')) NOT LIKE 'sme%'
    AND NOT EXISTS (SELECT 1 FROM team_member h WHERE h.team_id = ht.id AND h.user_id = m.user_id)
    AND (
         EXISTS (SELECT 1 FROM span a

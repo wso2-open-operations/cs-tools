@@ -440,9 +440,10 @@ func (s *rotaAccessService) UpdateTeamMember(ctx context.Context, teamKey, userI
 // as the same engineer or sub_lead, without a tier, and their rota manager
 // grant for teamKey goes with the move. Refused, with nothing changed, under
 // the same conditions as a removal: upcoming turns or an alert tier on
-// teamKey (409), and a lead is never moved (409). Someone a move tag already
-// puts on toTeamKey today or later (a Brazil rotation, Migration) is not moved
-// either (409): the tag is the move, and membership stays with their own team.
+// teamKey (409), and a lead is never moved (409). Someone a CRE move tag
+// already puts on toTeamKey today or later (a Brazil rotation, Migration, the
+// India team) is not moved either (409): the tag is the move, and membership
+// stays with their own team. SRE and SME moves are not checked.
 // Already on toTeamKey and off teamKey changes nothing.
 func (s *rotaAccessService) MoveTeamMember(ctx context.Context, teamKey, userID, toTeamKey string) (domain.TeamMembership, error) {
 	if strings.TrimSpace(teamKey) == "" {
