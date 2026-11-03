@@ -55,6 +55,10 @@ type WorklogTimeRow struct {
 	ItemType string
 	WorkDate time.Time
 	State    string
+	// Severity is the case severity (S0-S4) of the work item, empty for
+	// anything that is not a case. The reports split case time into
+	// Incident and Query by it.
+	Severity string
 	Minutes  int
 	Entries  int
 }
@@ -189,6 +193,11 @@ func NewWorklogReportRepository(db *Scoped) WorklogReportRepository {
 	return &worklogReportRepo{db: db}
 }
 
+// A member with role 'lead' in ANY team is left out of the roster entirely,
+// in both reports: the previous system removes its team-lead role from the
+// roster outright. Our 'lead' also covers per-shift leads that system keeps
+// (a known, accepted conflation, no data changed). TeamContacts, and so the
+// derived recipients, still use lead emails.
 // A user can hold rows in more than one team -- team_member has no unique
 // constraint on user_id -- but each person appears under exactly one team in
 // the mails. DISTINCT ON picks one deterministically: a team the person
@@ -210,6 +219,7 @@ SELECT DISTINCT ON (u.id)
    AND (cardinality($1::text[]) = 0 OR LOWER(COALESCE(t.type, '')) = ANY($1))
    AND NOT (t.key = ANY($2))
    AND m.role NOT IN ('cre_head', 'cs_head', 'americas_team_lead')
+   AND NOT EXISTS (SELECT 1 FROM team_member lm WHERE lm.user_id = u.id AND lm.role = 'lead')
    AND COALESCE(u.is_active, TRUE)
  ORDER BY u.id, (m.role = 'lead') DESC, t.key`
 
@@ -248,16 +258,18 @@ SELECT tc.user_id::text,
        COALESCE(wi.type::TEXT, ''),
        tc.work_date,
        COALESCE(tc.state::TEXT, 'UNKNOWN'),
+       COALESCE(c.severity::TEXT, ''),
        SUM(COALESCE(tc.analyzing_minutes, 0) + COALESCE(tc.setting_up_minutes, 0) +
            COALESCE(tc.reproducing_debugging_minutes, 0) + COALESCE(tc.providing_solution_minutes, 0) +
            COALESCE(tc.patching_minutes, 0))::int,
        COUNT(*)::int
   FROM time_card tc
   JOIN work_item wi ON wi.id = tc.case_id
+  LEFT JOIN "case" c ON c.id = wi.id
  WHERE tc.work_date IS NOT NULL
    AND tc.work_date >= $1
    AND tc.work_date <= $2
- GROUP BY tc.user_id, wi.id, wi.wso2_id, wi.number, wi.type, tc.work_date, tc.state
+ GROUP BY tc.user_id, wi.id, wi.wso2_id, wi.number, wi.type, tc.work_date, tc.state, c.severity
  ORDER BY tc.user_id, tc.work_date DESC, wi.id`
 
 func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([]WorklogTimeRow, error) {
@@ -271,7 +283,7 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 	for rows.Next() {
 		var x WorklogTimeRow
 		if err := rows.Scan(&x.UserID, &x.ItemID, &x.IssueKey, &x.ItemType,
-			&x.WorkDate, &x.State, &x.Minutes, &x.Entries); err != nil {
+			&x.WorkDate, &x.State, &x.Severity, &x.Minutes, &x.Entries); err != nil {
 			return nil, fmt.Errorf("scan worklog time row: %w", err)
 		}
 		out = append(out, x)
@@ -307,20 +319,46 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 // Add one only with evidence from a delivered mail that it should be
 // absent; the cost of guessing wrong is a person silently vanishing from
 // their team's figures.
+//
+// CONFIRMED ENGAGEMENT ALLOCATIONS are read straight from
+// customer_engagement_allocation_resource and returned as ALLOCATION rows
+// (short code 'ENG_ALLOC'), because that table, not the schedule
+// absences, is what the previous system's report consults: state
+// CONFIRMED, utilization at least 100, dates overlapping the range, and
+// the person must be a resource with both dates set. Any allocation that
+// meets that blanks the covered days, whatever its engagement type.
 const worklogLeaveQuery = `
-SELECT a.user_id::text,
-       k.short_code,
-       k.label,
-       k.bucket,
-       a.starts_on,
-       a.ends_on
-  FROM team_schedule_absence a
-  JOIN team_schedule_absence_kind k ON k.id = a.kind_id
- WHERE (k.bucket IN ('LEAVE', 'EXCLUDED')
-        OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT', 'ALLO_INT')))
-   AND a.starts_on <= $2
-   AND (a.ends_on IS NULL OR a.ends_on >= $1)
- ORDER BY a.user_id, a.starts_on`
+SELECT user_id, short_code, label, bucket, starts_on, ends_on
+  FROM (
+    SELECT a.user_id::text AS user_id,
+           k.short_code,
+           k.label,
+           k.bucket,
+           a.starts_on,
+           a.ends_on
+      FROM team_schedule_absence a
+      JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+     WHERE (k.bucket IN ('LEAVE', 'EXCLUDED')
+            OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT', 'ALLO_INT')))
+       AND a.starts_on <= $2
+       AND (a.ends_on IS NULL OR a.ends_on >= $1)
+    UNION ALL
+    SELECT ar.resource_id::text,
+           'ENG_ALLOC',
+           'Engagement allocation',
+           'ALLOCATION',
+           ar.start_date,
+           ar.end_date
+      FROM customer_engagement_allocation_resource ar
+     WHERE ar.resource_id IS NOT NULL
+       AND ar.state = 'CONFIRMED'
+       AND ar.utilization >= 100
+       AND ar.start_date IS NOT NULL
+       AND ar.end_date IS NOT NULL
+       AND ar.start_date <= $2
+       AND ar.end_date >= $1
+  ) x
+ ORDER BY user_id, starts_on`
 
 const worklogTeamContactsQuery = `
 SELECT t.key,
