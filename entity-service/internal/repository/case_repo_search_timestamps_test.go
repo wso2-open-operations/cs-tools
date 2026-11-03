@@ -51,9 +51,14 @@ func TestSearchCaseViewJSON_ResolvedAndClosedOn(t *testing.T) {
 		t.Fatalf("resolvedOn/closedOn = %v/%v, want %q", m["resolvedOn"], m["closedOn"], set)
 	}
 
-	b, _ = json.Marshal(domain.SearchCaseView{})
+	b, err = json.Marshal(domain.SearchCaseView{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	m = map[string]any{}
-	_ = json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
 	for _, k := range []string{"resolvedOn", "closedOn"} {
 		v, ok := m[k]
 		if !ok || v != nil {
