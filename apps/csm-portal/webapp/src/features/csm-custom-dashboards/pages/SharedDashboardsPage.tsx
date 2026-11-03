@@ -133,6 +133,10 @@ export default function SharedDashboardsPage(): JSX.Element {
     return <Navigate to={`${BASE_PATH}/${encodeURIComponent(dashboards[0].id)}`} replace />;
   }
 
+  /**
+   * How the dashboard reached the user, for the line under its name: through a team,
+   * through the link, or shared directly. An owner who was deleted is "a former user".
+   */
   const sharedBy = (d: SharedDashboardSummary): string => {
     const owner = d.owner ? d.owner.name || d.owner.email : "a former user";
     if (d.sharedViaTeam) return `Shared with your team ${d.sharedViaTeam.name} by ${owner}`;

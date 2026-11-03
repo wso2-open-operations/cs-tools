@@ -235,6 +235,7 @@ export default function MyDashboardsPage(): JSX.Element {
     }
   };
 
+  /** Renames `target`; a failure keeps the Rename dialog open with the error (a name already taken says so). */
   const handleRename = async (target: CustomDashboardSummary, name: string): Promise<void> => {
     setRenameError(null);
     try {

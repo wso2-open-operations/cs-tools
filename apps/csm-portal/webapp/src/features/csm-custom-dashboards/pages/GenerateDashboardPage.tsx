@@ -94,6 +94,10 @@ export default function GenerateDashboardPage({
   const unchanged = editing && draft === initialDashboard;
   const hasWork = editing ? !unchanged || messages.length > 0 : draft !== null || messages.length > 0;
 
+  /**
+   * Saves the draft under the name from the name dialog and opens it in My Dashboards.
+   * A failure keeps the dialog open with the error (a name already taken says so).
+   */
   const handleSaveAs = async (name: string): Promise<void> => {
     if (!draft) return;
     setNameError(null);

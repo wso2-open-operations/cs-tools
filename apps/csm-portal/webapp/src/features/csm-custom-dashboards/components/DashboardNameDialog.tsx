@@ -81,6 +81,11 @@ export default function DashboardNameDialog({
   const canConfirm = !busy && trimmed !== "" && !tooLong && !unchanged;
   const shownError = error !== null && submitted === trimmed ? error : null;
 
+  /**
+   * Confirms the trimmed name, unless it is empty, too long or (when a change is
+   * required) unchanged. The name is remembered so the parent's error shows only
+   * until the user edits it.
+   */
   const handleSubmit = (e: FormEvent): void => {
     e.preventDefault();
     if (!canConfirm) return;
