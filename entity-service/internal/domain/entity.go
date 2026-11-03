@@ -3558,6 +3558,12 @@ type SearchCaseView struct {
 	// EscalationLevel is the case's current escalation level -- see
 	// CaseView.EscalationLevel's doc comment.
 	EscalationLevel *string `json:"escalationLevel"`
+	// ResolvedOn is the time the case moved to solution proposed, as a UTC
+	// RFC 3339 string. Null if it never did.
+	ResolvedOn *string `json:"resolvedOn"`
+	// ClosedOn is the time the case was closed, as a UTC RFC 3339 string.
+	// Null if it is not closed.
+	ClosedOn *string `json:"closedOn"`
 }
 
 // SearchCasesResponse is the paginated result of a case search. When the

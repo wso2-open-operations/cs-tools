@@ -646,13 +646,14 @@ export default function CsmIssuesView({
         c.wso2CaseId && c.caseNumber
           ? `${c.wso2CaseId}/${c.caseNumber}`
           : c.wso2CaseId || c.caseNumber || "";
-      const updated = formatBackendTimestampForDisplay(c.updatedAt, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const fmt = (ts: string | undefined) =>
+        formatBackendTimestampForDisplay(ts, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }) ?? "";
       const stateText =
         stateLabel(c.state) +
         (c.state === "work_in_progress" && c.workState
@@ -660,7 +661,8 @@ export default function CsmIssuesView({
           : "");
       const row = [caseId, c.subject, c.projectName, c.product];
       if (showExportSeverityColumn) row.push(c.severity);
-      row.push(stateText, updated ?? "");
+      // Resolved = moved to solution proposed (kept through closure); Closed only once closed.
+      row.push(stateText, fmt(c.updatedAt), fmt(c.createdAt), fmt(c.resolvedAt), fmt(c.closedAt));
       return row;
     },
     [showExportSeverityColumn],
@@ -673,6 +675,9 @@ export default function CsmIssuesView({
     ...(showExportSeverityColumn ? ["Severity"] : []),
     "State",
     "Updated",
+    "Created",
+    "Resolved",
+    "Closed",
   ];
 
   const { showSuccess } = useSuccessBanner();

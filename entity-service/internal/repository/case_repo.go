@@ -3815,6 +3815,16 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	return where, filterArgs, argIdx, nil
 }
 
+// formatSearchTimestamp renders a nullable timestamp the way the search
+// response's createdOn/updatedOn are rendered (UTC RFC3339), or nil when unset.
+func formatSearchTimestamp(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
 // SearchCases implements CaseRepository.
 func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope SearchScope) ([]domain.SearchCaseView, int, error) {
 	// WithCallerIdentity from the explicit scope parameter -- see
@@ -3902,7 +3912,8 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		        pw.id, pw.number,
 		        rc_wi.id, rc_wi.number,
 		        a.id, a.name, a.support_tier::TEXT,
-		        cre.id, cre.name, sre.id, sre.name
+		        cre.id, cre.name, sre.id, sre.name,
+		        `+caseLikeResolvedOnColumn+`, `+caseLikeClosedOnColumn+`
 		 FROM (SELECT wi.id FROM work_item wi %s %s
 		       ORDER BY %s %s NULLS LAST, wi.id
 		       LIMIT $%d OFFSET $%d) page
@@ -3939,6 +3950,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			var creTeamID, creTeamName, sreTeamID, sreTeamName *string
 			var creatorEmail string
 			var bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
+			var resolvedOn, closedOn *time.Time
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &internalID,
 				&caseType, &subject, &description, &severity, &issueType, &state,
@@ -3954,6 +3966,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 				&rcID, &rcNumber,
 				&accountID, &accountName, &accountTier,
 				&creTeamID, &creTeamName, &sreTeamID, &sreTeamName,
+				&resolvedOn, &closedOn,
 			); err != nil {
 				return fmt.Errorf("scan case: %w", err)
 			}
@@ -4001,6 +4014,8 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			}
 			cv.CreatedOn = createdAt.UTC().Format(time.RFC3339)
 			cv.UpdatedOn = updatedAt.UTC().Format(time.RFC3339)
+			cv.ResolvedOn = formatSearchTimestamp(resolvedOn)
+			cv.ClosedOn = formatSearchTimestamp(closedOn)
 			// best_case_eta/most_likely_eta/worst_case_eta are DATE columns --
 			// formatted the same way GetCaseByID already does, so a caller
 			// reading either endpoint sees the identical "YYYY-MM-DD" shape.
