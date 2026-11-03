@@ -108,8 +108,14 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 	msg, err := g.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(g.model),
 		MaxTokens: maxTokens,
-		System:    []anthropic.TextBlockParam{{Text: system}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
+		// The system prompt is the same for every user and call of one
+		// deployment (the catalogue, and the team list the backend builds
+		// once at start), so it is cached: a call within the cache's lifetime
+		// (5 minutes, renewed by each hit) reads it at a tenth of the input
+		// price. Nothing that changes per request may come before this
+		// breakpoint; the prompt and the draft are in the user message after it.
+		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
+		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
 	})
 	took := time.Since(start)
 	if err != nil {

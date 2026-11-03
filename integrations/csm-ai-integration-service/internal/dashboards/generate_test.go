@@ -142,6 +142,41 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	}
 }
 
+// The system prompt (catalogue and teams) is the same on every call, so it
+// carries the one cache breakpoint; the user message, which changes per
+// request, carries none.
+func TestGenerateCachesTheSystemPromptOnly(t *testing.T) {
+	gw := &fakeGateway{text: validGenerated}
+	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "My open cases.", Draft: json.RawMessage(`{"displayName":"x"}`)}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var req struct {
+		System []struct {
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"system"`
+		Messages []struct {
+			Content []struct {
+				CacheControl map[string]any `json:"cache_control"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	body, _ := gw.lastBody.Load().(string)
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(req.System) != 1 || len(req.System[0].CacheControl) != 1 || req.System[0].CacheControl["type"] != "ephemeral" {
+		t.Errorf("system cache_control = %+v, want exactly {type: ephemeral} (the default 5-minute lifetime)", req.System)
+	}
+	for _, m := range req.Messages {
+		for _, c := range m.Content {
+			if c.CacheControl != nil {
+				t.Errorf("user message cache_control = %v, want none", c.CacheControl)
+			}
+		}
+	}
+}
+
 func TestGenerateWithNoTeamsSendsTheCatalogueAsIs(t *testing.T) {
 	gw := &fakeGateway{text: validGenerated}
 	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE"}, 5*time.Second).
