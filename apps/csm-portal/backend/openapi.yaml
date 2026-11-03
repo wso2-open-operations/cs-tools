@@ -5814,10 +5814,12 @@ paths:
       description: >
         The link id is in the body, not the path, so it stays out of access
         logs. From then on the dashboard is listed under GET /dashboards/shared
-        (sharedViaLink true) while the link stays on, unless the caller owns
-        it (own true: open it under My Dashboards) or already has it through a
-        person or team share. Opening it again changes nothing. 400 when
-        linkId is not a UUID; 404 when the link is unknown or turned off.
+        while the link stays on, unless the caller owns it (own true: open it
+        under My Dashboards): through the link (sharedViaLink true), or
+        through a person or team share while the caller has one, and through
+        the link again if that share goes. Opening it again changes nothing.
+        400 when linkId is not a UUID; 404 when the link is unknown or turned
+        off.
         Every portal role that can view dashboards.
       operationId: openDashboardLink
       requestBody:

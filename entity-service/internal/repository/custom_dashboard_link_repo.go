@@ -152,12 +152,13 @@ func (r *customDashboardLinkRepo) DisableLink(ctx context.Context, ownerID, dash
 }
 
 // OpenLink records that userID opened the link linkID and returns its
-// dashboard. A row is added only when the user would not see the dashboard
-// otherwise: not for its owner, nor for a user it is already shared with
-// directly or through a team they are in now (the Shared Dashboards list
-// shows one entry per dashboard either way, see sharedWithUserFrom). Opening
-// it again adds nothing. "" when no dashboard has that link on, or the user
-// is not internal staff (internal only, as team shares).
+// dashboard. A row is added for everyone but the owner, also for a user it is
+// already shared with directly or through a team: the Shared Dashboards list
+// shows one entry per dashboard either way (see sharedWithUserFrom), and the
+// row keeps it there through the link if that share goes later, as for a user
+// shared it after opening the link. Opening it again adds nothing. "" when no
+// dashboard has that link on, or the user is not internal staff (internal
+// only, as team shares).
 //
 // The dashboard row is read FOR SHARE so an open cannot overlap DisableLink:
 // the access row's foreign key only takes FOR KEY SHARE, which does not wait
@@ -178,11 +179,6 @@ func (r *customDashboardLinkRepo) OpenLink(ctx context.Context, userID, linkID s
 		   INSERT INTO custom_dashboard_link_access (dashboard_id, user_id)
 		   SELECT d.id, me.id FROM d, me
 		   WHERE d.owner_user_id IS DISTINCT FROM me.id
-		     AND NOT EXISTS (SELECT 1 FROM custom_dashboard_share ps
-		                     WHERE ps.dashboard_id = d.id AND ps.shared_with_user_id = me.id)
-		     AND NOT EXISTS (SELECT 1 FROM custom_dashboard_team_share ts
-		                     JOIN team_member tm ON tm.team_id = ts.team_id AND tm.user_id = me.id
-		                     WHERE ts.dashboard_id = d.id)
 		   ON CONFLICT (dashboard_id, user_id) DO NOTHING
 		   RETURNING 1
 		 )

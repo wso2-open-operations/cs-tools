@@ -405,7 +405,11 @@ func TestCustomDashboardLinkIntegration_OnlyInternalStaffOpenALink(t *testing.T)
 	}
 }
 
-func TestCustomDashboardLinkIntegration_AlreadySharedAddsNoLinkAccess(t *testing.T) {
+// A user already shared the dashboard directly or through a team who opens
+// the link gets an access row, but the Shared list still shows the share;
+// when that share goes, the dashboard stays through the link, as for a user
+// shared it after opening the link.
+func TestCustomDashboardLinkIntegration_AlreadySharedStillRecordsTheOpen(t *testing.T) {
 	f := newLinkFixture(t)
 	f.userType(t, cdbOwnerB, "INTERNAL")
 	shares := NewCustomDashboardShareRepository(f.pool)
@@ -428,8 +432,8 @@ func TestCustomDashboardLinkIntegration_AlreadySharedAddsNoLinkAccess(t *testing
 	if id, _ := f.open(t, cdbOwnerB, on2.LinkID); id != cdbDashboard2 {
 		t.Errorf("OpenLink 2 = %q, want dashboard 2", id)
 	}
-	if n := f.accessRows(t, cdbDashboard1) + f.accessRows(t, cdbDashboard2); n != 0 {
-		t.Errorf("access rows for dashboards already shared with B = %d, want 0", n)
+	if n1, n2 := f.accessRows(t, cdbDashboard1), f.accessRows(t, cdbDashboard2); n1 != 1 || n2 != 1 {
+		t.Errorf("access rows for dashboards already shared with B = %d, %d, want 1 each", n1, n2)
 	}
 	after := f.sharedWith(t, cdbOwnerB)
 	if len(after) != 2 || len(before) != 2 {
@@ -443,6 +447,17 @@ func TestCustomDashboardLinkIntegration_AlreadySharedAddsNoLinkAccess(t *testing
 	// Alpha (2) is through the team, Zeta (1) direct; ordered by name.
 	if after[0].ID != cdbDashboard2 || after[0].SharedViaTeam == nil || after[1].ID != cdbDashboard1 || after[1].SharedViaTeam != nil {
 		t.Errorf("B's shared list = %+v, want Alpha via the team, then Zeta direct", after)
+	}
+
+	// Both shares go: B still has both dashboards, through the links.
+	if ok, err := shares.RemoveShare(f.ctx, cdbOwnerA, cdbDashboard1, cdbOwnerB); err != nil || !ok {
+		t.Fatalf("RemoveShare: %v, %v", ok, err)
+	}
+	if ok, err := NewCustomDashboardTeamShareRepository(f.pool).RemoveTeamShare(f.ctx, cdbOwnerA, cdbDashboard2, cdbTeamOrion); err != nil || !ok {
+		t.Fatalf("RemoveTeamShare: %v, %v", ok, err)
+	}
+	if list := f.sharedWith(t, cdbOwnerB); len(list) != 2 || !list[0].SharedViaLink || !list[1].SharedViaLink || list[0].SharedViaTeam != nil {
+		t.Errorf("B's shared list after both shares went = %+v, want both via the link", list)
 	}
 }
 
