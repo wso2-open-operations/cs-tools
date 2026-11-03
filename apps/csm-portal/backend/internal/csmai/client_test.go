@@ -79,6 +79,9 @@ func withCorrelationID(t *testing.T, id string) context.Context {
 	return ctx
 }
 
+// TestGenerateDashboardSendsTheRequestAndReadsTheAnswer: the client posts the
+// prompt, draft and teams with the token and the caller's correlation id, and
+// decodes the candidates and all four token counts.
 func TestGenerateDashboardSendsTheRequestAndReadsTheAnswer(t *testing.T) {
 	var got map[string]any
 	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {

@@ -56,6 +56,9 @@ func post(t *testing.T, h *DashboardHandler, body string) (int, map[string]any) 
 	return rec.Code, out
 }
 
+// TestGenerateReturnsTheCandidates: the generator gets the trimmed prompt, the
+// draft and the teams, and the 200 response carries the candidates and all
+// four token counts.
 func TestGenerateReturnsTheCandidates(t *testing.T) {
 	gen := &fakeGenerator{res: dashboards.Result{
 		Candidates:  []json.RawMessage{json.RawMessage(`{"displayName":"A"}`), json.RawMessage(`{"displayName":"B"}`)},
