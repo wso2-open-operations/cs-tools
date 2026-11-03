@@ -825,7 +825,7 @@ describe("DashboardWidgetTile", () => {
     expect(params.get("states")).toBe("open");
   });
 
-  it("resolves a relative-date filter in the click-through href, so the destination list matches the number that was clicked", async () => {
+  it("keeps a case widget's relative date in the click-through href, for the cases list to resolve browser-local", async () => {
     postMock.mockResolvedValue({ total: 3, cases: [], limit: 1, offset: 0, hasMore: false });
 
     renderWithClient(
@@ -842,23 +842,20 @@ describe("DashboardWidgetTile", () => {
 
     await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument());
 
+    // The cases list resolves the placeholder itself, in the viewer's own
+    // local day (`useGetCsmCases`), so it counts what the tile counted; an
+    // instant frozen into the link showed as an empty date in the list's
+    // Advanced date row.
     const params = new URLSearchParams(
       (screen.getByRole("link").getAttribute("href") ?? "").split("?")[1],
     );
-    const createdFrom = params.get("createdFrom") ?? "";
-    // An unresolved placeholder reaching the list page is forwarded to the
-    // backing service, which resolves "today" against UTC rather than the
-    // viewer's own local day — so the tile's count and the list behind it
-    // disagreed by the offset between the two midnights. The href must
-    // carry the same browser-local instant the tile itself counted with.
-    expect(createdFrom).not.toContain("__today__");
-    const now = new Date();
-    expect(createdFrom).toBe(
-      new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString(),
-    );
+    expect(params.get("createdFrom")).toBe("__today__");
+    // The tile's own count still went out resolved.
+    const sent = JSON.stringify(postMock.mock.calls[0]?.[1]);
+    expect(sent).not.toContain("__today__");
   });
 
-  it("resolves a relative-date filter in the View more preview href too", async () => {
+  it("keeps a case widget's relative date in the View more preview href too", async () => {
     postMock.mockResolvedValue({
       total: 6,
       cases: [
@@ -881,14 +878,37 @@ describe("DashboardWidgetTile", () => {
         resourceType="case"
         shape="list"
         filters={{
-          filters: [{ field: "createdOn", op: "gte", values: ["__today__"] }],
+          filters: [{ field: "createdOn", op: "gte", values: ["__daysAgo:30__"] }],
         }}
         listLimit={5}
       />,
     );
 
     const viewMoreLink = await screen.findByRole("link", { name: /view more/i });
-    expect(viewMoreLink.getAttribute("href") ?? "").not.toContain("__today__");
+    expect(decodeURIComponent(viewMoreLink.getAttribute("href") ?? "")).toContain(
+      "createdOn~gte=__daysAgo:30__",
+    );
+  });
+
+  it("still resolves a relative date in a non-case widget's href (its list page has no resolver)", async () => {
+    postMock.mockResolvedValue({ total: 2, timeCards: [], limit: 1, offset: 0, hasMore: false });
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="my_month"
+        displayName="My Time Cards This Month"
+        resourceType="time_card"
+        shape="count"
+        filters={{ startDate: "__startOfMonth:0__" }}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("2")).toBeInTheDocument());
+    const href = decodeURIComponent(screen.getByRole("link").getAttribute("href") ?? "");
+    const now = new Date();
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    expect(href).not.toContain("__startOfMonth");
+    expect(href).toContain(`startDate=${firstOfMonth}`);
   });
 
   it("shape count: click-through carries a `from` location.state pointing back to this dashboard page, so the destination list can offer a Back button", async () => {

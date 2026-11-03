@@ -219,6 +219,40 @@ describe("WidgetInlineDrilldownPanel", () => {
     expect(params.get("severity")).toBe("critical");
   });
 
+  it("keeps a case widget's relative dates in the 'View more' href, so the list shows them as such", async () => {
+    postMock.mockResolvedValue({
+      total: 6,
+      cases: [{ id: "1", number: "CS-1", subject: "Disk full", state: "open" }],
+      limit: 4,
+      offset: 0,
+      hasMore: true,
+    });
+
+    renderPanel(
+      <WidgetInlineDrilldownPanel
+        widgetId="cases_by_severity"
+        displayName="Cases by severity"
+        resourceType="case"
+        filters={{
+          filters: [
+            { field: "createdOn", op: "gte", values: ["__daysAgo:30__"] },
+            { field: "createdOn", op: "lte", values: ["__today__"] },
+          ],
+        }}
+        slice={CRITICAL_SLICE}
+        listLimit={4}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const viewMoreLink = await screen.findByRole("link", { name: /view more/i });
+    const params = new URLSearchParams((viewMoreLink.getAttribute("href") ?? "").split("?")[1]);
+    expect(params.get("createdOn~gte")).toBe("__daysAgo:30__");
+    expect(params.get("createdOn~lte")).toBe("__today__");
+    // The panel's own list request still goes out resolved.
+    expect(JSON.stringify(postMock.mock.calls[0]?.[1])).not.toContain("__daysAgo");
+  });
+
   it("calls onClose when the close control is activated", async () => {
     postMock.mockResolvedValue({ total: 0, cases: [], limit: 4, offset: 0, hasMore: false });
     const onClose = vi.fn();

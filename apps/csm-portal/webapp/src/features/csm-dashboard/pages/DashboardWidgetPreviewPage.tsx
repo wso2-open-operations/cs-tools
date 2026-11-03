@@ -51,6 +51,7 @@ import {
 } from "@features/csm-cases/utils/caseListColumns";
 import {
   callRequestWidgetFiltersToQuery,
+  CASE_FAMILY_RESOURCE_TYPE_SET,
   DEFAULT_CALL_REQUEST_WIDGET_FILTERS,
   resourceTypeForPreviewSlug,
   translateCallRequestDashboardFilters,
@@ -64,6 +65,7 @@ import {
   GROUPABLE_FIELD_ACCOUNT,
   parseWidgetPreviewFilters,
   resolveCurrentUserSentinels,
+  widgetFilterChipLabel,
 } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import CasesFilterBar, {
   type CasesFilters,
@@ -113,13 +115,7 @@ const SEARCH_DEBOUNCE_MS = 300;
  * shape the tile's own count used — so its result set is guaranteed to match,
  * at the cost of a plain search box instead of a fully editable filter bar.
  */
-const CASE_FAMILY_RESOURCE_TYPES = new Set<BeWidgetResourceType>([
-  "case",
-  "service_request",
-  "security_report_analysis",
-  "announcement",
-  "engagement",
-]);
+const CASE_FAMILY_RESOURCE_TYPES: ReadonlySet<BeWidgetResourceType> = CASE_FAMILY_RESOURCE_TYPE_SET;
 
 /**
  * "View more" landing for a dashboard `shape: "list"` widget tile — the same
@@ -952,7 +948,7 @@ function DashboardWidgetPreviewContent({
               key={`${entry.field}-${entry.op ?? "in"}`}
               size="small"
               variant="outlined"
-              label={`${entry.field}${entry.op ? ` (${entry.op})` : ""}: ${entry.value}`}
+              label={widgetFilterChipLabel(entry)}
             />
           ))}
         </Box>
