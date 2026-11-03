@@ -427,15 +427,15 @@ export function isAbortError(error: unknown): boolean {
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(abortError());
-    const timer = window.setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timer);
-        reject(abortError());
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -500,13 +500,21 @@ export async function sendFileInChunks(
   const count = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
   let next = 0;
   let sent = 0;
+  // The first failure, kept so it is the one thrown, and so the other workers
+  // stop taking new chunks. A chunk already in flight is left to finish.
+  let failure: { error: unknown } | undefined;
   const worker = async () => {
-    for (;;) {
+    while (!failure) {
       const index = next++;
       if (index >= count) return;
       const from = index * UPLOAD_CHUNK_BYTES;
       const body = file.slice(from, Math.min(from + UPLOAD_CHUNK_BYTES, file.size));
-      await sendChunk(authFetch, { type, attachmentId, index, body, signal });
+      try {
+        await sendChunk(authFetch, { type, attachmentId, index, body, signal });
+      } catch (error) {
+        failure ??= { error };
+        return;
+      }
       sent += body.size;
       onProgress?.(sent, file.size);
     }
@@ -515,10 +523,8 @@ export async function sendFileInChunks(
     { length: Math.min(UPLOAD_CHUNK_CONCURRENCY, count) },
     worker,
   );
-  // A failed chunk must stop the others, not leave them sending.
-  const results = await Promise.allSettled(workers);
-  const failed = results.find((r) => r.status === "rejected");
-  if (failed) throw (failed as PromiseRejectedResult).reason;
+  await Promise.all(workers);
+  if (failure) throw failure.error;
   return count;
 }
 

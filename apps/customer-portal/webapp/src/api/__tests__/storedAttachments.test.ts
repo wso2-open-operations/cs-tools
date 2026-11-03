@@ -421,6 +421,32 @@ describe("storedAttachments", () => {
       }
     });
 
+    it("stops taking new chunks after one fails, and throws that failure", async () => {
+      withMode();
+      const started10 = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
+      const sent: number[] = [];
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started10, 201);
+        const index = Number(String(url).match(/chunks\/(\d+)/)?.[1]);
+        sent.push(index);
+        if (index === 0)
+          return json({ message: "Only the person who started the upload can send it." }, 403);
+        // The others are still in flight when chunk 0 is refused.
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return new Response(null, { status: 204 });
+      });
+      await expect(
+        uploadStoredAttachment(authFetch, {
+          type: "work_item",
+          parentId: "c",
+          file: bigFile(6 * CHUNK),
+          name: "a.bin",
+        }),
+      ).rejects.toThrow("Only the person who started the upload can send it.");
+      // Three workers each took one chunk before the failure; none took a fourth.
+      expect(sent.length).toBeLessThanOrEqual(3);
+    });
+
     it("does not retry a refusal", async () => {
       withMode();
       let tries = 0;
