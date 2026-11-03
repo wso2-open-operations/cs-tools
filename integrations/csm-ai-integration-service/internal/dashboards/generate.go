@@ -116,9 +116,11 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 		// The system prompt is the same for every user and call of one
 		// deployment (the catalogue, and the team list the backend builds
 		// once at start), so it is cached: a call within the cache's lifetime
-		// (5 minutes, renewed by each hit) reads it at a tenth of the input
-		// price. Nothing that changes per request may come before this
-		// breakpoint; the prompt and the draft are in the user message after it.
+		// (5 minutes, renewed by each hit) reads it at the model's cache-hit
+		// price: 0.05 times the input price on Sonnet 5.5 (the default) and
+		// Opus 5.5, 0.1 times on most other models. Nothing that changes per
+		// request may come before this breakpoint; the prompt and the draft
+		// are in the user message after it.
 		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
 		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
 	})
