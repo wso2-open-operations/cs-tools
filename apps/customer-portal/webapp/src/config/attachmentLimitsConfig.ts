@@ -52,7 +52,7 @@ export function entityAttachmentMaxBytes(): number {
 
 /**
  * Largest pasted or inserted comment image, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 10). Read at call time.
+ * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 1). Read at call time.
  */
 export function inlineImageMaxBytes(): number {
   return Math.floor(

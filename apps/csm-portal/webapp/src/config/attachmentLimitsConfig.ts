@@ -25,7 +25,7 @@ export const LEGACY_ATTACHMENT_MAX_BYTES = 10 * BYTES_PER_MB;
 /** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 10 MiB). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 
-/** Largest comment image (entity-service `INLINE_IMAGE_MAX_BYTES` default, 10 MiB). */
+/** Largest comment image (entity-service `INLINE_IMAGE_MAX_BYTES` default, 1 MiB). */
 export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
 
 /** A positive number of megabytes from a number or numeric string, else `fallback`. */
