@@ -126,8 +126,10 @@ csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 -
 ```
 
 The subject is prefixed `[Test]` and/or `[Manual range]`, so it cannot be mistaken for the scheduled mail. These
-flags are valid only with `--run-now` for these two tasks, are refused with `TRYOUT_TASK` or while the task has a
-`debug` list, and an override run writes no ledger row, so it never marks a scheduled period done.
+flags are valid only with `--run-now` for these two tasks and are refused with `TRYOUT_TASK`. `--recipients` is
+also refused while the task has a `debug` list, because debug mail mode would redirect the mail. A window alone
+is allowed, and its mail then goes to the debug list. An override run writes no ledger row, so it never marks a
+scheduled period done.
 
 ### Alerting
 
