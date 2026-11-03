@@ -210,17 +210,24 @@ interface Cell {
   quiet?: boolean;
 }
 
+/** How the legend names a time zone's standing-hours chip. */
+const ZONE_HOURS_LABEL: Readonly<Record<string, string>> = {
+  IST: "IST working hours",
+  PDT: "Americas cover",
+  AEST: "Australia cover",
+};
+
 /** What a weekday nobody has marked is: an ordinary working day.
  *
  *  Drawn, never stored. The rota sheet this replaces wrote LK into every
- *  such cell by hand; here it is simply what an empty weekday means, so it
+ *  such cell by hand (the chip now reads IST); here it is simply what an empty weekday means, so it
  *  gives way the moment leave, an allocation or a turn is marked, and there
  *  is nothing to clean up when one is. Not a turn, so "Rotations only" fades
  *  it like the rest of the standing hours. */
 const WORKING_DAY: Cell = {
-  code: "LK",
+  code: "IST",
   token: "LK",
-  title: "Working day (LK)",
+  title: "Working day (IST, Regular hours)",
   isRotation: false,
   isDefault: true,
 };
@@ -805,7 +812,7 @@ export default function MonthRoster({
       const code = own ? ordinaryDayCode(own, isLead) : undefined;
       const sh = code && code !== REGULAR_HOURS_CODE ? shifts.get(code) : undefined;
       return sh
-        ? { code: sh.shortCode, token: sh.colourToken, title: `Working day (${sh.shortCode})`, isRotation: false, isDefault: true }
+        ? { code: sh.shortCode, token: sh.colourToken, title: `Working day (${sh.shortCode}, ${sh.label})`, isRotation: false, isDefault: true }
         : WORKING_DAY;
     };
     return (
@@ -943,7 +950,17 @@ export default function MonthRoster({
     // Only when a marker is on a row in view: the legend explains what is
     // drawn, and the marker is not a code a lead can mark.
     if (rows.some((r) => (engByPerson.get(r.userId)?.size ?? 0) > 0)) put(ENGAGEMENT_MARK_LEGEND_ITEM);
-    return [...out.values()];
+    // Standing hours are explained once per chip: Regular hours and the India
+    // region shift both read IST, and are the same nine-to-five, so one IST
+    // line says it. A zone chip reads as whose working hours it is.
+    const seenHours = new Set<string>();
+    return [...out.values()].flatMap((it) => {
+      if (it.group !== "Hours") return [it];
+      if (seenHours.has(it.code)) return [];
+      seenHours.add(it.code);
+      const label = ZONE_HOURS_LABEL[it.code];
+      return [label ? { ...it, label } : it];
+    });
   }, [rows, days, kindByCode, defaultFor, absenceKinds, family, shifts, engByPerson]);
 
   /** Turn a click on any roster cell into the slot the page should open the

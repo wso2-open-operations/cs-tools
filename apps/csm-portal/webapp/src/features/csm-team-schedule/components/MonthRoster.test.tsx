@@ -381,7 +381,7 @@ describe("MonthRoster: an unmarked weekday is a working day", () => {
   it("shows LK on every weekday nobody has marked, and nothing at the weekend", () => {
     const { container } = renderRoster();
     expect(container.querySelectorAll(".chip.dflt")).toHaveLength(21);
-    expect([...container.querySelectorAll(".chip.dflt")].every((c) => c.textContent === "LK")).toBe(true);
+    expect([...container.querySelectorAll(".chip.dflt")].every((c) => c.textContent === "IST")).toBe(true);
     // The turn on the 21st is still the turn, not LK.
     expect(within(container.querySelector("table") as HTMLElement).getByText("6-9p")).toBeInTheDocument();
   });
@@ -928,7 +928,7 @@ describe("MonthRoster: back from a move mid-month", () => {
 
   it("reads the India region shift for a team's engineers, and Regular hours for its lead", () => {
     // The lead of a team on the India region shift is a Sri Lankan-team
-    // engineer on rotation, so their ordinary day stays LK.
+    // engineer on rotation, so their ordinary day stays Regular hours.
     const { container } = renderRoster({
       assignments: [],
       shifts: shiftMap(REGULAR, REGULAR_IND, EVENING),
@@ -940,13 +940,13 @@ describe("MonthRoster: back from a move mid-month", () => {
       },
       teamDefaultShift: { bravo: REGULAR_IND.code },
     });
-    const firstCell = (name: string) =>
+    // Both chips read IST, so the window is told apart by the day's title.
+    const firstChip = (name: string) =>
       [...container.querySelectorAll("tbody tr")]
         .find((tr) => tr.textContent?.includes(name))
-        ?.querySelector("td")
-        ?.textContent?.trim();
-    expect(firstCell("Nia")).toBe(REGULAR_IND.shortCode);
-    expect(firstCell("Lia")).toBe(REGULAR.shortCode);
+        ?.querySelector("td:not(.name)");
+    expect(firstChip("Nia")?.getAttribute("title")).toContain(REGULAR_IND.label);
+    expect(firstChip("Lia")?.getAttribute("title")).toContain(REGULAR.label);
   });
 
   it("keeps a lead on their team's own ordinary day anywhere else", () => {
@@ -1166,8 +1166,28 @@ describe("MonthRoster: reading the codes", () => {
     expect(legend).not.toBeNull();
     expect(within(legend).getByText(EVENING.label)).toBeInTheDocument();
     expect(within(legend).getByText(ANNUAL_LEAVE.label)).toBeInTheDocument();
-    expect(within(legend).getByText(/Working day/)).toBeInTheDocument();
+    // An unmarked weekday is the zone's working hours, named for the zone.
+    expect(within(legend).getByText("IST working hours")).toBeInTheDocument();
     expect(within(legend).queryByText(RND.label)).not.toBeInTheDocument();
+  });
+
+  it("explains each zone's hours chip once, by whose working hours they are", () => {
+    // Regular hours and the India region shift both read IST: one IST line.
+    const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", colourToken: "AEST", isRotation: false, startMinute: 360, endMinute: 540 });
+    const { container } = renderRoster({
+      shifts: shiftMap(REGULAR, REGULAR_IND, EVENING, aest),
+      assignments: [
+        assignment({ name: "Ben", rotaDate: "2026-09-21", shiftCode: REGULAR.code }),
+        assignment({ name: "Dev", rotaDate: "2026-09-21", shiftCode: REGULAR_IND.code }),
+        assignment({ name: "Ava", rotaDate: "2026-09-21", shiftCode: aest.code }),
+      ],
+    });
+    const legend = container.querySelector(".rlegend") as HTMLElement;
+    const hours = [...legend.querySelectorAll(".chip")].map((c) => c.textContent);
+    expect(hours.filter((t) => t === "IST")).toHaveLength(1);
+    expect(within(legend).getByText("IST working hours")).toBeInTheDocument();
+    expect(within(legend).getByText("Australia cover")).toBeInTheDocument();
+    expect(within(legend).queryByText(REGULAR_IND.label)).not.toBeInTheDocument();
   });
 
   it("does not explain a kind that is no longer offered, though its day still shows", () => {

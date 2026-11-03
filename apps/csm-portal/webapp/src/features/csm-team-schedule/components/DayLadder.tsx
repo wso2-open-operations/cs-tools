@@ -26,6 +26,7 @@ import {
   initialsOf,
   partsInZone,
   placeOnDay,
+  rotationHostOf,
   timeOf,
   toIsoDate,
 } from "../utils/rota";
@@ -304,9 +305,29 @@ export default function DayLadder({
      * Those, and hours that overlap without matching, are set side by side
      * by packIntoColumns below.
      */
+    /** The rotation whose hours a standing window is stored on, on this day:
+     *  AEST regular hours sit on the Morning rotation's 06:00-09:00. */
+    const weekend = day.getDay() === 0 || day.getDay() === 6;
+    const hostOf = (window: ScheduleShift | undefined): ScheduleShift | undefined =>
+      rotationHostOf(window, shifts.values(), weekend);
     const mergeSameHours = (cards: Block[]): Block[] => {
       const out: Block[] = [];
       for (const group of groupBy(cards, (c) => `${c.startMin}-${c.endMin}`).values()) {
+        // Only people on standing hours that are stored on a rotation's hours
+        // (AEST regular hours, with nobody on the Morning rotation that day):
+        // still the rotation's card, so the morning reads the same every day.
+        // They are listed as its members, untagged: the zone is the Roster's
+        // to show.
+        const host = hostOf(group[0].shift);
+        if (host && group.every((c) => !c.shift?.isRotation && hostOf(c.shift)?.code === host.code)) {
+          out.push({
+            ...group[0],
+            key: group.map((c) => c.key).join("+"),
+            shift: host,
+            rows: group.flatMap((c) => c.rows),
+          });
+          continue;
+        }
         if (group.length < 2) {
           out.push(...group);
           continue;
@@ -340,18 +361,31 @@ export default function DayLadder({
           continue;
         }
         // The first window leads -- its colour and chip -- and an on-call
-        // variant follows the window it is on call for.
+        // variant follows the window it is on call for. A rotation leads a
+        // standing window on the same hours, so the card keeps its name and
+        // colour.
         const ordered = [...group].sort(
-          (a, b) => Number(a.shift?.isOnCall ?? false) - Number(b.shift?.isOnCall ?? false),
+          (a, b) =>
+            Number(a.shift?.isOnCall ?? false) - Number(b.shift?.isOnCall ?? false) ||
+            Number(!(a.shift?.isRotation ?? true)) - Number(!(b.shift?.isRotation ?? true)),
         );
         const lead = ordered[0];
         // A window and its own on-call are one rotation, not two: the card
         // takes the window's name ("Morning 6-9am", not "Morning 6-9am ·
         // Morning 6-9am on-call") and lists everyone together, the on-call
-        // person tagged as such on their own row.
-        if (ordered.filter((c) => !c.shift?.isOnCall).length === 1) {
+        // person tagged as such on their own row. A standing window on the
+        // same hours (AEST regular hours on the morning) folds into that one
+        // list too, its people listed as the rotation's members, untagged.
+        const turns = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation !== false);
+        const standing = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation === false);
+        if (turns.length === 1 || (turns.length === 0 && standing.length === 1)) {
+          // Nobody on the rotation itself, only its on-call beside the
+          // standing window: still the rotation's card, as when the standing
+          // window is alone.
+          const host = turns.length === 0 ? hostOf(standing[0].shift) : undefined;
           out.push({
             ...lead,
+            ...(host ? { shift: host } : {}),
             key: ordered.map((c) => c.key).join("+"),
             rows: ordered.flatMap((c) => c.rows),
           });
