@@ -49,6 +49,7 @@ func newLinkFixture(t *testing.T) linkFixture {
 	return linkFixture{links: NewCustomDashboardLinkRepository(pool), dashboards: dashboards, pool: pool, ctx: context.Background()}
 }
 
+// get is GetLink as owner, failing the test on an error.
 func (f linkFixture) get(t *testing.T, owner, dashboard string) *domain.CustomDashboardLink {
 	t.Helper()
 	l, err := f.links.GetLink(f.ctx, owner, dashboard)
@@ -58,6 +59,7 @@ func (f linkFixture) get(t *testing.T, owner, dashboard string) *domain.CustomDa
 	return l
 }
 
+// enable is EnableLink as owner, failing the test on an error.
 func (f linkFixture) enable(t *testing.T, owner, dashboard string) *domain.CustomDashboardLink {
 	t.Helper()
 	l, err := f.links.EnableLink(f.ctx, owner, dashboard)
@@ -67,6 +69,7 @@ func (f linkFixture) enable(t *testing.T, owner, dashboard string) *domain.Custo
 	return l
 }
 
+// disable is DisableLink as owner, failing the test on an error.
 func (f linkFixture) disable(t *testing.T, owner, dashboard string) bool {
 	t.Helper()
 	ok, err := f.links.DisableLink(f.ctx, owner, dashboard)
@@ -85,6 +88,7 @@ func (f linkFixture) opened(t *testing.T, dashboard, user string) {
 	}
 }
 
+// accessRows counts the dashboard's custom_dashboard_link_access rows.
 func (f linkFixture) accessRows(t *testing.T, dashboard string) int {
 	t.Helper()
 	var n int
@@ -210,6 +214,8 @@ func (f linkFixture) userType(t *testing.T, user, typ string) {
 	}
 }
 
+// open is OpenLink as user, failing the test on an error: the dashboard id
+// ("" for no dashboard) and whether user owns it.
 func (f linkFixture) open(t *testing.T, user, linkID string) (string, bool) {
 	t.Helper()
 	id, own, err := f.links.OpenLink(f.ctx, user, linkID)
@@ -219,6 +225,7 @@ func (f linkFixture) open(t *testing.T, user, linkID string) (string, bool) {
 	return id, own
 }
 
+// sharedWith is user's Shared Dashboards list, failing the test on an error.
 func (f linkFixture) sharedWith(t *testing.T, user string) []domain.SharedCustomDashboardSummary {
 	t.Helper()
 	list, err := NewCustomDashboardShareRepository(f.pool).ListSharedWithUser(f.ctx, user)

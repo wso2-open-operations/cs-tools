@@ -63,6 +63,7 @@ func newOrphanFixture(t *testing.T) orphanFixture {
 	return f
 }
 
+// shareWith shares dashboard with user directly.
 func (f orphanFixture) shareWith(t *testing.T, dashboard, user string) {
 	t.Helper()
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO custom_dashboard_share (dashboard_id, shared_with_user_id) VALUES ($1, $2)`,
@@ -71,6 +72,7 @@ func (f orphanFixture) shareWith(t *testing.T, dashboard, user string) {
 	}
 }
 
+// shareWithTeam shares dashboard with team.
 func (f orphanFixture) shareWithTeam(t *testing.T, dashboard, team string) {
 	t.Helper()
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO custom_dashboard_team_share (dashboard_id, team_id) VALUES ($1, $2)`,
@@ -79,6 +81,7 @@ func (f orphanFixture) shareWithTeam(t *testing.T, dashboard, team string) {
 	}
 }
 
+// exec runs one statement, failing the test with what on an error.
 func (f orphanFixture) exec(t *testing.T, what, sql string, args ...any) {
 	t.Helper()
 	if _, err := f.pool.Exec(f.ctx, sql, args...); err != nil {
@@ -86,11 +89,13 @@ func (f orphanFixture) exec(t *testing.T, what, sql string, args ...any) {
 	}
 }
 
+// deleteUser deletes the user, which runs the owner-deletion rules under test.
 func (f orphanFixture) deleteUser(t *testing.T, id string) {
 	t.Helper()
 	f.exec(t, "delete user", `DELETE FROM "user" WHERE id = $1`, id)
 }
 
+// exists reports whether the dashboard row is still there.
 func (f orphanFixture) exists(t *testing.T, dashboard string) bool {
 	t.Helper()
 	var ok bool
@@ -100,6 +105,7 @@ func (f orphanFixture) exists(t *testing.T, dashboard string) bool {
 	return ok
 }
 
+// enableLink turns the dashboard's link on as owner.
 func (f orphanFixture) enableLink(t *testing.T, owner, dashboard string) {
 	t.Helper()
 	if l, err := NewCustomDashboardLinkRepository(f.pool).EnableLink(f.ctx, owner, dashboard); err != nil || l == nil {

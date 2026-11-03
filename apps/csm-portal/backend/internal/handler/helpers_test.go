@@ -1187,6 +1187,8 @@ type mockEntityTimeCardClient struct {
 	deleteTimeCardFn     func(ctx context.Context, id string) ([]byte, error)
 }
 
+// AggregateTimeCards calls aggregateTimeCardsFn when set, else answers an
+// empty aggregate (no groups, zero totals).
 func (m *mockEntityTimeCardClient) AggregateTimeCards(ctx context.Context, body []byte) ([]byte, error) {
 	if m.aggregateTimeCardsFn != nil {
 		return m.aggregateTimeCardsFn(ctx, body)

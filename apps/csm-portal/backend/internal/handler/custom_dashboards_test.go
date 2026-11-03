@@ -52,6 +52,7 @@ type fakeCustomDashboardClient struct {
 	err            error
 }
 
+// GetCustomDashboardLink records the dashboard id and answers f.link, or f.err.
 func (f *fakeCustomDashboardClient) GetCustomDashboardLink(_ context.Context, id string) (entity.CustomDashboardLink, error) {
 	f.called, f.gotID = true, id
 	if f.err != nil {
@@ -60,6 +61,7 @@ func (f *fakeCustomDashboardClient) GetCustomDashboardLink(_ context.Context, id
 	return f.link, nil
 }
 
+// EnableCustomDashboardLink records the dashboard id and answers f.link, or f.err.
 func (f *fakeCustomDashboardClient) EnableCustomDashboardLink(_ context.Context, id string) (entity.CustomDashboardLink, error) {
 	f.called, f.gotID = true, id
 	if f.err != nil {
@@ -68,11 +70,13 @@ func (f *fakeCustomDashboardClient) EnableCustomDashboardLink(_ context.Context,
 	return f.link, nil
 }
 
+// DisableCustomDashboardLink records the dashboard id and answers f.err.
 func (f *fakeCustomDashboardClient) DisableCustomDashboardLink(_ context.Context, id string) error {
 	f.called, f.gotID = true, id
 	return f.err
 }
 
+// OpenCustomDashboardLink records the link id and answers f.opened, or f.err.
 func (f *fakeCustomDashboardClient) OpenCustomDashboardLink(_ context.Context, linkID string) (entity.OpenedCustomDashboardLink, error) {
 	f.called, f.gotLinkID = true, linkID
 	if f.err != nil {
@@ -1049,6 +1053,9 @@ func TestSharedDashboards_PassTheTeamOn(t *testing.T) {
 // and anyone's POST /dashboards/shared/link.
 const testDashboardLinkID = "5e636a12-0000-4000-8000-0000000000cc"
 
+// serveLinkRoute serves one request through the four link routes as main.go
+// registers their paths (without the permission middleware), signed in as the
+// test user when signedIn.
 func serveLinkRoute(client *fakeCustomDashboardClient, method, path, body string, signedIn bool) *httptest.ResponseRecorder {
 	h := NewCustomDashboardHandler(client)
 	mux := http.NewServeMux()

@@ -43,6 +43,9 @@ type stubTimeCardRepo struct {
 func (s *stubTimeCardRepo) SearchTimeCards(context.Context, domain.SearchTimeCardsRequest, string) ([]domain.TimeCardView, int, error) {
 	panic("not implemented")
 }
+
+// AggregateTimeCards calls aggregateTimeCards; a test that reaches it
+// without setting it panics, as the stub's other methods do.
 func (s *stubTimeCardRepo) AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error) {
 	if s.aggregateTimeCards == nil {
 		panic("not implemented")
