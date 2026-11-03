@@ -238,6 +238,10 @@ func (f fakeUploadCleanup) CleanupUploads(context.Context) (domain.UploadCleanup
 	return f.res, f.err
 }
 
+func (f fakeUploadCleanup) AcknowledgeOrphans(context.Context, domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error) {
+	return domain.AcknowledgeOrphansResult{}, f.err
+}
+
 func TestStoredAttachmentHandler_CleanupUploads(t *testing.T) {
 	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithUploadCleanup(fakeUploadCleanup{res: domain.UploadCleanupResult{Found: 3, Cleaned: 2, Failed: 1}})
 	rec := httptest.NewRecorder()
@@ -323,5 +327,52 @@ func TestStoredAttachmentHandler_BackendCallsMapErrors(t *testing.T) {
 				t.Errorf("locate status = %d, want %d", rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+type fakeUploadCleanupSvc struct {
+	ack domain.AcknowledgeOrphansRequest
+	err error
+}
+
+func (f *fakeUploadCleanupSvc) CleanupUploads(context.Context) (domain.UploadCleanupResult, error) {
+	return domain.UploadCleanupResult{}, f.err
+}
+
+func (f *fakeUploadCleanupSvc) AcknowledgeOrphans(_ context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error) {
+	f.ack = req
+	return domain.AcknowledgeOrphansResult{Acknowledged: len(req.IDs)}, f.err
+}
+
+func TestStoredAttachmentHandler_AcknowledgeOrphans(t *testing.T) {
+	cleanup := &fakeUploadCleanupSvc{}
+	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithUploadCleanup(cleanup)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", h.AcknowledgeOrphans)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup/acknowledge", strings.NewReader(`{"ids":["a","b"]}`)))
+	if rec.Code != http.StatusOK || len(cleanup.ack.IDs) != 2 {
+		t.Fatalf("status = %d, request = %+v", rec.Code, cleanup.ack)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"acknowledged":2`) {
+		t.Errorf("headers = %v body = %s", rec.Header(), rec.Body.String())
+	}
+
+	// An unknown field is refused, as on every other route.
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup/acknowledge", strings.NewReader(`{"ids":["a"],"delete":true}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown field gave %d, want 400", rec.Code)
+	}
+
+	// Without the cleanup service the route answers 404, like the other cleanup routes.
+	bare := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{})
+	mux = http.NewServeMux()
+	mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", bare.AcknowledgeOrphans)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup/acknowledge", strings.NewReader(`{"ids":["a"]}`)))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("without the service gave %d, want 404", rec.Code)
 	}
 }

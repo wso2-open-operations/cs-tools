@@ -561,32 +561,139 @@ func TestBackend_EmbeddedImagesAreLeftAsWritten(t *testing.T) {
 	}
 }
 
-func TestBackend_CleanupMarksRowsAndReportsTheKeysItDropped(t *testing.T) {
+const (
+	orphanA = "22222222-2222-4222-8222-222222222222"
+	orphanB = "33333333-3333-4333-8333-333333333333"
+	keyless = "44444444-4444-4444-8444-444444444444"
+)
+
+// backendCleanup builds the cleanup service as backend mode does: a nil store, so
+// a call to it would panic.
+func backendCleanup(repo *fakeStoredRepo) *attachmentUploadCleanupService {
+	svc := NewAttachmentUploadCleanupService(repo, nil, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
+	svc.now = func() time.Time { return saNow }
+	return svc
+}
+
+func orphanRepo() *fakeStoredRepo {
 	repo := newFakeStoredRepo()
 	repo.abandoned = []domain.AbandonedUpload{{Kind: domain.StoredAttachmentWorkItem, ID: "11111111-1111-4111-8111-111111111111"}}
 	k1, k2 := "csm/projects/p/workitems/w/inline_attachments/a_1.png", "csm/projects/p/workitems/w/inline_attachments/a_2.png"
 	repo.unlinked = []domain.StoredAttachmentRow{
-		{ID: "22222222-2222-4222-8222-222222222222", StorageKey: &k1},
-		{ID: "33333333-3333-4333-8333-333333333333", StorageKey: &k2},
-		{ID: "44444444-4444-4444-8444-444444444444"}, // no key: nothing to report
+		{ID: orphanA, StorageKey: &k1},
+		{ID: orphanB, StorageKey: &k2},
+		{ID: keyless}, // no key: nothing in storage to remove
 	}
-	// A nil store is how backend mode builds it; a call to it would panic.
-	svc := NewAttachmentUploadCleanupService(repo, nil, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
-	svc.now = func() time.Time { return saNow }
+	return repo
+}
+
+func TestBackend_CleanupHandsOrphansOverWithoutMarkingThemDeleted(t *testing.T) {
+	repo := orphanRepo()
+	svc := backendCleanup(repo)
 
 	res, err := svc.CleanupUploads(context.Background())
 	if err != nil {
 		t.Fatalf("CleanupUploads: %v", err)
 	}
-	if res.Found != 1 || res.Cleaned != 1 || res.Failed != 0 || res.ImagesRemoved != 3 || res.ImagesFailed != 0 {
-		t.Errorf("result = %+v", res)
+	if res.Found != 1 || res.Cleaned != 1 || res.Failed != 0 {
+		t.Errorf("abandoned uploads: %+v", res)
 	}
 	if _, ok := repo.failed["11111111-1111-4111-8111-111111111111"]; !ok {
 		t.Error("the abandoned row was not marked FAILED")
 	}
-	if len(res.OrphanedKeys) != 2 || res.OrphanedKeys[0] != k1 || res.OrphanedKeys[1] != k2 {
-		t.Errorf("OrphanedKeys = %v, want the two keys of the images that were dropped", res.OrphanedKeys)
+	if len(res.Orphans) != 2 || res.Orphans[0].ID != orphanA || res.Orphans[1].ID != orphanB ||
+		!strings.HasSuffix(res.Orphans[0].StorageKey, "a_1.png") || !strings.HasSuffix(res.Orphans[1].StorageKey, "a_2.png") {
+		t.Errorf("Orphans = %+v, want both images that have a file", res.Orphans)
 	}
+	// Only the image with no file is finished here. The others stay COMPLETE and
+	// unlinked, so a lost response cannot lose their keys: the next run lists them again.
+	if len(repo.deleted) != 1 || repo.deleted[keyless] == "" {
+		t.Errorf("deleted = %v, want only the image with no file marked DELETED", repo.deleted)
+	}
+	if res.ImagesRemoved != 1 || res.ImagesFailed != 0 {
+		t.Errorf("ImagesRemoved = %d, ImagesFailed = %d, want 1 and 0", res.ImagesRemoved, res.ImagesFailed)
+	}
+}
+
+func TestBackend_CleanupListsTheSameOrphansAgainUntilAcknowledged(t *testing.T) {
+	repo := orphanRepo()
+	svc := backendCleanup(repo)
+
+	// The first response is lost. Nothing was recorded as done, so the next run
+	// hands over the same two keys.
+	first, err := svc.CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Orphans) != 2 || len(second.Orphans) != 2 || first.Orphans[0] != second.Orphans[0] || first.Orphans[1] != second.Orphans[1] {
+		t.Fatalf("first = %+v, second = %+v, want the same orphans each run", first.Orphans, second.Orphans)
+	}
+
+	// Once the caller has removed the files and acknowledged them, they are done.
+	ack, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{IDs: []string{orphanA, orphanB}})
+	if err != nil {
+		t.Fatalf("AcknowledgeOrphans: %v", err)
+	}
+	if ack.Acknowledged != 2 || ack.Skipped != 0 {
+		t.Errorf("ack = %+v", ack)
+	}
+	if repo.deleted[orphanA] == "" || repo.deleted[orphanB] == "" {
+		t.Errorf("deleted = %v, want both acknowledged images marked DELETED", repo.deleted)
+	}
+	if len(repo.deleteCtx) == 0 || !repo.deleteCtx[len(repo.deleteCtx)-1] {
+		t.Error("MarkDeleted must run as the system: UPDATE is internal-only on these tables")
+	}
+}
+
+func TestBackend_AcknowledgeOnlyTouchesImagesThatAreStillOrphans(t *testing.T) {
+	repo := orphanRepo()
+	svc := backendCleanup(repo)
+	linkedMeanwhile := "55555555-5555-4555-8555-555555555555" // not in the unlinked list any more
+
+	ack, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{
+		IDs: []string{orphanA, strings.ToUpper(orphanA), linkedMeanwhile, "b1000000-0000-0000-0000-000000000001"},
+	})
+	if err != nil {
+		t.Fatalf("AcknowledgeOrphans: %v", err)
+	}
+	// A repeated id counts once; an image that is no longer an orphan, or never was,
+	// is skipped, so this cannot be used to delete an arbitrary image.
+	if ack.Acknowledged != 1 || ack.Skipped != 2 {
+		t.Errorf("ack = %+v, want 1 acknowledged and 2 skipped", ack)
+	}
+	if len(repo.deleted) != 1 || repo.deleted[orphanA] == "" {
+		t.Errorf("deleted = %v, want only the one real orphan", repo.deleted)
+	}
+}
+
+func TestBackend_AcknowledgeValidationAndAccess(t *testing.T) {
+	svc := backendCleanup(orphanRepo())
+	ctx := context.Background()
+
+	_, err := svc.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{})
+	wantErr[*apierror.ValidationError](t, err, "no ids")
+	_, err = svc.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: []string{"not-a-uuid"}})
+	wantErr[*apierror.ValidationError](t, err, "a malformed id")
+	tooMany := make([]string, uploadCleanupMaxPerRun+1)
+	for i := range tooMany {
+		tooMany[i] = orphanA
+	}
+	_, err = svc.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: tooMany})
+	wantErr[*apierror.ValidationError](t, err, "too many ids")
+
+	restricted := NewAttachmentUploadCleanupService(orphanRepo(), nil, stubAccess{})
+	_, err = restricted.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: []string{orphanA}})
+	wantErr[*apierror.ForbiddenError](t, err, "a restricted caller")
+}
+
+func TestSFTPGoMode_AcknowledgeIsNotAvailable(t *testing.T) {
+	svc := NewAttachmentUploadCleanupService(newFakeStoredRepo(), &fakeUploadStore{}, alwaysUnrestrictedAccess{})
+	_, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{IDs: []string{orphanA}})
+	wantErr[*apierror.NotFoundError](t, err, "acknowledge with SFTPGo")
 }
 
 func TestSFTPGoModeCleanupReportsNoKeys(t *testing.T) {
@@ -600,7 +707,7 @@ func TestSFTPGoModeCleanupReportsNoKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupUploads: %v", err)
 	}
-	if res.ImagesRemoved != 1 || len(res.OrphanedKeys) != 0 {
-		t.Errorf("result = %+v: with SFTPGo the file is removed here, so there is nothing to report", res)
+	if res.ImagesRemoved != 1 || len(res.Orphans) != 0 {
+		t.Errorf("result = %+v: with SFTPGo the file is removed here, so there is nothing to hand over", res)
 	}
 }
