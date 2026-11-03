@@ -486,6 +486,34 @@ attachment can delete it", "too many attachment links requested"), read only fro
 body); 404, 401 as usual; 502/503/504 -> 503; anything else a fixed fallback. Tests:
 `stored_attachments_test.go` (handler), `stored_attachments_test.go` (entity client).
 
+## Stored attachments in Azure Blob Storage (`ATTACHMENT_STORAGE_MODE=backend`)
+
+Must match entity-service's setting of the same name; the default `sftpgo` keeps the section above. In `backend`
+mode this service holds the Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`,
+`libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
+size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
+(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is for
+this process only: it is never put in a response, a header or a log.** The module permission is the route's own
+(`PermWrite` to upload and delete, `PermDownloadAttachment` to read), so the handler only checks `type`.
+
+| Route | Permission | Does |
+|---|---|---|
+| `POST /attachments/upload` | `PermWrite` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | authorize, then Put Block (<= 16 MiB, index within the size limit) |
+| `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume |
+| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 409/429) deletes the file |
+| `GET /attachments/download/{id}/content?type=` | `PermDownloadAttachment` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
+| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline |
+| `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
+
+`POST /attachments/download` (links) is not registered in this mode. Config: `AZURE_STORAGE_CONNECTION_STRING`, or
+`AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_KEY` (+ optional `AZURE_STORAGE_ENDPOINT` for Azurite), and
+`AZURE_STORAGE_CONTAINER`. Entra client-credential sign-in is not in `libs/azblobstore` yet. `libs/azblobstore` is a
+separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build with an uncommitted `go.work` listing this module
+and the library, and add the `require` line once the tag exists (with it present a workspace build fails while the
+tag is missing). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
+`.../acknowledge`).
+
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
 A pasted screenshot in a comment or case/incident/change-request description is normally extracted
