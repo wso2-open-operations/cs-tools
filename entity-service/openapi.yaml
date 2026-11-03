@@ -270,16 +270,10 @@ paths:
         Start an upload. Checks the caller may add a file to the parent (a
         REGISTERED member of its project, or internal), that the work item is not
         closed (refused for every caller), and the size and type. Records a
-        PENDING attachment and returns a one-use link. With uploadMethod
-        multipart the browser POSTs a multipart form with the file in the field
-        named by fieldName to uploadUrl before expiresAt, then calls confirm. A
-        file of ATTACHMENT_CHUNKED_UPLOAD_THRESHOLD_BYTES or more (never a comment
-        image) gets uploadMethod tus: the browser uses the TUS resumable-upload
-        protocol against uploadUrl (create the upload with Upload-Length and an
-        Upload-Metadata of share_id=shareId and path=path, send chunkSize-byte
-        chunks, resume from the server's offset after a break) and then calls
-        confirm. expiresAt only bounds starting a TUS upload. A comment image (type comment) may
-        only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
+        PENDING attachment and returns a one-use link: the browser POSTs a
+        multipart form with the file in the field named by fieldName to uploadUrl
+        before expiresAt, then calls confirm. A comment image (type comment) may
+        only be a PNG, JPEG or WebP; it is uploaded against the work item
         before its comment exists. With ATTACHMENT_STORAGE_MODE=backend there is no
         link: the response has no uploadUrl or fieldName, expiresAt is when an
         unconfirmed upload may be cleaned up, and the browser sends the file to the
@@ -40117,9 +40111,8 @@ components:
         contentType:
           type: string
           description: >-
-            Required for type comment, where it must be image/png, image/jpeg,
-            image/gif or image/webp. Defaults to application/octet-stream
-            otherwise.
+            Required for type comment, where it must be image/png, image/jpeg
+            or image/webp. Defaults to application/octet-stream otherwise.
         sizeBytes:
           type: integer
           format: int64
