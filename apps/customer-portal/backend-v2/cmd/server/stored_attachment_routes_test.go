@@ -33,6 +33,9 @@ func TestStoredAttachmentRoutesDoNotConflictWithTheCaseAttachmentRoutes(t *testi
 		"POST /attachments/upload",
 		"POST /attachments/upload/{id}/confirm",
 		"POST /attachments/delete",
+		"PUT /attachments/upload/{id}/chunks/{index}",
+		"GET /attachments/upload/{id}/chunks",
+		"GET /attachments/download/{id}/content",
 		"GET /attachments/inline/{id}/content",
 		"GET /attachments/{id}/content",
 		"GET /attachments/{id}",
@@ -42,5 +45,16 @@ func TestStoredAttachmentRoutesDoNotConflictWithTheCaseAttachmentRoutes(t *testi
 		"POST /attachments",
 	} {
 		mux.HandleFunc(p, h)
+	}
+}
+
+func TestParseAttachmentStorageMode(t *testing.T) {
+	for in, want := range map[string]string{"": "sftpgo", " Backend ": "backend", "SFTPGO": "sftpgo"} {
+		if got, err := parseAttachmentStorageMode(in); err != nil || got != want {
+			t.Errorf("%q = %q, %v", in, got, err)
+		}
+	}
+	if _, err := parseAttachmentStorageMode("s3"); err == nil {
+		t.Error("an unknown mode must be refused")
 	}
 }
