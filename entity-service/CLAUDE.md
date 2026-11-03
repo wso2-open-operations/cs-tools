@@ -1012,8 +1012,8 @@ reopen logs a WARN at every start as the reminder.
   `Invoice__c` event first asks the database whether a project of that invoice has an ACP-suspended
   invoice track (`ACPSuspendedInvoiceTrackFor`: `sf_invoice` -> its opportunity -> `sf_opportunity_link`
   -> project); with none, which is nearly always, it makes no Salesforce call. When the local tables do
-  not know the invoice or its opportunity yet, it falls back to "does any project have one", so the
-  local tables can only narrow the check. A `Project__c` event costs one database read when the project
+  not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
+  back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
   is not ACP-suspended.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /

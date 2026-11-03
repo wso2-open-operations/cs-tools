@@ -40,10 +40,11 @@ const (
 	acpReopenTestSfID      = "a0dACPREOPENTEST01"
 	acpReopenTestTag       = "acp-reopen-test"
 
-	acpReopenTestOpportunityID = "acf00000-0000-4000-8000-000000000101"
-	acpReopenTestInvoiceID     = "acf00000-0000-4000-8000-000000000102"
-	acpReopenTestLinkID        = "acf00000-0000-4000-8000-000000000103"
-	acpReopenTestInvoiceSfID   = "a0IACPREOPENTEST01"
+	acpReopenTestOpportunityID  = "acf00000-0000-4000-8000-000000000101"
+	acpReopenTestInvoiceID      = "acf00000-0000-4000-8000-000000000102"
+	acpReopenTestLinkID         = "acf00000-0000-4000-8000-000000000103"
+	acpReopenTestInvoiceSfID    = "a0IACPREOPENTEST01"
+	acpReopenTestOtherProjectID = "acf00000-0000-4000-8000-000000000002"
 )
 
 // seedACPReopenProject writes one project with the given closure states and
@@ -70,9 +71,9 @@ func seedACPReopenProject(t *testing.T, pool *pgxpool.Pool, endState, invoiceSta
 }
 
 // seedACPReopenInvoice writes one invoice (acpReopenTestInvoiceSfID) on an
-// opportunity linked to the test project when linked is true, and to no
-// project otherwise, removed again when the test ends.
-func seedACPReopenInvoice(t *testing.T, pool *pgxpool.Pool, linked bool) {
+// opportunity linked to linkTo, or to no project when linkTo is empty,
+// removed again when the test ends.
+func seedACPReopenInvoice(t *testing.T, pool *pgxpool.Pool, linkTo string) {
 	t.Helper()
 	ctx := context.Background()
 	cleanup := func() {
@@ -96,12 +97,33 @@ func seedACPReopenInvoice(t *testing.T, pool *pgxpool.Pool, linked bool) {
 		VALUES ($1, now(), now(), $2, $2, $3, $4)`, acpReopenTestInvoiceID, acpReopenTestTag, acpReopenTestInvoiceSfID, acpReopenTestOpportunityID); err != nil {
 		t.Fatalf("seed invoice: %v", err)
 	}
-	if !linked {
+	if linkTo == "" {
 		return
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO sf_opportunity_link (id, created_on, updated_on, created_by, updated_by, opportunity_id, project_id)
-		VALUES ($1, now(), now(), $2, $2, $3, $4)`, acpReopenTestLinkID, acpReopenTestTag, acpReopenTestOpportunityID, acpReopenTestProjectID); err != nil {
+		VALUES ($1, now(), now(), $2, $2, $3, $4)`, acpReopenTestLinkID, acpReopenTestTag, acpReopenTestOpportunityID, linkTo); err != nil {
 		t.Fatalf("seed opportunity link: %v", err)
+	}
+}
+
+// seedACPReopenOtherProject writes a second, open project with no ACP
+// record, removed again when the test ends.
+func seedACPReopenOtherProject(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	cleanup := func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM project WHERE id = $1`, acpReopenTestOtherProjectID); err != nil {
+			t.Fatalf("clean other project: %v", err)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, name,
+		                     end_date_closure_state, invoice_due_date_closure_state, wso2_closure_state)
+		VALUES ($1, now(), now(), $2, $2, 'ACPREOPENOTHER', 'ACP Reopen Other', 'OPEN', 'OPEN', 'OPEN')`,
+		acpReopenTestOtherProjectID, acpReopenTestTag); err != nil {
+		t.Fatalf("seed other project: %v", err)
 	}
 }
 
@@ -418,12 +440,19 @@ func TestACPReopenRepoIntegration_SuspendedListings(t *testing.T) {
 	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, "a0IACPREOPENNONE01"); err != nil || !found {
 		t.Errorf("ACPSuspendedInvoiceTrackFor(unknown invoice) = %v, %v, want true", found, err)
 	}
-	// A known invoice answers for its own projects only.
-	seedACPReopenInvoice(t, pool, false)
+	// An invoice whose opportunity is linked to no project yet: every project
+	// is considered too.
+	seedACPReopenInvoice(t, pool, "")
+	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, acpReopenTestInvoiceSfID); err != nil || !found {
+		t.Errorf("ACPSuspendedInvoiceTrackFor(invoice with no linked project) = %v, %v, want true", found, err)
+	}
+	// A linked invoice answers for its own projects only.
+	seedACPReopenOtherProject(t, pool)
+	seedACPReopenInvoice(t, pool, acpReopenTestOtherProjectID)
 	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, acpReopenTestInvoiceSfID); err != nil || found {
 		t.Errorf("ACPSuspendedInvoiceTrackFor(invoice of another project) = %v, %v, want false", found, err)
 	}
-	seedACPReopenInvoice(t, pool, true)
+	seedACPReopenInvoice(t, pool, acpReopenTestProjectID)
 	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, acpReopenTestInvoiceSfID); err != nil || !found {
 		t.Errorf("ACPSuspendedInvoiceTrackFor(invoice of the project) = %v, %v, want true", found, err)
 	}

@@ -194,25 +194,25 @@ func acpSectionSuspended(key string) string {
 }
 
 // ACPSuspendedInvoiceTrackFor implements ACPReopenRepository. A local
-// invoice row with an opportunity answers for the projects linked to that
-// opportunity only. With none (the invoice is new, or the local tables are
-// behind) it falls back to whether any project at all has such a track: the
-// local tables may only narrow the check, never hide a project from it.
+// invoice row whose opportunity is linked to a project answers for those
+// projects only. With none (the invoice, its opportunity or the link is new,
+// or the local tables are behind) it falls back to whether any project at all
+// has such a track: the local tables may only narrow the check, never hide a
+// project from it.
 // $1 is cast to text: sf_id is varchar and LEFT takes text, and Postgres
 // refuses to prepare a parameter it deduces as both.
 func (r *acpReopenRepo) ACPSuspendedInvoiceTrackFor(ctx context.Context, invoiceSfID string) (bool, error) {
 	ctx = WithSystemIdentity(ctx)
 	var known, found bool
 	err := r.db.QueryRow(ctx, `
-		WITH opp AS (
-			SELECT DISTINCT i.opportunity_id FROM sf_invoice i
-			WHERE i.opportunity_id IS NOT NULL AND i.sf_id IN ($1::text, LEFT($1::text, 15))
+		WITH linked AS (
+			SELECT p.invoice_due_date_closure_state, p.suspension_process_state FROM sf_invoice i
+			JOIN sf_opportunity_link l ON l.opportunity_id = i.opportunity_id
+			JOIN project p ON p.id = l.project_id
+			WHERE i.sf_id IN ($1::text, LEFT($1::text, 15))
 		)
-		SELECT EXISTS (SELECT 1 FROM opp),
-		       EXISTS (SELECT 1 FROM opp
-		               JOIN sf_opportunity_link l ON l.opportunity_id = opp.opportunity_id
-		               JOIN project p ON p.id = l.project_id
-		               WHERE `+acpInvoiceTrackSuspended+`)`, invoiceSfID).Scan(&known, &found)
+		SELECT EXISTS (SELECT 1 FROM linked),
+		       EXISTS (SELECT 1 FROM linked p WHERE `+acpInvoiceTrackSuspended+`)`, invoiceSfID).Scan(&known, &found)
 	if err != nil {
 		return false, fmt.Errorf("acp reopen: look for an ACP-suspended invoice track for invoice %s: %w", invoiceSfID, err)
 	}
