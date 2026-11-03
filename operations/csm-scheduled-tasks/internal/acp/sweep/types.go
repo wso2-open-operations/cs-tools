@@ -326,13 +326,16 @@ type ProjectFailure struct {
 }
 
 // projectUpdater is the minimal write surface processProject needs:
-// UpdateProject writes the CSM project by its CSM id, and SuspendInSalesforce
-// sets the Salesforce project's State__c to Suspended by its Salesforce id.
+// UpdateProject writes the CSM project by its CSM id, CheckRecordWritable
+// writes its suspensionProcessState back unchanged before a notice is sent
+// (see probeRecordWrite), and SuspendInSalesforce sets the Salesforce
+// project's State__c to Suspended by its Salesforce id.
 // Satisfied by *Writer for real writes; DryRunProjectUpdater (writes
 // nothing) is injected instead when ACP_DRY_RUN is set — processProject itself
 // never branches on a dry-run flag.
 type projectUpdater interface {
 	UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
+	CheckRecordWritable(ctx context.Context, id string, state []byte) error
 	SuspendInSalesforce(ctx context.Context, sfID string) error
 }
 

@@ -499,8 +499,12 @@ both places.
 
   **`ALERTS_ENABLED=false` (this component's switch for all email) turns `acp_closure` into a dry
   run without emails** (logged at startup) instead of refusing: refusing would stop every other
-  task too, and a real run with emails silenced is the first case above. Nothing is written, so
-  nothing is lost; once alerts are back, the next real run sends what is due.
+  task too, and a real run with emails silenced is the first case above. Nothing is written, so no
+  notice is recorded as sent; once alerts are back, the next real run sends the notice due then.
+  **Notices are not caught up**: only the narrowest window reached is sent (`closure.dueWindow`),
+  so after a pause longer than a window a project that crossed the 15- and 7-day windows meanwhile
+  gets neither, and one whose end date passed gets the day-0 notice and is suspended in the same
+  run. Keep a pause short, or check which projects crossed a window during it.
 - **Testing.** A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` sends every notice there
   instead (`notify.ForReport`, `[Test copy]` subject), as for a report task. `ACP_TEST_PROJECT_ID`
   scopes a run to one CSM project. A `TRYOUT_TASK=acp_closure` is forced to a dry run unless
@@ -535,6 +539,13 @@ both places.
   `registry.Task.MaxAttempts`): a retry repeats nothing already recorded in CSM, except a notice
   whose email went out while its CSM record failed, which is sent again, so the rest waits for the
   next weekday's run.
+- **A write is tried before every notice** (`probeRecordWrite`, `CheckRecordWritable`): the project's
+  `suspensionProcessState` is written back unchanged (`{}` when it has none). If CSM refuses it for
+  the project's own reason (400, 404, 409, 422), nothing is sent and the project is skipped as a
+  `dataError`, on every run until its record is fixed. Without it, a project whose record CSM
+  refuses would get the same notice every weekday, sent and never recorded (PR #3126 review). A
+  refusal every project would get stops the run before the first notice. The cost is one extra CSM
+  write per notice.
 
 ## ACP reopen check
 
@@ -551,11 +562,21 @@ and alerts). Whether anything is written is entity-service's `CSM_ACP_REOPEN_DRY
 is switched off the next run reopens everything that was only logged as "would reopen" during the
 dry run. Independent of `ACP_ENABLED`.
 
+**Turn it on together with entity-service's live reopen.** `ACP_REOPEN_CHECK_ENABLED=true` here and
+`CSM_ACP_REOPEN_ENABLED=true` with `CSM_ACP_REOPEN_DRY_RUN=false` in entity-service are a pair. With
+entity-service's reopen live and this off, a reopen that fails past Service Bus's redeliveries is never
+retried, and a project set back to Open by hand is never finished. With this on and entity-service's
+reopen off, every run fails with a 404 (or a 403 if this client is not in `M2M_CLIENT_IDS`).
+
+- **Runs before `acp_closure`**: registered first, so a tick that covers both (the driver late, or a
+  restart after 04:00 UTC) still reopens a project before `acp_closure` could send it a reminder.
 - Calls entity-service with the shared `OAUTH2_*` client (its id in entity-service's
   `M2M_CLIENT_IDS`, as for ACP), with a 2-minute timeout per page.
 - A run in which a project failed returns an error naming at most 20 project ids (the errors are in
-  entity-service's log); retried after 4 hours, like `acp_closure`. A page error, a page that makes no
-  progress, or more than 2,000 pages stops the run with an error.
+  entity-service's log); retried after 4 hours, like `acp_closure`, and at most once a day
+  (`MaxAttempts` 2), so a failure that lasts (entity-service's reopen not on yet) alerts twice a day,
+  not five times; the next day's run catches up. A page error, a page that makes no progress, or more
+  than 2,000 pages stops the run with an error.
 
 ## Running a task now (`--run-now`)
 

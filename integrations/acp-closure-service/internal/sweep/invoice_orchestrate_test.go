@@ -333,7 +333,7 @@ func TestProcessProject_InvoiceCascade_PassesInvoiceSfIDToInternalNoticeOnly(t *
 
 // TestProcessProject_InvoiceNoticeShowsInvoiceNumber covers the internal
 // invoice notice's "Invoice Id:" field. Legacy shows the invoice number
-// (legacy u_name, the API's "name", e.g. US00000001); the Salesforce ID is
+// (a legacy column name, the API's "name", e.g. US00000001); the Salesforce ID is
 // only used for the "Open in Salesforce" link, and the API's "id" is an
 // internal record ID no reader recognises. Falls back to that internal ID
 // only when an invoice has no name, so the field is never blank.

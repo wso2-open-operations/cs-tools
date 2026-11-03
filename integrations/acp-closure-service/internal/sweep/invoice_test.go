@@ -66,13 +66,13 @@ func TestCustomerInvoiceNoticeSubject_TerminalMatchesSubscriptionBased(t *testin
 // Suspension Notice", confirmed against actual_7_days_invoice_email_cutomer.html
 // ("Payment Reminder of Project - X.", trailing period included).
 func TestCustomerInvoiceNoticeSubject_ReminderDiffersFromSubscriptionBased(t *testing.T) {
-	got := customerInvoiceNoticeSubject(closure.NoticeWindow7, "Robert Bosch Krankenhaus GmbH - Subscription")
-	want := "Payment Reminder of Project - Robert Bosch Krankenhaus GmbH - Subscription."
+	got := customerInvoiceNoticeSubject(closure.NoticeWindow7, "Example Customer Ltd - Subscription")
+	want := "Payment Reminder of Project - Example Customer Ltd - Subscription."
 	if got != want {
 		t.Errorf("customerInvoiceNoticeSubject(reminder) = %q, want %q", got, want)
 	}
 
-	subscriptionSubject := customerNoticeSubject(closure.NoticeWindow7, "Robert Bosch Krankenhaus GmbH - Subscription")
+	subscriptionSubject := customerNoticeSubject(closure.NoticeWindow7, "Example Customer Ltd - Subscription")
 	if got == subscriptionSubject {
 		t.Error("invoice reminder subject should not match the subscription-based one — they're confirmed different phrases")
 	}

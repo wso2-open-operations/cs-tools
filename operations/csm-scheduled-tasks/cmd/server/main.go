@@ -1079,6 +1079,20 @@ func main() {
 		})
 	}
 
+	// entity-service's daily ACP reopen check -- see internal/acp's
+	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
+	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
+	// CSM_ACP_REOPEN_ENABLED=true (else POST /acp/reopen-check is a 404 and
+	// the run fails and alerts). Whether anything is written is
+	// entity-service's own dry run (CSM_ACP_REOPEN_DRY_RUN), not a setting here.
+	// Registered before acp_closure on purpose: the engine runs the tasks due
+	// in one tick in registration order, so when one tick covers both (the
+	// driver late, or a restart after 04:00 UTC) a project is reopened before
+	// acp_closure could send it a reminder.
+	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
+		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
 	// The Account Closure Process -- see internal/acp's package doc and this
 	// component's CLAUDE.md, "ACP closure". OFF unless ACP_ENABLED=true: it
 	// emails customers and suspends their projects in CSM and Salesforce, so
@@ -1087,16 +1101,6 @@ func main() {
 	if envBool("ACP_ENABLED", false) {
 		tasks = append(tasks, acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
 			entityServiceScopes, emailClient, emailBaseURL, alertsEnabled, scheduleOverrides, recipientOverrides))
-	}
-	// entity-service's daily ACP reopen check -- see internal/acp's
-	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
-	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
-	// CSM_ACP_REOPEN_ENABLED=true (else POST /acp/reopen-check is a 404 and
-	// the run fails and alerts). Whether anything is written is
-	// entity-service's own dry run (CSM_ACP_REOPEN_DRY_RUN), not a setting here.
-	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
-		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
-			entityServiceScopes, scheduleOverrides, recipientOverrides))
 	}
 
 	var tasksWithRecipients []string
@@ -1206,6 +1210,7 @@ func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oaut
 		Schedule:     scheduleFor(scheduleOverrides, acpReopenCheckTaskName, "30 3 * * *"),
 		Handler:      acp.RunReopenCheck(client),
 		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
 		To:           to,
 		Cc:           cc,
 	}
@@ -1217,11 +1222,12 @@ func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oaut
 // such duplicates, and 4 hours still lands in the same working day.
 const acpRetryBackoff = 4 * time.Hour
 
-// acpMaxAttempts allows acp_closure one retry per day. Each retry can send a
-// project's notice again (its email went out, its CSM record failed), so the
-// rest waits for the next weekday's run; the failure alert says so.
-// acp_reopen_check has no cap: entity-service records each reopen, so its
-// retry repeats nothing.
+// acpMaxAttempts allows each ACP task one retry per day. For acp_closure a
+// retry can send a project's notice again (its email went out, its CSM record
+// failed), so the rest waits for the next weekday's run; the failure alert
+// says so. For acp_reopen_check a retry repeats nothing, but a failure that
+// lasts (entity-service's reopen not enabled yet, a 404 or 403, during the
+// rollout) would otherwise alert every 4 hours; tomorrow's run catches up.
 const acpMaxAttempts = 2
 
 // acpTask builds the acp_closure task from the ACP_* settings, stopping

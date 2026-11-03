@@ -39,6 +39,11 @@ func (u *DryRunProjectUpdater) UpdateProject(ctx context.Context, id string, bod
 	return []byte(`{}`), nil
 }
 
+// CheckRecordWritable always succeeds without doing anything.
+func (u *DryRunProjectUpdater) CheckRecordWritable(ctx context.Context, id string, state []byte) error {
+	return nil
+}
+
 // SuspendInSalesforce always succeeds without doing anything.
 func (u *DryRunProjectUpdater) SuspendInSalesforce(ctx context.Context, sfID string) error {
 	return nil

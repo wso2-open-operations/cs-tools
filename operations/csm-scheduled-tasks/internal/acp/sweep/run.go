@@ -227,10 +227,6 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 	return projects, nil
 }
 
-// skipExcluded reports whether id is in excludedProjectIDs, logging and
-// counting the skip in result if so. Shared by both of Run's paths (the
-// ACP_TEST_PROJECT_ID-scoped early check and the broad-sweep loop) so the
-// log line and counter update have exactly one definition.
 // evaluate fills in proj's details and decides it, recording a failure of
 // either step against the project. A project whose own data is unusable
 // (dataError) is recorded as skipped, not failed: a retry cannot fix it, and
@@ -264,6 +260,10 @@ func evaluate(ctx context.Context, details DetailSource, updater projectUpdater,
 	return nil
 }
 
+// skipExcluded reports whether id is in excludedProjectIDs, logging and
+// counting the skip in result if so. Shared by both of Run's paths (the
+// ACP_TEST_PROJECT_ID-scoped early check and the broad-sweep loop) so the
+// log line and counter update have exactly one definition.
 func skipExcluded(ctx context.Context, id string, excludedProjectIDs map[string]bool, result *Result) bool {
 	if !excludedProjectIDs[id] {
 		return false

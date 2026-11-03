@@ -136,6 +136,18 @@ type mockProjectUpdater struct {
 	// records the Salesforce ids it was called with.
 	sfSuspendFn    func(ctx context.Context, sfID string) error
 	sfSuspendCalls []string
+	// checkFn, when set, answers CheckRecordWritable; checks records the
+	// states it was given.
+	checkFn func(ctx context.Context, id string, state []byte) error
+	checks  []string
+}
+
+func (m *mockProjectUpdater) CheckRecordWritable(ctx context.Context, id string, state []byte) error {
+	m.checks = append(m.checks, string(state))
+	if m.checkFn != nil {
+		return m.checkFn(ctx, id, state)
+	}
+	return nil
 }
 
 func (m *mockProjectUpdater) SuspendInSalesforce(ctx context.Context, sfID string) error {

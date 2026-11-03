@@ -122,6 +122,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 
 		var updater interface {
 			UpdateProject(ctx context.Context, id string, body []byte) ([]byte, error)
+			CheckRecordWritable(ctx context.Context, id string, state []byte) error
 			SuspendInSalesforce(ctx context.Context, sfID string) error
 		} = sweep.NewWriter(clients.CSM, clients.SalesEntity)
 		if cfg.DryRun {

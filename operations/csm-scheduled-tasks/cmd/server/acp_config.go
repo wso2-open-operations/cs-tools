@@ -81,9 +81,12 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 // ALERTS_ENABLED=false (this component's switch for all email) turns the
 // task into a dry run without emails instead of refusing: refusing would
 // stop every other task too, and a real run with emails silenced is the
-// first case above. A dry run writes nothing, so nothing is lost; once
-// alerts are back, the next real run sends what is due (windows are
-// thresholds).
+// first case above. A dry run writes nothing, so no notice is recorded as
+// sent; once alerts are back, the next real run sends the notice that is due
+// then. Only the narrowest window reached is sent, not every window passed
+// (closure.dueWindow): after a pause longer than a window, a project that
+// crossed the 15- and 7-day windows meanwhile gets neither, and one whose end
+// date passed gets the day-0 notice and is suspended in the same run.
 //
 // A TRYOUT_TASK=acp_closure not scoped to one test project is a dry run
 // (it would otherwise write to every open project), and runs on weekends.

@@ -18,7 +18,9 @@ package sweep
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -57,6 +59,18 @@ func (w *Writer) UpdateProject(ctx context.Context, id string, body []byte) ([]b
 		return nil, &writesFailingError{err: err}
 	}
 	return resp, err
+}
+
+// CheckRecordWritable writes the CSM project's suspensionProcessState back as
+// state, unchanged, to learn whether CSM takes writes to it before a notice
+// goes out (probeRecordWrite). Errors as UpdateProject's.
+func (w *Writer) CheckRecordWritable(ctx context.Context, id string, state []byte) error {
+	body, err := json.Marshal(map[string]json.RawMessage{"suspensionProcessState": state})
+	if err != nil {
+		return fmt.Errorf("marshal update request: %w", err)
+	}
+	_, err = w.UpdateProject(ctx, id, body)
+	return err
 }
 
 // writesFailingError is a CSM write failure that is not about the project:

@@ -24,16 +24,21 @@ import (
 )
 
 // parityFile is the file of cases ACP's rules and entity-service's copy of
-// them (the ACP reopen check) must agree on; see closure's parityFile.
+// them (the ACP reopen check) must agree on; see closure's parityFile, which
+// this matches (fails inside the monorepo, skips outside it).
 func parityFile(t *testing.T) []byte {
 	t.Helper()
+	const entityService = "../../../../../entity-service"
 	path := os.Getenv("ACP_RULES_PARITY_FILE")
 	if path == "" {
-		path = "../../../../../entity-service/internal/service/testdata/acp_rules_parity.json"
+		path = entityService + "/internal/service/testdata/acp_rules_parity.json"
 	}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		t.Skipf("%s not found; the rules parity cases live in entity-service", path)
+		if _, modErr := os.Stat(entityService + "/go.mod"); modErr == nil {
+			t.Fatalf("%s not found, but entity-service is in this checkout: the parity cases must be there (entity-service's ACP reopen, PR #3124)", path)
+		}
+		t.Skipf("%s not found and no entity-service in this checkout; the rules parity cases live there", path)
 	}
 	if err != nil {
 		t.Fatal(err)

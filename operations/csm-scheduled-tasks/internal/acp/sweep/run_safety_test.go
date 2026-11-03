@@ -52,10 +52,11 @@ func delivering() *mockNotifier {
 	return &mockNotifier{sendFn: func(context.Context, notify.Notice) (bool, error) { return true, nil }}
 }
 
-// When CSM refuses the record of a notice already sent, for a reason every
-// project's write would hit (401/403, 429, 5xx, no response), the run stops:
-// carrying on would send every remaining due notice unrecorded, and the next
-// run would send them all again.
+// When CSM refuses writes for a reason every project's write would hit
+// (401/403, 429, 5xx, no response), the run stops: carrying on would send
+// every remaining due notice unrecorded, and the next run would send them all
+// again. The write tried before the first notice (probeRecordWrite) already
+// fails, so not even the first project's notice goes out.
 func TestRun_CSMNotTakingWritesStopsTheRun(t *testing.T) {
 	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
@@ -78,8 +79,8 @@ func TestRun_CSMNotTakingWritesStopsTheRun(t *testing.T) {
 			if !errors.As(err, &stopped) || !strings.Contains(err.Error(), "2 project(s) not evaluated") {
 				t.Fatalf("err = %v, want the run stopped with 2 projects left", err)
 			}
-			if len(ntf.sent) != 1 {
-				t.Errorf("notices sent = %d, want only the first project's", len(ntf.sent))
+			if len(ntf.sent) != 0 {
+				t.Errorf("notices sent = %d, want none: the write before the notice failed", len(ntf.sent))
 			}
 			if len(result.Failures) != 1 || result.Failures[0].ProjectID != "p1" {
 				t.Errorf("failures = %+v, want p1 only", result.Failures)
@@ -89,7 +90,9 @@ func TestRun_CSMNotTakingWritesStopsTheRun(t *testing.T) {
 }
 
 // A write refused for the project's own reason (a 4xx other than 401, 403
-// and 429) fails that project only; the run goes on.
+// and 429) concerns that project only; the run goes on. It is found by the
+// write tried before the notice, so the project is skipped with nothing
+// sent: otherwise its notice would go out on every run, never recorded.
 func TestRun_AProjectsOwnWriteErrorDoesNotStopTheRun(t *testing.T) {
 	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	reader := threeDueProjects(now)
@@ -100,8 +103,43 @@ func TestRun_AProjectsOwnWriteErrorDoesNotStopTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(ntf.sent) != 3 || len(result.Failures) != 3 {
-		t.Errorf("sent=%d failures=%d, want every project tried", len(ntf.sent), len(result.Failures))
+	if len(ntf.sent) != 0 || len(result.Skipped) != 3 || len(result.Failures) != 0 {
+		t.Errorf("sent=%d skipped=%d failures=%d, want every project tried, skipped, nothing sent",
+			len(ntf.sent), len(result.Skipped), len(result.Failures))
+	}
+}
+
+// A project whose record CSM refuses is skipped on every run, so its notice
+// is never sent again and again; once the record takes writes, the notice
+// goes out once and is recorded.
+func TestProcessProject_RecordRefusedSendsNothingUntilFixed(t *testing.T) {
+	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	end := now.AddDate(0, 0, 80)
+	proj := project{ID: "p1", Account: &projectAccountRef{ID: "a1"}, EndDate: &end}
+	ntf := delivering()
+	updater := &mockProjectUpdater{checkFn: func(context.Context, string, []byte) error {
+		return &apierror.Error{StatusCode: 400}
+	}}
+	for day := 0; day < 3; day++ {
+		err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, day), proj)
+		var bad *dataError
+		if !errors.As(err, &bad) {
+			t.Fatalf("day %d: err = %v, want a dataError (skipped)", day, err)
+		}
+	}
+	if len(ntf.sent) != 0 || len(updater.calls) != 0 {
+		t.Fatalf("sent=%d writes=%d, want nothing while the record is refused", len(ntf.sent), len(updater.calls))
+	}
+	if len(updater.checks) != 3 || updater.checks[0] != `{}` {
+		t.Errorf("checks = %v, want one per run, {} for a project with no record yet", updater.checks)
+	}
+
+	updater.checkFn = nil
+	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, now.AddDate(0, 0, 3), proj); err != nil {
+		t.Fatalf("after the fix: %v", err)
+	}
+	if len(ntf.sent) == 0 || len(updater.calls) != 1 {
+		t.Errorf("after the fix: sent=%d writes=%d, want the notice sent and recorded once", len(ntf.sent), len(updater.calls))
 	}
 }
 

@@ -22,8 +22,10 @@
 package sweep
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -260,6 +262,9 @@ func actSubscription(ctx context.Context, reader entityReader, updater projectUp
 		delivered := false
 		var err error
 		if !alreadyClosed {
+			if err := probeRecordWrite(ctx, updater, proj.ID, *history); err != nil {
+				return err
+			}
 			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, nil, internalNoticeBody, customerNoticeSubject, customerNoticeBody)
 			if err != nil {
 				return fmt.Errorf("sweep: notify project %s: %w", proj.ID, err)
@@ -723,6 +728,30 @@ func pageContacts(fetch func(body []byte) (rows, total int, err error)) error {
 			return nil
 		}
 	}
+}
+
+// probeRecordWrite writes the project's suspensionProcessState back as it is
+// (history; {} when the project has none), before a notice is sent. Notices go
+// out before they are recorded, so a project whose record CSM refuses (a 400,
+// 404, 409 or 422 about this project) would get the same notice on every run
+// until someone fixed it. Refused here, nothing has been sent: the project is
+// a dataError (skipped with a WARN, the run not failed) and stays that way,
+// sending nothing, until its record is fixed. A refusal every project would
+// get (writesFailingError) stops the run as any CSM write does. The probe
+// changes nothing but updated_on/updated_by.
+func probeRecordWrite(ctx context.Context, updater projectUpdater, projectID string, history json.RawMessage) error {
+	state := history
+	if len(bytes.TrimSpace(state)) == 0 {
+		state = json.RawMessage(`{}`)
+	}
+	if err := updater.CheckRecordWritable(ctx, projectID, state); err != nil {
+		var refused *writesFailingError
+		if errors.As(err, &refused) {
+			return err
+		}
+		return &dataError{err: fmt.Errorf("CSM refuses writes to this project's record, so no notice is sent until it is fixed: %w", err)}
+	}
+	return nil
 }
 
 // recordNoticeSent writes the new window into suspensionProcessState's

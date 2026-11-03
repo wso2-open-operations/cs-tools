@@ -116,6 +116,9 @@ func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater
 		delivered := false
 		var err error
 		if !alreadyClosed {
+			if err := probeRecordWrite(ctx, updater, proj.ID, *history); err != nil {
+				return err
+			}
 			delivered, err = notifyForWindow(ctx, reader, ntf, proj, decision.Window, invoice.sfIDs(),
 				func(w closure.NoticeWindow, p project, accountOwnerName string) string {
 					return internalInvoiceNoticeBody(w, p, accountOwnerName, invoice)

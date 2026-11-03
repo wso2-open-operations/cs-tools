@@ -197,6 +197,14 @@ func TestWriter(t *testing.T) {
 		t.Errorf("CSM calls = %+v", csm.calls)
 	}
 
+	state := `{"based_on_subscription_end_date":{"event_type":"30_days_notice"}}`
+	if err := w.CheckRecordWritable(context.Background(), "p1", []byte(state)); err != nil {
+		t.Fatalf("CheckRecordWritable: %v", err)
+	}
+	if len(csm.calls) != 2 || string(csm.calls[1].body) != `{"suspensionProcessState":`+state+`}` {
+		t.Errorf("CheckRecordWritable wrote %+v, want the record back unchanged", csm.calls)
+	}
+
 	if err := w.SuspendInSalesforce(context.Background(), "a0dSF1"); err != nil {
 		t.Fatalf("SuspendInSalesforce: %v", err)
 	}
