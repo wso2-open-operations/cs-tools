@@ -28,7 +28,7 @@ import "net/http"
 // defense-in-depth. Content-Type is required for JSON request bodies:
 // application/json is not a CORS-safelisted value, so a POST/PATCH preflight
 // fails without it.
-const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID"
+const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Range"
 
 // corsAllowedMethods covers both listeners: the main REST API's full verb set
 // (PUT included: the Team Schedule's paging contacts, rota access and Alert
