@@ -162,6 +162,51 @@ func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *h
 	_, _ = io.Copy(w, c.Body)
 }
 
+// AuthorizeUpload handles POST /attachments/upload/{id}/authorize. It exists
+// only with ATTACHMENT_STORAGE_MODE=backend; the response carries an internal
+// storage key for the calling portal backend.
+func (h *StoredAttachmentHandler) AuthorizeUpload(w http.ResponseWriter, r *http.Request) {
+	var req domain.AuthorizeAttachmentUploadRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	req.ID = r.PathValue("id")
+	resp, err := h.svc.AuthorizeUpload(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// LocateAttachment handles POST /attachments/locate. It exists only with
+// ATTACHMENT_STORAGE_MODE=backend; the response carries an internal storage key
+// for the calling portal backend.
+func (h *StoredAttachmentHandler) LocateAttachment(w http.ResponseWriter, r *http.Request) {
+	var req domain.LocateAttachmentRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.LocateAttachment(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
+// InlineImageLocation handles GET /attachments/inline/{id}/location: where a
+// comment's inline image is stored, after the service has checked the caller may
+// see it. It exists only with ATTACHMENT_STORAGE_MODE=backend.
+func (h *StoredAttachmentHandler) InlineImageLocation(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.LocateInlineImage(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, resp)
+}
+
 // writeStoredAttachmentJSON writes a response that carries short-lived links, so
 // it must never be cached by a browser or an intermediary.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body any) {
