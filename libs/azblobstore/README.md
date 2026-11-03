@@ -11,9 +11,14 @@ talks to Azure.
 ## How an upload uses it
 
 ```go
+// Recommended: sign in as an Entra app that holds "Storage Blob Data Contributor"
+// on the container only (and turn off shared key access on the account).
 store, _ := azblobstore.New(azblobstore.Config{
-    AccountName: "...", AccountKey: "...", Container: "attachments",
+    AccountName: "...", Container: "attachments",
+    TenantID: "...", ClientID: "...", ClientSecret: "...",
 })
+// Or, for development: the account key (AccountName + AccountKey) or a
+// connection string (Azurite).
 
 // One call per chunk the browser sends (index 0, 1, 2, ...).
 store.PutBlock(ctx, key, index, chunkBody, chunkSize)
