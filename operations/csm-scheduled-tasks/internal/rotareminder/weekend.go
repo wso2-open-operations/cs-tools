@@ -33,6 +33,67 @@ import (
 // other sent.
 const weekendKind = "weekend_notice"
 
+// SupportRota is another family's weekend turns, listed in the weekend summary
+// for information (Config.Support).
+type SupportRota struct {
+	// Family is the Team Schedule family read ("SRE").
+	Family string
+	// Title heads the block in the summary ("SRE Weekend Support").
+	Title string
+	// Rotations maps each shift code listed to its name in the Rotation
+	// Definitions table ("SRE_TZ3" -> "SRE Night (TZ3)"); a person's line
+	// shows the name up to its bracket. A code not here is not listed.
+	Rotations map[string]string
+}
+
+// SREWeekendSupport is the SRE rota the CRE weekend summary lists: the SaaS
+// weekend day turn and the TZ3 night. IaaS and PaaS are not listed.
+func SREWeekendSupport() SupportRota {
+	return SupportRota{
+		Family: "SRE",
+		Title:  "SRE Weekend Support",
+		Rotations: map[string]string{
+			"SRE_WE_TZ1": "SRE Weekend (TZ1 + TZ2)",
+			"SRE_TZ3":    "SRE Night (TZ3)",
+		},
+	}
+}
+
+// readSupport is cfg.Support's turns on the weekend's days, in day, start,
+// tier and name order. They are for information, so a failed read is logged
+// and the summary goes without them rather than not at all.
+func readSupport(ctx context.Context, rota RotaReader, cfg Config, sat, sun time.Time, wantedDay map[string]time.Time) []teamschedule.Assignment {
+	if cfg.Support.Family == "" || len(cfg.Support.Rotations) == 0 {
+		return nil
+	}
+	assignments, err := rota.WorkingAssignments(ctx, sat.Format(dateLayout), sun.Format(dateLayout), cfg.Support.Family)
+	if err != nil {
+		slog.WarnContext(ctx, "rota reminder: could not read the weekend support rota; the summary goes without it",
+			"family", cfg.Support.Family, "weekend", sat.Format(dateLayout), "err", err)
+		return nil
+	}
+	var out []teamschedule.Assignment
+	for _, a := range assignments {
+		if _, ok := wantedDay[a.RotaDate]; ok && cfg.Support.Rotations[a.ShiftCode] != "" {
+			out = append(out, a)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.RotaDate != b.RotaDate {
+			return a.RotaDate < b.RotaDate
+		}
+		if !a.StartsAt.Equal(b.StartsAt) {
+			return a.StartsAt.Before(b.StartsAt)
+		}
+		if a.Tier != b.Tier {
+			return a.Tier < b.Tier
+		}
+		return strings.ToLower(a.Engineer.Name) < strings.ToLower(b.Engineer.Name)
+	})
+	return out
+}
+
 // WeekendNotice returns the handler run every evening from Sunday to Thursday
 // for the coming weekend. Once the weekend is fully marked it sends the
 // summary and the invitations and records the send, after which it sends
@@ -171,7 +232,8 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 		return nil
 	}
 
-	summary, ok := buildWeekendEmail(cfg, pending, rostered, today, gaps)
+	support := readSupport(ctx, rota, cfg, sat, sun, wantedDay)
+	summary, ok := buildWeekendEmail(cfg, pending, rostered, support, today, gaps)
 	if !ok {
 		slog.WarnContext(ctx, "rota reminder: nobody on the weekend rota has an email address; nothing sent", "weekend", period)
 		cfg.Tally.skipped("nobody on the weekend rota of " + longDay(sat) + " has an email address")

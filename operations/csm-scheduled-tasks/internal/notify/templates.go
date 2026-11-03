@@ -242,6 +242,11 @@ type WeekendRotaData struct {
 	Intro string
 	// Days are the teams, one per rota day ("Saturday Team").
 	Days []WeekendRotaDay
+	// SupportTitle heads another family's turns listed after the teams
+	// ("SRE Weekend Support"), SupportDays one entry per day ("Saturday");
+	// nothing is written when SupportDays is empty.
+	SupportTitle string
+	SupportDays  []WeekendRotaDay
 	// Definitions are the rotations, each once.
 	Definitions []RotationDefinition
 	// ZoneNotes are the small print under the table: what each zone name
@@ -290,6 +295,19 @@ func RenderWeekendRota(data WeekendRotaData) string {
 			b.WriteString(escapeHTML(p))
 		}
 		b.WriteString("</p>\n")
+	}
+	if len(data.SupportDays) > 0 {
+		fmt.Fprintf(&b, "<p style=\"margin-bottom:4px;\"><b>%s</b></p>\n", escapeHTML(data.SupportTitle))
+		for _, d := range data.SupportDays {
+			fmt.Fprintf(&b, "<p style=\"margin-top:0;\"><b>%s:</b> ", escapeHTML(d.Title))
+			for i, p := range d.People {
+				if i > 0 {
+					b.WriteString("<br/>")
+				}
+				b.WriteString(escapeHTML(p))
+			}
+			b.WriteString("</p>\n")
+		}
 	}
 	if len(data.Definitions) > 0 {
 		b.WriteString("<p style=\"margin-bottom:4px;\"><b>Rotation Definitions</b></p>\n")

@@ -670,3 +670,107 @@ func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
 		}
 	}
 }
+
+// sreWeekend is the SRE weekend of 24-25 October: the SaaS weekend day turn
+// (L1, L2) and the TZ3 night (L1) each day, and an IaaS day turn the CRE
+// summary does not list.
+func sreWeekend() []teamschedule.Assignment {
+	tiered := func(a teamschedule.Assignment, tier string) teamschedule.Assignment {
+		a.Tier = tier
+		return a
+	}
+	var out []teamschedule.Assignment
+	for _, d := range []string{"2026-10-24", "2026-10-25"} {
+		next := map[string]string{"2026-10-24": "2026-10-25", "2026-10-25": "2026-10-26"}[d]
+		l2 := map[string]struct{ name, email string }{"2026-10-24": {"Lee", "lee@example.com"}, "2026-10-25": {"Oli", "oli@example.com"}}[d]
+		out = append(out,
+			tiered(assignment("Max", "max@example.com", "apollo", "SRE_TZ3", d, d+" 21:00", next+" 06:00"), "L1"),
+			tiered(assignment(l2.name, l2.email, "apollo", "SRE_WE_TZ1", d, d+" 06:00", d+" 21:00"), "L2"),
+			tiered(assignment("Kim", "kim@example.com", "apollo", "SRE_WE_TZ1", d, d+" 06:00", d+" 21:00"), "L1"),
+			assignment("Pat", "pat@example.com", "iaas", "SRE_IAAS_DAY", d, d+" 08:00", d+" 20:00"),
+		)
+	}
+	return out
+}
+
+// The CRE weekend summary also lists the SRE people on the SaaS weekend and
+// TZ3 turns, defines those two rotations, and goes to them; they get no
+// invitation and the IaaS turn is not listed.
+func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
+	rota := &fakeRota{assignments: fullWeekend(), other: map[string][]teamschedule.Assignment{"SRE": sreWeekend()}}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 5 {
+		t.Fatalf("sent %d emails, want the summary and the four CRE invitations", len(mail.sent))
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	if got := strings.Join(summary.to, ","); got != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com,"+
+		"kim@example.com,lee@example.com,max@example.com,oli@example.com" {
+		t.Errorf("summary to %s", got)
+	}
+	for _, want := range []string{
+		"<b>SRE Weekend Support</b>",
+		"<b>Saturday:</b> Kim (SRE Weekend, L1)<br/>Lee (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
+		"<b>Sunday:</b> Kim (SRE Weekend, L1)<br/>Oli (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
+		"<td>SRE Weekend (TZ1 + TZ2)<br/><span style=\"color:#666666; font-size:12px;\">2 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>SRE support (L1 &#8594; L2)</td>",
+		"<td>SRE Night (TZ3)<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>09:00 PM &#8211; 06:00 AM IST</td><td>15:30 &#8211; 00:30</td><td>SRE support (L1)</td>",
+		"The SRE turns are listed for information; they get no calendar invitation from this email.",
+	} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary lacks %q:\n%s", want, summary.body)
+		}
+	}
+	if strings.Contains(summary.body, "Pat") {
+		t.Errorf("summary lists the IaaS turn:\n%s", summary.body)
+	}
+	for _, m := range mail.sent {
+		if m.subject == summary.subject {
+			continue
+		}
+		if slices.ContainsFunc(m.to, func(a string) bool { return strings.HasPrefix(a, "kim@") || strings.HasPrefix(a, "max@") }) {
+			t.Errorf("an SRE person got %q", m.subject)
+		}
+	}
+	// The CRE days are listed as before: the SRE turns are not in them.
+	if !strings.Contains(summary.body, "<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>") {
+		t.Errorf("the Saturday Team changed:\n%s", summary.body)
+	}
+}
+
+// The SRE turns are for information: a failed read of the SRE rota sends the
+// CRE summary without them, and SRE people never make a weekend fully marked.
+func TestWeekendNotice_SRETurnsAreInformationOnly(t *testing.T) {
+	rota := &fakeRota{assignments: fullWeekend(), otherErr: errors.New("entity-service down")}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	if strings.Contains(summary.body, "SRE") || len(summary.to) != 5 {
+		t.Errorf("a failed SRE read changed the summary: to %v\n%s", summary.to, summary.body)
+	}
+
+	// One LK Weekend person short: the rota admins are asked, nobody on
+	// either rota is emailed, and the SRE rota is not even read.
+	short := slices.DeleteFunc(fullWeekend(), func(a teamschedule.Assignment) bool {
+		return a.Engineer.Name == "Cid" && a.RotaDate == "2026-10-25"
+	})
+	rota = &fakeRota{assignments: short, other: map[string][]teamschedule.Assignment{"SRE": sreWeekend()}}
+	mail = &fakeEmail{}
+	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Ada", Email: "ada@example.com"}}}
+	if err := WeekendNotice(rota, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Join(mail.sent[0].to, ",") != "ada@example.com" {
+		t.Fatalf("sent %d emails (%v), want only the rota admins' one", len(mail.sent), mail.sent)
+	}
+	if rota.reads != 2 { // the catalogue and the CRE rota
+		t.Errorf("read the rota %d times, want 2", rota.reads)
+	}
+}
