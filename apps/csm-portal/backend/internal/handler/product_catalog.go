@@ -278,7 +278,9 @@ func (h *ProductCatalogHandler) read(w http.ResponseWriter, r *http.Request, op,
 
 // write runs one write upstream. A refusal (e.g. an EOL date before the
 // release date, or a duplicate) names the field or rule, which only the caller
-// can fix, so it is surfaced through mapUpstreamError.
+// can fix, so it is surfaced through mapUpstreamError: a documented exception
+// to the generic mapping (see CLAUDE.md, Handler conventions). entity-service
+// writes these messages in request terms and never includes database detail.
 func (h *ProductCatalogHandler) write(w http.ResponseWriter, r *http.Request, op, fallback string, status int, call func(context.Context) ([]byte, error)) {
 	h.run(w, r, op, status, call, func(err error) { mapUpstreamError(w, err, fallback) })
 }

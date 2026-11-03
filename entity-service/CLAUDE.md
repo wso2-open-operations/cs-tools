@@ -11721,8 +11721,12 @@ pool and not in the ServiceNow data source (there the two searches read ServiceN
   profile the version already has (NULL profiles are distinct to the unique constraint, so it would not). A PATCH
   or retire of a live version row applies to all live rows of the version: its listing, or, without a
   `public_id`, the unpublished rows of the same product and version; on a retired row it touches only that row.
-  `deploymentProfile` and `publicId` are row-only, and `publicId` may only name a live listing of the same
-  product and version.
+  `deploymentProfile` and `publicId` are row-only: `publicId` may only name a live listing of the same
+  product and version, and a `deploymentProfile` the version already has (NULL included) is refused under the same
+  product lock.
+- **Error messages are in request terms.** The CSM portal shows a write's 400 reason to the user, so `changeError`
+  maps each catalogue constraint to a field or rule (`catalogConstraintMessages`, `catalogColumnFields`) and never
+  echoes `pgErr.Detail` or `pgErr.Message`.
 - **Rules, checked in the write transaction on the rows as written** (`checkVersionRules`), so a body is always
   judged with the stored values it leaves alone: release <= earliest possible EOL <= EOL, announcement <= EOL, and
   a row on a public feed needs `public_abbreviation` or a product `code`, checked when a write publishes a row or

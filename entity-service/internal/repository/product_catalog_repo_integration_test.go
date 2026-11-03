@@ -291,3 +291,35 @@ func TestProductCatalogIntegration_ClearingACodePublishedVersionsRelyOn(t *testi
 	err := product(CatalogSet{Column: "code", Cast: "%s", Value: (*string)(nil)})
 	catITWantRule(t, err, "would have no abbreviation")
 }
+
+func TestProductCatalogIntegration_RenamingAProfileToOneTakenIsRefused(t *testing.T) {
+	r, _ := newProductCatalogIntegrationRepo(t)
+	ids, err := catITCreate(t, r, catITProductCoded, "8.0.0", []string{"", "Gateway"}, nil)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	gateway := ids[1]
+	_, err = catITUpdate(r, gateway, nil, CatalogSet{Column: "deployment_profile", Cast: "%s", Value: (*string)(nil)})
+	catITWantRule(t, err, "already has a row for no deployment profile")
+	if _, err := catITUpdate(r, gateway, nil, catITStr("deployment_profile", "%s", "Gateway")); err != nil {
+		t.Fatalf("keeping its own profile refused: %v", err)
+	}
+	if _, err := catITUpdate(r, gateway, nil, catITStr("deployment_profile", "%s", "Key Manager")); err != nil {
+		t.Fatalf("free profile refused: %v", err)
+	}
+}
+
+func TestProductCatalogIntegration_ConstraintErrorsNameTheField(t *testing.T) {
+	r, _ := newProductCatalogIntegrationRepo(t)
+	ids, err := catITCreate(t, r, catITProductCoded, "9.0.0", []string{"All In One"}, nil)
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	missing := "5fc00000-0000-4000-8000-0000000000ff"
+	_, err = catITUpdate(r, ids[0], []CatalogSet{catITStr("release_line_id", "%s::uuid", missing)})
+	catITWantRule(t, err, "releaseLineId: no such release line")
+	var ve *apierror.ValidationError
+	if errors.As(err, &ve) && (strings.Contains(ve.Msg, "release_line") || strings.Contains(ve.Msg, "Key (")) {
+		t.Fatalf("database detail leaked: %q", ve.Msg)
+	}
+}

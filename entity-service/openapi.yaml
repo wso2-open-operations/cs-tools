@@ -5960,6 +5960,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Unexpected error.
           content:
@@ -6416,6 +6422,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
           content:
             application/json:
               schema:
@@ -32173,16 +32185,47 @@ components:
           items:
             $ref: '#/components/schemas/ProductVersion'
     SearchAllProductVersionsRequest:
-      allOf:
-        - $ref: '#/components/schemas/SearchProductVersionsRequest'
-        - type: object
+      type: object
+      additionalProperties: false
+      description: The per-product version search's filters, plus productId, across products.
+      properties:
+        pagination:
+          type: object
+          additionalProperties: false
           properties:
-            productId:
-              type: string
-              format: uuid
-              description: Only this product.
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              description: Rows per page. Defaults to 20, capped at 1000 (the whole catalogue fits in one page).
+            offset:
+              type: integer
+              minimum: 0
+              description: Zero-based offset into the result set.
+        productId:
+          type: string
+          format: uuid
+          description: Only this product.
+        searchQuery:
+          type: string
+          description: Case-insensitive match against the version string.
+        deploymentProfile:
+          type: string
+          description: Only rows with this deployment profile, matched case-insensitively.
+        excludeRetired:
+          type: boolean
+          description: Leave out retired rows.
+        feed:
+          type: string
+          enum: [support-matrix, release-matrix]
+          description: Only the live rows with a public listing on this feed.
+        publicId:
+          type: integer
+          format: int64
+          description: Only the rows of this public listing.
     ProductWrite:
       type: object
+      additionalProperties: false
       description: name and class are required on create.
       properties:
         name: {type: string, maxLength: 100}
@@ -32194,9 +32237,14 @@ components:
         description: {type: string, maxLength: 2000, nullable: true}
     ProductVersionPatch:
       type: object
-      description: The status is case-insensitive. Dates are YYYY-MM-DD.
+      additionalProperties: false
+      description: Dates are YYYY-MM-DD. Listing fields apply to every live row of the version; deploymentProfile and publicId to this row only.
       properties:
-        currentSupportStatus: {type: string, enum: [available, extended, deprecated, discontinued], nullable: true}
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED]
         releaseDate: {type: string, format: date, nullable: true}
         earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
         supportEolDate: {type: string, format: date, nullable: true}
@@ -32219,26 +32267,55 @@ components:
           type: string
           maxLength: 255
           nullable: true
-          description: This row only (PATCH).
+          description: This row only.
         publicId:
           type: integer
           format: int64
           nullable: true
-          description: This row only (PATCH); on create, the listing to join.
+          description: This row only; a live listing of the same product and version.
     ProductVersionCreate:
-      allOf:
-        - $ref: '#/components/schemas/ProductVersionPatch'
-        - type: object
-          required: [version, profiles]
-          properties:
-            version: {type: string, maxLength: 20}
-            profiles:
-              type: array
-              minItems: 1
-              description: One row per deployment profile; "" is a row with no profile.
-              items: {type: string, maxLength: 255}
+      type: object
+      additionalProperties: false
+      required: [version, profiles]
+      description: Dates are YYYY-MM-DD. One row per profile, all on one public listing.
+      properties:
+        version: {type: string, maxLength: 20}
+        profiles:
+          type: array
+          minItems: 1
+          description: One row per deployment profile; "" is a row with no profile.
+          items: {type: string, maxLength: 255}
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED]
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, maxLength: 150, nullable: true}
+        publicAbbreviation: {type: string, maxLength: 64, nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+        releaseLinks: {type: string, maxLength: 255, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string, maxLength: 50}
+        legacyStatus: {type: boolean}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: A live listing of the same product and version to join; omit it to start a new listing.
     ReleaseLineWrite:
       type: object
+      additionalProperties: false
       description: name is required on create.
       properties:
         name: {type: string, maxLength: 100}

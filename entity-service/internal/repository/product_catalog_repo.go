@@ -311,18 +311,44 @@ func checkListingAgrees(ctx context.Context, tx pgx.Tx, publicID int64, cols []s
 	return nil
 }
 
+// catalogConstraintMessages names, per catalogue constraint, what the caller
+// did wrong in request terms.
+var catalogConstraintMessages = map[string]string{
+	"product_name_category_unit_key":                            "a product with this name, class and unit already exists",
+	"product_version_product_id_version_deployment_profile_key": "this version already has a row for that deployment profile",
+	"product_version_product_id_fkey":                           "productId: no such product",
+	"product_version_release_line_id_fkey":                      "releaseLineId: no such release line",
+	"release_line_name_key":                                     "a release line with this name already exists",
+}
+
+// catalogColumnFields maps a catalogue column to its request field.
+var catalogColumnFields = map[string]string{
+	"name": "name", "code": "code", "version": "version", "deployment_profile": "deploymentProfile",
+	"public_name": "publicName", "public_abbreviation": "publicAbbreviation", "description": "description",
+	"release_links": "releaseLinks", "status": "status", "start_date": "startDate",
+}
+
 // changeError turns a database constraint failure into a readable 400.
 func changeError(a CatalogApply, err error) error {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		noun := entityNoun(a.EntityType)
+		// The messages name request fields, never the database: the portal
+		// shows a write's reason to the user, and pgErr.Detail / Message
+		// name tables, columns and values.
+		if msg, ok := catalogConstraintMessages[pgErr.ConstraintName]; ok {
+			return &apierror.ValidationError{Msg: msg}
+		}
 		switch pgErr.Code {
 		case "23505":
-			return &apierror.ValidationError{Msg: fmt.Sprintf("this %s would duplicate an existing one: %s", noun, pgErr.Detail)}
+			return &apierror.ValidationError{Msg: fmt.Sprintf("this %s would duplicate an existing one", noun)}
 		case "23503":
-			return &apierror.ValidationError{Msg: fmt.Sprintf("this %s refers to a row that does not exist: %s", noun, pgErr.Detail)}
+			return &apierror.ValidationError{Msg: fmt.Sprintf("this %s refers to something that does not exist", noun)}
 		case "23502", "23514", "22P02", "22007", "22008", "22001":
-			return &apierror.ValidationError{Msg: fmt.Sprintf("invalid value for this %s: %s", noun, pgErr.Message)}
+			if field, ok := catalogColumnFields[pgErr.ColumnName]; ok {
+				return &apierror.ValidationError{Msg: field + ": invalid value"}
+			}
+			return &apierror.ValidationError{Msg: fmt.Sprintf("invalid value for this %s", noun)}
 		}
 	}
 	var nf *apierror.NotFoundError
@@ -442,8 +468,13 @@ func applyCatalogChange(ctx context.Context, tx pgx.Tx, actor string, a CatalogA
 		}
 		if isVersion {
 			for _, s := range a.RowSets {
-				if s.Column == "public_id" {
+				switch s.Column {
+				case "public_id":
 					if err := checkJoinListing(ctx, tx, s.Value, "", "", a.EntityID); err != nil {
+						return nil, nil, err
+					}
+				case "deployment_profile":
+					if err := checkProfileFree(ctx, tx, s.Value, a.EntityID); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -519,6 +550,35 @@ func setString(sets []CatalogSet, column string) string {
 		}
 	}
 	return ""
+}
+
+// checkProfileFree refuses renaming a row's deployment profile to one its
+// version already has, NULL (no profile) included, which the unique
+// constraint would let through. It locks the product, as a CREATE does.
+func checkProfileFree(ctx context.Context, tx pgx.Tx, value any, rowID string) error {
+	profile, _ := value.(*string)
+	var productID, version string
+	if err := tx.QueryRow(ctx, `SELECT product_id::text, version FROM product_version WHERE id = $1::uuid`,
+		rowID).Scan(&productID, &version); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM product WHERE id = $1::uuid FOR UPDATE`, productID); err != nil {
+		return err
+	}
+	var taken bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_version WHERE product_id = $1::uuid
+		AND version = $2 AND deployment_profile IS NOT DISTINCT FROM $3 AND id <> $4::uuid)`,
+		productID, version, profile, rowID).Scan(&taken); err != nil {
+		return err
+	}
+	if taken {
+		label := "no deployment profile"
+		if profile != nil {
+			label = *profile
+		}
+		return &apierror.ValidationError{Msg: fmt.Sprintf("version %s already has a row for %s", version, label)}
+	}
+	return nil
 }
 
 // checkJoinListing allows setting public_id only to null or to an existing
