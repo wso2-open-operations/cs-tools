@@ -144,9 +144,14 @@ export default function DashboardWidgetPreviewPage(): JSX.Element {
   const { user, isLoading: isLoadingUser } = useCurrentUser();
   // Back returns to the dashboard the user came from (a tile sets
   // `state.from`, a custom or shared dashboard included); the System
-  // Dashboards page only for a link opened directly, with no state.
+  // Dashboards page only for a link opened directly, with no state. Only an
+  // app path counts: not "//host" or "/\\host", which browsers read as
+  // another host.
   const from = (location.state as { from?: unknown } | null)?.from;
-  const backTarget = typeof from === "string" && from.startsWith("/") ? from : "/dashboard";
+  const backTarget =
+    typeof from === "string" && from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/\\")
+      ? from
+      : "/dashboard";
 
   const resourceType = resourceTypeForPreviewSlug(previewSlug);
   const widgetId = searchParams.get("w");

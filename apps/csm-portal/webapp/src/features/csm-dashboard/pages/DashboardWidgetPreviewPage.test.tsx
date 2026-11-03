@@ -452,11 +452,13 @@ describe("DashboardWidgetPreviewPage", () => {
     expect(screen.getByText("A custom dashboard")).toBeInTheDocument();
   });
 
-  it("returns to the System Dashboards page when `from` is not an app path", () => {
-    renderAt(entryWithState({ from: "https://example.test/elsewhere" }));
-    fireEvent.click(screen.getByRole("button", { name: /back/i }));
-    expect(screen.getByText("Dashboard landing")).toBeInTheDocument();
-  });
+  for (const from of ["https://example.test/elsewhere", "//example.test/elsewhere", "/\\example.test/elsewhere"]) {
+    it(`returns to the System Dashboards page when \`from\` is not an app path: ${from}`, () => {
+      renderAt(entryWithState({ from }));
+      fireEvent.click(screen.getByRole("button", { name: /back/i }));
+      expect(screen.getByText("Dashboard landing")).toBeInTheDocument();
+    });
+  }
 });
 
 /**
