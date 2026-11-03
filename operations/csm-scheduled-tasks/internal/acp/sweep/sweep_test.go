@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -585,18 +586,30 @@ func TestProcessProject_Day0SuccessfulNotifyThenSuspend(t *testing.T) {
 	if err := json.Unmarshal(updater.calls[0].body, &noticeBody); err != nil {
 		t.Fatalf("parse first update body: %v", err)
 	}
-	if got := noticeBody.SuspensionProcessState.BasedOnSubscriptionEndDate.EventType; got != "suspend" {
-		t.Errorf("first call event_type = %q, want %q", got, "suspend")
+	// The notice is recorded as "suspend_notice": "suspend" is written only
+	// with the suspension, so a half-done suspension never looks like a
+	// project set back to Open by hand.
+	if got := noticeBody.SuspensionProcessState.BasedOnSubscriptionEndDate.EventType; got != "suspend_notice" {
+		t.Errorf("first call event_type = %q, want %q", got, "suspend_notice")
 	}
 
 	var suspendBody struct {
-		EndDateClosureState string `json:"endDateClosureState"`
+		EndDateClosureState    string `json:"endDateClosureState"`
+		SuspensionProcessState struct {
+			BasedOnSubscriptionEndDate map[string]string `json:"based_on_subscription_end_date"`
+		} `json:"suspensionProcessState"`
 	}
 	if err := json.Unmarshal(updater.calls[1].body, &suspendBody); err != nil {
 		t.Fatalf("parse second update body: %v", err)
 	}
 	if suspendBody.EndDateClosureState != "Closed" {
 		t.Errorf("second call endDateClosureState = %q, want %q", suspendBody.EndDateClosureState, "Closed")
+	}
+	// The notice's action result is carried over (the mock notifier reports
+	// nothing delivered).
+	want := map[string]string{"event_type": "suspend", "suspended_on": "2026-07-28", "actionSendEmailNotification": "IGNORED"}
+	if got := suspendBody.SuspensionProcessState.BasedOnSubscriptionEndDate; !reflect.DeepEqual(got, want) {
+		t.Errorf("second call record = %v, want %v (in the same update as the closure state)", got, want)
 	}
 }
 

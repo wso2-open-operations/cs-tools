@@ -221,6 +221,7 @@ func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOth
 		startState     string
 		wantSub        string
 		wantInvoice    string
+		wantWrites     int
 	}{
 		{
 			// The staging case: invoice long overdue (acts first, suspends),
@@ -231,6 +232,7 @@ func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOth
 			startState:     `{"based_on_subscription_end_date":{"event_type":"60_days_notice"},"based_on_due_invoices":{"event_type":"open"}}`,
 			wantSub:        "30_days_notice",
 			wantInvoice:    "suspend",
+			wantWrites:     3, // invoice notice, invoice suspension, subscription notice
 		},
 		{
 			name:           "subscription first then invoice",
@@ -239,6 +241,7 @@ func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOth
 			startState:     `{"based_on_subscription_end_date":{"event_type":"7_days_notice"},"based_on_due_invoices":{"event_type":"open"}}`,
 			wantSub:        "suspend",
 			wantInvoice:    "suspend",
+			wantWrites:     4, // each cascade: its notice, then its suspension
 		},
 	}
 	for _, tt := range tests {
@@ -271,8 +274,8 @@ func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOth
 					writes++
 				}
 			}
-			if writes != 2 {
-				t.Fatalf("suspensionProcessState written %d times, want 2 (one per cascade)", writes)
+			if writes != tt.wantWrites {
+				t.Fatalf("suspensionProcessState written %d times, want %d (each notice, and each suspension with its closure state)", writes, tt.wantWrites)
 			}
 			var state struct {
 				Sub struct {

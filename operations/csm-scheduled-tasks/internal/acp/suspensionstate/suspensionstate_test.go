@@ -19,6 +19,7 @@ package suspensionstate
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/closure"
@@ -142,8 +143,8 @@ func TestWithState_NullBlobIsAFirstWrite(t *testing.T) {
 				if err := json.Unmarshal(got, &blob); err != nil {
 					t.Fatalf("output is not valid JSON: %v (%s)", err, got)
 				}
-				if len(blob) != 1 || blob[tc.key]["event_type"] != "suspend" || blob[tc.key]["actionSendEmailNotification"] != "SUCCESSFUL" {
-					t.Errorf("output = %s, want only %s with event_type suspend", got, tc.key)
+				if len(blob) != 1 || blob[tc.key]["event_type"] != SuspendNoticeEventType || blob[tc.key]["actionSendEmailNotification"] != "SUCCESSFUL" {
+					t.Errorf("output = %s, want only %s with event_type suspend_notice", got, tc.key)
 				}
 			})
 		}
@@ -288,4 +289,41 @@ func normalizeJSON(t *testing.T, raw json.RawMessage) []byte {
 		t.Fatalf("normalizeJSON: %v", err)
 	}
 	return out
+}
+
+// The suspension's record replaces only its own section, keeps that
+// section's action results, and reads back as window 0, like the day-0
+// notice record it follows.
+func TestWithSuspended(t *testing.T) {
+	raw := json.RawMessage(`{"based_on_subscription_end_date":{"event_type":"suspend_notice","actionSendEmailNotification":"SUCCESSFUL"},"based_on_due_invoices":{"event_type":"open"},"based_on_compliance":{"x":1}}`)
+	got, err := WithSubscriptionEndDateSuspended(raw, "2026-11-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(got, &blob); err != nil {
+		t.Fatal(err)
+	}
+	var sub map[string]string
+	if err := json.Unmarshal(blob[subscriptionEndDateKey], &sub); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"event_type": "suspend", "suspended_on": "2026-11-03", "actionSendEmailNotification": "SUCCESSFUL"}
+	if !reflect.DeepEqual(sub, want) {
+		t.Errorf("section = %v, want %v", sub, want)
+	}
+	if string(blob[dueInvoicesKey]) != `{"event_type":"open"}` || string(blob["based_on_compliance"]) != `{"x":1}` {
+		t.Errorf("other sections changed: %s", got)
+	}
+	if w, err := LastNoticeWindow(got); err != nil || w == nil || *w != closure.NoticeWindow0 {
+		t.Errorf("LastNoticeWindow = %v, %v, want window 0", w, err)
+	}
+
+	got, err = WithDueInvoicesSuspended(json.RawMessage("null"), "2026-11-03")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"based_on_due_invoices":{"event_type":"suspend","suspended_on":"2026-11-03"}}` {
+		t.Errorf("first write = %s", got)
+	}
 }

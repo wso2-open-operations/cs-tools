@@ -465,11 +465,19 @@ both places.
   runs over its copy too (skipped when that file is absent; `ACP_RULES_PARITY_FILE` points at
   another path). A rule changed here and not there makes ACP suspend a project every day and the
   reopen check reopen it, so change both and the file together.
-- **Salesforce first.** A suspension sets Salesforce `State__c` to Suspended before the CSM
-  suspension (`suspendInSalesforce`). A Salesforce failure then leaves the project Open in CSM, so
-  the next run tries again (CSM first used to leave it for someone to fix by hand); and a reopen
-  check running between the two writes finds nothing ACP-suspended yet instead of reopening a
-  project that Salesforce is then set back to Suspended on.
+- **Salesforce first, then one CSM update.** A suspension sets Salesforce `State__c` to Suspended
+  (`suspendInSalesforce`), then writes the closure state **and** the suspension's record
+  (`"event_type": "suspend"` with `"suspended_on": "YYYY-MM-DD"`, Colombo date) to CSM in one
+  `PATCH` (`writeSuspension`). The day-0 notice before it is recorded as `"suspend_notice"`, which
+  reads as window 0, so a retry sends no second notice and only retries the suspension.
+  `"suspend"` is never written on its own: an Open project with a `"suspend"` record is what
+  entity-service's reopen reads as "a person set it back to Open", and it would set Salesforce Open
+  and email "Back to Open" for a project that was never suspended (PR #3124/#3126 review). So a
+  Salesforce failure leaves the project Open in CSM with `"suspend_notice"` only, and the next run
+  tries again (CSM first used to leave it for someone to fix by hand); and a reopen running between
+  the two writes, after an event or the Salesforce echo of ACP's own write, finds nothing to reopen
+  or finish. `suspended_on` is what entity-service checks before emailing for a project set back to
+  Open by hand (only for a suspension in the last 7 days).
 - **Dry run by default** (`ACP_DRY_RUN`, unset or malformed is true): decide and log, write
   nothing to CSM or Salesforce. Notices are only logged unless `ACP_EMAIL_SEND_ENABLED=true`
   (which needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`). Addresses outside `@wso2.com` are

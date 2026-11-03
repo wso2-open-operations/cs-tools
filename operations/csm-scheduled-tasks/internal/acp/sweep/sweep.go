@@ -242,7 +242,7 @@ func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf n
 	return &cascadeDecision{
 		decision: decision,
 		act: func(ctx context.Context, alreadyClosed bool, history *json.RawMessage) error {
-			return actSubscription(ctx, reader, updater, ntf, proj, decision, alreadyClosed, history)
+			return actSubscription(ctx, reader, updater, ntf, proj, decision, alreadyClosed, history, now)
 		},
 	}, nil
 }
@@ -255,7 +255,7 @@ func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf n
 // from notify returns immediately — this ordering, not a separate flag, is
 // what guarantees suspend never proceeds after a failed notify (the day-0
 // "email first, stop on failure" contract).
-func actSubscription(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, alreadyClosed bool, history *json.RawMessage) error {
+func actSubscription(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, alreadyClosed bool, history *json.RawMessage, now time.Time) error {
 	if decision.ShouldNotify {
 		delivered := false
 		var err error
@@ -271,7 +271,7 @@ func actSubscription(ctx context.Context, reader entityReader, updater projectUp
 	}
 
 	if decision.ShouldSuspend {
-		if err := suspend(ctx, updater, proj); err != nil {
+		if err := suspend(ctx, updater, proj, history, now); err != nil {
 			return fmt.Errorf("sweep: suspend project %s: %w", proj.ID, err)
 		}
 	}
@@ -762,6 +762,19 @@ func recordNoticeSent(ctx context.Context, updater projectUpdater, projectID str
 // already-fetched endDateClosureState — no extra round-trip), mirroring
 // legacy's checkForOpenProject guard.
 //
+// The suspension's record (based_on_subscription_end_date "suspend" with
+// suspended_on, see suspensionstate.WithSubscriptionEndDateSuspended) goes in
+// the same update as the closure state, after Salesforce took
+// State__c=Suspended, and nowhere else: the day-0 notice is recorded as
+// "suspend_notice" (recordNoticeSent). So a suspension that stops half way
+// (Salesforce or the CSM write failing) leaves an Open project with no
+// "suspend" record, which entity-service's reopen would otherwise read as a
+// project a person set back to Open and finish, with a "Back to Open" email
+// for a project that was never suspended. The next run sees "suspend_notice"
+// as the day-0 notice already sent and only retries the suspension. A
+// dimension already past Open was not suspended by this run, so nothing is
+// recorded as ACP's suspension for it.
+//
 // "Closed" is the end-date value the legacy system mapped to an overall
 // "Suspended" (an end-date "Suspended" did not count there), and the only end-date suspension value Salesforce's
 // Closure_State_End_Date_Based__c picklist has. CSM's own roll-up accepts both,
@@ -781,23 +794,44 @@ func recordNoticeSent(ctx context.Context, updater projectUpdater, projectID str
 // since notifyForWindow is never called on that path either. Confirmed
 // acceptable — do not add logging back here without re-confirming that
 // decision has changed.
-func suspend(ctx context.Context, updater projectUpdater, proj project) error {
-	if proj.EndDateClosureState != nil && *proj.EndDateClosureState != "Open" {
+func suspend(ctx context.Context, updater projectUpdater, proj project, history *json.RawMessage, now time.Time) error {
+	if !dimensionOpen(proj.EndDateClosureState) {
 		return nil
 	}
+	newState, err := suspensionstate.WithSubscriptionEndDateSuspended(*history, suspendedOn(now))
+	if err != nil {
+		return fmt.Errorf("build suspensionProcessState: %w", err)
+	}
+	return writeSuspension(ctx, updater, proj, history, newState, "endDateClosureState", "Closed")
+}
 
-	body, err := json.Marshal(map[string]string{"endDateClosureState": "Closed"})
+// writeSuspension sets Salesforce State__c to Suspended, then writes the
+// closure state field and the suspension's record (newState) to CSM in one
+// update, and moves history on. Shared by suspend and suspendInvoice.
+func writeSuspension(ctx context.Context, updater projectUpdater, proj project, history *json.RawMessage, newState json.RawMessage, field, value string) error {
+	body, err := json.Marshal(map[string]any{field: value, "suspensionProcessState": newState})
 	if err != nil {
 		return fmt.Errorf("marshal update request: %w", err)
 	}
-
 	if err := suspendInSalesforce(ctx, updater, proj); err != nil {
 		return err
 	}
 	if _, err := updater.UpdateProject(ctx, proj.ID, body); err != nil {
 		return fmt.Errorf("Salesforce State__c set to Suspended, but suspending the CSM project failed (the next run tries again): %w", err)
 	}
+	*history = newState
 	return nil
+}
+
+// suspensionDateZone is the operations time zone (Colombo, UTC+05:30) the
+// suspended_on date is given in, as the run's weekday is.
+var suspensionDateZone = time.FixedZone("UTC+05:30", 5*60*60+30*60)
+
+// suspendedOn is the suspended_on date (YYYY-MM-DD) of a suspension made at
+// now. entity-service's reopen sends its "Back to Open" email for a project a
+// person set back to Open only when this is recent.
+func suspendedOn(now time.Time) string {
+	return now.In(suspensionDateZone).Format("2006-01-02")
 }
 
 // suspendInSalesforce sets the project's Salesforce State__c to Suspended,
@@ -809,11 +843,14 @@ func suspend(ctx context.Context, updater projectUpdater, proj project) error {
 //     (Written second, a failure left CSM suspended, which the next run never
 //     lists again, so State__c had to be set by hand.)
 //   - entity-service's reopen check reopens only what CSM shows ACP
-//     suspended. Run between the two writes, it now finds nothing to reopen
-//     and the project ends suspended everywhere (if it was in fact renewed or
-//     paid, the reopen's daily check reopens it). Written CSM first, a reopen
-//     in between could set the project Open, and this write then set
-//     Salesforce back to Suspended after the "Back to Open" email went out.
+//     suspended, and the "suspend" record is written only in the CSM update
+//     that suspends (see suspend). Run between the two writes, the reopen
+//     finds an Open project with no "suspend" record: nothing to reopen and
+//     nothing to finish, and the project ends suspended everywhere (if it
+//     was in fact renewed or paid, the reopen's daily check reopens it).
+//     Written CSM first, a reopen in between could set the project Open, and
+//     this write then set Salesforce back to Suspended after the "Back to
+//     Open" email went out.
 //
 // ACP never reopens, so it never writes Open.
 func suspendInSalesforce(ctx context.Context, updater projectUpdater, proj project) error {

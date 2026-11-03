@@ -48,6 +48,7 @@ type reopenCheckResponse struct {
 	Checked          int      `json:"checked"`
 	Reopened         int      `json:"reopened"`
 	Finished         int      `json:"finished"`
+	SkippedSetByHand int      `json:"skippedSetByHand"`
 	Failed           int      `json:"failed"`
 	FailedProjectIDs []string `json:"failedProjectIds"`
 	NextCursor       string   `json:"nextCursor"`
@@ -84,6 +85,7 @@ func RunReopenCheck(client ReopenChecker) func(ctx context.Context) error {
 			total.Checked += r.Checked
 			total.Reopened += r.Reopened
 			total.Finished += r.Finished
+			total.SkippedSetByHand += r.SkippedSetByHand
 			total.Failed += r.Failed
 			total.FailedProjectIDs = append(total.FailedProjectIDs, r.FailedProjectIDs...)
 			// more is the only end signal: entity-service sets more and
@@ -98,7 +100,15 @@ func RunReopenCheck(client ReopenChecker) func(ctx context.Context) error {
 			cursor = r.NextCursor
 		}
 		slog.InfoContext(ctx, "acp reopen check: finished",
-			"checked", total.Checked, "reopened", total.Reopened, "finished", total.Finished, "failed", total.Failed)
+			"checked", total.Checked, "reopened", total.Reopened, "finished", total.Finished, "failed", total.Failed,
+			"skippedSetByHand", total.SkippedSetByHand)
+		if total.SkippedSetByHand > 0 {
+			// Their overall closure state does not match their sub-states:
+			// set by hand on purpose, or migrated data the legacy rule
+			// computed. Either way they are never reopened automatically.
+			slog.WarnContext(ctx, "acp reopen check: projects left alone because their closure state was set by hand; see entity-service's log for each",
+				"skippedSetByHand", total.SkippedSetByHand)
+		}
 		if total.Failed == 0 {
 			return nil
 		}

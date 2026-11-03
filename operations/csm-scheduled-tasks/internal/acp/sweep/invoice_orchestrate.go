@@ -100,7 +100,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 	return &cascadeDecision{
 		decision: decision,
 		act: func(ctx context.Context, alreadyClosed bool, history *json.RawMessage) error {
-			return actInvoice(ctx, reader, updater, ntf, proj, decision, resolvedForNotice, alreadyClosed, history)
+			return actInvoice(ctx, reader, updater, ntf, proj, decision, resolvedForNotice, alreadyClosed, history, now)
 		},
 	}, false, nil
 }
@@ -111,7 +111,7 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 // of the subscription equivalents. alreadyClosed reflects every
 // higher-priority cascade's own decision.ShouldSuspend so far this run —
 // see processProject.
-func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, invoice dueInvoice, alreadyClosed bool, history *json.RawMessage) error {
+func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater, ntf notifier, proj project, decision closure.Decision, invoice dueInvoice, alreadyClosed bool, history *json.RawMessage, now time.Time) error {
 	if decision.ShouldNotify {
 		delivered := false
 		var err error
@@ -135,7 +135,7 @@ func actInvoice(ctx context.Context, reader entityReader, updater projectUpdater
 	}
 
 	if decision.ShouldSuspend {
-		if err := suspendInvoice(ctx, updater, proj); err != nil {
+		if err := suspendInvoice(ctx, updater, proj, history, now); err != nil {
 			return fmt.Errorf("sweep: suspend invoice for project %s: %w", proj.ID, err)
 		}
 	}
@@ -195,24 +195,17 @@ func recordInvoiceNoticeSent(ctx context.Context, updater projectUpdater, projec
 // suspendInvoice mirrors suspend exactly, writing/reading
 // InvoiceDueDateClosureState instead of EndDateClosureState — its own
 // per-dimension idempotency guard, entirely separate from the subscription
-// cascade's.
-func suspendInvoice(ctx context.Context, updater projectUpdater, proj project) error {
-	if proj.InvoiceDueDateClosureState != nil && *proj.InvoiceDueDateClosureState != "Open" {
+// cascade's — and recording the suspension in based_on_due_invoices, in the
+// same update and only there, for the same reason (see suspend).
+func suspendInvoice(ctx context.Context, updater projectUpdater, proj project, history *json.RawMessage, now time.Time) error {
+	if !dimensionOpen(proj.InvoiceDueDateClosureState) {
 		return nil
 	}
-
-	body, err := json.Marshal(map[string]string{"invoiceDueDateClosureState": "Suspended"})
+	newState, err := suspensionstate.WithDueInvoicesSuspended(*history, suspendedOn(now))
 	if err != nil {
-		return fmt.Errorf("marshal update request: %w", err)
+		return fmt.Errorf("build suspensionProcessState: %w", err)
 	}
-
-	if err := suspendInSalesforce(ctx, updater, proj); err != nil {
-		return err
-	}
-	if _, err := updater.UpdateProject(ctx, proj.ID, body); err != nil {
-		return fmt.Errorf("Salesforce State__c set to Suspended, but suspending the CSM project failed (the next run tries again): %w", err)
-	}
-	return nil
+	return writeSuspension(ctx, updater, proj, history, newState, "invoiceDueDateClosureState", "Suspended")
 }
 
 // listedInvoices turns the resolved due invoices into the lines the internal

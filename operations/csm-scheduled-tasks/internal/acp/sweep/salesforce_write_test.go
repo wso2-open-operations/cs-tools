@@ -26,8 +26,8 @@ import (
 )
 
 // day0Project is an Open project whose end date passed three days ago, with
-// the day-0 notice already recorded, so processProject goes straight to
-// suspend.
+// the day-0 notice already recorded ("suspend_notice": the suspension itself
+// not done yet), so processProject goes straight to suspend.
 func day0Project(sfID *string) project {
 	endDate := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
 	open := "Open"
@@ -37,7 +37,7 @@ func day0Project(sfID *string) project {
 		Account:                &projectAccountRef{ID: "a1"},
 		EndDate:                &endDate,
 		ClosureState:           &open,
-		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend"}}`),
+		SuspensionProcessState: []byte(`{"based_on_subscription_end_date":{"event_type":"suspend_notice"}}`),
 	}
 }
 
@@ -216,5 +216,93 @@ func TestWriter(t *testing.T) {
 func TestDryRun_SkipsSalesforce(t *testing.T) {
 	if err := (&DryRunProjectUpdater{}).SuspendInSalesforce(context.Background(), "a0dSF1"); err != nil {
 		t.Errorf("SuspendInSalesforce: %v, want nil", err)
+	}
+}
+
+// TestSuspend_HalfDoneSuspensionLeavesNoSuspendRecord: on day 0 the notice
+// goes out and is recorded as "suspend_notice"; Salesforce then fails. CSM
+// must hold no "suspend" record, or entity-service's reopen would read the
+// Open project as set back to Open by hand and send "Back to Open". The next
+// run sends no second notice, retries the suspension, and writes "suspend"
+// in the same update as the closure state.
+func TestSuspend_HalfDoneSuspensionLeavesNoSuspendRecord(t *testing.T) {
+	proj := day0Project(strPtr("a0dSF1"))
+	proj.SuspensionProcessState = nil
+	updater := &mockProjectUpdater{
+		sfSuspendFn: func(context.Context, string) error { return errors.New("sales-entity down") },
+	}
+	ntf := &mockNotifier{}
+	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now, proj); err == nil {
+		t.Fatal("processProject() error = nil, want the Salesforce failure")
+	}
+	if len(ntf.sent) == 0 {
+		t.Fatal("the day-0 notice was not sent")
+	}
+	if len(updater.calls) != 1 {
+		t.Fatalf("CSM writes = %d, want only the notice record", len(updater.calls))
+	}
+	var first struct {
+		State json.RawMessage `json:"suspensionProcessState"`
+	}
+	if err := json.Unmarshal(updater.calls[0].body, &first); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(first.State), `"suspend"`) || !strings.Contains(string(first.State), `"suspend_notice"`) {
+		t.Fatalf("record after a failed suspension = %s, want suspend_notice and no suspend", first.State)
+	}
+
+	// The next run: Salesforce is back.
+	proj.SuspensionProcessState = first.State
+	updater = &mockProjectUpdater{}
+	ntf = &mockNotifier{}
+	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now.AddDate(0, 0, 1), proj); err != nil {
+		t.Fatalf("retry: processProject() error = %v", err)
+	}
+	if len(ntf.sent) != 0 {
+		t.Errorf("retry sent %d notices, want none (the day-0 notice is recorded)", len(ntf.sent))
+	}
+	if len(updater.calls) != 1 {
+		t.Fatalf("retry CSM writes = %d, want one (closure state and record together)", len(updater.calls))
+	}
+	var second struct {
+		EndDate string `json:"endDateClosureState"`
+		State   struct {
+			Sub map[string]string `json:"based_on_subscription_end_date"`
+		} `json:"suspensionProcessState"`
+	}
+	if err := json.Unmarshal(updater.calls[0].body, &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.EndDate != "Closed" || second.State.Sub["event_type"] != "suspend" || second.State.Sub["suspended_on"] != "2026-07-29" {
+		t.Errorf("retry write = %s, want Closed with the suspend record dated 2026-07-29", updater.calls[0].body)
+	}
+}
+
+// TestSuspendInvoice_RecordGoesWithTheClosureState: the invoice track
+// writes its "suspend" record only in the update that suspends it.
+func TestSuspendInvoice_RecordGoesWithTheClosureState(t *testing.T) {
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	updater := &mockProjectUpdater{}
+	proj := project{ID: "p1", SfID: strPtr("a0dSF1"), Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
+	if err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, &mockNotifier{}, now, proj); err != nil {
+		t.Fatalf("processProject() error = %v, want nil", err)
+	}
+	for _, c := range updater.calls {
+		var body struct {
+			Invoice *string `json:"invoiceDueDateClosureState"`
+			State   struct {
+				Inv map[string]string `json:"based_on_due_invoices"`
+			} `json:"suspensionProcessState"`
+		}
+		if err := json.Unmarshal(c.body, &body); err != nil {
+			t.Fatal(err)
+		}
+		suspendRecord := body.State.Inv["event_type"] == "suspend"
+		if suspendRecord != (body.Invoice != nil) {
+			t.Errorf("write %s: the suspend record and invoiceDueDateClosureState must go together", c.body)
+		}
+		if suspendRecord && body.State.Inv["suspended_on"] != "2026-06-01" {
+			t.Errorf("suspended_on = %q, want 2026-06-01", body.State.Inv["suspended_on"])
+		}
 	}
 }

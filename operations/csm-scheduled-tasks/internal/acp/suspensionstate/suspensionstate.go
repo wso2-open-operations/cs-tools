@@ -42,26 +42,42 @@ const subscriptionEndDateKey = "based_on_subscription_end_date"
 // idempotency track, entirely separate from subscriptionEndDateKey.
 const dueInvoicesKey = "based_on_due_invoices"
 
+// SuspendEventType is the event_type of a track ACP suspended. It is written
+// only together with the suspended closure state, in one update, after
+// Salesforce took State__c=Suspended (WithSubscriptionEndDateSuspended,
+// WithDueInvoicesSuspended), so the record never exists without the
+// suspension: entity-service's reopen reads "suspend" on an Open project as
+// a project a person set back to Open, and finishes it.
+const SuspendEventType = "suspend"
+
+// SuspendNoticeEventType records that the day-0 notice went out while the
+// suspension itself is not done yet (Salesforce or the CSM write still to
+// come, or failed). It reads as window 0, so the next run does not send the
+// notice again and only retries the suspension. The reopen ignores it.
+const SuspendNoticeEventType = "suspend_notice"
+
 // eventTypeToWindow maps the legacy event_type vocabulary observed in
 // based_on_subscription_end_date to closure.NoticeWindow.
 var eventTypeToWindow = map[string]closure.NoticeWindow{
-	"90_days_notice": closure.NoticeWindow90,
-	"60_days_notice": closure.NoticeWindow60,
-	"30_days_notice": closure.NoticeWindow30,
-	"15_days_notice": closure.NoticeWindow15,
-	"7_days_notice":  closure.NoticeWindow7,
-	"suspend":        closure.NoticeWindow0,
+	"90_days_notice":       closure.NoticeWindow90,
+	"60_days_notice":       closure.NoticeWindow60,
+	"30_days_notice":       closure.NoticeWindow30,
+	"15_days_notice":       closure.NoticeWindow15,
+	"7_days_notice":        closure.NoticeWindow7,
+	SuspendNoticeEventType: closure.NoticeWindow0,
+	SuspendEventType:       closure.NoticeWindow0,
 }
 
-// windowToEventType is the inverse of eventTypeToWindow, used when writing a
-// new based_on_subscription_end_date state back.
+// windowToEventType is the event_type a notice for a window is recorded
+// with. Window 0 is SuspendNoticeEventType: "suspend" is written only with
+// the suspension.
 var windowToEventType = map[closure.NoticeWindow]string{
 	closure.NoticeWindow90: "90_days_notice",
 	closure.NoticeWindow60: "60_days_notice",
 	closure.NoticeWindow30: "30_days_notice",
 	closure.NoticeWindow15: "15_days_notice",
 	closure.NoticeWindow7:  "7_days_notice",
-	closure.NoticeWindow0:  "suspend",
+	closure.NoticeWindow0:  SuspendNoticeEventType,
 }
 
 // subscriptionEndDateState and dueInvoicesState are identically-shaped —
@@ -157,6 +173,49 @@ func WithSubscriptionEndDateOpen(raw json.RawMessage) (json.RawMessage, error) {
 // based_on_due_invoices.
 func WithDueInvoicesOpen(raw json.RawMessage) (json.RawMessage, error) {
 	return withSection(raw, dueInvoicesKey, map[string]string{"event_type": "open"})
+}
+
+// WithSubscriptionEndDateSuspended returns a copy of raw with
+// based_on_subscription_end_date recording ACP's suspension: event_type
+// "suspend" and suspended_on (YYYY-MM-DD), keeping the section's action
+// results (the day-0 notice's actionSendEmailNotification). It is sent in the
+// same update as endDateClosureState. Other keys are preserved byte-for-byte.
+func WithSubscriptionEndDateSuspended(raw json.RawMessage, suspendedOn string) (json.RawMessage, error) {
+	return withSuspended(raw, subscriptionEndDateKey, suspendedOn)
+}
+
+// WithDueInvoicesSuspended is WithSubscriptionEndDateSuspended for
+// based_on_due_invoices, sent with invoiceDueDateClosureState.
+func WithDueInvoicesSuspended(raw json.RawMessage, suspendedOn string) (json.RawMessage, error) {
+	return withSuspended(raw, dueInvoicesKey, suspendedOn)
+}
+
+// withSuspended is the shared implementation behind
+// WithSubscriptionEndDateSuspended and WithDueInvoicesSuspended. The
+// section's string fields are carried over; a field that is not a string
+// (none is written by this package) is dropped.
+func withSuspended(raw json.RawMessage, key, suspendedOn string) (json.RawMessage, error) {
+	section := map[string]string{}
+	if len(raw) > 0 {
+		var blob map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &blob); err != nil {
+			return nil, fmt.Errorf("suspensionstate: parse blob: %w", err)
+		}
+		if existing, ok := blob[key]; ok {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(existing, &fields); err == nil {
+				for name, value := range fields {
+					var str string
+					if json.Unmarshal(value, &str) == nil {
+						section[name] = str
+					}
+				}
+			}
+		}
+	}
+	section["event_type"] = SuspendEventType
+	section["suspended_on"] = suspendedOn
+	return withSection(raw, key, section)
 }
 
 // withState is the shared implementation behind WithSubscriptionEndDateState
