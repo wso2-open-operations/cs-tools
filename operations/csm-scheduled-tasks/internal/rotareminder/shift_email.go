@@ -111,7 +111,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 // each rotation once (its hours on its own clock and in UTC, and its role).
 // gaps, when any, are listed too (Friday's reminder goes out with them). ok is
 // false when nobody on them has an address.
-func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.Assignment, today time.Time, gaps []gap) (shiftEmail, bool) {
+func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamschedule.Assignment, today time.Time, gaps []gap) (shiftEmail, bool) {
 	var people []teamschedule.Assignment
 	var days []time.Time
 	for _, w := range pending {
@@ -120,6 +120,12 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 			days = append(days, w.day)
 		}
 	}
+	// The support turns are listed for the days the email covers, and their
+	// people get it too.
+	support = slices.DeleteFunc(slices.Clone(support), func(a teamschedule.Assignment) bool {
+		return !slices.ContainsFunc(days, func(d time.Time) bool { return d.Format(dateLayout) == a.RotaDate })
+	})
+	people = append(people, support...)
 	to, _ := recipients(people)
 	if len(to) == 0 {
 		return shiftEmail{}, false
@@ -149,6 +155,25 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 			}
 		}
 		data.Days = append(data.Days, day)
+	}
+	if len(support) > 0 {
+		data.SupportTitle = cfg.Support.Title
+		for _, d := range days {
+			day := notify.WeekendRotaDay{Title: d.Format("Monday")}
+			for _, a := range support {
+				if a.RotaDate != d.Format(dateLayout) {
+					continue
+				}
+				line := a.Engineer.Name + " (" + shortName(cfg.Support.Rotations[a.ShiftCode])
+				if a.Tier != "" {
+					line += ", " + a.Tier
+				}
+				day.People = append(day.People, line+")")
+			}
+			if len(day.People) > 0 {
+				data.SupportDays = append(data.SupportDays, day)
+			}
+		}
 	}
 
 	// Each rotation once, in rota order, described from its first turn.
@@ -189,6 +214,13 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 			zoneOrder = append(zoneOrder, clock.String())
 		}
 	}
+	if defs := supportDefinitions(cfg, days, support); len(defs) > 0 {
+		data.Definitions = append(data.Definitions, defs...)
+		if _, ok := zones[cfg.Zone.String()]; !ok {
+			zones[cfg.Zone.String()] = cfg.Zone
+			zoneOrder = append(zoneOrder, cfg.Zone.String())
+		}
+	}
 	var legend []string
 	for _, name := range zoneOrder {
 		at := days[0].In(zones[name]).Add(12 * time.Hour)
@@ -212,6 +244,10 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 		data.AfterTable = append(data.AfterTable, "A calendar invitation for your team's rotation follows in a separate email, "+
 			"with everybody on that rotation as a guest.")
 	}
+	if len(support) > 0 {
+		data.AfterTable = append(data.AfterTable, "The "+cfg.Support.Family+" turns are listed for information; "+
+			"they get no calendar invitation from this email.")
+	}
 	// The summary is the one email the weekend-only copies get.
 	cc := without(append(append([]string{}, cfg.Copy...), cfg.WeekendCopy...), to)
 	email := shiftEmail{to: to, cc: cc, subject: fmt.Sprintf("[%s] Weekend Rotation – %s", cfg.Family, dayList(days))}
@@ -220,6 +256,57 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 	}
 	email.body = notify.RenderWeekendRota(data)
 	return email, true
+}
+
+// supportDefinitions defines each support rotation once, in the order its
+// turns come: its hours on the rota's clock and in UTC, and its tiers ("SRE
+// support (L1 → L2)").
+func supportDefinitions(cfg Config, days []time.Time, support []teamschedule.Assignment) []notify.RotationDefinition {
+	var codes []string
+	first := map[string]teamschedule.Assignment{}
+	perDay := map[string]map[string]map[string]bool{} // code -> date -> person
+	tiers := map[string][]string{}
+	for _, a := range support {
+		if _, ok := first[a.ShiftCode]; !ok {
+			first[a.ShiftCode] = a
+			codes = append(codes, a.ShiftCode)
+			perDay[a.ShiftCode] = map[string]map[string]bool{}
+		}
+		if perDay[a.ShiftCode][a.RotaDate] == nil {
+			perDay[a.ShiftCode][a.RotaDate] = map[string]bool{}
+		}
+		perDay[a.ShiftCode][a.RotaDate][strings.ToLower(a.Engineer.UserID+"|"+a.Engineer.Email+"|"+a.Engineer.Name)] = true
+		if a.Tier != "" && !slices.Contains(tiers[a.ShiftCode], a.Tier) {
+			tiers[a.ShiftCode] = append(tiers[a.ShiftCode], a.Tier)
+		}
+	}
+	var defs []notify.RotationDefinition
+	for _, code := range codes {
+		a := first[code]
+		s, e := a.StartsAt.In(cfg.Zone), a.EndsAt.In(cfg.Zone)
+		role := cfg.Support.Family + " support"
+		if t := tiers[code]; len(t) > 0 {
+			slices.Sort(t)
+			role += " (" + strings.Join(t, " → ") + ")"
+		}
+		defs = append(defs, notify.RotationDefinition{
+			Rotation:  cfg.Support.Rotations[code],
+			Members:   memberCount(days, perDay[code]),
+			LocalTime: s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s),
+			UTCWindow: a.StartsAt.UTC().Format("15:04") + " – " + a.EndsAt.UTC().Format("15:04"),
+			Role:      role,
+		})
+	}
+	return defs
+}
+
+// shortName is a rotation's name up to its bracket: "SRE Night (TZ3)" ->
+// "SRE Night".
+func shortName(name string) string {
+	if i := strings.Index(name, " ("); i > 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // memberCount says how many people a rotation has: "3 members", or, when the

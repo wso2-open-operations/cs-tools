@@ -1004,6 +1004,12 @@ func main() {
 			slog.Error("ROTA_REMINDER_WINDOWS is malformed; refusing to start", "err", err)
 			os.Exit(1)
 		}
+		// The CRE weekend summary also lists the SRE people on the weekend
+		// (SaaS weekend day and TZ3 night), for information.
+		var rotaSupport rotareminder.SupportRota
+		if strings.EqualFold(family, "CRE") {
+			rotaSupport = rotareminder.SREWeekendSupport()
+		}
 		rotaConfig := func(task, sched string, rotations map[string]string, to, cc []string) rotareminder.Config {
 			var copied []string
 			if copyTaskRecipients {
@@ -1018,6 +1024,7 @@ func main() {
 				Invites:        invites,
 				OrganizerEmail: organizer,
 				Required:       weekendRequired,
+				Support:        rotaSupport,
 				Windows:        rotaWindows,
 				Settings:       teamScheduleClient,
 				EmailsEnabled:  alertsEnabled,

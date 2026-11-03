@@ -126,6 +126,11 @@ type Config struct {
 	// the weekend is announced ("CRE_WEEKEND" -> 3, "CRE_WEEKEND_NIGHT" -> 1).
 	// Only people on the shift itself count, not its on-call variant.
 	Required map[string]int
+	// Support is another family's weekend turns the weekend summary also
+	// lists (the SRE people on the CRE weekend). They are added to the
+	// summary's recipients only: they are not counted for the minimums and
+	// get no invitation. The zero value lists none.
+	Support SupportRota
 	// Windows gives a rotation its own hours on its own clock, instead of the
 	// Team Schedule's ("CRE_WEEKEND_NIGHT" -> 08:00-18:00 America/Los_Angeles).
 	Windows map[string]LocalWindow

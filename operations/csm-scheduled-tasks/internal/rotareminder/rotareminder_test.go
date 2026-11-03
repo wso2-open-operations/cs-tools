@@ -91,9 +91,13 @@ func TestComingWeekend(t *testing.T) {
 type fakeRota struct {
 	assignments []teamschedule.Assignment
 	err         error
-	reads       int
-	from, to    string
-	family      string
+	// other answers a read of another family (the weekend support rota),
+	// failing with otherErr when set; such a read is not recorded below.
+	other    map[string][]teamschedule.Assignment
+	otherErr error
+	reads    int
+	from, to string
+	family   string
 }
 
 func (f *fakeRota) Catalogue(context.Context) (teamschedule.Catalogue, error) {
@@ -114,6 +118,9 @@ func (f *fakeRota) Catalogue(context.Context) (teamschedule.Catalogue, error) {
 
 func (f *fakeRota) WorkingAssignments(_ context.Context, from, to, family string) ([]teamschedule.Assignment, error) {
 	f.reads++
+	if family != "CRE" && (f.other != nil || f.otherErr != nil) {
+		return f.other[family], f.otherErr
+	}
 	f.from, f.to, f.family = from, to, family
 	return f.assignments, f.err
 }

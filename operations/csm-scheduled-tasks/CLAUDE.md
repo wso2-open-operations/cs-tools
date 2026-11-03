@@ -224,6 +224,16 @@ schedules assume `TZ=UTC` like every other here.
   Saturday, Americas Saturday, LK Sunday, Americas Sunday) gets its own email to its own people,
   carrying its invitation with all of them as guests, so they can start a group chat from the
   event. One recipient is greeted by full name, several with "Dear all,".
+- **The CRE weekend summary also lists the SRE weekend people** (`Config.Support`,
+  `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
+  second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
+  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
+  appear in an "SRE Weekend Support" block after the day teams ("Name (SRE Weekend, L1)", the
+  turn's `tier`), get one Rotation Definitions row per rotation (IST hours, "SRE support (L1 →
+  L2)" from the tiers seen), and are added to the summary's To. That is all: they never count
+  toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
+  record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
+  being sent, and a failed read is logged and the summary goes without the block.
 - **Settings saved on the Rota Access tab win.** Every run first reads
   `GET /team-schedule/reminder-settings/{family}` (entity-service, migration 0242; the
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
