@@ -15,9 +15,9 @@
 // under the License.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type JSX, StrictMode } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
@@ -41,6 +41,7 @@ import { DASHBOARD_LINK_PATH } from "@features/csm-custom-dashboards/utils/dashb
 import OpenDashboardLinkPage from "@features/csm-custom-dashboards/pages/OpenDashboardLinkPage";
 
 const LINK_ID = "5e636a12-0000-4000-8000-0000000000cc";
+const OTHER_LINK_ID = "5e636a12-0000-4000-8000-0000000000dd";
 const DASHBOARD = "5e636a12-0000-4000-8000-000000000001";
 
 function Probe(): JSX.Element {
@@ -49,12 +50,14 @@ function Probe(): JSX.Element {
 }
 
 /** Renders the open-link page at `linkId`, with a probe on each route it can
- * land on; `strict` wraps it in StrictMode (effects run twice). */
-function renderAt(linkId: string, { strict = false } = {}) {
+ * land on; `strict` wraps it in StrictMode (effects run twice), and
+ * `nextLinkId` adds a "Next link" link to that link's page. */
+function renderAt(linkId: string, { strict = false, nextLinkId = "" } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const tree = (
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[`${DASHBOARD_LINK_PATH}/${linkId}`]}>
+        {nextLinkId && <Link to={`${DASHBOARD_LINK_PATH}/${nextLinkId}`}>Next link</Link>}
         <Routes>
           <Route path="/dashboard/shared/link/:linkId" element={<OpenDashboardLinkPage />} />
           <Route path="/dashboard/shared/:dashboardId" element={<Probe />} />
@@ -108,6 +111,28 @@ describe("OpenDashboardLinkPage", () => {
     renderAt(LINK_ID);
     expect(await screen.findByText("The link couldn't be opened. Try again in a moment.")).toBeInTheDocument();
     expect(screen.queryByText(/upstream said/)).not.toBeInTheDocument();
+  });
+
+  it("drops the previous link's error when it moves on to another link", async () => {
+    postMock.mockRejectedValueOnce(new BackendApiError(404, "This link doesn't open a dashboard."));
+    postMock.mockReturnValueOnce(new Promise(() => {}));
+    renderAt(LINK_ID, { nextLinkId: OTHER_LINK_ID });
+    expect(await screen.findByText("Couldn't open the link")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Next link" }));
+    expect(screen.getByText("Opening the dashboard…")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't open the link")).not.toBeInTheDocument();
+    await waitFor(() => expect(postMock).toHaveBeenLastCalledWith("/dashboards/shared/link", { linkId: OTHER_LINK_ID }));
+  });
+
+  it("ignores the previous link's answer when it arrives after moving on", async () => {
+    let answerFirst: (v: unknown) => void = () => {};
+    postMock.mockReturnValueOnce(new Promise((resolve) => (answerFirst = resolve)));
+    postMock.mockReturnValueOnce(new Promise(() => {}));
+    renderAt(LINK_ID, { nextLinkId: OTHER_LINK_ID });
+    fireEvent.click(screen.getByRole("link", { name: "Next link" }));
+    await act(async () => answerFirst({ dashboardId: DASHBOARD, own: false }));
+    expect(screen.getByText("Opening the dashboard…")).toBeInTheDocument();
+    expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
   });
 
   it("offers a way to the Shared Dashboards list", async () => {

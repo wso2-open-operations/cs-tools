@@ -43,7 +43,9 @@ export default function OpenDashboardLinkPage(): JSX.Element {
   const { linkId = "" } = useParams<{ linkId: string }>();
   const navigate = useNavigate();
   const { mutateAsync } = useOpenDashboardLink();
-  const [result, setResult] = useState<{ opened: OpenedDashboardLink } | { error: Error } | null>(null);
+  const [answer, setAnswer] = useState<
+    ({ linkId: string } & ({ opened: OpenedDashboardLink } | { error: Error })) | null
+  >(null);
   // Opened once per link id, also under StrictMode's double effect. The
   // answer is kept here, not read from the mutation: StrictMode's remount
   // detaches the mutation's observer, which then never sees it.
@@ -53,10 +55,15 @@ export default function OpenDashboardLinkPage(): JSX.Element {
     if (requested.current === linkId) return;
     requested.current = linkId;
     mutateAsync(linkId).then(
-      (opened) => setResult({ opened }),
-      (error: Error) => setResult({ error }),
+      (opened) => setAnswer({ linkId, opened }),
+      (error: Error) => setAnswer({ linkId, error }),
     );
   }, [linkId, mutateAsync]);
+
+  // Only this link's answer counts: when the page moves on to another link,
+  // the previous one's error or dashboard (even one that arrives late) is not
+  // shown while the new link opens.
+  const result = answer?.linkId === linkId ? answer : null;
 
   if (result && "opened" in result) {
     const { dashboardId, own } = result.opened;
