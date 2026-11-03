@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 )
 
 // These tests run against a real blob service, normally the Azurite emulator:
@@ -43,7 +45,9 @@ const (
 	azuriteKey     = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
 )
 
-func integrationStore(t *testing.T) *Store {
+// integrationConfig is the connection to the test blob service, with a fresh
+// container name. It skips the test when no service is configured.
+func integrationConfig(t *testing.T) Config {
 	t.Helper()
 	endpoint := os.Getenv("AZBLOBSTORE_TEST_ENDPOINT")
 	if endpoint == "" {
@@ -57,12 +61,17 @@ func integrationStore(t *testing.T) *Store {
 		key = v
 	}
 
-	s, err := New(Config{
+	return Config{
 		AccountName: account,
 		AccountKey:  key,
 		Endpoint:    endpoint,
 		Container:   fmt.Sprintf("azblobstore-test-%d", time.Now().UnixNano()),
-	})
+	}
+}
+
+func integrationStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := New(integrationConfig(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -279,6 +288,41 @@ func TestStore_DeleteIsIdempotent(t *testing.T) {
 	if err := s.Delete(ctx, "never/existed.txt"); err != nil {
 		t.Fatalf("Delete of a missing blob: %v", err)
 	}
+}
+
+// A container that does not exist is a misconfigured store, not an absent blob:
+// none of the calls may report it as ErrNotFound, Delete must not say it worked,
+// and UncommittedBlocks must not return an empty list.
+func TestStore_MissingContainerIsAnErrorNotABlobNotFound(t *testing.T) {
+	// The same account, with a container nobody created (no EnsureContainer).
+	s, err := New(integrationConfig(t))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	key := "any/file.txt"
+
+	check := func(name string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Errorf("%s succeeded against a missing container", name)
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			t.Errorf("%s = ErrNotFound, want the container error: %v", name, err)
+		}
+		if !bloberror.HasCode(err, bloberror.ContainerNotFound) {
+			t.Errorf("%s = %v, want ContainerNotFound", name, err)
+		}
+	}
+
+	_, err = s.Stat(ctx, key)
+	check("Stat", err)
+	check("Delete", s.Delete(ctx, key))
+	_, err = s.UncommittedBlocks(ctx, key)
+	check("UncommittedBlocks", err)
+	_, err = s.Open(ctx, key, nil)
+	check("Open", err)
 }
 
 func TestStore_UncommittedBlocksOfUnknownBlobIsEmpty(t *testing.T) {
