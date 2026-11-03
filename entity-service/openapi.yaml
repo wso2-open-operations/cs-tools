@@ -11811,6 +11811,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/long-open-cases:
+    get:
+      summary: >-
+        Build the long-open cases report: the cases still being worked on
+        after a given age, in two tables by their project's onboarding
+        status. Read-only. Internal callers only.
+      description: >-
+        A case is listed when it is open, in progress, waiting on WSO2 or
+        reopened (not awaiting information, solution proposed or closed);
+        was created on or before the start of the day `olderThanDays` days
+        ago in the report's timezone (Asia/Colombo); belongs to a project
+        whose project type is one of the configured types (a case with no
+        project is not listed); is a plain case rather than another kind of
+        work item; carries none of the configured excluded tags; and has
+        never had an ETA shared. A case whose project onboarding status is
+        in progress or not started is listed under `onboardingCases`; every
+        other case, including one whose project has no onboarding status,
+        under `cases`. Each table is oldest first. Each table is capped at
+        5000 rows as a safeguard; `casesTotal` and `onboardingCasesTotal`
+        always hold the full size, and the matching `...Truncated` flag is
+        true when a table was cut. The caller supplies the recipients.
+      operationId: getLongOpenCaseReport
+      parameters:
+        - name: olderThanDays
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 3650
+            default: 30
+          description: The age a case must have reached to be listed.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LongOpenCaseReport'
+        "400":
+          description: olderThanDays is not a whole number of days in range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The report's project types are not configured on this deployment, or the caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /banners:
     get:
       summary: Banners for the customer portal.
@@ -30678,6 +30747,71 @@ components:
           type: string
         technicalOwner:
           type: string
+    LongOpenCaseReport:
+      type: object
+      description: The long-open cases report.
+      required: [generatedAt, olderThanDays, createdBefore, cases, onboardingCases, casesTotal, onboardingCasesTotal, casesTruncated, onboardingCasesTruncated]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        olderThanDays:
+          type: integer
+          description: The age every listed case has reached.
+        createdBefore:
+          type: string
+          format: date-time
+          description: Every listed case was created on or before this instant.
+        cases:
+          type: array
+          description: Long-open cases whose project is not being onboarded, oldest first.
+          items:
+            $ref: '#/components/schemas/LongOpenCaseReportRow'
+        onboardingCases:
+          type: array
+          description: Long-open cases whose project onboarding is in progress or not started, oldest first.
+          items:
+            $ref: '#/components/schemas/LongOpenCaseReportRow'
+        casesTotal:
+          type: integer
+          description: The full size of `cases`, before the per-table cap.
+        onboardingCasesTotal:
+          type: integer
+          description: The full size of `onboardingCases`, before the per-table cap.
+        casesTruncated:
+          type: boolean
+          description: True when `cases` holds fewer rows than `casesTotal`.
+        onboardingCasesTruncated:
+          type: boolean
+          description: True when `onboardingCases` holds fewer rows than `onboardingCasesTotal`.
+    LongOpenCaseReportRow:
+      type: object
+      description: One long-open case.
+      required: [number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
+      properties:
+        number:
+          type: string
+        internalId:
+          type: string
+          description: The case's internal identifier, or empty.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, reopened]
+        severity:
+          type: string
+          description: The case's severity (catastrophic, critical, high, medium or low), or empty when none is set.
+        assignedEngineer:
+          type: string
+          description: Display name of the assignee, or empty.
+        csTeam:
+          type: string
+          description: Name of the CS team that owns the case's account, or empty.
     WorklogReport:
       type: object
       description: >-
