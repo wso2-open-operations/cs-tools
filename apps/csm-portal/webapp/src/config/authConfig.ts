@@ -119,13 +119,13 @@ declare global {
       CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean | string;
       /**
        * Largest file, in megabytes, offered for upload when entity attachments
-       * are on (default 100, the entity-service default). A number or numeric
+       * are on (default 10, the entity-service default). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
       /**
        * Largest image, in megabytes, that can be pasted or inserted into a
-       * comment (default 10, the entity-service default). A number or numeric
+       * comment (default 1, the entity-service default). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
