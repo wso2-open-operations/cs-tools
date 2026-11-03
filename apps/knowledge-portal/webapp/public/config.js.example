@@ -11,4 +11,8 @@ window.config = {
   // CORS is set by the API gateway, not by the backend.
   // Local development default: http://localhost:8085
   KNOWLEDGE_PORTAL_BACKEND_BASE_URL: "http://localhost:8085",
+
+  // Optional. Where "Contact support" links send a visitor who did not find
+  // an answer. Leave it out to hide those callouts entirely.
+  // KNOWLEDGE_PORTAL_SUPPORT_URL: "https://example.com/support",
 };

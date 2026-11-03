@@ -169,7 +169,7 @@ Shutdown is graceful (15 s) on `SIGINT`/`SIGTERM`.
   choosing one.
 - **Record-level authorization** is resolved from platform data, not from the token: for example,
   posting a public case comment requires being the case's assigned engineer, and de-escalating
-  requires being one of the case's team leads. Handlers read the record from the entity-service for
+  requires being one of the case's team leads (and nothing more than a portal role). Handlers read the record from the entity-service for
   these checks. A caller whose token grants a limited role but has no platform user record is
   provisioned one on first use from their own token.
 - `GET /users/me` reports the caller's portal roles from the same guard that enforces the routes, so
@@ -417,7 +417,7 @@ unset one (except the three marked optional).
 
 | Variable | Warns if unset | Grants |
 |---|---|---|
-| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, scan-user, `/user-info`, ...) |
+| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, `/user-info`, ...) |
 | `AUTH_ESCALATOR_ROLES` | Yes | `view`, `escalate` |
 | `AUTH_ATTACHMENT_DOWNLOADER_ROLES` | Yes | `view`, `download_attachment` |
 | `AUTH_SUPPORT_ENGINEER_ROLES` | Yes | The `cs_engineer` portal role: `view`, `view_operations`, `time_cards_and_updates`, `download_attachment`, `write`, `security_center`, `escalate`, work notes, comment edit/delete, PLG use. (The variable keeps its old name; the role is `cs_engineer`.) Not `approve_time_card`, `admin` or `create_announcement` |
@@ -445,7 +445,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `view_operations` | Operations reads: incidents, change requests, problems, incident tasks, outages, alerts. `cs_engineer`, `admin`, `security_team` |
 | `time_cards_and_updates` | Time-card routes and update-level lookups. `cs_engineer`, `admin`, time-card approver |
 | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state`; checked inside the handler. Time-card approver and `admin` |
-| `escalate` | `POST /cases/{id}/escalations`; de-escalating also requires being one of the case's team leads |
+| `escalate` | Escalating via `POST /cases/{id}/escalations` (the route itself only needs `view`; the handler checks this for `ESCALATE`). De-escalating does not use it: it requires being one of the case's team leads, whatever the caller's other roles, and holding `escalate` does not substitute |
 | `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` |
 | `write` | Every other `POST`/`PATCH`/`DELETE` |
 | `admin` | Admin-only routes such as `POST /users`, `POST /users/{id}/roles`, `GET /roles/grantable`, knowledge-base administration |
@@ -477,6 +477,11 @@ differ.
 | `CSM_NOTIFICATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `notify.read` |
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | No | unset | Integration service, used only by `GET /health/dependencies` today. `https` base URL | `https://integration.example.com` |
 | `CSM_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `integration.read` |
+| `CSM_AI_INTEGRATION_SERVICE_BASE_URL` | No | unset | AI integration service: makes the dashboard generator's model calls; unset, the generate page answers with a sample. `https`, or `http` for a local host only | `https://ai.example.com` |
+| `CSM_AI_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `ai.generate` |
+| `CSM_AI_INTEGRATION_SERVICE_TIMEOUT` | No | `55s` | One generate call's timeout (Go duration, > 0, shorter than `REST_WRITE_TIMEOUT`) | `55s` |
+| `DASHBOARD_GENERATE_LIMIT_PER_MINUTE` | No | `10` | Most `POST /dashboards/generate` calls one user may start in any minute (whole number > 0); over it answers 429 with `Retry-After`. Counted per backend instance | `10` |
+| `DASHBOARD_GENERATE_LIMIT_PER_DAY` | No | `100` | The same over any 24 hours; not below the per-minute limit | `100` |
 | `SALES_ENTITY_BASE_URL` | No | unset | Sales entity GraphQL service backing `POST /scan-user`; unset makes only those lookups fail at call time. `https` base URL. Not listed in `.env.example` as active | `https://sales-entity.example.com` |
 | `GOOGLE_DRIVE_CLIENT_ID` | No | unset | OAuth2 client id for the Drive folder-browsing routes (`/files`) | `your-drive-client-id` |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | No | unset | Matching client secret | `your-drive-client-secret` |
@@ -636,7 +641,7 @@ main service plus the `/plg/*` routes). Main areas:
 | Knowledge base | `/kb-articles/*`, `/knowledge-bases/*`, `/kb-manager-*` |
 | Announcements | `/announcements/*`, `/announcement-requests/*` |
 | Dashboards | `/dashboards`, `/dashboards/{id}`, `/dashboards/filter-presets`, `/dashboards/sections` |
-| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/scan-user`, `/user-info` |
+| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/user-info` |
 
 Many routes forward to entity-service operations that only exist for one data source; when the
 paired entity-service does not support an operation for its data source it returns an error that

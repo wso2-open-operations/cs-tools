@@ -82,7 +82,7 @@ With the repo's docker-compose stack:
 
 ```bash
 docker compose up -d legacy-product-api
-curl http://127.0.0.1:8087/products/support-matrix
+curl http://127.0.0.1:8088/products/support-matrix
 ```
 
 Or directly, with a `.env` (see `.env.example`):

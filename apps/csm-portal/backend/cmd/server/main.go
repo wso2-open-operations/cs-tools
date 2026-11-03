@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -50,6 +51,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
+// main loads the configuration, builds every upstream client and handler,
+// registers the routes and serves until SIGINT or SIGTERM, then shuts down
+// gracefully. Invalid required configuration stops the start.
 func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
@@ -102,6 +106,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// integrations/csm-ai-integration-service makes the generator's model
+	// calls when CSM_AI_INTEGRATION_SERVICE_BASE_URL is set (see below).
+	aiCfg, err := loadAIIntegrationConfig(os.Getenv)
+	if err != nil {
+		slog.Error("invalid AI integration service configuration", "err", err)
+		os.Exit(1)
+	}
+	// Per-user limits on POST /dashboards/generate: each call is a model call.
+	generateLimits, err := loadGenerateRateLimits(os.Getenv)
+	if err != nil {
+		slog.Error("invalid dashboard generate limit configuration", "err", err)
+		os.Exit(1)
+	}
+	if aiCfg.Enabled() && aiCfg.Timeout >= reqTimeouts.RESTWrite {
+		slog.Warn("CSM_AI_INTEGRATION_SERVICE_TIMEOUT should be shorter than REST_WRITE_TIMEOUT",
+			"aiTimeout", aiCfg.Timeout, "writeTimeout", reqTimeouts.RESTWrite)
+	}
+
 	// All upstream service clients (entity, updates, SCIM, and future notification
 	// channels) authenticate as the same OAuth2 client-credentials app; only the
 	// base URL and scopes differ per service.
@@ -146,6 +168,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	salesforceResyncHandler := handler.NewSalesforceResyncHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -234,17 +257,10 @@ func main() {
 	// Viewer-audience endpoints (ported from SupportPortalLite's Ballerina
 	// backend) are always registered. Every one of them reads entity-service
 	// through the shared customerEntityClient; only Google Drive (the /files
-	// routes) and the Scan User entity service (Scan User's
-	// lookups) are separate upstreams, and each is independently optional:
-	// unset leaves just its own endpoints failing at call time with a mapped
-	// upstream error -- see loadViewerConfig.
+	// routes) is a separate upstream, independently optional: unset leaves
+	// just its own endpoints failing at call time with a mapped upstream
+	// error -- see loadViewerConfig.
 	viewerCfg := loadViewerConfig()
-	salesEntityClient := entity.NewSalesEntityClient(entity.SalesEntityConfig{
-		BaseURL:      viewerCfg.salesEntityBaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-	})
 	driveClient := googledrive.NewClient(googledrive.Config{
 		ClientID:     viewerCfg.driveClientID,
 		ClientSecret: viewerCfg.driveClientSecret,
@@ -275,12 +291,10 @@ func main() {
 		files:          handler.NewFilesHandler(driveClient, accessGuard),
 		customerHealth: handler.NewCustomerHealthHandler(riskClient, handler.NewPostgresCustomerHealthClient(customerEntityClient), customerEntityClient, accessGuard),
 		userInfo:       handler.NewUserInfoHandler(customerEntityClient, accessGuard),
-		userScan:       handler.NewSplUserScanHandler(salesEntityClient, customerEntityClient, accessGuard),
 		accountEsc:     handler.NewViewerAccountHandler(handler.NewPostgresViewerAccountClient(customerEntityClient), accessGuard),
 	}
 	slog.Info("viewer-access endpoints registered",
-		"googleDriveConfigured", viewerCfg.driveClientID != "",
-		"salesEntityConfigured", viewerCfg.salesEntityBaseURL != "")
+		"googleDriveConfigured", viewerCfg.driveClientID != "")
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -340,7 +354,23 @@ func main() {
 	if engineeringEntityClient != nil {
 		engineeringPinger = engineeringEntityClient
 	}
-	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger)
+	// aiClient stays nil (and aiPinger an untyped nil) when the service is
+	// not configured; see notificationPinger above for the typed-nil pitfall.
+	var aiClient *csmai.Client
+	var aiPinger handler.HealthPinger
+	if aiCfg.Enabled() {
+		aiClient = csmai.NewClient(csmai.Config{
+			BaseURL:      aiCfg.BaseURL,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       aiCfg.Scopes,
+			Timeout:      aiCfg.Timeout,
+		})
+		aiPinger = aiClient
+	}
+	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger).
+		WithAIIntegration(aiPinger)
 
 	// timecardApproverRoleIDs is optional: empty means none of
 	// AUTH_TIMECARD_APPROVER_ROLES' real role names has a configured ID, in
@@ -357,6 +387,20 @@ func main() {
 		WithGrantableRoles(grantableRoles)
 	grantableRolesHandler := handler.NewGrantableRolesHandler(grantableRoles)
 	dashboardHandler := handler.NewDashboardHandler(accessGuard)
+	// The AI integration service makes the model calls when configured
+	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
+	// answers with a fixed sample. This backend holds no model client.
+	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	if aiClient != nil {
+		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+	}
+	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
+	// A team named in a generated dashboard's creTeam / sreTeam filter (its
+	// registry key) becomes the team's group id, once, here.
+	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
+		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
+	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
 	caseHandler = caseHandler.WithAccessGuard(accessGuard)
 	projectHandler = projectHandler.WithAccessGuard(accessGuard)
 	timeCardHandler = timeCardHandler.WithAccessGuard(accessGuard)
@@ -418,7 +462,11 @@ func main() {
 	route("DELETE /comments/{id}", handler.PermUpdateDeleteComment, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
-	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
+	// PermView is only the floor here: the action-dependent rule lives in
+	// CreateCaseEscalation (ESCALATE needs PermEscalate; DEESCALATE needs
+	// being one of the case's team leads, with no escalation role), which a
+	// route permission cannot express because it depends on the body and the case.
+	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments", handler.PermWrite, caseHandler.CreateCaseAttachment)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	route("GET /attachments/{id}/content", handler.PermDownloadAttachment, caseHandler.GetCaseAttachmentContent)
@@ -459,8 +507,35 @@ func main() {
 	route("GET /dashboards/filter-presets", handler.PermView, dashboardHandler.GetFilterPresets)
 	route("GET /dashboards/sections", handler.PermView, dashboardHandler.GetSharedSections)
 	route("GET /dashboards/{dashboardId}", handler.PermView, dashboardHandler.GetDashboardDetail)
-	route("GET /updates/product-update-levels", handler.PermTimeCardsAndUpdates, updatesHandler.GetProductUpdateLevels)
-	route("POST /updates/levels/search", handler.PermTimeCardsAndUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
+	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
+	// the webapp's `canWrite` on that menu section. A literal path, so it never
+	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
+	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
+	// Same permission as generating one. "custom" is a literal segment, so it
+	// never collides with the {dashboardId} wildcard.
+	route("GET /dashboards/custom", handler.PermWrite, customDashboardHandler.ListCustomDashboards)
+	route("GET /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.GetCustomDashboard)
+	route("PUT /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.SaveCustomDashboard)
+	route("DELETE /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.DeleteCustomDashboard)
+	// Sharing one of the caller's dashboards, view only (owner only).
+	route("GET /dashboards/custom/{id}/shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardShares)
+	route("PUT /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.AddCustomDashboardShare)
+	route("DELETE /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardShare)
+	// Sharing a saved dashboard with a registry team (by team key); whoever
+	// is in the team sees it under Shared Dashboards.
+	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
+	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
+	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Dashboards other users shared with the caller, view only. "shared" is a
+	// literal segment, like "custom", so it never collides with {dashboardId}.
+	// PermView, like the system dashboards: anyone a dashboard can be shared
+	// with (any internal user, any member of a team) can open it, and its
+	// widgets query with the viewer's own permissions.
+	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
+	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
+	route("GET /updates/product-update-levels", handler.PermViewUpdates, updatesHandler.GetProductUpdateLevels)
+	route("POST /updates/levels/search", handler.PermViewUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
 	route("PATCH /users/me", handler.PermAuthenticated, usersHandler.PatchMe)
 	route("GET /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.ListSavedFilterViews)
@@ -514,6 +589,12 @@ func main() {
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
 	// staff role should be able to set it.
 	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
+	// Admin-only: compare one account's or project's Salesforce data with the
+	// database, then overwrite the chosen components. Synchronous and slow
+	// (up to about a minute); entity-service re-checks admin and serialises
+	// per target.
+	route("POST /salesforce/resync/preview", handler.PermAdmin, salesforceResyncHandler.Preview)
+	route("POST /salesforce/resync/apply", handler.PermAdmin, salesforceResyncHandler.Apply)
 	route("POST /accounts/search", handler.PermViewSharedEntity, accountHandler.SearchAccounts)
 	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)
@@ -747,6 +828,25 @@ func main() {
 	route("DELETE /team-schedule/case-alerts/settings/routes/{routeId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertRoute)
 	route("PUT /team-schedule/case-alerts/settings/values", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertValues)
 	route("DELETE /team-schedule/case-alerts/settings/values/{valueId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertValue)
+	// Operations > Change requests > Standard changes: the CAB-approved standard change templates and the
+	// proposals that create, revise or retire them. Reading is for whoever sees
+	// Operations; every write is checked again by entity-service (the proposer edits
+	// and submits, a CAB member decides, the owner or the CAB suspends).
+	standardChangeHandler := handler.NewStandardChangeHandler(customerEntityClient)
+	route("POST /standard-change-templates/search", handler.PermViewOperations, standardChangeHandler.SearchTemplates)
+	route("GET /standard-change-templates/{id}", handler.PermViewOperations, standardChangeHandler.GetTemplate)
+	route("GET /standard-change-templates/{id}/versions/{versionId}", handler.PermViewOperations, standardChangeHandler.GetTemplateVersion)
+	route("POST /standard-change-templates/{id}/suspend", handler.PermWrite, standardChangeHandler.SuspendTemplate)
+	route("POST /standard-change-templates/{id}/resume", handler.PermWrite, standardChangeHandler.ResumeTemplate)
+	route("POST /standard-change-templates/{id}/clear-review", handler.PermWrite, standardChangeHandler.ClearTemplateReview)
+	route("POST /standard-change-proposals", handler.PermWrite, standardChangeHandler.CreateProposal)
+	route("POST /standard-change-proposals/search", handler.PermViewOperations, standardChangeHandler.SearchProposals)
+	route("GET /standard-change-proposals/{id}", handler.PermViewOperations, standardChangeHandler.GetProposal)
+	route("PATCH /standard-change-proposals/{id}", handler.PermWrite, standardChangeHandler.UpdateProposal)
+	route("POST /standard-change-proposals/{id}/submit", handler.PermWrite, standardChangeHandler.SubmitProposal)
+	route("POST /standard-change-proposals/{id}/withdraw", handler.PermWrite, standardChangeHandler.WithdrawProposal)
+	route("POST /standard-change-proposals/{id}/decision", handler.PermWrite, standardChangeHandler.DecideProposal)
+
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)
 	route("GET /runbooks", handler.PermViewOperations, runbookHandler.ListRunbooks)
@@ -759,6 +859,10 @@ func main() {
 	route("GET /portal-banners/manage", handler.PermAdmin, bannerHandler.ListManagedBanners)
 	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
 	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
+
+	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
+	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
+	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
@@ -817,10 +921,8 @@ func main() {
 
 	// Viewer-audience routes -- see viewerHandlers above. Always registered,
 	// and every one of them is entity-service-backed, except that GET /files
-	// and GET /files/search read Google Drive and POST /scan-user's
-	// Scan User lookups read the Scan User entity service; those two
-	// upstreams are independently optional and fail at call time when
-	// unconfigured. None of the routes below carry a /spl/ prefix: the viewer
+	// and GET /files/search read Google Drive, an upstream that is
+	// independently optional and fails at call time when unconfigured. None of the routes below carry a /spl/ prefix: the viewer
 	// audience and csm-portal share one backend, so the prefix only ever
 	// existed to avoid colliding with csm-portal's own, differently-shaped
 	// case-management domain, and none of these routes do. Accounts,
@@ -849,7 +951,6 @@ func main() {
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
-	route("POST /scan-user", handler.PermViewerAccess, viewerHandlers.userScan.ScanUser)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)
 	route("GET /usage-metrics/projects", handler.PermUsageMetricsViewer, viewerHandlers.usageMetrics.GetProjects)
@@ -1536,10 +1637,10 @@ func splitComma(s string) []string {
 
 // viewerHandlerSet holds every viewer-audience handler -- always constructed
 // and always registered. All of them read entity-service through the shared
-// customerEntityClient; files (Google Drive) and userScan's Scan User
-// lookups are the only ones with an upstream of their own, and an
-// unconfigured one fails its own calls at request time instead of the route
-// not existing at all (see loadViewerConfig).
+// customerEntityClient; files (Google Drive) is the only one with an
+// upstream of its own, and when that is unconfigured it fails its own calls
+// at request time instead of the route not existing at all (see
+// loadViewerConfig).
 type viewerHandlerSet struct {
 	reports        *handler.ReportsHandler
 	lookups        *handler.LookupsHandler
@@ -1547,55 +1648,36 @@ type viewerHandlerSet struct {
 	files          *handler.FilesHandler
 	customerHealth *handler.CustomerHealthHandler
 	userInfo       *handler.UserInfoHandler
-	userScan       *handler.SplUserScanHandler
 	accountEsc     *handler.ViewerAccountHandler
 }
 
 // viewerConfig holds the environment values behind the viewer-audience
-// endpoints' two optional upstreams (Google Drive and the Scan User entity
-// service), resolved by loadViewerConfig. Everything else those endpoints
-// read comes from entity-service via the shared customerEntityClient.
+// endpoints' one optional upstream (Google Drive), resolved by
+// loadViewerConfig. Everything else those endpoints read comes from
+// entity-service via the shared customerEntityClient.
 type viewerConfig struct {
-	driveClientID      string
-	driveClientSecret  string
-	driveRefreshToken  string
-	salesEntityBaseURL string
+	driveClientID     string
+	driveClientSecret string
+	driveRefreshToken string
 }
 
 // loadViewerConfig resolves the viewer-audience endpoints' optional
 // upstream configuration. Every value is independently optional (os.Getenv,
 // not mustEnv): unset Google Drive credentials leave only GET /files and
-// GET /files/search failing at call time, and an unset Scan User entity
-// service URL only Scan User's lookups, each with a normal mapped upstream
+// GET /files/search failing at call time, with a normal mapped upstream
 // error (mapUpstreamErrorGeneric) rather than the route being a 404 or the
-// process refusing to start. An explicitly-set value is still validated
-// (optionalHTTPSBaseURL exits on a malformed URL -- that's a real
-// misconfiguration, not "feature absent").
+// process refusing to start.
 //
-// GOOGLE_DRIVE_* and the Scan User entity service URL carry no SPL_ prefix: Google
-// Drive and the Scan User entity service are just this feature's own
-// upstreams, so they follow this file's convention of naming a service's
-// credentials after the service, not the caller. See .env.example for what
-// each variable configures.
+// GOOGLE_DRIVE_* carries no SPL_ prefix: Google Drive is just this
+// feature's own upstream, so it follows this file's convention of naming a
+// service's credentials after the service, not the caller. See .env.example
+// for what each variable configures.
 func loadViewerConfig() viewerConfig {
 	return viewerConfig{
-		driveClientID:      os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
-		driveClientSecret:  os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
-		driveRefreshToken:  os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
-		salesEntityBaseURL: optionalHTTPSBaseURL("SALES_ENTITY_BASE_URL"),
+		driveClientID:     os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
+		driveClientSecret: os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
+		driveRefreshToken: os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
 	}
-}
-
-// optionalHTTPSBaseURL reads key and, if set, validates it exactly like
-// mustHTTPSBaseURL (a configured-but-malformed URL is still a real
-// misconfiguration worth failing startup over). An unset key returns "",
-// leaving the dependent upstream unconfigured rather than failing startup.
-func optionalHTTPSBaseURL(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return ""
-	}
-	return mustHTTPSBaseURL(key, v)
 }
 
 func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {

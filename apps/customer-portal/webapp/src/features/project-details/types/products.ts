@@ -32,6 +32,9 @@ export type ProductVersionItem = {
   releaseDate?: string;
   supportEolDate?: string;
   earliestPossibleSupportEolDate?: string;
+  // Several version records share one `version` and differ only by this
+  // (e.g. "API Control Plane" vs "Traffic Manager" for the same 4.6.0).
+  deploymentProfile?: string | null;
   product?: { id: string; label: string };
 };
 

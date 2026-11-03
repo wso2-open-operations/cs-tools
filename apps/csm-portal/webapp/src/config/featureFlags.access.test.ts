@@ -51,7 +51,7 @@ describe("feature visibility by portal access", () => {
   // comment_updater), which a plain viewer holds none of. Usage Metrics is
   // also hidden: canViewUsageMetrics needs full access or
   // usage_metrics_viewer, which a plain viewer holds neither of (reported
-  // live). User Scan (isSplAudience) stays visible. Customer Health is not a
+  // live). Customer Health is not a
   // top-level section for a plain viewer: it moves under the Customers
   // dropdown (showCustomerHealthUnderCustomers), see the describe block below.
   //
@@ -60,13 +60,12 @@ describe("feature visibility by portal access", () => {
   // (by 1, then by 3 more) every time an unrelated section was added to the
   // nav tree without this test being updated alongside it -- exactly the
   // kind of break a plain content comparison can't hide.
-  it("hides Operations, Security Center, PLG, Updates, Time cards, Team Schedule, Knowledge, Usage Metrics and Settings from a view-only role, and keeps the other sections", () => {
+  it("hides Operations, Security Center, PLG, Time cards, Team Schedule, Knowledge, Usage Metrics and Settings from a view-only role, and keeps the other sections", () => {
     const ids = visibleNavSections(viewer).map((s) => s.id);
     for (const hidden of [
       "operations",
       "security-center",
       "plg",
-      "updates",
       "time-cards",
       "team-schedule",
       "kb-articles",
@@ -82,7 +81,8 @@ describe("feature visibility by portal access", () => {
       "allocations",
       "announcements",
       "customers",
-      "user-scan",
+      // Updates is read-only, so the viewer role keeps it (Time cards stay hidden).
+      "updates",
       "help",
     ]);
   });
@@ -90,7 +90,7 @@ describe("feature visibility by portal access", () => {
   // Customer Health is for the viewer role AND for cs_engineer/admin
   // (canViewCustomerHealth); Usage Metrics for cs_engineer/admin and
   // usage_metrics_viewer. Both sit together at the end of the sidebar, above
-  // User Scan (viewer-only), Settings and Help.
+  // Settings and Help.
   it("shows Customer Health and Usage Metrics to a CS engineer, at the end of the sidebar above Settings and Help", () => {
     expect(visibleNavSections(csEngineer).map((s) => s.id).slice(-4)).toEqual([
       "customer-health",
@@ -103,20 +103,17 @@ describe("feature visibility by portal access", () => {
     expect(featureStateForPath("/usage-metrics", csEngineer)).toBe("enabled");
   });
 
-  it("puts Customer Health and Usage Metrics above User Scan and Help for a CS engineer who also holds viewer", () => {
+  it("puts Customer Health and Usage Metrics above Settings and Help for a CS engineer who also holds viewer", () => {
     const both = getPortalAccess(["cs_engineer", "viewer"]);
-    expect(visibleNavSections(both).map((s) => s.id).slice(-5)).toEqual([
+    expect(visibleNavSections(both).map((s) => s.id).slice(-4)).toEqual([
       "customer-health",
       "usage-metrics",
-      "user-scan",
       "admin",
       "help",
     ]);
   });
 
-  it("keeps User Scan viewer-only while Customer Health also opens to a CS engineer", () => {
-    expect(visibleNavSections(csEngineer).map((s) => s.id)).not.toContain("user-scan");
-    expect(featureStateForPath("/user-scan", csEngineer)).toBe("hidden");
+  it("opens Customer Health to a CS engineer without the viewer role", () => {
     // Roles that hold neither viewer nor full access still do not see it.
     for (const role of ["escalator", "attachment_downloader", "usage_metrics_viewer", "timecard_approver", "dashboard_designer", "security_team"]) {
       const access = getPortalAccess([role]);
@@ -199,7 +196,7 @@ describe("feature visibility by portal access", () => {
 
   it("hides Updates and Time cards from roles without time-card access, and shows them otherwise", () => {
     const ids = (a: ReturnType<typeof getPortalAccess>) => visibleNavSections(a).map((s) => s.id);
-    for (const role of ["viewer", "escalator", "attachment_downloader", "usage_metrics_viewer", "dashboard_designer"]) {
+    for (const role of ["escalator", "attachment_downloader", "usage_metrics_viewer", "dashboard_designer"]) {
       const access = getPortalAccess([role]);
       expect(ids(access)).not.toContain("updates");
       expect(ids(access)).not.toContain("time-cards");
@@ -212,6 +209,15 @@ describe("feature visibility by portal access", () => {
       expect(ids(access)).toContain("time-cards");
       expect(featureStateForPath("/time-cards", access)).toBe("enabled");
     }
+  });
+
+  it("a viewer sees Updates (route and section) but not Time cards", () => {
+    const access = getPortalAccess(["viewer"]);
+    const ids = visibleNavSections(access).map((s) => s.id);
+    expect(ids).toContain("updates");
+    expect(ids).not.toContain("time-cards");
+    expect(featureStateForPath("/updates", access)).toBe("enabled");
+    expect(featureStateForPath("/time-cards", access)).toBe("hidden");
   });
 
   it("a time-card approver sees Time cards and Updates but not Operations", () => {
@@ -231,9 +237,10 @@ describe("feature visibility by portal access", () => {
       expect.arrayContaining(["help.operations", "help.security-center", "help.updates", "help.time-cards"]),
     );
     const viewerTopics = topics(getPortalAccess(["viewer"]));
-    for (const id of ["help.operations", "help.security-center", "help.updates", "help.time-cards", "help.settings"]) {
+    for (const id of ["help.operations", "help.security-center", "help.time-cards", "help.settings"]) {
       expect(viewerTopics).not.toContain(id);
     }
+    expect(viewerTopics).toContain("help.updates");
     expect(viewerTopics).toContain("help.overview");
     expect(viewerTopics).toContain("help.support");
 

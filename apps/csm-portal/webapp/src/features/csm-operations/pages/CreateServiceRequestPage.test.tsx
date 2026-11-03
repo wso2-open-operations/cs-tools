@@ -17,7 +17,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { BeProject, BeProjectMetadata } from "@api/backend/types";
+import type { BeCatalogItemVariable, BeProject, BeProjectMetadata } from "@api/backend/types";
 
 const navigateMock = vi.fn();
 const postCaseMutateAsyncMock = vi.fn();
@@ -32,6 +32,18 @@ let projectMetadataResult: {
   isLoading: boolean;
   isError: boolean;
 } = { data: undefined, isLoading: false, isError: false };
+
+// The selected catalog item's questions. One optional question by default,
+// which `selectFullFlow` answers: the backend refuses a service request with
+// no answers at all, so a submittable flow needs one.
+const SERVICE_NAME_VARIABLE: BeCatalogItemVariable = {
+  id: "var-1",
+  questionText: "Service name",
+  order: 100,
+  type: "single_line_text",
+  mandatory: false,
+};
+let catalogItemVariables: BeCatalogItemVariable[] = [SERVICE_NAME_VARIABLE];
 
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
@@ -100,7 +112,12 @@ vi.mock("@features/csm-operations/api/useSearchCatalogs", () => ({
   }),
 }));
 vi.mock("@features/csm-operations/api/useCatalogItemVariables", () => ({
-  useCatalogItemVariables: () => ({ data: [], isLoading: false, isError: false, isSuccess: true }),
+  useCatalogItemVariables: () => ({
+    data: catalogItemVariables,
+    isLoading: false,
+    isError: false,
+    isSuccess: true,
+  }),
 }));
 // Captures the `filterProject` predicate the page hands to the picker so the
 // "which project types are offered" tests can call it directly.
@@ -145,10 +162,19 @@ function selectProjectAndDeployment(): void {
 }
 
 /** Drives every field canSubmit requires (project, deployment, deployed
- * product, catalog, catalog item) so the read-access gating tests exercise
- * canSubmit's own hasNoSrReadAccess check — not a disabled button that's
- * actually disabled because an earlier, unrelated field is still empty. */
+ * product, catalog, catalog item, and one answer) so the read-access gating
+ * tests exercise canSubmit's own hasNoSrReadAccess check — not a disabled
+ * button that's actually disabled because an earlier, unrelated field is
+ * still empty. */
 function selectFullFlow(): void {
+  selectCatalogItem();
+  fireEvent.change(screen.getByRole("textbox", { name: /^service name$/i }), {
+    target: { value: "api-gateway" },
+  });
+}
+
+/** Everything up to and including the catalog item, leaving its questions unanswered. */
+function selectCatalogItem(): void {
   selectProjectAndDeployment();
   fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
   fireEvent.click(screen.getByRole("option", { name: "API Manager 4.3.0" }));
@@ -279,6 +305,59 @@ describe("CreateServiceRequestPage — gating on hasServiceRequestReadAccess", (
       screen.queryByText(/isn't eligible to raise service requests/i),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
+  });
+});
+
+describe("CreateServiceRequestPage — at least one answered question", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    postCaseMutateAsyncMock.mockReset();
+    showErrorMock.mockReset();
+    projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    catalogItemVariables = [SERVICE_NAME_VARIABLE];
+  });
+
+  it("blocks Create while every (optional) question is blank, and says why", () => {
+    render(<CreateServiceRequestPage />);
+    selectCatalogItem();
+
+    expect(screen.getByText("Answer at least one question.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: /^service name$/i }), {
+      target: { value: "api-gateway" },
+    });
+    expect(screen.queryByText("Answer at least one question.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeEnabled();
+  });
+
+  it("blocks Create for a catalog item with no questions at all", () => {
+    catalogItemVariables = [];
+    render(<CreateServiceRequestPage />);
+    selectCatalogItem();
+
+    expect(screen.getByText("This catalog item has no additional fields.")).toBeInTheDocument();
+    expect(screen.getByText(/needs at least one answer/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("sends only the answered questions once one is filled", () => {
+    catalogItemVariables = [
+      SERVICE_NAME_VARIABLE,
+      { ...SERVICE_NAME_VARIABLE, id: "var-2", questionText: "Notes", order: 200 },
+    ];
+    postCaseMutateAsyncMock.mockReturnValue(new Promise(() => {}));
+    render(<CreateServiceRequestPage />);
+    selectFullFlow();
+    fireEvent.click(screen.getByRole("button", { name: /create service request/i }));
+
+    expect(postCaseMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "service_request",
+        catalogItemId: "item-1",
+        variables: [{ id: "var-1", value: "api-gateway" }],
+      }),
+    );
   });
 });
 

@@ -18,6 +18,7 @@ import {
   changeRequestApprovedReadOnlyReason,
   changeRequestTransitionRequiresReason,
   customerApprovalLockedReason,
+  customerProjectNeededForApproval,
   customerReviewLockedReason,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
   isChangeRequestCreationPhase,
@@ -156,6 +157,18 @@ export const PLANNED_WINDOW_SKIPPED =
 /** The words for a change request on hold that was asked to change state without being taken off hold. */
 export const ON_HOLD_STATE_SKIPPED = "On hold, so its state can't change. Take it off hold in the same edit.";
 
+/** The words for a change request with no assignment group that was asked to request approval. */
+export const REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED =
+  "No assignment group, so approval can't be requested. Set one in the same edit.";
+
+/**
+ * The words for a change request with a customer step ticked and no Customer Project that was asked to request
+ * approval. Unlike the assignment group, the project can't always be set in the same edit: a bulk edit sets it only
+ * when every selected change request is New.
+ */
+export const REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED =
+  "A customer step is ticked and there is no Customer Project, so approval can't be requested until it has one.";
+
 /** What a bulk plan needs to know about one change request (its detail, read just before the run). */
 export type BulkChangeRequestRecord = Partial<
   Pick<
@@ -164,6 +177,7 @@ export type BulkChangeRequestRecord = Partial<
     | "type"
     | "onHold"
     | "project"
+    | "assignedTeam"
     | "customerApprovalRequired"
     | "customerReviewRequired"
     | "plannedStartOn"
@@ -190,10 +204,15 @@ export type BulkChangeRequestRecord = Partial<
  * - On hold: putting one on hold that already is only updates the reason (a
  *   second "on hold" would clear it), taking one off that isn't is not sent, and
  *   one on hold can't change state unless the same edit takes it off hold.
+ * - Request Approval (state `assess`) needs an assignment group, and in New a
+ *   Customer Project when a customer step is ticked on a non-Emergency change,
+ *   each as it will stand (the edit's own value, else the stored one): one
+ *   without is skipped with the reason, as the backend would refuse it.
  *
  * A change request left with nothing to send is skipped with the reason. The
- * backend stays the authority: what it refuses for one change request (nobody
- * to ask, no assignment group) is reported for that one and the rest go through.
+ * backend stays the authority: what it refuses for one change request (e.g.
+ * nobody on the Customer Project to ask) is reported for that one and the rest
+ * go through.
  */
 export function bulkChangeRequestPlan(cr: BulkChangeRequestRecord, edit: BulkChangeRequestEdit): BulkChangeRequestPlan {
   if (isChangeRequestTerminal(cr.state)) {
@@ -255,6 +274,19 @@ export function bulkChangeRequestPlan(cr: BulkChangeRequestRecord, edit: BulkCha
   if (patch.onHold === true && cr.onHold) delete patch.onHold;
   if (patch.onHold === false && !cr.onHold) delete patch.onHold;
   if (cr.onHold && patch.state && patch.onHold !== false) return { skip: ON_HOLD_STATE_SKIPPED };
+
+  if (patch.state === "assess") {
+    // Request Approval, judged as the backend does: the team (any state), then in New the Customer Project.
+    if (!patch.assignedTeamId && !cr.assignedTeam?.id) return { skip: REQUEST_APPROVAL_NEEDS_TEAM_SKIPPED };
+    const needsProject =
+      isChangeRequestCreationPhase(cr.state) &&
+      customerProjectNeededForApproval(
+        patch.type ?? cr.type,
+        patch.customerApprovalRequired ?? cr.customerApprovalRequired,
+        patch.customerReviewRequired ?? cr.customerReviewRequired,
+      );
+    if (needsProject && !(patch.projectId ?? cr.project?.id)) return { skip: REQUEST_APPROVAL_NEEDS_PROJECT_SKIPPED };
+  }
 
   if (Object.keys(patch).length === 0) {
     if (approved && bulkEditTouchesContent(edit)) return { skip: APPROVED_FIELDS_SKIPPED };

@@ -66,6 +66,9 @@ import EditIncidentDialog from "@features/csm-operations/components/EditIncident
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
 import IncidentTasksWidget from "@features/csm-operations/components/IncidentTasksWidget";
+import ChildIncidentsWidget from "@features/csm-operations/components/ChildIncidentsWidget";
+import { useSearchChildIncidents } from "@features/csm-operations/api/useSearchChildIncidents";
+import { INCIDENT_RESOLUTION_CODE_LABELS } from "@features/csm-operations/utils/incidentResolution";
 import IncidentRunbookSection from "@features/csm-operations/components/IncidentRunbookSection";
 import IncidentActionBar from "@features/csm-operations/components/IncidentActionBar";
 import IncidentCreateMenu from "@features/csm-operations/components/IncidentCreateMenu";
@@ -80,6 +83,7 @@ import {
   incidentPriorityLabel,
   incidentStateColor,
   incidentStateLabel,
+  isIncidentOpen,
 } from "@features/csm-operations/utils/incidents";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -170,8 +174,8 @@ function IncidentDescription({ text }: { text: string }): JSX.Element {
  * (entity-service/ServiceNow, not this BFF or the FE): `state: RESOLVED`/
  * `CLOSED` 500s without a resolution, fixed by having
  * `EditIncidentDialog`/`IncidentResolutionDialog` collect
- * `resolutionCode`/`resolutionNotes` (write-only fields, no read-side model
- * — see `BeUpdateIncidentPayload`) once the target state is one of those two.
+ * `resolutionCode`/`resolutionNotes` (see `BeUpdateIncidentPayload`) once the
+ * target state is one of those two.
  * `additionalComments` (and, defensively, `workNotes` — same ServiceNow
  * journal-field shape, not independently confirmed) is the dangerous one:
  * the PATCH returns 200, but the response's own echoed value comes back
@@ -220,6 +224,72 @@ function MetaCell({ label, children }: { label: string; children: ReactNode }): 
 
 function RefText({ value }: { value?: BeEntityRef | null }): JSX.Element {
   return <Typography variant="body2">{value?.name || "—"}</Typography>;
+}
+
+function incidentDetailPath(incidentId: string): string {
+  return `${OPERATIONS_INCIDENTS_PATH}/${encodeURIComponent(incidentId)}`;
+}
+
+/** Display text for a stored resolution code; an unmapped one shows as-is. */
+function resolutionCodeLabel(code: string): string {
+  return INCIDENT_RESOLUTION_CODE_LABELS[code as BeIncidentResolutionCode] ?? code;
+}
+
+/**
+ * The resolution of a Resolved or Closed incident: code, notes, who and when,
+ * and whether it was resolved by its parent incident's resolution. Not shown
+ * once the incident is re-opened, which keeps the stored values.
+ */
+function IncidentResolutionCard({ incident }: { incident: BeIncidentDetail }): JSX.Element | null {
+  const isResolved = incident.state === "RESOLVED" || incident.state === "CLOSED";
+  const hasResolution = !!(incident.resolutionCode || incident.resolvedOn || incident.resolutionNotes);
+  if (!isResolved || !hasResolution) return null;
+  const self = incident.id ? incidentDetailPath(incident.id) : undefined;
+  return (
+    <Card
+      data-testid="incident-resolution"
+      sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}
+    >
+      <Typography variant="subtitle2">Resolution</Typography>
+      <Box
+        sx={{
+          display: "grid",
+          gap: 2,
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: "repeat(2, minmax(0, 1fr))",
+            md: "repeat(3, minmax(0, 1fr))",
+          },
+        }}
+      >
+        <MetaCell label="Resolution code">
+          <Typography variant="body2">
+            {incident.resolutionCode ? resolutionCodeLabel(incident.resolutionCode) : "—"}
+          </Typography>
+        </MetaCell>
+        <MetaCell label="Resolved by">
+          <Typography variant="body2">{incident.resolvedBy || "—"}</Typography>
+        </MetaCell>
+        <MetaCell label="Resolved on">
+          <Typography variant="body2">{formatDateTime(incident.resolvedOn)}</Typography>
+        </MetaCell>
+        {incident.resolvedWithParent && (
+          <MetaCell label="Resolved with parent incident">
+            {incident.parentIncident ? (
+              <EntityRefLink value={incident.parentIncident} routeBase={OPERATIONS_INCIDENTS_PATH} from={self} />
+            ) : (
+              <Typography variant="body2">Yes</Typography>
+            )}
+          </MetaCell>
+        )}
+      </Box>
+      <MetaCell label="Resolution notes">
+        <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          {incident.resolutionNotes || "—"}
+        </Typography>
+      </MetaCell>
+    </Card>
+  );
 }
 
 type IncidentTabId =
@@ -281,6 +351,13 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_INCIDENTS_PATH;
   const { data, isLoading, isError } = useGetIncident(id);
+  // Shared (same query key) with the Related tab's ChildIncidentsWidget;
+  // read here for the resolve dialog's count of children it will resolve.
+  const { data: childIncidents } = useSearchChildIncidents(id);
+  const openChildCount = useMemo(
+    () => (childIncidents?.incidents ?? []).filter((c) => isIncidentOpen(c.state)).length,
+    [childIncidents],
+  );
   // The incident number as the short chip label (matching `CsmCaseDetailPage`'s
   // own `caseNumber`-only report); incidents have no separate project-scoped
   // id the way cases do, so the tooltip's `internalId` reuses the same
@@ -599,7 +676,15 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // Choreo/Asgardeo-specific copy would have to — a heuristic, not a gate:
   // the select is purely a convenience, and submitting it for a non-Choreo
   // incident is harmless (the backend just ignores it).
-  const hasLinks = !!(incident.parent || incident.changeRequest || incident.problem || incident.causedBy);
+  const hasLinks = !!(
+    incident.parentIncident ||
+    incident.parent ||
+    incident.changeRequest ||
+    incident.problem ||
+    incident.causedBy
+  );
+  // Back on a record opened from here returns to this incident.
+  const selfPath = incidentDetailPath(incident.id as string);
   const hasLinkedServiceRequests =
     !!incident.linkedServiceRequests && incident.linkedServiceRequests.length > 0;
 
@@ -814,9 +899,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                     key: "child_incident",
                     label: "Create child incident",
                     icon: <GitBranch size={16} />,
-                    // Pre-selects this incident as the new incident's generic
-                    // parent — see `CreateIncidentFromIncidentNavState`'s doc
-                    // comment.
+                    // Pre-selects this incident as the new incident's parent
+                    // incident (`parentIncidentId`) — see
+                    // `CreateIncidentFromIncidentNavState`'s doc comment.
                     onSelect: () =>
                       navigate("/operations/incidents/new", {
                         state: {
@@ -872,6 +957,22 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         >
           {(
             [
+              // A child shows its parent first: resolving the parent
+              // resolves it.
+              ...(incident.parentIncident
+                ? [
+                    {
+                      label: "Parent incident",
+                      render: () => (
+                        <EntityRefLink
+                          value={incident.parentIncident}
+                          routeBase={OPERATIONS_INCIDENTS_PATH}
+                          from={selfPath}
+                        />
+                      ),
+                    },
+                  ]
+                : []),
               { label: "Caller", render: () => <RefText value={incident.caller} /> },
               { label: "Assignment group", render: () => <RefText value={incident.assignmentGroup} /> },
               { label: "Assigned to", render: () => <RefText value={incident.assignedTo} /> },
@@ -887,6 +988,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         </Box>
         <IncidentRunbookSection subject={incident.subject ?? ""} />
       </Card>
+
+      <IncidentResolutionCard incident={incident} />
 
       <Box className="csm-print-hide" sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
@@ -1049,6 +1152,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           {/* Tasks first and full width: the table needs the room, and it
               is the part of this tab people act on. */}
           <IncidentTasksWidget incidentId={incident.id as string} />
+          <ChildIncidentsWidget parentIncidentId={incident.id as string} />
 
           <Box
             sx={{
@@ -1072,8 +1176,16 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                   }}
                 >
                   <MetaCell label="Parent incident">
-                    <EntityRefLink value={incident.parent} routeBase="/operations/incidents" />
+                    <EntityRefLink
+                      value={incident.parentIncident}
+                      routeBase={OPERATIONS_INCIDENTS_PATH}
+                      from={selfPath}
+                    />
                   </MetaCell>
+                  {/* The generic parent can be a case, change request, problem
+                      or incident, and the ref does not say which, so it is
+                      shown as text rather than guessing a route. */}
+                  <MetaCell label="Parent record"><RefText value={incident.parent} /></MetaCell>
                   <MetaCell label="Change request">
                     <EntityRefLink value={incident.changeRequest} routeBase="/operations/change-requests" />
                   </MetaCell>
@@ -1207,6 +1319,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <IncidentResolutionDialog
           target={resolutionTarget}
           isSubmitting={patchIncident.isPending}
+          openChildCount={openChildCount}
           onClose={() => {
             if (!patchIncident.isPending) setResolutionTarget(null);
           }}

@@ -129,6 +129,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		)
 	}
 
+	var customDashboardHandler *handler.CustomDashboardHandler
+	var customDashboardShareHandler *handler.CustomDashboardShareHandler
+	var customDashboardTeamShareHandler *handler.CustomDashboardTeamShareHandler
+	if db != nil {
+		customDashboardRepo := repository.NewCustomDashboardRepository(db)
+		customDashboardHandler = handler.NewCustomDashboardHandler(
+			service.NewCustomDashboardService(customDashboardRepo, userRepo),
+		)
+		customDashboardShareHandler = handler.NewCustomDashboardShareHandler(
+			service.NewCustomDashboardShareService(repository.NewCustomDashboardShareRepository(db), customDashboardRepo, userRepo),
+		)
+		customDashboardTeamShareHandler = handler.NewCustomDashboardTeamShareHandler(
+			service.NewCustomDashboardTeamShareService(repository.NewCustomDashboardTeamShareRepository(db), customDashboardRepo, userRepo),
+		)
+	}
+
 	// event_publish_failures, sla_clocks, scheduled_task_run, and
 	// alert_incident_mapping have no ServiceNow equivalent. They are
 	// Postgres-backed and registered only when a pool is available
@@ -210,7 +226,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var slaStatusHandler *handler.SLAStatusHandler
 	if db != nil {
 		slaStatusRepo := repository.NewSLAStatusRepository(repository.NewScoped(db))
-		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc))
+		slaStatusHandler = handler.NewSLAStatusHandler(service.NewSLAStatusService(slaStatusRepo, accessSvc, cfg.CSMPortalBackendClientID, eventPublisher))
 	}
 
 	// scheduled_task_run has no ServiceNow equivalent either — same
@@ -351,6 +367,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
 	var runbookHandler *handler.RunbookHandler
+	// standardChangeHandler serves the standard change catalogue and its proposals
+	// (migration 0252); Postgres only. standardChangeRepo is also what the change
+	// request create and PATCH use to apply a template.
+	var standardChangeHandler *handler.StandardChangeHandler
+	var standardChangeRepo repository.StandardChangeRepository
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
@@ -417,10 +438,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var salesforceEventHandler *handler.SalesforceEventHandler
 	// salesforcePartnerHandler is set when the partner refresh is on.
 	var salesforcePartnerHandler *handler.SalesforcePartnerHandler
+	// salesforceResyncHandler is set when the Salesforce ingest is wired: the
+	// admin resync compares and overwrites through those same ingests, so a
+	// component whose ingest flag is off reports "skipped".
+	var salesforceResyncHandler *handler.SalesforceResyncHandler
 	// membershipRegistrationHandler and projectContactSyncHandler both need
 	// the very same membership-ingest-enabled SalesforceEventService this
 	// block builds, so all three are wired together rather than side by side.
 	var membershipIngestSvc service.SalesforceEventService
+	// resyncIngestSvc is the ingest service the admin resync runs through.
+	var resyncIngestSvc service.SalesforceEventService
 	var salesEntityClient *salesentity.Client
 	// ingestRetryCtx stops the Salesforce ingest retry worker; closePublishers
 	// (returned to cmd/api/main.go) cancels it on shutdown and waits on
@@ -562,6 +589,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				})
 			membershipIngestSvc = withPartnerIngest(withOpportunityIngest(membershipIngestSvc))
 			salesforceEventHandler = handler.NewSalesforceEventHandler(membershipIngestSvc)
+			resyncIngestSvc = membershipIngestSvc
 
 			// The delayed-retry job re-runs memberships whose project or
 			// account was not in CSM when their event arrived. It lives here
@@ -606,8 +634,18 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				log.Printf("salesforce ingest retry worker enabled (every %s)", cfg.SalesforceIngestRetryInterval)
 			}
 		} else {
-			salesforceEventHandler = handler.NewSalesforceEventHandler(withPartnerIngest(withOpportunityIngest(service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport))))
+			resyncIngestSvc = withPartnerIngest(withOpportunityIngest(service.NewSalesforceEventService(accountIngestRepo, salesEntityClient, ingestSupport)))
+			salesforceEventHandler = handler.NewSalesforceEventHandler(resyncIngestSvc)
 		}
+		// The admin resync (POST /salesforce/resync/preview and /apply). It
+		// is admin-only (AUTH_ADMIN_ROLES) and adds no flag of its own: each
+		// component runs only when its ingest is on.
+		resyncSvc, err := service.NewSalesforceResyncService(resyncIngestSvc, salesEntityClient,
+			repository.NewSalesforceResyncReadRepository(repository.NewScoped(db)), accessSvc, cfg.AuthAdminRoles)
+		if err != nil {
+			panic("salesforce: " + err.Error())
+		}
+		salesforceResyncHandler = handler.NewSalesforceResyncHandler(resyncSvc)
 	}
 
 	// POST /users/me/memberships/register (H-0 of the customer onboarding flow).
@@ -1574,6 +1612,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// (what the call-escalation ladders start from) and takes work notes, with no ServiceNow behind it.
 		activeIncidentSvc = service.NewIncidentServiceWithPublisher(incidentRepo, userRepo, incidentEventPublisher)
 	}
+	// This engine's own in-process SLA clock registration/revision/state
+	// effects, now also wired into incidents (previously case-only) -- see
+	// SLAEngineService.RegisterIncidentClocks' own doc comment. Same
+	// slaEngineSvc instance constructed above for cases (nil when
+	// CSM_SLA_ENGINE_ENABLED=false or no database, which
+	// WithIncidentSLAEngine tolerates); reaches every branch above
+	// (DataSourceServiceNow's *snIncidentService, the dual-write mirror's
+	// own *incidentService, and the plain-Postgres default's
+	// *incidentService) through this one decorator call, mirroring
+	// activeCaseSvc's identical WithSLAEngine wiring. Only one real
+	// sla_policy row currently matches anything for incidents -- see that
+	// doc comment for which one and why everything else is a safe no-op for
+	// now.
+	activeIncidentSvc = service.WithIncidentSLAEngine(activeIncidentSvc, slaEngineSvc)
 	// SLA_DATA_SOURCE=servicenow: SLA-filtered incident search/aggregate is
 	// answered by a read-only ServiceNow-backed incident service instead of the
 	// Postgres sla_live query, the same routing the case service gets via
@@ -1630,8 +1682,16 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
+		// Standard change templates and the proposals that create, modify or
+		// retire them: internal callers only.
+		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
+		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
+		// From here on a standard change is raised from a template of this
+		// catalogue (the change request service is a pointer the handler shares; a
+		// ServiceNow-backed one is returned unchanged).
+		service.WithStandardChangeTemplates(activeChangeRequestSvc, standardChangeRepo)
 		portalBannerHandler = handler.NewPortalBannerHandler(
-			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.AuthAdminRoles),
+			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
 		// Product catalogue routes of the products API: editable by
 		// AUTH_PRODUCT_CATALOG_MANAGER_ROLES and by CSM admins. Postgres data
@@ -1997,6 +2057,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)
 	}
+	if salesforceResyncHandler != nil {
+		mux.HandleFunc("POST /salesforce/resync/preview", salesforceResyncHandler.Preview)
+		mux.HandleFunc("POST /salesforce/resync/apply", salesforceResyncHandler.Apply)
+	}
 	if customerEngagementAllocationHandler != nil {
 		mux.HandleFunc("POST /customer-engagements/allocation-events", customerEngagementAllocationHandler.ProcessAllocationEvent)
 	}
@@ -2026,6 +2090,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if slaStatusHandler != nil {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
+		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
@@ -2145,6 +2210,22 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /release-lines/{id}/retire", productCatalogHandler.RetireReleaseLine)
 		mux.HandleFunc("GET /carbon-platform-history", productCatalogHandler.ListCarbonPlatformHistory)
 		mux.HandleFunc("GET /carbon-kernel-releases", productCatalogHandler.ListCarbonKernelReleases)
+	}
+	if standardChangeHandler != nil {
+		// Standard changes (Operations > Change requests > Standard changes): internal callers only.
+		mux.HandleFunc("POST /standard-change-templates/search", internalOnly(accessSvc, standardChangeHandler.SearchTemplates))
+		mux.HandleFunc("GET /standard-change-templates/{id}", internalOnly(accessSvc, standardChangeHandler.GetTemplate))
+		mux.HandleFunc("GET /standard-change-templates/{id}/versions/{versionId}", internalOnly(accessSvc, standardChangeHandler.GetTemplateVersion))
+		mux.HandleFunc("POST /standard-change-templates/{id}/suspend", internalOnly(accessSvc, standardChangeHandler.SuspendTemplate))
+		mux.HandleFunc("POST /standard-change-templates/{id}/resume", internalOnly(accessSvc, standardChangeHandler.ResumeTemplate))
+		mux.HandleFunc("POST /standard-change-templates/{id}/clear-review", internalOnly(accessSvc, standardChangeHandler.ClearTemplateReview))
+		mux.HandleFunc("POST /standard-change-proposals", internalOnly(accessSvc, standardChangeHandler.CreateProposal))
+		mux.HandleFunc("POST /standard-change-proposals/search", internalOnly(accessSvc, standardChangeHandler.SearchProposals))
+		mux.HandleFunc("GET /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.GetProposal))
+		mux.HandleFunc("PATCH /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.UpdateProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/submit", internalOnly(accessSvc, standardChangeHandler.SubmitProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/withdraw", internalOnly(accessSvc, standardChangeHandler.WithdrawProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/decision", internalOnly(accessSvc, standardChangeHandler.DecideProposal))
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that
@@ -2278,6 +2359,29 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("PATCH /users/me/saved-filter-views", savedFilterViewHandler.Save)
 		mux.HandleFunc("DELETE /users/me/saved-filter-views", savedFilterViewHandler.Delete)
 		mux.HandleFunc("POST /users/me/saved-filter-views/reorder", savedFilterViewHandler.Reorder)
+	}
+	if customDashboardHandler != nil {
+		// The caller's own saved dashboards (CSM portal My Dashboards).
+		mux.HandleFunc("GET /users/me/dashboards", customDashboardHandler.List)
+		mux.HandleFunc("GET /users/me/dashboards/{id}", customDashboardHandler.Get)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}", customDashboardHandler.Save)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}", customDashboardHandler.Delete)
+	}
+	if customDashboardShareHandler != nil {
+		// Sharing the caller's saved dashboards (owner) and the ones shared
+		// with the caller (recipient, view only).
+		mux.HandleFunc("GET /users/me/dashboards/{id}/shares", customDashboardShareHandler.ListShares)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/shares/{userId}", customDashboardShareHandler.AddShare)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/shares/{userId}", customDashboardShareHandler.RemoveShare)
+		mux.HandleFunc("GET /users/me/shared-dashboards", customDashboardShareHandler.ListSharedWithMe)
+		mux.HandleFunc("GET /users/me/shared-dashboards/{id}", customDashboardShareHandler.GetSharedWithMe)
+	}
+	if customDashboardTeamShareHandler != nil {
+		// Sharing the caller's saved dashboards with teams (owner); the
+		// members read them through the shared-dashboards routes above.
+		mux.HandleFunc("GET /users/me/dashboards/{id}/team-shares", customDashboardTeamShareHandler.ListTeamShares)
+		mux.HandleFunc("PUT /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.AddTeamShare)
+		mux.HandleFunc("DELETE /users/me/dashboards/{id}/team-shares/{teamId}", customDashboardTeamShareHandler.RemoveTeamShare)
 	}
 
 	if membershipRegistrationHandler != nil {

@@ -158,6 +158,13 @@ func (d *Directory) TeamResultByGroupName(name string) (TeamResult, bool) {
 	return TeamResult{}, false
 }
 
+// TeamResults returns every configured team's catalogue entry (registry key as
+// id, name, family and backing group ids in UUID form), ordered by name, as
+// POST /teams/search lists them but unpaged. The slice is a copy.
+func (d *Directory) TeamResults() []TeamResult {
+	return append([]TeamResult(nil), d.teamResults...)
+}
+
 // TeamByKey looks a team up by its registry key. ok is false if no configured
 // team matches.
 func (d *Directory) TeamByKey(key string) (Team, bool) {

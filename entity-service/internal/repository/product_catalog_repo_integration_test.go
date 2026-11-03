@@ -30,7 +30,7 @@ import (
 )
 
 // These run the catalogue writes against a live PostgreSQL instance with
-// migrations 0269-0271, because the cross-field rules live in SQL inside the
+// migrations 0270-0272, because the cross-field rules live in SQL inside the
 // write transaction. Skipped unless ENTITY_TEST_DATABASE_URL is set (see
 // account_repo_salesforce_integration_test.go for the setup).
 

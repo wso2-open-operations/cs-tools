@@ -46,7 +46,11 @@ import {
   PROJECTS,
   SRA_VIEWS,
 } from "../../config/testData";
-import { CASE_DETAIL } from "../../utils/selectors";
+import {
+  CASE_DETAIL,
+  CASE_ESCALATION,
+  SECURITY_CENTER,
+} from "../../utils/selectors";
 
 withSession(test);
 
@@ -90,6 +94,37 @@ test.describe("View Security Report", () => {
 
         // Subject — the generated title, pinned as-is.
         await expect(sra.subject()).toHaveText(subject);
+      });
+
+      test("offers only Activity, Details and Attachments, with no escalation", async ({
+        page,
+      }) => {
+        test.skip(
+          !project.id || !sraId,
+          `${projectType} needs a project id and an SRA id. ` +
+            `Fill them in tests/e2e/config/testData.ts.`,
+        );
+
+        const sra = new CaseDetailPage(page);
+        await sra.openSecurityReportAnalysis(project.id, sraId);
+        const main = page.getByTestId("app-main");
+        const { shown, hidden } = SECURITY_CENTER.reportDetailTabs;
+
+        for (const name of shown) {
+          await expect(main.getByRole("tab", { name })).toBeVisible();
+        }
+        // Absent rather than hidden: CaseDetailsContent drops them from the
+        // tab list for a security report analysis.
+        for (const name of hidden) {
+          await expect(main.getByRole("tab", { name })).toHaveCount(0);
+        }
+        await expect(main.getByRole("tab")).toHaveCount(shown.length);
+        await expect(
+          page.getByRole("button", { name: CASE_ESCALATION.button }),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("button", { name: CASE_ESCALATION.deescalateButton }),
+        ).toHaveCount(0);
       });
     });
   }

@@ -50,6 +50,22 @@ describe("config modules", () => {
     expect(authConfig.clientId).toBe("client-id");
   });
 
+  it("auth config leaves the redirect URLs undefined when they are not set", async () => {
+    const config = (window as unknown as { config: Record<string, string> })
+      .config;
+    delete config.CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL;
+    config.CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL = "   ";
+    const { authConfig } = await import("@config/authConfig");
+    expect(authConfig.signInRedirectURL).toBeUndefined();
+    expect(authConfig.signOutRedirectURL).toBeUndefined();
+  });
+
+  it("auth config passes configured redirect URLs through", async () => {
+    const { authConfig } = await import("@config/authConfig");
+    expect(authConfig.signInRedirectURL).toBe("https://app.test/sign-in");
+    expect(authConfig.signOutRedirectURL).toBe("https://app.test/sign-out");
+  });
+
   it("banner config modules expose visibility flags", async () => {
     const top = await import("@config/topBannersConfig");
     const notification = await import("@config/notificationBannerConfig");

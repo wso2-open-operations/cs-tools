@@ -188,9 +188,14 @@ type IncidentRepository interface {
 	// On Hold, Resolved/Closed (with resolutionCode/resolutionNotes), or
 	// Cancelled. See IncidentLifecycleUpdate for the field-by-field rules.
 	// One transaction. Returns NotFoundError when id is not an incident the
-	// caller can see, and ValidationError for an unknown assignee/resolver or
-	// a Resolved/Closed target with no resolution code or notes.
-	UpdateIncidentLifecycle(ctx context.Context, id string, u IncidentLifecycleUpdate, actorEmail string) error
+	// caller can see, and ValidationError for an unknown assignee/resolver,
+	// a Resolved/Closed target with no resolution code or notes, or a parent
+	// incident that is the incident itself or one of its descendants.
+	//
+	// Resolving an incident resolves its open child incidents in the same
+	// transaction (cascadeChildIncidentResolution); they are returned, so the
+	// caller can do for each what it does after its own commit.
+	UpdateIncidentLifecycle(ctx context.Context, id string, u IncidentLifecycleUpdate, actorEmail string) ([]ResolvedChildIncident, error)
 	// ApplySpecialistHandoff hands an incident to a specialist group in one
 	// transaction: it locks the incident, passes its current state to plan
 	// (which applies the eligibility rules and may refuse with an error),
@@ -295,7 +300,9 @@ type SpecialistHandoffWritten struct {
 // resolved_by_id from ResolvedByID, falling back to DefaultResolvedByID.
 // Entering Closed or Canceled also closes the incident's open incident tasks,
 // as ServiceNow's "Cascade closure of Incident Tasks" does (see
-// cascadeIncidentTaskClosure).
+// cascadeIncidentTaskClosure). Entering Resolved also resolves the open child
+// incidents, as ServiceNow's "Update Child Incidents" does (see
+// cascadeChildIncidentResolution).
 type IncidentLifecycleUpdate struct {
 	State               *string // incident_state_enum label
 	AssignedEngineerID  *string
@@ -328,7 +335,7 @@ type IncidentLifecycleUpdate struct {
 	ChangeRequestID     *string
 	ProblemID           *string
 	CausedByID          *string
-	ParentIncidentID    *string
+	ParentIncidentID    **string // non-nil outer, nil inner unlinks it from its parent
 	IncidentReport      *string
 	Environment         **string  // non-nil outer, nil inner clears it
 	WatchList           *[]string // replaces the whole list, as ServiceNow does; empty clears it
@@ -337,6 +344,18 @@ type IncidentLifecycleUpdate struct {
 	// Impact or Urgency is set, priority is recomputed from the new value and
 	// the one already on record, as ServiceNow's lookup does on every save.
 	PriorityFor func(impact, urgency string) string
+}
+
+// ResolvedChildIncident is a child incident UpdateIncidentLifecycle resolved
+// because its parent was, at any depth. PreviousState, PreviousResolutionCode
+// and ResolutionCode are domain values, as GetIncidentByID reads them; the
+// new state is always RESOLVED.
+type ResolvedChildIncident struct {
+	ID                     string
+	Number                 string
+	PreviousState          string
+	PreviousResolutionCode *string
+	ResolutionCode         *string
 }
 
 type incidentRepo struct {
@@ -435,6 +454,9 @@ func incidentWhereClause(f domain.SearchIncidentsFilters, priorities, states, se
 	}
 	if len(f.ParentIDs) > 0 {
 		add("wi.parent_id = ANY($%d::uuid[])", f.ParentIDs)
+	}
+	if len(f.ParentIncidentIDs) > 0 {
+		add("inc.parent_incident_id = ANY($%d::uuid[])", f.ParentIncidentIDs)
 	}
 	if len(states) > 0 {
 		add("inc.state = ANY($%d::text[]::incident_state_enum[])", states)
@@ -750,7 +772,7 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		       caused_by_cr.id, caused_by_wi.number,
 		       inc.resolution_code::TEXT, inc.close_notes,
 		       rb.id, COALESCE(rb.name, NULLIF(TRIM(CONCAT_WS(' ', rb.first_name, rb.last_name)), '')),
-		       inc.resolved_on, inc.incident_report, wi.description,
+		       inc.resolved_on, inc.resolved_with_parent, inc.incident_report, wi.description,
 		       wi.created_on, wi.created_by, wi.updated_on, wi.updated_by,
 		       ag.id, ag.name
 		` + incidentFromJoins + `
@@ -773,6 +795,7 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		resolutionCode, closeNotes         *string
 		rbID, rbName                       *string
 		resolvedOn                         *time.Time
+		resolvedWithParent                 bool
 		incidentReport                     *string
 		description                        *string
 		createdOn, updatedOn               time.Time
@@ -793,7 +816,7 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		&causedByID, &causedByNumber,
 		&resolutionCode, &closeNotes,
 		&rbID, &rbName,
-		&resolvedOn, &incidentReport, &description,
+		&resolvedOn, &resolvedWithParent, &incidentReport, &description,
 		&createdOn, &createdBy, &updatedOn, &updatedBy,
 		&agID, &agName,
 	)
@@ -809,6 +832,7 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		Priority: priority, State: incidentStateFromEnum(state), Category: category, Subcategory: subcatL,
 		ContactType: incidentContactTypeFromEnum(contactType), Impact: impact, Urgency: urgency,
 		ResolutionCode: incidentResolutionCodeFromEnum(resolutionCode), ResolutionNotes: closeNotes, IncidentReport: incidentReport,
+		ResolvedWithParent:    resolvedWithParent,
 		Description:           description,
 		WatchList:             []domain.IncidentWatchListItem{},
 		LinkedServiceRequests: []domain.LinkedServiceRequestRef{},
@@ -1450,31 +1474,32 @@ var incidentLifecycleFKField = map[string][2]string{
 }
 
 // UpdateIncidentLifecycle implements IncidentRepository.
-func (r *incidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u IncidentLifecycleUpdate, actorEmail string) error {
-	_, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) (struct{}, error) {
-		if err := r.updateIncidentLifecycleTx(ctx, tx, id, u, actorEmail); err != nil {
-			return struct{}{}, err
+func (r *incidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u IncidentLifecycleUpdate, actorEmail string) ([]ResolvedChildIncident, error) {
+	children, err := InTxReturning(ctx, r.db, func(tx pgx.Tx) ([]ResolvedChildIncident, error) {
+		children, err := r.updateIncidentLifecycleTx(ctx, tx, id, u, actorEmail)
+		if err != nil {
+			return nil, err
 		}
-		return struct{}{}, insertIncidentNotesTx(ctx, tx, id, u.WorkNotes, u.AdditionalComments, actorEmail)
+		return children, insertIncidentNotesTx(ctx, tx, id, u.WorkNotes, u.AdditionalComments, actorEmail)
 	})
 	if err == nil {
-		return nil
+		return children, nil
 	}
 	var ve *apierror.ValidationError
 	var nfe *apierror.NotFoundError
 	if errors.As(err, &ve) || errors.As(err, &nfe) {
-		return err
+		return nil, err
 	}
 	if IsRLSPolicyViolation(err) {
-		return &apierror.NotFoundError{Msg: "incident not found"}
+		return nil, &apierror.NotFoundError{Msg: "incident not found"}
 	}
 	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "23503" {
 		if f, ok := incidentLifecycleFKField[pgErr.ConstraintName]; ok {
-			return &apierror.ValidationError{Msg: f[0] + " does not identify an existing " + f[1]}
+			return nil, &apierror.ValidationError{Msg: f[0] + " does not identify an existing " + f[1]}
 		}
-		return &apierror.ValidationError{Msg: "a referenced id does not exist"}
+		return nil, &apierror.ValidationError{Msg: "a referenced id does not exist"}
 	}
-	return fmt.Errorf("update incident: %w", err)
+	return nil, fmt.Errorf("update incident: %w", err)
 }
 
 // Work notes ServiceNow's OOB "Cascade closure of Incident Tasks" writes on
@@ -1540,13 +1565,174 @@ func cascadeIncidentTaskClosure(ctx context.Context, tx pgx.Tx, incidentID, inci
 	return nil
 }
 
+// childIncidentResolvedNote is what ServiceNow's OOB "Update Child Incidents"
+// business rule writes on each child incident it resolves, as an additional
+// comment (WSO2's production children carry it as a comment only, no work
+// note).
+const childIncidentResolvedNote = "Resolved based on resolution of Parent Incident."
+
+// maxChildIncidentCascadeDepth is how many levels of child incidents below the
+// resolved one cascadeChildIncidentResolution follows. The visited set already
+// stops a loop in bad data; this stops a runaway chain.
+const maxChildIncidentCascadeDepth = 10
+
+// cascadeChildIncidentResolution ports ServiceNow's "Update Child Incidents"
+// for Resolved: once incident parentID has entered Resolved in tx, every
+// child incident (parent_incident_id = parentID) that is not Resolved, Closed
+// or Canceled -- New and On Hold included, as ServiceNow resolves any active
+// child -- is resolved with it:
+//
+//   - resolution_code and close_notes stay the child's own when it has
+//     them, else the parent's (as on WSO2's production instance: a child that
+//     already carried a code, such as Duplicate, kept it);
+//   - resolved_by_id is the parent's as stored (NULL stays NULL), resolved_on
+//     is now, and resolved_with_parent is set;
+//   - work_item.updated_on/updated_by are stamped, and
+//     childIncidentResolvedNote is added as a comment.
+//
+// ServiceNow's rule fires again on each child's own update, so a child's
+// children follow from the child's values, recursively. Children are locked
+// in id order; visited and maxChildIncidentCascadeDepth guard against bad
+// data. Only Resolved cascades: Closed, Canceled and a re-open leave the
+// children alone. Any failure fails the parent's update with it.
+func cascadeChildIncidentResolution(ctx context.Context, tx pgx.Tx, parentID, actorEmail string, visited map[string]bool, depth int) ([]ResolvedChildIncident, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT inc.id::text, wi.number, inc.state::text, inc.resolution_code::text
+		FROM incident inc
+		JOIN work_item wi ON wi.id = inc.id
+		WHERE inc.parent_incident_id = $1
+		  AND inc.state NOT IN ('RESOLVED', 'CLOSED', 'CANCELED')
+		ORDER BY inc.id
+		FOR UPDATE OF inc`, parentID)
+	if err != nil {
+		return nil, fmt.Errorf("update incident: read open child incidents: %w", err)
+	}
+	type child struct {
+		id, number, state string
+		code              *string
+	}
+	var children []child
+	for rows.Next() {
+		var c child
+		if err := rows.Scan(&c.id, &c.number, &c.state, &c.code); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("update incident: scan open child incident: %w", err)
+		}
+		children = append(children, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("update incident: read open child incidents: %w", err)
+	}
+	if len(children) == 0 {
+		return nil, nil
+	}
+	if depth > maxChildIncidentCascadeDepth {
+		return nil, &apierror.ValidationError{Msg: fmt.Sprintf(
+			"child incident %s is nested more than %d levels below the incident being resolved; resolve the incidents further down first",
+			children[0].number, maxChildIncidentCascadeDepth)}
+	}
+
+	note := childIncidentResolvedNote
+	var resolved []ResolvedChildIncident
+	for _, c := range children {
+		if visited[c.id] {
+			continue
+		}
+		visited[c.id] = true
+		var code *string
+		if err := tx.QueryRow(ctx, `
+			UPDATE incident c
+			SET state = 'RESOLVED',
+			    resolution_code = COALESCE(c.resolution_code, p.resolution_code),
+			    close_notes = CASE WHEN c.close_notes ~ '\S' THEN c.close_notes ELSE p.close_notes END,
+			    resolved_by_id = p.resolved_by_id,
+			    resolved_on = NOW(),
+			    resolved_with_parent = TRUE
+			FROM incident p
+			WHERE c.id = $1 AND p.id = $2
+			RETURNING c.resolution_code::text`, c.id, parentID).Scan(&code); err != nil {
+			return nil, fmt.Errorf("update incident: resolve child incident %s: %w", c.number, err)
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE work_item SET updated_on = NOW(), updated_by = $2 WHERE id = $1`, c.id, actorEmail); err != nil {
+			return nil, fmt.Errorf("update incident: resolve child incident %s: %w", c.number, err)
+		}
+		if err := insertIncidentNotesTx(ctx, tx, c.id, nil, &note, actorEmail); err != nil {
+			return nil, fmt.Errorf("update incident: resolve child incident %s: %w", c.number, err)
+		}
+		resolved = append(resolved, ResolvedChildIncident{
+			ID:                     c.id,
+			Number:                 c.number,
+			PreviousState:          *incidentStateFromEnum(&c.state),
+			PreviousResolutionCode: incidentResolutionCodeFromEnum(c.code),
+			ResolutionCode:         incidentResolutionCodeFromEnum(code),
+		})
+		below, err := cascadeChildIncidentResolution(ctx, tx, c.id, actorEmail, visited, depth+1)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, below...)
+	}
+	return resolved, nil
+}
+
+// checkParentIncident refuses a parent incident link that would loop: the
+// incident as its own parent, or a parent that already has the incident
+// among its ancestors (parent_incident_id, followed up). A transaction-scoped
+// advisory lock serialises these checks, so two updates linking A under B
+// and B under A cannot both pass. A parent that does not exist is left to the
+// foreign key.
+func checkParentIncident(ctx context.Context, tx pgx.Tx, id, parentID string) error {
+	if strings.EqualFold(id, parentID) {
+		return &apierror.ValidationError{Msg: "parentIncidentId cannot be the incident itself"}
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('incident-parent-link', 0::bigint))`); err != nil {
+		return fmt.Errorf("update incident: lock parent incident links: %w", err)
+	}
+	// UNION, not UNION ALL: an id seen before ends the walk, so a loop
+	// already in the data cannot keep it going.
+	var parentNumber *string
+	var loops bool
+	if err := tx.QueryRow(ctx, `
+		WITH RECURSIVE ancestor(id) AS (
+			SELECT $1::uuid
+			UNION
+			SELECT inc.parent_incident_id
+			FROM ancestor a
+			JOIN incident inc ON inc.id = a.id
+			WHERE inc.parent_incident_id IS NOT NULL
+		)
+		SELECT (SELECT number FROM work_item WHERE id = $1::uuid),
+		       EXISTS (SELECT 1 FROM ancestor WHERE id = $2::uuid)`, parentID, id).Scan(&parentNumber, &loops); err != nil {
+		return fmt.Errorf("update incident: check parent incident: %w", err)
+	}
+	if loops {
+		return &apierror.ValidationError{Msg: fmt.Sprintf(
+			"parentIncidentId cannot be %s: it is a child incident of this incident, directly or further down",
+			stringOrEmpty(parentNumber))}
+	}
+	return nil
+}
+
 // updateIncidentLifecycleTx is UpdateIncidentLifecycle's body: lock the
 // incident row, check the Resolved/Closed resolution requirement against the
 // request plus what is already on record, then update work_item (always,
 // for updated_on/updated_by, plus subject, parent, group and assignee) and
 // incident (state, resolution and the record's own columns, only when one is
-// being set), and replace the watch list when one is given.
-func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx, id string, u IncidentLifecycleUpdate, actorEmail string) error {
+// being set), and replace the watch list when one is given. A state change
+// then cascades: Closed/Canceled to the incident tasks, Resolved to the open
+// child incidents, which are returned.
+func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx, id string, u IncidentLifecycleUpdate, actorEmail string) ([]ResolvedChildIncident, error) {
+	// Before the row lock: checkParentIncident's advisory lock must come first
+	// in every transaction that takes both, or a re-link waiting for it while
+	// holding this row can deadlock with a resolve whose cascade wants this row.
+	// An unlink needs no check: it cannot make a loop.
+	if u.ParentIncidentID != nil && *u.ParentIncidentID != nil {
+		if err := checkParentIncident(ctx, tx, id, **u.ParentIncidentID); err != nil {
+			return nil, err
+		}
+	}
 	var currentState, number string
 	var currentCode, currentNotes, currentCategory, currentImpact, currentUrgency, currentSubcategoryID *string
 	err := tx.QueryRow(ctx, `
@@ -1558,10 +1744,10 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		FOR UPDATE OF inc`, id).Scan(&currentState, &currentCode, &currentNotes, &number,
 		&currentCategory, &currentImpact, &currentUrgency, &currentSubcategoryID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return &apierror.NotFoundError{Msg: "incident not found"}
+		return nil, &apierror.NotFoundError{Msg: "incident not found"}
 	}
 	if err != nil {
-		return fmt.Errorf("update incident: read current state: %w", err)
+		return nil, fmt.Errorf("update incident: read current state: %w", err)
 	}
 
 	if u.State != nil && (*u.State == "RESOLVED" || *u.State == "CLOSED") {
@@ -1573,7 +1759,7 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 			notes = u.ResolutionNotes
 		}
 		if code == nil || *code == "" || notes == nil || strings.TrimSpace(*notes) == "" {
-			return &apierror.ValidationError{Msg: "resolutionCode and resolutionNotes are required to move an incident to " + *u.State}
+			return nil, &apierror.ValidationError{Msg: "resolutionCode and resolutionNotes are required to move an incident to " + *u.State}
 		}
 	}
 
@@ -1597,9 +1783,9 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		wiArgs...,
 	).Scan(&wiID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return &apierror.NotFoundError{Msg: "incident not found"}
+			return nil, &apierror.NotFoundError{Msg: "incident not found"}
 		}
-		return err
+		return nil, err
 	}
 
 	var incSets []string
@@ -1626,11 +1812,12 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		addInc("resolved_by_id = $%d::uuid", *resolvedBy)
 	}
 	if enteringResolved {
-		incSets = append(incSets, "resolved_on = NOW()")
+		// Resolved by this update itself, not by its parent's cascade.
+		incSets = append(incSets, "resolved_on = NOW()", "resolved_with_parent = FALSE")
 	}
 	if err := r.addIncidentRecordFields(ctx, tx, u, addInc, &incSets,
 		currentCategory, currentImpact, currentUrgency, currentSubcategoryID); err != nil {
-		return err
+		return nil, err
 	}
 	if len(incSets) > 0 {
 		incArgs = append(incArgs, id)
@@ -1638,19 +1825,25 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 			fmt.Sprintf(`UPDATE incident SET %s WHERE id = $%d`, strings.Join(incSets, ", "), len(incArgs)),
 			incArgs...,
 		); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if u.WatchList != nil {
 		if err := replaceIncidentWatchers(ctx, tx, id, *u.WatchList); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	// After the incident's own write, as ServiceNow's cascade is an after rule.
-	if u.State != nil && *u.State != currentState {
-		return cascadeIncidentTaskClosure(ctx, tx, id, number, *u.State, actorEmail)
+	// After the incident's own write, as ServiceNow's cascades are after rules.
+	if u.State == nil || *u.State == currentState {
+		return nil, nil
 	}
-	return nil
+	if err := cascadeIncidentTaskClosure(ctx, tx, id, number, *u.State, actorEmail); err != nil {
+		return nil, err
+	}
+	if !enteringResolved {
+		return nil, nil
+	}
+	return cascadeChildIncidentResolution(ctx, tx, id, actorEmail, map[string]bool{id: true}, 1)
 }
 
 // addIncidentRecordFields adds the incident columns of the record's own
@@ -1742,7 +1935,13 @@ func (r *incidentRepo) addIncidentRecordFields(ctx context.Context, tx pgx.Tx, u
 	set("change_request_id = $%d::uuid", u.ChangeRequestID)
 	set("problem_id = $%d::uuid", u.ProblemID)
 	set("caused_by_id = $%d::uuid", u.CausedByID)
-	set("parent_incident_id = $%d::uuid", u.ParentIncidentID)
+	if u.ParentIncidentID != nil {
+		if *u.ParentIncidentID == nil {
+			*incSets = append(*incSets, "parent_incident_id = NULL")
+		} else {
+			addInc("parent_incident_id = $%d::uuid", **u.ParentIncidentID)
+		}
+	}
 	set("incident_report = $%d", u.IncidentReport)
 	if u.Environment != nil {
 		if *u.Environment == nil {

@@ -54,7 +54,7 @@ func TestTransform_CarriesRoutingSignals(t *testing.T) {
 		"AlarmDescription": `{"service":"choreo","assignment_group":" SRE - Apollo "}`,
 		"AWSAccountId":     "111122223333",
 	})
-	a, err := Transform(snsEnvelope(alarm), Config{})
+	a, err := Transform(snsEnvelope(alarm), Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestTransform_CarriesRoutingSignals(t *testing.T) {
 
 // Without AWSAccountId the account comes from the AlarmArn; without a usable Message, from the TopicArn.
 func TestTransform_SourceAccountFallsBack(t *testing.T) {
-	a, err := Transform(snsEnvelope(sampleAlarm(nil)), Config{})
+	a, err := Transform(snsEnvelope(sampleAlarm(nil)), Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestTransform_SourceAccountFallsBack(t *testing.T) {
 	}
 
 	raw := []byte(`{"Type":"Notification","TopicArn":"arn:aws:sns:eu-west-1:444455556666:sre-artemis","Message":"not json"}`)
-	a, err = Transform(raw, Config{})
+	a, err = Transform(raw, Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestArnAccount(t *testing.T) {
 func TestTransform_RejectsNonNotificationTypes(t *testing.T) {
 	for _, typ := range []string{"UnsubscribeConfirmation", "SomethingNew"} {
 		raw := []byte(`{"Type":"` + typ + `","TopicArn":"arn:aws:sns:us-east-1:123456789012:alerts","Message":"You have chosen to deactivate subscription."}`)
-		if _, err := Transform(raw, Config{}); !errors.Is(err, ErrUnsupportedType) {
+		if _, err := Transform(raw, Config{}, nil); !errors.Is(err, ErrUnsupportedType) {
 			t.Errorf("%s: err = %v, want ErrUnsupportedType", typ, err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestTransform_RejectsNonNotificationTypes(t *testing.T) {
 
 func TestTransform_NoTypeStillTransforms(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"Message": `{"AlarmName":"HighCPUAlarm","NewStateValue":"ALARM"}`})
-	if a, err := Transform(raw, Config{}); err != nil || a.MetricName != "HighCPUAlarm" {
+	if a, err := Transform(raw, Config{}, nil); err != nil || a.MetricName != "HighCPUAlarm" {
 		t.Errorf("alert = %+v, err = %v", a, err)
 	}
 }

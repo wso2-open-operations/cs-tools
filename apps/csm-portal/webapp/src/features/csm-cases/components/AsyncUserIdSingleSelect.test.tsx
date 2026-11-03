@@ -98,3 +98,27 @@ describe("AsyncUserIdSingleSelect — server-side role scoping", () => {
     });
   });
 });
+
+describe("AsyncUserIdSingleSelect — required", () => {
+  it("marks the field required (asterisk + required input) when asked", () => {
+    mockedUseInfiniteUserSearch.mockReturnValue(NO_RESULTS);
+
+    const { container } = render(
+      <AsyncUserIdSingleSelect value="" onChange={vi.fn()} label="New team lead" required />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "New team lead" })).toBeRequired();
+    expect(container.querySelector("label .MuiFormLabel-asterisk")).not.toBeNull();
+  });
+
+  it("is not required by default", () => {
+    mockedUseInfiniteUserSearch.mockReturnValue(NO_RESULTS);
+
+    const { container } = render(
+      <AsyncUserIdSingleSelect value="" onChange={vi.fn()} label="Approver" />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Approver" })).not.toBeRequired();
+    expect(container.querySelector("label .MuiFormLabel-asterisk")).toBeNull();
+  });
+});

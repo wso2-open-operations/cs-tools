@@ -18,3 +18,35 @@
 export const PRODUCT_CLASS = {
   PRODUCT_MODEL: "product_model",
 } as const;
+
+/**
+ * Update-levels stream per deployment profile, keyed by the product key the
+ * update-levels service uses (the product abbreviation) and then by the
+ * lower-cased deployment profile. A profile missing here has no stream of its
+ * own and uses the product's.
+ *
+ * Names come from GET /updates/product-update-levels: API Manager ships its
+ * control plane, universal gateway and traffic manager with level numbering
+ * of their own (wso2am-acp, wso2am-universal-gw, wso2am-tm).
+ */
+export const UPDATE_STREAM_BY_DEPLOYMENT_PROFILE: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  wso2am: {
+    "api control plane": "wso2am-acp",
+    "universal gateway": "wso2am-universal-gw",
+    "traffic manager": "wso2am-tm",
+  },
+};
+
+/**
+ * Deployment profiles that describe the ordinary, undivided deployment of a
+ * product (lower-cased). They are the profile of most version records, so they
+ * are not shown: a version with one of them keeps the plain label it has always
+ * had. Only the profiles that tell otherwise identical version records apart
+ * (API Control Plane, Traffic Manager, Key Manager, ...) are.
+ */
+export const DEFAULT_DEPLOYMENT_PROFILES: ReadonlySet<string> = new Set([
+  "all in one",
+  "standard",
+]);

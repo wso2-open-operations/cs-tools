@@ -189,7 +189,17 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	}
 
 	keep := make([]string, 0, len(row.LineItems))
+	var moved []string
 	for _, li := range row.LineItems {
+		previous, err := previousIDs(ctx, q, previousLineItemOpportunitiesQuery, li.LineItemSfID)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity line item %s: %w", li.LineItemSfID, err)
+		}
+		for _, id := range previous {
+			if id != res.OpportunityID {
+				moved = append(moved, id)
+			}
+		}
 		liArgs := []any{
 			domain.SalesforceSyncActor,
 			res.OpportunityID, li.Name, li.ProductName, li.Quantity,
@@ -210,12 +220,20 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 		keep = append(keep, li.LineItemSfID)
 		res.LineItemsWritten++
 	}
-	tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
-	if err != nil {
-		return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+	if !row.KeepStaleLineItems {
+		tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+		}
+		res.LineItemsDeleted = int(tag.RowsAffected())
 	}
-	res.LineItemsDeleted = int(tag.RowsAffected())
 
+	if err := deriveOpportunityOnboarding(ctx, q, res.OpportunityID); err != nil {
+		return res, err
+	}
+	if err := deriveMovedLineItemOpportunities(ctx, q, moved, res.OpportunityID); err != nil {
+		return res, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}

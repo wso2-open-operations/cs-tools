@@ -7271,6 +7271,12 @@ components:
           type: string
         endOfLifeOn:
           type: string
+        deploymentProfile:
+          type: string
+          description: >
+            Deployment profile of this version record (e.g. "All In One",
+            "API Control Plane"). Several version records share one label and
+            differ only by this. Omitted when the version has none.
 
     DeployedProductSummary:
       description: >
@@ -7744,6 +7750,12 @@ components:
           type: string
         earliestPossibleSupportEolDate:
           type: string
+        deploymentProfile:
+          type: string
+          description: >
+            Deployment profile of this version record (e.g. "All In One",
+            "API Control Plane"). Several records share one `version` and
+            differ only by this. Omitted when the version has none.
         createdOn:
           type: string
         updatedOn:

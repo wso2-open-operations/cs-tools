@@ -196,7 +196,7 @@ separate scheduled-task component that calls this service's `/scheduled-tasks/at
   2. `1NNNNN_<description>.sql`: six-digit, 100000 and above. Row-level-security policy migrations,
      applied after every schema migration so the tables they protect already exist.
   3. `0NNNNN_<description>.up.sql` (with `.down.sql` rollbacks that are never auto-applied): legacy
-     files numbered 000020 to 000105, applied last.
+     files numbered 000086 to 000105, applied last.
 - Run the service as a non-superuser database role. PostgreSQL superusers bypass
   row-level security, so a superuser connection hides policy problems. The local compose stack
   migrates as an admin role and runs the service as a separate application role for this reason.

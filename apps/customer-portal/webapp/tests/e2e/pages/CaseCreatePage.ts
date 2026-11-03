@@ -65,7 +65,7 @@ export class CaseCreatePage {
     // reliable readiness signal because it is present for every project type
     // (Cloud Support hides Deployment but still shows Product), so waiting on
     // it lets callers assert on field state without racing the load.
-    await expect(this.productVersionSelect()).toBeVisible({
+    await expect(this.productReadySignal()).toBeVisible({
       timeout: FORM_LOAD_TIMEOUT_MS,
     });
   }
@@ -95,7 +95,7 @@ export class CaseCreatePage {
 
     // Product is the reliable readiness signal for every project type — see
     // openViaGetHelp.
-    await expect(this.productVersionSelect()).toBeVisible({
+    await expect(this.productReadySignal()).toBeVisible({
       timeout: FORM_LOAD_TIMEOUT_MS,
     });
   }
@@ -205,6 +205,21 @@ export class CaseCreatePage {
     return this.main()
       .getByRole("combobox")
       .filter({ hasText: CREATE_CASE.placeholders.productVersion });
+  }
+
+  /**
+   * The Product select once it has a value. A project whose deployment offers a
+   * single product gets it auto-selected, so the placeholder never renders —
+   * Cloud Support's form opens on "WSO2 API Manager 1.7.0" (live 2026-10-27).
+   * Product labels all start with "WSO2", which no placeholder does.
+   */
+  prefilledProductSelect(): Locator {
+    return this.main().getByRole("combobox").filter({ hasText: /^WSO2 / });
+  }
+
+  /** Product select in either state — the form's readiness signal. */
+  productReadySignal(): Locator {
+    return this.productVersionSelect().or(this.prefilledProductSelect()).first();
   }
 
   titleInput(): Locator {
@@ -318,11 +333,13 @@ export class CaseCreatePage {
     // Same placeholder caveat as selectDeployment: a pre-populated form has no
     // placeholder to match, and the "Select deployment first" variant appears
     // only transiently while the options load.
-    const needsChoosing = await select
+    // Wait for either state, then only choose when the placeholder is what
+    // arrived — waiting on the placeholder alone burns the whole budget on an
+    // auto-selected product.
+    await this.productReadySignal()
       .waitFor({ state: "attached", timeout: FORM_LOAD_TIMEOUT_MS })
-      .then(() => true)
-      .catch(() => false);
-    if (!needsChoosing) return "(already selected)";
+      .catch(() => undefined);
+    if ((await select.count()) === 0) return "(already selected)";
 
     // Waits for enabled on the long form-load budget: the options are refetched
     // after a deployment is picked, and the control is disabled until they land.

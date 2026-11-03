@@ -333,3 +333,44 @@ func TestStore_ShiftWake_MovesOnlyMembersStillInTheIndex(t *testing.T) {
 		t.Errorf("ShiftedPauseSeconds = %d, want 5400 -- the baseline must be written in the same atomic operation as the wake shift", meta.ShiftedPauseSeconds)
 	}
 }
+
+// TestStore_WipeAll_ClearsWakeClocksAndClaims confirms WipeAll's SCAN-based
+// delete actually removes every key family it's documented to -- the wake
+// index, a clock hash, and a tier claim -- not just the ones a plain DEL on
+// a fixed key list would catch.
+func TestStore_WipeAll_ClearsWakeClocksAndClaims(t *testing.T) {
+	store, closeStore := testStore(t)
+	defer closeStore()
+	ctx := context.Background()
+	caseID := testCaseID(t)
+
+	startedAt := time.Now().Truncate(time.Second)
+	if err := store.SetClock(ctx, caseID, ClockResponse, ClockMeta{CaseNumber: "CS0001", StartedAt: startedAt}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	if err := store.AddWake(ctx, wakeMember(caseID, ClockResponse, 50), time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("AddWake() error = %v", err)
+	}
+	if _, err := store.ClaimTier(ctx, caseID, ClockResponse, 50, startedAt); err != nil {
+		t.Fatalf("ClaimTier() error = %v", err)
+	}
+
+	if err := store.WipeAll(ctx); err != nil {
+		t.Fatalf("WipeAll() error = %v", err)
+	}
+
+	if _, found, err := store.GetClock(ctx, caseID, ClockResponse); err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	} else if found {
+		t.Error("clock hash still exists after WipeAll")
+	}
+	if score, err := store.rdb.ZScore(ctx, wakeKey, wakeMember(caseID, ClockResponse, 50)).Result(); err == nil {
+		t.Errorf("wake member still exists after WipeAll (score %v)", score)
+	}
+	if claimed, err := store.ClaimTier(ctx, caseID, ClockResponse, 50, startedAt); err != nil {
+		t.Fatalf("ClaimTier() (post-wipe) error = %v", err)
+	} else if !claimed {
+		t.Error("ClaimTier() after WipeAll = false, want true -- the prior claim should have been deleted")
+	}
+	_ = store.ReleaseTier(ctx, caseID, ClockResponse, 50, startedAt)
+}

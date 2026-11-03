@@ -41,6 +41,35 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
 	return decodeRequestWithLimit(w, r, dst, maxRequestBodySize, "request body too large")
 }
 
+// decodeOptionalRequest is decodeRequest for an endpoint whose body may be left
+// out: an empty body (or one of only whitespace) leaves dst as it is and
+// succeeds; anything else is decoded under decodeRequest's rules.
+func decodeOptionalRequest[T any](w http.ResponseWriter, r *http.Request, dst *T) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		apierror.WriteJSON(w, http.StatusBadRequest, decodeErrMsg(err))
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			apierror.WriteJSON(w, http.StatusBadRequest, decodeErrMsg(err))
+			return false
+		}
+		apierror.WriteJSON(w, http.StatusBadRequest, "request body must contain a single JSON object")
+		return false
+	}
+	return true
+}
+
 // decodeRequestWithLimit is the same as decodeRequest but allows the caller to
 // override the default 1 MiB body cap and the message returned when that cap
 // is exceeded. Use this for endpoints whose payload is legitimately larger

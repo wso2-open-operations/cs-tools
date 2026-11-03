@@ -314,12 +314,15 @@ func hasProjectID(project *string) bool {
 
 // changeRequestPatchNeedsGate reports whether the request carries anything the
 // creation-phase gate judges: the state, the project, the type, the requester, either
-// box, or any deployment field.
+// box, any deployment field, a field of the approved-content lock, or the deviation
+// from the implementation plan (recorded from Implement on and final once the change
+// is closed, canceled or rolled back: checkDeviationEditable needs the stored state).
 func changeRequestPatchNeedsGate(req domain.PatchChangeRequestRequest) bool {
 	return req.State != nil || req.ProjectID != nil || req.Type != nil || req.RequestedByID != nil ||
 		req.CustomerApprovalRequired != nil || req.CustomerReviewRequired != nil ||
 		req.DeploymentIDs != nil || req.DeploymentProductIDs != nil ||
 		req.DeploymentID != nil || req.DeployedProductID != nil ||
+		req.ImplementationDeviation != nil ||
 		changeRequestPatchTouchesApprovedContent(req)
 }
 
@@ -455,9 +458,11 @@ func lockChangeRequestForPatch(ctx context.Context, tx pgx.Tx, id string) (chang
 	// conflicts with itself), which is all this lock is for.
 	//
 	// updated_by comes back with the lock: it is the last writer BEFORE this PATCH's own
-	// UPDATE of the row (which always stamps the caller). A staff answer to a time the
-	// customer proposed has to know who proposed it, and the only place that is still
-	// intact is here (changeRequestGateSnapshot.priorWriter).
+	// UPDATE of the row (which always stamps the caller). A staff answer to a time stored
+	// before migration 0249 (no record of its proposer) names the proposer by the last
+	// writer: that UPDATE fires migration 0250's trigger, which records them when the rule
+	// names them and they have a "user" row, and otherwise this is the only place the writer
+	// is still intact (changeRequestGateSnapshot.priorWriter).
 	err := tx.QueryRow(ctx,
 		`SELECT id::text, updated_by FROM work_item WHERE id = $1::uuid AND type = 'CHANGE_REQUEST' FOR NO KEY UPDATE`, id).Scan(&locked, &updatedBy)
 	if errors.Is(err, pgx.ErrNoRows) || IsRLSPolicyViolation(err) {

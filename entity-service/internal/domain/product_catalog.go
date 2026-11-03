@@ -21,7 +21,7 @@ import (
 )
 
 // Product catalogue: the product and EOL data CSM publishes to the wso2.com
-// Support Matrix and Release Matrix (migrations 0269-0272), served by the
+// Support Matrix and Release Matrix (migrations 0270-0272), served by the
 // products API (Product and ProductVersion carry the catalogue fields; see
 // entity.go). Write payloads take dates as "YYYY-MM-DD".
 

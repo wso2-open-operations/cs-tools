@@ -305,6 +305,19 @@ type snIncidentService struct {
 	// ServiceNow's service support groups and does not yet add these (see
 	// snGroupService.searchSupportGroups).
 	extraGroupIDs []string
+	// slaEngine registers this engine's own source='CSM' SLA clocks for an
+	// incident created through CreateIncident -- see
+	// SLAEngineService.RegisterIncidentClocks' own doc comment. nil-safe to
+	// omit; set via WithIncidentSLAEngine, never a constructor parameter
+	// (see that function's own doc comment for why). Deliberately NOT set
+	// on the mirror instance NewServiceNowIncidentMirrorService constructs
+	// for DataSourcePostgresServiceNowDualWrite -- that instance's
+	// CreateIncident runs before incidentService's own Postgres insert
+	// exists, and "sla".work_item_id has a hard foreign key against it;
+	// incidentService registers the clocks itself, once that insert has
+	// actually succeeded (createIncidentSNFirst), mirroring
+	// snCaseMirrorSvc's identical nil slaEngine for the same reason.
+	slaEngine SLAEngineService
 }
 
 // NewServiceNowIncidentService constructs an IncidentService backed by the
@@ -363,6 +376,10 @@ func (s *snIncidentService) SearchIncidents(ctx context.Context, req domain.Sear
 	}
 	if err := validateUUIDs("parentIds", req.Filters.ParentIDs); err != nil {
 		return domain.SearchIncidentsResponse{}, err
+	}
+	if len(req.Filters.ParentIncidentIDs) > 0 {
+		// The ServiceNow integration has no parent_incident filter to map it onto.
+		return domain.SearchIncidentsResponse{}, &apierror.ValidationError{Msg: "filters.parentIncidentIds is not supported by this data source"}
 	}
 	parsedFilters, err := ParseIncidentFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {
@@ -526,6 +543,10 @@ func (s *snIncidentService) AggregateIncidents(ctx context.Context, req domain.A
 	}
 	if err := validateUUIDs("parentIds", req.Filters.ParentIDs); err != nil {
 		return domain.AggregateResponse{}, err
+	}
+	if len(req.Filters.ParentIncidentIDs) > 0 {
+		// The ServiceNow integration has no parent_incident filter to map it onto.
+		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "filters.parentIncidentIds is not supported by this data source"}
 	}
 	parsedFilters, err := ParseIncidentFieldFilters(req.Filters.Filters, time.Now().UTC())
 	if err != nil {
@@ -985,8 +1006,28 @@ func (s *snIncidentService) CreateIncident(ctx context.Context, req domain.Creat
 	resp.Incident.CreatedOn = snResp.Incident.CreatedOn
 	resp.Incident.CreatedBy = snResp.Incident.CreatedBy
 	resp.Incident.Priority = incidentPriorityFor(req.Impact, req.Urgency)
+	registerIncidentSLAClocksEvent(ctx, s.slaEngine, resp.Incident.ID, resp.Incident.Priority)
 	s.publishIncidentCreated(ctx, req, resp.Incident.ID, resp.Incident.Number, resp.Incident.CreatedOn)
 	return resp, nil
+}
+
+// registerIncidentSLAClocksEvent is RegisterCaseClocks' incident call-site
+// helper (registerCaseSLAClocksEvent, sn_case_service.go) -- best-effort,
+// nil-safe, bounded by the same applyCaseStateSLATimeout. Unlike
+// registerCaseSLAClocksEvent, this needs no GetIncidentByID re-fetch: every
+// call site here already computed the incident's own just-created priority
+// directly (incidentPriorityFor), so there's nothing a fresh read would add.
+// priority is the DB enum label text (e.g. "CRITICAL") -- domain.IncidentPriority's
+// own string values already match it verbatim, so this is a plain cast, not
+// a translation.
+func registerIncidentSLAClocksEvent(ctx context.Context, slaEngine SLAEngineService, incidentID, priority string) {
+	if slaEngine == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, applyCaseStateSLATimeout)
+	defer cancel()
+	p := domain.IncidentPriority(priority)
+	slaEngine.RegisterIncidentClocks(ctx, incidentID, &p)
 }
 
 // publishIncidentCreated best-effort publishes an incident.created event for
@@ -1452,31 +1493,33 @@ func mapSNIncidentSpecialistHandoffSummary(sn snIncidentSpecialistHandoffSummary
 
 // snUpdateIncidentPayload is the Choreo PATCH /incidents/{id} request body.
 type snUpdateIncidentPayload struct {
-	Subject             *string   `json:"subject,omitempty"`
-	PriorityKey         *int      `json:"priorityKey,omitempty"`
-	StateKey            *int      `json:"stateKey,omitempty"`
-	CategoryKey         *string   `json:"categoryKey,omitempty"`
-	SubcategoryKey      *string   `json:"subcategoryKey,omitempty"`
-	ContactTypeKey      *string   `json:"contactTypeKey,omitempty"`
-	ImpactKey           *int      `json:"impactKey,omitempty"`
-	UrgencyKey          *int      `json:"urgencyKey,omitempty"`
-	ResolutionCodeKey   *string   `json:"resolutionCodeKey,omitempty"`
-	ParentID            *string   `json:"parentId,omitempty"`
-	ParentIncidentID    *string   `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string   `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string   `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string   `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string   `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string   `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string   `json:"changeRequestId,omitempty"`
-	ProblemID           *string   `json:"problemId,omitempty"`
-	CausedByID          *string   `json:"causedById,omitempty"`
-	ResolvedByID        *string   `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string   `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string   `json:"incidentReport,omitempty"`
-	AdditionalComments  *string   `json:"additionalComments,omitempty"`
-	WorkNotes           *string   `json:"workNotes,omitempty"`
-	WatchList           *[]string `json:"watchList,omitempty"`
+	Subject           *string `json:"subject,omitempty"`
+	PriorityKey       *int    `json:"priorityKey,omitempty"`
+	StateKey          *int    `json:"stateKey,omitempty"`
+	CategoryKey       *string `json:"categoryKey,omitempty"`
+	SubcategoryKey    *string `json:"subcategoryKey,omitempty"`
+	ContactTypeKey    *string `json:"contactTypeKey,omitempty"`
+	ImpactKey         *int    `json:"impactKey,omitempty"`
+	UrgencyKey        *int    `json:"urgencyKey,omitempty"`
+	ResolutionCodeKey *string `json:"resolutionCodeKey,omitempty"`
+	ParentID          *string `json:"parentId,omitempty"`
+	// ParentIncidentID is json.RawMessage, as Environment is, so a clear
+	// reaches ServiceNow as a real `null` rather than being left out.
+	ParentIncidentID    json.RawMessage `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string         `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string         `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string         `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string         `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string         `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string         `json:"changeRequestId,omitempty"`
+	ProblemID           *string         `json:"problemId,omitempty"`
+	CausedByID          *string         `json:"causedById,omitempty"`
+	ResolvedByID        *string         `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string         `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string         `json:"incidentReport,omitempty"`
+	AdditionalComments  *string         `json:"additionalComments,omitempty"`
+	WorkNotes           *string         `json:"workNotes,omitempty"`
+	WatchList           *[]string       `json:"watchList,omitempty"`
 	// Environment: see snCreateIncidentPayload.Environment doc comment.
 	// json.RawMessage (not *string) so an explicit clear can be forwarded to
 	// ServiceNow as a real `null`, not just omitted -- same pattern as
@@ -1544,7 +1587,7 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 
 	optionalUUIDs := map[string]*string{
 		"parentId":            req.ParentID,
-		"parentIncidentId":    req.ParentIncidentID,
+		"parentIncidentId":    setValueOf(req.ParentIncidentID),
 		"assignmentGroupId":   req.AssignmentGroupID,
 		"assignedEngineerId":  req.AssignedEngineerID,
 		"serviceId":           req.ServiceID,
@@ -1636,8 +1679,15 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 		payload.ParentID = &v
 	}
 	if req.ParentIncidentID != nil {
-		v := uuidToSysid(*req.ParentIncidentID)
-		payload.ParentIncidentID = &v
+		var v any
+		if *req.ParentIncidentID != nil {
+			v = uuidToSysid(**req.ParentIncidentID)
+		}
+		raw, err := rawJSONOrNull(v)
+		if err != nil {
+			return domain.UpdateIncidentResponse{}, fmt.Errorf("sn update incident: marshal parentIncidentId: %w", err)
+		}
+		payload.ParentIncidentID = raw
 	}
 	if req.AssignmentGroupID != nil {
 		v := uuidToSysid(*req.AssignmentGroupID)
@@ -1688,12 +1738,23 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 	// urgency therefore raises the priority just as surely as one naming it,
 	// and gating on req.Priority alone meant that update published nothing
 	// and no ladder ever started.
+	// Two independent reasons to pay for this fetch: s.publisher only ever
+	// needs it for escalation-relevant fields (incidentUpdateTouchesEscalation);
+	// s.slaEngine needs it for a wider set -- incidentUpdateTouchesResolutionFacts
+	// also covers ServiceID/Category, which the real "Cloud Incident - High
+	// Priority" policy's own start_condition matches on (business_service/
+	// category) but which never start or stop a call escalation on their
+	// own. Without the OR here, a ServiceID- or Category-only PATCH would
+	// never fetch a baseline at all, leaving ReviseIncidentClocks unable to
+	// tell whether the policy newly applies or newly stopped applying -- a
+	// real gap a review caught.
 	var before domain.IncidentView
-	if s.publisher != nil && incidentUpdateTouchesEscalation(req) {
+	if (s.publisher != nil && incidentUpdateTouchesEscalation(req)) ||
+		(s.slaEngine != nil && incidentUpdateTouchesResolutionFacts(req)) {
 		if fetched, ferr := s.GetIncidentByID(ctx, req.ID); ferr == nil {
 			before = fetched
 		} else {
-			slog.WarnContext(ctx, "sn update incident: escalation baseline fetch failed; skipping escalation signals",
+			slog.WarnContext(ctx, "sn update incident: pre-PATCH baseline fetch failed; skipping escalation signals and SLA revision",
 				"incidentId", req.ID)
 		}
 	}
@@ -1709,6 +1770,32 @@ func (s *snIncidentService) UpdateIncident(ctx context.Context, req domain.Updat
 	}
 
 	view := mapSNIncidentToView(snResp.Incident)
+
+	// Deliberately independent of s.publisher -- see
+	// incidentService.UpdateIncident's own identically-reasoned call site
+	// for why, and why it runs before publishEscalationSignals below rather
+	// than after. before is zero-valued when the pre-PATCH fetch above was
+	// skipped (neither s.publisher's nor s.slaEngine's own trigger applied)
+	// or failed -- requiring before.ID != nil (the same "no baseline"
+	// convention publishEscalationSignals' own guard just below uses) AND
+	// incidentUpdateTouchesResolutionFacts(req) (not priority alone -- the
+	// real "Cloud Incident - High Priority" policy's own start_condition
+	// also matches on business_service/category, a gap a review caught; see
+	// that function's own doc comment) is what keeps a notes-only update, or
+	// one whose baseline fetch simply failed, from reading a zero-valued
+	// before against view's real values as "changed" and spuriously
+	// cancelling/restarting a live RESOLUTION clock.
+	if s.slaEngine != nil {
+		if req.State != nil {
+			s.slaEngine.ApplyIncidentStateEffects(ctx, req.ID, *req.State)
+		}
+		if before.ID != nil && incidentUpdateTouchesResolutionFacts(req) &&
+			incidentResolutionFactsChanged(before, view) && view.Priority != nil {
+			p := domain.IncidentPriority(*view.Priority)
+			s.slaEngine.ReviseIncidentClocks(ctx, req.ID, &p)
+		}
+	}
+
 	s.publishEscalationSignals(ctx, req, before, view)
 
 	return domain.UpdateIncidentResponse{

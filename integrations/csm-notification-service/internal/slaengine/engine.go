@@ -24,12 +24,14 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/businessdays"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 )
 
@@ -104,6 +106,9 @@ type store interface {
 	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int, incarnation time.Time) (applied bool, err error)
 	ClaimTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) (claimed bool, err error)
 	ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error
+	WipeAll(ctx context.Context) error
+	ListClockKeys(ctx context.Context) ([]string, error)
+	DeleteClock(ctx context.Context, caseID, clockType string) error
 }
 
 // eventPublisher abstracts eventbus.Producer for testability.
@@ -112,9 +117,9 @@ type eventPublisher interface {
 }
 
 // chatSender abstracts notifications.GoogleChatClient's SendSLABreachAlert/
-// HasAudienceSpace for testability. teamLeadName is always sent "" — see
-// Engine.sendBreachAlert's own doc comment for why this engine has no way
-// to resolve it any more.
+// HasAudienceSpace for testability. teamLeadName is resolved live from
+// entity-service's own GetClockState response (clockState.TeamLeadName) —
+// see Engine.sendBreachAlert's own doc comment.
 type chatSender interface {
 	SendSLABreachAlert(ctx context.Context, audience, clockType, tier, caseNumber, wso2CaseID, caseTitle, caseType, productName, team, teamLeadName, severity, state, openedAt, caseLink string) error
 	HasAudienceSpace(audience string) bool
@@ -123,6 +128,14 @@ type chatSender interface {
 // linkResolver abstracts recipientlinks.Resolver's CSMLink for testability.
 type linkResolver interface {
 	CSMLink(caseID string) string
+}
+
+// emailSender abstracts notifications.EmailClient's SendEmail for
+// testability — mirrors dispatch.emailSender's own narrower shape, trimmed
+// to only the one method sendBreachEmails actually calls (no SendEmailFrom/
+// FromAddress: neither breach email has a from-address override).
+type emailSender interface {
+	SendEmail(ctx context.Context, to, cc, bcc, replyTo []string, subject, htmlBody string, attachments []notifications.EmailAttachment) error
 }
 
 // entityClockStatusClient abstracts EntityClient.GetClockState for
@@ -254,16 +267,33 @@ type Engine struct {
 	// (SLA_EMAIL_SENDING_ENABLED, default true; disabled only by the literal
 	// "false", same disable-entirely convention as
 	// EMAIL_SENDING_ENABLED/CALL_SENDING_ENABLED in cmd/server/main.go). The
-	// name is kept for config compatibility, but when false it suppresses
-	// every SLA-triggered outbound message: the Google Chat breach card sent
-	// by sendBreachAlert (the only SLA Chat send in this service) and any SLA
-	// breach email should that reaction be rebuilt. Non-SLA alerts are
-	// unaffected.
+	// name is kept for config compatibility, and now gates every SLA-triggered
+	// outbound message for real: the Google Chat breach card sent by
+	// sendBreachAlert and the two SLA breach emails sent by sendBreachEmails.
+	// Non-SLA alerts are unaffected.
 	slaEmailSendingEnabled bool
+	// email is this engine's own link to the shared email channel —
+	// sendBreachEmails' only caller of SendEmail. nil (the zero value every
+	// existing test's own Engine literal leaves it at) means no email client
+	// is configured, in which case sendBreachEmails is a no-op, same posture
+	// as entity being nil for the Chat-side stale-alert check.
+	email emailSender
+	// emailDebugMode/emailDebugRecipients mirror dispatch.Dispatcher's own
+	// fields of the same purpose (EMAIL_DEBUG_MODE/EMAIL_DEBUG_RECIPIENTS) —
+	// a separate copy, not a shared reference, since this engine and that
+	// dispatcher are constructed independently in cmd/server/main.go but
+	// read from the same two env vars, so a deployment's debug posture is
+	// consistent across both without this engine depending on that package.
+	emailDebugMode       bool
+	emailDebugRecipients []string
 	// now is the clock chataudience.Resolve is given, so a test can pin
 	// the time of day the Americas/weekend audiences depend on. nil means
 	// time.Now; see clock.
 	now func() time.Time
+	// recalculating guards RecalculateFromEntity against a second request
+	// arriving while one is still running -- see that method's own doc
+	// comment.
+	recalculating atomic.Bool
 }
 
 // clock returns e.now(), or time.Now() when no clock is set.
@@ -278,9 +308,17 @@ func (e *Engine) clock() time.Time {
 // caller already constructs for Reconcile — see entityClockStatusClient's
 // own doc comment for what it's used for here. slaEmailSendingEnabled gates
 // all SLA-triggered messages (Chat card and email) — see that field's own
-// doc comment.
-func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, entity entityClockStatusClient, slaEmailSendingEnabled bool) *Engine {
-	return &Engine{store: store, pub: pub, chat: chat, links: links, entity: entity, slaEmailSendingEnabled: slaEmailSendingEnabled}
+// doc comment. email/emailDebugMode/emailDebugRecipients back
+// sendBreachEmails — see each field's own doc comment; email may be nil
+// (no SLA breach email reaction configured).
+func NewEngine(store *Store, pub *eventbus.Producer, chat chatSender, links *recipientlinks.Resolver, entity entityClockStatusClient, slaEmailSendingEnabled bool, email emailSender, emailDebugMode bool, emailDebugRecipients []string) *Engine {
+	return &Engine{
+		store: store, pub: pub, chat: chat, links: links, entity: entity,
+		slaEmailSendingEnabled: slaEmailSendingEnabled,
+		email:                  email,
+		emailDebugMode:         emailDebugMode,
+		emailDebugRecipients:   emailDebugRecipients,
+	}
 }
 
 // avoidWeekend rolls due forward to the next Monday, same time-of-day, if
@@ -582,10 +620,16 @@ func (e *Engine) entityPauseStatus(ctx context.Context, caseID, clockType string
 // durable row's own IsPaused flag), but it computes and bakes a correct,
 // pause-aware wake schedule itself from scratch — routing its own call
 // through resumeShift too would apply the pause offset a second time.
-func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool) {
+// setPaused returns whether the write succeeded -- checked only by
+// reconcileClock (to decide whether this clock needs a repair pass); every
+// other call site already ignored it before this return value existed and
+// is unaffected.
+func (e *Engine) setPaused(ctx context.Context, caseID, clockType string, paused bool) bool {
 	if err := e.store.SetPaused(ctx, caseID, clockType, paused); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to update clock paused state", "caseId", caseID, "clockType", clockType, "paused", paused, "err", err)
+		return false
 	}
+	return true
 }
 
 // resumeShift is the other half of setPaused(..., false): once a clock
@@ -706,33 +750,43 @@ func (e *Engine) CompleteResponseClock(ctx context.Context, caseID string) {
 	}
 }
 
-// CompleteWorkaroundClock force-completes the workaround clock — called
-// from dispatch.handleWorkaroundProvided when entity-service publishes
+// PauseWorkaroundClock pauses the workaround clock — called from
+// dispatch.handleWorkaroundProvided when entity-service publishes
 // events.TypeWorkaroundProvided (a case's workaroundProvided field was set
-// to true via PATCH; entity-service has no equivalent "recall" event, so
-// there's no opposite operation here either — same accepted gap
-// CompleteWorkaroundClock's entity-service namesake documents). Before this
-// existed, ApplyStateEffects only ever paused/resumed this clock, never
-// completed it — a documented gap this closes. Idempotent, same reasoning
-// as CompleteResponseClock.
+// to true via PATCH). Renamed from CompleteWorkaroundClock and changed from
+// a force-complete (AdvanceAlertedTier to 100) to a pause (SetPaused) --
+// a real, reported bug found reviewing entity-service's own matching fix:
+// that service's real WORKAROUND-target policies pause the clock on this
+// same signal, they don't complete it (it only actually stops on the case
+// closing or a fix ETA being shared) -- entity-service's own
+// CompleteWorkaroundClock hook used to force-complete it there too, which
+// is exactly the bug that PR fixed, but this engine's own, independent copy
+// of the same mistake was never updated to match, so after that fix shipped
+// this engine would force-complete (AdvanceAlertedTier is a one-way ratchet
+// that NOTHING can undo, not even a full Recalculate) a clock
+// entity-service itself now correctly keeps running paused -- a later
+// workaround recall resuming the real clock would then alert nothing ever
+// again for it, silently.
 //
-// Unlike every other trigger in this file, this one DOES return its store
-// error rather than just logging it (a CodeRabbit-caught gap): this is a
-// one-shot signal with no later reconciliation pass to re-derive it from —
-// RegisterClocks/ApplyStateEffects/CompleteResponseClock all react to
-// events whose effect either repeats (a resent status change) or is
-// re-established by a later event in the same case's lifecycle, and
-// Reconcile's own startup sweep can rebuild a clock's state from
-// entity-service's durable row regardless. A workaround-provided signal
-// lost here (e.g. a transient Redis outage) has no such second chance:
-// nothing else ever calls this again for the same PATCH. Returning the
-// error lets dispatch.handleWorkaroundProvided fail the record, so
-// eventbus.Consumer retries it instead of silently acknowledging a clock
-// that was never actually completed.
-func (e *Engine) CompleteWorkaroundClock(ctx context.Context, caseID string) error {
-	if _, err := e.store.AdvanceAlertedTier(ctx, caseID, ClockWorkaround, 100, time.Time{}); err != nil {
-		slog.ErrorContext(ctx, "slaengine: failed to complete workaround clock", "caseId", caseID, "err", err)
-		return fmt.Errorf("slaengine: complete workaround clock for %s: %w", caseID, err)
+// Unlike CompleteResponseClock, this still has no recall counterpart
+// (entity-service publishes no such event), but that no longer matters the
+// way it used to: entity-service's own row now stays ACTIVE (merely
+// paused) rather than disappearing into a completed stage, so
+// Reconcile/RecalculateFromEntity's own pause-aware rebuild
+// (activeSLAClock.IsPaused) and ApplyStateEffects' own entityPauseStatus
+// check (run on every later case.status_changed, regardless of cause) both
+// already re-derive the correct current pause state directly from
+// entity-service on their own schedule -- a workaround recall resumes for
+// real the next time either one runs, with no new event needed. Idempotent,
+// same reasoning as CompleteResponseClock, and still returns its store
+// error rather than just logging it (unchanged from before this rename):
+// a lost pause here still has to wait for one of those two to catch up
+// rather than being re-established by this same trigger firing again, so
+// retrying the record is still worth it over silently acknowledging it.
+func (e *Engine) PauseWorkaroundClock(ctx context.Context, caseID string) error {
+	if err := e.store.SetPaused(ctx, caseID, ClockWorkaround, true); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to pause workaround clock", "caseId", caseID, "err", err)
+		return fmt.Errorf("slaengine: pause workaround clock for %s: %w", caseID, err)
 	}
 	return nil
 }
@@ -940,9 +994,13 @@ func (e *Engine) alertTier(ctx context.Context, meta ClockMeta, caseID, clockTyp
 // briefly needed them and entity-service stopped populating them), so this
 // alert routes on team alone, falling back to the fixed "Incident Monitor"
 // audience — a known, accepted reduction from the removed poll design's
-// own live entity-service lookup, not a bug. teamLeadName is always sent
-// "" for the same reason: no event this engine consumes carries it, and
-// there is no live entity-service lookup left to resolve it from.
+// own live entity-service lookup, not a bug. teamLeadName, by contrast, IS
+// resolved — from state.TeamLeadName below, the same GetClockState call
+// made for the stale-alert check, which entity-service now also resolves
+// this field on (see that call's own doc comment). Resolve's
+// own "Incident Monitor" fallback is retargeted to chataudience.SLADefault
+// right before sending (see that constant's own doc comment) — a different
+// webhook into the same Chat space, not a different space.
 //
 // A failed send to one audience is logged (naming that Chat space) and NOT
 // retried — same explicit product decision, and same reasoning, as the
@@ -1011,8 +1069,17 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		return
 	}
 
+	// state is kept (not just checked) beyond this block -- sendBreachEmails
+	// below reads its AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName,
+	// resolved by this exact same entity-service call, rather than a second
+	// round trip. Its zero value (e.entity == nil, or a lookup error/not
+	// found) simply means those four fields are empty, which
+	// sendBreachEmails already treats as "not resolvable, skip" -- the same
+	// posture it has for a genuinely unassigned case or team.
+	var state clockState
 	if e.entity != nil {
-		state, err := e.entity.GetClockState(ctx, caseID, clockType)
+		var err error
+		state, err = e.entity.GetClockState(ctx, caseID, clockType)
 		switch {
 		case err != nil:
 			slog.WarnContext(ctx, "slaengine: failed to verify clock state before sending breach alert, sending anyway", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
@@ -1038,10 +1105,129 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 	audiences := chataudience.Resolve(meta.Team, false, "", e.clock(), e.chat.HasAudienceSpace)
 	caseLink := e.links.CSMLink(caseID)
 	for _, audience := range audiences {
-		if err := e.chat.SendSLABreachAlert(ctx, audience, clockType, tierLabel(tier), caseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType, meta.Product, meta.Team, "", meta.Priority, meta.State, openedAt, caseLink); err != nil {
-			slog.ErrorContext(ctx, "slaengine: failed to send sla breach alert to chat space, not retrying", "caseId", caseID, "clockType", clockType, "tier", tier, "chatSpace", audience, "err", err)
+		// The Incident Monitor fallback posts through its own dedicated
+		// webhook (chataudience.SLADefault), not the shared space's
+		// Incident Monitor webhook -- see that constant's own doc comment.
+		// Every other audience (a real team's own space, Evaluation,
+		// Onboarding, Americas) is sent exactly as Resolve returned it.
+		sendAudience := audience
+		if sendAudience == chataudience.IncidentMonitor {
+			sendAudience = chataudience.SLADefault
+		}
+		if err := e.chat.SendSLABreachAlert(ctx, sendAudience, clockType, tierLabel(tier), caseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType, meta.Product, meta.Team, state.TeamLeadName, meta.Priority, meta.State, openedAt, caseLink); err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to send sla breach alert to chat space, not retrying", "caseId", caseID, "clockType", clockType, "tier", tier, "chatSpace", sendAudience, "err", err)
 		}
 	}
+
+	e.sendBreachEmails(ctx, meta, caseID, clockType, tier, caseNumber, openedAt, caseLink, state)
+}
+
+// sendBreachEmails sends the same tier crossing sendBreachAlert just posted
+// to Chat as two separate emails — one to the case's assigned engineer, one
+// to the case's team email group — on top of (not instead of) the Chat
+// alert. A no-op when e.email is nil (no SLA breach email reaction
+// configured for this deployment). Either recipient is skipped silently
+// (logged at INFO, not WARN/ERROR) when entity-service couldn't resolve it
+// (state.AssigneeEmail/TeamEmail empty) — a case with no assignee, or a
+// team with no configured group_email, is a normal state, not a
+// misconfiguration this engine can fix; production has no real address to
+// send to in that case regardless.
+//
+// Unlike sendBreachAlert's own per-audience Chat sends, there is no
+// separate Redis claim guarding this against a duplicate send: the one
+// thing that could cause sendBreachAlert to run twice for the same tier
+// crossing is a retried Tick, and that only happens when e.pub.Publish
+// failed earlier in processDueMember's own call chain -- strictly BEFORE
+// sendBreachAlert is ever reached (see that method's own call site) -- so a
+// retry that reaches here at all is, by construction, the first and only
+// attempt for this tier's own incarnation. A send failure here is logged
+// and not retried, the same explicit "don't retry a Chat/email failure"
+// decision and reasoning sendBreachAlert's own doc comment gives for Chat:
+// retrying would need re-claiming the tier, and a single persistently
+// broken mailbox must not turn into an unbounded resend loop on every
+// later tick.
+//
+// recipientRole ("assignee"/"team") is logged on every outcome so a skip or
+// failure is attributable to one recipient or the other, not just this
+// case/clockType/tier.
+func (e *Engine) sendBreachEmails(ctx context.Context, meta ClockMeta, caseID, clockType string, tier int, caseNumber, openedAt, caseLink string, state clockState) {
+	if e.email == nil {
+		return
+	}
+
+	data := notifications.SLABreachEmailData{
+		ClockType:    clockType,
+		Tier:         tierLabel(tier),
+		Severity:     meta.Priority,
+		CaseNumber:   caseNumber,
+		WSO2CaseID:   meta.WSO2CaseID,
+		CaseTitle:    meta.CaseTitle,
+		CaseType:     meta.CaseType,
+		Product:      meta.Product,
+		Team:         meta.Team,
+		TeamLeadName: state.TeamLeadName,
+		State:        meta.State,
+		OpenedAt:     openedAt,
+		CaseLink:     caseLink,
+	}
+	subject := notifications.SLABreachEmailSubject(clockType, data.Tier, meta.Priority, caseNumber, meta.WSO2CaseID)
+
+	// unresolvedLabel, when non-empty, names who this recipient WOULD have
+	// been (e.g. the team name) even though real is empty -- production has
+	// nowhere to send regardless, but a debug deployment can still show it:
+	// sent to the configured debug recipients, with the body's "Sent to"
+	// line naming unresolvedLabel directly, so testing whether team routing
+	// itself resolved correctly doesn't depend on this environment also
+	// having that team's group_email configured. Assignee passes "" here --
+	// an unassigned case has no name worth surfacing this way.
+	send := func(recipientRole, real, unresolvedLabel string, render func(intendedFor string) string) {
+		if real == "" {
+			if !e.emailDebugMode || unresolvedLabel == "" {
+				slog.InfoContext(ctx, "slaengine: sla breach email recipient not resolved, skipping", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
+				return
+			}
+			if len(e.emailDebugRecipients) == 0 {
+				slog.WarnContext(ctx, "slaengine: EMAIL_DEBUG_MODE=true but EMAIL_DEBUG_RECIPIENTS is empty; not sending breach email",
+					"caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
+				return
+			}
+			body := render(unresolvedLabel + " (no email on file)")
+			if err := e.email.SendEmail(ctx, e.emailDebugRecipients, nil, nil, nil, subject, body, nil); err != nil {
+				slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole, "err", err)
+				return
+			}
+			slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole, "unresolvedLabel", unresolvedLabel)
+			return
+		}
+		to := []string{real}
+		var intendedFor string
+		if e.emailDebugMode {
+			if len(e.emailDebugRecipients) == 0 {
+				slog.WarnContext(ctx, "slaengine: EMAIL_DEBUG_MODE=true but EMAIL_DEBUG_RECIPIENTS is empty; not sending breach email",
+					"caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
+				return
+			}
+			intendedFor = real
+			to = e.emailDebugRecipients
+		}
+		body := render(intendedFor)
+		if err := e.email.SendEmail(ctx, to, nil, nil, nil, subject, body, nil); err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to send sla breach email", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole, "err", err)
+			return
+		}
+		slog.InfoContext(ctx, "slaengine: sla breach email sent", "caseId", caseID, "clockType", clockType, "tier", tier, "recipient", recipientRole)
+	}
+
+	send("assignee", state.AssigneeEmail, "", func(intendedFor string) string {
+		d := data
+		d.IntendedFor = intendedFor
+		return notifications.RenderSLABreachAssigneeEmail(state.AssigneeName, d)
+	})
+	send("team", state.TeamEmail, meta.Team, func(intendedFor string) string {
+		d := data
+		d.IntendedFor = intendedFor
+		return notifications.RenderSLABreachTeamEmail(state.TeamLeadName, d)
+	})
 }
 
 // entityActiveClocksClient abstracts EntityClient.GetActiveCSMSLAClocks for
@@ -1051,13 +1237,19 @@ type entityActiveClocksClient interface {
 }
 
 // Reconcile rebuilds this engine's entire Redis-held state from
-// entity-service's own durable record (GET /sla-status?source=csm) — the one
+// entity-service's own durable record (GET /sla-status) — the one
 // thing Redis itself has no durability for (see redis.go's own package doc
-// comment: every clock's state lives in Redis, nowhere else). Entity-service
-// already writes the matching source='CSM' "sla" row synchronously, in the
-// same request, for every lifecycle event this engine also reacts to (see
-// that repo's own CLAUDE.md, "CSM-native SLA clock engine") — so if this
-// engine's own Redis instance is ever flushed or replaced, this is what lets
+// comment: every clock's state lives in Redis, nowhere else). This used to
+// scope to source=csm, entity-service's own in-process clocks, filtering out
+// a separate, continuously-running external sync job's own rows to avoid
+// treating them as this engine's own -- that job stopped writing SLA rows at
+// cutover, so there is no longer anything to filter: every active "sla" row
+// is this engine's own, including one still carrying its original, pre-
+// cutover timing, which gets picked up and continued exactly as-is (see
+// entity-service's own CLAUDE.md, "CSM-native SLA clock engine"). Entity-
+// service already writes the matching "sla" row synchronously, in the
+// same request, for every lifecycle event this engine also reacts to -- so
+// if this engine's own Redis instance is ever flushed or replaced, this is what lets
 // it resume tracking every still-open case's clocks from that record instead
 // of silently losing them all with no way to recover, which is the normal,
 // silent outcome without this.
@@ -1093,6 +1285,430 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 	return nil
 }
 
+// slaRecalculationRepairTimeout bounds RecalculateFromEntity's own repair
+// pass -- a second, independent context from whatever budget the caller
+// gave the main pass (see that method's own doc comment on why a shared,
+// possibly-already-exhausted context is the exact failure mode the repair
+// pass exists to avoid retrying under). Short relative to the main pass's
+// own budget: by the time a repair pass runs, the clock list it's working
+// from is already just the handful that failed the first time, not the
+// full active-clock set.
+const slaRecalculationRepairTimeout = 2 * time.Minute
+
+// slaRecalculationProgressLogTargetLines/slaRecalculationProgressLogMinInterval
+// decide how often RecalculateFromEntity's main pass logs its own progress --
+// scaled to the total clock count rather than a flat interval, so a small
+// staging set (a few hundred clocks) and a large production one (checked
+// live at over 100,000) both get a reasonable number of log lines: a flat
+// "every 50" would be one line per clock for the former and tens of
+// thousands of lines for the latter. recalculationProgressLogInterval
+// targets roughly slaRecalculationProgressLogTargetLines lines for the
+// whole pass, never closer together than slaRecalculationProgressLogMinInterval
+// (so a tiny active-clock set doesn't log on every single clock).
+const (
+	slaRecalculationProgressLogTargetLines = 20
+	slaRecalculationProgressLogMinInterval = 50
+)
+
+// recalculationProgressLogInterval returns how many clocks apart
+// recalculateFromEntityPass's own progress log lines should be, for a pass
+// over total clocks total. See slaRecalculationProgressLogTargetLines' own
+// doc comment for the reasoning.
+func recalculationProgressLogInterval(total int) int {
+	interval := total / slaRecalculationProgressLogTargetLines
+	if interval < slaRecalculationProgressLogMinInterval {
+		return slaRecalculationProgressLogMinInterval
+	}
+	return interval
+}
+
+// RecalculateFromEntity is the CSM portal's "Recalculate SLA" admin action
+// (TypeSLARecalculationRequested) -- called from
+// Dispatcher.handleSLARecalculationRequested, in its own detached goroutine,
+// never on that handler's own consumer goroutine (a full reconciliation
+// pages through every currently-active clock and must not hold up ordinary
+// event processing).
+//
+// Deliberately never wipes Redis up front any more (an earlier version did,
+// via Store.WipeAll) -- a blanket wipe-then-rebuild has a real correctness
+// gap: between the wipe and the moment a given clock's own turn in the
+// rebuild loop comes, Redis has NO entry for it at all, so a tier due during
+// that window is invisible to Tick and simply never alerts, and a genuine,
+// concurrent case update's own live write (ApplyStateEffects pausing it,
+// say) can be wiped out from under it. Writing every clock IN PLACE instead
+// (recalculateFromEntityPass below) means existing clocks keep ticking and
+// alerting correctly for the entire duration of this call -- there is never
+// a window where Redis is missing data it already had.
+//
+// Runs recalculateFromEntityPass TWICE:
+//  1. The main pass, against entity-service's active-clock list as it is
+//     right now -- the bulk of the work, and visible via its own progress
+//     log (recalculationProgressLogInterval).
+//  2. A settle pass, immediately after -- re-fetches the SAME list, now
+//     possibly changed by real, concurrent case activity that happened
+//     anywhere during the (possibly long) main pass, and reconciles every
+//     clock again from that current data. This is what actually closes the
+//     race the old wipe-then-rebuild design could not: a clock registered,
+//     paused, resumed, or completed by a genuine update during the main
+//     pass is corrected here from its real, current row, rather than being
+//     left as whatever the main pass's own now-stale snapshot wrote. Same
+//     bounded cost as the main pass (one more bulk fetch + reconcile) --
+//     deliberately NOT a per-clock re-fetch for every clock, which would
+//     turn one paginated bulk call into one extra entity-service round trip
+//     PER ACTIVE CLOCK, a far larger load for the same benefit. This does
+//     not fully close the race (a change landing in the instant between the
+//     settle pass's own fetch and write is still possible) -- same accepted
+//     residual as refreshAndReconcileClock's own one-round-trip window.
+//
+// Cleanup candidates come from Store.ListClockKeys taken as a snapshot
+// BEFORE the main pass even starts, diffed (in cleanupStaleClocks) against
+// the settle pass's own fresh list, and only then deleted (Store.DeleteClock)
+// -- this is the one thing writing-in-place cannot do on its own: a clock
+// that completed/cancelled or was otherwise cleaned out of entity-service's
+// own data (a bulk resync changing which "sla" rows exist at all) has to be
+// told apart from one that's simply not in THIS page yet. Two CodeRabbit-
+// caught gaps in an earlier version of this, both covered by
+// cleanupStaleClocks' own doc comment: the snapshot has to be taken before
+// the main pass (not after the settle pass) so a clock registered live
+// anywhere during this call is never even a candidate, and every remaining
+// candidate is re-verified directly against entity-service immediately
+// before its delete, since OFFSET-based pagination can otherwise skip a
+// still-genuinely-active row. Each delete is independent and best-effort: a
+// single failure is logged and the rest still proceed, and failing to
+// list/delete stale entries at all never fails the whole recalculation
+// (those entries are mostly harmless on their own -- processDueMember
+// already drops a due wake entry for an unregistered clock without
+// alerting).
+//
+// Guarded by recalculating (atomic.Bool) so two requests in flight at once
+// -- a double click, or a redelivered Kafka record -- can't race each
+// other's own rebuild: the second is logged and skipped, not queued or
+// merged.
+func (e *Engine) RecalculateFromEntity(ctx context.Context) error {
+	client, ok := e.entity.(entityActiveClocksClient)
+	if !ok || client == nil {
+		return fmt.Errorf("slaengine: recalculate: no entity-service client configured")
+	}
+	if !e.recalculating.CompareAndSwap(false, true) {
+		slog.WarnContext(ctx, "slaengine: recalculation already in progress, skipping this request")
+		return nil
+	}
+	defer e.recalculating.Store(false)
+
+	// Snapshot cleanup candidates BEFORE the main pass runs, not after the
+	// settle pass -- a CodeRabbit-caught gap: RegisterClocks runs on
+	// case.created independently of this recalculation's own guard, so a
+	// clock registered anywhere during either pass (its own case.created
+	// landing after this snapshot but before the settle pass's fetch) would
+	// otherwise be in Redis but missing from the settle list, and
+	// cleanupStaleClocks would delete a clock that was never stale at all.
+	// Restricting cleanup candidates to keys that already existed before
+	// this call started removes that case entirely: a clock that didn't
+	// exist yet when this snapshot was taken is never considered for
+	// deletion, no matter what either pass's own fetch does or doesn't see.
+	// A listing failure here is logged and skips cleanup for this run only
+	// -- the rebuild passes below still run.
+	preExisting, err := e.store.ListClockKeys(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: list existing clock keys failed, skipping cleanup for this run", "err", err)
+	}
+
+	clocks, err := e.recalculateFromEntityPass(ctx, client, true)
+	if err != nil {
+		return fmt.Errorf("slaengine: recalculate: main pass: %w", err)
+	}
+
+	settled, err := e.recalculateFromEntityPass(ctx, client, false)
+	if err != nil {
+		return fmt.Errorf("slaengine: recalculate: settle pass: %w", err)
+	}
+
+	e.cleanupStaleClocks(ctx, preExisting, settled)
+
+	slog.InfoContext(ctx, "slaengine: recalculation complete", "count", len(clocks))
+	return nil
+}
+
+// recalculateFromEntityPass fetches entity-service's current active-clock
+// list and reconciles every one of them in place, with the same
+// fresh-context repair retry RecalculateFromEntity's own doc comment
+// describes for whatever fails the first time. Returns the fetched list (so
+// the caller knows exactly which clocks this pass considered current) and an
+// error only when the fetch itself fails, or when one or more clocks are
+// still broken even after the repair pass.
+func (e *Engine) recalculateFromEntityPass(ctx context.Context, client entityActiveClocksClient, logProgress bool) ([]activeSLAClock, error) {
+	clocks, err := client.GetActiveCSMSLAClocks(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch active clocks: %w", err)
+	}
+
+	now := time.Now()
+	progressInterval := recalculationProgressLogInterval(len(clocks))
+	var failed []activeSLAClock
+	for i, c := range clocks {
+		if !e.reconcileClock(ctx, c, now) {
+			failed = append(failed, c)
+		}
+		// Progress log every progressInterval clocks (and on the very last
+		// one) -- this runs synchronously in a detached goroutine with
+		// nothing else reporting on it while in flight, and a large
+		// active-clock set can take a while; a log line only at the very end
+		// gives no visibility into whether a long-running recalculation is
+		// progressing or stuck. progressInterval scales with the total
+		// count (see its own doc comment) so this stays a reasonable number
+		// of lines whether there are a few hundred clocks or over 100,000.
+		// Only the main pass logs this -- the settle pass re-touches the
+		// same clocks and would otherwise double the noise for no new
+		// information.
+		if logProgress {
+			if done := i + 1; done%progressInterval == 0 || done == len(clocks) {
+				slog.InfoContext(ctx, "slaengine: recalculate: progress", "recalculated", done, "total", len(clocks))
+			}
+		}
+	}
+
+	// A repair pass, on a FRESH context, for whatever didn't make it the
+	// first time -- a CodeRabbit-caught gap: ctx is the one, shared,
+	// slaRecalculationTimeout-bounded context for this whole call, so a
+	// clock that failed because ctx was already running out when its own
+	// turn came (large active-clock set, a slow patch of Redis calls ahead
+	// of it in the loop) would otherwise be retried, if at all, against a
+	// context that's already dead or seconds from dying -- not a real
+	// second chance. Every write here is idempotent, so re-running
+	// reconcileClock for exactly the clocks that failed is safe to repeat
+	// regardless of why the first attempt failed (a transient Redis error,
+	// not just ctx exhaustion).
+	if len(failed) > 0 {
+		slog.WarnContext(ctx, "slaengine: recalculate: retrying clocks that failed to rebuild, on a fresh context", "count", len(failed))
+		repairCtx, cancel := context.WithTimeout(context.Background(), slaRecalculationRepairTimeout)
+		defer cancel()
+		repairNow := time.Now()
+		var stillFailed []activeSLAClock
+		for _, c := range failed {
+			// refreshAndReconcileClock, not a bare reconcileClock(repairCtx, c,
+			// repairNow) -- a second CodeRabbit-caught gap in the repair pass
+			// specifically: c is the snapshot fetched once, back at the start
+			// of this pass, which by repair time can be stale -- long enough
+			// for a live case update to have already paused or resumed this
+			// exact clock for real reasons unrelated to this recalculation.
+			// Reapplying c's own stale IsPaused/PausedOn as-is would silently
+			// clobber that genuine, newer state. Re-fetching this one clock's
+			// CURRENT state right before writing narrows that window to this
+			// repair pass's own single round trip -- it does not fully close
+			// it, but it's a real reduction from "stale by up to this pass's
+			// own duration" to "stale by at most one round trip."
+			if _, ok := e.refreshAndReconcileClock(repairCtx, c, repairNow); !ok {
+				stillFailed = append(stillFailed, c)
+			}
+		}
+		if len(stillFailed) > 0 {
+			slog.ErrorContext(ctx, "slaengine: recalculate: some clocks could not be rebuilt even after a repair pass -- breach alerting for them stays broken until the next recalculation or a restart", "count", len(stillFailed))
+			return clocks, fmt.Errorf("%d clock(s) could not be rebuilt even after a repair pass", len(stillFailed))
+		}
+	}
+
+	return clocks, nil
+}
+
+// cleanupStaleClocks removes every clock from existing (the snapshot
+// RecalculateFromEntity took BEFORE either pass ran -- see that method's
+// own doc comment for why cleanup candidates come from a pre-recalculation
+// snapshot, not the settle pass's own list) that fresh (the settle pass's
+// own, most current list) no longer reports -- see RecalculateFromEntity's
+// own doc comment for why this, not a blanket wipe, is how an orphaned entry
+// (a bulk resync of entity-service's own data changing which "sla" rows
+// exist at all) gets cleaned up.
+//
+// A second CodeRabbit-caught gap, on top of the snapshot-timing one:
+// OFFSET-based pagination (GetActiveCSMSLAClocks) can skip a row if a clock
+// closes between two pages during either pass's own fetch, independently of
+// anything this engine does -- the skipped clock is still genuinely active,
+// but simply absent from fresh through no fault of its own. Before deleting
+// any candidate, e.entity.GetClockState double-checks it directly against
+// entity-service: only a clock confirmed absent, or found but in a terminal
+// stage, is actually deleted; a lookup error or a found-and-still-open row
+// is skipped, same fail-safe-toward-not-deleting posture
+// refreshAndReconcileClock's own terminal-stage check already uses.
+//
+// Best-effort throughout: one clock's lookup or delete failing is logged
+// and never stops the rest -- none of this ever fails the recalculation
+// itself, since every entry left behind here is already harmless on its own
+// (processDueMember drops a due wake entry for an unregistered clock
+// without alerting).
+func (e *Engine) cleanupStaleClocks(ctx context.Context, existing []string, fresh []activeSLAClock) {
+	freshIDs := make(map[string]bool, len(fresh))
+	for _, c := range fresh {
+		freshIDs[c.CaseID+"|"+c.ClockType] = true
+	}
+
+	removed := 0
+	for _, id := range existing {
+		if freshIDs[id] {
+			continue
+		}
+		caseID, clockType, ok := strings.Cut(id, "|")
+		if !ok {
+			continue
+		}
+		if e.entity != nil {
+			state, err := e.entity.GetClockState(ctx, caseID, clockType)
+			if err != nil {
+				slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: verify candidate before delete failed, skipping it", "caseId", caseID, "clockType", clockType, "err", err)
+				continue
+			}
+			if state.Found && !isTerminalSLAStage(state.Stage) {
+				continue
+			}
+		}
+		if err := e.store.DeleteClock(ctx, caseID, clockType); err != nil {
+			slog.ErrorContext(ctx, "slaengine: recalculate: cleanup: delete stale clock failed", "caseId", caseID, "clockType", clockType, "err", err)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		slog.InfoContext(ctx, "slaengine: recalculate: cleanup: removed stale clocks no longer active in entity-service", "count", removed)
+	}
+}
+
+// refreshAndReconcileClock re-fetches one (caseID, clockType) clock's
+// CURRENT state directly from entity-service and rebuilds it from that
+// fresh read, rather than from display's own (possibly stale) IsPaused/
+// StartedOn/pause fields -- display still supplies every field
+// GetClockState doesn't carry (CaseNumber/CaseTitle/Product/Team/Priority/
+// CaseType/State), just not the condition-sensitive ones. Used by
+// RecalculateFromEntity's own repair pass (see its own doc comment on the
+// staleness this narrows) and by ReviseClocks (a severity change always
+// needs this clock's real, current per-policy state, which only
+// entity-service has -- there is no "reuse the old snapshot" option at
+// all here, unlike the repair pass). e.entity nil, entity-service
+// reporting no open clock at all for this (work item, target), or one
+// already in a terminal stage (ACHIEVED/CANCELLED/COMPLETED -- GetClockState
+// returns a row "regardless of whether it's currently active", so Found
+// alone does not mean "still live" the way it does for
+// GetActiveCSMSLAClocks) are all treated as "nothing to rebuild", not an
+// error: a genuinely-gone or already-finished clock means Redis should
+// hold nothing live for it either, which it already does after a wipe
+// (RecalculateFromEntity), never did in the first place for a clock type
+// this severity's policy doesn't apply to (ReviseClocks), or must not be
+// resurrected into looking live again (either caller, for a clock that
+// finished on its own in the meantime). Only a genuine lookup failure is
+// reported as an error.
+// found reports whether entity-service currently has an open clock at all
+// for this (work item, target); ok reports whether the rebuild (when found)
+// succeeded. A caller that needs to know the difference between "genuinely
+// nothing to rebuild" and "rebuilt successfully" uses found; one that
+// doesn't (RecalculateFromEntity's own repair pass, where a wipe already
+// cleared everything either way) can ignore it.
+func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLAClock, now time.Time) (found, ok bool) {
+	if e.entity == nil {
+		return false, true
+	}
+	state, err := e.entity.GetClockState(ctx, display.CaseID, display.ClockType)
+	if err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to refresh clock state before rebuilding", "caseId", display.CaseID, "clockType", display.ClockType, "err", err)
+		return false, false
+	}
+	// GetClockState returns a row "regardless of whether it's currently
+	// active" (see its own doc comment) -- unlike GetActiveCSMSLAClocks,
+	// Found alone does not mean "still live". Treated the same as !Found
+	// (nothing to rebuild): ReviseClocks' own stale-wake-removal path for
+	// that case is exactly right here too -- a clock that already reached
+	// ACHIEVED/CANCELLED/COMPLETED must never be written back into Redis as
+	// a live one with fresh future wake entries, whether the display
+	// snapshot it's being asked to rebuild from thinks it's still paused or
+	// not.
+	if !state.Found || isTerminalSLAStage(state.Stage) {
+		return false, true
+	}
+	c := display
+	c.IsPaused = state.IsPaused
+	c.StartedOn = state.StartedOn
+	c.PausedOn = state.PausedOn
+	c.PauseDurationSeconds = state.PauseDurationSeconds
+	c.DurationSeconds = state.DurationSeconds
+	c.Schedule = state.Schedule
+	return true, e.reconcileClock(ctx, c, now)
+}
+
+// ReviseClocks re-syncs one case's own three clocks with entity-service's
+// real, current per-policy state after its priority genuinely changes --
+// called from dispatch.handleSeverityChanged. A priority change on
+// entity-service's own side cancels whichever clock(s) the case's PREVIOUS
+// severity resolved a policy for and registers fresh ones for its new
+// severity (a different policy, a different duration, possibly a different
+// set of clock types entirely) -- but nothing about that write alone told
+// this engine's own Redis-held tracking anything: unlike RegisterClocks
+// (case.created) and ApplyStateEffects (case.status_changed), nothing here
+// reacted to a severity change at all before this method existed, so
+// Redis kept ticking down the OLD severity's clock, under its OLD
+// duration, indefinitely -- confirmed, not hypothetical: a stale wake
+// entry from before the change can even still fire a breach alert, since
+// sendBreachAlert's own incarnation check (isSameClockIncarnation) can't
+// tell "genuinely resolved" apart from "entity-service is now tracking a
+// completely different clock" and fails open toward sending rather than
+// risk losing a real alert.
+//
+// For a clock type the new severity's policy set still covers,
+// refreshAndReconcileClock rebuilds it from entity-service's current state
+// -- the same incarnation-aware SetClock Lua script that already protects
+// against ApplyStateEffects' own stale-replay risk (see setClockScript's
+// own doc comment in redis.go) is what makes writing the NEW clock's own
+// StartedOn here safely supersede the OLD incarnation, with no separate
+// "delete the old one first" step needed. For a clock type the new
+// severity has NO policy for at all, refreshAndReconcileClock's usual
+// "not found -- nothing to rebuild" posture is wrong here (unlike its
+// other caller, there is no preceding wipe that already cleared the old
+// entries): this actively removes that clock's own wake entries instead,
+// so the old severity's tier reminders don't go on ticking for a clock
+// that no longer exists under any policy at all.
+//
+// priority/caseNumber/wso2CaseID/caseTitle/product/team are exactly what
+// events.SeverityChangedPayload carries (priority = NewSeverity) -- plain
+// strings, not the unexported activeSLAClock type itself, since
+// dispatch.slaEngineService (a different package) is this method's one real
+// caller. CaseType/State (which that payload doesn't carry, and
+// GetClockState doesn't either -- they're purely display fields, not
+// condition-sensitive) are instead read back per clock type from whatever
+// Redis already holds from before the revision, so a rebuilt clock's Chat
+// card still shows them correctly.
+func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+	if e.entity == nil {
+		return
+	}
+	display := activeSLAClock{
+		CaseID:     caseID,
+		CaseNumber: caseNumber,
+		WSO2CaseID: wso2CaseID,
+		CaseTitle:  caseTitle,
+		Product:    product,
+		Team:       team,
+		Priority:   priority,
+	}
+	now := time.Now()
+	for _, clockType := range clockTypesInOrder {
+		c := display
+		c.ClockType = clockType
+		if oldMeta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
+			c.CaseType = oldMeta.CaseType
+			c.State = oldMeta.State
+		}
+
+		found, ok := e.refreshAndReconcileClock(ctx, c, now)
+		if found {
+			continue
+		}
+		if !ok {
+			continue
+		}
+		for _, tier := range tierSequence {
+			if err := e.store.RemoveWake(ctx, wakeMember(caseID, clockType, tier)); err != nil {
+				slog.ErrorContext(ctx, "slaengine: revise clocks: failed to remove stale wake entry for a clock type the new severity no longer covers", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
+			}
+		}
+	}
+}
+
 // reconcileClock rebuilds one (caseID, clockType) clock's Redis state from
 // its durable entity-service row — the same due-date arithmetic
 // RegisterClocks uses (tierTime/avoidWeekend), just anchored on that row's
@@ -1110,7 +1726,17 @@ func (e *Engine) Reconcile(ctx context.Context, client entityActiveClocksClient)
 // "breach" alerts for history that's probably already been alerted on
 // before whatever wiped Redis. Only a tier still in the future gets a real
 // wake entry, so normal ticking resumes seamlessly from here.
-func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) {
+//
+// Returns false if any Redis write for this clock failed -- used by
+// RecalculateFromEntity to find which clocks need a repair pass (see its
+// own doc comment on why, after a destructive WipeAll, a clock left
+// half-rebuilt is a real "this clock never alerts again" risk, not just a
+// logged warning). Reconcile's own startup pass ignores the return value
+// entirely, exactly as it always did: every failure here is still logged
+// internally regardless of whether the caller checks it, and a skip (no
+// duration recorded / no start time) is reported as success -- it's a
+// legitimate "nothing to track" outcome, not a failure to repair.
+func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.Time) bool {
 	if c.DurationSeconds <= 0 {
 		// entity-service itself has no resolved duration recorded for this
 		// row -- same "no fallback duration" posture RegisterClocks has for
@@ -1118,12 +1744,12 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		// (a row GetActiveCSMSLAClocks returned was, by definition, already
 		// registered against some real policy), but defended regardless.
 		slog.WarnContext(ctx, "slaengine: reconcile: no duration recorded for this clock, skipping", "caseId", c.CaseID, "clockType", c.ClockType, "priority", c.Priority)
-		return
+		return true
 	}
 	duration := time.Duration(c.DurationSeconds) * time.Second
 	if c.StartedOn == nil {
 		slog.WarnContext(ctx, "slaengine: reconcile: no start time, skipping clock", "caseId", c.CaseID, "clockType", c.ClockType)
-		return
+		return true
 	}
 	startedAt := *c.StartedOn
 
@@ -1161,15 +1787,17 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 	if err := e.store.SetClock(ctx, c.CaseID, c.ClockType, meta); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to rebuild clock metadata", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
-		return
+		return false
 	}
 
+	ok := true
 	highestPastTier := 0
 	for _, tier := range tierSequence {
 		at := tierTime(startedAt, tierDuration, tier, c.Schedule).Add(pauseOffset)
 		if at.After(now) {
 			if err := e.store.AddWake(ctx, wakeMember(c.CaseID, c.ClockType, tier), at); err != nil {
 				slog.ErrorContext(ctx, "slaengine: reconcile: failed to schedule sla wake entry", "caseId", c.CaseID, "clockType", c.ClockType, "tier", tier, "err", err)
+				ok = false
 			}
 			continue
 		}
@@ -1183,6 +1811,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 		// of race AdvanceAlertedTier's own doc comment describes for Tick.
 		if _, err := e.store.AdvanceAlertedTier(ctx, c.CaseID, c.ClockType, highestPastTier, startedAt); err != nil {
 			slog.ErrorContext(ctx, "slaengine: reconcile: failed to pre-claim already-past tiers", "caseId", c.CaseID, "clockType", c.ClockType, "tier", highestPastTier, "err", err)
+			ok = false
 		}
 	}
 	// The shifted-pause baseline must equal exactly what this pass already
@@ -1211,6 +1840,7 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	}
 	if err := e.store.SetShiftedPauseSeconds(ctx, c.CaseID, c.ClockType, baselineSeconds); err != nil {
 		slog.ErrorContext(ctx, "slaengine: reconcile: failed to record the shifted-pause baseline", "caseId", c.CaseID, "clockType", c.ClockType, "err", err)
+		ok = false
 	}
 	// Always applied, not just when true: the durable row is the source of
 	// truth for this flag during reconciliation, and Redis may currently
@@ -1219,7 +1849,10 @@ func (e *Engine) reconcileClock(ctx context.Context, c activeSLAClock, now time.
 	// true here would leave a stale paused=true in Redis forever, which
 	// Tick's own "drop if paused" check (processDueMember) would then
 	// silently swallow every future tier crossing for, never alerting.
-	e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused)
+	if !e.setPaused(ctx, c.CaseID, c.ClockType, c.IsPaused) {
+		ok = false
+	}
+	return ok
 }
 
 // RunTicker calls Tick every interval until ctx is done. Run from its own

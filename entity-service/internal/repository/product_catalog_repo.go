@@ -62,7 +62,7 @@ type CatalogApply struct {
 }
 
 // ProductCatalogRepository writes the product catalogue and reads its
-// reference tables (migrations 0269-0271). Products and versions
+// reference tables (migrations 0270-0272). Products and versions
 // are read through ProductRepository and ProductVersionRepository.
 type ProductCatalogRepository interface {
 	// ListReleaseLines and GetReleaseLine (nil when there is no such id).

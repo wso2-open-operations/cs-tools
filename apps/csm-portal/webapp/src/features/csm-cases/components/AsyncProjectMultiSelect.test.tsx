@@ -163,3 +163,26 @@ describe("AsyncProjectMultiSelect", () => {
     expect(options[0]).toHaveTextContent(P1.name);
   });
 });
+
+describe("AsyncProjectMultiSelect — required marker", () => {
+  it("marks the input required and shows the helper text when asked", () => {
+    mockResults([]);
+    render(
+      <AsyncProjectMultiSelect
+        label="Projects"
+        values={[]}
+        onChange={vi.fn()}
+        required
+        helperText="Required to submit for approval."
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: /^projects$/i })).toBeRequired();
+    expect(screen.getByText("Required to submit for approval.")).toBeInTheDocument();
+  });
+
+  it("is not required by default", () => {
+    mockResults([]);
+    render(<AsyncProjectMultiSelect label="Projects" values={[]} onChange={vi.fn()} />);
+    expect(screen.getByRole("combobox", { name: /^projects$/i })).not.toBeRequired();
+  });
+});

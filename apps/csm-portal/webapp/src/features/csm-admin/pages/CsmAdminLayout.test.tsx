@@ -92,7 +92,11 @@ describe("CsmAdminLayout — top-level tabs", () => {
   });
 
   it("hides the Dashboards tab for a non-admin user, while User management still shows", () => {
-    mockRoles = ["agent"];
+    // cs_engineer, not "agent": Settings itself requires cs_engineer/admin
+    // (canViewSettings), so an "agent" role has no access to any tab here at
+    // all -- this case is specifically about a non-admin role that DOES still
+    // reach Settings, same as the comment on `canViewSettings`.
+    mockRoles = ["cs_engineer"];
     renderLayout("/admin/user-management/users");
     expect(screen.queryByRole("tab", { name: "Dashboards" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Banners" })).not.toBeInTheDocument();

@@ -325,6 +325,7 @@ export default function DeploymentAttachmentsPanel({
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
               <TextField
                 label="Name"
+                required
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 size="small"

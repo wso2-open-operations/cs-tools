@@ -33,6 +33,9 @@ import type {
 import CaseAlertSettings from "./CaseAlertSettings";
 
 const settings: { data?: Settings } = {};
+// A password box has no role; its label ends in the required asterisk when
+// the space is new.
+const WEBHOOK = /^Google Chat webhook URL/;
 const saveRoom = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false };
 const setWebhook = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false };
 const testRoom = { mutate: vi.fn(), isPending: false };
@@ -356,15 +359,30 @@ describe("Chat space for each team: changes wait for Submit", () => {
   it("needs a Google Chat webhook URL for a new space", () => {
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
     const { dialog } = openAdd();
-    expect(within(dialog).getByLabelText("Google Chat webhook URL")).toHaveAttribute("type", "password");
+    const url = within(dialog).getByLabelText(WEBHOOK);
+    expect(url).toHaveAttribute("type", "password");
+    expect(url).toBeRequired();
+    expect(url.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("Paste the space's Google Chat webhook URL.");
-    fireEvent.change(within(dialog).getByLabelText("Google Chat webhook URL"), {
+    fireEvent.change(within(dialog).getByLabelText(WEBHOOK), {
       target: { value: "https://example.com/hook" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("isn't a Google Chat webhook URL");
     expect(pending()).toHaveTextContent("No changes to submit.");
+  });
+
+  it("does not mark the webhook URL once URLs can't be saved on this server, which disables the box", () => {
+    const { rerender } = render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
+    openAdd();
+    // The server stops taking URLs while the dialog is open.
+    settings.data = make({ webhooksEnabled: false });
+    rerender(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
+    const url = within(screen.getByRole("dialog", { name: "Add a team's chat space" })).getByLabelText(WEBHOOK);
+    expect(url).toBeDisabled();
+    expect(url).not.toBeRequired();
+    expect(url.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeNull();
   });
 
   it("adds a team: nothing is saved until Submit, then the room and its URL", async () => {
@@ -376,7 +394,7 @@ describe("Chat space for each team: changes wait for Submit", () => {
     // Artemis starts as the file has it: it also gets incidents with no SRE team.
     expect(within(dialog).getByRole("checkbox", { name: "Also gets incidents with no SRE team" })).toBeChecked();
     expect(within(dialog).queryByLabelText("Alerts by")).not.toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("Google Chat webhook URL"), { target: { value: HOOK } });
+    fireEvent.change(within(dialog).getByLabelText(WEBHOOK), { target: { value: HOOK } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -407,6 +425,10 @@ describe("Chat space for each team: changes wait for Submit", () => {
     const { dialog } = openAdd();
     fireEvent.change(within(dialog).getByLabelText("Team"), { target: { value: "SRE|apollo" } });
     expect(within(dialog).getByText(`Leave empty to keep the saved URL (${HINT}).`)).toBeInTheDocument();
+    // Its URL is saved, so the box is no longer required.
+    const url = within(dialog).getByLabelText(WEBHOOK);
+    expect(url).not.toBeRequired();
+    expect(url.closest("label")?.querySelector(".MuiFormLabel-asterisk")).toBeNull();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Also gets incidents with no SRE team" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     await submit();
@@ -424,6 +446,7 @@ describe("Chat space for each team: changes wait for Submit", () => {
     fireEvent.click(edit);
     const dialog = screen.getByRole("dialog", { name: "Edit IaaS chat space" });
     expect(within(dialog).queryByLabelText("Team")).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(WEBHOOK)).not.toBeRequired();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Also gets incidents with no SRE team" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     expect(edit).toHaveFocus();
@@ -490,7 +513,7 @@ describe("Chat space for each team: changes wait for Submit", () => {
     saveRoom.mutateAsync.mockRejectedValueOnce(new Error("That webhook URL was not accepted."));
     render(<CaseAlertSettings layout="full" chain="SRE_SAAS" />);
     const { dialog } = openAdd();
-    fireEvent.change(within(dialog).getByLabelText("Google Chat webhook URL"), { target: { value: HOOK } });
+    fireEvent.change(within(dialog).getByLabelText(WEBHOOK), { target: { value: HOOK } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add to changes" }));
     fireEvent.click(screen.getByRole("button", { name: "Submit SRE changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("That webhook URL was not accepted.");
@@ -531,6 +554,8 @@ describe("Chat space for each team: changes wait for Submit", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a chat space URL for U2" }));
     const field = screen.getByLabelText("Google Chat webhook URL for U2");
     expect(field).toHaveFocus();
+    // The only field of its form, so it is required (its label is for screen readers only).
+    expect(field).toBeRequired();
     fireEvent.change(field, { target: { value: "https://example.com/hook" } });
     fireEvent.click(screen.getByRole("button", { name: "Add to changes" }));
     expect(screen.getByRole("alert")).toHaveTextContent("isn't a Google Chat webhook URL");

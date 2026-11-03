@@ -34,21 +34,35 @@
 // applied.
 //
 
-import { test, expect, withSession, type Page } from "../../fixtures/test";
+import { promises as fs } from "node:fs";
+import {
+  test,
+  expect,
+  withSession,
+  type Locator,
+  type Page,
+} from "../../fixtures/test";
 import { CaseAttachmentsPage } from "../../pages/CaseAttachmentsPage";
 import { CaseDetailPage } from "../../pages/CaseDetailPage";
+import { CasesListPage } from "../../pages/CasesListPage";
 import { EngagementsPage } from "../../pages/EngagementsPage";
 import {
   ATTACHMENT_FILES,
   ENGAGEMENT_INPUT,
   PROJECTS,
+  ProjectType,
 } from "../../config/testData";
 import {
   CASE_ATTACHMENTS,
   CASE_CALLS,
+  CASES_LIST,
   ENGAGEMENTS,
 } from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
+import {
+  caseSearchWithEngagementTypes,
+  caseSearchWithoutEngagementTypes,
+} from "../../utils/listSearch";
 import { RECORD_ID_PATTERN, projectPathPattern } from "../../utils/ids";
 
 withSession(test);
@@ -159,7 +173,11 @@ test.describe("Engagements", () => {
       // The cards are gone while filtered — the page shows one or the other —
       // and Back is what brings them back. It does not navigate: it clears the
       // stat filter, so the URL is the same before and after.
-      await expect(engagements.statCard(card.label)).toHaveCount(0);
+      //
+      // Checked by the card's button, not its text: "Outstanding Engagements"
+      // is both the card label and the filtered list's heading, so a text match
+      // would find the heading and report the card still there.
+      await expect(engagements.statCardButton(card.label)).toHaveCount(0);
 
       const filteredUrl = page.url();
       await engagements.backButton().click();
@@ -223,6 +241,153 @@ test.describe("Engagements", () => {
     console.log(`Engagements: sorted by each field and reversed the order`);
   });
 
+  /** The CS numbers of the rendered rows, as numbers, in order. */
+  async function rowNumbers(rows: Locator): Promise<number[]> {
+    return (await rows.allInnerTexts()).map((text) =>
+      Number(/CS(\d+)/.exec(text)?.[1] ?? NaN),
+    );
+  }
+
+  // ✅ READ-ONLY.
+  // Runs on Managed Cloud Subscription: it is the fixture project with more
+  // engagements than one page holds (the Subscription one has only a few, and
+  // ListPagination renders nothing until the list overflows a page).
+  test("pages through the list and changes rows per page", async ({ page }) => {
+    const paged = PROJECTS[ProjectType.MANAGED_CLOUD_SUBSCRIPTION];
+    test.skip(!paged.id, "Managed Cloud Subscription needs a project id.");
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(paged.id);
+    await engagements.waitForList();
+    const main = page.getByTestId("app-main");
+    const rows = engagements.rows();
+    const { pagination } = ENGAGEMENTS;
+    const size = pagination.pageSize;
+    const next = main.getByRole("button", { name: pagination.nextPageButton });
+    const previous = main.getByRole("button", { name: pagination.previousPageButton });
+    test.skip(
+      (await next.count()) === 0,
+      "All engagements fit on one page, so the list renders no pagination.",
+    );
+    // The pagination footer's own range ("1–10 of N"), not the results bar's.
+    const range = main
+      .locator(".MuiTablePagination-displayedRows")
+      .filter({ hasText: pagination.displayedRowsPattern });
+    const total = Number(pagination.displayedRowsPattern.exec(await range.innerText())![3]);
+
+    // Page 1.
+    await expect(range).toHaveText(new RegExp(`^1[–-]${size} of ${total}$`));
+    await expect(previous).toBeDisabled();
+    await expect(rows).toHaveCount(size);
+    const firstPage = await rowNumbers(rows);
+
+    // Page 2: the next slice, disjoint from page 1.
+    await next.click();
+    const end2 = Math.min(2 * size, total);
+    await expect(range).toHaveText(new RegExp(`^${size + 1}[–-]${end2} of ${total}$`), {
+      timeout: 60_000,
+    });
+    await expect(rows).toHaveCount(end2 - size, { timeout: 60_000 });
+    const secondPage = await rowNumbers(rows);
+    expect(secondPage.filter((n) => firstPage.includes(n))).toEqual([]);
+
+    // Back to page 1: the same rows.
+    await previous.click();
+    await expect(previous).toBeDisabled();
+    await expect.poll(() => rowNumbers(rows)).toEqual(firstPage);
+
+    // Rows per page → 25: more rows on one page, range widened to match.
+    await main.getByRole("combobox", { name: pagination.rowsPerPageLabel }).click();
+    await page.getByRole("option", { name: "25", exact: true }).click();
+    const shown = Math.min(25, total);
+    await expect(rows).toHaveCount(shown, { timeout: 60_000 });
+    // ListPagination renders nothing once every record fits on one page
+    // (`totalRecords <= rowsPerPage`), so the range only exists past 25.
+    if (total > 25) {
+      await expect(range).toHaveText(new RegExp(`^1[–-]${shown} of ${total}$`), {
+        timeout: 60_000,
+      });
+    } else {
+      await expect(main.locator(".MuiTablePagination-root")).toHaveCount(0, {
+        timeout: 60_000,
+      });
+    }
+
+    console.log(`Engagements: ${total} over pages of ${size}; 25 per page shows ${shown}`);
+  });
+
+  // ✅ READ-ONLY. Both files are built in the browser from the loaded list.
+  test("exports the list to CSV and PDF", async ({ page }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+    const rows = engagements.rows();
+    test.skip((await rows.count()) === 0, "No engagements to export.");
+    const firstNumber = /CS\d+/.exec(await rows.first().innerText())![0];
+
+    const list = new CasesListPage(page);
+    await list.openExportMenu();
+    const csv = await list.exportAs(CASES_LIST.export.csvItem);
+    expect(csv.suggestedFilename()).toMatch(ENGAGEMENTS.exportFilenamePattern("csv"));
+    const csvText = await fs.readFile((await csv.path())!, "utf8");
+    expect(csvText.length, "the CSV should not be empty").toBeGreaterThan(0);
+    expect(csvText, "the CSV should carry the listed engagements").toContain(firstNumber);
+
+    await list.openExportMenu();
+    const pdf = await list.exportAs(CASES_LIST.export.pdfItem);
+    expect(pdf.suggestedFilename()).toMatch(ENGAGEMENTS.exportFilenamePattern("pdf"));
+    const pdfBytes = await fs.readFile((await pdf.path())!);
+    expect(pdfBytes.subarray(0, 5).toString(), "a PDF file").toBe("%PDF-");
+
+    console.log(
+      `Engagements: exported ${csv.suggestedFilename()} and ${pdf.suggestedFilename()}`,
+    );
+  });
+
+  // ✅ READ-ONLY.
+  test("orders the list by created date, newest and oldest first", async ({ page }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+    const rows = engagements.rows();
+    test.skip((await rows.count()) < 2, "Ordering needs at least two engagements.");
+    const { fields, orders } = ENGAGEMENTS.sort;
+
+    await engagements.chooseSortOption(engagements.sortFieldSelect(), fields.createdOn.label);
+    await expect(engagements.sortFieldSelect()).toContainText(fields.createdOn.label);
+
+    // CS numbers are issued in creation order, so they stand in for the
+    // created date the list sorts by.
+    const ordered = async (label: string, descending: boolean): Promise<number[]> => {
+      if (!(await engagements.sortOrderSelect().innerText()).includes(label)) {
+        await engagements.chooseSortOption(engagements.sortOrderSelect(), label);
+      }
+      await expect(engagements.sortOrderSelect()).toContainText(label);
+      let numbers: number[] = [];
+      await expect
+        .poll(
+          async () => {
+            numbers = await rowNumbers(rows);
+            const sorted = [...numbers].sort((a, b) => (descending ? b - a : a - b));
+            return numbers.length > 1 && numbers.join() === sorted.join();
+          },
+          { timeout: 60_000, message: `rows should be ${label}` },
+        )
+        .toBe(true);
+      return numbers;
+    };
+
+    const newest = await ordered(orders.newestFirst.label, true);
+    const oldest = await ordered(orders.oldestFirst.label, false);
+    expect(newest[0]).toBeGreaterThan(oldest[0]);
+
+    console.log(`Engagements: newest first CS${newest[0]}, oldest first CS${oldest[0]}`);
+  });
+
   test("searches the list, then filters and clears", async ({ page }) => {
     test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
 
@@ -259,6 +424,103 @@ test.describe("Engagements", () => {
 
     console.log(
       `Engagements: search narrowed ${before} rows and clearing restored them`,
+    );
+  });
+
+  test("filters the list by an engagement type breakdown entry", async ({
+    page,
+  }) => {
+    test.skip(!project.id, `${ENGAGEMENT_INPUT.projectType} needs a project id.`);
+
+    const engagements = new EngagementsPage(page);
+    await engagements.openViaSideNav(project.id);
+    await engagements.waitForList();
+
+    const before = await engagements.rows().count();
+    test.skip(before === 0, `${ENGAGEMENT_INPUT.projectType} lists no engagements.`);
+
+    await engagements.openFilters();
+
+    // Which entries the breakdown offers is project data: the options come from
+    // `stats.engagementTypeCount` and a type the project has none of is left
+    // out entirely. So they are read rather than assumed.
+    const offered = await engagements.openEngagementTypeMenu();
+    test.skip(
+      offered.length === 0,
+      `${ENGAGEMENT_INPUT.projectType} offers no engagement types to filter by.`,
+    );
+
+    // Every entry is named and distinct. Deliberately NOT checked against a
+    // fixed list of display names: this repo's source keeps only four, while
+    // the deployed build offers five (see ENGAGEMENTS.engagementType), so
+    // pinning the set would assert the source tree rather than the app.
+    for (const label of offered) {
+      expect(label.trim(), "a breakdown entry should be named").not.toBe("");
+    }
+    expect(
+      new Set(offered).size,
+      "the breakdown should not repeat an entry",
+    ).toBe(offered.length);
+
+    // The ids behind the entry, read off the option: one display name can group
+    // several backend types, so the request carries every id the option stands
+    // for and they cannot be derived from the label.
+    const chosen = offered[0];
+    const typeIds = await engagements.engagementTypeIds(chosen);
+    expect(
+      typeIds.length,
+      `"${chosen}" should carry at least one engagement type id`,
+    ).toBeGreaterThan(0);
+
+    // Armed before the click: the filter applies as it changes, and a response
+    // awaited afterwards could be one already in flight.
+    const filteredSearch = caseSearchWithEngagementTypes(page, typeIds);
+    await engagements.chooseEngagementType(chosen);
+    const filteredResponse = await filteredSearch;
+    await expectSuccess(filteredResponse, `filter engagements by ${chosen}`);
+
+    // The menu stays open on a multi-select, and its backdrop covers the list.
+    await engagements.closeEngagementTypeMenu();
+
+    // One filter is active, which the control states in its own label.
+    await expect(engagements.clearFiltersButton(1)).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+
+    // The list is a subset. Not an equality or a strict decrease: the project
+    // may hold only this type, in which case filtering legitimately changes
+    // nothing — but it can never ADD rows.
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBeLessThanOrEqual(before);
+
+    // Whatever the response returned is what is rendered — the part a
+    // regression between the refetch and the list would break.
+    const payload = (await filteredResponse.json()) as {
+      cases?: unknown[];
+      totalRecords?: number;
+    };
+    const returned = payload.cases?.length ?? 0;
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBe(returned);
+
+    // Clearing restores the unfiltered list, which is what shows the narrowing
+    // was the filter rather than something that happened to coincide with it.
+    const clearedSearch = caseSearchWithoutEngagementTypes(page);
+    await engagements.clearFiltersButton(1).click();
+    await expectSuccess(await clearedSearch, "clear the engagement type filter");
+
+    await expect(engagements.filtersButton()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await expect
+      .poll(() => engagements.rows().count(), { timeout: 30_000 })
+      .toBe(before);
+
+    console.log(
+      `Engagements: type "${chosen}" (ids ${typeIds.join(",")}) narrowed ` +
+        `${before} → ${returned} rows; offered [${offered.join(", ")}]`,
     );
   });
 

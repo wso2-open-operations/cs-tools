@@ -29,15 +29,16 @@ import (
 
 // Config is the resolved configuration.
 type Config struct {
-	GmailCredentialsJSON string
-	GmailDelegatedUser   string
-	ProcessedLabel       string
-	Lookback             string
-	PollInterval         time.Duration
-	RulesJSON            string
-	KafkaBroker          string
-	KafkaConnection      string
-	KafkaTopic           string
+	GmailClientID     string
+	GmailClientSecret string
+	GmailRefreshToken string
+	ProcessedLabel    string
+	Lookback          string
+	PollInterval      time.Duration
+	RulesJSON         string
+	KafkaBroker       string
+	KafkaConnection   string
+	KafkaTopic        string
 	// Port is the health endpoint's port (PORT, default 8080).
 	Port string
 }
@@ -47,14 +48,15 @@ var lookbackRe = regexp.MustCompile(`^[0-9]{1,3}[dhm]$`)
 // Load reads and validates the environment.
 func Load() (Config, error) {
 	c := Config{
-		GmailCredentialsJSON: os.Getenv("GMAIL_SERVICE_ACCOUNT_JSON"),
-		GmailDelegatedUser:   os.Getenv("GMAIL_DELEGATED_USER"),
-		ProcessedLabel:       getenv("GMAIL_PROCESSED_LABEL", "csm-mail-paging-processed"),
-		Lookback:             getenv("MAIL_LOOKBACK", "2d"),
-		RulesJSON:            os.Getenv("MAIL_TRIGGER_RULES"),
-		KafkaBroker:          os.Getenv("EVENT_BUS_BROKER"),
-		KafkaConnection:      os.Getenv("EVENT_BUS_CONNECTION_STRING"),
-		KafkaTopic:           os.Getenv("EVENT_BUS_TOPIC"),
+		GmailClientID:     os.Getenv("GMAIL_OAUTH_CLIENT_ID"),
+		GmailClientSecret: os.Getenv("GMAIL_OAUTH_CLIENT_SECRET"),
+		GmailRefreshToken: os.Getenv("GMAIL_OAUTH_REFRESH_TOKEN"),
+		ProcessedLabel:    getenv("GMAIL_PROCESSED_LABEL", "csm-mail-paging-processed"),
+		Lookback:          getenv("MAIL_LOOKBACK", "2d"),
+		RulesJSON:         os.Getenv("MAIL_TRIGGER_RULES"),
+		KafkaBroker:       os.Getenv("EVENT_BUS_BROKER"),
+		KafkaConnection:   os.Getenv("EVENT_BUS_CONNECTION_STRING"),
+		KafkaTopic:        os.Getenv("EVENT_BUS_TOPIC"),
 	}
 	c.Port = getenv("PORT", "8080")
 	if p, err := strconv.Atoi(c.Port); err != nil || p < 1 || p > 65535 {
@@ -69,8 +71,9 @@ func Load() (Config, error) {
 		return Config{}, errors.New("MAIL_LOOKBACK must look like 2d, 12h or 30m")
 	}
 	for name, v := range map[string]string{
-		"GMAIL_SERVICE_ACCOUNT_JSON": c.GmailCredentialsJSON, "GMAIL_DELEGATED_USER": c.GmailDelegatedUser,
-		"MAIL_TRIGGER_RULES": c.RulesJSON, "EVENT_BUS_BROKER": c.KafkaBroker,
+		"GMAIL_OAUTH_CLIENT_ID": c.GmailClientID, "GMAIL_OAUTH_CLIENT_SECRET": c.GmailClientSecret,
+		"GMAIL_OAUTH_REFRESH_TOKEN": c.GmailRefreshToken,
+		"MAIL_TRIGGER_RULES":        c.RulesJSON, "EVENT_BUS_BROKER": c.KafkaBroker,
 		"EVENT_BUS_CONNECTION_STRING": c.KafkaConnection, "EVENT_BUS_TOPIC": c.KafkaTopic,
 	} {
 		if v == "" {

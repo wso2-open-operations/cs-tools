@@ -188,6 +188,7 @@ export default function PinnedTabs(): JSX.Element {
             size="small"
             margin="dense"
             label="Tab name"
+            required
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
             onKeyDown={(e) => {

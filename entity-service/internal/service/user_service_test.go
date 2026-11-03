@@ -728,6 +728,52 @@ func TestUserService_CreateUser(t *testing.T) {
 		}
 	})
 
+	t.Run("systemProvisioned overrides actor to SYSTEM only for a verified CSM-portal-backend caller", func(t *testing.T) {
+		var gotActor string
+		repo := stubUserRepo{
+			createUser: func(_ context.Context, req domain.CreateUserRequest, actor string) (domain.User, error) {
+				gotActor = actor
+				return domain.User{ID: userDetailTestID, Email: req.Email}, nil
+			},
+		}
+		ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "new.engineer@wso2.com"))
+		req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com", SystemProvisioned: true}
+		csmPortalBackendAccess := stubAccessServiceWithScope{scope: AccessScope{
+			Unrestricted: true, HasInternalAccess: true, ViewerEmail: "new.engineer@wso2.com",
+		}}
+		if _, err := NewUserService(repo, csmPortalBackendAccess).CreateUser(ctx, req); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gotActor != domain.SystemActor {
+			t.Errorf("actor = %q, want %q", gotActor, domain.SystemActor)
+		}
+	})
+
+	t.Run("systemProvisioned is ignored for a caller whose scope doesn't match the CSM-portal-backend shape", func(t *testing.T) {
+		for name, access := range map[string]AccessService{
+			"plain unrestricted (e.g. a pure M2M client id)": alwaysUnrestrictedAccess{},
+			"nil access (not wired up)":                       nil,
+		} {
+			t.Run(name, func(t *testing.T) {
+				var gotActor string
+				repo := stubUserRepo{
+					createUser: func(_ context.Context, req domain.CreateUserRequest, actor string) (domain.User, error) {
+						gotActor = actor
+						return domain.User{ID: userDetailTestID, Email: req.Email}, nil
+					},
+				}
+				ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "caller@example.com"))
+				req := domain.CreateUserRequest{FirstName: "Jane", LastName: "Doe", Email: "jane.doe@example.com", SystemProvisioned: true}
+				if _, err := NewUserService(repo, access).CreateUser(ctx, req); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if gotActor != "caller@example.com" {
+					t.Errorf("actor = %q, want the caller's own email (systemProvisioned must be ignored)", gotActor)
+				}
+			})
+		}
+	})
+
 	t.Run("propagates the repository's conflict on a duplicate email", func(t *testing.T) {
 		repo := stubUserRepo{
 			createUser: func(context.Context, domain.CreateUserRequest, string) (domain.User, error) {

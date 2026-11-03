@@ -140,6 +140,18 @@ type CreateUserRequest struct {
 	LastName  string     `json:"lastName"`
 	Email     string     `json:"email"`
 	Roles     []UserRole `json:"roles"`
+	// SystemProvisioned, when true, attributes this create to the fixed
+	// SystemActor instead of the caller's own forwarded x-user-id-token
+	// email. Honored only when the caller is verified, through
+	// AccessService.ResolveScope, as apps/csm-portal/backend forwarding a
+	// real WSO2-domain user token (see UserService.CreateUser) -- this is
+	// what ensureUserProvisioned (that backend's own on-demand "user" row
+	// provisioning for a first-time worknote/escalation author) sets, so the
+	// row it creates is not self-attributed to the very person it is
+	// provisioning. Ignored, with the usual token-derived actor used
+	// instead, for any other caller -- it is never a caller-supplied actor
+	// override.
+	SystemProvisioned bool `json:"systemProvisioned,omitempty"`
 }
 
 // SearchUsersRequest is the input for a user search operation.
@@ -762,6 +774,10 @@ const (
 	SalesforceEntityOpportunity       = "Opportunity"
 	SalesforceEntityProject           = "Project__c"
 	SalesforceSyncActor               = "salesforce-sync"
+	// SystemActor is created_by/updated_by for a "user" row created on a
+	// caller's own behalf by the system rather than by a deliberate actor --
+	// see CreateUserRequest.SystemProvisioned.
+	SystemActor = "SYSTEM"
 	// PortalMembershipWriteActor is created_by/updated_by for a membership
 	// written by a portal rather than by the Salesforce ingest, so the two
 	// origins stay distinguishable in the audit columns even though they
@@ -896,6 +912,11 @@ type SalesforceMembershipUpsert struct {
 
 	ProjectSfID string
 	ProjectKey  string
+
+	// KeepStaleProjectGroups skips the removal of the membership's project
+	// groups that ProjectGroups does not list, so the write only adds rows.
+	// Only the admin resync sets it (it never deletes anything).
+	KeepStaleProjectGroups bool
 
 	// IsPrimaryContact is the contact's Salesforce primary_contact__c,
 	// written to account_contact.is_primary_contact on insert and update.
@@ -2111,7 +2132,7 @@ type Product struct {
 	CreatedOn time.Time    `json:"createdOn"`
 	UpdatedOn time.Time    `json:"updatedOn"`
 
-	// Product catalogue fields (migration 0269 onward). unit, businessUnit
+	// Product catalogue fields (migration 0270 onward). unit, businessUnit
 	// and manufacturer are the lowercase enum values.
 	Code         *string `json:"code"`
 	Unit         *string `json:"unit"`
@@ -2213,7 +2234,7 @@ type ProductVersion struct {
 	CreatedOn         time.Time `json:"createdOn"`
 	UpdatedOn         time.Time `json:"updatedOn"`
 
-	// Product catalogue fields (migrations 0269-0271). The public feeds group
+	// Product catalogue fields (migrations 0270-0272). The public feeds group
 	// the live rows sharing PublicID into one listing.
 	ProductName                string         `json:"productName"`
 	ProductCode                *string        `json:"productCode"`
@@ -2449,6 +2470,13 @@ type DeployedProductVersionRef struct {
 	Name           string     `json:"name"`
 	ReleasedDate   *time.Time `json:"releasedDate"`
 	SupportEoLDate *time.Time `json:"supportEoLDate"`
+	// DeploymentProfile is product_version.deployment_profile (e.g. "All In
+	// One", "API Control Plane"); null when the version has none. Several
+	// version rows can share a Name and differ only by this, so without it a
+	// caller cannot tell which of them a deployed product points at.
+	// Postgres data source only -- the ServiceNow version record carries no
+	// profile, so it stays null there.
+	DeploymentProfile *string `json:"deploymentProfile"`
 }
 
 // DeployedProductView is the enriched search result for a deployed product.
@@ -4631,7 +4659,10 @@ const (
 )
 
 // CreateChangeRequestRequest is the input for POST /change-requests.
-// Subject is the only required field; all others are optional.
+// Subject and Type are required; all others are optional. Priority, Impact and
+// Risk must each be one of the values its type lists (planning, which a
+// migrated change request can read back as its priority, is not one): anything
+// else is a 400 naming the field, before anything is written.
 type CreateChangeRequestRequest struct {
 	Subject             string                 `json:"subject"`
 	Category            *ChangeRequestCategory `json:"category,omitempty"`
@@ -4654,6 +4685,18 @@ type CreateChangeRequestRequest struct {
 	TestPlan            *string                `json:"testPlan,omitempty"`
 	PlannedStartDate    *string                `json:"plannedStartDate,omitempty"`
 	PlannedEndDate      *string                `json:"plannedEndDate,omitempty"`
+
+	// ImplementationDeviation: see ChangeRequest.ImplementationDeviation. It is
+	// meant for a clone of a change request that has one (the CSM webapp sends it
+	// only then), but any staff create may carry it; a blank value (no text once
+	// its markup is removed, such as an emptied editor's "<p><br></p>") is not
+	// stored. The new change request then has to fold it into its implementation
+	// plan and clear it before Request Approval.
+	// Staff only: a create from a customer carrying one is refused (403). A
+	// backing data source that cannot store it refuses a non-blank one (400),
+	// and it is never mirrored to the previous system.
+	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
+
 	// Comment is the customer-visible "Additional comments" entry and WorkNote
 	// the internal "Work notes" entry. On the PostgreSQL data source each
 	// becomes a row in comment (type COMMENT / WORK_NOTE) written with the
@@ -4708,6 +4751,21 @@ type CreateChangeRequestRequest struct {
 	// IsCustomerApproved / IsCustomerReviewed). Postgres data source only.
 	CustomerApprovalRequired *bool `json:"customerApprovalRequired,omitempty"`
 	CustomerReviewRequired   *bool `json:"customerReviewRequired,omitempty"`
+
+	// StandardChangeTemplateID raises the change request from a standard change
+	// template (PostgreSQL data sources only). It is required for type
+	// "standard" and refused with any other type. The template must be active.
+	// Everything the template specifies -- subject, description, justification,
+	// the implementation, backout and test plans, the risk and impact analysis,
+	// category, impact, risk, rollback duration, planning visibility and the two
+	// customer gates -- comes from its current version with the parameters
+	// filled in, and must not be sent. StandardChangeTemplateVersionID, when
+	// sent, is the version the caller rendered: a template revised since is a
+	// 409. StandardChangeParameters are the values for the version's
+	// parameters, by key.
+	StandardChangeTemplateID        *string           `json:"standardChangeTemplateId,omitempty"`
+	StandardChangeTemplateVersionID *string           `json:"standardChangeTemplateVersionId,omitempty"`
+	StandardChangeParameters        map[string]string `json:"standardChangeParameters,omitempty"`
 }
 
 // CreateChangeRequestResponse is the output for POST /change-requests.
@@ -5098,7 +5156,13 @@ type SearchAccountContactsResponse struct {
 }
 
 // PatchChangeRequestRequest is the request body for PATCH /change-requests/{id}.
-// All fields are optional, but at least one must be provided.
+// All fields are optional, but at least one must be provided. An explicit null
+// clears ImplementationPlan, Priority, Category, RequestedByID,
+// AffectedServicesText, AffectedComponentsText and RollbackDurationText and
+// counts as a field. A null DurationInput is forwarded by the data source that
+// talks to the previous system directly and refused, like any DurationInput, by
+// the PostgreSQL data sources. CustomerGroupID and EnvironmentIDs refuse a null;
+// on every other field a null is read as omitted.
 type PatchChangeRequestRequest struct {
 	Title              *string              `json:"title,omitempty"`
 	Description        *string              `json:"description,omitempty"`
@@ -5197,6 +5261,10 @@ type PatchChangeRequestRequest struct {
 	// OnHoldReason also accompanies this same request. OnHoldReason may also
 	// be sent alone (OnHold omitted) to edit the reason text of an existing
 	// hold without touching OnHold itself.
+	//
+	// The hold, like ServiceID and ServiceOfferingID, is PostgreSQL-only: it is
+	// never mirrored to the previous system, and the data source that talks to
+	// that system directly refuses a request carrying any of the four (400).
 	OnHold       *bool   `json:"onHold,omitempty"`
 	OnHoldReason *string `json:"onHoldReason,omitempty"`
 	// IsPlanningVisibleToCustomers ("Implementation Plan visible to customers")
@@ -5218,31 +5286,68 @@ type PatchChangeRequestRequest struct {
 	CustomerApprovalRequired *bool `json:"customerApprovalRequired,omitempty"`
 	CustomerReviewRequired   *bool `json:"customerReviewRequired,omitempty"`
 
-	// The fields below are the change-request field-parity additions. Except
-	// Comment and WorkNote (journal entries, append-only, cannot be cleared),
-	// every one of them uses a pointer-to-pointer to distinguish three states:
+	// ImplementationDeviation sets the "Deviation from the implementation plan"
+	// (see ChangeRequest.ImplementationDeviation). nil leaves it unchanged; a
+	// blank value -- no text once its markup is removed, so "<p><br></p>" too --
+	// clears it (a plain *string: an explicit null is read as omitted, unlike
+	// the pointer-to-pointer fields below). It is not one of the
+	// approved lock's fields: it is recorded in implement, review and
+	// customer_review. Before implementation a change is a 400
+	// change_request_deviation_not_yet (in new, clearing one a clone carried over
+	// is accepted), and in a final state (closed, canceled, rollback) a 400
+	// change_request_deviation_final; resending the stored value is always
+	// accepted. The state judged is the stored one, so a PATCH that closes the
+	// change from review may still record the deviation, and one that moves it
+	// from scheduled to implement may not. Request Approval is refused (400
+	// change_request_deviation_not_incorporated) while one is stored, unless the
+	// same PATCH clears it. Staff only (a customer's PATCH may not carry it).
+	// A backing data source that cannot store it refuses it (400), and it is
+	// never mirrored to the previous system.
+	ImplementationDeviation *string `json:"implementationDeviation,omitempty"`
+
+	// The fields below are the change-request field-parity additions.
+	// ImplementationPlan, Priority, Category, RequestedByID,
+	// AffectedServicesText, AffectedComponentsText, RollbackDurationText,
+	// CustomerGroupID and DurationInput are pointers to pointers, to distinguish
+	// three states:
 	//   - nil outer pointer: field omitted -- leave the value unchanged
 	//   - non-nil outer, nil inner: explicit null -- clear the value
 	//   - non-nil outer, non-nil inner: set the value
-	// DeploymentProductIDs uses a single pointer instead: nil
-	// means omitted, and any non-nil slice (including an explicitly empty one)
-	// replaces the whole list -- the same convention CreateIncidentRequest's
-	// WatchList already uses, since an array field has no separate "null" state
-	// worth distinguishing from "empty".
-	ImplementationPlan     **string                `json:"implementationPlan"`
-	Priority               **ChangeRequestPriority `json:"priority"`
-	Category               **ChangeRequestCategory `json:"category"`
-	RequestedByID          **string                `json:"requestedById"`
-	AffectedServicesText   **string                `json:"affectedServicesText"`
-	AffectedComponentsText **string                `json:"affectedComponentsText"`
+	// On the wire an explicit null reaches the struct as the second state
+	// through PatchChangeRequestRequest.UnmarshalJSON
+	// (change_request_patch_json.go), and counts as a field: encoding/json alone
+	// reads a null as an omitted field. CustomerGroupID's null is refused like
+	// any other value, and so is EnvironmentIDs' (UnmarshalJSON keeps it as a
+	// non-nil pointer to a nil slice). DurationInput's null clears only on the
+	// data source that talks to the previous system directly; the PostgreSQL data
+	// sources refuse any DurationInput (see its comment). The tags carry
+	// omitempty so a marshalled request (the write-back failure record) reads
+	// back the same way.
+	// DeploymentProductIDs, EnvironmentIDs and DeploymentIDs use a single
+	// pointer instead: nil means omitted (for the first and the last a null
+	// too), and any non-nil slice (including an explicitly empty one) replaces
+	// the whole list -- the same convention CreateIncidentRequest's WatchList
+	// already uses, since an array field has no separate "null" state worth
+	// distinguishing from "empty". Comment and WorkNote are plain pointers:
+	// journal entries, append-only, which cannot be cleared (a null is read as
+	// omitted).
+	ImplementationPlan **string `json:"implementationPlan,omitempty"`
+	// Priority is critical, high, moderate or low. Anything else is a 400,
+	// planning included: rows migrated from the previous system can read back
+	// "planning" (its priority 5), but it is not a value this API sets.
+	Priority               **ChangeRequestPriority `json:"priority,omitempty"`
+	Category               **ChangeRequestCategory `json:"category,omitempty"`
+	RequestedByID          **string                `json:"requestedById,omitempty"`
+	AffectedServicesText   **string                `json:"affectedServicesText,omitempty"`
+	AffectedComponentsText **string                `json:"affectedComponentsText,omitempty"`
 	// RollbackDurationText is a raw, unvalidated string (e.g. "2 hours");
 	// parsing or normalizing it is a decision for the layer above, not this one.
-	RollbackDurationText **string  `json:"rollbackDurationText"`
-	DeploymentProductIDs *[]string `json:"deploymentProductIds"`
+	RollbackDurationText **string  `json:"rollbackDurationText,omitempty"`
+	DeploymentProductIDs *[]string `json:"deploymentProductIds,omitempty"`
 	// CustomerGroupID and EnvironmentIDs are NO LONGER ACCEPTED (any value,
 	// null included, is a 400); see CreateChangeRequestRequest.
-	CustomerGroupID **string  `json:"customerGroupId"`
-	EnvironmentIDs  *[]string `json:"environmentIds"`
+	CustomerGroupID **string  `json:"customerGroupId,omitempty"`
+	EnvironmentIDs  *[]string `json:"environmentIds,omitempty"`
 	// DeploymentIDs replaces the whole list of the project's deployments the
 	// change touches (an explicitly empty array clears it, and with it the
 	// deployment products that follow from it). Together
@@ -5254,17 +5359,18 @@ type PatchChangeRequestRequest struct {
 	// Changing ProjectID while deployments are stored requires DeploymentIDs
 	// in the same request. Cannot be combined with the single DeploymentID /
 	// DeployedProductID fields. PostgreSQL data source only.
-	DeploymentIDs *[]string `json:"deploymentIds"`
+	DeploymentIDs *[]string `json:"deploymentIds,omitempty"`
 	// Comment and WorkNote append a new journal entry (the customer-visible
 	// "Additional comments" and the internal "Work notes"); they reject an
 	// empty or whitespace-only value, and neither can be used to clear anything.
 	Comment  *string `json:"comment,omitempty"`
 	WorkNote *string `json:"workNote,omitempty"`
-	// DurationInput is the calendar duration in whole seconds. It is accepted
-	// only when it exactly matches the effective planned window: PlannedStartOn
-	// if provided in this same request, else the change request's stored start,
-	// and likewise for the end. See CreateChangeRequestRequest.DurationInput.
-	DurationInput **int `json:"durationInput"`
+	// DurationInput is the calendar duration in whole seconds. The PostgreSQL
+	// data sources have no column for it and refuse any value, null included.
+	// The data source that talks to the previous system directly forwards it (a
+	// null as a null) without checking it against the planned window; a
+	// negative value is a 400.
+	DurationInput **int `json:"durationInput,omitempty"`
 }
 
 // PatchChangeRequestResponse is the response for PATCH /change-requests/{id}.
@@ -5569,8 +5675,8 @@ type ChangeRequest struct {
 	// CustomerProposal is the conversation about a time the customer proposed
 	// (see ChangeRequestCustomerProposal): present on the PostgreSQL data source
 	// when customer_updated_on is set, absent otherwise. It is derived from the two
-	// synced columns customer_updated_on / customer_updated_date_confirmation
-	// and the approver rows; nothing extra is stored for it.
+	// synced columns customer_updated_on / customer_updated_date_confirmation,
+	// the approver rows and the record of who proposed the time (migration 0249).
 	CustomerProposal *ChangeRequestCustomerProposal `json:"customerProposal,omitempty"`
 
 	// The fields below are change-request field-parity additions. All 20 are
@@ -5584,6 +5690,16 @@ type ChangeRequest struct {
 	Priority           *string    `json:"priority"`
 	Category           *string    `json:"category"`
 	RequestedBy        *EntityRef `json:"requestedBy"`
+
+	// ImplementationDeviation is the "Deviation from the implementation plan":
+	// what the implementation or the review actually did differently from
+	// ImplementationPlan (rich text). Unlike the plan, it is recorded after the
+	// approval: from implement on, until the change request is closed, canceled
+	// or rolled back. A clone copies it, and the clone must fold it into its plan
+	// and clear it before Request Approval. Internal: null for a restricted
+	// (customer) caller, the same line Tags draws. Null when the backing data
+	// source has no such field.
+	ImplementationDeviation *string `json:"implementationDeviation"`
 
 	// Group C1 -- real content the shared API did not surface before.
 	AffectedServicesText   *string `json:"affectedServicesText"`
@@ -5614,6 +5730,14 @@ type ChangeRequest struct {
 	// never mirrored to the previous system (unlike a case's).
 	Tags []Tag `json:"tags"`
 
+	// StandardChange names the standard change template (and version) the change
+	// request was raised from, with the values its parameters were given. Staff
+	// only, PostgreSQL data sources only; omitted for a change request not raised
+	// from a template, and for every other reader. While it is set, the fields the
+	// template specifies are read-only (errorCode
+	// change_request_standard_template_field).
+	StandardChange *ChangeRequestStandardChange `json:"standardChange,omitempty"`
+
 	// Group C2 -- carried for parity, read-through only; no write path is
 	// exposed for any of these seven.
 	// ChangeRequestType is named to avoid colliding with the ChangeRequestType
@@ -5636,8 +5760,9 @@ type ChangeRequest struct {
 // customer proposed for it. The previous system already modelled that conversation and
 // the synced schema carries it: change_request.customer_updated_on is the customer's
 // proposed plan START and change_request.customer_updated_date_confirmation is WSO2's
-// answer, AGREE or DISAGREE (the confirmation of the proposed date). Nothing here is
-// stored beyond those two columns; the object is derived on every read.
+// answer, AGREE or DISAGREE (the confirmation of the proposed date). Who proposed it is
+// recorded by the proposal itself (customer_proposed_by_user_id / customer_proposed_for /
+// customer_proposed_on, migration 0249). The object is derived on every read.
 //
 // Answer is one of
 //
@@ -5662,16 +5787,25 @@ type ChangeRequestCustomerProposal struct {
 	Answer string  `json:"answer"`
 	// ProposerRecorded says whether a registered contact of the change's project is
 	// recorded as having proposed the time: while the answer is "pending", true when the
-	// change's last writer (work_item.updated_by) is one, who is then the person who
-	// proposed it. Nothing else names a proposer (no comment, audit or other log is read)
-	// and nothing is added to record one. False when nobody is recorded -- a date a WSO2
-	// user wrote in the previous system, one left over from an older cycle, or a genuine
-	// proposal that a later write to the change replaced as last writer. A time nobody is
-	// recorded as having proposed is not a proposal WSO2 can accept (CanAccept is false,
-	// Accept is refused) and the banner says the proposer is not recorded; proposing a
-	// different time is the way on, and the customer then approves it. Absent unless
-	// pending. A customer is only ever shown a pending time that somebody is recorded as
-	// having proposed (otherwise they read "unanswered").
+	// proposal's own record (customer_proposed_by_user_id, written with the proposal) is
+	// about the stored time and names a contact who is still a registered contact of the
+	// project. A later write to the change by anybody else (a work note, the hold, another
+	// writer's write to the work item) does not change it; only a new round does: entering
+	// Customer Approval, or a plain Re-schedule, voids it. A change with no record
+	// (customer_proposed_for NULL: a time stored before migration 0249, or one written later
+	// by another writer on a change that has had no proposal since it entered Customer
+	// Approval) is read by the rule that held before 0249: the change's last writer
+	// (work_item.updated_by) when that is a registered contact; a write that replaces that
+	// writer records them first when they have a user record (migration 0250), so such a
+	// proposal stays recorded whoever writes to the change after it. No comment, audit or
+	// other log is read. False when nobody is recorded -- a date a WSO2 user wrote in the
+	// previous system, one left over from an older cycle, a stored time another writer
+	// moved off its record, a contact who has left the project or whose user was deleted.
+	// A time nobody is recorded as having proposed is not a proposal WSO2 can accept
+	// (CanAccept is false, Accept is refused) and the banner says the proposer is not
+	// recorded; proposing a different time is the way on, and the customer then approves
+	// it. Absent unless pending. A customer is only ever shown a pending time that
+	// somebody is recorded as having proposed (otherwise they read "unanswered").
 	ProposerRecorded *bool `json:"proposerRecorded,omitempty"`
 	// ProposedByName / ProposedByEmail / ProposedOn: the proposer and the time, only
 	// for a staff reader, only while pending and ProposerRecorded is true.
@@ -6013,6 +6147,13 @@ type SearchGroupsFilters struct {
 	// (the ones assignmentGroupId takes), not team-registry ids, which the
 	// search returns without this filter on the Postgres data source.
 	SupportGroupsOnly bool `json:"supportGroupsOnly,omitempty"`
+	// IncidentExtraGroupsOnly limits the result to the active groups the
+	// deployment has configured as extra incident assignment groups (and none
+	// when none are configured). Ids are "group" ids, as with SupportGroupsOnly.
+	// The set may include a group that is also a service's support group, so it
+	// can overlap SupportGroupsOnly results. It wins over SupportGroupsOnly when
+	// both are set. Other data sources return an empty result.
+	IncidentExtraGroupsOnly bool `json:"incidentExtraGroupsOnly,omitempty"`
 }
 
 // SearchGroupsRequest is the input for POST /groups/search.
@@ -6598,6 +6739,11 @@ type SearchIncidentsFilters struct {
 	SearchQuery string             `json:"searchQuery"`
 	Priorities  []IncidentPriority `json:"priorities"`
 	ParentIDs   []string           `json:"parentIds"`
+	// ParentIncidentIDs filters to the child incidents of these incidents:
+	// incident.parent_incident_id (ServiceNow's parent_incident), not the
+	// generic work_item.parent_id ParentIDs matches. UUIDs. PostgreSQL only;
+	// the ServiceNow data source rejects it.
+	ParentIncidentIDs []string `json:"parentIncidentIds,omitempty"`
 	// Number filters to the incident whose human-readable number (e.g.
 	// "INC0010001") exactly matches (optional). Exact match against
 	// ServiceNow's `number` column, routed as a first-class filter rather
@@ -6934,37 +7080,41 @@ type CreateIncidentResponse struct {
 // UpdateIncidentRequest is the input for PATCH /incidents/{id}. All fields are optional,
 // but at least one must be provided.
 type UpdateIncidentRequest struct {
-	ID                  string                  `json:"-"`
-	Subject             *string                 `json:"subject,omitempty"`
-	Priority            *IncidentPriority       `json:"priority,omitempty"`
-	State               *IncidentState          `json:"state,omitempty"`
-	Category            *IncidentCategory       `json:"category,omitempty"`
-	Subcategory         *IncidentSubcategory    `json:"subcategory,omitempty"`
-	ContactType         *IncidentContactType    `json:"contactType,omitempty"`
-	Impact              *IncidentImpact         `json:"impact,omitempty"`
-	Urgency             *IncidentUrgency        `json:"urgency,omitempty"`
-	ResolutionCode      *IncidentResolutionCode `json:"resolutionCode,omitempty"`
-	ParentID            *string                 `json:"parentId,omitempty"`
-	ParentIncidentID    *string                 `json:"parentIncidentId,omitempty"`
-	AssignmentGroupID   *string                 `json:"assignmentGroupId,omitempty"`
-	AssignedEngineerID  *string                 `json:"assignedEngineerId,omitempty"`
-	ServiceID           *string                 `json:"serviceId,omitempty"`
-	ServiceOfferingID   *string                 `json:"serviceOfferingId,omitempty"`
-	ConfigurationItemID *string                 `json:"configurationItemId,omitempty"`
-	ChangeRequestID     *string                 `json:"changeRequestId,omitempty"`
-	ProblemID           *string                 `json:"problemId,omitempty"`
-	CausedByID          *string                 `json:"causedById,omitempty"`
-	ResolvedByID        *string                 `json:"resolvedById,omitempty"`
-	ResolutionNotes     *string                 `json:"resolutionNotes,omitempty"`
-	IncidentReport      *string                 `json:"incidentReport,omitempty"`
-	AdditionalComments  *string                 `json:"additionalComments,omitempty"`
-	WorkNotes           *string                 `json:"workNotes,omitempty"`
-	WatchList           *[]string               `json:"watchList,omitempty"`
+	ID             string                  `json:"-"`
+	Subject        *string                 `json:"subject,omitempty"`
+	Priority       *IncidentPriority       `json:"priority,omitempty"`
+	State          *IncidentState          `json:"state,omitempty"`
+	Category       *IncidentCategory       `json:"category,omitempty"`
+	Subcategory    *IncidentSubcategory    `json:"subcategory,omitempty"`
+	ContactType    *IncidentContactType    `json:"contactType,omitempty"`
+	Impact         *IncidentImpact         `json:"impact,omitempty"`
+	Urgency        *IncidentUrgency        `json:"urgency,omitempty"`
+	ResolutionCode *IncidentResolutionCode `json:"resolutionCode,omitempty"`
+	ParentID       *string                 `json:"parentId,omitempty"`
+	// ParentIncidentID: nil leaves the parent incident as it is, a non-nil
+	// pointer holding nil (an explicit `null`) clears it, as Environment.
+	// See UnmarshalJSON.
+	ParentIncidentID    **string  `json:"parentIncidentId,omitempty"`
+	AssignmentGroupID   *string   `json:"assignmentGroupId,omitempty"`
+	AssignedEngineerID  *string   `json:"assignedEngineerId,omitempty"`
+	ServiceID           *string   `json:"serviceId,omitempty"`
+	ServiceOfferingID   *string   `json:"serviceOfferingId,omitempty"`
+	ConfigurationItemID *string   `json:"configurationItemId,omitempty"`
+	ChangeRequestID     *string   `json:"changeRequestId,omitempty"`
+	ProblemID           *string   `json:"problemId,omitempty"`
+	CausedByID          *string   `json:"causedById,omitempty"`
+	ResolvedByID        *string   `json:"resolvedById,omitempty"`
+	ResolutionNotes     *string   `json:"resolutionNotes,omitempty"`
+	IncidentReport      *string   `json:"incidentReport,omitempty"`
+	AdditionalComments  *string   `json:"additionalComments,omitempty"`
+	WorkNotes           *string   `json:"workNotes,omitempty"`
+	WatchList           *[]string `json:"watchList,omitempty"`
 	// Environment: see CreateIncidentRequest.Environment doc comment. Double
 	// pointer distinguishes "omitted" (nil) from an explicit `null` clear
 	// (non-nil outer, nil inner) from a new value (non-nil, non-nil) -- a
 	// single *string can't tell omitted apart from explicit null on decode,
-	// same convention as ChangeRequest's CustomerGroupID.
+	// same convention as ChangeRequest's CustomerGroupID. encoding/json alone
+	// decodes a `null` as omitted; UnmarshalJSON is what makes it a clear.
 	Environment **string `json:"environment"`
 }
 
@@ -7021,7 +7171,12 @@ type IncidentView struct {
 	ResolutionNotes *string `json:"resolutionNotes"`
 	ResolvedBy      *string `json:"resolvedBy"`
 	ResolvedOn      *string `json:"resolvedOn"`
-	IncidentReport  *string `json:"incidentReport"`
+	// ResolvedWithParent is true when the incident was resolved because its
+	// parent incident was (ServiceNow's "Update Child Incidents" rule, ported
+	// to UpdateIncidentLifecycle), and false once it is resolved on its own.
+	// Always false on the ServiceNow data source.
+	ResolvedWithParent bool    `json:"resolvedWithParent"`
+	IncidentReport     *string `json:"incidentReport"`
 	// Description is ServiceNow's incident.description field (separate from Subject, which
 	// maps to the shorter short_description), read from work_item.description -- the same
 	// column every other work_item type already uses for its own long-form description.
@@ -8821,12 +8976,29 @@ type SLAStatus struct {
 	// addressed by these fields. AssigneeName/AssigneeEmail resolve
 	// work_item.assigned_to_id the same way GetCaseByID's own
 	// AssignedEngineer join does; "" when the case has no assignee.
-	// TeamEmail/TeamLeadName resolve from the SAME "group" row Team
-	// already comes from (account.cre_team_id) -- "group".group_email and
-	// "group".manager_id -> "user".name respectively; "" when the case has
-	// no account, the account has no CRE team, or that team has no
-	// group_email/manager_id set. All four are best-effort display/routing
-	// enrichment, not part of the SLA clock itself.
+	// TeamEmail is NOT the "group" row Team's own display name comes from
+	// (account.cre_team_id -> "group") -- it is team.group_email, on the
+	// team row with the SAME id (team.id and "group".id coincide for a
+	// properly-synced CRE team -- see TeamLeadName's own doc comment
+	// below), since "group".group_email and team.group_email are two
+	// different, independently-synced values for the same team and
+	// team.group_email is the one other proven code (TeamGroupEmails,
+	// migration_case_report_repo.go) already relies on. "" when the case
+	// has no account, the account has no CRE team, or that team has no
+	// group_email set. TeamLeadName does NOT come from that same "group"
+	// row at all either -- "group".manager_id is an unrelated field (a real,
+	// reported bug: an earlier version of this resolved TeamLeadName from
+	// it, which for most teams simply isn't set, and for any team where it
+	// is set names the wrong person). The real team lead is
+	// team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id -- the identical join CaseTeamLeads already uses
+	// for the escalation ladder's own team-lead notifications
+	// (escalation_repo.go), just picking one (oldest membership first) for
+	// this single-string field, since a team can genuinely have more than
+	// one lead (team_member.role has no uniqueness constraint for 'lead',
+	// unlike the one-per-team 'americas_team_lead' role). All four are
+	// best-effort display/routing enrichment, not part of the SLA clock
+	// itself.
 	AssigneeName  string `json:"assigneeName,omitempty"`
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
@@ -8934,6 +9106,23 @@ type SLAClockState struct {
 	// weekends/holidays the pause spanned. Always 0 for a 24x7-scheduled
 	// clock (nothing ever writes this column for one).
 	BusinessPauseDurationSeconds int64 `json:"businessPauseDurationSeconds"`
+	// AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName mirror SLAStatus's
+	// own fields of the same name and the SAME resolution -- see that
+	// type's own doc comment, in particular for why TeamLeadName is NOT
+	// the account's CRE "group" row's own manager_id (a real, fixed bug)
+	// but team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id, the same join CaseTeamLeads already uses.
+	// Added so csm-notification-service's SLA breach email reaction can
+	// read all four from the exact same read it already makes right
+	// before sending a breach alert (GetClockState, for its own
+	// stale-alert suppression check) rather than needing a second round
+	// trip to GET /sla-status. "" when not resolvable (no assignee, no
+	// team, or the team has no group_email/lead set) -- same as
+	// SLAStatus's own posture.
+	AssigneeName  string `json:"assigneeName,omitempty"`
+	AssigneeEmail string `json:"assigneeEmail,omitempty"`
+	TeamEmail     string `json:"teamEmail,omitempty"`
+	TeamLeadName  string `json:"teamLeadName,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed
@@ -9593,6 +9782,7 @@ type SearchKBArticlesRequest struct {
 	AuthorID        string           `json:"authorId,omitempty"`
 	TeamKeys        []string         `json:"teamKeys,omitempty"`
 	SearchQuery     string           `json:"searchQuery,omitempty"`
+	PublicOnly      bool             `json:"publicOnly,omitempty"`
 	Pagination      Pagination       `json:"pagination"`
 }
 
@@ -9658,6 +9848,7 @@ type KnowledgeBase struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
 	Active    bool      `json:"active"`
+	IsPublic  bool      `json:"isPublic"`
 	CreatedOn time.Time `json:"createdOn"`
 	UpdatedOn time.Time `json:"updatedOn"`
 }

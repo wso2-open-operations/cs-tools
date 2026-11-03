@@ -67,6 +67,22 @@ describe("widgetPreviewUrl", () => {
     expect(filters.rating).toEqual(["5"]);
   });
 
+  it("encodes a boolean filter value instead of dropping it", () => {
+    // An account widget's `hasProject` / `active` were dropped from the URL,
+    // so the preview listed accounts the tile had not counted.
+    const href = buildWidgetPreviewHref({
+      previewSlug: "accounts",
+      widgetId: "with-projects",
+      displayName: "Accounts with Projects",
+      filters: { hasProject: true, active: false },
+      resourceType: "account",
+    });
+
+    const params = new URLSearchParams(href.split("?")[1]);
+    expect(params.get("hasProject")).toBe("true");
+    expect(params.get("active")).toBe("false");
+  });
+
   it("masks the current user's own id to @me instead of embedding it verbatim", () => {
     const href = buildWidgetPreviewHref({
       previewSlug: "cases",

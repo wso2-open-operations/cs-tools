@@ -27,6 +27,7 @@ const patchMutateMock = vi.fn();
 const patchResetMock = vi.fn();
 const editAccountTeamsDialogMock = vi.fn();
 const useGetUsersMeMock = vi.fn(() => ({ data: { roles: ["admin"] } }));
+let mockIsAdmin = true;
 let patchIsPending = false;
 let patchIsError = false;
 let patchError: Error | null = null;
@@ -89,6 +90,15 @@ vi.mock("@features/settings/api/useGetUsersMe", () => ({
   useGetUsersMe: () => useGetUsersMeMock(),
 }));
 
+vi.mock("@context/current-user/usePortalAccess", () => ({
+  usePortalAccess: () => ({ isSplAudience: false, isAdmin: mockIsAdmin }),
+}));
+vi.mock("@features/csm-admin/salesforce-resync/SalesforceResyncDialog", () => ({
+  default: ({ scope, id }: { scope: string; id: string }) => (
+    <div data-testid="salesforce-resync-dialog">{`${scope}:${id}`}</div>
+  ),
+}));
+
 // Imported after the mocks above so the module picks them up.
 import CsmAccountDetailPage from "@features/csm-accounts/pages/CsmAccountDetailPage";
 import { BackendApiError } from "@api/backend/client";
@@ -149,6 +159,22 @@ describe("CsmAccountDetailPage", () => {
     patchIsPending = false;
     patchIsError = false;
     patchError = null;
+    mockIsAdmin = true;
+  });
+
+  it("shows Compare with Salesforce to an admin and opens the dialog for this account", () => {
+    mockAccount({ data: BASE_ACCOUNT });
+    renderPage(<CsmAccountDetailPage />);
+    expect(screen.queryByTestId("salesforce-resync-dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare with Salesforce" }));
+    expect(screen.getByTestId("salesforce-resync-dialog")).toHaveTextContent("account:acct-1");
+  });
+
+  it("hides Compare with Salesforce from a non-admin", () => {
+    mockIsAdmin = false;
+    mockAccount({ data: BASE_ACCOUNT });
+    renderPage(<CsmAccountDetailPage />);
+    expect(screen.queryByRole("button", { name: "Compare with Salesforce" })).not.toBeInTheDocument();
   });
 
   it("shows a placeholder and an edit trigger when neither CRE nor SRE team is set", () => {

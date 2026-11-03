@@ -37,6 +37,11 @@ type AccountPartnerWriteRepository interface {
 	// the shape the ServiceNow sync left in the table. It returns how many
 	// rows it inserted and deleted.
 	ReplacePartners(ctx context.Context, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (added, removed int, err error)
+	// AddPartners is ReplacePartners without the deletes: it inserts the
+	// missing forward and reverse rows for partnerIDs and records state, and
+	// leaves every stored link alone. The admin resync uses it, because it
+	// never deletes a row.
+	AddPartners(ctx context.Context, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (added int, err error)
 }
 
 type accountPartnerWriteRepo struct {
@@ -161,4 +166,50 @@ func replaceAccountPartners(ctx context.Context, q querier, customerSfID, custom
 		return 0, 0, err
 	}
 	return added, removed, nil
+}
+
+// AddPartners implements AccountPartnerWriteRepository.
+func (r *accountPartnerWriteRepo) AddPartners(ctx context.Context, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (int, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("add account partners: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	added, err := addAccountPartners(ctx, tx, customerSfID, customerID, partnerIDs, state)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("add account partners: commit: %w", err)
+	}
+	return added, nil
+}
+
+// addAccountPartners is AddPartners' body: the two insert statements of
+// replaceAccountPartners under the same lock, and no delete.
+func addAccountPartners(ctx context.Context, q querier, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (int, error) {
+	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, accountPartnersLockKey(customerSfID)); err != nil {
+		return 0, fmt.Errorf("add account partners: lock: %w", err)
+	}
+	if partnerIDs == nil {
+		partnerIDs = []string{}
+	}
+	added := 0
+	for _, stmt := range []struct {
+		what string
+		sql  string
+	}{
+		{"insert forward links", insertForwardPartnerLinksQuery},
+		{"insert reverse links", insertReversePartnerLinksQuery},
+	} {
+		tag, err := q.Exec(ctx, stmt.sql, domain.SalesforceSyncActor, customerID, partnerIDs, relationshipLabelPartnerOf, relationshipLabelCustomerOf)
+		if err != nil {
+			return 0, fmt.Errorf("add account partners: %s: %w", stmt.what, err)
+		}
+		added += int(tag.RowsAffected())
+	}
+	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
+		return 0, err
+	}
+	return added, nil
 }

@@ -28,7 +28,7 @@ import (
 )
 
 // ProductVersionRepository defines the persistence operations for the
-// product_version table (migration 0016, catalogue fields from 0269).
+// product_version table (migration 0016, catalogue fields from 0270).
 type ProductVersionRepository interface {
 	// SearchProductVersions returns a filtered, paginated slice of product versions
 	// together with the total count of matching rows before pagination.

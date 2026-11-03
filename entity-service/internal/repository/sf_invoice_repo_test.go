@@ -29,11 +29,17 @@ import (
 // (none: no row), everything else with one row, recording the statements.
 type updateTagQuerier struct {
 	partnerQuerier
-	update string
-	rows   int64
+	update   string
+	rows     int64
+	prevOpps []string // answer to previousLineItemOpportunitiesQuery
 }
 
 func (q *updateTagQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if sql == previousLineItemOpportunitiesQuery {
+		q.statements = append(q.statements, sql)
+		q.args = append(q.args, args)
+		return scanRow{vals: []any{append([]string{}, q.prevOpps...)}}
+	}
 	if sql == q.update {
 		q.statements = append(q.statements, sql)
 		q.args = append(q.args, args)

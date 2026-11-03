@@ -33,6 +33,7 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import {
   POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
@@ -317,7 +318,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
-              Description *
+              Description
+              <RequiredMark />
             </Typography>
             <Box role="group" aria-labelledby="sra-description-label">
               <Editor
@@ -328,6 +330,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 maxHeight="300px"
                 toolbarVariant="full"
                 disabled={submitting}
+                ariaRequired
               />
             </Box>
           </Grid>
@@ -338,7 +341,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
               color="text.secondary"
               sx={{ display: "block", mb: 0.5 }}
             >
-              Attachments *
+              Attachments
+              <RequiredMark />
             </Typography>
             <AttachmentsField
               attachments={attachments}

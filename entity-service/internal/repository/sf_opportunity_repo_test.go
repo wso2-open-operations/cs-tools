@@ -84,6 +84,12 @@ func (q *oppQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
 func (q *oppQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case previousLineItemOpportunitiesQuery:
+		prev := []string{}
+		if owner, ok := q.products[args[0].(string)]; ok {
+			prev = append(prev, owner)
+		}
+		return scanRow{vals: []any{prev}}
 	case insertSfOpportunityQuery:
 		q.nextID++
 		id := fmt.Sprintf("opp-row-%d", q.nextID)
@@ -300,5 +306,28 @@ func TestSfOpportunitySQL_NeverTouchesServiceNowColumns(t *testing.T) {
 		if m := forbidden.FindString(sql); m != "" {
 			t.Errorf("%s writes ServiceNow-owned column %q", name, m)
 		}
+	}
+}
+
+// A line item the opportunity set takes over from another opportunity
+// re-derives the opportunity it left, after the new one.
+func TestWriteSfOpportunity_LineItemMoveDerivesPreviousOpportunity(t *testing.T) {
+	q := &oppQuerier{
+		opportunities: map[string]string{"006xx": "opp-a", "006yy": "opp-b"},
+		products:      map[string]string{"00k-moved": "opp-b"},
+	}
+	if _, err := writeSfOpportunity(context.Background(), q, domain.SalesforceOpportunityUpsert{
+		SfID: "006xx", KeepStaleLineItems: true, LineItems: []domain.SalesforceOpportunityLineItemUpsert{lineItem("00k-moved")},
+	}, oppState("UPDATED")); err != nil {
+		t.Fatal(err)
+	}
+	var derived int
+	for _, s := range q.statements {
+		if s == deriveOnboardingForOpportunityQuery {
+			derived++
+		}
+	}
+	if derived != 2 {
+		t.Errorf("derive statements = %d, want 2 (new opportunity, then the previous one)", derived)
 	}
 }

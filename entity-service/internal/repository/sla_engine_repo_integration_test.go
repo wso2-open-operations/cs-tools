@@ -311,6 +311,65 @@ func TestSLAEngineIntegration_ReviseClocksCancelComputesHasBreachedLive(t *testi
 	}
 }
 
+// TestSLAEngineIntegration_ReviseClocksCancelFreezesElapsedPercentage is the
+// regression test for a real, reported bug: a clock cancelled by a severity
+// change (ReviseClocks' own flatCancelQuery) displayed 0% elapsed/0 business
+// duration afterward, no matter how much real time had actually passed --
+// business_elapsed_percentage/business_duration are sla_live's own fallback
+// for any non-IN_PROGRESS/BREACHED stage, including CANCELLED, and nothing
+// ever froze them at the moment of cancellation the way CompleteClock/
+// SetPaused already freeze them at their own transitions.
+func TestSLAEngineIntegration_ReviseClocksCancelFreezesElapsedPercentage(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLAEngineWorkItem(t, pool)
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewSLAEngineRepository(scoped, "")
+
+	workaroundPolicy, err := repo.FindPolicyByName(ctx, "P0 - Workaround (Managed Services)", "WORKAROUND")
+	if err != nil {
+		t.Fatalf("FindPolicyByName(workaround): %v", err)
+	}
+
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, workaroundPolicy, time.Time{}); err != nil {
+		t.Fatalf("RegisterClock(workaround) setup: %v", err)
+	}
+	// Start the clock 10 minutes ago, well short of the policy's own
+	// duration -- this clock is genuinely only partway through, the
+	// overwhelmingly common real case for a severity-change cancellation
+	// (unlike the BREACHED test above, which pushes start_on past the
+	// duration entirely).
+	elapsedBeforeCancel := 10 * time.Minute
+	if _, err := scoped.Exec(ctx,
+		`UPDATE sla SET start_on = NOW() - $2::interval WHERE work_item_id = $1::uuid AND sla_policy_id = $3::uuid`,
+		slaEngineIntegrationWorkItemID, intervalLiteral(elapsedBeforeCancel), workaroundPolicy.ID); err != nil {
+		t.Fatalf("push start_on back setup: %v", err)
+	}
+
+	if _, err := repo.ReviseClocks(ctx, slaEngineIntegrationWorkItemID, []repository.SLAPolicyRef{workaroundPolicy}); err != nil {
+		t.Fatalf("ReviseClocks: %v", err)
+	}
+
+	var pct float64
+	var businessDurationSeconds float64
+	if err := scoped.QueryRow(ctx, `
+		SELECT business_elapsed_percentage, EXTRACT(EPOCH FROM business_duration)
+		FROM sla s JOIN sla_policy sp ON sp.id = s.sla_policy_id
+		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = 'WORKAROUND' AND s.stage::TEXT = 'CANCELLED'`,
+		slaEngineIntegrationWorkItemID).Scan(&pct, &businessDurationSeconds); err != nil {
+		t.Fatalf("scan cancelled row: %v", err)
+	}
+	if pct <= 0 {
+		t.Errorf("business_elapsed_percentage = %v on the cancelled row, want > 0 -- the clock ran for %v before being cancelled", pct, elapsedBeforeCancel)
+	}
+	// Allow generous slack (the test's own setup/assertion queries cost real
+	// wall-clock time too): the frozen duration should read close to the 10
+	// minutes this clock actually ran, not 0.
+	if businessDurationSeconds < elapsedBeforeCancel.Seconds()-30 {
+		t.Errorf("business_duration = %vs on the cancelled row, want close to %vs", businessDurationSeconds, elapsedBeforeCancel.Seconds())
+	}
+}
+
 // TestSLAEngineIntegration_ReviseClocksPreservesBreachedResponseClock is the
 // RESPONSE-specific counterpart to the test above: per explicit product
 // direction, "did a support engineer reply at all" is a fact about the past
@@ -701,5 +760,50 @@ func TestSLAEngineIntegration_CompleteClockFinalizesAnOpenPause(t *testing.T) {
 	}
 	if diff := pauseDurationSeconds - openPause.Seconds(); diff < -2 || diff > 2 {
 		t.Errorf("pause_duration = %vs, want ~%vs -- the still-open segment must be folded in", pauseDurationSeconds, openPause.Seconds())
+	}
+}
+
+// TestSLAEngineIntegration_ActiveClockPoliciesRunsAgainstRealPostgres is the
+// regression test for a real, reported, production-confirmed bug:
+// slaPolicyRefColumnsPrefixed used to blindly prepend the table alias to
+// each WHOLE column expression ("alias + c" over strings like
+// "EXTRACT(EPOCH FROM duration)"), producing invalid SQL
+// ("sp.EXTRACT(EPOCH FROM duration)") that Postgres rejects with "syntax
+// error at or near \"FROM\"" (SQLSTATE 42601) -- EXTRACT(field FROM source)
+// is its own special syntax, not a plain comma-argument function call, so
+// it cannot be schema/alias-qualified as a whole. This made
+// ActiveClockPolicies fail on every single call, for every case, in every
+// environment, confirmed directly against real staging logs -- which
+// silently broke every condition-driven pause/resume/complete transition
+// system-wide, since ApplyCaseStateEffects's per-target loop depends on this
+// query to find anything to evaluate at all. A fake-repository unit test
+// can't catch an actual SQL syntax error; only a real database can.
+func TestSLAEngineIntegration_ActiveClockPoliciesRunsAgainstRealPostgres(t *testing.T) {
+	pool := caseStatsPool(t)
+	seedSLAEngineWorkItem(t, pool)
+	ctx := repository.WithSystemIdentity(context.Background())
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewSLAEngineRepository(scoped, "")
+
+	policy, err := repo.FindPolicyByName(ctx, "P0 - Resolution (Open Source)", "RESOLUTION")
+	if err != nil {
+		t.Fatalf("FindPolicyByName(resolution): %v", err)
+	}
+	if _, err := repo.RegisterClock(ctx, slaEngineIntegrationWorkItemID, policy, time.Time{}); err != nil {
+		t.Fatalf("RegisterClock setup: %v", err)
+	}
+
+	refs, err := repo.ActiveClockPolicies(ctx, slaEngineIntegrationWorkItemID, "RESOLUTION")
+	if err != nil {
+		t.Fatalf("ActiveClockPolicies: %v -- this must not be a SQL syntax error", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("ActiveClockPolicies returned %d refs, want 1", len(refs))
+	}
+	if refs[0].ID != policy.ID {
+		t.Errorf("ActiveClockPolicies returned policy %q, want %q", refs[0].ID, policy.ID)
+	}
+	if refs[0].Duration != policy.Duration {
+		t.Errorf("ActiveClockPolicies Duration = %v, want %v -- EXTRACT(EPOCH FROM sp.duration) must resolve correctly", refs[0].Duration, policy.Duration)
 	}
 }
