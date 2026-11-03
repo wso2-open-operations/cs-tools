@@ -69,6 +69,9 @@ const customDashboardLinkState = `
 	FROM custom_dashboard d
 	WHERE d.id = $2::uuid AND d.owner_user_id = $1::uuid`
 
+// scanCustomDashboardLink reads one link state row (link_enabled, the link
+// id as text, "" when there is none, and the opened-by count); pgx.ErrNoRows
+// passes through for the caller to turn into "not the owner's".
 func scanCustomDashboardLink(row pgx.Row) (*domain.CustomDashboardLink, error) {
 	var l domain.CustomDashboardLink
 	if err := row.Scan(&l.Enabled, &l.LinkID, &l.OpenedBy); err != nil {

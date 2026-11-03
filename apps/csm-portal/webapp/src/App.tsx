@@ -261,6 +261,8 @@ function LegacySettingsRedirect({ to }: { to: string }): JSX.Element {
   return <Navigate to={to} state={state} replace />;
 }
 
+/** The app's root: signals the boot loading screen once React has mounted,
+ * then renders the providers and every route. */
 export default function App(): JSX.Element {
   // Signals the index.html boot loading screen that React has mounted and
   // taken over rendering, so it can remove itself. Not gated on auth/data —

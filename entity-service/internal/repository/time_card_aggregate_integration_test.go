@@ -120,6 +120,9 @@ type tcAggWant struct {
 	count, minutes int
 }
 
+// checkTimeCardAggregate compares an aggregate with the groups wanted, in
+// order, and with its "others" and total counts and minutes; every minute
+// field must be present (minutes were asked for).
 func checkTimeCardAggregate(t *testing.T, got domain.AggregateResponse, want []tcAggWant, othersCount, othersMinutes, total, totalMinutes int) {
 	t.Helper()
 	if len(got.Groups) != len(want) {

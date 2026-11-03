@@ -48,6 +48,8 @@ function Probe(): JSX.Element {
   return <div data-testid="landed">{location.pathname}</div>;
 }
 
+/** Renders the open-link page at `linkId`, with a probe on each route it can
+ * land on; `strict` wraps it in StrictMode (effects run twice). */
 function renderAt(linkId: string, { strict = false } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const tree = (

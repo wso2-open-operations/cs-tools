@@ -98,6 +98,7 @@ describe("GenerateChatPanel", () => {
 
   it("still takes the cursor when it opens from a button that has it", () => {
     const props = { messages: [], onSend: vi.fn(), onClose: vi.fn() };
+    // The page around the chat: the button that opens it, and the chat once open.
     const page = (open: boolean) => (
       <>
         <button type="button">Edit with AI</button>

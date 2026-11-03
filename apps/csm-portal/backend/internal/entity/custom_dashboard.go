@@ -325,6 +325,8 @@ type openCustomDashboardLinkRequest struct {
 	LinkID string `json:"linkId"`
 }
 
+// decodeCustomDashboardLink decodes entity-service's link state body, which
+// its GET and PUT link routes answer.
 func decodeCustomDashboardLink(raw []byte) (CustomDashboardLink, error) {
 	var l CustomDashboardLink
 	if err := json.Unmarshal(raw, &l); err != nil {
