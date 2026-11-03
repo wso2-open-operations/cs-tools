@@ -84,6 +84,40 @@ type timeCardService struct {
 	// NULL.
 	snWriteback *SNWritebackDispatcher
 	snMirror    TimeCardService
+	// projectHours, when set, refreshes the card's project hours after a
+	// state transition commits. Optional: nil keeps the old behaviour.
+	projectHours ProjectHoursRecomputer
+}
+
+// ProjectHoursRecomputer recomputes one project's allocated, consumed and
+// remaining hours. QueryHourService implements it.
+type ProjectHoursRecomputer interface {
+	RecomputeProjectHours(ctx context.Context, projectID string) error
+}
+
+// WithTimeCardProjectHours makes svc refresh a project's hours after each
+// time card state transition (approve, reject). svc must be what
+// NewTimeCardService or NewTimeCardServiceWithSNWriteback returned; any other
+// value, or a nil recomputer, returns svc unchanged.
+func WithTimeCardProjectHours(svc TimeCardService, r ProjectHoursRecomputer) TimeCardService {
+	if s, ok := svc.(*timeCardService); ok && r != nil {
+		s.projectHours = r
+	}
+	return svc
+}
+
+// refreshProjectHours is best-effort and runs after the transition has
+// committed and the mirror has been dispatched: a failure is logged and the
+// approval still succeeds, the hourly recompute heals the project. Only the
+// project id is logged.
+func (s *timeCardService) refreshProjectHours(ctx context.Context, view domain.TimeCardView) {
+	if s.projectHours == nil || view.Project == nil || view.Project.ID == "" {
+		return
+	}
+	if err := s.projectHours.RecomputeProjectHours(ctx, view.Project.ID); err != nil {
+		slog.ErrorContext(ctx, "time card state change: project hours recompute failed",
+			"projectId", view.Project.ID, "timeCardId", view.ID, "error", err)
+	}
 }
 
 // NewTimeCardService constructs a TimeCardService backed by Postgres.
@@ -369,6 +403,7 @@ func (s *timeCardService) UpdateTimeCard(ctx context.Context, req domain.UpdateT
 			return domain.TimeCardMutationResponse{}, err
 		}
 		s.dispatchTimeCardUpdateMirror(ctx, req)
+		s.refreshProjectHours(ctx, view)
 		return domain.TimeCardMutationResponse{Message: "Time card updated successfully", TimeCard: &view}, nil
 	}
 

@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -680,3 +682,122 @@ func TestValidateApproverIDsExcludeSubmitter(t *testing.T) {
 }
 
 func strPtrTC(s string) *string { return &s }
+
+// recordingProjectHours records which projects were asked to recompute.
+type recordingProjectHours struct {
+	mu  sync.Mutex
+	ids []string
+	err error
+}
+
+func (r *recordingProjectHours) RecomputeProjectHours(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ids = append(r.ids, id)
+	return r.err
+}
+
+func (r *recordingProjectHours) calls() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.ids...)
+}
+
+const testHoursProjectUUID = "99999999-0000-4000-8000-000000000009"
+
+func projectHoursTestService(t *testing.T, hours ProjectHoursRecomputer, mirror TimeCardService, dispatcher *SNWritebackDispatcher) (TimeCardService, *stubTimeCardRepo) {
+	t.Helper()
+	repo := &stubTimeCardRepo{
+		transitionTimeCardState: func(_ context.Context, id string, _ domain.TimeCardState, _ *string, _ string) (domain.TimeCardView, error) {
+			return domain.TimeCardView{ID: id, Project: &domain.TimeCardRef{ID: testHoursProjectUUID, Name: "Project"}}, nil
+		},
+		updateTimeCardFields: func(context.Context, domain.UpdateTimeCardRequest, string) (domain.TimeCardView, error) {
+			return domain.TimeCardView{ID: testUUID, Project: &domain.TimeCardRef{ID: testHoursProjectUUID}}, nil
+		},
+	}
+	users := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+	var svc TimeCardService
+	if dispatcher != nil {
+		svc = NewTimeCardServiceWithSNWriteback(repo, users, dispatcher, mirror)
+	} else {
+		svc = NewTimeCardService(repo, users)
+	}
+	return WithTimeCardProjectHours(svc, hours), repo
+}
+
+// A state transition refreshes the card's project exactly once; a plain field
+// edit does not.
+func TestTimeCardService_UpdateTimeCard_RefreshesProjectHoursOnStateChange(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved, rejected := domain.TimeCardStateApproved, domain.TimeCardStateRejected
+
+	for _, tc := range []struct {
+		name string
+		req  domain.UpdateTimeCardRequest
+		want []string
+	}{
+		{"approve", domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}, []string{testHoursProjectUUID}},
+		{"reject", domain.UpdateTimeCardRequest{ID: testUUID, State: &rejected, LeadComment: strPtrTC("not billable")}, []string{testHoursProjectUUID}},
+		{"field edit", domain.UpdateTimeCardRequest{ID: testUUID, WorkLogComment: strPtrTC("updated")}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hours := &recordingProjectHours{}
+			svc, _ := projectHoursTestService(t, hours, nil, nil)
+			if _, err := svc.UpdateTimeCard(ctx, tc.req); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := hours.calls(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("recomputed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The hook is best-effort: its failure neither fails the approval nor keeps
+// the mirror from being dispatched.
+func TestTimeCardService_UpdateTimeCard_ProjectHoursFailureKeepsApprovalAndMirror(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+
+	storedSysID := uuidToSysid(testSNSysID2)
+	called := make(chan domain.UpdateTimeCardRequest, 1)
+	mirror := &stubMirrorTimeCardService{
+		updateTimeCard: func(_ context.Context, mirrorReq domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
+			called <- mirrorReq
+			return domain.TimeCardMutationResponse{}, nil
+		},
+	}
+	hours := &recordingProjectHours{err: errors.New("database unavailable")}
+	svc, repo := projectHoursTestService(t, hours, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
+	repo.getTimeCardSNSysID = func(context.Context, string) (*string, error) { return &storedSysID, nil }
+
+	resp, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved})
+	if err != nil {
+		t.Fatalf("approval must succeed when the project hours recompute fails: %v", err)
+	}
+	if resp.TimeCard == nil {
+		t.Error("response carries no time card")
+	}
+	if got := hours.calls(); len(got) != 1 {
+		t.Errorf("recompute calls = %v, want exactly one", got)
+	}
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.UpdateTimeCard was never dispatched")
+	}
+}
+
+// Without the optional dependency the service behaves as before.
+func TestTimeCardService_UpdateTimeCard_NoProjectHoursRecomputer(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	svc, _ := projectHoursTestService(t, nil, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

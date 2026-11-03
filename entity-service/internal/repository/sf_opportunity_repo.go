@@ -234,6 +234,14 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	if err := deriveMovedLineItemOpportunities(ctx, q, moved, res.OpportunityID); err != nil {
 		return res, err
 	}
+	// Allocated hours follow the lines just written, after the onboarding
+	// window they depend on has been derived. Durations only.
+	if err := recomputeOpportunityProjectHours(ctx, q, res.OpportunityID); err != nil {
+		return res, err
+	}
+	if err := recomputeMovedOpportunityProjectHours(ctx, q, moved, res.OpportunityID); err != nil {
+		return res, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}

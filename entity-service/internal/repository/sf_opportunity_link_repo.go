@@ -124,6 +124,13 @@ func writeSfOpportunityLink(ctx context.Context, q querier, row domain.Salesforc
 	if err := deriveMovedLinkProjects(ctx, q, previous, row.ProjectID); err != nil {
 		return false, err
 	}
+	// Allocated hours follow the link just written. Durations only.
+	if err := recomputeProjectHours(ctx, q, row.ProjectID); err != nil {
+		return false, err
+	}
+	if err := recomputeMovedProjectHours(ctx, q, previous, row.ProjectID); err != nil {
+		return false, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, fmt.Errorf("upsert opportunity link from salesforce: %w", err)
 	}

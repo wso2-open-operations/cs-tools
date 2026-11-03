@@ -169,6 +169,14 @@ type qhCase struct {
 	onboardingStatus   string
 	onboardingTotal    int
 	onboardingConsumed int
+	// onboardingEnded makes the onboarding line end yesterday (and start 60
+	// days ago) instead of running through the next 30 days.
+	onboardingEnded bool
+	// cardDaysAgo dates the billable card that many days back (0 = today).
+	cardDaysAgo int
+	// sharedBillableMins, when non-zero, adds a second project linked to the
+	// same opportunity with that much approved billable time.
+	sharedBillableMins int
 }
 
 // Three accounts, one per outcome. OVER is overdrawn, NEAR sits at 92%
@@ -260,6 +268,20 @@ func seedQueryHourFixture(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, $2, $3,
 		              CURRENT_DATE - 30, CURRENT_DATE + 30)`,
 			oppID, c.productName, c.quantity)
+		if status != "NOT_APPLICABLE" {
+			// The onboarding pool is derived from this line, not read from
+			// the stored consumed figure.
+			startOff, endOff := -30, 30
+			if c.onboardingEnded {
+				startOff, endOff = -60, -1
+			}
+			exec(`INSERT INTO sf_opportunity_product
+			        (id, created_on, updated_on, created_by, updated_by,
+			         opportunity_id, product_name, quantity,
+			         service_start_date, service_end_date)
+			      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1,
+			              'WSO2 Onboarding Services', 1, CURRENT_DATE + $2::int, CURRENT_DATE + $3::int)`, oppID, startOff, endOff)
+		}
 
 		exec(`INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by,
 		        number, wso2_id, subject, type)
@@ -268,8 +290,25 @@ func seedQueryHourFixture(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 		exec(`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
 		        case_id, customer_project_id, user_id, work_date, state, is_billable, analyzing_minutes)
 		      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed',
-		              $1, $2, $3, CURRENT_DATE, 'APPROVED', TRUE, $4)`,
-			itemID, projID, amID, c.billableMins)
+		              $1, $2, $3, CURRENT_DATE - $5::int, 'APPROVED', TRUE, $4)`,
+			itemID, projID, amID, c.billableMins, c.cardDaysAgo)
+		if c.sharedBillableMins > 0 {
+			// A second project on the same opportunity, with its own time.
+			proj2 := uuidFor(7000 + i)
+			exec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by,
+			        name, key, sf_id, account_id, onboarding_status)
+			      VALUES ($1, NOW(), NOW(), 'qh-seed', 'qh-seed', $2, $3, $4, $5,
+			              $6::onboarding_status_enum)`,
+				proj2, c.accountName+" Project 2", c.key+"2", "a1"+c.key, accID, status)
+			exec(`INSERT INTO sf_opportunity_link (id, created_on, updated_on, created_by, updated_by,
+			        opportunity_id, project_id)
+			      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed', $1, $2)`, oppID, proj2)
+			exec(`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
+			        case_id, customer_project_id, user_id, work_date, state, is_billable, analyzing_minutes)
+			      VALUES (gen_random_uuid(), NOW(), NOW(), 'qh-seed', 'qh-seed',
+			              $1, $2, $3, CURRENT_DATE - $5::int, 'APPROVED', TRUE, $4)`,
+				itemID, proj2, amID, c.sharedBillableMins, c.cardDaysAgo)
+		}
 		// Non-billable time that must draw nothing down.
 		exec(`INSERT INTO time_card (id, created_on, updated_on, created_by, updated_by,
 		        case_id, customer_project_id, user_id, work_date, state, is_billable, analyzing_minutes)
@@ -299,18 +338,15 @@ func nullIfEmpty(check, value string) any {
 	return value
 }
 
-// *** THE ONBOARDING GRANT IS ONE-TIME, AND ONLY NEW PROJECTS GET ONE. ***
+// *** THE ONBOARDING POOL IS DERIVED, AND FILLS FIRST. ***
 //
-// A new project is granted onboarding hours -- 200 on this deployment --
-// and work is charged against those before it reaches the query-support
-// allowance. A renewal has no grant: its hours come straight off query
-// support.
-//
-// Once onboarding is COMPLETED the grant stops absorbing, so later work
-// lands on query hours. What it already absorbed stays absorbed, which
-// is what makes the grant one-time rather than a discount that is
-// clawed back the moment onboarding closes.
-func TestQueryHourOnboardingGrantAppliesToNewProjectsOnly(t *testing.T) {
+// A project with an onboarding line is granted 200 onboarding hours, and
+// billable work is charged against them before it reaches the query-support
+// allowance. A project without one has no grant: its hours come straight off
+// query support. What is consumed is always recomputed from approved
+// billable time cards, never read back from a stored figure, so a stale
+// stored value cannot move the result.
+func TestQueryHourOnboardingPoolFillsFirst(t *testing.T) {
 	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
@@ -322,21 +358,32 @@ func TestQueryHourOnboardingGrantAppliesToNewProjectsOnly(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Each project logs the same 3000 billable minutes against the same
-	// 100-hour allowance, and differs only in its onboarding state.
+	// Each project logs the same billable minutes against the same
+	// 100-hour allowance, and differs only in its onboarding state. The
+	// stored onboarding figures are deliberately wrong: they must be ignored.
 	saved := qhFixture
 	qhFixture = []qhCase{
 		{key: "INPROG", accountName: "In Progress Ltd", amEmail: "am-inprog@example.com",
 			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
-			onboardingStatus: "IN_PROGRESS", onboardingTotal: 200 * 60, onboardingConsumed: 1200},
-		{key: "DONE", accountName: "Completed Ltd", amEmail: "am-done@example.com",
-			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
-			onboardingStatus: "COMPLETED", onboardingTotal: 200 * 60, onboardingConsumed: 1200},
+			onboardingStatus: "IN_PROGRESS", onboardingTotal: 5, onboardingConsumed: 5},
+		{key: "SPILL", accountName: "Spill Ltd", amEmail: "am-spill@example.com",
+			productName: "Development Support - 100 hours", quantity: 1, billableMins: 13000,
+			onboardingStatus: "IN_PROGRESS"},
 		{key: "RENEW", accountName: "Renewal Ltd", amEmail: "am-renew@example.com",
 			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
 			onboardingStatus: "NOT_APPLICABLE"},
-		// A renewal carrying a stale onboarding figure must still not
-		// have it credited -- the status decides, not the number.
+		// A renewal carrying a stale onboarding figure must not have it
+		// credited, and the figure is left as it was.
+		// Two projects share one opportunity: the allowance is shared, so both
+		// show the same total and the same (opportunity-wide) consumed.
+		{key: "SHARE", accountName: "Shared Ltd", amEmail: "am-share@example.com",
+			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
+			sharedBillableMins: 2000, onboardingStatus: "NOT_APPLICABLE"},
+		// The onboarding line has ended: what it absorbed stays absorbed and
+		// is still taken off query hours, run after run.
+		{key: "EXPIRED", accountName: "Expired Ltd", amEmail: "am-expired@example.com",
+			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
+			onboardingStatus: "IN_PROGRESS", onboardingEnded: true, cardDaysAgo: 30},
 		{key: "STALE", accountName: "Stale Ltd", amEmail: "am-stale@example.com",
 			productName: "Development Support - 100 hours", quantity: 1, billableMins: 3000,
 			onboardingStatus: "NOT_APPLICABLE", onboardingTotal: 200 * 60, onboardingConsumed: 1200},
@@ -345,35 +392,83 @@ func TestQueryHourOnboardingGrantAppliesToNewProjectsOnly(t *testing.T) {
 
 	seedQueryHourFixture(ctx, t, pool)
 	ctx = repository.WithSystemIdentity(ctx)
-	if _, err := service.NewQueryHourService(
-		repository.NewQueryHourRepository(repository.NewScoped(pool)), "@example.com").
-		Recompute(ctx); err != nil {
+	svc := service.NewQueryHourService(
+		repository.NewQueryHourRepository(repository.NewScoped(pool)), "@example.com")
+	if _, err := svc.Recompute(ctx); err != nil {
 		t.Fatalf("Recompute: %v", err)
 	}
 
-	consumed := func(key string) int {
-		var mins int
+	mins := func(key, col string) int {
+		var m int
 		if err := pool.QueryRow(ctx,
-			`SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM consumed_duration)/60),0)::int
-			   FROM project WHERE key = $1`, key).Scan(&mins); err != nil {
-			t.Fatalf("read %s: %v", key, err)
+			`SELECT COALESCE(FLOOR(EXTRACT(EPOCH FROM `+col+`)/60),0)::int
+			   FROM project WHERE key = $1`, key).Scan(&m); err != nil {
+			t.Fatalf("read %s.%s: %v", key, col, err)
 		}
-		return mins
+		return m
 	}
+	check := func(key string, onbTotal, onbConsumed, onbRemaining, qConsumed, qRemaining int) {
+		t.Helper()
+		for col, want := range map[string]int{
+			"total_onboarding_duration":     onbTotal,
+			"consumed_onboarding_duration":  onbConsumed,
+			"remaining_onboarding_duration": onbRemaining,
+			"consumed_duration":             qConsumed,
+			"remaining_query_duration":      qRemaining,
+			"total_query_duration":          6000,
+		} {
+			if got := mins(key, col); got != want {
+				t.Errorf("%s %s = %d, want %d", key, col, got, want)
+			}
+		}
+	}
+	// 3000 billable, all inside the 12000-minute onboarding pool.
+	check("INPROG", 12000, 3000, 9000, 0, 6000)
+	// 13000 billable: the pool takes 12000, 1000 overflows to query.
+	check("SPILL", 12000, 12000, 0, 1000, 5000)
+	// No onboarding: the whole 3000 hits query hours.
+	check("RENEW", 0, 0, 0, 3000, 3000)
+	// Not applicable: onboarding columns untouched, none credited.
+	check("STALE", 12000, 1200, 0, 3000, 3000)
+	// Shared opportunity: 3000 + 2000 billable across both projects.
+	check("SHARE", 0, 0, 0, 5000, 1000)
+	check("SHARE2", 0, 0, 0, 5000, 1000)
+	// Ended onboarding line: the 3000 stays in the onboarding pool.
+	check("EXPIRED", 12000, 3000, 9000, 0, 6000)
 
-	// Onboarding live: 1200 of the 3000 came out of the grant.
-	if got := consumed("INPROG"); got != 1800 {
-		t.Errorf("IN_PROGRESS consumed = %d, want 1800 (3000 less the 1200 onboarding absorbed)", got)
+	// Running it again, or through the per-project entry point the time
+	// card approval uses, changes nothing: it is derived, not accumulated.
+	var projID string
+	if err := pool.QueryRow(ctx, `SELECT id::text FROM project WHERE key = 'SPILL'`).Scan(&projID); err != nil {
+		t.Fatal(err)
 	}
-	// Onboarding finished: what it absorbed stays absorbed.
-	if got := consumed("DONE"); got != 1800 {
-		t.Errorf("COMPLETED consumed = %d, want 1800 -- a one-time grant is not clawed back", got)
+	for i := 0; i < 2; i++ {
+		if err := svc.RecomputeProjectHours(ctx, projID); err != nil {
+			t.Fatalf("RecomputeProjectHours: %v", err)
+		}
 	}
-	// Renewal: the whole 3000 hits query hours.
-	if got := consumed("RENEW"); got != 3000 {
-		t.Errorf("renewal consumed = %d, want 3000 -- renewals have no grant", got)
+	check("SPILL", 12000, 12000, 0, 1000, 5000)
+
+	// The per-project function is durations only: an approval must not
+	// move the opportunity state the hourly job compares against.
+	var before, after *string
+	if err := pool.QueryRow(ctx, `SELECT query_hour_state::text FROM sf_opportunity WHERE name = 'SPILL'`).Scan(&before); err != nil {
+		t.Fatal(err)
 	}
-	if got := consumed("STALE"); got != 3000 {
-		t.Errorf("renewal with a stale onboarding figure consumed = %d, want 3000", got)
+	if _, err := pool.Exec(ctx, `UPDATE time_card SET analyzing_minutes = analyzing_minutes + 9000
+	                              WHERE customer_project_id = $1 AND is_billable`, projID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecomputeProjectHours(ctx, projID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT query_hour_state::text FROM sf_opportunity WHERE name = 'SPILL'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if (before == nil) != (after == nil) || (before != nil && *before != *after) {
+		t.Errorf("opportunity state moved from %v to %v; only Recompute may write it", before, after)
+	}
+	if got := mins("SPILL", "consumed_duration"); got != 10000 {
+		t.Errorf("SPILL consumed after more approved time = %d, want 10000", got)
 	}
 }

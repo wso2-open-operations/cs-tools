@@ -18,6 +18,8 @@ package service_test
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -32,8 +34,12 @@ type fakeQueryHourRepo struct {
 	projects map[string][]repository.QueryHourProjectRow
 	states   map[string]*domain.QueryHourState
 
-	wroteState     map[string]*domain.QueryHourState
-	wroteDurations map[string][3]int
+	projectIDs []string
+
+	wroteState map[string]*domain.QueryHourState
+	// recomputed lists, in order, the projects whose hours were recomputed.
+	recomputed   []string
+	recomputeErr map[string]error
 }
 
 func (f *fakeQueryHourRepo) ActiveLines(context.Context) ([]repository.QueryHourLineRow, error) {
@@ -52,12 +58,12 @@ func (f *fakeQueryHourRepo) SetOpportunityState(_ context.Context, id string, s 
 	f.wroteState[id] = s
 	return nil
 }
-func (f *fakeQueryHourRepo) SetProjectDurations(_ context.Context, id string, total, consumed, remaining int) error {
-	if f.wroteDurations == nil {
-		f.wroteDurations = map[string][3]int{}
-	}
-	f.wroteDurations[id] = [3]int{total, consumed, remaining}
-	return nil
+func (f *fakeQueryHourRepo) RecomputeProjectHours(_ context.Context, id string) error {
+	f.recomputed = append(f.recomputed, id)
+	return f.recomputeErr[id]
+}
+func (f *fakeQueryHourRepo) ProjectIDsWithActiveLines(context.Context) ([]string, error) {
+	return f.projectIDs, nil
 }
 
 func qhLine(product string, qty float64) repository.QueryHourLineRow {
@@ -68,42 +74,6 @@ func qhLine(product string, qty float64) repository.QueryHourLineRow {
 		AccountID: "acc-1", AccountName: "Acme",
 		AccountManagerEmail: "am@example.com", TechnicalOwnerEmail: "to@example.com",
 		ProductName: product, Quantity: qty, ServiceStart: start, ServiceEnd: end,
-	}
-}
-
-// The entitlement rule, line by line: a tier multiplies its quantity by
-// its hours, and the subscription line is worth one hour per unit.
-// ServiceNow then holds the figure in minutes.
-func TestQueryHourEntitlement(t *testing.T) {
-	for _, tc := range []struct {
-		product string
-		qty     float64
-		want    int
-	}{
-		{"Development Support - 200 hours", 1, 200 * 60},
-		{"Development Support - 100 hours", 2, 200 * 60},
-		{"Development Support - 50 hours", 3, 150 * 60},
-		{"Development Support - 25 hours", 1, 25 * 60},
-		{"Development Support - 10 hours", 4, 40 * 60},
-		{"Query support limit (included in subscription)", 5, 5 * 60},
-	} {
-		t.Run(tc.product, func(t *testing.T) {
-			repo := &fakeQueryHourRepo{
-				lines: []repository.QueryHourLineRow{qhLine(tc.product, tc.qty)},
-				projects: map[string][]repository.QueryHourProjectRow{
-					"opp-1": {{ProjectID: "p1", ProjectKey: "ACME"}},
-				},
-			}
-			if _, err := service.NewQueryHourService(repo, "@example.com").
-				Recompute(context.Background()); err != nil {
-				t.Fatalf("Recompute: %v", err)
-			}
-			// The project durations are written on every run, state
-			// change or not, so they are where the entitlement shows.
-			if got := repo.wroteDurations["p1"][0]; got != tc.want {
-				t.Errorf("entitlement = %d minutes, want %d", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -139,29 +109,44 @@ func TestQueryHourUnmatchedProductIsCounted(t *testing.T) {
 	}
 }
 
-// Consumption counts BILLABLE approved time only, less onboarding.
-func TestQueryHourConsumptionIsBillableLessOnboarding(t *testing.T) {
+// The hourly recompute has no arithmetic of its own for project hours: it
+// runs the shared per-project function for every project with a line in
+// service, and a failing project neither stops the others nor the state
+// comparison (so the notifications) that follows.
+func TestQueryHourRecomputeDelegatesProjectHours(t *testing.T) {
 	repo := &fakeQueryHourRepo{
-		lines: []repository.QueryHourLineRow{qhLine("Development Support - 100 hours", 1)},
-		projects: map[string][]repository.QueryHourProjectRow{"opp-1": {{
-			ProjectID: "p1", ProjectKey: "ACME",
-			BillableMinutes:    5000,
-			NonBillableMinutes: 9000, // must not draw the allowance down
-			OnboardingMinutes:  500,
-		}}},
+		projectIDs:   []string{"p1", "p2", "p3"},
+		recomputeErr: map[string]error{"p2": errors.New("boom")},
+		lines:        []repository.QueryHourLineRow{qhLine("Development Support - 100 hours", 1)},
+		projects: map[string][]repository.QueryHourProjectRow{
+			"opp-1": {{ProjectID: "p1", ProjectKey: "ACME", BillableMinutes: 100 * 60}},
+		},
 	}
-	if _, err := service.NewQueryHourService(repo, "@example.com").Recompute(context.Background()); err != nil {
+	transitions, err := service.NewQueryHourService(repo, "@example.com").Recompute(context.Background())
+	if err != nil {
 		t.Fatalf("Recompute: %v", err)
 	}
-	got := repo.wroteDurations["p1"]
-	if got[1] != 4500 {
-		t.Errorf("consumed = %d, want 4500 (5000 billable less 500 onboarding)", got[1])
+	if want := []string{"p1", "p2", "p3"}; !reflect.DeepEqual(repo.recomputed, want) {
+		t.Errorf("recomputed = %v, want %v", repo.recomputed, want)
 	}
-	if got[0] != 6000 {
-		t.Errorf("total = %d, want 6000", got[0])
+	if len(transitions) != 1 {
+		t.Errorf("transitions = %d, want 1: a failed project must not suppress the state comparison", len(transitions))
 	}
-	if got[2] != 1500 {
-		t.Errorf("remaining = %d, want 1500", got[2])
+}
+
+// Recompute alone detects crossings: it writes the state, the per-project
+// function (used by the other triggers) must not.
+func TestQueryHourRecomputeProjectHoursDoesNotTouchState(t *testing.T) {
+	repo := &fakeQueryHourRepo{}
+	svc := service.NewQueryHourService(repo, "@example.com")
+	if err := svc.RecomputeProjectHours(context.Background(), "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.wroteState) != 0 {
+		t.Errorf("wrote state %v", repo.wroteState)
+	}
+	if !reflect.DeepEqual(repo.recomputed, []string{"p1"}) {
+		t.Errorf("recomputed = %v", repo.recomputed)
 	}
 }
 

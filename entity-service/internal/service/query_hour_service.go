@@ -56,6 +56,10 @@ import (
 // State ladder, by usage percentage: 100 -> CLOSURE_NOTICE_100,
 // 90 -> NOTIFIED_90, 75 -> NOTIFIED_75, below -> cleared.
 //
+// Per-project figures (query and onboarding pools) are computed by
+// domain.ComputeProjectHours, run by RecomputeProjectHours. This file keeps
+// the per-opportunity arithmetic only for the state ladder and the report.
+//
 // NO MIGRATION. Every column written here already exists:
 // sf_opportunity.query_hour_state (an enum whose three values are
 // already ServiceNow's 1/2/3) and project's total_query_duration,
@@ -67,6 +71,12 @@ type QueryHourService interface {
 	// Recompute rebuilds every opportunity's utilisation, writes the
 	// figures back, and returns the projects that crossed a threshold.
 	Recompute(ctx context.Context) ([]domain.QueryHourTransition, error)
+	// RecomputeProjectHours recomputes one project's allocated, consumed and
+	// remaining hours for the query and onboarding pools. It is the single
+	// per-project calculation: the hourly Recompute, a time card state change
+	// and the opportunity ingest all run it. It writes durations only, never an
+	// opportunity's state, and sends nothing.
+	RecomputeProjectHours(ctx context.Context, projectID string) error
 	// WeeklyReport returns the exceeded and close-to-exceeding accounts,
 	// with the audience their owners imply.
 	WeeklyReport(ctx context.Context) (domain.QueryHourReport, error)
@@ -201,7 +211,27 @@ func (s *queryHourService) computeAll(ctx context.Context) ([]computed, error) {
 	return out, nil
 }
 
+// RecomputeProjectHours implements QueryHourService.
+func (s *queryHourService) RecomputeProjectHours(ctx context.Context, projectID string) error {
+	return s.repo.RecomputeProjectHours(ctx, projectID)
+}
+
 func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTransition, error) {
+	// Durations first, through the same per-project function the time card
+	// and ingest hooks use, so the onboarding figure the state arithmetic
+	// below subtracts is the freshly derived one. A project that fails is
+	// logged and left for the next run: it must not stop the state
+	// comparison, and so the notifications, for everyone else.
+	projectIDs, err := s.repo.ProjectIDsWithActiveLines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range projectIDs {
+		if err := s.RecomputeProjectHours(ctx, id); err != nil {
+			slog.ErrorContext(ctx, "query hours: recompute project hours failed", "projectId", id, "error", err)
+		}
+	}
+
 	all, err := s.computeAll(ctx)
 	if err != nil {
 		return nil, err
@@ -218,17 +248,6 @@ func (s *queryHourService) Recompute(ctx context.Context) ([]domain.QueryHourTra
 
 		if !sameState(before, after) {
 			if err := s.repo.SetOpportunityState(ctx, c.opp.OpportunityID, after); err != nil {
-				return nil, err
-			}
-		}
-
-		// An opportunity's allowance is shared by its projects, so each
-		// one carries the same totals -- which is what the per-project
-		// notification prints.
-		for _, p := range c.opp.Projects {
-			remaining := c.opp.TotalMinutes - c.opp.ConsumedMinutes
-			if err := s.repo.SetProjectDurations(ctx, p.ProjectID,
-				c.opp.TotalMinutes, c.opp.ConsumedMinutes, remaining); err != nil {
 				return nil, err
 			}
 		}

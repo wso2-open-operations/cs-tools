@@ -114,6 +114,13 @@ func writeSfOpportunityLineItem(ctx context.Context, q querier, opportunitySfID,
 	if err := deriveMovedLineItemOpportunities(ctx, q, previous, opportunityID); err != nil {
 		return false, err
 	}
+	// Allocated hours follow the line just written. Durations only.
+	if err := recomputeOpportunityProjectHours(ctx, q, opportunityID); err != nil {
+		return false, err
+	}
+	if err := recomputeMovedOpportunityProjectHours(ctx, q, previous, opportunityID); err != nil {
+		return false, err
+	}
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return false, err
 	}

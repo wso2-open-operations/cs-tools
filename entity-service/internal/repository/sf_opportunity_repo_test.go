@@ -43,6 +43,8 @@ type oppQuerier struct {
 	statements []string
 	ledger     []domain.UpsertSalesforceIngestStateRequest
 	nextID     int
+	// hoursFor lists the opportunities the project hours hook ran for.
+	hoursFor []string
 }
 
 func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -77,7 +79,13 @@ func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.Co
 	return pgconn.NewCommandTag("SELECT 1"), nil
 }
 
-func (q *oppQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (q *oppQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+		// The project hours hook: no linked projects.
+		q.statements = append(q.statements, sql)
+		q.hoursFor = append(q.hoursFor, args[0].(string))
+		return &fakeRows{}, nil
+	}
 	return nil, fmt.Errorf("unexpected Query")
 }
 
@@ -188,6 +196,10 @@ func TestWriteSfOpportunity_InsertsNewOpportunityWithLineItems(t *testing.T) {
 	}
 	if !strings.Contains(q.statements[0], "pg_advisory_xact_lock") {
 		t.Errorf("first statement = %q, want the advisory lock", q.statements[0])
+	}
+	// Project hours are recomputed once for the opportunity written.
+	if !reflect.DeepEqual(q.hoursFor, []string{"opp-row-1"}) {
+		t.Errorf("project hours recomputed for %v, want [opp-row-1]", q.hoursFor)
 	}
 	if len(q.ledger) != 1 || q.ledger[0].Entity != "opportunity" || q.ledger[0].EventType != "CREATED" {
 		t.Errorf("ledger = %+v", q.ledger)

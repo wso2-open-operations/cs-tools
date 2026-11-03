@@ -35,6 +35,7 @@ type linkQuerier struct {
 	statements []string
 	ledger     []string
 	derived    []string // project ids the onboarding rule ran for
+	hours      []string // project ids the project hours hook ran for
 }
 
 func (q *linkQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -62,6 +63,11 @@ func (q *linkQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
 
 func (q *linkQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
+	if sql == projectHoursStateQuery {
+		// The project hours hook; an unknown project is a no-op.
+		q.hours = append(q.hours, args[0].(string))
+		return scanRow{err: pgx.ErrNoRows}
+	}
 	if sql == previousLinkProjectsQuery {
 		prev := []string{}
 		if l, ok := q.links[args[0].(string)]; ok && l.ProjectID != "" {
@@ -115,6 +121,10 @@ func TestWriteSfOpportunityLink_InsertThenUpdate(t *testing.T) {
 	// Insert derives p1; the move to p2 derives p2 and then the previous owner p1.
 	if want := []string{"p1", "p2", "p1"}; !reflect.DeepEqual(q.derived, want) {
 		t.Errorf("derived projects = %v, want %v", q.derived, want)
+	}
+	// Project hours follow the same owners, after the onboarding derivation.
+	if want := []string{"p1", "p2", "p1"}; !reflect.DeepEqual(q.hours, want) {
+		t.Errorf("project hours recomputed for %v, want %v", q.hours, want)
 	}
 }
 
