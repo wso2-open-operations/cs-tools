@@ -293,6 +293,25 @@ func TestStore_DeleteIsIdempotent(t *testing.T) {
 // A container that does not exist is a misconfigured store, not an absent blob:
 // none of the calls may report it as ErrNotFound, Delete must not say it worked,
 // and UncommittedBlocks must not return an empty list.
+func TestStore_CheckContainer(t *testing.T) {
+	cfg := integrationConfig(t)
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := context.Background()
+	// Nobody has created this container yet.
+	if err := s.CheckContainer(ctx); err == nil {
+		t.Fatal("CheckContainer succeeded for a container that does not exist")
+	}
+	if err := s.EnsureContainer(ctx); err != nil {
+		t.Fatalf("EnsureContainer: %v", err)
+	}
+	if err := s.CheckContainer(ctx); err != nil {
+		t.Fatalf("CheckContainer on an existing container: %v", err)
+	}
+}
+
 func TestStore_MissingContainerIsAnErrorNotABlobNotFound(t *testing.T) {
 	// The same account, with a container nobody created (no EnsureContainer).
 	s, err := New(integrationConfig(t))

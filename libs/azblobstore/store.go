@@ -129,6 +129,17 @@ func containerURL(cfg Config) string {
 	return base + "/" + cfg.Container
 }
 
+// CheckContainer fails if the container cannot be reached with these settings.
+// Unlike EnsureContainer it only reads, so it works with a role scoped to the
+// container (an app with "Storage Blob Data Contributor" on one container cannot
+// create containers). Use it at startup in production.
+func (s *Store) CheckContainer(ctx context.Context) error {
+	if _, err := s.container.GetProperties(ctx, nil); err != nil {
+		return fmt.Errorf("azblobstore: container is not reachable: %w", err)
+	}
+	return nil
+}
+
 // EnsureContainer creates the container if it does not exist. Production
 // containers are created by infrastructure; this is for Azurite and tests.
 func (s *Store) EnsureContainer(ctx context.Context) error {
