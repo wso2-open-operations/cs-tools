@@ -39,6 +39,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/mailpaging"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
@@ -799,6 +800,37 @@ func main() {
 			"allowListed", len(testCallCfg.AllowedNumbers) > 0, "sending", callSendingEnabled)
 	} else {
 		slog.Warn("paging test calls need Redis and CUSTOMER_ENTITY_BASE_URL; paging.test_call_requested will be ignored")
+	}
+
+	// Alert-email phone escalation (mail.alert.received, published by
+	// csm-mail-paging-service). Off unless MAIL_ESCALATION_CONFIG names the
+	// ladder file and Redis and entity-service are configured; without any of
+	// them the event is acknowledged and ignored. Its own engine and Redis keys, nothing shared
+	// with internal/paging but the Twilio client.
+	var mailPaging *mailpaging.Engine
+	if path := os.Getenv("MAIL_ESCALATION_CONFIG"); path != "" {
+		switch mailCfg, err := mailpaging.Load(path); {
+		case err != nil:
+			slog.Error("invalid MAIL_ESCALATION_CONFIG; mail alert paging is off", "err", err)
+		case redisClient == nil:
+			slog.Error("MAIL_ESCALATION_CONFIG needs Redis (REDIS_URL or REDIS_ADDR); mail alert paging is off")
+		case os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "":
+			slog.Error("MAIL_ESCALATION_CONFIG needs CUSTOMER_ENTITY_BASE_URL (phone numbers are looked up there); mail alert paging is off")
+		default:
+			// The same entity-service lookup the incident ladders use for a
+			// person's number: their profile number, else the paging-only one.
+			phones := paging.NewEntityClient(paging.EntityConfig{
+				BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+				TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+				ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+				ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+			})
+			mailPaging = mailpaging.NewEngine(mailCfg, mailpaging.NewRedisStore(redisClient), phones, twilioClient, callSendingEnabled)
+			dispatcher = dispatcher.WithMailAlertPaging(mailPaging)
+			go mailPaging.RunTicker(ctx, envDuration("MAIL_ESCALATION_TICK_INTERVAL", 5*time.Second))
+			slog.Info("mail alert paging is enabled", "rules", len(mailCfg.Rules), "sending", callSendingEnabled)
+		}
 	}
 
 	// incident.special_ops_alert (sre-events) pages the SME through the SRE

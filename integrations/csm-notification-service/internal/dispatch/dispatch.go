@@ -238,6 +238,9 @@ type Dispatcher struct {
 	// pagingTests places paging-number test calls; set via
 	// WithPagingTestCalls, nil when not configured.
 	pagingTests pagingTestCaller
+	// mailPager starts the phone escalation for mail.alert.received; set via
+	// WithMailAlertPaging, nil when not configured.
+	mailPager mailAlertPager
 
 	// specialOps is the SME page for incident.special_ops_alert; see
 	// DeferSpecialOpsPage.
@@ -581,6 +584,32 @@ func (d *Dispatcher) handlePagingTestCall(ctx context.Context, raw json.RawMessa
 		return nil
 	}
 	return d.pagingTests.HandleTestCall(ctx, p)
+}
+
+// mailAlertPager starts the phone escalation for mail.alert.received;
+// internal/mailpaging's Engine implements it.
+type mailAlertPager interface {
+	HandleAlert(ctx context.Context, p events.MailAlertReceivedPayload) error
+}
+
+// WithMailAlertPaging routes mail.alert.received to p. Optional: a deployment
+// without it logs and acknowledges the event.
+func (d *Dispatcher) WithMailAlertPaging(p mailAlertPager) *Dispatcher {
+	d.mailPager = p
+	return d
+}
+
+// handleMailAlert hands a mail alert to the pager.
+func (d *Dispatcher) handleMailAlert(ctx context.Context, raw json.RawMessage) error {
+	var p events.MailAlertReceivedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode mail.alert.received payload: %w", err)
+	}
+	if d.mailPager == nil {
+		slog.InfoContext(ctx, "dispatch: mail alert paging is not configured here; ignoring the event", "rule", p.RuleName)
+		return nil
+	}
+	return d.mailPager.HandleAlert(ctx, p)
 }
 
 // specialOpsPager places the SME page for incident.special_ops_alert; the SRE
@@ -1077,6 +1106,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleSRCommentAdded(ctx, record, env.Payload)
 	case events.TypePagingTestCallRequested:
 		return d.handlePagingTestCall(ctx, env.Payload)
+	case events.TypeMailAlertReceived:
+		return d.handleMailAlert(ctx, env.Payload)
 	case events.TypeIncidentSpecialOpsAlert:
 		return d.handleSpecialOpsAlert(ctx, env.EntityID, env.Payload)
 	case events.TypeSLATierReached:

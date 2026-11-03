@@ -1,9 +1,13 @@
 # csm-mail-paging-service
 
 Polls a Gmail mailbox and publishes an event to the event bus for every email
-that matches a configured rule. It does not place calls. Paging on these events
-(csm-notification-service's paging engine) is planned follow-up work and is not
-active: until a consumer exists, publishing the event pages nobody.
+that matches a configured rule. It does not place calls. csm-notification-service
+consumes `mail.alert.received` and calls the rule's escalation levels (R1, R2, ...,
+one wait apart) by phone, looking each person's number up by email; the ladder is
+configured there (`MAIL_ESCALATION_CONFIG`, keyed by the rule `name`), and is off
+until that is set. Point `EVENT_BUS_TOPIC` at the topic that service reads
+(its `EVENT_HUB_TOPIC`). Any other `eventType`
+is published but has no consumer yet.
 
 ```
 Gmail (group mail) -> poll -> rules -> event bus (Envelope) -> consumer
