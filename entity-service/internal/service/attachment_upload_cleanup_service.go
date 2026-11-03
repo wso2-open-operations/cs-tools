@@ -58,6 +58,10 @@ type attachmentUploadCleanupService struct {
 }
 
 // NewAttachmentUploadCleanupService constructs an AttachmentUploadCleanupService.
+// A nil store is ATTACHMENT_STORAGE_MODE=backend: this service holds no files, so
+// it only marks rows and reports the storage keys of the images it dropped (see
+// domain.UploadCleanupResult.OrphanedKeys). An upload that was never confirmed
+// leaves nothing in storage to remove (uncommitted blocks expire by themselves).
 func NewAttachmentUploadCleanupService(repo repository.StoredAttachmentRepository, store uploadStore, access AccessService) AttachmentUploadCleanupService {
 	return &attachmentUploadCleanupService{repo: repo, store: store, access: access, now: time.Now}
 }
@@ -79,11 +83,13 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	}
 	res := domain.UploadCleanupResult{Found: len(abandoned)}
 	for _, u := range abandoned {
-		if err := s.store.RemoveDir(ctx, filestore.StagingDir(u.ID)); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-			res.Failed++
-			slog.WarnContext(ctx, "could not remove an abandoned upload folder", "attachmentId", u.ID, "error", err)
-			s.deferRetry(ctx, sys, u.Kind, u.ID)
-			continue
+		if s.store != nil {
+			if err := s.store.RemoveDir(ctx, filestore.StagingDir(u.ID)); err != nil && !errors.Is(err, filestore.ErrNotFound) {
+				res.Failed++
+				slog.WarnContext(ctx, "could not remove an abandoned upload folder", "attachmentId", u.ID, "error", err)
+				s.deferRetry(ctx, sys, u.Kind, u.ID)
+				continue
+			}
 		}
 		if err := s.repo.MarkFailed(sys, u.Kind, u.ID, "upload abandoned: never confirmed"); err != nil {
 			res.Failed++
@@ -99,7 +105,7 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		return res, err
 	}
 	for _, img := range unlinked {
-		if img.StorageKey != nil && *img.StorageKey != "" {
+		if s.store != nil && img.StorageKey != nil && *img.StorageKey != "" {
 			if err := s.store.RemoveFile(ctx, strings.TrimLeft(*img.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
 				res.ImagesFailed++
 				slog.WarnContext(ctx, "could not remove an unlinked comment image", "attachmentId", img.ID, "error", err)
@@ -114,6 +120,9 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 			continue
 		}
 		res.ImagesRemoved++
+		if s.store == nil && img.StorageKey != nil && *img.StorageKey != "" {
+			res.OrphanedKeys = append(res.OrphanedKeys, *img.StorageKey)
+		}
 	}
 	slog.InfoContext(ctx, "attachment upload cleanup",
 		"audit", true, "action", "upload-cleanup", "callerId", auditCaller(ctx),
