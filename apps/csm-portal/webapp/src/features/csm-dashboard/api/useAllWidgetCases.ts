@@ -53,17 +53,20 @@ export function useAllWidgetCases({
 }): UseQueryResult<AllWidgetCases, Error> {
   const api = useBackendApi();
   const config = WIDGET_RESOURCE_CONFIG[resourceType];
+  // A case-family link keeps its relative dates (`__daysAgo:30__`; see
+  // `DashboardWidgetTile`'s `resolvePlaceholders`), so they are resolved here,
+  // browser-local, as every other case search on this page does. Resolved on
+  // each render and keyed on the result: a placeholder resolves to a whole
+  // local day, so the key stays the same through a day and changes at local
+  // midnight, and a cached answer is never served for the previous day's window.
+  const resolvedFilters = resolveRelativeDateFilters(filters);
 
   return useQuery<AllWidgetCases, Error>({
     // Same leading slots as `useWidgetData`'s key, so `invalidateWidgetQueries`
     // refreshes this too.
-    queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, widgetId, resourceType, "all", filters],
+    queryKey: [ApiQueryKeys.CSM_DASHBOARD_WIDGET_DATA, widgetId, resourceType, "all", resolvedFilters],
     queryFn: async ({ signal }): Promise<AllWidgetCases> => {
       if (!config) throw new Error(`Unsupported widget resourceType: ${resourceType}`);
-      // A case-family link keeps its relative dates (`__daysAgo:30__`; see
-      // `DashboardWidgetTile`'s `resolvePlaceholders`), so they are resolved
-      // here, browser-local, as every other case search on this page does.
-      const resolvedFilters = resolveRelativeDateFilters(filters);
       const items: Record<string, unknown>[] = [];
       let total = 0;
       while (items.length < MAX_GROUPED_WIDGET_RECORDS) {
