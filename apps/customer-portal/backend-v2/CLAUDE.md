@@ -1116,3 +1116,29 @@ The portal deliberately does **not** write to Salesforce itself for this. entity
   `middleware.TokenValidator` instead (see "The AI chat agent"). It is still JWT-authenticated —
   do not add a second exception without the same browser-level justification.
 - **Run gosec on every change** — `gosec -fmt=text ./...` must report 0 issues before opening a PR.
+
+## Stored attachments in Azure Blob Storage (`ATTACHMENT_STORAGE_MODE=backend`)
+
+Must match entity-service's setting of the same name; default `sftpgo` keeps everything above. In `backend`
+mode this service holds the Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`,
+`libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
+size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
+(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is
+for this process only: it is never put in a response, a header or a log.**
+
+| Route | Does |
+|---|---|
+| `POST /attachments/upload` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | authorize, then Put Block (<= 16 MiB, index within the size limit) |
+| `GET /attachments/upload/{id}/chunks?type=` | the stored chunks, to resume |
+| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 429) deletes the file |
+| `GET /attachments/download/{id}/content?type=` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
+| `GET /attachments/inline/{id}/content` | locate, then stream; only four image types are shown inline |
+| `POST /attachments/delete` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
+
+Config: `AZURE_STORAGE_CONNECTION_STRING`, or `AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_KEY` (+ optional
+`AZURE_STORAGE_ENDPOINT` for Azurite), and `AZURE_STORAGE_CONTAINER`. Entra client-credential sign-in is not in
+`libs/azblobstore` yet. `libs/azblobstore` is a separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build
+with an uncommitted `go.work` listing this module and the library, and add the `require` line once the tag exists
+(it makes a workspace build fail while the tag is missing). Not done yet: the job that deletes orphan files
+(`POST /attachments/uploads/cleanup`, then `.../acknowledge`).
