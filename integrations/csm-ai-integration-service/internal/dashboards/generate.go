@@ -74,10 +74,15 @@ type Request struct {
 // last object; otherwise Candidates holds every JSON object in the reply, in
 // order (the last valid one is the answer: see the backend).
 type Result struct {
-	Candidates   []json.RawMessage
-	Declined     string
-	InputTokens  int64
-	OutputTokens int64
+	Candidates []json.RawMessage
+	Declined   string
+	// InputTokens is the input that was neither read from nor written to the
+	// cache (the user message, mostly, once the system prompt is cached); the
+	// two cache counts are the rest of the input.
+	InputTokens              int64
+	CacheCreationInputTokens int64
+	CacheReadInputTokens     int64
+	OutputTokens             int64
 }
 
 // Generator makes the model call.
@@ -150,7 +155,12 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 	if len(objects) == 0 {
 		return Result{}, outcomeUnusable, fmt.Errorf("%w: no JSON object in the reply", ErrUnusable)
 	}
-	res := Result{InputTokens: msg.Usage.InputTokens, OutputTokens: msg.Usage.OutputTokens}
+	res := Result{
+		InputTokens:              msg.Usage.InputTokens,
+		CacheCreationInputTokens: msg.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     msg.Usage.CacheReadInputTokens,
+		OutputTokens:             msg.Usage.OutputTokens,
+	}
 	if reason, ok := declineReason(objects[len(objects)-1]); ok {
 		res.Declined = reason
 		return res, outcomeDeclined, nil
@@ -167,7 +177,10 @@ func readReply(msg *anthropic.Message) (Result, string, error) {
 func logUsage(ctx context.Context, model, outcome string, stopReason anthropic.StopReason, usage anthropic.Usage, took time.Duration) {
 	slog.InfoContext(ctx, "dashboard generate: token usage",
 		"model", model, "outcome", outcome, "stopReason", stopReason,
-		"inputTokens", usage.InputTokens, "outputTokens", usage.OutputTokens,
+		"inputTokens", usage.InputTokens,
+		"cacheCreationInputTokens", usage.CacheCreationInputTokens,
+		"cacheReadInputTokens", usage.CacheReadInputTokens,
+		"outputTokens", usage.OutputTokens,
 		"durationMs", took.Milliseconds())
 }
 

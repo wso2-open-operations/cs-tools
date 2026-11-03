@@ -80,7 +80,8 @@ func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
 		"content":     []any{map[string]any{"type": "text", "text": f.text}},
 		"stop_reason": stop, "stop_sequence": nil,
-		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400},
+		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400,
+			"cache_creation_input_tokens": 700, "cache_read_input_tokens": 9000},
 	})
 	_, _ = w.Write(reply)
 }
@@ -130,8 +131,8 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	if len(res.Candidates) != 1 || string(res.Candidates[0]) != validGenerated || res.Declined != "" {
 		t.Errorf("result = %+v, want the one object", res)
 	}
-	if res.InputTokens != 5000 || res.OutputTokens != 400 {
-		t.Errorf("usage = %d/%d, want 5000/400", res.InputTokens, res.OutputTokens)
+	if res.InputTokens != 5000 || res.OutputTokens != 400 || res.CacheCreationInputTokens != 700 || res.CacheReadInputTokens != 9000 {
+		t.Errorf("usage = %+v, want input 5000, cache write 700, cache read 9000, output 400", res)
 	}
 	system, user, maxTok, model := gw.request(t)
 	if system != teams.WithTeams("CATALOGUE\n", team) || !strings.Contains(system, "| Rigel | `rigel` | CRE ABT | `creTeam` |") {
@@ -334,6 +335,14 @@ func TestGenerateLogsTokenUsageForEveryOutcome(t *testing.T) {
 			}
 			if tc.tokens > 0 && l["outputTokens"] != float64(400) {
 				t.Errorf("output tokens = %v, want 400", l["outputTokens"])
+			}
+			// The cache counts, 0 when the call failed.
+			wantWrite, wantRead := float64(700), float64(9000)
+			if tc.tokens == 0 {
+				wantWrite, wantRead = 0, 0
+			}
+			if l["cacheCreationInputTokens"] != wantWrite || l["cacheReadInputTokens"] != wantRead {
+				t.Errorf("cache tokens = %v / %v, want %v / %v", l["cacheCreationInputTokens"], l["cacheReadInputTokens"], wantWrite, wantRead)
 			}
 			if ms, ok := l["durationMs"].(float64); !ok || (tc.name == "ok" && ms < 50) {
 				t.Errorf("durationMs = %v, want the call's time (at least the gateway's 50ms on ok)", l["durationMs"])
