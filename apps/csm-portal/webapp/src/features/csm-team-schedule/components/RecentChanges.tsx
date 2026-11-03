@@ -37,6 +37,11 @@ interface RecentChangesProps {
 /** One line in the list: a change as a lead would say it. */
 interface Entry {
   id: string;
+  /** The engineer the change is about, for the person filter. */
+  userId: string;
+  /** Whether the page knows the engineer's name; an unnamed one reads
+   *  "someone" and is left out of the person filter. */
+  named: boolean;
   when: Date;
   actor: string;
   who: string;
@@ -58,6 +63,19 @@ function fmtSpan(from: string, to?: string): string {
   if (!to || to === from) return fmtDay(from);
   return `${fmtDay(from)} – ${fmtDay(to)}`;
 }
+
+/** The exact moment, in India Standard Time whatever the reader's own zone:
+ *  "3 Nov, 09:27 IST". Precise enough to tell a change made before the daily
+ *  timesheet report read the roster from one made after. */
+const istFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Colombo",
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+const fmtIst = (when: Date): string => `${istFormat.format(when)} IST`;
 
 /** "just now", "12 min ago", "3 h ago", then the date. */
 function ago(when: Date, now: number): string {
@@ -88,15 +106,19 @@ export default function RecentChanges({
 }: RecentChangesProps): JSX.Element {
   const [shown, setShown] = useState(PAGE);
   const [now] = useState(() => Date.now());
+  /** The engineer to show changes for; "" is everyone. */
+  const [person, setPerson] = useState("");
 
   const entries = useMemo(() => {
     const out: Entry[] = [];
     const used = new Set<string>();
     const base = (a: ScheduleActivity) => ({
       id: a.id,
+      userId: a.userId,
       when: new Date(a.createdOn),
       actor: a.actorEmail.split("@")[0],
       who: nameOf(a.userId) ?? "someone",
+      named: nameOf(a.userId) !== undefined,
       subject: a.subject,
     });
     for (const a of activity) {
@@ -156,12 +178,40 @@ export default function RecentChanges({
     return out;
   }, [activity, nameOf, shiftLabel, kindLabel]);
 
+  /** Everyone the listed changes are about, by name, for the filter. Only
+   *  people the page can name: a list of "someone"s could not be told apart. */
+  const people = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const e of entries) if (e.named && !byId.has(e.userId)) byId.set(e.userId, e.who);
+    return [...byId.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [entries]);
+  const visible = person ? entries.filter((e) => e.userId === person) : entries;
+
   return (
     <section className="recent" aria-label="Recent changes">
       <div className="rc-head">
         <b>Recent changes</b>
-        <span className="count">{entries.length}</span>
+        <span className="count">{visible.length}</span>
         <span className="rc-sub">to your teams&rsquo; rota and leave, in the months on screen</span>
+        {people.length > 1 || person ? (
+          <label className="rc-filter">
+            Person
+            <select
+              value={person}
+              onChange={(e) => {
+                setPerson(e.target.value);
+                setShown(PAGE);
+              }}
+            >
+              <option value="">Everyone</option>
+              {people.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <button type="button" className="pk-x" onClick={onClose} aria-label="Close recent changes">
           ×
         </button>
@@ -174,12 +224,17 @@ export default function RecentChanges({
         </div>
       ) : entries.length === 0 ? (
         <div className="offnone">No changes yet in these months.</div>
+      ) : visible.length === 0 ? (
+        <div className="offnone">No changes to this person in these months.</div>
       ) : (
         <ol className="rc-list">
-          {entries.slice(0, shown).map((e) => (
+          {visible.slice(0, shown).map((e) => (
             <li key={e.id} className={`rc-i ${e.subject}`}>
-              <span className="rc-when" title={e.when.toLocaleString()}>
+              <span className="rc-when">
                 {ago(e.when, now)}
+                <time className="rc-at" dateTime={e.when.toISOString()}>
+                  {fmtIst(e.when)}
+                </time>
               </span>
               <span className="rc-body">
                 <b>{e.who}</b> · {e.days}: {e.what}
@@ -189,9 +244,9 @@ export default function RecentChanges({
           ))}
         </ol>
       )}
-      {entries.length > shown ? (
+      {visible.length > shown ? (
         <button type="button" className="btn sm ghost rc-more" onClick={() => setShown((n) => n + PAGE)}>
-          Show {Math.min(PAGE, entries.length - shown)} more
+          Show {Math.min(PAGE, visible.length - shown)} more
         </button>
       ) : null}
     </section>

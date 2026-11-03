@@ -45,6 +45,7 @@ import MonthRoster from "../components/MonthRoster";
 import MyWeekStrip from "../components/MyWeekStrip";
 import NextRotation from "../components/NextRotation";
 import RecentChanges from "../components/RecentChanges";
+import RosterFreezeBanner from "../components/RosterFreezeBanner";
 import UndoToast, { type UndoOffer } from "../components/UndoToast";
 import { UndoIncomplete, applyRevertRuns, awayIsRevertible, rotaRevertRuns } from "../utils/undo";
 import { useEngagementAllocations } from "../api/useEngagementAllocations";
@@ -1519,6 +1520,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
     <div className="csm-ts" style={SCHEDULE_THEME_VARS}>
       <div className="wrap">
         <h1>Team Schedule</h1>
+        <RosterFreezeBanner />
 
         <div className="tabrow">
           <div className="tabs" role="tablist" aria-busy={visibleTabs.length === 0}>
