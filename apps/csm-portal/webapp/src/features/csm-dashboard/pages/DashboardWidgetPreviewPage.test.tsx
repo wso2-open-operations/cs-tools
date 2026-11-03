@@ -61,7 +61,7 @@ vi.mock("@hooks/useIdTokenClaims", () => ({
 import DashboardWidgetPreviewPage from "@features/csm-dashboard/pages/DashboardWidgetPreviewPage";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 
-function renderAt(initialEntry: string) {
+function renderAt(initialEntry: string | { pathname: string; search?: string; state?: unknown }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -70,6 +70,7 @@ function renderAt(initialEntry: string) {
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/dashboard" element={<div>Dashboard landing</div>} />
+          <Route path="/dashboard/custom/:id" element={<div>A custom dashboard</div>} />
           <Route path="/dashboard/preview/:previewSlug" element={<DashboardWidgetPreviewPage />} />
         </Routes>
       </MemoryRouter>
@@ -432,6 +433,30 @@ describe("DashboardWidgetPreviewPage", () => {
     expect(screen.getByText("Dashboard landing")).toBeInTheDocument();
   });
 
+  /** The preview href as a router entry, with `state`. */
+  const entryWithState = (state: unknown) => {
+    const href = buildWidgetPreviewHref({
+      previewSlug: "cases",
+      resourceType: "case",
+      widgetId: "my_critical_open",
+      displayName: "My Critical & High Cases",
+      filters: {},
+    });
+    const [pathname, search] = href.split("?");
+    return { pathname, search: `?${search}`, state };
+  };
+
+  it("returns to the dashboard it was opened from when Back is clicked", () => {
+    renderAt(entryWithState({ from: "/dashboard/custom/abc" }));
+    fireEvent.click(screen.getByRole("button", { name: /back/i }));
+    expect(screen.getByText("A custom dashboard")).toBeInTheDocument();
+  });
+
+  it("returns to the System Dashboards page when `from` is not an app path", () => {
+    renderAt(entryWithState({ from: "https://example.test/elsewhere" }));
+    fireEvent.click(screen.getByRole("button", { name: /back/i }));
+    expect(screen.getByText("Dashboard landing")).toBeInTheDocument();
+  });
 });
 
 /**

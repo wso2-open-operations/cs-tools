@@ -28,7 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import type { BeWidgetResourceType } from "@api/backend/types";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
@@ -140,7 +140,13 @@ export default function DashboardWidgetPreviewPage(): JSX.Element {
   const { previewSlug } = useParams<{ previewSlug: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, isLoading: isLoadingUser } = useCurrentUser();
+  // Back returns to the dashboard the user came from (a tile sets
+  // `state.from`, a custom or shared dashboard included); the System
+  // Dashboards page only for a link opened directly, with no state.
+  const from = (location.state as { from?: unknown } | null)?.from;
+  const backTarget = typeof from === "string" && from.startsWith("/") ? from : "/dashboard";
 
   const resourceType = resourceTypeForPreviewSlug(previewSlug);
   const widgetId = searchParams.get("w");
@@ -153,7 +159,7 @@ export default function DashboardWidgetPreviewPage(): JSX.Element {
       variant="text"
       size="small"
       startIcon={<ArrowLeft size={16} />}
-      onClick={() => navigate("/dashboard")}
+      onClick={() => navigate(backTarget)}
       sx={{ alignSelf: "flex-start" }}
     >
       Back
