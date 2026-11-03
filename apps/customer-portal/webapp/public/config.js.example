@@ -146,14 +146,22 @@ window.config = {
   //   false – the older ServiceNow attachment flow is used.
   CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
 
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
+  // CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE  (optional — default: "sftpgo")
+  //   "sftpgo"  – (default) the browser sends and fetches files with SFTPGo links.
+  //   "backend" – the portal backend holds the files in Azure Blob Storage:
+  //               uploads go to it in 16 MiB chunks and downloads stream from it,
+  //               so no storage address is exposed. Must match the backend's
+  //               ATTACHMENT_STORAGE_MODE.
+  // CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
+
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 100)
   //   Largest case or deployment file offered for upload, in MB. Set it to match
   //   entity-service's ATTACHMENT_MAX_BYTES; the service stays authoritative and
   //   this only refuses a file early. A number or numeric string; anything else
   //   (zero, negative, text) uses the default.
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25,
 
-  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB  (optional — default: 1)
+  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB  (optional — default: 10)
   //   Largest image pasted or inserted into a comment, in MB. Match entity-service's
   //   INLINE_IMAGE_MAX_BYTES. Same value rules as above.
   // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,

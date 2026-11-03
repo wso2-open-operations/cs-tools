@@ -32,11 +32,11 @@ describe("attachment size limits", () => {
   afterEach(() => setConfig(undefined));
 
   it("default to entity-service's own defaults", () => {
-    expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
-    expect(inlineImageMaxBytes()).toBe(1 * MIB);
+    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
+    expect(inlineImageMaxBytes()).toBe(10 * MIB);
     setConfig({});
-    expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
-    expect(inlineImageMaxBytes()).toBe(1 * MIB);
+    expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
+    expect(inlineImageMaxBytes()).toBe(10 * MIB);
   });
 
   it("read a number or a numeric string, at call time", () => {
@@ -51,8 +51,8 @@ describe("attachment size limits", () => {
     "fall back to the default for %j",
     (bad) => {
       setConfig({ CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: bad, CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: bad });
-      expect(entityAttachmentMaxBytes()).toBe(10 * MIB);
-      expect(inlineImageMaxBytes()).toBe(1 * MIB);
+      expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
+      expect(inlineImageMaxBytes()).toBe(10 * MIB);
     },
   );
 

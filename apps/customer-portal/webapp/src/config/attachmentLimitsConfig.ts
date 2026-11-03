@@ -18,8 +18,8 @@
 const MIB = 1024 * 1024;
 
 /** Entity-service's own defaults (`ATTACHMENT_MAX_BYTES`, `INLINE_IMAGE_MAX_BYTES`). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const DEFAULT_INLINE_IMAGE_MAX_MB = 10;
 
 /**
  * A size in MB from `window.config`. Platform config injection often turns
@@ -38,7 +38,7 @@ function configuredMb(value: unknown, fallback: number): number {
 
 /**
  * Largest work item or deployment file the portal offers to upload, in bytes
- * (`CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB`, default 10). Read at call time.
+ * (`CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB`, default 100). Read at call time.
  * Entity-service enforces its own limit; this only refuses early.
  */
 export function entityAttachmentMaxBytes(): number {
@@ -52,7 +52,7 @@ export function entityAttachmentMaxBytes(): number {
 
 /**
  * Largest pasted or inserted comment image, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 1). Read at call time.
+ * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 10). Read at call time.
  */
 export function inlineImageMaxBytes(): number {
   return Math.floor(
