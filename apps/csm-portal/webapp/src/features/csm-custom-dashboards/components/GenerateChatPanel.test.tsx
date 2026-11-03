@@ -80,6 +80,36 @@ describe("GenerateChatPanel", () => {
     expect(onSend).toHaveBeenCalledWith("Only P1");
   });
 
+  it("leaves the cursor where the user moved it while a reply was on its way", () => {
+    const props = { messages: [], onSend: vi.fn(), onClose: vi.fn() };
+    const page = (busy: boolean) => (
+      <>
+        <button type="button">Discard</button>
+        <GenerateChatPanel {...props} busy={busy} />
+      </>
+    );
+    const { rerender } = render(page(true));
+    const discard = screen.getByRole("button", { name: "Discard" });
+    discard.focus();
+    rerender(page(false));
+    expect(discard).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Message" })).not.toHaveFocus();
+  });
+
+  it("still takes the cursor when it opens from a button that has it", () => {
+    const props = { messages: [], onSend: vi.fn(), onClose: vi.fn() };
+    const page = (open: boolean) => (
+      <>
+        <button type="button">Edit with AI</button>
+        {open && <GenerateChatPanel {...props} />}
+      </>
+    );
+    const { rerender } = render(page(false));
+    screen.getByRole("button", { name: "Edit with AI" }).focus();
+    rerender(page(true));
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
   it("fills the box from an example prompt without sending it", () => {
     const { onSend, box } = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "My open cases by severity" }));
