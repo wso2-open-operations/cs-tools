@@ -1602,6 +1602,249 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /attachments/upload/{id}/chunks/{index}:
+    put:
+      summary: Send one chunk of an upload (ATTACHMENT_STORAGE_MODE=backend only).
+      description: >
+        The body is the raw bytes of chunk `index` (0-based), at most 16 MiB; every
+        chunk but the last should be exactly 16 MiB. A chunk may be sent again and
+        in any order. Nothing is visible until the upload is confirmed. Only the
+        person who started the upload may send chunks; entity-service checks that.
+      operationId: putAttachmentsUploadIdChunksIndex
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Stored
+        "411":
+          description: LengthRequired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/upload/{id}/chunks:
+    get:
+      summary: List the chunks already stored for an upload (ATTACHMENT_STORAGE_MODE=backend only).
+      description: Lets an interrupted upload carry on from the first missing chunk.
+      operationId: getAttachmentsUploadIdChunks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunkBytes:
+                    type: integer
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        size:
+                          type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/download/{id}/content:
+    get:
+      summary: Download an attachment (ATTACHMENT_STORAGE_MODE=backend only).
+      description: >
+        Streams the file as an attachment of an opaque type. Supports a single
+        `Range: bytes=a-b` so an interrupted download can resume (206, 416 when
+        past the end). Access is checked by entity-service on every request.
+      operationId: getAttachmentsDownloadIdContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: The file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: A range of the file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "416":
+          description: RangeNotSatisfiable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /attachments/delete:
     post:
       summary: Delete a stored attachment (only the person who uploaded it).
