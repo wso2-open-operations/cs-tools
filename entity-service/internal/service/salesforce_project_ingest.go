@@ -141,8 +141,18 @@ func (s *salesforceEventService) projectInsertsAllowed() bool {
 	return s.project.enabled() && s.project.InsertEnabled
 }
 
-// handleProjectEvent is the Project__c branch of HandleEvent.
+// handleProjectEvent is the Project__c branch of HandleEvent: the Project
+// ingest, then the ACP reopen check (acp_reopen.go), which runs only once the
+// ingest succeeded and whether or not the ingest is on.
 func (s *salesforceEventService) handleProjectEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
+	if err := s.ingestProjectEvent(ctx, req); err != nil {
+		return err
+	}
+	return s.reopenAfterProjectEvent(ctx, req)
+}
+
+// ingestProjectEvent is the Project ingest's part of handleProjectEvent.
+func (s *salesforceEventService) ingestProjectEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
 	if !s.project.enabled() {
 		slog.InfoContext(ctx, "salesforce: project ingest disabled, ignoring project event",
 			"eventType", req.EventType, "referenceId", req.ReferenceID)
