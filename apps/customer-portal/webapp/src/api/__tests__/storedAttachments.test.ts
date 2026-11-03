@@ -272,7 +272,7 @@ describe("storedAttachments", () => {
           file: big,
           name: "big.bin",
         }),
-      ).rejects.toThrow("File size exceeds 10 MB limit.");
+      ).rejects.toThrow("File size exceeds 100 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
@@ -296,7 +296,7 @@ describe("storedAttachments", () => {
       }
     });
 
-    it("refuses a comment image over the 1 MB default before anything is sent", async () => {
+    it("refuses a comment image over the 10 MB default before anything is sent", async () => {
       const big = { size: inlineImageMaxBytes() + 1, name: "p.png", type: "image/png" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
@@ -305,7 +305,7 @@ describe("storedAttachments", () => {
           file: big,
           name: "p.png",
         }),
-      ).rejects.toThrow("File size exceeds 1 MB limit.");
+      ).rejects.toThrow("File size exceeds 10 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
@@ -351,6 +351,121 @@ describe("storedAttachments", () => {
         status: 409,
         message: "This case is closed, so new attachments can't be added.",
       });
+    });
+  });
+
+  describe("with the files held by the portal backend", () => {
+    const CHUNK = 16 * 1024 * 1024;
+    const withMode = () => {
+      (window as unknown as { config: unknown }).config = {
+        CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
+        CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
+      };
+    };
+    const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
+    const bigFile = (size: number) =>
+      ({
+        size,
+        name: "big.bin",
+        type: "application/octet-stream",
+        slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
+      }) as unknown as File;
+
+    it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+      withMode();
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started, 201);
+        if (url.includes("/chunks/")) return new Response(null, { status: 204 });
+        return json({ id: "att-1", name: "big.bin", sizeBytes: 0, status: "COMPLETE" });
+      });
+      const progress: number[] = [];
+      await uploadStoredAttachment(authFetch, {
+        type: "work_item",
+        parentId: "case-1",
+        file: bigFile(2 * CHUNK + 5),
+        name: "big.bin",
+        onProgress: (sent) => progress.push(sent),
+      });
+      const chunkCalls = authFetch.mock.calls.filter(([u]) => String(u).includes("/chunks/"));
+      expect(chunkCalls.map(([u]) => String(u).match(/chunks\/(\d+)/)?.[1]).sort()).toEqual(["0", "1", "2"]);
+      expect(chunkCalls.every(([u, i]) => String(u).endsWith("?type=work_item") && i.method === "PUT")).toBe(true);
+      expect(rawFetch).not.toHaveBeenCalled();
+      const confirm = authFetch.mock.calls.find(([u]) => String(u).endsWith("/confirm"))!;
+      expect(JSON.parse(confirm[1].body)).toEqual({ type: "work_item", chunks: 3 });
+      expect(progress[progress.length - 1]).toBe(2 * CHUNK + 5);
+    });
+
+    it("tries a chunk again after a passing failure", async () => {
+      withMode();
+      vi.useFakeTimers();
+      try {
+        let tries = 0;
+        authFetch.mockImplementation(async (url: string) => {
+          if (url.endsWith("/attachments/upload")) return json(started, 201);
+          if (url.endsWith("/confirm"))
+            return json({ id: "att-1", name: "a.bin", sizeBytes: 10, status: "COMPLETE" });
+          tries++;
+          return tries === 1 ? new Response("", { status: 503 }) : new Response(null, { status: 204 });
+        });
+        const done = uploadStoredAttachment(authFetch, {
+          type: "work_item",
+          parentId: "case-1",
+          file: bigFile(10),
+          name: "a.bin",
+        });
+        await vi.runAllTimersAsync();
+        await expect(done).resolves.toMatchObject({ status: "COMPLETE" });
+        expect(tries).toBeGreaterThanOrEqual(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not retry a refusal", async () => {
+      withMode();
+      let tries = 0;
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started, 201);
+        tries++;
+        return json({ message: "Only the person who started the upload can send it." }, 403);
+      });
+      await expect(
+        uploadStoredAttachment(authFetch, { type: "work_item", parentId: "c", file: bigFile(10), name: "a.bin" }),
+      ).rejects.toThrow("Only the person who started the upload can send it.");
+      expect(tries).toBe(1);
+    });
+
+    it("downloads through the backend route and saves it under the given name", async () => {
+      withMode();
+      const save = vi.fn();
+      vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:x", revokeObjectURL: vi.fn() });
+      const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => save());
+      authFetch.mockResolvedValueOnce(
+        new Response("0123456789", { status: 200, headers: { "Content-Length": "10" } }),
+      );
+      await downloadStoredAttachment(authFetch, {
+        type: "work_item",
+        id: "11111111-2222-3333-4444-555555555555",
+        name: "report.pdf",
+      });
+      expect(authFetch.mock.calls[0][0]).toBe(
+        `${BASE}/attachments/download/11111111-2222-3333-4444-555555555555/content?type=work_item`,
+      );
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(rawFetch).not.toHaveBeenCalled();
+      click.mockRestore();
+    });
+
+    it("reports 404 so the older flow can be tried, and 410 for a removed file", async () => {
+      withMode();
+      authFetch.mockResolvedValueOnce(json({ message: "Not found" }, 404));
+      await expect(
+        downloadStoredAttachment(authFetch, { type: "work_item", id: "a" }),
+      ).rejects.toMatchObject({ status: 404 });
+      authFetch.mockResolvedValueOnce(json({ message: "This attachment was removed." }, 410));
+      await expect(
+        downloadStoredAttachment(authFetch, { type: "work_item", id: "a" }),
+      ).rejects.toMatchObject({ status: 410 });
     });
   });
 
