@@ -48,6 +48,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/sftpgo"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
+	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
 func main() {
@@ -188,6 +189,22 @@ func main() {
 		Spaces: parseGoogleChatSpaces(os.Getenv("NOTIFICATIONS_GOOGLE_CHAT_SPACES")),
 	})
 	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
+
+	// Where stored-attachment files live: "sftpgo" (default) or "backend", which
+	// has this service hold the Azure credentials. Must match entity-service.
+	attachmentMode, err := parseAttachmentStorageMode(os.Getenv("ATTACHMENT_STORAGE_MODE"))
+	if err != nil {
+		slog.Error("invalid attachment storage mode", "err", err)
+		os.Exit(1)
+	}
+	var attachmentStore *azblobstore.Store
+	if attachmentMode == attachmentStorageBackend {
+		attachmentStore, err = newAttachmentStore(os.Getenv)
+		if err != nil {
+			slog.Error("could not set up attachment storage", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	// SFTPGo-backed attachment storage — off by default (see loadSftpgoConfig).
 	// When disabled, no SFTPGO_* env var is read at all and neither the client
@@ -438,11 +455,24 @@ func main() {
 	// content route above); download links are PermDownloadAttachment for the same
 	// reason; upload, confirm and delete are PermWrite.
 	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
-	route("POST /attachments/download", handler.PermDownloadAttachment, storedAttachmentHandler.ResolveLinks)
-	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
-	route("POST /attachments/upload/{id}/confirm", handler.PermWrite, storedAttachmentHandler.ConfirmUpload)
-	route("POST /attachments/delete", handler.PermWrite, storedAttachmentHandler.DeleteAttachment)
-	route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, storedAttachmentHandler.InlineImageContent)
+	if attachmentMode == attachmentStorageBackend {
+		// Files live in Azure Blob Storage and this backend moves the bytes;
+		// entity-service keeps the access check and says which key to use.
+		blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore)
+		route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
+		route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
+		route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
+		route("POST /attachments/upload/{id}/confirm", handler.PermWrite, blobAttachmentHandler.ConfirmUpload)
+		route("POST /attachments/delete", handler.PermWrite, blobAttachmentHandler.DeleteAttachment)
+		route("GET /attachments/download/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.Download)
+		route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, blobAttachmentHandler.InlineImage)
+	} else {
+		route("POST /attachments/download", handler.PermDownloadAttachment, storedAttachmentHandler.ResolveLinks)
+		route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
+		route("POST /attachments/upload/{id}/confirm", handler.PermWrite, storedAttachmentHandler.ConfirmUpload)
+		route("POST /attachments/delete", handler.PermWrite, storedAttachmentHandler.DeleteAttachment)
+		route("GET /attachments/inline/{id}/content", handler.PermDownloadAttachment, storedAttachmentHandler.InlineImageContent)
+	}
 	route("GET /attachments/{id}", handler.PermView, caseHandler.GetAttachment)
 	route("PATCH /attachments/{id}", handler.PermWrite, caseHandler.UpdateAttachment)
 	route("POST /cases/{id}/call-requests", handler.PermWrite, caseHandler.CreateCallRequest)
