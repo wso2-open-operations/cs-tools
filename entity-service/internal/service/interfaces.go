@@ -1723,6 +1723,12 @@ type AttachmentUploadCleanupService interface {
 	// a day and marks its row FAILED, at most a bounded number per run. Internal
 	// callers only (a ForbiddenError otherwise).
 	CleanupUploads(ctx context.Context) (domain.UploadCleanupResult, error)
+	// AcknowledgeOrphans marks DELETED the orphaned comment images (see
+	// UploadCleanupResult.Orphans) whose files the caller has removed from
+	// storage. Only with ATTACHMENT_STORAGE_MODE=backend (a NotFoundError
+	// otherwise). Internal callers only. An id that is no longer an orphan is
+	// skipped, so repeating a call is safe.
+	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
 }
 
 // InlineImageLinker attaches the comment images a saved comment shows to that

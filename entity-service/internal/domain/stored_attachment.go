@@ -282,8 +282,33 @@ type UploadCleanupResult struct {
 	// uploaded and never linked to a comment.
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
-	// OrphanedKeys is set only with ATTACHMENT_STORAGE_MODE=backend, where this
-	// service holds no files: the storage keys of the unlinked comment images it
-	// just marked DELETED, for the caller to remove from storage.
-	OrphanedKeys []string `json:"orphanedKeys,omitempty"`
+	// Orphans is set only with ATTACHMENT_STORAGE_MODE=backend, where this service
+	// holds no files: the unlinked comment images whose files the caller must
+	// remove from storage. They are NOT yet marked DELETED, so every run lists
+	// them again until the caller removes the files and acknowledges them
+	// (AcknowledgeOrphansRequest). A lost response therefore loses nothing.
+	Orphans []OrphanedImage `json:"orphans,omitempty"`
+}
+
+// OrphanedImage is an unlinked comment image whose file is in storage this
+// service cannot reach. StorageKey is internal: it is for the caller that removes
+// the file and must never reach a browser.
+type OrphanedImage struct {
+	ID         string `json:"id"`
+	StorageKey string `json:"storageKey"`
+}
+
+// AcknowledgeOrphansRequest is the body of POST /attachments/uploads/cleanup/acknowledge:
+// the ids of orphaned images whose files the caller has removed from storage. It
+// exists only with ATTACHMENT_STORAGE_MODE=backend.
+type AcknowledgeOrphansRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// AcknowledgeOrphansResult says how many of the acknowledged images were marked
+// DELETED, and how many were skipped because they are no longer orphans (already
+// acknowledged, or linked to a comment since).
+type AcknowledgeOrphansResult struct {
+	Acknowledged int `json:"acknowledged"`
+	Skipped      int `json:"skipped"`
 }

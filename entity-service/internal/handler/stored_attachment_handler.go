@@ -65,6 +65,25 @@ func (h *StoredAttachmentHandler) CleanupUploads(w http.ResponseWriter, r *http.
 	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
+// AcknowledgeOrphans handles POST /attachments/uploads/cleanup/acknowledge. It
+// exists only with ATTACHMENT_STORAGE_MODE=backend.
+func (h *StoredAttachmentHandler) AcknowledgeOrphans(w http.ResponseWriter, r *http.Request) {
+	if h.uploads == nil {
+		http.NotFound(w, r)
+		return
+	}
+	var req domain.AcknowledgeOrphansRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.uploads.AcknowledgeOrphans(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeStoredAttachmentJSON(w, http.StatusOK, res)
+}
+
 // CleanupShares handles POST /attachments/shares/cleanup.
 func (h *StoredAttachmentHandler) CleanupShares(w http.ResponseWriter, r *http.Request) {
 	if h.cleanup == nil {

@@ -2020,10 +2020,10 @@ The default (`sftpgo`) is untouched; the switch exists so the cutover can be rol
 
 **Routes in this mode.** Registered: `POST /attachments/upload`, `.../upload/{id}/confirm`,
 `POST /attachments/delete`, `POST /attachments/uploads/cleanup` (all kept, with changed internals
-below), plus three new ones: `POST /attachments/upload/{id}/authorize`, `POST /attachments/locate`
-and `GET /attachments/inline/{id}/location`. **Not registered (404):** `POST /attachments/download`,
+below), plus four new ones: `POST /attachments/upload/{id}/authorize`, `POST /attachments/locate`,
+`GET /attachments/inline/{id}/location` and `POST /attachments/uploads/cleanup/acknowledge`. **Not registered (404):** `POST /attachments/download`,
 `GET /attachments/inline/{id}/content` and `POST /attachments/shares/cleanup`, which only make sense
-with SFTPGo. In `sftpgo` mode the three new routes are not registered and the service answers
+with SFTPGo. In `sftpgo` mode the four new routes are not registered and the service answers
 `NotFoundError` if called directly.
 
 **The storage key is internal.** `authorize`, `locate` and `inline/{id}/location` return a
@@ -2067,9 +2067,16 @@ backend must strip it from anything it forwards. Every response is `Cache-Contro
 - *Remove files.* Nothing here deletes a blob. The backend removes the file after a delete or a
   rejected confirm. `POST /attachments/uploads/cleanup` still marks abandoned rows `FAILED` (an
   upload that was never confirmed leaves nothing in storage: uncommitted blocks expire by
-  themselves) and the unlinked comment images `DELETED`, and **returns the storage keys of those
-  images in `orphanedKeys`** for the caller to remove. A row marked `DELETED` whose blob was never
-  removed is an orphan nothing else will find, so run the cleanup from something that can delete.
+  themselves). For unlinked comment images it is a **two-step handoff**: the cleanup returns
+  them in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists
+  them again until the caller removes the files and then calls
+  `POST /attachments/uploads/cleanup/acknowledge` with their ids. Only then are they marked
+  `DELETED`. A `DELETED` row is never listed again, so marking first would lose the key if the
+  response were lost; this way nothing is lost and a repeated call is safe. Acknowledge only
+  marks an id that is still an orphan (re-read from the unlinked list), so it cannot be used to
+  delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file
+  (nothing in storage) is marked `DELETED` straight away. Run the cleanup from something that
+  can both delete blobs and call this service.
 - *Store an image pasted into a comment.* `ExtractInlineImages` returns the content unchanged: a
   base64 image stays embedded in the comment, as it did before the stored-attachment flow. The
   portals upload a pasted image as a `comment` attachment before saving, so this only affects a

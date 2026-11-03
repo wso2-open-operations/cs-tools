@@ -725,14 +725,25 @@ paths:
                     type: integer
                     description: Comment images stored but never linked to a comment within 24 hours, removed.
                   imagesFailed: {type: integer}
-                  orphanedKeys:
+                  orphans:
                     type: array
-                    items: {type: string}
                     description: >-
                       Only with ATTACHMENT_STORAGE_MODE=backend, where this
-                      service holds no files: the storage keys of the unlinked
-                      comment images it just marked DELETED, for the caller to
-                      remove from storage.
+                      service holds no files: the unlinked comment images whose
+                      files the caller must remove from storage. They are not
+                      marked DELETED yet, so every run lists them again until the
+                      caller removes the files and acknowledges them with
+                      POST /attachments/uploads/cleanup/acknowledge. The storage
+                      keys are internal and must never reach a browser.
+                    items:
+                      type: object
+                      required: [id, storageKey]
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        storageKey:
+                          type: string
         "403":
           description: The caller is not an internal service.
           content:
@@ -747,6 +758,78 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: Storage is unavailable; try again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/uploads/cleanup/acknowledge:
+    post:
+      summary: >-
+        Acknowledge orphaned comment images whose files the caller has removed from
+        storage. Only with ATTACHMENT_STORAGE_MODE=backend, where
+        POST /attachments/uploads/cleanup hands the orphans over without marking
+        them DELETED. An id is marked DELETED only if it is still an orphan (an
+        unlinked comment image past the cleanup age); one that was linked to a
+        comment since, was already acknowledged, or never was an orphan is skipped,
+        so this cannot delete an arbitrary image and repeating a call is safe. Internal
+        callers only. At most 200 ids. Not registered (404) unless
+        ATTACHMENT_STORAGE_MODE=backend.
+      operationId: acknowledgeOrphanedImages
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              additionalProperties: false
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "200":
+          description: What the call did.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [acknowledged, skipped]
+                properties:
+                  acknowledged:
+                    type: integer
+                    description: Images marked DELETED.
+                  skipped:
+                    type: integer
+                    description: Images that are no longer orphans.
+        "400":
+          description: No ids, more than 200, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The route is not registered (not ATTACHMENT_STORAGE_MODE=backend).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
           content:
             application/json:
               schema:

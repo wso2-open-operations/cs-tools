@@ -2186,6 +2186,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
 			mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
 			mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
+			mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 		} else {
 			mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
 			mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
