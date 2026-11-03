@@ -472,8 +472,12 @@ func checkDayWindow(at string, query map[string]any, rule dayWindowRule) error {
 		}
 		return nil
 	}
-	// Every day of 2024-2027 (a leap year and three others): every month
-	// length and quarter length, and every weekday, comes up.
+	// The years are a sample of calendar shapes, not a limit: every day of
+	// 2024-2027 (a leap year and three others) meets every month length,
+	// quarter length and weekday a relative date can, and a window's length
+	// depends only on those, so a pass holds for any later year too. Walking
+	// every day (about 1,460 date steps, under a millisecond per widget) is
+	// simpler to trust than a hand-picked list of dates.
 	for day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2028; day = day.AddDate(0, 0, 1) {
 		s, okS := relativeDate(start, day)
 		e, okE := relativeDate(end, day)
