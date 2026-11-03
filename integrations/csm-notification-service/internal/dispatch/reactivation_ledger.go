@@ -18,8 +18,11 @@ package dispatch
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -31,15 +34,17 @@ import (
 // does not send the email again. A notice is identified by its project and
 // its reactivatedOn: a later reopen of the same project is a new notice.
 type ReactivationLedger interface {
-	// Reserve takes the notice for this attempt. reserved false with sent
-	// true: it was already sent. reserved false with sent false: another
-	// attempt is sending it right now (retry later).
-	Reserve(ctx context.Context, key string) (reserved, sent bool, err error)
+	// Reserve takes the notice for this attempt and returns the attempt's
+	// token (empty when not reserved). Empty with sent true: it was already
+	// sent. Empty with sent false: another attempt is sending it right now
+	// (retry later).
+	Reserve(ctx context.Context, key string) (token string, sent bool, err error)
 	// MarkSent records the notice as sent, after the email went out.
 	MarkSent(ctx context.Context, key string) error
-	// Release gives the reservation back after a failed send, so a retry can
-	// take it.
-	Release(ctx context.Context, key string) error
+	// Release gives this attempt's reservation (token) back after a failed
+	// send, so a retry can take it. A reservation another attempt took
+	// since, or a sent marker, is left as it is.
+	Release(ctx context.Context, key, token string) error
 }
 
 // Values and lifetimes of a Redis ledger entry. A reservation expires on its
@@ -55,7 +60,7 @@ type ReactivationLedger interface {
 // them while the reservation of an attempt that crashed is still live, and
 // the email would never be sent.
 const (
-	reactivationSending      = "sending"
+	reactivationSending      = "sending:"
 	reactivationSent         = "sent"
 	reactivationSendingTTL   = 2 * time.Minute
 	reactivationSendTimeout  = time.Minute
@@ -76,26 +81,46 @@ func NewRedisReactivationLedger(rdb *redis.Client) *RedisReactivationLedger {
 }
 
 // Reserve implements ReactivationLedger with SET NX: only one attempt can
-// hold the reservation, across replicas and restarts.
-func (l *RedisReactivationLedger) Reserve(ctx context.Context, key string) (bool, bool, error) {
+// hold the reservation, across replicas and restarts. The reservation's
+// value is "sending:" plus the attempt's random token, so Release can tell
+// its own reservation from a later attempt's.
+func (l *RedisReactivationLedger) Reserve(ctx context.Context, key string) (string, bool, error) {
 	k := reactivationKeyPrefix + key
-	ok, err := l.rdb.SetNX(ctx, k, reactivationSending, reactivationSendingTTL).Result()
+	token, err := newReservationToken()
 	if err != nil {
-		return false, false, fmt.Errorf("reactivation ledger: reserve: %w", err)
+		return "", false, fmt.Errorf("reactivation ledger: reserve: %w", err)
+	}
+	ok, err := l.rdb.SetNX(ctx, k, reactivationSending+token, reactivationSendingTTL).Result()
+	if err != nil {
+		return "", false, fmt.Errorf("reactivation ledger: reserve: %w", err)
 	}
 	if ok {
-		return true, false, nil
+		return token, false, nil
 	}
 	v, err := l.rdb.Get(ctx, k).Result()
 	if errors.Is(err, redis.Nil) {
 		// Expired between the two calls: let the retry try again.
-		return false, false, nil
+		return "", false, nil
 	}
 	if err != nil {
-		return false, false, fmt.Errorf("reactivation ledger: read: %w", err)
+		return "", false, fmt.Errorf("reactivation ledger: read: %w", err)
 	}
-	return false, v == reactivationSent, nil
+	return "", v == reactivationSent, nil
 }
+
+// newReservationToken is a random token naming one attempt's reservation.
+func newReservationToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// releaseScript deletes the key only while it still holds this attempt's
+// reservation, in one step: a GET then DEL could delete a reservation
+// another attempt took after this one's expired.
+var releaseScript = redis.NewScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
 
 // MarkSent implements ReactivationLedger.
 func (l *RedisReactivationLedger) MarkSent(ctx context.Context, key string) error {
@@ -105,18 +130,15 @@ func (l *RedisReactivationLedger) MarkSent(ctx context.Context, key string) erro
 	return nil
 }
 
-// Release implements ReactivationLedger. Only a reservation is removed: a
-// sent marker is never given back.
-func (l *RedisReactivationLedger) Release(ctx context.Context, key string) error {
-	k := reactivationKeyPrefix + key
-	v, err := l.rdb.Get(ctx, k).Result()
-	if errors.Is(err, redis.Nil) || (err == nil && v != reactivationSending) {
+// Release implements ReactivationLedger. Only this attempt's reservation is
+// removed (releaseScript, compare and delete): a sent marker is never given
+// back, and neither is a reservation another attempt holds, whatever the
+// send and reservation timings are.
+func (l *RedisReactivationLedger) Release(ctx context.Context, key, token string) error {
+	if strings.TrimSpace(token) == "" {
 		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("reactivation ledger: release: %w", err)
-	}
-	if err := l.rdb.Del(ctx, k).Err(); err != nil {
+	if err := releaseScript.Run(ctx, l.rdb, []string{reactivationKeyPrefix + key}, reactivationSending+token).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return fmt.Errorf("reactivation ledger: release: %w", err)
 	}
 	return nil

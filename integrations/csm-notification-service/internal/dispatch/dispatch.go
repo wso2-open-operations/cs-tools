@@ -981,6 +981,9 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// restart/rebalance gap this closes. A record already in progress or
 	// already fully handled is skipped outright, never reaching a single
 	// handler.
+	if ownsItsDedup(env.Type) {
+		return d.dispatchByType(ctx, record, env)
+	}
 	baseKey := recordBaseKey(record)
 	if !d.durablyClaimRecord(ctx, baseKey) {
 		slog.InfoContext(ctx, "dispatch: record already in progress or already processed, skipping", "type", string(env.Type))
@@ -1001,6 +1004,23 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		d.markRecordDone(releaseCtx, baseKey)
 	}
 	return err
+}
+
+// ownsItsDedup reports whether an event type's handler keeps its own durable
+// duplicate record, so Handle's record-level claim is not taken for it.
+//
+// project.reactivated (the "Back to Open state" email) does: its
+// ReactivationLedger reserves the notice before the send and marks it sent
+// after, and a delivery that finds a reservation held waits for it to be
+// released, marked sent or expired. The record-level claim treats "in
+// progress" like "done": after a crash between the claim and the send, the
+// redelivery seconds later would find the claim held, be skipped and
+// committed, and the email would never be sent. With the claim skipped, the
+// redelivery reaches the handler, waits out the crashed attempt's
+// reservation, and sends. The ledger also keys by project and reactivatedOn,
+// not by the record's bytes, and keeps a sent notice for 30 days, not 3.
+func ownsItsDedup(t events.Type) bool {
+	return t == events.TypeProjectReactivated
 }
 
 // dispatchByType is Handle's own event-type switch, split out so Handle

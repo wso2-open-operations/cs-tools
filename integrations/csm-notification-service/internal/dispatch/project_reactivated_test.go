@@ -19,6 +19,8 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"reflect"
 	"runtime"
 	"strings"
@@ -186,21 +188,21 @@ type fakeReactivationLedger struct {
 	onHeld func(state map[string]string, key string)
 }
 
-func (l *fakeReactivationLedger) Reserve(_ context.Context, key string) (bool, bool, error) {
+func (l *fakeReactivationLedger) Reserve(_ context.Context, key string) (string, bool, error) {
 	if l.err != nil {
-		return false, false, l.err
+		return "", false, l.err
 	}
 	switch l.state[key] {
 	case reactivationSent:
-		return false, true, nil
+		return "", true, nil
 	case reactivationSending:
 		if l.onHeld != nil {
 			l.onHeld(l.state, key)
 		}
-		return false, false, nil
+		return "", false, nil
 	}
 	l.state[key] = reactivationSending
-	return true, false, nil
+	return "token", false, nil
 }
 
 func (l *fakeReactivationLedger) MarkSent(_ context.Context, key string) error {
@@ -208,7 +210,7 @@ func (l *fakeReactivationLedger) MarkSent(_ context.Context, key string) error {
 	return nil
 }
 
-func (l *fakeReactivationLedger) Release(_ context.Context, key string) error {
+func (l *fakeReactivationLedger) Release(_ context.Context, key, _ string) error {
 	l.released = append(l.released, key)
 	if l.state[key] == reactivationSending {
 		delete(l.state, key)
@@ -266,13 +268,15 @@ func TestDispatcher_ProjectReactivated_LedgerStopsDuplicates(t *testing.T) {
 		t.Errorf("retry: err=%v state=%q", err, ledger.state[key])
 	}
 
-	// A ledger that cannot be read is retried, never a reason to send.
+	// A ledger that cannot be reached fails open: the email is sent (at worst
+	// one duplicate after a Redis outage), never dropped once the retries
+	// run out.
 	before := len(email.calls)
 	failing := &fakeReactivationLedger{state: map[string]string{}, err: errors.New("redis down")}
 	d3 := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
 		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(failing)
-	if err := d3.Handle(context.Background(), rec); err == nil || len(email.calls) != before {
-		t.Errorf("err=%v sent=%d, want an error and no send", err, len(email.calls)-before)
+	if err := d3.Handle(context.Background(), rec); err != nil || len(email.calls) != before+1 {
+		t.Errorf("err=%v sent=%d, want the email sent despite the ledger", err, len(email.calls)-before)
 	}
 }
 
@@ -417,5 +421,81 @@ func TestDispatcher_ProjectReactivated_RecipientsAreFilteredNotRejected(t *testi
 	}
 	if len(email.calls) != 1 || !reflect.DeepEqual(email.calls[0].to, reactivatedCC) || email.calls[0].cc != nil {
 		t.Errorf("with no internal recipient the CC lists must be in To: %+v", email.calls)
+	}
+}
+
+// The crash this event's ledger exists for, driven through Handle with both
+// duplicate checks on one Redis: an attempt took Handle's record-level claim
+// and the ledger reservation, then the pod died before sending. The
+// redelivery seconds later must not be skipped by the record-level claim
+// (ownsItsDedup): it waits out the dead attempt's reservation and sends. A
+// later redelivery is stopped by the ledger.
+func TestDispatcher_ProjectReactivated_CrashThenRedeliverSendsOnce(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	rec := reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)
+	key := reactivatedTestProjectID + "/2026-10-29T09:30:00Z"
+
+	// What the crashed attempt left behind.
+	mr.Set(durableDedupKeyPrefix+recordBaseKey(rec), "1")
+	mr.SetTTL(durableDedupKeyPrefix+recordBaseKey(rec), durableDedupInProgressTTL)
+	mr.Set(reactivationKeyPrefix+key, reactivationSending+"crashed-attempt")
+	mr.SetTTL(reactivationKeyPrefix+key, reactivationSendingTTL)
+
+	email := &mockEmailSender{}
+	d := newTestDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}).
+		WithACPReactivation(nil, "@example.com").
+		WithACPReactivationLedger(NewRedisReactivationLedger(rdb)).
+		WithDurableDedup(rdb)
+	d.acpReactivationWaitFor, d.acpReactivationPoll = 5*time.Second, 10*time.Millisecond
+	// The dead attempt's reservation expires while the redelivery waits.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		mr.FastForward(reactivationSendingTTL + time.Second)
+	}()
+
+	if err := d.Handle(context.Background(), rec); err != nil {
+		t.Fatalf("redelivery: %v", err)
+	}
+	if len(email.calls) != 1 {
+		t.Fatalf("emails sent = %d, want 1: the redelivery after the crash must send", len(email.calls))
+	}
+	if v, _ := mr.Get(reactivationKeyPrefix + key); v != reactivationSent {
+		t.Errorf("ledger = %q, want sent", v)
+	}
+	if err := d.Handle(context.Background(), rec); err != nil || len(email.calls) != 1 {
+		t.Errorf("second redelivery: err=%v sent=%d, want skipped by the ledger", err, len(email.calls))
+	}
+}
+
+// Debug mode sends to the debug recipients and leaves the ledger alone, so a
+// test send is never recorded as the real notice.
+func TestDispatcher_ProjectReactivated_DebugModeLeavesTheLedgerAlone(t *testing.T) {
+	email := &mockEmailSender{}
+	ledger := &fakeReactivationLedger{state: map[string]string{}}
+	d := NewDispatcher(email, &mockGoogleChatSender{}, &mockCallSender{}, &mockLinkResolver{}, true, true,
+		[]string{"tester@example.com"}, true, "", nil).
+		WithACPReactivation(nil, "@example.com").WithACPReactivationLedger(ledger)
+	if err := d.Handle(context.Background(), reactivatedRecord(`["renewal"]`, `["owner@example.com"]`)); err != nil {
+		t.Fatal(err)
+	}
+	if len(email.calls) != 1 || len(ledger.state) != 0 {
+		t.Errorf("sent=%d ledger=%v, want one test send and nothing recorded", len(email.calls), ledger.state)
+	}
+}
+
+// The internal domain always starts with "@", however it is configured, so
+// "wso2.com" cannot admit a lookalike such as "user@notwso2.com".
+func TestInternalDomainSuffix(t *testing.T) {
+	for in, want := range map[string]string{"": "@wso2.com", "@wso2.com": "@wso2.com", "wso2.com": "@wso2.com", " WSO2.com ": "@wso2.com"} {
+		if got := internalDomainSuffix(in); got != want {
+			t.Errorf("internalDomainSuffix(%q) = %q, want %q", in, got, want)
+		}
+	}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithACPReactivation(nil, "example.com")
+	got := d.reactivationRecipients(context.Background(), []string{"owner@example.com", "user@notexample.com"}, nil)
+	if len(got) != 1 || got[0] != "owner@example.com" {
+		t.Errorf("recipients = %v, want only owner@example.com", got)
 	}
 }

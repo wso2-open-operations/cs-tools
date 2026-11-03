@@ -51,13 +51,26 @@ const acpDefaultInternalDomain = "@wso2.com"
 //
 // Duplicates: entity-service publishes at least once, so the same notice
 // can arrive again (a redelivery after a restart or a rebalance, before the
-// offset was committed). With a ledger (Redis), the notice is reserved before
-// the send and marked sent after it, keyed by project and reactivatedOn: a
-// notice already sent is skipped, one being sent by another attempt is
-// retried later. Within one process the claim also holds off a concurrent
-// delivery of the same record, which returns nil (the winner owns the send).
-// Without a ledger only the claim guards, so a redelivery after a restart
-// can send the email again.
+// offset was committed). The ledger (Redis) owns this event's duplicate
+// check; Handle's record-level claim is not taken for it (ownsItsDedup). The
+// notice is reserved before the send and marked sent after it, keyed by
+// project and reactivatedOn: a notice already sent is skipped, and one
+// reserved by another attempt is waited for (reserveReactivation), so a
+// redelivery after a crash mid-send still sends it. Within one process the
+// claim also holds off a concurrent delivery of the same record, which
+// returns nil (the winner owns the send). Without a ledger only the claim
+// guards, so a redelivery after a restart can send the email again.
+//
+// Redis failing: the email is sent anyway, with a WARN (fail open, as
+// Handle's record-level claim does). Failing closed would drop it for good
+// once the consumer's and the dead-letter topic's retries ran out, and
+// nothing would trigger it again, the project being Open already; the cost
+// of failing open is at most one duplicate after a Redis outage.
+//
+// Debug mode (EMAIL_DEBUG_MODE): the email goes to the debug recipients and
+// the ledger is not used, so a test send is never recorded as the real one
+// (a debug deployment sharing Redis with a real one would otherwise make the
+// real one skip the notice).
 func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventbus.Record, raw json.RawMessage) error {
 	var p events.ProjectReactivatedPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -98,15 +111,26 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 	defer d.forget(key)
 
 	ledgerKey := p.ProjectID + "/" + p.ReactivatedOn
-	if d.acpReactivationLedger != nil {
-		reserved, sent, err := d.reserveReactivation(ctx, ledgerKey)
+	ledger := d.acpReactivationLedger
+	if d.emailDebugMode {
+		ledger = nil
+	}
+	var token string
+	if ledger != nil {
+		var sent bool
+		var err error
+		token, sent, err = d.reserveReactivation(ctx, ledger, ledgerKey)
 		switch {
-		case err != nil:
+		case err != nil && ctx.Err() != nil:
 			return fmt.Errorf("dispatch: reserve back-to-open email for project %s: %w", p.ProjectID, err)
+		case err != nil:
+			slog.WarnContext(ctx, "dispatch: back-to-open email ledger unavailable, sending without the duplicate check",
+				append(logAttrs, "err", err)...)
+			ledger = nil
 		case sent:
 			slog.InfoContext(ctx, "dispatch: back-to-open email already sent, not sending it again", logAttrs...)
 			return nil
-		case !reserved:
+		case token == "":
 			return fmt.Errorf("dispatch: back-to-open email for project %s is still being sent by another attempt", p.ProjectID)
 		}
 	}
@@ -125,22 +149,26 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 	subject := "Back to Open state : " + p.ProjectName
 	// Bounded so the send ends well inside its reservation (see
 	// reactivationSendTimeout): a delivery waiting on the reservation must
-	// never see it expire while this attempt is still sending.
+	// never see it expire while this attempt is still sending. Known and
+	// accepted: if the email API takes the message but answers after the
+	// deadline, this attempt counts it failed, releases the reservation, and
+	// the retry sends the email a second time. The API (POST /send-email)
+	// has no idempotency key to prevent that.
 	sendCtx, cancel := context.WithTimeout(ctx, reactivationSendTimeout)
 	err := d.email.SendEmail(sendCtx, to, cc, nil, nil, subject, body, nil)
 	cancel()
 	if err != nil {
-		if d.acpReactivationLedger != nil {
-			if relErr := d.acpReactivationLedger.Release(context.WithoutCancel(ctx), ledgerKey); relErr != nil {
+		if ledger != nil {
+			if relErr := ledger.Release(context.WithoutCancel(ctx), ledgerKey, token); relErr != nil {
 				slog.WarnContext(ctx, "dispatch: release back-to-open reservation failed; it expires on its own", append(logAttrs, "err", relErr)...)
 			}
 		}
 		return fmt.Errorf("dispatch: send back-to-open email for project %s: %w", p.ProjectID, err)
 	}
-	if d.acpReactivationLedger != nil {
+	if ledger != nil {
 		// Not cancellable: a shutdown that lost this write would let the
 		// redelivery after the restart send the email again.
-		if err := d.acpReactivationLedger.MarkSent(context.WithoutCancel(ctx), ledgerKey); err != nil {
+		if err := ledger.MarkSent(context.WithoutCancel(ctx), ledgerKey); err != nil {
 			slog.ErrorContext(ctx, "dispatch: back-to-open email sent but not recorded as sent; a redelivery may send it again",
 				append(logAttrs, "err", err)...)
 		}
@@ -150,24 +178,24 @@ func (d *Dispatcher) handleProjectReactivated(ctx context.Context, record eventb
 }
 
 // reserveReactivation is ReactivationLedger.Reserve, waiting while another
-// attempt holds the reservation: until it is released (reserved), marked
-// sent (sent), or acpReactivationWaitFor has passed (neither, so the record
-// is retried). An attempt that crashed after Reserve leaves a reservation
+// attempt holds the reservation: until it is released (a token), marked sent
+// (sent), or acpReactivationWaitFor has passed (neither, so the record is
+// retried). An attempt that crashed after Reserve leaves a reservation
 // only its expiry clears, and failing at once would spend the consumer's and
 // the dead-letter topic's retries, seconds in all, before it does: the
 // record would be dropped and the email never sent. The wait holds the
 // partition, at most about reactivationSendingTTL, and only after a crash or
 // while another replica is sending the same notice.
-func (d *Dispatcher) reserveReactivation(ctx context.Context, key string) (reserved, sent bool, err error) {
+func (d *Dispatcher) reserveReactivation(ctx context.Context, ledger ReactivationLedger, key string) (token string, sent bool, err error) {
 	deadline := time.Now().Add(d.acpReactivationWaitFor)
 	for {
-		reserved, sent, err = d.acpReactivationLedger.Reserve(ctx, key)
-		if err != nil || reserved || sent || !time.Now().Before(deadline) {
-			return reserved, sent, err
+		token, sent, err = ledger.Reserve(ctx, key)
+		if err != nil || token != "" || sent || !time.Now().Before(deadline) {
+			return token, sent, err
 		}
 		select {
 		case <-ctx.Done():
-			return false, false, ctx.Err()
+			return "", false, ctx.Err()
 		case <-time.After(d.acpReactivationPoll):
 		}
 	}
@@ -177,10 +205,7 @@ func (d *Dispatcher) reserveReactivation(ctx context.Context, key string) (reser
 // addresses in the internal domain, each once. A dropped one is counted in a
 // WARN, never logged by address.
 func (d *Dispatcher) reactivationRecipients(ctx context.Context, recipients []string, logAttrs []any) []string {
-	domain := strings.ToLower(strings.TrimSpace(d.acpInternalDomain))
-	if domain == "" {
-		domain = acpDefaultInternalDomain
-	}
+	domain := internalDomainSuffix(d.acpInternalDomain)
 	var out []string
 	invalid, external := 0, 0
 	seen := map[string]bool{}
@@ -201,6 +226,21 @@ func (d *Dispatcher) reactivationRecipients(ctx context.Context, recipients []st
 			append(logAttrs, "invalid", invalid, "notInternal", external, "kept", len(out))...)
 	}
 	return out
+}
+
+// internalDomainSuffix is the address suffix an internal address must end
+// with: the configured domain trimmed, lower-cased and starting with "@"
+// (added when missing), so "wso2.com" cannot admit "user@notwso2.com".
+// acpDefaultInternalDomain when none is configured.
+func internalDomainSuffix(configured string) string {
+	domain := strings.ToLower(strings.TrimSpace(configured))
+	if domain == "" {
+		return acpDefaultInternalDomain
+	}
+	if !strings.HasPrefix(domain, "@") {
+		domain = "@" + domain
+	}
+	return domain
 }
 
 // reactivatedReasonLine picks the sentence for why the project reopened.
