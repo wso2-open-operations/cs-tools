@@ -248,6 +248,19 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if _, err := time.Parse(time.RFC3339, p.ChangedOn); err != nil {
 			return fmt.Errorf("events: %s changedOn %q is not RFC3339", t, p.ChangedOn)
 		}
+	case TypeMailAlertReceived:
+		var p MailAlertReceivedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// The ruleName picks the ladder and the dedupeKey is what stops a
+		// redelivery starting a second one.
+		if p.RuleName == "" || p.MessageID == "" || p.DedupeKey == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if entityID != "" && entityID != p.MessageID {
+			return fmt.Errorf("events: %s entityId does not match payload messageId", t)
+		}
 	case TypePagingTestCallRequested:
 		var p PagingTestCallRequestedPayload
 		if err := decodeStrict(raw, &p); err != nil {

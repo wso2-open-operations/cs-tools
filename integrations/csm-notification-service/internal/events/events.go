@@ -150,6 +150,12 @@ const (
 	// TypeProjectContactRegistered is published by entity-service when a
 	// membership moves into REGISTERED; dispatch sends the Welcome email.
 	TypeProjectContactRegistered Type = "project_contact.registered"
+
+	// TypeMailAlertReceived is published by csm-mail-paging-service for each
+	// email that matches one of its rules. internal/mailpaging calls the
+	// rule's escalation levels by phone. The envelope's entityId is the Gmail
+	// message id.
+	TypeMailAlertReceived Type = "mail.alert.received"
 )
 
 // KnownTypes lists every Type this service accepts, in the order they're
@@ -167,6 +173,7 @@ var KnownTypes = []Type{
 	TypeProjectContactInvited, TypeProjectContactRegistered,
 	TypeSRCreated, TypeSRAcknowledged, TypeSRCommentAdded,
 	TypeCaseEscalated,
+	TypeMailAlertReceived,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -652,6 +659,20 @@ type PagingTestCallRequestedPayload struct {
 	Phone       string `json:"phone"`
 	RequestedBy string `json:"requestedBy"`
 	RequestedAt string `json:"requestedAt"`
+}
+
+// MailAlertReceivedPayload is TypeMailAlertReceived's payload, mirroring
+// csm-mail-paging-service's poller.Payload field for field (kept in sync by
+// hand).
+type MailAlertReceivedPayload struct {
+	// RuleName is the mail rule that matched; it selects the escalation ladder.
+	RuleName  string `json:"ruleName"`
+	MessageID string `json:"messageId"`
+	// DedupeKey is stable across redeliveries and distinct per rule.
+	DedupeKey  string `json:"dedupeKey"`
+	Subject    string `json:"subject"`
+	From       string `json:"from"`
+	ReceivedAt string `json:"receivedAt,omitempty"`
 }
 
 // SLATierReachedPayload is TypeSLATierReached's payload — published by
