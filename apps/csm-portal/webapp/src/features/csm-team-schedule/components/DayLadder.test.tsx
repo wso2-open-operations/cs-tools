@@ -270,6 +270,41 @@ describe("DayLadder: cards that share their hours", () => {
     expect(card).not.toHaveTextContent(/AEST/);
   });
 
+  it("keeps the Morning card when only the Morning on-call is beside the AEST person", () => {
+    const aest = shift({
+      code: "CRE_REGULAR_AEST",
+      shortCode: "AEST",
+      label: "AEST regular hours",
+      startMinute: 360,
+      endMinute: 540,
+      isRotation: false,
+      sortOrder: 36,
+    });
+    const at = { rotaDate: ISO, startsAt: `${ISO}T00:30:00.000Z`, endsAt: `${ISO}T03:30:00.000Z` };
+    const { container } = render(
+      <DayLadder
+        day={WEDNESDAY}
+        tz={TZ}
+        zoneLabel="IST"
+        lanes={[
+          lane([
+            assignment({ ...at, name: "Ava", shiftCode: aest.code }),
+            assignment({ ...at, name: "Cal", shiftCode: MORNING_OC.code, isOnCall: true }),
+          ]),
+        ]}
+        shifts={shiftMap(REGULAR, EVENING, MORNING, MORNING_OC, aest)}
+        zones={ZONES}
+        absences={[]}
+        absenceKinds={[ANNUAL_LEAVE]}
+        {...scopeControls()}
+      />,
+    );
+    const card = [...container.querySelectorAll(".zblk")].find((c) => c.textContent?.includes("Ava"))!;
+    expect(card.querySelector(".zbt")).toHaveTextContent(/^Morning 6-9am$/);
+    expect(card).not.toHaveTextContent(/AEST/);
+    expect(card.querySelector(".zoc")).toHaveTextContent("Cal");
+  });
+
   it("folds a window that differs only by team into the crowded card", () => {
     // Regular hours and the India region shift are the same nine-to-five. A
     // card this size lists teams, which is the whole distinction, so a second

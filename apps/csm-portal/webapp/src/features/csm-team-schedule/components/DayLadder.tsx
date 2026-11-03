@@ -379,8 +379,13 @@ export default function DayLadder({
         const turns = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation !== false);
         const standing = ordered.filter((c) => !c.shift?.isOnCall && c.shift?.isRotation === false);
         if (turns.length === 1 || (turns.length === 0 && standing.length === 1)) {
+          // Nobody on the rotation itself, only its on-call beside the
+          // standing window: still the rotation's card, as when the standing
+          // window is alone.
+          const host = turns.length === 0 ? hostOf(standing[0].shift) : undefined;
           out.push({
             ...lead,
+            ...(host ? { shift: host } : {}),
             key: ordered.map((c) => c.key).join("+"),
             rows: ordered.flatMap((c) => c.rows),
           });

@@ -189,6 +189,7 @@ function TeamCell({ rows }: { rows: ScheduleAssignment[] }): JSX.Element {
  */
 function WeekEditCell({
   cell,
+  standing,
   turn,
   rotaDate,
   dayName,
@@ -199,6 +200,9 @@ function WeekEditCell({
   onRemove,
 }: {
   cell: ScheduleAssignment[];
+  /** People listed from a standing window on this row's hours: shown, but not
+   *  turns of this row, so not offered for removal. */
+  standing?: Set<string>;
   turn: WeekTurn;
   rotaDate: string;
   dayName: string;
@@ -220,15 +224,17 @@ function WeekEditCell({
           </span>
           <span className="who">{a.engineer.name}</span>
           {a.tier && !tiered ? <span className="tier-t">{a.tier}</span> : null}
-          <button
-            type="button"
-            className="rm"
-            aria-label={`Take ${a.engineer.name} off ${turn.label} on ${dayName}`}
-            disabled={busy}
-            onClick={() => onRemove(a)}
-          >
-            ×
-          </button>
+          {standing?.has(a.id) ? null : (
+            <button
+              type="button"
+              className="rm"
+              aria-label={`Take ${a.engineer.name} off ${turn.label} on ${dayName}`}
+              disabled={busy}
+              onClick={() => onRemove(a)}
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
       <select
@@ -659,7 +665,8 @@ export default function WeekTable({
                     >
                       {edit && turn && editable ? (
                         <WeekEditCell
-                          cell={standing ? cell.filter((a) => !standing.has(a.id)) : cell}
+                          cell={cell}
+                          standing={standing}
                           turn={turn}
                           rotaDate={iso}
                           dayName={dayName}
