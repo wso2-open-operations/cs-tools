@@ -574,6 +574,15 @@ type Config struct {
 	MigrationCaseReportHoldTag     string
 	MigrationCaseReportAccountsTag string
 	MigrationCaseReportTeamKeys    []string
+	// LongOpenCasesReportProjectTypes are the project type names (compared
+	// exactly) a case's project must have to appear in the long-open cases
+	// report (GET /reports/long-open-cases). LongOpenCasesReportExcludedTags
+	// are tag names (compared ignoring case) that remove a case from it.
+	// A blank value falls back to the defaults rather than emptying the
+	// list: no project types would silently produce an empty report, and no
+	// excluded tags would list cases the team has set aside.
+	LongOpenCasesReportProjectTypes []string
+	LongOpenCasesReportExcludedTags []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -1005,6 +1014,8 @@ func Load() *Config {
 		MigrationCaseReportHoldTag:                    getEnvOrDefault("MIGRATION_CASE_REPORT_HOLD_TAG", "s_mig_hold"),
 		MigrationCaseReportAccountsTag:                getEnvOrDefault("MIGRATION_CASE_REPORT_ACCOUNTS_TAG", "s_acc"),
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
+		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
+		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
@@ -1180,6 +1191,18 @@ func getBoolOrDefault(key string, defaultVal bool) bool {
 // splitComma parses a comma-separated env var into a trimmed, non-empty
 // slice ("" for an unset/empty var, matching integrations/csm-notification-service's
 // own copy of this exact helper).
+
+// defaultLongOpenCasesReportProjectTypes and defaultLongOpenCasesReportExcludedTags
+// are the long-open cases report's filter sets when the environment does not
+// override them.
+var (
+	defaultLongOpenCasesReportProjectTypes = []string{
+		"Subscription", "Managed Cloud Subscription", "Cloud Support", "Development Support", "Professional Services",
+	}
+	// "migrartion" is a historic misspelling that exists as stored on
+	// real cases; it must stay exactly as is to match them.
+	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
 
 func splitComma(s string) []string {
 	if s == "" {

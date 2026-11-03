@@ -366,6 +366,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var pagingChainHandler *handler.PagingChainHandler
 	var caseAlertSettingsHandler *handler.CaseAlertSettingsHandler
 	var migrationCaseReportHandler *handler.MigrationCaseReportHandler
+	var longOpenCaseReportHandler *handler.LongOpenCaseReportHandler
 	var runbookHandler *handler.RunbookHandler
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
@@ -1717,6 +1718,20 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 					AccountsTag:       cfg.MigrationCaseReportAccountsTag,
 					RecipientTeamKeys: cfg.MigrationCaseReportTeamKeys,
 				}))
+		// Long-open cases report: the cases still being worked on after a
+		// given age, in two tables by their project's onboarding status. It
+		// reads the Postgres case tables only, so it is not offered when cases
+		// are served from the other data source: a database pool can exist
+		// there too, and the report would be incomplete without saying so.
+		if cfg.DataSource != config.DataSourceServiceNow {
+			longOpenCaseReportHandler = handler.NewLongOpenCaseReportHandler(
+				service.NewLongOpenCaseReportService(
+					repository.NewLongOpenCaseReportRepository(repository.NewScoped(db)),
+					service.LongOpenCaseReportConfig{
+						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
+						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
+					}))
+		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
 		runbookRepo = repository.NewRunbookRepository(db)
 		runbookHandler = handler.NewRunbookHandler(service.NewRunbookService(runbookRepo))
@@ -2204,6 +2219,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// internalOnly: the scan names accounts, their owners and who is
 		// assigned to each migration; a customer token must never reach it.
 		mux.HandleFunc("GET /reports/migration-cases", internalOnly(accessSvc, migrationCaseReportHandler.GetMigrationCaseReport))
+	}
+	if longOpenCaseReportHandler != nil {
+		// internalOnly: the report names customers' cases and who is
+		// assigned to each; a customer token must never reach it.
+		mux.HandleFunc("GET /reports/long-open-cases", internalOnly(accessSvc, longOpenCaseReportHandler.GetLongOpenCaseReport))
 	}
 	if productRegressionReportHandler != nil {
 		// internalOnly: the report names customers' cases and deployments; a
