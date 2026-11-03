@@ -301,7 +301,13 @@ export default function DashboardPieChart({
           height={chartSize}
           legend={{ show: false }}
           margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-          tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
+          // Same value text as the labels and the legend (hours as "1.7 h"),
+          // as DashboardBarChart's tooltip.
+          tooltip={{
+            show: true,
+            wrapperStyle: { zIndex: 1000 },
+            ...(formatValue ? { formatter: (value: unknown) => formatValue(Number(value)) } : {}),
+          }}
         >
           <Pie
             data={chartData}
