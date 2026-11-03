@@ -273,7 +273,7 @@ paths:
         PENDING attachment and returns a one-use link: the browser POSTs a
         multipart form with the file in the field named by fieldName to uploadUrl
         before expiresAt, then calls confirm. A comment image (type comment) may
-        only be a PNG, JPEG, GIF or WebP; it is uploaded against the work item
+        only be a PNG, JPEG or WebP; it is uploaded against the work item
         before its comment exists. With ATTACHMENT_STORAGE_MODE=backend there is no
         link: the response has no uploadUrl or fieldName, expiresAt is when an
         unconfirmed upload may be cleaned up, and the browser sends the file to the
@@ -36981,9 +36981,8 @@ components:
         contentType:
           type: string
           description: >-
-            Required for type comment, where it must be image/png, image/jpeg,
-            image/gif or image/webp. Defaults to application/octet-stream
-            otherwise.
+            Required for type comment, where it must be image/png, image/jpeg
+            or image/webp. Defaults to application/octet-stream otherwise.
         sizeBytes:
           type: integer
           format: int64
