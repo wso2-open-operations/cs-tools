@@ -79,3 +79,23 @@ func (c *Client) StreamInlineImage(ctx context.Context, id string) (body io.Read
 	}
 	return resp.Body, resp.Header.Get("Content-Type"), resp.ContentLength, nil
 }
+
+// The calls below exist only when entity-service runs with
+// ATTACHMENT_STORAGE_MODE=backend: it decides who may touch which file and says
+// where it lives, and this backend moves the bytes. Their responses carry the
+// storage key, so they are for this backend alone and must never be relayed.
+
+// AuthorizeStoredAttachmentUpload calls POST /attachments/upload/{id}/authorize.
+func (c *Client) AuthorizeStoredAttachmentUpload(ctx context.Context, id string, body json.RawMessage) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/upload/%s/authorize", url.PathEscape(id)), body)
+}
+
+// LocateStoredAttachment calls POST /attachments/locate.
+func (c *Client) LocateStoredAttachment(ctx context.Context, body json.RawMessage) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/attachments/locate", body)
+}
+
+// LocateInlineImage calls GET /attachments/inline/{id}/location.
+func (c *Client) LocateInlineImage(ctx context.Context, id string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/inline/%s/location", url.PathEscape(id)), nil)
+}
