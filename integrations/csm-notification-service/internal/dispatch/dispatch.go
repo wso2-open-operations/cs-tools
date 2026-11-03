@@ -137,6 +137,8 @@ type linkResolver interface {
 	CSMLink(caseID string) string
 	ChangeRequestLink(audience, changeRequestID, projectID string) string
 	OutageLink(outageID string) string
+	// ProjectLink is a project's page in the CSM portal.
+	ProjectLink(projectID string) string
 	ServiceRequestLink(caseID string) string
 	IncidentLink(incidentID string) string
 	// IsCustomer classifies a single email as external (customer) vs
@@ -306,6 +308,23 @@ type Dispatcher struct {
 	// argument each caller passes, from linkResolver.CSMLink).
 	defaultCSMEmailCC []string
 
+	// acpReactivationCC (ACP_REACTIVATION_CC) is CC'd on every "Back to Open
+	// state" email (project.reactivated); set via WithACPReactivation. Empty
+	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
+	acpReactivationCC []string
+	// acpInternalDomain is the only domain the "Back to Open state" email is
+	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
+	// is an internal notice. Empty means "@wso2.com".
+	acpInternalDomain string
+	// acpReactivationLedger, when set, records the "Back to Open state"
+	// emails already sent (Redis), so a redelivery never sends one twice.
+	acpReactivationLedger ReactivationLedger
+	// acpReactivationWaitFor and acpReactivationPoll bound how long, and how
+	// often, a delivery that finds the notice reserved waits for it to clear
+	// (see reserveReactivation). Set with the ledger; tests shorten them.
+	acpReactivationWaitFor time.Duration
+	acpReactivationPoll    time.Duration
+
 	// defaultOnCallNumber is handleIncidentCreated's fallback value for its
 	// payload's own CallTo when a publisher omits it — see that function's
 	// doc comment for why a publisher (e.g. entity-service) might not know
@@ -420,6 +439,25 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 		records:              make(map[string]*recordState),
 		identityExisted:      make(map[string]bool),
 	}
+}
+
+// WithACPReactivation sets the CC list of the "Back to Open state" email
+// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
+// in production), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
+	d.acpReactivationCC = cc
+	d.acpInternalDomain = internalDomain
+	return d
+}
+
+// WithACPReactivationLedger sets the durable record of "Back to Open state"
+// emails already sent and returns d for chaining. Without one only the
+// in-process claim guards against a second send.
+func (d *Dispatcher) WithACPReactivationLedger(l ReactivationLedger) *Dispatcher {
+	d.acpReactivationLedger = l
+	d.acpReactivationWaitFor = reactivationSendingTTL + reactivationWaitInterval
+	d.acpReactivationPoll = reactivationWaitInterval
+	return d
 }
 
 // WithFrustrationDetection configures handleCommentAdded's
@@ -972,6 +1010,9 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// restart/rebalance gap this closes. A record already in progress or
 	// already fully handled is skipped outright, never reaching a single
 	// handler.
+	if ownsItsDedup(env.Type) {
+		return d.dispatchByType(ctx, record, env)
+	}
 	baseKey := recordBaseKey(record)
 	if !d.durablyClaimRecord(ctx, baseKey) {
 		slog.InfoContext(ctx, "dispatch: record already in progress or already processed, skipping", "type", string(env.Type))
@@ -992,6 +1033,23 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		d.markRecordDone(releaseCtx, baseKey)
 	}
 	return err
+}
+
+// ownsItsDedup reports whether an event type's handler keeps its own durable
+// duplicate record, so Handle's record-level claim is not taken for it.
+//
+// project.reactivated (the "Back to Open state" email) does: its
+// ReactivationLedger reserves the notice before the send and marks it sent
+// after, and a delivery that finds a reservation held waits for it to be
+// released, marked sent or expired. The record-level claim treats "in
+// progress" like "done": after a crash between the claim and the send, the
+// redelivery seconds later would find the claim held, be skipped and
+// committed, and the email would never be sent. With the claim skipped, the
+// redelivery reaches the handler, waits out the crashed attempt's
+// reservation, and sends. The ledger also keys by project and reactivatedOn,
+// not by the record's bytes, and keeps a sent notice for 30 days, not 3.
+func ownsItsDedup(t events.Type) bool {
+	return t == events.TypeProjectReactivated
 }
 
 // dispatchByType is Handle's own event-type switch, split out so Handle
@@ -1038,6 +1096,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeProjectContactRegistered:
 		return d.handleProjectContactRegistered(ctx, record, env.Payload)
+	case events.TypeProjectReactivated:
+		return d.handleProjectReactivated(ctx, record, env.Payload)
 	case events.TypeSRCreated:
 		return d.handleSRCreated(ctx, record, env.Payload)
 	case events.TypeSRAcknowledged:
