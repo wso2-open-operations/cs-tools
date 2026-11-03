@@ -1688,6 +1688,23 @@ type StoredAttachmentService interface {
 	// it, so the browser never talks to SFTPGo. An image the caller cannot see,
 	// that is not stored, or that was deleted is a NotFoundError.
 	OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error)
+
+	// The three calls below exist only with ATTACHMENT_STORAGE_MODE=backend, where
+	// the portal backends hold the files and this service never touches one; in the
+	// default SFTPGo mode they answer NotFoundError. Each returns an internal storage
+	// key for the backend that asked, which must never reach a browser.
+
+	// AuthorizeUpload checks, as the caller, that a started upload may still receive
+	// data (theirs, still PENDING, parent still open) and returns where the backend
+	// writes it. The backend calls it for every chunk.
+	AuthorizeUpload(ctx context.Context, req domain.AuthorizeAttachmentUploadRequest) (domain.AttachmentUploadTarget, error)
+	// LocateAttachment checks, as the caller, that they may see an attachment and
+	// returns where its file is, or why it has none (the AttachmentUnavailable*
+	// reasons). An attachment the caller cannot see is a NotFoundError.
+	LocateAttachment(ctx context.Context, req domain.LocateAttachmentRequest) (domain.AttachmentLocation, error)
+	// LocateInlineImage is OpenInlineImage without the file: the same lookup and
+	// refusals (a removed image is a GoneError), and the key to stream from.
+	LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error)
 }
 
 // AttachmentShareCleanupService removes the spent and expired SFTPGo shares that
