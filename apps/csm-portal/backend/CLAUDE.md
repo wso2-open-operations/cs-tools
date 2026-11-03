@@ -446,9 +446,12 @@ this process only: it is never put in a response, a header or a log.** The modul
 | `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline |
 | `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
 
-`POST /attachments/download` (links) is not registered in this mode. Config: `AZURE_STORAGE_CONNECTION_STRING`, or
-`AZURE_STORAGE_ACCOUNT` + `AZURE_STORAGE_KEY` (+ optional `AZURE_STORAGE_ENDPOINT` for Azurite), and
-`AZURE_STORAGE_CONTAINER`. Entra client-credential sign-in is not in `libs/azblobstore` yet. `libs/azblobstore` is a
+`POST /attachments/download` (links) is not registered in this mode. Config: `AZURE_STORAGE_ACCOUNT` and
+`AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**, `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+`AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the container only; or `AZURE_STORAGE_KEY` (the
+account's shared key, full control of the account); or `AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional
+`AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in the secret store, never in the repo or a log. With a
+container-scoped role the container must already exist. `libs/azblobstore` is a
 separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build with an uncommitted `go.work` listing this module
 and the library, and add the `require` line once the tag exists (with it present a workspace build fails while the
 tag is missing). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
