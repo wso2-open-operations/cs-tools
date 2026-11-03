@@ -53,7 +53,8 @@ import {
 } from "@features/support/constants/supportConstants";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageCountExceededMessage,
+  imageSizeExceededMessage,
 } from "@constants/common";
 import { formatBytes } from "@features/project-details/utils/projectDetails";
 
@@ -388,7 +389,9 @@ export default function ActivityCommentInput({
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : reason === "count"
+                    ? imageCountExceededMessage()
+                    : imageSizeExceededMessage(),
               )
             }
             overlayElement={

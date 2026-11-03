@@ -86,16 +86,33 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     });
   });
 
-  it("allows files over 10 MB up to 100 MB", () => {
+  it("allows a file up to the 10 MB default and refuses one over it", () => {
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 50 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
     pick(big);
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
     const tooBig = new File(["x"], "huge.bin");
-    Object.defineProperty(tooBig, "size", { value: 101 * 1024 * 1024 });
+    Object.defineProperty(tooBig, "size", { value: 11 * 1024 * 1024 });
     pick(tooBig);
-    expect(screen.getByText(/exceeds 100 MB limit/i)).toBeInTheDocument();
+    expect(screen.getByText(/exceeds 10 MB limit/i)).toBeInTheDocument();
+  });
+
+  it("uses the configured file size limit in the check and the message", () => {
+    (window as unknown as { config?: unknown }).config = { CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 };
+    try {
+      const { pick } = renderModal({ caseId: "case-1" });
+      const ok = new File(["x"], "ok.bin");
+      Object.defineProperty(ok, "size", { value: 24 * 1024 * 1024 });
+      pick(ok);
+      expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+      const tooBig = new File(["x"], "big.bin");
+      Object.defineProperty(tooBig, "size", { value: 26 * 1024 * 1024 });
+      pick(tooBig);
+      expect(screen.getByText(/exceeds 25 MB limit/i)).toBeInTheDocument();
+    } finally {
+      (window as unknown as { config?: unknown }).config = undefined;
+    }
   });
 
   it("shows the server's message and retries only the confirm step", async () => {
@@ -121,5 +138,35 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
       caseId: "case-1",
     });
     expect(uploadMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes an abort signal and a progress callback, and shows the GB limit", () => {
+    (window as unknown as { config?: unknown }).config = {
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240,
+    };
+    const { pick } = renderModal({ caseId: "case-1" });
+    const big = new File(["x"], "big.bin");
+    Object.defineProperty(big, "size", { value: 11 * 1024 * 1024 * 1024 });
+    pick(big);
+    expect(screen.getByText(/exceeds 10 GB limit/i)).toBeInTheDocument();
+    pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    const [vars] = uploadMutate.mock.calls[0];
+    expect(vars.signal).toBeInstanceOf(AbortSignal);
+    expect(typeof vars.onProgress).toBe("function");
+  });
+
+  it("aborts the running upload when the modal is closed", () => {
+    const { pick, onClose } = renderModal({ caseId: "case-1" });
+    pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+    const [vars, options] = uploadMutate.mock.calls[0];
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(vars.signal.aborted).toBe(true);
+    expect(onClose).toHaveBeenCalled();
+    // The rejection that follows a cancel is not shown as an error.
+    options.onError(Object.assign(new Error("The upload was cancelled."), { name: "AbortError" }));
+    expect(screen.queryByText("The upload was cancelled.")).not.toBeInTheDocument();
   });
 });

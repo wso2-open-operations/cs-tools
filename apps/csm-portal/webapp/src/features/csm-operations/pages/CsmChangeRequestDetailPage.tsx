@@ -1382,6 +1382,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <AttachmentsWidget
             attachments={attachmentList}
             uploading={postAttachment.isPending}
+            uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
+            onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError
                 ? (postAttachment.error?.message ?? "Could not upload the attachment.")

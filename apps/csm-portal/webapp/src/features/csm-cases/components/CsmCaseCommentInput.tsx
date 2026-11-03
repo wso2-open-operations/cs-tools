@@ -45,10 +45,11 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import {
   ALLOWED_IMAGE_TYPES_LABEL,
-  MAX_IMAGE_SIZE_BYTES,
+  MAX_COMMENT_IMAGES_MESSAGE,
 } from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
+import { getMaxAttachmentSizeBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   hasBlobSource,
@@ -58,7 +59,6 @@ import {
   startInlineImageUpload,
   useInlineImageStatus,
 } from "@features/csm-cases/api/inlineImageUploads";
-import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
 /** A file staged for upload, with the display name chosen in the modal. */
@@ -275,11 +275,13 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
-  const onPasteError = useCallback((reason: "size" | "type") => {
+  const onPasteError = useCallback((reason: "size" | "type" | "count") => {
     setError(
-      reason === "type"
-        ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
-        : `Pasted image exceeds the maximum allowed size of ${formatBytes(MAX_IMAGE_SIZE_BYTES)}.`,
+      reason === "count"
+        ? MAX_COMMENT_IMAGES_MESSAGE
+        : reason === "type"
+          ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
+          : `Pasted image exceeds the maximum allowed size of ${formatBytes(inlineImageMaxBytes())}.`,
     );
   }, []);
 
@@ -336,8 +338,9 @@ export default function CsmCaseCommentInput({
     // (matching submit()'s own single-message pattern below) but still
     // attach whichever dropped files DO pass, rather than rejecting the
     // whole drop over one oversized file.
-    const tooLarge = incoming.find((f) => f.size > MAX_ATTACHMENT_SIZE_BYTES);
-    const accepted = incoming.filter((f) => f.size <= MAX_ATTACHMENT_SIZE_BYTES);
+    const maxBytes = getMaxAttachmentSizeBytes();
+    const tooLarge = incoming.find((f) => f.size > maxBytes);
+    const accepted = incoming.filter((f) => f.size <= maxBytes);
 
     if (accepted.length > 0) {
       setAttachments((prev) => {
@@ -353,7 +356,7 @@ export default function CsmCaseCommentInput({
     setError(
       tooLarge
         ? `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
-            MAX_ATTACHMENT_SIZE_BYTES,
+            maxBytes,
           )}.`
         : null,
     );
@@ -417,13 +420,12 @@ export default function CsmCaseCommentInput({
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
-    const tooLarge = attachments.find(
-      (a) => a.file.size > MAX_ATTACHMENT_SIZE_BYTES,
-    );
+    const maxBytes = getMaxAttachmentSizeBytes();
+    const tooLarge = attachments.find((a) => a.file.size > maxBytes);
     if (tooLarge) {
       setError(
         `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
-          MAX_ATTACHMENT_SIZE_BYTES,
+          maxBytes,
         )}.`,
       );
       return;

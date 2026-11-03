@@ -80,9 +80,12 @@ import { mergeRegister, $getNearestNodeOfType } from "@lexical/utils";
 import {
   ALLOWED_IMAGE_MIME_TYPES,
   ALLOWED_IMAGE_TYPES_LABEL,
-  MAX_IMAGE_SIZE_BYTES,
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_IMAGES_MESSAGE,
   RICH_TEXT_BLOCK_TAGS,
 } from "@components/rich-text-editor/richTextConstants";
+import { countUploadedImages } from "@components/rich-text-editor/ImageNode";
+import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
@@ -270,14 +273,20 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      const maxImageBytes = inlineImageMaxBytes();
+      if (file.size > maxImageBytes) {
         showError(
-          `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
+          `Image "${file.name}" exceeds the maximum allowed size of ${formatMegabytes(maxImageBytes)}. Please choose a smaller file.`,
         );
         resetInput();
         return;
       }
       if (imageUploader) {
+        if (countUploadedImages(editor) >= MAX_COMMENT_IMAGES) {
+          showError(MAX_COMMENT_IMAGES_MESSAGE);
+          resetInput();
+          return;
+        }
         const src = imageUploader(file);
         editor.focus(() => {
           editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });

@@ -42,6 +42,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/scim"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/updates"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/usermanagement"
+	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
 func main() {
@@ -248,6 +249,20 @@ func main() {
 			return middleware.CheckPermission(w, r, roleResolver, m, a)
 		})
 
+	attachmentMode, err := parseAttachmentStorageMode(os.Getenv("ATTACHMENT_STORAGE_MODE"))
+	if err != nil {
+		slog.Error("invalid attachment storage mode", "err", err)
+		os.Exit(1)
+	}
+	var attachmentStore *azblobstore.Store
+	if attachmentMode == attachmentStorageBackend {
+		attachmentStore, err = newAttachmentStore(os.Getenv)
+		if err != nil {
+			slog.Error("could not set up attachment storage", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -342,13 +357,17 @@ func main() {
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/metrics/search", instanceHandler.SearchDeployedProductInstanceMetricsStats)
 	mux.HandleFunc("POST /deployments/products/{id}/instances/stats/usages/search", instanceHandler.SearchDeployedProductInstanceUsageStats)
 
-	// SFTPGo-backed attachments (entity-service owns the access checks). The module
+	// Stored attachments (entity-service owns the access checks). The module
 	// permission depends on the attachment type, so the handler applies it.
-	mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
-	mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
-	mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
-	mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
-	mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.GetInlineImage)
+	if attachmentMode == attachmentStorageBackend {
+		registerBlobAttachmentRoutes(mux, storedAttachmentHandler, handler.NewBlobAttachmentHandler(storedAttachmentHandler, entityClient, attachmentStore))
+	} else {
+		mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
+		mux.HandleFunc("POST /attachments/upload", storedAttachmentHandler.InitiateUpload)
+		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
+		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
+		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.GetInlineImage)
+	}
 
 	mux.HandleFunc("GET /attachments/{id}/content", attachmentHandler.GetAttachmentContent)
 	mux.HandleFunc("GET /attachments/{id}", attachmentHandler.GetAttachment)

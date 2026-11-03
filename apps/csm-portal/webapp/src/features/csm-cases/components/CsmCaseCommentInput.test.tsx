@@ -16,7 +16,7 @@
 
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 // The real client reads runtime config at module load, which isn't present
@@ -57,13 +57,20 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     onChange,
     attachments,
     onImageUpload,
+    onPasteError,
   }: {
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
     onImageUpload?: (file: File) => string;
+    onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
     <div data-testid="editor-stub">
+      {onPasteError && (
+        <button type="button" onClick={() => onPasteError("count")}>
+          paste-too-many
+        </button>
+      )}
       {onImageUpload && (
         <button
           type="button"
@@ -220,15 +227,46 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("3");
   });
 
-  it("rejects a dropped file over the size limit but keeps the ones that fit", () => {
-    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
-    const composer = screen.getByTestId("csm-comment-composer");
+  describe("size limit", () => {
+    afterEach(() => {
+      window.config = {} as typeof window.config;
+    });
 
-    const tooBig = makeFile("huge.zip", 11 * 1024 * 1024);
-    fireEvent.drop(composer, fileDrop([makeFile("ok.txt", 100), tooBig]));
+    it("rejects a dropped file over the older 10 MB limit when entity attachments are off", () => {
+      window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as unknown as typeof window.config;
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+      const composer = screen.getByTestId("csm-comment-composer");
 
-    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/huge\.zip.*too large/i)).toBeInTheDocument();
+      const tooBig = makeFile("huge.zip", 11 * 1024 * 1024);
+      fireEvent.drop(composer, fileDrop([makeFile("ok.txt", 100), tooBig]));
+
+      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+      expect(screen.getByText(/huge\.zip.*too large.*10\.00 MB/i)).toBeInTheDocument();
+    });
+
+    it("rejects a dropped file over the configured limit through the entity flow, but keeps the ones that fit", () => {
+      window.config = { CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 } as unknown as typeof window.config;
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+      const composer = screen.getByTestId("csm-comment-composer");
+
+      // 11 MB fits under 25 MB; 26 MB does not.
+      fireEvent.drop(
+        composer,
+        fileDrop([makeFile("ok.zip", 11 * 1024 * 1024), makeFile("huge.zip", 26 * 1024 * 1024)]),
+      );
+
+      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+      expect(screen.getByText(/huge\.zip.*too large.*25\.00 MB/i)).toBeInTheDocument();
+    });
+
+    it("keeps the default of 10 MB through the entity flow when nothing is configured", () => {
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+      const composer = screen.getByTestId("csm-comment-composer");
+
+      fireEvent.drop(composer, fileDrop([makeFile("big.zip", 9 * 1024 * 1024)]));
+
+      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    });
   });
 
   it("still prevents the browser's default file handling when the composer is disabled, without attaching anything", () => {
@@ -385,6 +423,12 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     upload.mockReset();
     URL.createObjectURL = vi.fn(() => `blob:https://csm.example.com/${(blobCount += 1)}`);
     URL.revokeObjectURL = vi.fn();
+  });
+
+  it("tells the user a comment can have at most 5 images when the editor refuses another", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "paste-too-many" }));
+    expect(screen.getByText("A comment can have at most 5 images.")).toBeInTheDocument();
   });
 
   it("gives the editor no image uploader without a case id, so images are embedded as before", () => {

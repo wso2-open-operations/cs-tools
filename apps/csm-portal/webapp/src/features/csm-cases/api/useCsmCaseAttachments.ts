@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -47,6 +47,7 @@ import {
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
 import { BackendApiError } from "@api/backend/client";
+import { LEGACY_ATTACHMENT_MAX_BYTES } from "@config/attachmentLimitsConfig";
 import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
@@ -70,8 +71,7 @@ const MAX_ATTACHMENT_PAGES = 200;
  * request body itself is capped higher to allow base64 inflation). Validate
  * here so the user gets a clear message instead of a 413.
  */
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
+export const MAX_ATTACHMENT_SIZE_BYTES = LEGACY_ATTACHMENT_MAX_BYTES;
 /** Read a File as a base64 data URI (`data:<mime>;base64,...`). */
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -161,6 +161,12 @@ export type PostCsmCaseAttachmentResult = UseMutationResult<
    * `sftpgoAttachmentStorageEnabled` is on.
    */
   uploadProgress: number | null;
+  /**
+   * Stops the upload in flight (a large, chunked one; a small one-shot upload
+   * cannot be interrupted). The mutation then fails with "The upload was
+   * cancelled." and the half-made attachment is left to the server's cleanup.
+   */
+  cancelUpload: () => void;
 };
 
 /**
@@ -192,6 +198,8 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
   const { user } = useCurrentUser();
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelUpload = useCallback(() => abortRef.current?.abort(), []);
 
   const mutation = useMutation<
     CaseAttachment | null,
@@ -204,6 +212,8 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
       // check below does not apply.
       if (isEntityAttachmentsEnabled()) {
         setUploadProgress(0);
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
           await uploadEntityAttachment(api, {
             type: WORK_ITEM_ATTACHMENT_TYPE,
@@ -211,6 +221,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
             file: input.file,
             name: input.name,
             onProgress: setUploadProgress,
+            signal: controller.signal,
           });
         } catch (err) {
           throw new Error(
@@ -218,6 +229,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
             { cause: err },
           );
         } finally {
+          if (abortRef.current === controller) abortRef.current = null;
           setUploadProgress(null);
         }
         return null;
@@ -301,7 +313,7 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
     },
   });
 
-  return { ...mutation, uploadProgress };
+  return { ...mutation, uploadProgress, cancelUpload };
 }
 
 /**

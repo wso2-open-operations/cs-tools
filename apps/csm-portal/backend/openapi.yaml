@@ -1303,8 +1303,9 @@ paths:
     post:
       summary: >-
         Start an upload. Records a pending attachment and returns a one-use link the
-        browser POSTs the file to (multipart, field filenames), then calls confirm.
-        Refused for a closed work item. A caller may have 60 links created per minute.
+        browser sends the file to, then calls confirm: a single multipart POST (field
+        filenames) when uploadMethod is multipart, or a tus upload in chunks when it is
+        tus. Refused for a closed work item. A caller may have 60 links created per minute.
       operationId: postStoredAttachmentsUpload
       requestBody:
         required: true
@@ -1331,7 +1332,7 @@ paths:
                   format: int64
       responses:
         "201":
-          description: The attachment id and number, uploadUrl, fieldName, expiresAt and maxBytes; never cacheable.
+          description: The attachment id and number, uploadMethod (multipart or tus), uploadUrl, expiresAt and maxBytes, plus fieldName for multipart and shareId, path and chunkSize for tus; never cacheable.
           content:
             application/json:
               schema:

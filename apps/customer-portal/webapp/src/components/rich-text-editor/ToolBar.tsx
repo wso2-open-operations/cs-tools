@@ -80,9 +80,12 @@ import { mergeRegister, $getNearestNodeOfType } from "@lexical/utils";
 import {
   ALLOWED_INLINE_IMAGE_EXTENSIONS,
   ALLOWED_INLINE_IMAGE_TYPES,
-  MAX_IMAGE_SIZE_BYTES,
   RICH_TEXT_BLOCK_TAGS,
 } from "@features/support/constants/supportConstants";
+import {
+  formatLimitMb,
+  inlineImageMaxBytes,
+} from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   INSERT_IMAGE_COMMAND,
@@ -100,8 +103,10 @@ import {
 } from "@lexical/rich-text";
 import { $createParagraphNode } from "lexical";
 
+import { imageCountExceededMessage } from "@constants/common";
 import {
   insertImageWithUpload,
+  remainingImageSlots,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
 
@@ -114,6 +119,7 @@ const Toolbar = ({
   showKeyboardHint = false,
   enterToSubmit = false,
   onImageUpload,
+  onPasteError,
 }: {
   onAttachmentClick?: () => void;
   disabled?: boolean;
@@ -122,6 +128,8 @@ const Toolbar = ({
   enterToSubmit?: boolean;
   /** See Editor's `onImageUpload`: images are uploaded instead of read as base64. */
   onImageUpload?: ImageUploadHandler;
+  /** Told when an image is refused because the draft already holds the maximum. */
+  onPasteError?: (reason: "count") => void;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
   const [editor] = useLexicalComposerContext();
@@ -276,14 +284,21 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+      const maxImageBytes = inlineImageMaxBytes();
+      if (file.size > maxImageBytes) {
         showError(
-          `Image "${file.name}" exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB. Please choose a smaller file.`,
+          `Image "${file.name}" exceeds the maximum allowed size of ${formatLimitMb(maxImageBytes)}MB. Please choose a smaller file.`,
         );
         resetInput();
         return;
       }
       if (onImageUpload) {
+        if (remainingImageSlots(editor) <= 0) {
+          if (onPasteError) onPasteError("count");
+          else showError(imageCountExceededMessage());
+          resetInput();
+          return;
+        }
         editor.focus(() => {
           insertImageWithUpload(editor, file, file.name, onImageUpload);
         });

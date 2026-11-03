@@ -129,6 +129,9 @@ export function useAttachmentPreview(
     queryFn: () => fetchAttachmentDataUrl(authFetch, attachmentId!, caseId),
     enabled: !!attachmentId,
     staleTime: 0,
+    // Each fetch of an attachment preview creates a one-use SFTPGo link, so a
+    // refocus of the window must not ask for it again.
+    refetchOnWindowFocus: false,
     retry: (count: number, error: unknown) =>
       !(error instanceof ImageRemovedError) && count < 1,
   });

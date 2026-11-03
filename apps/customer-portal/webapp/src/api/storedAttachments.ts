@@ -14,6 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { Upload } from "tus-js-client";
+import {
+  entityAttachmentMaxBytes,
+  formatLimit,
+  inlineImageMaxBytes,
+} from "@config/attachmentLimitsConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 
 /** Which attachment table a stored attachment lives in. */
@@ -37,6 +43,8 @@ export interface StoredAttachmentLink {
   reason?: AttachmentUnavailableReason | string;
   url?: string;
   expiresAt?: string;
+  /** True for a file too big to hold in memory: let the browser stream it to disk. */
+  largeFile?: boolean;
 }
 
 /** Response of POST /attachments/upload. */
@@ -47,6 +55,14 @@ export interface StoredAttachmentUploadStart {
   fieldName: string;
   expiresAt?: string;
   maxBytes: number;
+  /** Absent means "multipart". */
+  uploadMethod?: "multipart" | "tus";
+  /** TUS only. A secret: never log it or put it in a message. */
+  shareId?: string;
+  /** TUS only: the path to upload to ("/upload.bin"). */
+  path?: string;
+  /** TUS only: bytes per PATCH request. */
+  chunkSize?: number;
 }
 
 /** Response of POST /attachments/upload/{id}/confirm. */
@@ -64,16 +80,6 @@ export type AuthFetch = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
-
-/**
- * Largest file the portal offers to upload. Entity-service enforces its own
- * (authoritative) limit and `maxBytes` of the upload response is checked too;
- * this only avoids starting an upload that is certain to be refused.
- */
-export const STORED_ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
-
-/** Largest comment image the portal offers to upload (entity-service's default). */
-export const STORED_INLINE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 
 export const STORED_ATTACHMENT_RATE_LIMIT_MESSAGE =
   "Too many attachment requests. Please wait a minute and try again.";
@@ -102,6 +108,14 @@ export class UploadConfirmPendingError extends Error {
     this.attachmentId = attachmentId;
   }
 }
+
+/** Shown when the TUS upload could not even be created (link used, expired or refused). */
+export const TUS_CREATE_FAILED_MESSAGE =
+  "The upload link has been used or has expired. Please start the upload again.";
+
+/** Shown when a TUS upload failed after it had started, once retries ran out. */
+export const TUS_INTERRUPTED_MESSAGE =
+  "The upload was interrupted. Please try again.";
 
 function getBackendBaseUrl(): string {
   const baseUrl = window.config?.CUSTOMER_PORTAL_BACKEND_BASE_URL;
@@ -197,6 +211,16 @@ export function saveBlobAs(blob: Blob, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 }
 
+/** Hands a URL to the browser's downloader (a plain navigation, no fetch). */
+function startBrowserDownload(url: string): void {
+  const link = document.createElement("a");
+  link.href = url;
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 /**
  * Downloads one attachment: asks for a link, fetches it at once and saves the
  * bytes under the attachment's own name (the stored file's name carries an
@@ -224,6 +248,13 @@ export async function downloadStoredAttachment(
       "Unavailable",
       unavailableMessage(link.reason),
     );
+  }
+
+  if (link.largeFile) {
+    // Too big to hold in memory: the browser's own downloader streams it to
+    // disk and can resume it. It saves under SFTPGo's stored name.
+    startBrowserDownload(link.url);
+    return;
   }
 
   let blob: Blob;
@@ -305,6 +336,91 @@ export async function confirmStoredUpload(
   return (await response.json()) as StoredAttachmentConfirmed;
 }
 
+/** Options of a TUS upload. */
+export interface TusUploadOptions {
+  signal?: AbortSignal;
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+}
+
+function abortError(): Error {
+  const error = new Error("The upload was cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+/** True for the error thrown when an upload is cancelled. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+/**
+ * Step 2 for a large file: resumable chunks (TUS) straight to SFTPGo, with no
+ * Authorization header. Failing to create the upload (before any chunk) and a
+ * later failure get different messages. The share id and the upload URL are
+ * never put in a message.
+ */
+export function sendFileWithTus(
+  start: Pick<
+    StoredAttachmentUploadStart,
+    "uploadUrl" | "shareId" | "path" | "chunkSize"
+  >,
+  file: File,
+  options: TusUploadOptions = {},
+): Promise<void> {
+  const { signal, onProgress } = options;
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const upload: Upload = new Upload(file, {
+      endpoint: start.uploadUrl,
+      metadata: { path: start.path ?? "/upload.bin", share_id: start.shareId ?? "" },
+      ...(start.chunkSize && start.chunkSize > 0
+        ? { chunkSize: start.chunkSize }
+        : {}),
+      retryDelays: [0, 1000, 3000, 5000, 10000],
+      storeFingerprintForResuming: false,
+      removeFingerprintOnSuccess: true,
+      // The share is spent when the upload is created, so a creation the server
+      // answered (even with a 5xx) is never retried: a second one cannot succeed.
+      onShouldRetry: (error) => {
+        const status = error.originalResponse?.getStatus();
+        if (!upload.url && status !== undefined) return false;
+        return (
+          status === undefined ||
+          status >= 500 ||
+          status === 409 ||
+          status === 423
+        );
+      },
+      onProgress: (sent, total) => onProgress?.(sent, total),
+      onError: () => {
+        signal?.removeEventListener("abort", onAbort);
+        const created = !!upload.url;
+        reject(
+          new ApiError(
+            0,
+            "Upload failed",
+            created ? TUS_INTERRUPTED_MESSAGE : TUS_CREATE_FAILED_MESSAGE,
+          ),
+        );
+      },
+      onSuccess: () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      },
+    });
+    const onAbort = () => {
+      // Leave the partial file to the server's cleanup rather than terminating it.
+      void upload.abort(false);
+      reject(abortError());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    upload.start();
+  });
+}
+
 export type StoredUploadStep = "preparing" | "uploading" | "finishing";
 
 /**
@@ -321,16 +437,20 @@ export async function uploadStoredAttachment(
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
+    /** Cancels a large (TUS) upload. */
+    signal?: AbortSignal;
+    /** Bytes sent so far, for a large (TUS) upload only. */
+    onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
-  const { type, parentId, file, name, onStep } = input;
+  const { type, parentId, file, name, onStep, signal, onProgress } = input;
+  // Only an early refusal: entity-service enforces its own limit, and the
+  // `maxBytes` of the upload response is checked below too.
   const localMaxBytes =
-    type === "comment"
-      ? STORED_INLINE_IMAGE_MAX_BYTES
-      : STORED_ATTACHMENT_MAX_BYTES;
+    type === "comment" ? inlineImageMaxBytes() : entityAttachmentMaxBytes();
   if (file.size > localMaxBytes) {
     throw new Error(
-      `File size exceeds ${Math.floor(localMaxBytes / (1024 * 1024))} MB limit.`,
+      `File size exceeds ${formatLimit(localMaxBytes)} limit.`,
     );
   }
   onStep?.("preparing");
@@ -343,11 +463,16 @@ export async function uploadStoredAttachment(
   });
   if (start.maxBytes > 0 && file.size > start.maxBytes) {
     throw new Error(
-      `File size exceeds the ${Math.floor(start.maxBytes / (1024 * 1024))} MB limit.`,
+      `File size exceeds the ${formatLimit(start.maxBytes)} limit.`,
     );
   }
+  if (signal?.aborted) throw abortError();
   onStep?.("uploading");
-  await sendFileToUploadLink(start, file);
+  if (start.uploadMethod === "tus") {
+    await sendFileWithTus(start, file, { signal, onProgress });
+  } else {
+    await sendFileToUploadLink(start, file);
+  }
   onStep?.("finishing");
   try {
     return await confirmStoredUpload(authFetch, {

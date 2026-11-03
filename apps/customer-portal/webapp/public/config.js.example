@@ -150,6 +150,18 @@ window.config = {
   //   false – the older ServiceNow attachment flow is used.
   CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
 
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
+  //   Largest case or deployment file offered for upload, in MB. Set it to match
+  //   entity-service's ATTACHMENT_MAX_BYTES; the service stays authoritative and
+  //   this only refuses a file early. A number or numeric string; anything else
+  //   (zero, negative, text) uses the default.
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25,
+
+  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB  (optional — default: 1)
+  //   Largest image pasted or inserted into a comment, in MB. Match entity-service's
+  //   INLINE_IMAGE_MAX_BYTES. Same value rules as above.
+  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])

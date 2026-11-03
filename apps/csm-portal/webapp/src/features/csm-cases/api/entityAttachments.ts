@@ -15,6 +15,8 @@
 // under the License.
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
+import { Upload } from "tus-js-client";
+import { formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 
 /**
@@ -53,6 +55,11 @@ export interface EntityAttachmentLink {
   reason?: string;
   url?: string;
   expiresAt?: string;
+  /**
+   * The file is too big to read into memory: hand `url` to the browser's own
+   * downloader instead of fetching it.
+   */
+  largeFile?: boolean;
 }
 
 interface EntityAttachmentLinksResponse {
@@ -66,6 +73,12 @@ export interface EntityUploadStart {
   fieldName: string;
   expiresAt: string;
   maxBytes: number;
+  /** "multipart" (one POST, the default when absent) or "tus" (resumable chunks). */
+  uploadMethod?: "multipart" | "tus";
+  /** TUS only. `shareId` is a secret: never log it or put it in a message. */
+  shareId?: string;
+  path?: string;
+  chunkSize?: number;
 }
 
 export interface EntityConfirmedAttachment {
@@ -161,14 +174,19 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
  * more. Returns `undefined` when entity-service has no such attachment or its
  * file is not stored there (`NOT_STORED`), so a caller can fall back to the
  * older flow; any other unavailable reason throws.
+ *
+ * `firstLink` is a link the caller already requested (and found usable); it is
+ * used for the first attempt instead of asking again.
  */
 export async function fetchEntityAttachmentBlob(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string; purpose: EntityLinkPurpose },
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  firstLink?: EntityAttachmentLink,
 ): Promise<{ blob: Blob; link: EntityAttachmentLink } | undefined> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const link = await requestDownloadLink(api, args.type, args.id, args.purpose);
+    const link =
+      attempt === 0 && firstLink ? firstLink : await requestDownloadLink(api, args.type, args.id, args.purpose);
     if (!link) return undefined;
     if (!link.available || !link.url) {
       if (link.reason === "NOT_STORED") return undefined;
@@ -185,17 +203,41 @@ export async function fetchEntityAttachmentBlob(
 }
 
 /**
+ * Hands a URL to the browser's own downloader (a plain link click, no new tab),
+ * so a big file streams to disk, can resume, and never sits in memory. The saved
+ * name is the one SFTPGo stores the file under.
+ */
+export function startBrowserDownload(url: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
  * Downloads an attachment under its own name (SFTPGo names the file after its
  * stored path, which carries the attachment number). Resolves `false` when
  * entity-service does not hold the file, so the caller can use the older flow.
+ *
+ * A link flagged `largeFile` is not fetched: the URL goes to the browser's
+ * downloader (`navigate`), which streams it to disk under SFTPGo's stored name.
  */
 export async function downloadEntityAttachment(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string },
   fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
+  navigate: (url: string) => void = startBrowserDownload,
 ): Promise<boolean> {
-  const got = await fetchEntityAttachmentBlob(api, { ...args, purpose: "download" }, fetchImpl);
+  const first = await requestDownloadLink(api, args.type, args.id, "download");
+  if (first?.available && first.url && first.largeFile) {
+    navigate(first.url);
+    return true;
+  }
+  const got = await fetchEntityAttachmentBlob(api, { ...args, purpose: "download" }, fetchImpl, first);
   if (!got) return false;
   save(got.blob, got.link.name);
   return true;
@@ -225,7 +267,112 @@ export interface UploadEntityAttachmentArgs {
   file: File;
   /** Display name; defaults to the file's own name. */
   name?: string;
+  /** Overall progress, 0-100. */
   onProgress?: (percent: number) => void;
+  /** Aborts a running upload (a TUS upload stops; a multipart POST is not interrupted). */
+  signal?: AbortSignal;
+}
+
+/** Shown when SFTPGo refused to create a TUS upload (the link was used or has run out). */
+export const TUS_CREATE_FAILED_MESSAGE =
+  "The upload link has been used or has expired. Please start the upload again.";
+
+/** Shown when a TUS upload broke off after it had started and retries ran out. */
+export const TUS_INTERRUPTED_MESSAGE = "The upload was interrupted. Please try again.";
+
+/** Shown when the user cancels an upload. */
+export const UPLOAD_CANCELLED_MESSAGE = "The upload was cancelled.";
+
+/** A failed TUS upload. The message never holds the share id or the upload URL. */
+export class EntityTusUploadError extends Error {
+  /** HTTP status of the refused request, when there was a response. */
+  status?: number;
+  /** True when the upload could not even be created (no chunk was sent). */
+  duringCreate: boolean;
+  constructor(duringCreate: boolean, status?: number) {
+    super(duringCreate ? TUS_CREATE_FAILED_MESSAGE : TUS_INTERRUPTED_MESSAGE);
+    this.name = "EntityTusUploadError";
+    this.duringCreate = duringCreate;
+    this.status = status;
+  }
+}
+
+/** The user (or the app) aborted an upload. */
+export class EntityUploadAbortedError extends Error {
+  constructor() {
+    super(UPLOAD_CANCELLED_MESSAGE);
+    this.name = "AbortError";
+  }
+}
+
+export const TUS_RETRY_DELAYS_MS = [0, 1000, 3000, 5000, 10000];
+
+function tusStatus(err: unknown): number | undefined {
+  const response = (err as { originalResponse?: { getStatus?: () => number } } | null)?.originalResponse;
+  const status = response?.getStatus?.();
+  return typeof status === "number" && status > 0 ? status : undefined;
+}
+
+/**
+ * Sends `file` to SFTPGo's TUS endpoint in chunks, with no Authorization header
+ * (the share id in the metadata is the credential). Resolves when the last chunk
+ * is stored; the caller then confirms.
+ *
+ * Creating the upload is what uses the one-use share, so a failure before the
+ * upload exists is never retried (a second create always fails) and reported as
+ * {@link TUS_CREATE_FAILED_MESSAGE}. Once it exists, network drops and 5xx
+ * answers are retried; when those run out the error is
+ * {@link TUS_INTERRUPTED_MESSAGE}.
+ */
+export function uploadFileViaTus(args: {
+  file: Blob;
+  endpoint: string;
+  shareId: string;
+  path: string;
+  chunkSize: number;
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (args.signal?.aborted) {
+      reject(new EntityUploadAbortedError());
+      return;
+    }
+    let created = false;
+    let settled = false;
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      args.signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
+    const upload = new Upload(args.file, {
+      endpoint: args.endpoint,
+      metadata: { path: args.path, share_id: args.shareId },
+      chunkSize: args.chunkSize,
+      retryDelays: TUS_RETRY_DELAYS_MS,
+      storeFingerprintForResuming: false,
+      removeFingerprintOnSuccess: true,
+      onUploadUrlAvailable: () => {
+        created = true;
+      },
+      onShouldRetry: (err) => {
+        const status = tusStatus(err);
+        if (!created) return status === undefined; // only a dropped connection may retry a create
+        if (status === undefined) return true;
+        return status >= 500 || status === 408 || status === 409 || status === 423 || status === 429;
+      },
+      onProgress: (sent, total) => args.onProgress?.(sent, total),
+      onError: (err) => finish(() => reject(new EntityTusUploadError(!created, tusStatus(err)))),
+      onSuccess: () => finish(resolve),
+    });
+    const onAbort = (): void => {
+      void upload.abort();
+      finish(() => reject(new EntityUploadAbortedError()));
+    };
+    args.signal?.addEventListener("abort", onAbort, { once: true });
+    upload.start();
+  });
 }
 
 /**
@@ -264,23 +411,42 @@ export async function uploadEntityAttachment(
   });
   if (start.maxBytes > 0 && args.file.size > start.maxBytes) {
     throw new Error(
-      `"${name}" is too large. The maximum attachment size is ${Math.floor(start.maxBytes / (1024 * 1024))} MB.`,
+      `"${name}" is too large. The maximum attachment size is ${formatSizeLimit(start.maxBytes)}.`,
     );
   }
+  if (args.signal?.aborted) throw new EntityUploadAbortedError();
 
-  // Straight to SFTPGo: one file in the form field it names, no app credentials.
-  const form = new FormData();
-  form.append(start.fieldName || "filenames", args.file, name);
-  args.onProgress?.(10);
-  const uploaded = await fetchImpl(start.uploadUrl, {
-    method: "POST",
-    body: form,
-    credentials: "omit",
-  });
-  if (!uploaded.ok) {
-    throw new Error(`Could not upload ${name} (HTTP ${uploaded.status}). Please try again.`);
+  if (start.uploadMethod === "tus") {
+    if (!start.shareId || !start.chunkSize || start.chunkSize <= 0) {
+      throw new Error("The upload could not be started. Please try again.");
+    }
+    // Straight to SFTPGo in resumable chunks; bytes sent map to 0-90 %.
+    await uploadFileViaTus({
+      file: args.file,
+      endpoint: start.uploadUrl,
+      shareId: start.shareId,
+      path: start.path || "/upload.bin",
+      chunkSize: start.chunkSize,
+      signal: args.signal,
+      onProgress: (sent, total) =>
+        args.onProgress?.(total > 0 ? Math.min(90, Math.floor((sent / total) * 90)) : 0),
+    });
+    args.onProgress?.(90);
+  } else {
+    // Straight to SFTPGo: one file in the form field it names, no app credentials.
+    const form = new FormData();
+    form.append(start.fieldName || "filenames", args.file, name);
+    args.onProgress?.(10);
+    const uploaded = await fetchImpl(start.uploadUrl, {
+      method: "POST",
+      body: form,
+      credentials: "omit",
+    });
+    if (!uploaded.ok) {
+      throw new Error(`Could not upload ${name} (HTTP ${uploaded.status}). Please try again.`);
+    }
+    args.onProgress?.(90);
   }
-  args.onProgress?.(90);
 
   let lastError: unknown;
   for (let attempt = 0; attempt < CONFIRM_ATTEMPTS; attempt += 1) {
