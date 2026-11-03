@@ -83,7 +83,7 @@ func TestGenerateDashboardSendsTheRequestAndReadsTheAnswer(t *testing.T) {
 	var got map[string]any
 	f := &fakeService{handle: func(w http.ResponseWriter, _ *http.Request, body []byte) {
 		_ = json.Unmarshal(body, &got)
-		_, _ = io.WriteString(w, `{"candidates":[{"displayName":"A"},{"displayName":"B"}],"usage":{"inputTokens":10,"outputTokens":2}}`)
+		_, _ = io.WriteString(w, `{"candidates":[{"displayName":"A"},{"displayName":"B"}],"usage":{"inputTokens":10,"cacheCreationInputTokens":30,"cacheReadInputTokens":40,"outputTokens":2}}`)
 	}}
 	c := newTestClient(t, f, 5*time.Second)
 	ctx := withCorrelationID(t, "corr-123")
@@ -96,6 +96,9 @@ func TestGenerateDashboardSendsTheRequestAndReadsTheAnswer(t *testing.T) {
 	}
 	if len(res.Candidates) != 2 || string(res.Candidates[1]) != `{"displayName":"B"}` || res.Usage.InputTokens != 10 || res.Declined != "" {
 		t.Errorf("result = %+v", res)
+	}
+	if u := res.Usage; u.CacheCreationInputTokens != 30 || u.CacheReadInputTokens != 40 || u.OutputTokens != 2 {
+		t.Errorf("usage = %+v, want cache write 30, cache read 40, output 2", u)
 	}
 	if f.lastPath.Load() != "POST /ai/dashboards/generate" || f.lastAuth.Load() != "Bearer tok-1" || f.lastCType.Load() != "application/json" {
 		t.Errorf("request = %v, auth %v, content type %v", f.lastPath.Load(), f.lastAuth.Load(), f.lastCType.Load())
