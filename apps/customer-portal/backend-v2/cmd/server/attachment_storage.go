@@ -47,13 +47,18 @@ func parseAttachmentStorageMode(v string) (string, error) {
 	}
 }
 
-// newAttachmentStore builds the Azure store from the environment and makes sure
-// its container exists.
+// newAttachmentStore builds the Azure store from the environment and checks that
+// its container is reachable (or creates it when AZURE_STORAGE_CREATE_CONTAINER=true). Sign in as an Entra app (AZURE_TENANT_ID, AZURE_CLIENT_ID,
+// AZURE_CLIENT_SECRET with AZURE_STORAGE_ACCOUNT), or with an account key or
+// connection string.
 func newAttachmentStore(getenv func(string) string) (*azblobstore.Store, error) {
 	store, err := azblobstore.New(azblobstore.Config{
 		ConnectionString: getenv("AZURE_STORAGE_CONNECTION_STRING"),
 		AccountName:      getenv("AZURE_STORAGE_ACCOUNT"),
 		AccountKey:       getenv("AZURE_STORAGE_KEY"),
+		TenantID:         getenv("AZURE_TENANT_ID"),
+		ClientID:         getenv("AZURE_CLIENT_ID"),
+		ClientSecret:     getenv("AZURE_CLIENT_SECRET"),
 		Endpoint:         getenv("AZURE_STORAGE_ENDPOINT"),
 		Container:        getenv("AZURE_STORAGE_CONTAINER"),
 	})
@@ -62,7 +67,16 @@ func newAttachmentStore(getenv func(string) string) (*azblobstore.Store, error) 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := store.EnsureContainer(ctx); err != nil {
+	// Creating a container needs account-level rights that the recommended
+	// container-scoped role does not have, so only do it when asked (Azurite and
+	// development). Otherwise just check the existing container is reachable.
+	if strings.EqualFold(strings.TrimSpace(getenv("AZURE_STORAGE_CREATE_CONTAINER")), "true") {
+		if err := store.EnsureContainer(ctx); err != nil {
+			return nil, fmt.Errorf("attachment container: %w", err)
+		}
+		return store, nil
+	}
+	if err := store.CheckContainer(ctx); err != nil {
 		return nil, fmt.Errorf("attachment container: %w", err)
 	}
 	return store, nil

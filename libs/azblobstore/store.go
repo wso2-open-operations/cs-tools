@@ -34,24 +34,41 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/streaming"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 )
 
-// Config says which container to use and how to sign in to it. Set either
-// ConnectionString, or AccountName and AccountKey.
+// Config says which container to use and how to sign in to it. Set one of:
+//
+//   - TenantID, ClientID and ClientSecret with AccountName: sign in as a
+//     Microsoft Entra app. This is the recommended way: give the app the
+//     "Storage Blob Data Contributor" role on the container only, and turn off
+//     shared key access on the account.
+//   - AccountName and AccountKey: the account's shared key. Full control of the
+//     whole account, so keep it for development and a dedicated account.
+//   - ConnectionString: what the Azurite emulator hands out.
+//
+// If more than one is set, the connection string wins, then Entra, then the key.
 type Config struct {
 	// ConnectionString is an Azure storage connection string. It is what the
 	// Azurite emulator hands out for local development.
 	ConnectionString string
-	// AccountName and AccountKey sign requests with the account's shared key.
+	// AccountName is the storage account. With AccountKey it signs requests with
+	// the account's shared key; with the three Entra settings below it only
+	// names the account.
 	AccountName string
 	AccountKey  string
+	// TenantID, ClientID and ClientSecret sign in as a Microsoft Entra app
+	// (client-credential flow). The secret is never logged or returned in an error.
+	TenantID     string
+	ClientID     string
+	ClientSecret string
 	// Endpoint overrides the blob service URL, for example
 	// http://127.0.0.1:10000/devstoreaccount1 for Azurite. It is only used with
-	// AccountName and AccountKey; empty means https://<AccountName>.blob.core.windows.net.
+	// AccountName; empty means https://<AccountName>.blob.core.windows.net.
 	Endpoint string
 	// Container is the container every key lives in.
 	Container string
@@ -73,26 +90,54 @@ func New(cfg Config) (*Store, error) {
 		c   *container.Client
 		err error
 	)
+	entra := cfg.TenantID != "" || cfg.ClientID != "" || cfg.ClientSecret != ""
 	switch {
 	case cfg.ConnectionString != "":
 		c, err = container.NewClientFromConnectionString(cfg.ConnectionString, cfg.Container, nil)
+	case entra:
+		if cfg.TenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.AccountName == "" {
+			return nil, errors.New("azblobstore: signing in as an Entra app needs a tenant id, client id, client secret and account name")
+		}
+		cred, credErr := azidentity.NewClientSecretCredential(cfg.TenantID, cfg.ClientID, cfg.ClientSecret, nil)
+		if credErr != nil {
+			// The library's error can echo the inputs; say only what is wrong.
+			return nil, errors.New("azblobstore: invalid Entra app settings (check the tenant id, client id and client secret)")
+		}
+		c, err = container.NewClient(containerURL(cfg), cred, nil)
 	case cfg.AccountName != "" && cfg.AccountKey != "":
 		cred, credErr := blob.NewSharedKeyCredential(cfg.AccountName, cfg.AccountKey)
 		if credErr != nil {
 			return nil, fmt.Errorf("azblobstore: invalid account key: %w", credErr)
 		}
-		base := strings.TrimRight(cfg.Endpoint, "/")
-		if base == "" {
-			base = fmt.Sprintf("https://%s.blob.core.windows.net", cfg.AccountName)
-		}
-		c, err = container.NewClientWithSharedKeyCredential(base+"/"+cfg.Container, cred, nil)
+		c, err = container.NewClientWithSharedKeyCredential(containerURL(cfg), cred, nil)
 	default:
-		return nil, errors.New("azblobstore: set a connection string, or an account name and key")
+		return nil, errors.New("azblobstore: set a connection string, an account name and key, or an Entra app (tenant id, client id, client secret) and account name")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("azblobstore: create client: %w", err)
 	}
 	return &Store{container: c}, nil
+}
+
+// containerURL is the container's address: the endpoint override or the
+// account's standard blob URL, then the container name.
+func containerURL(cfg Config) string {
+	base := strings.TrimRight(cfg.Endpoint, "/")
+	if base == "" {
+		base = fmt.Sprintf("https://%s.blob.core.windows.net", cfg.AccountName)
+	}
+	return base + "/" + cfg.Container
+}
+
+// CheckContainer fails if the container cannot be reached with these settings.
+// Unlike EnsureContainer it only reads, so it works with a role scoped to the
+// container (an app with "Storage Blob Data Contributor" on one container cannot
+// create containers). Use it at startup in production.
+func (s *Store) CheckContainer(ctx context.Context) error {
+	if _, err := s.container.GetProperties(ctx, nil); err != nil {
+		return fmt.Errorf("azblobstore: container is not reachable: %w", err)
+	}
+	return nil
 }
 
 // EnsureContainer creates the container if it does not exist. Production
