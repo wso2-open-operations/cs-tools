@@ -198,13 +198,15 @@ func acpSectionSuspended(key string) string {
 // opportunity only. With none (the invoice is new, or the local tables are
 // behind) it falls back to whether any project at all has such a track: the
 // local tables may only narrow the check, never hide a project from it.
+// $1 is cast to text: sf_id is varchar and LEFT takes text, and Postgres
+// refuses to prepare a parameter it deduces as both.
 func (r *acpReopenRepo) ACPSuspendedInvoiceTrackFor(ctx context.Context, invoiceSfID string) (bool, error) {
 	ctx = WithSystemIdentity(ctx)
 	var known, found bool
 	err := r.db.QueryRow(ctx, `
 		WITH opp AS (
 			SELECT DISTINCT i.opportunity_id FROM sf_invoice i
-			WHERE i.opportunity_id IS NOT NULL AND i.sf_id IN ($1, LEFT($1, 15))
+			WHERE i.opportunity_id IS NOT NULL AND i.sf_id IN ($1::text, LEFT($1::text, 15))
 		)
 		SELECT EXISTS (SELECT 1 FROM opp),
 		       EXISTS (SELECT 1 FROM opp
