@@ -3622,11 +3622,12 @@ paths:
       description: >
         Postgres-only, internal staff only. The link id is in the body, not
         the path, so it stays out of access logs. From then on the dashboard
-        is listed under GET /users/me/shared-dashboards (sharedViaLink true),
-        while the link stays on, unless the caller owns it or already has it
-        through a person or team share. Opening it again changes nothing. A
-        link that is unknown or off, and a caller who is not internal staff,
-        are not found.
+        is listed under GET /users/me/shared-dashboards while the link stays
+        on, unless the caller owns it: through the link (sharedViaLink true),
+        or through a person or team share while the caller has one, and
+        through the link again if that share goes. Opening it again changes
+        nothing. A link that is unknown or off, and a caller who is not
+        internal staff, are not found.
       operationId: openCustomDashboardLink
       requestBody:
         required: true

@@ -11355,10 +11355,11 @@ Saved dashboards are live in production, so a change here must leave the stored 
   get the same 404, so the answer tells nobody whether a link id ever existed. The owner opening their own
   link gets `own: true` and no row.
 - **Who counts as having opened it.** `custom_dashboard_link_access` holds one row per (dashboard, user)
-  for an internal user who opened the link and did not already have the dashboard: a user it is shared with
-  directly or through one of their teams gets no row (the Shared list already shows it to them), and
-  opening it again adds nothing. `openedBy` counts these rows only, never who; rows go with the dashboard
-  and with the user.
+  for every internal user but the owner who opened the link, also one it is already shared with directly
+  or through one of their teams (the Shared list still shows that share, see below), and opening it again
+  adds nothing. So whether the user opened the link before or after being shared the dashboard, it stays
+  in their list through the link when that share goes. `openedBy` counts these rows only, never who; rows
+  go with the dashboard and with the user.
 - **The Shared list** (`ListSharedWithUser` / `GetSharedWithUser`) shows each dashboard once: a direct
   share wins, then a team share (`sharedViaTeam`), then the link (`sharedViaLink: true`). A link row is
   kept when a direct or team share is added later, so the dashboard comes back through the link when that
