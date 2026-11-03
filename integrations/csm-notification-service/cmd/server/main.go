@@ -795,8 +795,8 @@ func main() {
 
 	// Alert-email phone escalation (mail.alert.received, published by
 	// csm-mail-paging-service). Off unless MAIL_ESCALATION_CONFIG names the
-	// ladder file and Redis is configured; without either the event is
-	// acknowledged and ignored. Its own engine and Redis keys, nothing shared
+	// ladder file and Redis and entity-service are configured; without any of
+	// them the event is acknowledged and ignored. Its own engine and Redis keys, nothing shared
 	// with internal/paging but the Twilio client.
 	var mailPaging *mailpaging.Engine
 	if path := os.Getenv("MAIL_ESCALATION_CONFIG"); path != "" {
@@ -805,8 +805,19 @@ func main() {
 			slog.Error("invalid MAIL_ESCALATION_CONFIG; mail alert paging is off", "err", err)
 		case redisClient == nil:
 			slog.Error("MAIL_ESCALATION_CONFIG needs Redis (REDIS_URL or REDIS_ADDR); mail alert paging is off")
+		case os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "":
+			slog.Error("MAIL_ESCALATION_CONFIG needs CUSTOMER_ENTITY_BASE_URL (phone numbers are looked up there); mail alert paging is off")
 		default:
-			mailPaging = mailpaging.NewEngine(mailCfg, mailpaging.NewRedisStore(redisClient), twilioClient, callSendingEnabled)
+			// The same entity-service lookup the incident ladders use for a
+			// person's number: their profile number, else the paging-only one.
+			phones := paging.NewEntityClient(paging.EntityConfig{
+				BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+				TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+				ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+				ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+			})
+			mailPaging = mailpaging.NewEngine(mailCfg, mailpaging.NewRedisStore(redisClient), phones, twilioClient, callSendingEnabled)
 			dispatcher = dispatcher.WithMailAlertPaging(mailPaging)
 			go mailPaging.RunTicker(ctx, envDuration("MAIL_ESCALATION_TICK_INTERVAL", 5*time.Second))
 			slog.Info("mail alert paging is enabled", "rules", len(mailCfg.Rules), "sending", callSendingEnabled)
@@ -893,21 +904,6 @@ func main() {
 	// onboarding events since that is all their topic carries.
 	projectConsumers := startConsumers(ctx, "project", projectCfg, projectConsumerGroup, projectConsumerCount, dispatcher.Handle, projectToDeadLetter)
 	projectDLQConsumers := startConsumers(ctx, "project-dlq", projectDLQCfg, projectDLQConsumerGroup, projectDLQConsumerCount, dispatcher.Handle, nil)
-
-	// mail.alert.received on its own topic (MAIL_EVENT_HUB_TOPIC, the topic
-	// csm-mail-paging-service publishes to). Off unless that is set and the
-	// ladder above is enabled. HandleShared, so an event type this service
-	// does not handle is skipped rather than dead-lettered. A record that
-	// exhausts its retries is logged and dropped: there is no dead-letter
-	// topic for it.
-	var mailConsumers []*eventbus.Consumer
-	if topic := os.Getenv("MAIL_EVENT_HUB_TOPIC"); topic != "" && mailPaging != nil && topic != eventBusCfg.Topic {
-		mailCfg := eventBusCfg
-		mailCfg.Topic = topic
-		group := envOrDefault("MAIL_CONSUMER_GROUP", "csm-notification-service-mail")
-		mailConsumers = startConsumers(ctx, "mail", mailCfg, group, envInt("MAIL_CONSUMER_COUNT", 1), dispatcher.HandleShared, nil)
-		slog.Info("mail alert consumer enabled", "topic", topic, "group", group)
-	}
 
 	// The incident call-escalation ladder (internal/paging) shares the Redis
 	// connected further up (for the SLA engine, started before any consumer
@@ -1292,9 +1288,6 @@ func main() {
 	stop()
 
 	for _, c := range mainConsumers {
-		c.Close()
-	}
-	for _, c := range mailConsumers {
 		c.Close()
 	}
 	for _, c := range dlqConsumers {

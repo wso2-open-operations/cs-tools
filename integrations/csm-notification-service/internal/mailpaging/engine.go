@@ -21,13 +21,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
 )
+
+// e164 is the format a call can be placed to, the same rule internal/paging
+// applies to a looked-up number.
+var e164 = regexp.MustCompile(`^\+[1-9]\d{7,14}$`)
 
 const (
 	tickBatch = 20
@@ -35,6 +41,13 @@ const (
 	// email-supplied text.
 	maxSpokenSubject = 100
 )
+
+// PhoneLookup returns the number to call for each email, keyed by lower-cased
+// email; someone with none is absent. paging.EntityClient.DialNumbers is the
+// real one: entity-service's profile number, else the paging-only one.
+type PhoneLookup interface {
+	DialNumbers(ctx context.Context, emails []string) (map[string]paging.DialNumber, error)
+}
 
 // Caller places one voice call; *notifications.TwilioClient implements it.
 type Caller interface {
@@ -55,15 +68,19 @@ type step struct {
 type Engine struct {
 	cfg     Config
 	store   Store
+	phones  PhoneLookup
 	caller  Caller
 	sending bool
 	now     func() time.Time
+	// lookupRetryDelay separates the attempts of a failing number lookup.
+	lookupRetryDelay time.Duration
 }
 
 // NewEngine builds an Engine. sending=false (CALL_SENDING_ENABLED) logs each
 // call instead of placing it.
-func NewEngine(cfg Config, store Store, caller Caller, sending bool) *Engine {
-	return &Engine{cfg: cfg, store: store, caller: caller, sending: sending, now: time.Now}
+func NewEngine(cfg Config, store Store, phones PhoneLookup, caller Caller, sending bool) *Engine {
+	return &Engine{cfg: cfg, store: store, phones: phones, caller: caller, sending: sending,
+		now: time.Now, lookupRetryDelay: time.Second}
 }
 
 // HandleAlert starts the ladder for one mail.alert.received. A rule with no
@@ -165,14 +182,15 @@ func (e *Engine) run(ctx context.Context, member string) {
 		}
 	}
 	level := rule.Levels[s.Level]
+	numbers, missing := e.numbersFor(ctx, level)
 	msg := spokenMessage(s.Rule, level.Name, s.Subject)
 	placed, failed := 0, 0
-	for _, phone := range level.Phones {
+	for _, number := range numbers {
 		if !e.sending {
 			slog.InfoContext(ctx, "mailpaging: CALL_SENDING_ENABLED=false; call logged, not placed", "rule", s.Rule, "level", level.Name)
 			continue
 		}
-		if _, err := e.caller.MakeCall(ctx, phone, msg); err != nil {
+		if _, err := e.caller.MakeCall(ctx, number, msg); err != nil {
 			failed++
 			slog.ErrorContext(ctx, "mailpaging: call failed", "rule", s.Rule, "level", level.Name, "err", err)
 			continue
@@ -180,7 +198,50 @@ func (e *Engine) run(ctx context.Context, member string) {
 		placed++
 	}
 	slog.InfoContext(ctx, "mailpaging: level called", "rule", s.Rule, "level", level.Name,
-		"people", len(level.Phones), "placed", placed, "failed", failed)
+		"people", len(level.Emails), "noNumber", missing, "placed", placed, "failed", failed)
+}
+
+// lookupAttempts bounds a failing number lookup: this runs on the ticker, so
+// it must not hold up the other levels for long.
+const lookupAttempts = 3
+
+// numbersFor resolves a level's people to numbers in one entity-service
+// request. Someone with no number, or one that is not E.164, is counted in
+// missing and skipped; a lookup that keeps failing yields no numbers for this
+// level (the next one is already scheduled).
+func (e *Engine) numbersFor(ctx context.Context, level Level) (numbers []string, missing int) {
+	var answers map[string]paging.DialNumber
+	var err error
+	for attempt := 1; attempt <= lookupAttempts; attempt++ {
+		if answers, err = e.phones.DialNumbers(ctx, level.Emails); err == nil {
+			break
+		}
+		slog.WarnContext(ctx, "mailpaging: phone lookup failed", "level", level.Name, "attempt", attempt, "err", err)
+		if attempt < lookupAttempts {
+			select {
+			case <-ctx.Done():
+				return nil, len(level.Emails)
+			case <-time.After(e.lookupRetryDelay):
+			}
+		}
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "mailpaging: no numbers for this level; skipping its calls", "level", level.Name)
+		return nil, len(level.Emails)
+	}
+	seen := map[string]bool{}
+	for _, email := range level.Emails {
+		n := strings.TrimSpace(answers[email].Number)
+		if !e164.MatchString(n) {
+			missing++
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			numbers = append(numbers, n)
+		}
+	}
+	return numbers, missing
 }
 
 // spokenMessage is what the call reads aloud. The subject is email-supplied,

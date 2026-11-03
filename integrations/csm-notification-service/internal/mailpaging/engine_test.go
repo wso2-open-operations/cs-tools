@@ -27,12 +27,13 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
 )
 
 const goodConfig = `{"rules":{"sre":{"levelWait":"3m","levels":[
- {"name":"R1","phones":["+15550000001"]},
- {"name":"R2","phones":["+15550000002","+15550000003"]},
- {"phones":["+15550000004"]}]}}}`
+ {"name":"R1","emails":["a@example.com"]},
+ {"name":"R2","emails":["b@example.com","C@Example.com"]},
+ {"emails":["d@example.com"]}]}}}`
 
 func TestParse_Valid(t *testing.T) {
 	c, err := Parse([]byte(goodConfig))
@@ -48,8 +49,18 @@ func TestParse_Valid(t *testing.T) {
 	}
 }
 
+func TestParse_NormalisesEmails(t *testing.T) {
+	c, err := Parse([]byte(goodConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Rules["sre"].Levels[1].Emails, ","); got != "b@example.com,c@example.com" {
+		t.Errorf("R2 emails = %q, want lower-cased", got)
+	}
+}
+
 func TestParse_DefaultsWait(t *testing.T) {
-	c, err := Parse([]byte(`{"rules":{"x":{"levels":[{"phones":["+15550000001"]}]}}}`))
+	c, err := Parse([]byte(`{"rules":{"x":{"levels":[{"emails":["a@example.com"]}]}}}`))
 	if err != nil || c.Rules["x"].Wait() != DefaultLevelWait {
 		t.Fatalf("Parse() = %v, %v; want the default wait", c.Rules["x"].Wait(), err)
 	}
@@ -59,11 +70,12 @@ func TestParse_Rejects(t *testing.T) {
 	for name, doc := range map[string]string{
 		"no rules":      `{"rules":{}}`,
 		"no levels":     `{"rules":{"x":{"levels":[]}}}`,
-		"no phones":     `{"rules":{"x":{"levels":[{"name":"R1","phones":[]}]}}}`,
-		"bad phone":     `{"rules":{"x":{"levels":[{"phones":["0771234567"]}]}}}`,
-		"dup level":     `{"rules":{"x":{"levels":[{"name":"R1","phones":["+15550000001"]},{"name":"R1","phones":["+15550000002"]}]}}}`,
-		"short wait":    `{"rules":{"x":{"levelWait":"1s","levels":[{"phones":["+15550000001"]}]}}}`,
-		"bad wait":      `{"rules":{"x":{"levelWait":"soon","levels":[{"phones":["+15550000001"]}]}}}`,
+		"no emails":     `{"rules":{"x":{"levels":[{"name":"R1","emails":[]}]}}}`,
+		"bad email":     `{"rules":{"x":{"levels":[{"emails":["not-an-email"]}]}}}`,
+		"phones field":  `{"rules":{"x":{"levels":[{"phones":["+15550000001"]}]}}}`,
+		"dup level":     `{"rules":{"x":{"levels":[{"name":"R1","emails":["a@example.com"]},{"name":"R1","emails":["b@example.com"]}]}}}`,
+		"short wait":    `{"rules":{"x":{"levelWait":"1s","levels":[{"emails":["a@example.com"]}]}}}`,
+		"bad wait":      `{"rules":{"x":{"levelWait":"soon","levels":[{"emails":["a@example.com"]}]}}}`,
 		"unknown field": `{"rules":{"x":{"levelz":[]}}}`,
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
@@ -123,6 +135,26 @@ func (s *fakeStore) Claim(_ context.Context, m string) (bool, error) {
 	return true, nil
 }
 
+type fakeLookup struct {
+	numbers map[string]string
+	calls   int
+	failFor int
+}
+
+func (l *fakeLookup) DialNumbers(_ context.Context, emails []string) (map[string]paging.DialNumber, error) {
+	l.calls++
+	if l.calls <= l.failFor {
+		return nil, errors.New("entity-service down")
+	}
+	out := map[string]paging.DialNumber{}
+	for _, e := range emails {
+		if n, ok := l.numbers[e]; ok {
+			out[e] = paging.DialNumber{Number: n, Source: paging.DialSourceProfile}
+		}
+	}
+	return out, nil
+}
+
 type fakeCaller struct {
 	mu    sync.Mutex
 	calls []string
@@ -141,6 +173,13 @@ func (c *fakeCaller) MakeCall(_ context.Context, to, msg string) (notifications.
 	return notifications.Call{SID: "CA1"}, nil
 }
 
+var testNumbers = map[string]string{
+	"a@example.com": "+15550000001",
+	"b@example.com": "+15550000002",
+	"c@example.com": "+15550000003",
+	"d@example.com": "+15550000004",
+}
+
 func newTestEngine(t *testing.T, sending bool) (*Engine, *fakeStore, *fakeCaller, *time.Time) {
 	t.Helper()
 	cfg, err := Parse([]byte(goodConfig))
@@ -149,8 +188,13 @@ func newTestEngine(t *testing.T, sending bool) (*Engine, *fakeStore, *fakeCaller
 	}
 	st, cl := newFakeStore(), &fakeCaller{fail: map[string]bool{}}
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
-	e := NewEngine(cfg, st, cl, sending)
+	numbers := map[string]string{}
+	for k, v := range testNumbers {
+		numbers[k] = v
+	}
+	e := NewEngine(cfg, st, &fakeLookup{numbers: numbers}, cl, sending)
 	e.now = func() time.Time { return now }
+	e.lookupRetryDelay = time.Millisecond
 	return e, st, cl, &now
 }
 
@@ -220,6 +264,57 @@ func TestLadder_FailedCallDoesNotStopTheLevelOrTheLadder(t *testing.T) {
 	_ = e.Tick(ctx)
 	if len(cl.calls) != 3 {
 		t.Fatalf("calls = %v, want R3 after the failure", cl.calls)
+	}
+}
+
+func TestLadder_PersonWithNoNumberIsSkippedAndTheRestCalled(t *testing.T) {
+	e, _, cl, now := newTestEngine(t, true)
+	ctx := context.Background()
+	delete(e.phones.(*fakeLookup).numbers, "b@example.com")
+	_ = e.HandleAlert(ctx, alert)
+	_ = e.Tick(ctx)
+	*now = now.Add(3 * time.Minute)
+	_ = e.Tick(ctx)
+	if got := strings.Join(cl.calls, ","); got != "+15550000001,+15550000003" {
+		t.Fatalf("calls = %q, want the R2 user with a number still called", got)
+	}
+}
+
+func TestLadder_NotE164NumberIsNotDialled(t *testing.T) {
+	e, _, cl, _ := newTestEngine(t, true)
+	e.phones.(*fakeLookup).numbers["a@example.com"] = "0771234567"
+	_ = e.HandleAlert(context.Background(), alert)
+	_ = e.Tick(context.Background())
+	if len(cl.calls) != 0 {
+		t.Fatalf("calls = %v, want none for a number that is not E.164", cl.calls)
+	}
+}
+
+func TestLadder_LookupRetriesThenSucceeds(t *testing.T) {
+	e, _, cl, _ := newTestEngine(t, true)
+	lk := e.phones.(*fakeLookup)
+	lk.failFor = lookupAttempts - 1
+	_ = e.HandleAlert(context.Background(), alert)
+	_ = e.Tick(context.Background())
+	if lk.calls != lookupAttempts || len(cl.calls) != 1 {
+		t.Fatalf("lookups = %d, calls = %v; want %d lookups and the R1 call", lk.calls, cl.calls, lookupAttempts)
+	}
+}
+
+func TestLadder_LookupFailureSkipsTheLevelNotTheLadder(t *testing.T) {
+	e, _, cl, now := newTestEngine(t, true)
+	lk := e.phones.(*fakeLookup)
+	lk.failFor = lookupAttempts
+	ctx := context.Background()
+	_ = e.HandleAlert(ctx, alert)
+	_ = e.Tick(ctx)
+	if len(cl.calls) != 0 {
+		t.Fatalf("calls = %v, want none while the lookup is down", cl.calls)
+	}
+	*now = now.Add(3 * time.Minute)
+	_ = e.Tick(ctx)
+	if got := strings.Join(cl.calls, ","); got != "+15550000002,+15550000003" {
+		t.Fatalf("calls = %q, want R2 called once the lookup is back", got)
 	}
 }
 

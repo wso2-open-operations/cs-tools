@@ -3,8 +3,10 @@
 Polls a Gmail mailbox and publishes an event to the event bus for every email
 that matches a configured rule. It does not place calls. csm-notification-service
 consumes `mail.alert.received` and calls the rule's escalation levels (R1, R2, ...,
-one wait apart) by phone; the ladder is configured there (`MAIL_ESCALATION_CONFIG`,
-keyed by the rule `name`), and is off until that is set. Any other `eventType`
+one wait apart) by phone, looking each person's number up by email; the ladder is
+configured there (`MAIL_ESCALATION_CONFIG`, keyed by the rule `name`), and is off
+until that is set. Point `EVENT_BUS_TOPIC` at the topic that service reads
+(its `EVENT_HUB_TOPIC`). Any other `eventType`
 is published but has no consumer yet.
 
 ```

@@ -2,9 +2,10 @@
 
 Polls Gmail and publishes one event per rule-matching email. No Twilio and no
 paging logic lives here: calls are placed by csm-notification-service's
-`internal/mailpaging` (`mail.alert.received`, levels R1, R2, ... called a wait
-apart, configured there by `MAIL_ESCALATION_CONFIG`, keyed by this service's rule
-`name`). Do not add a second call ladder to this service.
+`internal/mailpaging` (`mail.alert.received`, levels R1, R2, ... of people (by email,
+numbers come from entity-service) called a wait apart, configured there by
+`MAIL_ESCALATION_CONFIG`, keyed by this service's rule `name`). Set this service's
+`EVENT_BUS_TOPIC` to the topic that service reads (`EVENT_HUB_TOPIC`). Do not add a second call ladder to this service.
 
 - **Gmail label = idempotency.** A message is labelled processed only after all
   its events were published. Do not move that earlier, and do not add a second

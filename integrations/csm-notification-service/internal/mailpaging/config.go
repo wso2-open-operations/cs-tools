@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -39,13 +40,16 @@ const (
 	maxLevelWait     = time.Hour
 )
 
-var e164 = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
+// emailPattern is a sanity check on a configured address, not a validator.
+var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
 // Level is one rung: everyone on it is called together.
 type Level struct {
 	// Name is how the level is spoken and logged ("R1"); defaults to R<n>.
-	Name   string   `json:"name"`
-	Phones []string `json:"phones"`
+	Name string `json:"name"`
+	// Emails are the people on the level. Their phone numbers are looked up in
+	// entity-service when the level is called, not kept here.
+	Emails []string `json:"emails"`
 }
 
 // Rule is the ladder for one mail rule (csm-mail-paging-service's
@@ -112,14 +116,22 @@ func Parse(raw []byte) (Config, error) {
 				return Config{}, fmt.Errorf("mailpaging: rule %q repeats level %q", name, l.Name)
 			}
 			seen[l.Name] = true
-			if len(l.Phones) == 0 {
-				return Config{}, fmt.Errorf("mailpaging: rule %q level %q has no phones", name, l.Name)
+			if len(l.Emails) == 0 {
+				return Config{}, fmt.Errorf("mailpaging: rule %q level %q has no emails", name, l.Name)
 			}
-			for _, p := range l.Phones {
-				if !e164.MatchString(p) {
-					return Config{}, fmt.Errorf("mailpaging: rule %q level %q has a phone that is not E.164 (+<country><number>)", name, l.Name)
+			uniq := make([]string, 0, len(l.Emails))
+			have := map[string]bool{}
+			for _, e := range l.Emails {
+				e = strings.ToLower(strings.TrimSpace(e))
+				if !emailPattern.MatchString(e) {
+					return Config{}, fmt.Errorf("mailpaging: rule %q level %q has an entry that is not an email address", name, l.Name)
+				}
+				if !have[e] {
+					have[e] = true
+					uniq = append(uniq, e)
 				}
 			}
+			r.Levels[i].Emails = uniq
 		}
 		c.Rules[name] = r
 	}
