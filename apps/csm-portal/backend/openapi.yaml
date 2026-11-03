@@ -14396,7 +14396,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: "One of the same kind is already waiting to be sent."
+          description: "One that sends any of the same emails is already waiting to be sent."
           content:
             application/json:
               schema:

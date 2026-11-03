@@ -243,8 +243,8 @@ schedules assume `TZ=UTC` like every other here.
   email service settings.
 - **"Send now" (`rota_manual_reminder`, every run).** The card's Send now button queues a
   request in entity-service (`team_schedule_reminder_request`, migration 0242; asked for by a
-  CSM admin or the family's rota admin, refused while one of the same kind is waiting and within
-  10 minutes of the last that did not fail). This task has no address to call, so at every run it claims the
+  CSM admin or the family's rota admin, refused while one that sends any of the same emails is waiting
+  and within 10 minutes of the last that did not fail: `weekday` overlaps `morning` and `evening`). This task has no address to call, so at every run it claims the
   waiting requests (`POST .../reminder-requests/{family}/claim`, up to 5 a run) and sends each
   with the code above: `morning` is the next working day's Morning with its on-call, `evening` its
   Evening (each found by its code ending `_MORNING` / `_EVENING` in `ROTA_REMINDER_WEEKDAY_SHIFTS`;

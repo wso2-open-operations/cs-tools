@@ -245,6 +245,25 @@ func weekend(ctx context.Context, rota RotaReader, store ReminderStore, sender E
 				invites = append(invites, old)
 			}
 		}
+		// A rotation turned off keeps what it was sent even when its window
+		// has since gone from the rota: turning invitations off never
+		// withdraws one.
+		offCodes := make([]string, 0, len(cfg.InvitesOff))
+		for code, off := range cfg.InvitesOff {
+			if off {
+				offCodes = append(offCodes, code)
+			}
+		}
+		sort.Strings(offCodes)
+		for _, code := range offCodes {
+			for _, d := range []time.Time{sat, sun} {
+				uid := cfg.inviteUID(d.Format(dateLayout), code)
+				if old, ok := previous[uid]; ok && !current[uid] {
+					current[uid] = true
+					invites = append(invites, old)
+				}
+			}
+		}
 		for uid, old := range previous {
 			if current[uid] || len(old.Attendees) == 0 {
 				continue

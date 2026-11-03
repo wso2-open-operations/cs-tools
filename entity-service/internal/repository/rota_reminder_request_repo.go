@@ -33,8 +33,9 @@ import (
 // RotaReminderRequestRepository queues rota reminders asked for by hand
 // (team_schedule_reminder_request, migration 0242).
 type RotaReminderRequestRepository interface {
-	// Create queues a request, unless one of the same family and kind is
-	// still waiting (ConflictError) or was asked for within cooldown
+	// Create queues a request, unless one of the same family that sends any of
+	// the same emails (overlappingReminderKinds: weekday is Morning and
+	// Evening together) is still waiting (ConflictError) or was asked for within cooldown
 	// (TooManyRequestsError). A FAILED request sent nobody anything, so it
 	// does not start the cooldown: it can be asked for again at once. Checked and written under one lock, so two
 	// presses at once queue one request.
@@ -81,38 +82,62 @@ func (r *rotaReminderRequestRepository) inTx(ctx context.Context, actor string, 
 	return tx.Commit(ctx)
 }
 
+// overlappingReminderKinds is every kind whose request sends one of the
+// emails a request of kind sends: weekday is the Morning and the Evening
+// together, so it overlaps both, and they overlap it but not each other.
+func overlappingReminderKinds(kind string) []string {
+	switch kind {
+	case "weekday":
+		return []string{"weekday", "morning", "evening"}
+	case "morning", "evening":
+		return []string{kind, "weekday"}
+	}
+	return []string{kind}
+}
+
+// reminderRequestLockKind is the lock a kind's requests are checked under:
+// the weekday kinds share one, so two that overlap never pass the check at
+// once.
+func reminderRequestLockKind(kind string) string {
+	switch kind {
+	case "weekday", "morning", "evening":
+		return "weekday"
+	}
+	return kind
+}
+
 func (r *rotaReminderRequestRepository) Create(ctx context.Context, actor, family, kind string, test bool, cooldown time.Duration) (domain.RotaReminderRequest, error) {
 	var out domain.RotaReminderRequest
 	err := r.inTx(ctx, actor, func(tx pgx.Tx) error {
-		// A real request is one queue per family and kind; a test, one per
-		// family, kind and person.
+		// A real request is one queue per family and the kinds it overlaps; a
+		// test, the same per person.
 		owner := ""
 		if test {
 			owner = actor
 		}
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('rota-reminder-request:' || $1 || ':' || $2 || ':' || $3 || ':' || $4, 0))`,
-			family, kind, strconv.FormatBool(test), owner); err != nil {
+			family, reminderRequestLockKind(kind), strconv.FormatBool(test), owner); err != nil {
 			return fmt.Errorf("lock: %w", err)
 		}
 		last, err := scanRotaReminderRequest(tx.QueryRow(ctx, `SELECT `+rotaReminderRequestColumns+`
 			FROM team_schedule_reminder_request
-			WHERE family = $1 AND kind = $2 AND test = $3 AND ($4 = '' OR LOWER(requested_by) = LOWER($4))
+			WHERE family = $1 AND kind = ANY($2::text[]) AND test = $3 AND ($4 = '' OR LOWER(requested_by) = LOWER($4))
 			  AND status <> 'FAILED'
-			ORDER BY requested_on DESC LIMIT 1`, family, kind, test, owner))
+			ORDER BY requested_on DESC LIMIT 1`, family, overlappingReminderKinds(kind), test, owner))
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return fmt.Errorf("read the last request: %w", err)
 		case last.Status == "QUEUED" || last.Status == "SENDING":
-			what := "a " + kind + " reminder"
+			what := "a " + last.Kind + " reminder"
 			if test {
-				what = "your " + kind + " test"
+				what = "your " + last.Kind + " test"
 			}
 			return &apierror.ConflictError{Msg: fmt.Sprintf("%s asked for by %s is already waiting to be sent", what, last.RequestedBy)}
 		case time.Since(last.RequestedOn) < cooldown:
-			what := "a " + kind + " reminder was"
+			what := "a " + last.Kind + " reminder was"
 			if test {
-				what = "your " + kind + " test was"
+				what = "your " + last.Kind + " test was"
 			}
 			return &apierror.TooManyRequestsError{Msg: fmt.Sprintf("%s asked for less than %d minutes ago; try again later", what, int(cooldown.Minutes()))}
 		}

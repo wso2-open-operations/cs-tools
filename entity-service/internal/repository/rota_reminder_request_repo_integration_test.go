@@ -137,3 +137,78 @@ func TestRotaReminderRequestIntegration_Queue(t *testing.T) {
 		t.Errorf("a retry after a failed request: %+v, %v", retry, err)
 	}
 }
+
+// A weekday request sends the Morning and the Evening, so it and a Morning or
+// Evening request refuse each other in either order, while they wait and for
+// the cooldown after; Morning and Evening do not overlap, and a test never
+// holds up a real request. Same database and SME guard as the queue test.
+func TestRotaReminderRequestIntegration_OverlappingKinds(t *testing.T) {
+	dsn := os.Getenv("ENTITY_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("ENTITY_TEST_DATABASE_URL is not set; skipping the live-database tests")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	repo := NewRotaReminderRequestRepository(pool)
+	if existing, err := repo.List(ctx, "SME", 1); err != nil {
+		t.Fatal(err)
+	} else if len(existing) > 0 {
+		t.Skip("SME reminder requests already exist here; not touching them")
+	}
+	clear := func() {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `DELETE FROM team_schedule_reminder_request WHERE family = 'SME'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM team_schedule_reminder_request WHERE family = 'SME'`)
+	})
+	var conflict *apierror.ConflictError
+	var tooMany *apierror.TooManyRequestsError
+
+	// weekday waiting: morning and evening are refused, a test is not.
+	if _, err := repo.Create(ctx, "ann@example.com", "SME", "weekday", false, 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"morning", "evening"} {
+		if _, err := repo.Create(ctx, "ben@example.com", "SME", kind, false, 10*time.Minute); !errors.As(err, &conflict) {
+			t.Errorf("%s while a weekday request waits: %v", kind, err)
+		}
+	}
+	if _, err := repo.Create(ctx, "ann@example.com", "SME", "morning", true, 2*time.Minute); err != nil {
+		t.Errorf("a morning test while a real weekday request waits: %v", err)
+	}
+
+	// morning waiting: weekday is refused, evening is not.
+	clear()
+	if _, err := repo.Create(ctx, "ann@example.com", "SME", "morning", false, 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Create(ctx, "ben@example.com", "SME", "weekday", false, 10*time.Minute); !errors.As(err, &conflict) {
+		t.Errorf("weekday while a morning request waits: %v", err)
+	}
+	if _, err := repo.Create(ctx, "ben@example.com", "SME", "evening", false, 10*time.Minute); err != nil {
+		t.Errorf("evening while a morning request waits: %v", err)
+	}
+
+	// weekday sent a moment ago: morning is inside its cooldown.
+	clear()
+	sent, err := repo.Create(ctx, "ann@example.com", "SME", "weekday", false, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Claim(ctx, "csm-scheduled-tasks", "SME", 2*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Report(ctx, "csm-scheduled-tasks", "SME", sent.ID, "SENT", "Sent 2 emails."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Create(ctx, "ben@example.com", "SME", "morning", false, 10*time.Minute); !errors.As(err, &tooMany) {
+		t.Errorf("morning within a sent weekday request's cooldown: %v", err)
+	}
+}

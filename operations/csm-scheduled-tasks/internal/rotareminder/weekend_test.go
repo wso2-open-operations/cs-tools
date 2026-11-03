@@ -596,6 +596,45 @@ func TestWeekendReminder_InvitesTurnedOffForOneRotationKeepsWhatWasSent(t *testi
 	}
 }
 
+// Americas Weekend's invitations turned off, and Saturday's Americas window
+// then taken off the rota: its invitation already sent is still neither
+// withdrawn nor dropped from the record.
+func TestWeekendReminder_InvitesTurnedOffKeepsAWindowGoneFromTheRota(t *testing.T) {
+	const americasSat = "cre-rota-2026-10-24-cre_weekend_night@csm-team-schedule"
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: americasSat, Sequence: 1, Attendees: []string{"ivy@example.com", "jay@example.com"}},
+		}},
+	}}
+	var rota []teamschedule.Assignment
+	for _, a := range fullWeekend() {
+		if a.RotaDate == "2026-10-24" && baseCode(a.ShiftCode) == "CRE_WEEKEND_NIGHT" {
+			continue
+		}
+		rota = append(rota, a)
+	}
+	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: rota}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	for _, m := range mail.sent {
+		if strings.Contains(m.subject, "Cancelled:") {
+			t.Errorf("sent %q although Americas Weekend's invitations are off", m.subject)
+		}
+	}
+	kept := false
+	for _, inv := range store.recorded[0].invites {
+		if inv.UID == americasSat && inv.Sequence == 1 && len(inv.Attendees) == 2 {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("the Americas invitation already sent is not kept in the record: %+v", store.recorded[0].invites)
+	}
+}
+
 // Every weekend rotation's invitations off: the summary alone, and it does not
 // promise an invitation.
 func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
