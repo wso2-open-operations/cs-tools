@@ -193,6 +193,7 @@ func TestBlobConfirm_RefusalDeletesTheFileButARetryableFailureKeepsIt(t *testing
 		"upstream":  {apierror.NewUpstreamError(503, nil), false, 503},
 		"forbidden": {apierror.NewUpstreamError(403, nil), true, 403},
 		"conflict":  {apierror.NewUpstreamError(409, nil), false, 409},
+		"timeout":   {apierror.NewUpstreamError(408, nil), false, 500},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{data: []byte("x")}
