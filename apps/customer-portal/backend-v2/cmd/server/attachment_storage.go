@@ -48,12 +48,17 @@ func parseAttachmentStorageMode(v string) (string, error) {
 }
 
 // newAttachmentStore builds the Azure store from the environment and makes sure
-// its container exists.
+// its container exists. Sign in as an Entra app (AZURE_TENANT_ID, AZURE_CLIENT_ID,
+// AZURE_CLIENT_SECRET with AZURE_STORAGE_ACCOUNT), or with an account key or
+// connection string.
 func newAttachmentStore(getenv func(string) string) (*azblobstore.Store, error) {
 	store, err := azblobstore.New(azblobstore.Config{
 		ConnectionString: getenv("AZURE_STORAGE_CONNECTION_STRING"),
 		AccountName:      getenv("AZURE_STORAGE_ACCOUNT"),
 		AccountKey:       getenv("AZURE_STORAGE_KEY"),
+		TenantID:         getenv("AZURE_TENANT_ID"),
+		ClientID:         getenv("AZURE_CLIENT_ID"),
+		ClientSecret:     getenv("AZURE_CLIENT_SECRET"),
 		Endpoint:         getenv("AZURE_STORAGE_ENDPOINT"),
 		Container:        getenv("AZURE_STORAGE_CONTAINER"),
 	})
