@@ -29,6 +29,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -511,7 +512,7 @@ func TestOverrideRunsOfRealReportHandlers(t *testing.T) {
 	rec := []string{"jane.doe@example.com"}
 	cases := map[string]func(email notify.Sender) func(context.Context) error{
 		"stale": func(email notify.Sender) func(context.Context) error {
-			return stalecases.SendReport(fakeStale{}, email, 30*24*time.Hour, orRecipients(nil, rec), nil, true)
+			return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(nil, rec), nil, true)
 		},
 		"open": func(email notify.Sender) func(context.Context) error {
 			return opencases.SendReport(fakeOpen{}, email, orRecipients(nil, rec), nil, true)
@@ -545,8 +546,12 @@ func TestOverrideRunsOfRealReportHandlers(t *testing.T) {
 
 type fakeStale struct{}
 
-func (fakeStale) SearchOpenCasesOlderThan(context.Context, time.Duration) ([]entitycases.Case, int, error) {
-	return nil, 0, nil
+// fakeStale returns one case so the report is not empty (an empty report is
+// not sent at all).
+func (fakeStale) Report(context.Context, int) (longopenreport.Report, error) {
+	return longopenreport.Report{
+		Cases: []longopenreport.Row{{Number: "CS0000001"}}, CasesTotal: 1,
+	}, nil
 }
 
 type fakeOpen struct{}

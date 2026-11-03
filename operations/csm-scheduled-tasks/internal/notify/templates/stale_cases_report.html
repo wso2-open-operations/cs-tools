@@ -4,7 +4,7 @@
     <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
     <meta name="color-scheme" content="light dark" />
     <meta name="supported-color-schemes" content="light dark" />
-    <title>CSM Scheduled Tasks: cases open more than <!-- [THRESHOLD_DAYS] --> days</title>
+    <title>Cases open for more than <!-- [OLDER_THAN_DAYS] --> days</title>
 
     <style type="text/css">
         @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap");
@@ -25,7 +25,7 @@
         .footerContent a:hover { color: #ff7300 !important; }
 
         @media only screen and (max-width: 650px) {
-            .bodyContent { padding: 0 20px 30px !important; }
+            .bodyContent { padding: 0 16px 24px !important; }
         }
 
         @media (prefers-color-scheme: dark) {
@@ -47,17 +47,17 @@
         <tr>
             <td align="center" valign="top">
 
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px;">
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:1100px;">
                     <tr>
-                        <td align="center" bgcolor="#ff7101" style="padding:30px 0;">
-                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px;">
+                        <td align="center" bgcolor="#ff7101" style="padding:22px 0;">
+                            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:1100px;">
                                 <tr>
-                                    <td align="left" style="padding:0 30px;">
+                                    <td align="left" style="padding:0 24px;">
                                         <img src="<!-- [LOGO_SRC] -->" alt="WSO2 Logo" width="120" style="display:block;" />
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td align="left" style="padding:16px 30px 0; color:#ffffff; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase;">
+                                    <td align="left" style="padding:12px 24px 0; color:#ffffff; font-size:13px; font-weight:700; letter-spacing:1px; text-transform:uppercase;">
                                         Stale Cases Report
                                     </td>
                                 </tr>
@@ -68,36 +68,59 @@
                 <br/>
 
                 <!-- Main Content -->
-                <table bgcolor="#ffffff" border="0" cellpadding="0" cellspacing="0" class="Bodyconetntdark" width="100%" style="max-width:800px; margin:auto; box-shadow:0 2px 12px rgba(0,0,0,0.1);">
+                <table bgcolor="#ffffff" border="0" cellpadding="0" cellspacing="0" class="Bodyconetntdark" width="100%" style="max-width:1100px; margin:auto; box-shadow:0 2px 12px rgba(0,0,0,0.1);">
                     <tr>
-                        <td class="bodyContent" style="padding:40px 50px; color:#465868; font-size:16px; line-height:24px; text-align:left;">
+                        <td class="bodyContent" style="padding:28px 24px; color:#465868; font-size:16px; line-height:21px; text-align:left;">
 
-                            <p style="margin:0 0 30px;">
-                                <strong><!-- [CASE_COUNT] --></strong> case(s) have been open for more than
-                                <strong><!-- [THRESHOLD_DAYS] --> days</strong>, oldest first.
+                            <p style="margin:0 0 10px;">Hi Team,</p>
+                            <p style="margin:0 0 10px;">
+                                The cases below have been open for more than
+                                <strong><!-- [OLDER_THAN_DAYS] --> days</strong> without resolution and need action.
+                                Please review them and drive each one toward resolution.
                             </p>
-
-                            <!-- [TRUNCATION_NOTE] -->
-
-                            <table class="reportTable" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:13px; border-collapse:collapse;">
+                            <p style="margin:22px 0 8px; font-size:16px; font-weight:700;">Ongoing cases</p>
+                            <table class="reportTable" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:12px; border-collapse:collapse;">
                                 <thead>
                                     <tr>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Case</th>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Account</th>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Assigned To</th>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">State</th>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Severity</th>
-                                        <th align="right" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Days Open</th>
-                                        <th align="left" style="padding:8px 10px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Updated</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Case</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">WSO2 Case ID</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Integration CS Team</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Assignee</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">State</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Priority</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Last updated</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Created</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <!-- [CASE_ROWS] -->
+                                    <!-- [CASES_ROWS] -->
                                 </tbody>
                             </table>
+                            <!-- [CASES_NOTE] -->
+
+                            <p style="margin:22px 0 8px; font-size:16px; font-weight:700;">Ongoing cases on onboarding projects</p>
+                            <table class="reportTable" border="0" cellpadding="0" cellspacing="0" width="100%" style="font-size:12px; border-collapse:collapse;">
+                                <thead>
+                                    <tr>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Case</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">WSO2 Case ID</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Integration CS Team</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Assignee</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">State</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Priority</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Last updated</th>
+                                        <th align="left" style="padding:5px 8px; line-height:15px; background-color:#f1f3f5; color:#465868; font-size:12px; text-transform:uppercase; letter-spacing:0.5px;">Created</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- [ONBOARDING_CASES_ROWS] -->
+                                </tbody>
+                            </table>
+                            <!-- [ONBOARDING_CASES_NOTE] -->
+
 
                             <p style="margin:40px 0 0; font-size:13px; color:#8a8f98;">
-                                This is an automated report.
+                                This is an automated report. Please do not reply to this email.
                             </p>
 
                         </td>
@@ -105,7 +128,7 @@
                 </table>
 
                 <!-- Footer -->
-                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:800px; background-color:#e8eaed; padding:30px 0;">
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:1100px; background-color:#e8eaed; padding:30px 0;">
                     <tr>
                         <td align="center" style="padding:0 50px;">
                             <table border="0" cellpadding="0" cellspacing="0" width="100%">

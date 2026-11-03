@@ -123,28 +123,41 @@ entity-service; there is no automatic cleanup for this case.
 ## Stale cases report
 
 `internal/stalecases.SendReport`, registered as `"stale_cases_report"`, is this component's first
-sub-cron that sends an email on success rather than only on failure — see "Per-task report emails"
-below for why that's not a generic engine feature. Queries entity-service's `POST /cases/search`
-(via `internal/entitycases.Client.SearchOpenCasesOlderThan`) for every case whose `state` isn't
-`closed` and whose `createdOn` is at least 30 days in the past — a fixed threshold, not an env var;
-there's no operational need to tune it per deployment today (unlike
-`HOUSEKEEPING_RETENTION_DAYS` — see `cmd/server/main.go`'s `staleCaseThreshold` constant if that
-changes) — then emails a report table of them (oldest first) via `notify.RenderStaleCasesReport`.
-If more than 1,000 match (entity-service's page cap x `maxSearchPages`), the report lists the oldest 1,000 and
-states "showing only the oldest N of TOTAL" rather than failing; `open_cases_report` still errors in that case.
+sub-cron that sends an email on success rather than only on failure; see "Per-task report emails"
+below for why that's not a generic engine feature. It mails entity-service's long-open cases report:
+`internal/longopenreport.Client` calls `GET /reports/long-open-cases?olderThanDays=30` (same base URL
+and OAuth client credentials as the other entity-service clients, no extra env vars) and
+`notify.RenderLongOpenCasesReport` renders the result as two tables, in this order: "Ongoing cases"
+(the report's `cases`, projects that are not being onboarded) and "Ongoing cases on onboarding
+projects" (`onboardingCases`). Columns: Case, WSO2 Case ID, Integration CS Team, Assignee, State,
+Priority, Last updated, Created. Which cases count as ongoing, the split between the tables, the
+oldest-first order and the per-table row cap all live in entity-service; this task only fetches,
+renders and sends. The 30-day window is a fixed constant (`staleCaseOlderThanDays` in
+`cmd/server/main.go`), not an env var, and the subject is
+`[Action-Required][Report] Cases open for more than 30 days`.
+
+This depends on the entity-service long-open cases endpoint: deploy entity-service first. Against an
+entity-service without it the task fails (404) and the engine alerts.
+
+A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
+empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
+count-only line is logged, and the run succeeds. Case numbers are plain text, never links.
+
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
 
-Recipients are **not** `ALERT_RECIPIENTS` — that standing audience is about failure alerting, not
+Recipients are **not** `ALERT_RECIPIENTS`: that standing audience is about failure alerting, not
 report distribution. This task's report goes only to its own `SUB_CRON_RECIPIENTS` entry (`"to"`/
-`"cc"`, the same config surface every task's failure-alert recipients use — see "Alerting" below);
+`"cc"`, the same config surface every task's failure-alert recipients use; see "Alerting" below);
 a deployment that wants the same people getting both configures the same addresses in both places.
-If this task isn't mentioned in `SUB_CRON_RECIPIENTS` at all (`to` is empty), the handler skips the
-entity-service query entirely and just succeeds — no report to send means no reason to run the
-query on every tick.
+If this task isn't mentioned in `SUB_CRON_RECIPIENTS` at all (`to` is empty), or `ALERTS_ENABLED` is
+false, the handler skips the entity-service call entirely and just succeeds. A fetch or send failure
+returns an error. `--run-now=stale_cases_report --recipients=... [--cc=...]` works through
+`reportRunNow` like every report: it mails the override list only, even for a task with no `to` of its
+own.
 
-`internal/entitycases.Client` is a second entity-service client, separate from `internal/ledger`,
-even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials — see that
+`internal/entitycases.Client` remains a separate entity-service client, used by `open_cases_report`,
+even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials; see that
 package's own doc comment for why case search isn't just another method on `ledger.Client`.
 
 ## Open cases report
@@ -160,7 +173,7 @@ before the start of yesterday, then emails a report table of them (oldest first)
 
 "Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
 time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
-rolling duration such as `SearchOpenCasesOlderThan`'s: a case created at 23:59 yesterday (UTC) is
+rolling duration: a case created at 23:59 yesterday (UTC) is
 excluded, one created at 00:01 the day before is included, regardless of what time of day the task
 itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
 *cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and

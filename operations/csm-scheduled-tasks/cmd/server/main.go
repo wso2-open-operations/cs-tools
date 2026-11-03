@@ -51,6 +51,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -166,6 +167,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service migration-scan client", "err", err)
+		os.Exit(1)
+	}
+
+	// The stale cases report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service long-open-cases client", "err", err)
 		os.Exit(1)
 	}
 
@@ -465,11 +480,10 @@ func main() {
 	const staleCasesTaskName = "stale_cases_report"
 	staleCasesTo, staleCasesCc := recipientsFor(recipientOverrides, staleCasesTaskName)
 	staleCasesEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, staleCasesTaskName))
-	// Fixed, not env-configurable — unlike HOUSEKEEPING_RETENTION_DAYS, there's
-	// no operational reason to tune this per deployment today. Revisit as an
-	// env var (mirroring envDays("HOUSEKEEPING_RETENTION_DAYS", 30)'s shape)
-	// if that changes.
-	const staleCaseThreshold = 30 * 24 * time.Hour
+	// Fixed, not env-configurable: there's no operational reason to tune this
+	// per deployment today. It is the age window asked of entity-service's
+	// long-open cases report and named in the mail's subject.
+	const staleCaseOlderThanDays = 30
 
 	const openCasesTaskName = "open_cases_report"
 	// Where an issue key in a CS Worklogs mail points: the CSM portal,
@@ -659,25 +673,27 @@ func main() {
 			To:       housekeepingTo,
 			Cc:       housekeepingCc,
 		},
-		// Emails staleCasesTo/Cc a report of every case open more than
-		// staleCaseThreshold — see internal/stalecases's own doc comment.
-		// Sends nothing (but still succeeds) if staleCasesTo is empty, i.e.
-		// this task isn't mentioned in SUB_CRON_RECIPIENTS. Default schedule
-		// is daily at 07:00 (again, TZ=UTC-dependent — see above), ahead of
-		// most business hours; override via SUB_CRON_SCHEDULES if needed.
+		// Emails staleCasesTo/Cc the long-open cases report (cases open more
+		// than staleCaseOlderThanDays, in two tables) fetched from
+		// entity-service; see internal/stalecases's own doc comment. Sends
+		// nothing (but still succeeds) if staleCasesTo is empty, i.e. this task
+		// isn't mentioned in SUB_CRON_RECIPIENTS, or if both tables are empty.
+		// Default schedule is daily at 07:00 (again, TZ=UTC-dependent; see
+		// above), ahead of most business hours; override via
+		// SUB_CRON_SCHEDULES if needed.
 		{
 			Name:     staleCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, staleCasesTaskName, "0 7 * * *"),
-			Handler: stalecases.SendReport(entityCasesClient, staleCasesEmail,
-				staleCaseThreshold, staleCasesTo, staleCasesCc, alertsEnabled),
+			Handler: stalecases.SendReport(longOpenReportClient, staleCasesEmail,
+				staleCaseOlderThanDays, staleCasesTo, staleCasesCc, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(staleCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return stalecases.SendReport(entityCasesClient, email,
-						staleCaseThreshold, orRecipients(staleCasesTo, rec), staleCasesCc, alertsEnabled)
+					return stalecases.SendReport(longOpenReportClient, email,
+						staleCaseOlderThanDays, orRecipients(staleCasesTo, rec), staleCasesCc, alertsEnabled)
 				}),
 		},
 		// Products that deployment nodes report but the product catalogue does not
