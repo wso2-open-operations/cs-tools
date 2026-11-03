@@ -567,3 +567,20 @@ func (fakeQueryHours) WeeklyReport(context.Context) (queryhours.Report, error) {
 	return queryhours.Report{}, nil
 }
 func (fakeQueryHours) Recompute(context.Context) ([]queryhours.Transition, error) { return nil, nil }
+
+func TestConsumesCrossingsWarnsOnlyWithRecipients(t *testing.T) {
+	hook := consumesCrossings(func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
+		return func(context.Context) error { return nil }, []any{"base", true}, nil
+	})
+	_, plain, err := hook(registry.RunNowOptions{})
+	if err != nil || len(plain) != 2 {
+		t.Fatalf("plain run: settings=%v err=%v, want the base settings only", plain, err)
+	}
+	_, withRec, err := hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err != nil {
+		t.Fatalf("recipients run: %v", err)
+	}
+	if len(withRec) != 4 || withRec[2] != "warning" {
+		t.Fatalf("recipients run settings = %v, want a trailing warning key", withRec)
+	}
+}

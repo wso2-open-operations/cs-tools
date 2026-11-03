@@ -823,11 +823,11 @@ func main() {
 			// --recipients/--cc of a manual run-now only; see reportRunNow. A
 			// transition whose owners are unknown is still skipped.
 			RunNowFlags: reportRunNowFlags,
-			RunNowNarrow: reportRunNow(queryHoursNoticeEmail, emailClient,
+			RunNowNarrow: consumesCrossings(reportRunNow(queryHoursNoticeEmail, emailClient,
 				func(email notify.Sender, _ []string) func(ctx context.Context) error {
 					return queryhoursreport.SendUsageNotifications(queryHourClient, email,
 						queryHoursNoticeCc, queryHoursOverride, alertsEnabled)
-				}),
+				})),
 		},
 		{
 			Name:     queryHoursWeeklyTaskName,

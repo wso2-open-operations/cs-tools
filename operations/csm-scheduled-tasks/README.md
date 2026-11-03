@@ -156,7 +156,9 @@ reminders are not affected.
 - It needs the normal environment (entity-service, the email service, `ALERTS_ENABLED=true`) but no recipient
   configuration, and no env var change. A report that sends nothing when it has nothing to report (for example the
   unresolved products digest) still sends nothing. The query-hour notifications run reports only the threshold
-  crossings that exist, and skips one whose account has no internal owner.
+  crossings that exist, and skips one whose account has no internal owner. **Warning:** that task stores the
+  thresholds it recomputes, so a `--recipients` run of it consumes the crossings it finds: they go to your list only,
+  and the real account owners never get those notices later. The run-now log says so.
 - Refused without `--run-now`, and with `TRYOUT_TASK`. A plain `--run-now=<task>` and the scheduled run are unchanged.
 
 ### Alerting

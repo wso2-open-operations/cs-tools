@@ -483,7 +483,8 @@ rota reminders send to the rota's people, not a report audience, and are not cov
 without `--run-now`; `--cc` needs `--recipients`; `ALERTS_ENABLED=false` still silences the mail. The log carries
 counts of replaced recipients, never the addresses. A report that sends nothing when it has nothing to report stays
 silent, and a query-hour notification whose account has no internal owner is still skipped (that task also
-recomputes thresholds, as every run of it does).
+recomputes and stores thresholds, as every run of it does, so a `--recipients` run of it consumes the crossings it
+finds: the real owners never get those notices later, and the run-now WARN carries a `warning` key saying so).
 
 Example: `csm-scheduled-tasks --run-now=migration_case_report --recipients=jane.doe@example.com`. It needs the normal
 env (entity-service, email service, `ALERTS_ENABLED=true`) but no recipient config.

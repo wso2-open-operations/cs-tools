@@ -279,6 +279,22 @@ func recipientSettings(o registry.RunNowOptions) []any {
 	return []any{"recipientsReplaced", true, "toCount", len(o.Recipients), "ccCount", len(o.Cc)}
 }
 
+// consumesCrossings wraps a run-now hook for a task that stores the state it
+// compares against (the query-hour notifications). A --recipients run of it
+// mails the crossings to the override list only, and the stored state moves on,
+// so the real owners never get those notices. The run-now WARN names that
+// before the operator can miss it.
+func consumesCrossings(hook func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error),
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		handler, settings, err := hook(o)
+		if err == nil && len(o.Recipients) > 0 {
+			settings = append(settings, "warning", "crossings found by this run are mailed to the override list only and are not sent to the real owners later")
+		}
+		return handler, settings, err
+	}
+}
+
 // worklogsRunNow is reportRunNow for a CS Worklogs report task, which also
 // takes a reporting window. build makes the handler for a sender, a validated
 // window (the zero Override for none) and the override list (nil for none).
