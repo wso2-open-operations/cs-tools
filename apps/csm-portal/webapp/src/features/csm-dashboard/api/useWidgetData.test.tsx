@@ -25,7 +25,10 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
 
-import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
+import {
+  resolveWidgetRefetchInterval,
+  useWidgetData,
+} from "@features/csm-dashboard/api/useWidgetData";
 import {
   WIDGET_FETCH_CONCURRENCY_LIMIT,
   __resetWidgetFetchConcurrencyForTests,
@@ -515,79 +518,18 @@ describe("useWidgetData distinctBy", () => {
   });
 });
 
-describe("useWidgetData refetchIntervalMs (CS Overview wallboard polling)", () => {
-  // Real timers with a shrunk interval standing in for 60s — see the
-  // "client-side request timeout" block above for why fake timers don't
-  // work with this app's react-query/React versions.
-  const INTERVAL_MS = 100;
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  function PollingTile({ id }: { id: string }) {
-    useWidgetData({
-      widgetId: id,
-      resourceType: "case",
-      filters: { states: [id] },
-      shape: "count",
-      refetchIntervalMs: INTERVAL_MS,
-    });
-    return null;
-  }
-
-  function renderBoard(ids: string[], requestMs: number) {
-    const calls: Record<string, number> = {};
-    let inFlightOrQueued = 0;
-    let maxInFlightOrQueued = 0;
-    postMock.mockImplementation(async (_url: string, body: { filters: { states: string[] } }) => {
-      const id = body.filters.states[0];
-      calls[id] = (calls[id] ?? 0) + 1;
-      await sleep(requestMs);
-      return { total: calls[id], items: [] };
-    });
-    // Count queued + running fetches from react-query's side (a tile's
-    // queryFn starts — and waits for a slot — before postMock is reached).
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    queryClient.getQueryCache().subscribe(() => {
-      inFlightOrQueued = queryClient.isFetching();
-      maxInFlightOrQueued = Math.max(maxInFlightOrQueued, inFlightOrQueued);
-    });
-    const view = render(
-      <QueryClientProvider client={queryClient}>
-        {ids.map((id) => (
-          <PollingTile key={id} id={id} />
-        ))}
-      </QueryClientProvider>,
-    );
-    return { calls, maxQueued: () => maxInFlightOrQueued, unmount: view.unmount };
-  }
-
-  beforeEach(() => {
-    postMock.mockReset();
-    __resetWidgetFetchConcurrencyForTests();
+describe("resolveWidgetRefetchInterval", () => {
+  it("returns undefined (no auto-refetch) when the caller set no interval, regardless of queue depth", () => {
+    expect(resolveWidgetRefetchInterval(undefined, 0)).toBeUndefined();
+    expect(resolveWidgetRefetchInterval(undefined, 5)).toBeUndefined();
   });
 
-  it("keeps refetching EVERY tile, not just the last one in the shared queue", async () => {
-    // Regression: the interval used to switch itself off whenever the
-    // shared queue was busy at the moment a tile's own fetch settled —
-    // which, with the slot handed straight to the next tile, was always,
-    // for every tile but the last. Those tiles froze at their first value.
-    const ids = ["t1", "t2", "t3", "t4", "t5"];
-    const { calls, unmount } = renderBoard(ids, 5);
-    await sleep(INTERVAL_MS * 6);
-    unmount();
-    for (const id of ids) {
-      expect(calls[id], `tile ${id} refetch count`).toBeGreaterThanOrEqual(4);
-    }
-  }, 10_000);
+  it("returns the configured interval when the shared fetch queue is idle", () => {
+    expect(resolveWidgetRefetchInterval(60_000, 0)).toBe(60_000);
+  });
 
-  it("never queues more than one fetch per tile, even when a full round outlasts the interval", async () => {
-    // 5 tiles x 40ms one-at-a-time = 200ms per round, twice the interval.
-    const ids = ["t1", "t2", "t3", "t4", "t5"];
-    const { calls, maxQueued, unmount } = renderBoard(ids, 40);
-    await sleep(INTERVAL_MS * 8);
-    unmount();
-    expect(maxQueued()).toBeLessThanOrEqual(ids.length);
-    for (const id of ids) {
-      expect(calls[id], `tile ${id} refetch count`).toBeGreaterThanOrEqual(2);
-    }
-  }, 10_000);
+  it("suppresses the refetch (false) while the queue still has a wave draining, so ticks don't stack", () => {
+    expect(resolveWidgetRefetchInterval(60_000, 1)).toBe(false);
+    expect(resolveWidgetRefetchInterval(60_000, 12)).toBe(false);
+  });
 });

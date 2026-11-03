@@ -36,6 +36,7 @@ import {
 } from "@features/csm-dashboard/utils/currentUserFilterPlaceholder";
 import {
   shouldRetryWidgetFetch,
+  widgetFetchQueueDepth,
   withWidgetFetchSlot,
 } from "@features/csm-dashboard/utils/widgetFetchConcurrency";
 
@@ -48,6 +49,28 @@ export interface WidgetData {
   total: number;
   /** The resolved page of records — what a `shape: "list"` tile renders. */
   items: Record<string, unknown>[];
+}
+
+/**
+ * Computes a widget query's `refetchInterval`. Returns `undefined` (no
+ * auto-refetch) unless the caller set an interval — only the CS Overview
+ * wallboard does. When an interval IS set, it's suppressed (`false`) while
+ * the shared widget-fetch queue still has work in it: the wallboard's ~18
+ * tiles each poll on their own timer through a concurrency-1 queue, so
+ * without this a slow backend lets each tick stack another full poll wave
+ * onto the one still draining until the queue never clears. Skipping a tick
+ * while `queueDepth > 0` lets the current wave finish; the tile
+ * re-evaluates on its next render (the wallboard re-renders every 60s off
+ * `useDashboard`'s own poll) and resumes once the queue is idle. Under a
+ * healthy backend the queue empties seconds into each minute, so this never
+ * fires.
+ */
+export function resolveWidgetRefetchInterval(
+  refetchIntervalMs: number | undefined,
+  queueDepth: number,
+): number | false | undefined {
+  if (refetchIntervalMs === undefined) return undefined;
+  return queueDepth > 0 ? false : refetchIntervalMs;
 }
 
 /**
@@ -201,22 +224,11 @@ export function useWidgetData({
       effectiveDistinctBy,
     ],
     enabled: enabled && !awaitingCurrentUser,
-    // A plain fixed interval — deliberately NOT gated on the shared fetch
-    // queue being idle. An earlier version returned `false` whenever
-    // `widgetFetchQueueDepth() > 0`, meant to stop poll waves stacking up
-    // behind a slow backend. But react-query re-evaluates the interval when
-    // each tile's own fetch settles, and by then the queue has already
-    // handed its slot to the next tile — so the queue always looked busy,
-    // every tile except the last in line switched its own timer off, and
-    // stayed frozen at its first value until a full page reload (reported
-    // live: "Created Today"/"Resolved Today" stopped updating on the
-    // wallboard until it was hard-reloaded). The stacking it guarded
-    // against can't happen anyway: react-query never starts a second fetch
-    // for a query whose previous one is still in flight or queued, so the
-    // queue holds at most one entry per tile however slow the backend is —
-    // a slow backend just means tiles refresh as fast as the one-at-a-time
-    // queue allows, never an ever-growing backlog.
-    refetchInterval: refetchIntervalMs,
+    // Self-throttling: a wallboard tile whose interval fires while the
+    // shared fetch queue is still draining the previous wave skips that
+    // cycle rather than piling on (see `resolveWidgetRefetchInterval`).
+    refetchInterval: () =>
+      resolveWidgetRefetchInterval(refetchIntervalMs, widgetFetchQueueDepth()),
     queryFn: async (): Promise<WidgetData> => {
       if (!config) {
         // A widget's resourceType came back from the backend (now a
