@@ -20,7 +20,7 @@ import "testing"
 
 // These check migration 0271: a dashboard whose owner was deleted goes once
 // nobody can see it any more, i.e. when its last person or team share goes
-// and its link is off. They run on the team share fixture (teams Orion and
+// (its link was turned off with the owner, migration 0270). They run on the team share fixture (teams Orion and
 // Lyra) with an owner G and a recipient H of their own. Skipped unless
 // ENTITY_TEST_DATABASE_URL is set.
 
@@ -155,18 +155,21 @@ func TestCustomDashboardOrphanIntegration_GoesWithItsLastTeamShare(t *testing.T)
 	}
 }
 
-// An ownerless dashboard whose link is on stays when its last share goes:
-// anyone with the link can still open it.
-func TestCustomDashboardOrphanIntegration_ALinkThatIsOnKeepsIt(t *testing.T) {
+// A dashboard whose link was on has it turned off as its owner goes
+// (migration 0270), so it too goes with its last share.
+func TestCustomDashboardOrphanIntegration_ALinkThatWasOnDoesNotKeepIt(t *testing.T) {
 	f := newOrphanFixture(t)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanX, "Linked", `{"v":1}`)
 	f.enableLink(t, cdbOwnerG, cdbOrphanX)
 	f.shareWith(t, cdbOrphanX, cdbRecipientH)
 
 	f.deleteUser(t, cdbOwnerG)
-	f.deleteUser(t, cdbRecipientH)
 	if !f.exists(t, cdbOrphanX) {
-		t.Error("the dashboard went although its link is on")
+		t.Fatal("the dashboard went with its owner while H had it")
+	}
+	f.deleteUser(t, cdbRecipientH)
+	if f.exists(t, cdbOrphanX) {
+		t.Error("the dashboard is still there with no owner and no share, its link turned off with the owner")
 	}
 }
 
@@ -205,20 +208,25 @@ func TestCustomDashboardOrphanIntegration_OwnerAndLastRecipientTogether(t *testi
 	}
 }
 
-// No API turns off the link of an ownerless dashboard today; when something
-// does, a dashboard nobody else has goes with it, and one shared with
-// somebody stays.
+// No API turns the link of an ownerless dashboard on or off (both need the
+// owner, and 0270 turns it off as the owner goes); when something does, as
+// here in SQL, a dashboard nobody else has stays while its link is on and
+// goes once it is turned off, and one shared with somebody stays.
 func TestCustomDashboardOrphanIntegration_TurningAnOrphansLinkOff(t *testing.T) {
 	f := newOrphanFixture(t)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanX, "Link only", `{"v":1}`)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanY, "Link and a share", `{"v":2}`)
-	f.enableLink(t, cdbOwnerG, cdbOrphanX)
-	f.enableLink(t, cdbOwnerG, cdbOrphanY)
+	f.shareWithTeam(t, cdbOrphanX, cdbTeamOrion)
 	f.shareWith(t, cdbOrphanY, cdbRecipientH)
 	f.deleteUser(t, cdbOwnerG)
 
-	f.exec(t, "turn the links off", `UPDATE custom_dashboard SET link_enabled = false, link_id = NULL WHERE id = ANY($1::uuid[])`,
-		[]string{cdbOrphanX, cdbOrphanY})
+	both := []string{cdbOrphanX, cdbOrphanY}
+	f.exec(t, "turn the links on", `UPDATE custom_dashboard SET link_enabled = true, link_id = gen_random_uuid() WHERE id = ANY($1::uuid[])`, both)
+	f.exec(t, "delete team Orion", `DELETE FROM team WHERE id = $1`, cdbTeamOrion)
+	if !f.exists(t, cdbOrphanX) {
+		t.Fatal("the ownerless dashboard went with its last share although its link is on")
+	}
+	f.exec(t, "turn the links off", `UPDATE custom_dashboard SET link_enabled = false, link_id = NULL WHERE id = ANY($1::uuid[])`, both)
 	if f.exists(t, cdbOrphanX) {
 		t.Error("the ownerless dashboard nobody has is still there after its link was turned off")
 	}

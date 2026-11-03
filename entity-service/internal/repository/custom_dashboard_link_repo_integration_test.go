@@ -489,17 +489,20 @@ const (
 	cdbDashboardLinkedF  = "cdb00000-0000-4000-8000-0000000000f1"
 	cdbDashboardOpenedF  = "cdb00000-0000-4000-8000-0000000000f2"
 	cdbDashboardLinkOffF = "cdb00000-0000-4000-8000-0000000000f3"
+	cdbDashboardSharedF  = "cdb00000-0000-4000-8000-0000000000f4"
 )
 
-// Deleting the owner keeps a dashboard whose link is on (migration 0270),
-// opened by somebody or not yet, with no owner, and its link keeps opening
-// it; one whose link was turned off and that is shared with nobody still goes
-// with the owner (migration 0255).
-func TestCustomDashboardLinkIntegration_DeletingTheOwnerKeepsLinkedDashboards(t *testing.T) {
+// Deleting the owner turns every link of theirs off (migration 0270): the
+// people who had a dashboard only through its link lose it and the link opens
+// nothing, so a dashboard shared with nobody else goes with the owner, opened
+// by somebody or not, like one whose link was already off (migration 0255).
+// One shared with B directly stays, with no owner, its link off and no access
+// rows, and B keeps it through the share.
+func TestCustomDashboardLinkIntegration_DeletingTheOwnerTurnsTheLinkOff(t *testing.T) {
 	f := newLinkFixture(t)
-	ids := []string{cdbDashboardLinkedF, cdbDashboardOpenedF, cdbDashboardLinkOffF}
+	ids := []string{cdbDashboardLinkedF, cdbDashboardOpenedF, cdbDashboardLinkOffF, cdbDashboardSharedF}
 	clean := func() {
-		// Kept dashboards outlive F with no owner, so they go by id.
+		// A kept dashboard outlives F with no owner, so they go by id.
 		if _, err := f.pool.Exec(f.ctx, `DELETE FROM custom_dashboard WHERE id = ANY($1::uuid[])`, ids); err != nil {
 			t.Fatalf("clean dashboards: %v", err)
 		}
@@ -517,44 +520,48 @@ func TestCustomDashboardLinkIntegration_DeletingTheOwnerKeepsLinkedDashboards(t 
 	saveCustomDashboard(t, f.dashboards, cdbOwnerF, cdbDashboardLinkedF, "Linked", `{"v":1}`)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerF, cdbDashboardOpenedF, "Opened", `{"v":2}`)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerF, cdbDashboardLinkOffF, "Link off", `{"v":3}`)
+	saveCustomDashboard(t, f.dashboards, cdbOwnerF, cdbDashboardSharedF, "Shared", `{"v":4}`)
 	linked := f.enable(t, cdbOwnerF, cdbDashboardLinkedF)
 	opened := f.enable(t, cdbOwnerF, cdbDashboardOpenedF)
 	f.open(t, cdbOwnerB, opened.LinkID)
 	f.enable(t, cdbOwnerF, cdbDashboardLinkOffF)
 	f.disable(t, cdbOwnerF, cdbDashboardLinkOffF)
+	shared := f.enable(t, cdbOwnerF, cdbDashboardSharedF)
+	if ok, err := NewCustomDashboardShareRepository(f.pool).AddShare(f.ctx, cdbOwnerF, cdbDashboardSharedF, cdbOwnerB); err != nil || !ok {
+		t.Fatalf("AddShare: %v, %v", ok, err)
+	}
+	f.open(t, cdbOwnerB, shared.LinkID)
 
 	if _, err := f.pool.Exec(f.ctx, `DELETE FROM "user" WHERE id = $1`, cdbOwnerF); err != nil {
 		t.Fatalf("delete user F: %v", err)
 	}
 
-	// The two with the link on stay, with no owner and the link still on.
+	// Only the one shared with B directly is left, with no owner and no link.
 	var left []string
 	if err := f.pool.QueryRow(f.ctx,
 		`SELECT COALESCE(array_agg(name ORDER BY name), '{}') FROM custom_dashboard
-		 WHERE id = ANY($1::uuid[]) AND owner_user_id IS NULL AND link_enabled`, ids).Scan(&left); err != nil {
+		 WHERE id = ANY($1::uuid[]) AND owner_user_id IS NULL AND NOT link_enabled AND link_id IS NULL`, ids).Scan(&left); err != nil {
 		t.Fatalf("read dashboards: %v", err)
 	}
-	if len(left) != 2 || left[0] != "Linked" || left[1] != "Opened" {
-		t.Fatalf("dashboards left = %v, want Linked and Opened, with no owner and the link on", left)
+	var all int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM custom_dashboard WHERE id = ANY($1::uuid[])`, ids).Scan(&all); err != nil {
+		t.Fatalf("count dashboards: %v", err)
 	}
-	var linkOffLeft int
-	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM custom_dashboard WHERE id = $1`, cdbDashboardLinkOffF).Scan(&linkOffLeft); err != nil {
-		t.Fatalf("read the link-off dashboard: %v", err)
+	if len(left) != 1 || left[0] != "Shared" || all != 1 {
+		t.Fatalf("dashboards left = %v (%d in all), want only Shared, with no owner and its link off", left, all)
 	}
-	if linkOffLeft != 0 {
-		t.Errorf("the dashboard whose link was off and shared with nobody is still there")
+	if n := f.accessRows(t, cdbDashboardSharedF); n != 0 {
+		t.Errorf("access rows on the kept dashboard = %d, want 0", n)
 	}
 
-	// B, who opened one, still has it, with no owner.
+	// B keeps it through the share, and the old links open nothing.
 	list := f.sharedWith(t, cdbOwnerB)
-	if len(list) != 1 || list[0].ID != cdbDashboardOpenedF || !list[0].SharedViaLink || list[0].Owner != nil {
-		t.Fatalf("B's shared list = %+v, want Opened via the link, with no owner", list)
+	if len(list) != 1 || list[0].ID != cdbDashboardSharedF || list[0].SharedViaLink || list[0].Owner != nil {
+		t.Fatalf("B's shared list = %+v, want Shared through the direct share, with no owner", list)
 	}
-	// The link nobody had opened yet still opens it, and records who opened it.
-	if id, own := f.open(t, cdbOwnerB, linked.LinkID); id != cdbDashboardLinkedF || own {
-		t.Errorf("OpenLink on the ownerless dashboard = %q, own %v; want Linked, not own", id, own)
-	}
-	if n := f.accessRows(t, cdbDashboardLinkedF); n != 1 {
-		t.Errorf("access rows after B opened the ownerless link = %d, want 1", n)
+	for name, l := range map[string]string{"Linked": linked.LinkID, "Opened": opened.LinkID, "Shared": shared.LinkID} {
+		if id, _ := f.open(t, cdbOwnerB, l); id != "" {
+			t.Errorf("%s's old link opened %q after the owner went, want nothing", name, id)
+		}
 	}
 }
