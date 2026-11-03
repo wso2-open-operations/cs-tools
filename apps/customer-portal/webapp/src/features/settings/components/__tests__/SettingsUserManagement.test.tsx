@@ -210,6 +210,21 @@ describe("SettingsUserManagement", () => {
     expect(within(screen.getByTestId("pending-invite-new@acme.com")).getByText("Inviting…")).toBeInTheDocument();
   });
 
+  it("uses add wording on a failed system-user row", async () => {
+    mutateAsync.mockRejectedValueOnce(new Error("boom"));
+    render(<SettingsUserManagement projectId="p-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add user/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "submit-system-user" }));
+    });
+
+    const row = screen.getByTestId("pending-invite-jane.doe@example.com");
+    expect(within(row).getByRole("button", { name: "Retry adding user" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /invitation/i })).not.toBeInTheDocument();
+  });
+
   it("offers a resend only on rows the backend marks as resendable, behind a confirmation", async () => {
     contactsState.data = [
       { id: "c-1", email: "invited@acme.com", firstName: "Ina", lastName: "Vite", membershipStatus: "INVITED", canResendInvitation: true },

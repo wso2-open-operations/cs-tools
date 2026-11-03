@@ -77,6 +77,8 @@ import {
   SETTINGS_USER_RESEND_SUCCESS,
   SETTINGS_USER_RESEND_TOOLTIP,
   SETTINGS_USER_RETRY_TOOLTIP,
+  SETTINGS_USER_SYSTEM_USER_PENDING_PROCESSING_TOOLTIP,
+  SETTINGS_USER_SYSTEM_USER_RETRY_TOOLTIP,
   SETTINGS_USER_ROLE_PERMISSIONS_TITLE,
   SETTINGS_USER_SEARCH_PLACEHOLDER,
   SETTINGS_USER_SECURITY_UPDATE_SUCCESS,
@@ -694,6 +696,11 @@ function PendingInviteRow({
     isCsIntegrationUser: !!request.isCsIntegrationUser,
   } as ProjectContact;
 
+  const retryLabel = request.isCsIntegrationUser
+    ? SETTINGS_USER_SYSTEM_USER_RETRY_TOOLTIP
+    : SETTINGS_USER_RETRY_TOOLTIP;
+  const dismissLabel = request.isCsIntegrationUser ? "Dismiss" : "Dismiss invitation";
+
   const statusChip =
     status === "inviting" ? (
       <Chip
@@ -718,7 +725,13 @@ function PendingInviteRow({
         />
       </Tooltip>
     ) : (
-      <Tooltip title={SETTINGS_USER_PENDING_PROCESSING_TOOLTIP}>
+      <Tooltip
+        title={
+          request.isCsIntegrationUser
+            ? SETTINGS_USER_SYSTEM_USER_PENDING_PROCESSING_TOOLTIP
+            : SETTINGS_USER_PENDING_PROCESSING_TOOLTIP
+        }
+      >
         <Chip
           size="small"
           variant="outlined"
@@ -788,15 +801,15 @@ function PendingInviteRow({
         <TableCell align="right">
           <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
             {status !== "inviting" && (
-              <Tooltip title={SETTINGS_USER_RETRY_TOOLTIP}>
-                <IconButton size="small" aria-label="Retry invitation" onClick={() => onRetry(email)}>
+              <Tooltip title={retryLabel}>
+                <IconButton size="small" aria-label={retryLabel} onClick={() => onRetry(email)}>
                   <RefreshCw size={16} />
                 </IconButton>
               </Tooltip>
             )}
             {status !== "inviting" && (
               <Tooltip title={SETTINGS_USER_DISMISS_TOOLTIP}>
-                <IconButton size="small" aria-label="Dismiss invitation" onClick={() => onDismiss(email)}>
+                <IconButton size="small" aria-label={dismissLabel} onClick={() => onDismiss(email)}>
                   <X size={16} />
                 </IconButton>
               </Tooltip>

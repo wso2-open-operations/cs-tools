@@ -209,7 +209,12 @@ export const SETTINGS_USER_PENDING_STATUS = {
 export const SETTINGS_USER_PENDING_PROCESSING_TOOLTIP =
   "Still being processed. If it does not appear in a minute, retry the invitation.";
 
+export const SETTINGS_USER_SYSTEM_USER_PENDING_PROCESSING_TOOLTIP =
+  "Still being processed. If it does not appear in a minute, retry adding the user.";
+
 export const SETTINGS_USER_RETRY_TOOLTIP = "Retry invitation";
+
+export const SETTINGS_USER_SYSTEM_USER_RETRY_TOOLTIP = "Retry adding user";
 
 export const SETTINGS_USER_DISMISS_TOOLTIP = "Dismiss";
 
