@@ -1559,3 +1559,39 @@ func TestConfig_Validate_BackendModeNeedsNoSFTPGo(t *testing.T) {
 		t.Fatalf("backend mode with SFTPGo still set: %v", err)
 	}
 }
+
+// A leftover SFTPGO_* setting that would be refused in sftpgo mode (partial, or
+// http without the insecure flag) is ignored in backend mode, and still refused
+// in every other mode.
+func TestConfig_Validate_BackendModeIgnoresBrokenSFTPGoSettings(t *testing.T) {
+	broken := map[string]func(c *Config){
+		"only the url":  func(c *Config) { c.SFTPGoURL = "https://sftpgo.internal" },
+		"only the user": func(c *Config) { c.SFTPGoUser = "svc" },
+		"http without the flag": func(c *Config) {
+			c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "http://sftpgo.internal", "http://sftpgo.internal", "svc", "p"
+		},
+		"a public url that fails": func(c *Config) {
+			c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "not a url", "svc", "p"
+		},
+	}
+	for name, set := range broken {
+		t.Run(name, func(t *testing.T) {
+			c := baseValidConfig()
+			set(&c)
+			if err := c.Validate(); err == nil {
+				t.Fatal("sftpgo mode accepted a broken SFTPGO_* setting")
+			}
+
+			c.AttachmentStorageMode = AttachmentStorageModeBackend
+			if err := c.Validate(); err != nil {
+				t.Errorf("backend mode refused an ignored SFTPGO_* setting: %v", err)
+			}
+
+			// The mode itself is still validated.
+			c.AttachmentStorageMode = "nope"
+			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "ATTACHMENT_STORAGE_MODE") {
+				t.Errorf("an invalid mode gave %v", err)
+			}
+		})
+	}
+}

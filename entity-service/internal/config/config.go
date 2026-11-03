@@ -1506,22 +1506,27 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
 	}
-	// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
-	sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
-	if sftpgoSet && !c.HasSFTPGo() {
-		return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
-	}
-	if c.HasSFTPGo() {
-		for _, u := range []struct{ name, val string }{
-			{"SFTPGO_URL", c.SFTPGoURL},
-			{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
-		} {
-			parsed, err := url.Parse(u.val)
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-				return fmt.Errorf("%s must be an https URL", u.name)
-			}
-			if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
-				return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
+	// With ATTACHMENT_STORAGE_MODE=backend the SFTPGO_* settings are ignored, so a
+	// partial or insecure leftover from before the cutover must not stop the
+	// service starting. They are checked in every other mode.
+	if !c.HasBackendAttachmentStorage() {
+		// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
+		sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
+		if sftpgoSet && !c.HasSFTPGo() {
+			return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
+		}
+		if c.HasSFTPGo() {
+			for _, u := range []struct{ name, val string }{
+				{"SFTPGO_URL", c.SFTPGoURL},
+				{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
+			} {
+				parsed, err := url.Parse(u.val)
+				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+					return fmt.Errorf("%s must be an https URL", u.name)
+				}
+				if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
+					return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
+				}
 			}
 		}
 	}
