@@ -364,6 +364,11 @@ type Config struct {
 	// ACPReopenTestProjectSfID limits the reopen check to one Salesforce
 	// project (CSM_ACP_REOPEN_TEST_PROJECT_SF_ID). Empty: every project.
 	ACPReopenTestProjectSfID string
+	// ACPReactivationPollInterval is how often ProjectReactivationDrainer
+	// looks for queued "Back to Open state" notices
+	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
+	// another drainer never changes it.
+	ACPReactivationPollInterval time.Duration
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -1072,6 +1077,7 @@ func Load() *Config {
 	cfg.ACPReopenEnabled = os.Getenv("CSM_ACP_REOPEN_ENABLED") == "true"
 	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
 	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
+	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))

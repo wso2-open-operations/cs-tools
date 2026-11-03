@@ -84,6 +84,28 @@ func acpSectionEventType(raw json.RawMessage, key string) (string, error) {
 	return state.EventType, nil
 }
 
+// acpSectionSuspendedOn reads the suspended_on date ACP writes with its
+// suspension (YYYY-MM-DD) in the section of raw named by key; ok is false when
+// the section has none or it is not a date (records written before ACP dated
+// them).
+func acpSectionSuspendedOn(raw json.RawMessage, key string) (on time.Time, ok bool) {
+	var blob map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &blob); err != nil {
+		return time.Time{}, false
+	}
+	var state struct {
+		SuspendedOn string `json:"suspended_on"`
+	}
+	if err := json.Unmarshal(blob[key], &state); err != nil {
+		return time.Time{}, false
+	}
+	on, err := time.Parse("2006-01-02", strings.TrimSpace(state.SuspendedOn))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return on, true
+}
+
 // acpWithSectionOpen returns raw with only the given section replaced by
 // {"event_type":"open"}; every other key is carried through byte for byte and
 // nothing is HTML-escaped (suspensionstate.withSection).

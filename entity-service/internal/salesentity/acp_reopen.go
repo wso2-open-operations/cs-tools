@@ -44,6 +44,10 @@ const (
 // "Suspended".
 const ProjectStatusOpen = "Open"
 
+// ProjectStatusSuspended is the Salesforce project status (State__c) ACP
+// sets when it suspends a project.
+const ProjectStatusSuspended = "Suspended"
+
 // childSearchRequest is a paged search by one parent id. Exactly one of the
 // two ids is set; sales-entity-service ANDs the filters it is given.
 type childSearchRequest struct {

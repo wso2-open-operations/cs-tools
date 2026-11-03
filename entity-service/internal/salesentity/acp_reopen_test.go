@@ -38,7 +38,7 @@ func TestLinkedOpportunitiesByProject_SearchesByProjectAndPages(t *testing.T) {
 			if err := json.Unmarshal(raw, &req); err != nil {
 				t.Fatalf("parse body: %v", err)
 			}
-			if r.Method != http.MethodPost || req["projectId"] != "a0dE200000CZ9ZNIA1" || req["limit"] != float64(childSearchPageSize) {
+			if r.Method != http.MethodPost || req["projectId"] != "a0d000000000001AAA" || req["limit"] != float64(childSearchPageSize) {
 				t.Errorf("method=%s body=%s", r.Method, raw)
 			}
 			if _, ok := req["opportunityId"]; ok {
@@ -53,12 +53,12 @@ func TestLinkedOpportunitiesByProject_SearchesByProjectAndPages(t *testing.T) {
 			}
 			rows := make([]string, n)
 			for i := range rows {
-				rows[i] = fmt.Sprintf(`{"id":"L%d","projectId":"a0dE200000CZ9ZNIA1","opportunityId":"006%d"}`, offset+i, offset+i)
+				rows[i] = fmt.Sprintf(`{"id":"L%d","projectId":"a0d000000000001AAA","opportunityId":"006%d"}`, offset+i, offset+i)
 			}
 			_, _ = w.Write([]byte("[" + strings.Join(rows, ",") + "]"))
 		})
 	})
-	got, err := client.LinkedOpportunitiesByProject(context.Background(), "a0dE200000CZ9ZNIA1")
+	got, err := client.LinkedOpportunitiesByProject(context.Background(), "a0d000000000001AAA")
 	if err != nil {
 		t.Fatalf("LinkedOpportunitiesByProject: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestChildSearch_StopsAfterTheLastPage(t *testing.T) {
 
 func TestUpdateProjectStatus_PatchesTheProject(t *testing.T) {
 	client := newMembershipTestClient(t, func(mux *http.ServeMux) {
-		mux.HandleFunc("/projects/a0dE200000CZ9ZNIA1", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/projects/a0d000000000001AAA", func(w http.ResponseWriter, r *http.Request) {
 			raw, _ := io.ReadAll(r.Body)
 			if r.Method != http.MethodPatch || string(raw) != `{"status":"Open"}` {
 				t.Errorf("method=%s body=%s", r.Method, raw)
@@ -147,7 +147,7 @@ func TestUpdateProjectStatus_PatchesTheProject(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"Project updated successfully"}`))
 		})
 	})
-	if err := client.UpdateProjectStatus(context.Background(), "a0dE200000CZ9ZNIA1", ProjectStatusOpen); err != nil {
+	if err := client.UpdateProjectStatus(context.Background(), "a0d000000000001AAA", ProjectStatusOpen); err != nil {
 		t.Fatalf("UpdateProjectStatus: %v", err)
 	}
 }

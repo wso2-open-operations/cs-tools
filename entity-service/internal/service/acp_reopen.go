@@ -134,41 +134,51 @@ func acpReopenTriggers(eventType string) bool {
 // reopenAfterProjectEvent runs the reopen check for the project a Project__c
 // event names. It runs whether or not the Project ingest is on: the check
 // reads Salesforce itself and needs nothing the ingest writes. A failure is
-// logged and never fails the event: the ingest already succeeded, and the
-// daily check (CheckSuspendedProjects) tries the project again.
+// returned, so Service Bus delivers the event again (a customer who renewed
+// is reopened at once, not at the next daily check, which may be off); the
+// ingest is safe to run again. A dry run only logs it: it wrote nothing.
 func (s *salesforceEventService) reopenAfterProjectEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
 	if !s.acpReopen.enabled() || !acpReopenTriggers(req.EventType) {
 		return nil
 	}
-	if _, err := s.acpReopen.reopenProject(ctx, req.ReferenceID); err != nil {
-		slog.ErrorContext(ctx, "acp reopen: check failed, left to the daily check",
-			"projectSfId", req.ReferenceID, "err", err)
-	}
-	return nil
+	_, err := s.acpReopen.reopenProject(ctx, req.ReferenceID)
+	return s.acpReopen.eventFailure(ctx, err, "projectSfId", req.ReferenceID)
 }
 
 // reopenAfterInvoiceEvent runs the reopen check for every project linked to
 // the opportunity of the invoice an Invoice__c event names. A failure is
-// logged and left to the daily check, as for a project event.
+// returned, as for a project event.
 func (s *salesforceEventService) reopenAfterInvoiceEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
 	if !s.acpReopen.enabled() || !acpReopenTriggers(req.EventType) {
 		return nil
 	}
-	if err := s.acpReopen.reopenForInvoice(ctx, req.ReferenceID); err != nil {
-		slog.ErrorContext(ctx, "acp reopen: check failed, left to the daily check",
-			"invoiceSfId", req.ReferenceID, "err", err)
+	err := s.acpReopen.reopenForInvoice(ctx, req.ReferenceID)
+	return s.acpReopen.eventFailure(ctx, err, "invoiceSfId", req.ReferenceID)
+}
+
+// eventFailure logs a failed check after an event and returns what the event
+// should fail with: the error itself, so the event is delivered again, or nil
+// in a dry run (nothing was written, and the daily check covers it).
+func (a *ACPReopen) eventFailure(ctx context.Context, err error, idKey, id string) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if a.DryRun {
+		slog.ErrorContext(ctx, "acp reopen: dry run, check failed", idKey, id, "err", err)
+		return nil
+	}
+	slog.ErrorContext(ctx, "acp reopen: check failed, the event will be delivered again", idKey, id, "err", err)
+	return err
 }
 
 // reopenForInvoice finds the projects an invoice belongs to (invoice ->
 // opportunity -> linked projects) and checks each. It first asks the
-// database whether any project has its invoice track suspended by ACP: an
-// invoice can only reopen such a project, so most invoice events end there,
-// with no Salesforce call. Every project is tried; the first error is
-// returned.
+// database whether a project linked to this invoice has its invoice track
+// suspended by ACP (ACPSuspendedInvoiceTrackFor): an invoice can only reopen
+// such a project, so most invoice events end there, with no Salesforce call.
+// Every project is tried; the first error is returned.
 func (a *ACPReopen) reopenForInvoice(ctx context.Context, invoiceSfID string) error {
-	suspended, err := a.Projects.AnyACPSuspendedInvoiceTrack(ctx)
+	suspended, err := a.Projects.ACPSuspendedInvoiceTrackFor(ctx, salesforceID18(invoiceSfID))
 	if err != nil || !suspended {
 		return err
 	}
@@ -233,9 +243,10 @@ func acpSuspendedTracks(p domain.ACPReopenProject) (acpTracks, error) {
 type acpOutcome int
 
 const (
-	acpNothing  acpOutcome = iota // nothing to do (or a dry run)
-	acpReopened                   // one or both tracks set back to Open
-	acpFinished                   // opened by a person, now finished
+	acpNothing   acpOutcome = iota // nothing to do (or a dry run)
+	acpReopened                    // one or both tracks set back to Open
+	acpFinished                    // opened by a person, now finished
+	acpSetByHand                   // closure state set by hand, left alone
 )
 
 // acpReopenSalesforceWriteTimeout bounds the Salesforce State__c write made
@@ -258,10 +269,13 @@ func acpDerivedClosureState(p domain.ACPReopenProject) string {
 	return "OPEN"
 }
 
-// acpSetByHand reports whether the project's overall closure state was set
-// directly (the admin "Edit closure state" action): it differs from what its
-// sub-states give. Such a project is a person's decision and is left alone.
-func acpSetByHand(p domain.ACPReopenProject) bool {
+// acpClosureStateSetByHand reports whether the project's overall closure
+// state was set directly (the admin "Edit closure state" action): it differs
+// from what its sub-states give. Such a project is a person's decision and is
+// left alone. Migrated rows whose overall state the legacy system computed
+// differently also match; the daily check counts them (SkippedSetByHand) so
+// they are seen, and CLAUDE.md has the query to count them before go-live.
+func acpClosureStateSetByHand(p domain.ACPReopenProject) bool {
 	return p.ClosureState != nil && *p.ClosureState != acpDerivedClosureState(p)
 }
 
@@ -297,12 +311,13 @@ func (a *ACPReopen) checkProject(ctx context.Context, proj domain.ACPReopenProje
 			"projectId", proj.ID, "projectSfId", sfID, "err", err)
 		return acpNothing, nil
 	}
-	if acpSetByHand(proj) {
+	if acpClosureStateSetByHand(proj) {
 		if suspended.endDate || suspended.invoice {
-			slog.InfoContext(ctx, "acp reopen: closure state was set by hand, leaving the project as it is",
-				"projectId", proj.ID, "projectSfId", sfID, "closureState", derefString(proj.ClosureState))
+			slog.WarnContext(ctx, "acp reopen: closure state was set by hand, leaving the project as it is",
+				"projectId", proj.ID, "projectSfId", sfID, "closureState", derefString(proj.ClosureState),
+				"derivedClosureState", acpDerivedClosureState(proj))
 		}
-		return acpNothing, nil
+		return acpSetByHand, nil
 	}
 	if !suspended.endDate && !suspended.invoice {
 		if acpOpenedByHand(proj) {
@@ -372,7 +387,7 @@ func (a *ACPReopen) checkProject(ctx context.Context, proj domain.ACPReopenProje
 	plan := func(current domain.ACPReopenProject) (domain.ACPReopenWrite, bool, error) {
 		// Re-read under the row lock: ACP or a person may have changed the
 		// project since it was read above.
-		if acpSetByHand(current) {
+		if acpClosureStateSetByHand(current) {
 			return domain.ACPReopenWrite{}, false, nil
 		}
 		still, err := acpSuspendedTracks(current)
@@ -437,29 +452,70 @@ func acpOpenedByHand(p domain.ACPReopenProject) bool {
 	return false
 }
 
-// finishOpened finishes a project a person set back to Open: ACP's record of
-// the suspension is set to "open", the Salesforce project to Open, and the
-// notice is queued (with no reason: the project was not reopened by a
-// renewal or a payment seen here).
-func (a *ACPReopen) finishOpened(ctx context.Context, proj domain.ACPReopenProject, sfID string) (acpOutcome, error) {
-	if a.DryRun {
-		slog.InfoContext(ctx, "acp reopen: dry run, would finish a project set back to Open by hand",
-			"projectId", proj.ID, "projectSfId", sfID)
-		return acpNothing, nil
+// acpFinishNoticeMaxDays is how recent, in calendar days, ACP's suspension
+// must be for finishing a project set back to Open by hand to send the "Back
+// to Open state" notice. An older one, and one whose record carries no date
+// (every record written before ACP dated them), is finished without it: the
+// first live run finds every project ever reopened by hand, and a notice
+// months after the fact would only confuse.
+const acpFinishNoticeMaxDays = 7
+
+// acpRecentSuspension reports whether a section of raw that records ACP's
+// suspension carries a suspended_on date at most acpFinishNoticeMaxDays
+// before today (UTC).
+func acpRecentSuspension(raw json.RawMessage, now time.Time) bool {
+	now = now.UTC()
+	oldest := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -acpFinishNoticeMaxDays)
+	for _, key := range []string{acpEndDateSection, acpInvoiceSection} {
+		if ev, err := acpSectionEventType(raw, key); err != nil || ev != acpSuspendEventType {
+			continue
+		}
+		if on, ok := acpSectionSuspendedOn(raw, key); ok && !on.Before(oldest) {
+			return true
+		}
 	}
+	return false
+}
+
+// finishOpened finishes a project a person set back to Open: ACP's record of
+// the suspension is set to "open" and the Salesforce project to Open. The
+// notice is queued (with no reason: the project was not reopened by a
+// renewal or a payment seen here) only when the suspension is recent
+// (acpRecentSuspension). The Salesforce project is read first: one already
+// Open is not written again, and one in a state ACP never sets is left as it
+// is, logged.
+func (a *ACPReopen) finishOpened(ctx context.Context, proj domain.ACPReopenProject, sfID string) (acpOutcome, error) {
 	sp, err := a.SalesEntity.GetProject(ctx, sfID)
 	if err != nil {
 		return acpNothing, err
 	}
+	status := strings.TrimSpace(derefString(sp.Status))
+	alreadyOpen := strings.EqualFold(status, salesentity.ProjectStatusOpen)
+	switch {
+	case alreadyOpen, strings.EqualFold(status, salesentity.ProjectStatusSuspended):
+	case status == "":
+		slog.WarnContext(ctx, "acp reopen: Salesforce gave no project status, setting it to Open",
+			"projectId", proj.ID, "projectSfId", sfID)
+	default:
+		slog.WarnContext(ctx, "acp reopen: Salesforce project is neither Open nor Suspended, leaving a project set back to Open by hand as it is",
+			"projectId", proj.ID, "projectSfId", sfID, "salesforceStatus", status)
+		return acpNothing, nil
+	}
+	now := a.now()
+	notify := acpRecentSuspension(proj.SuspensionProcessState, now)
+	if a.DryRun {
+		slog.InfoContext(ctx, "acp reopen: dry run, would finish a project set back to Open by hand",
+			"projectId", proj.ID, "projectSfId", sfID, "writeSalesforce", !alreadyOpen, "notice", notify)
+		return acpNothing, nil
+	}
 	var c *salesentity.Customer
-	if customerID := strings.TrimSpace(derefString(sp.CustomerID)); customerID != "" {
+	if customerID := strings.TrimSpace(derefString(sp.CustomerID)); notify && customerID != "" {
 		cust, err := a.SalesEntity.GetCustomer(ctx, customerID)
 		if err != nil {
 			return acpNothing, err
 		}
 		c = &cust
 	}
-	now := a.now()
 	var written domain.ACPReopenWrite
 	plan := func(current domain.ACPReopenProject) (domain.ACPReopenWrite, bool, error) {
 		if !acpOpenedByHand(current) {
@@ -477,9 +533,13 @@ func (a *ACPReopen) finishOpened(ctx context.Context, proj domain.ACPReopenProje
 		written = domain.ACPReopenWrite{SectionsOnly: true, SuspensionProcessState: state}
 		return written, true, nil
 	}
-	outcome, done, err := a.Projects.Reopen(ctx, proj.ID, plan, a.salesforceOpenBeforeCommit(sp.ID),
+	beforeCommit := a.salesforceOpenBeforeCommit(sp.ID)
+	if alreadyOpen {
+		beforeCommit = nil
+	}
+	outcome, done, err := a.Projects.Reopen(ctx, proj.ID, plan, beforeCommit,
 		func(outcome domain.ACPReopenOutcome) (json.RawMessage, error) {
-			if !outcome.Open {
+			if !outcome.Open || !notify {
 				return nil, nil
 			}
 			return a.notice(ctx, proj, sp, c, written, now)
@@ -491,7 +551,8 @@ func (a *ACPReopen) finishOpened(ctx context.Context, proj domain.ACPReopenProje
 		return acpNothing, nil
 	}
 	slog.InfoContext(ctx, "acp reopen: finished a project set back to Open by hand",
-		"projectId", proj.ID, "projectSfId", sfID, "projectOpen", outcome.Open)
+		"projectId", proj.ID, "projectSfId", sfID, "projectOpen", outcome.Open,
+		"wroteSalesforce", !alreadyOpen, "notice", notify)
 	a.mirror(ctx, proj.ID, written)
 	return acpFinished, nil
 }
@@ -611,6 +672,8 @@ func (a *ACPReopen) CheckSuspendedProjects(ctx context.Context, req domain.ACPRe
 			resp.Reopened++
 		case outcome == acpFinished:
 			resp.Finished++
+		case outcome == acpSetByHand:
+			resp.SkippedSetByHand++
 		}
 	}
 	if len(projects) == limit {

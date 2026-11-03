@@ -81,8 +81,9 @@ func TestACPDerivedClosureState(t *testing.T) {
 	}
 }
 
-// An invoice event first asks the database whether any invoice track is
-// ACP-suspended; with none it makes no Salesforce call at all.
+// An invoice event first asks the database whether a project of that invoice
+// has an ACP-suspended invoice track; with none it makes no Salesforce call at
+// all.
 func TestACPReopen_InvoiceEventWithNothingSuspendedCallsNoSalesforce(t *testing.T) {
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: acpSuspendedProject()}} // end-date track only
 	sf := acpRenewedSF()
@@ -90,8 +91,8 @@ func TestACPReopen_InvoiceEventWithNothingSuspendedCallsNoSalesforce(t *testing.
 	if err := newACPTestService(repo, sf, nil, nil).HandleEvent(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	if repo.invoiceTrackChecks != 1 || sf.calls != 0 {
-		t.Errorf("database checks=%d salesforce calls=%d, want 1 and 0", repo.invoiceTrackChecks, sf.calls)
+	if !reflect.DeepEqual(repo.invoiceTrackChecks, []string{"INV1"}) || sf.calls != 0 {
+		t.Errorf("database checks=%v salesforce calls=%d, want [INV1] and 0", repo.invoiceTrackChecks, sf.calls)
 	}
 }
 
@@ -210,12 +211,14 @@ func (f *acpDeadlineSF) UpdateProjectStatus(ctx context.Context, id, status stri
 }
 
 // acpOpenedByHandProject is a project ACP suspended on the end-date track
-// that a person then set back to Open: Open everywhere, the record still says
-// "suspend".
+// the day before acpTestNow that a person then set back to Open: Open
+// everywhere, the record still says "suspend".
 func acpOpenedByHandProject() *domain.ACPReopenProject {
 	p := acpSuspendedProject()
 	p.EndDateClosureState = acpStr("OPEN")
 	p.ClosureState = acpStr("OPEN")
+	p.SuspensionProcessState = json.RawMessage(`{"based_on_subscription_end_date":{"event_type":"suspend","suspended_on":"2026-10-28"},` +
+		`"based_on_due_invoices":{"event_type":"open"}}`)
 	return p
 }
 
@@ -234,7 +237,7 @@ func newACPChecker(repo *acpFakeRepo, sf ACPReopenSalesforce, mod func(*ACPReope
 func TestACPReopenCheck_ReopensAndFinishes(t *testing.T) {
 	missed := acpSuspendedProject() // renewed in Salesforce, the event was lost
 	opened := acpOpenedByHandProject()
-	opened.ID, opened.SfID = "e3e87599-1bc7-6650-182c-0dc5604bcb69", acpOtherSfID
+	opened.ID, opened.SfID = "acf00000-0000-4000-8000-000000000009", acpOtherSfID
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: missed, acpOtherSfID: opened}}
 	sf := acpRenewedSF()
 
@@ -278,6 +281,86 @@ func TestACPReopenCheck_ReopensAndFinishes(t *testing.T) {
 	}
 }
 
+// Finishing a project set back to Open by hand sends the notice only for a
+// recent suspension: an old one, or a record with no date (written before ACP
+// dated it), is finished without one.
+func TestACPReopenCheck_FinishNoticeOnlyForARecentSuspension(t *testing.T) {
+	tests := []struct {
+		name   string
+		record string
+		notice bool
+	}{
+		{"suspended yesterday", `{"event_type":"suspend","suspended_on":"2026-10-28"}`, true},
+		{"suspended 7 days ago", `{"event_type":"suspend","suspended_on":"2026-10-22"}`, true},
+		{"suspended 30 days ago", `{"event_type":"suspend","suspended_on":"2026-09-29"}`, false},
+		{"no date", `{"event_type":"suspend"}`, false},
+		{"not a date", `{"event_type":"suspend","suspended_on":"soon"}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opened := acpOpenedByHandProject()
+			opened.SuspensionProcessState = json.RawMessage(`{"based_on_subscription_end_date":` + tt.record + `}`)
+			repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: opened}}
+			sf := acpRenewedSF()
+			resp, err := newACPChecker(repo, sf, nil).CheckSuspendedProjects(context.Background(), domain.ACPReopenCheckRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Finished != 1 || len(sf.statusCalls) != 1 {
+				t.Errorf("response = %+v status=%v, want finished and Salesforce set Open", resp, sf.statusCalls)
+			}
+			if got := len(repo.notices) == 1; got != tt.notice {
+				t.Errorf("notice sent = %v, want %v", got, tt.notice)
+			}
+		})
+	}
+}
+
+// Finishing a project set back to Open by hand reads the Salesforce project
+// first: one already Open is not written again, and one in a state ACP never
+// sets is left as it is.
+func TestACPReopenCheck_FinishLooksAtTheSalesforceStatus(t *testing.T) {
+	opened := acpOpenedByHandProject()
+	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: opened}}
+	sf := acpRenewedSF()
+	sf.project.Status = acpStr("OPEN")
+	resp, err := newACPChecker(repo, sf, nil).CheckSuspendedProjects(context.Background(), domain.ACPReopenCheckRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Finished != 1 || len(sf.statusCalls) != 0 || len(repo.notices) != 1 {
+		t.Errorf("already Open: %+v status=%v notices=%d, want finished, no Salesforce write", resp, sf.statusCalls, len(repo.notices))
+	}
+
+	opened = acpOpenedByHandProject()
+	repo = &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: opened}}
+	sf = acpRenewedSF()
+	sf.project.Status = acpStr("Terminated")
+	resp, err = newACPChecker(repo, sf, nil).CheckSuspendedProjects(context.Background(), domain.ACPReopenCheckRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Finished != 0 || repo.reopens != 0 || len(sf.statusCalls) != 0 || len(repo.notices) != 0 {
+		t.Errorf("unexpected status: %+v reopens=%d status=%v notices=%d, want nothing done", resp, repo.reopens, sf.statusCalls, len(repo.notices))
+	}
+}
+
+// A project whose overall closure state does not match its sub-states is
+// left alone and counted, so the skips are seen.
+func TestACPReopenCheck_CountsProjectsSetByHand(t *testing.T) {
+	p := acpSuspendedProject()
+	p.ClosureState = acpStr("OPEN") // the end-date track says CLOSED
+	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: p}}
+	sf := acpRenewedSF()
+	resp, err := newACPChecker(repo, sf, nil).CheckSuspendedProjects(context.Background(), domain.ACPReopenCheckRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.SkippedSetByHand != 1 || resp.Reopened != 0 || repo.reopens != 0 || sf.calls != 0 {
+		t.Errorf("response = %+v reopens=%d calls=%d, want one skip and nothing done", resp, repo.reopens, sf.calls)
+	}
+}
+
 // A dry run logs and changes nothing, also for a project opened by hand; a
 // failure is counted and named, and the rest are still checked.
 func TestACPReopenCheck_DryRunAndFailures(t *testing.T) {
@@ -294,7 +377,7 @@ func TestACPReopenCheck_DryRunAndFailures(t *testing.T) {
 
 	failing := acpSuspendedProject()
 	ok := acpSuspendedProject()
-	ok.ID, ok.SfID = "e3e87599-1bc7-6650-182c-0dc5604bcb69", acpOtherSfID
+	ok.ID, ok.SfID = "acf00000-0000-4000-8000-000000000009", acpOtherSfID
 	repo = &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: failing, acpOtherSfID: ok}}
 	sf2 := &acpFailingFor{acpFakeSF: acpRenewedSF(), sfID: acpTestSfID}
 	resp, err = newACPChecker(repo, sf2, nil).CheckSuspendedProjects(context.Background(), domain.ACPReopenCheckRequest{})
@@ -321,9 +404,9 @@ func (f *acpFailingFor) GetProject(ctx context.Context, id string) (salesentity.
 // Pages follow the cursor; a malformed cursor is refused.
 func TestACPReopenCheck_Pages(t *testing.T) {
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{}}
-	for i, sfID := range []string{"a0dE200000CZ9Z1IA1", "a0dE200000CZ9Z2IA1", "a0dE200000CZ9Z3IA1"} {
+	for i, sfID := range []string{"a0d000000000011AAA", "a0d000000000012AAA", "a0d000000000013AAA"} {
 		p := acpSuspendedProject()
-		p.ID = "e3e87599-1bc7-6650-182c-0dc5604bcb6" + string(rune('0'+i))
+		p.ID = "acf00000-0000-4000-8000-00000000000" + string(rune('0'+i))
 		p.SfID = sfID
 		repo.projects[sfID] = p
 	}
@@ -356,7 +439,7 @@ func TestACPReopenCheck_Pages(t *testing.T) {
 func TestACPReopenCheck_StopsBeforeTheDeadlineButAlwaysMakesProgress(t *testing.T) {
 	first := acpSuspendedProject()
 	second := acpSuspendedProject()
-	second.ID, second.SfID = "e3e87599-1bc7-6650-182c-0dc5604bcb69", acpOtherSfID
+	second.ID, second.SfID = "acf00000-0000-4000-8000-000000000009", acpOtherSfID
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: first, acpOtherSfID: second}}
 	checker := newACPChecker(repo, acpRenewedSF(), func(r *ACPReopen) { r.DryRun = true })
 
@@ -479,5 +562,43 @@ func TestProjectReactivationDrainer(t *testing.T) {
 	d.DrainOnce(context.Background())
 	if !parked.done[2] || parked.failures[2] != 2 {
 		t.Errorf("not parked after max attempts: done=%v failures=%d", parked.done[2], parked.failures[2])
+	}
+}
+
+// A failed attempt is kept in event_outbox only: no publish-failure row per
+// attempt that someone could re-drive while the drainer still retries.
+func TestProjectReactivationDrainer_WritesNoPublishFailureRows(t *testing.T) {
+	outbox := &acpFakeOutbox{pending: []int64{1}, payloads: map[int64]json.RawMessage{1: json.RawMessage(`{}`)},
+		failures: map[int64]int{}, done: map[int64]bool{}}
+	store := &recordingFailures{}
+	d := NewProjectReactivationDrainer(outbox, NewEventPublisherService(failKafka{}, store), time.Second, 3)
+	d.DrainOnce(context.Background())
+	d.DrainOnce(context.Background())
+	if outbox.failures[1] != 2 || store.calls != 0 {
+		t.Errorf("outbox failures=%d publish-failure rows=%d, want 2 and 0", outbox.failures[1], store.calls)
+	}
+}
+
+// deadlinePublisher records whether a publish had a deadline.
+type deadlinePublisher struct {
+	acpFlakyPublisher
+	remaining time.Duration
+}
+
+func (p *deadlinePublisher) Publish(ctx context.Context, t events.Type, id string, payload json.RawMessage) error {
+	if d, ok := ctx.Deadline(); ok {
+		p.remaining = time.Until(d)
+	}
+	return p.acpFlakyPublisher.Publish(ctx, t, id, payload)
+}
+
+// A publish runs while the notice's row is locked, so it has its own deadline.
+func TestProjectReactivationDrainer_PublishHasADeadline(t *testing.T) {
+	outbox := &acpFakeOutbox{pending: []int64{1}, payloads: map[int64]json.RawMessage{1: json.RawMessage(`{}`)},
+		failures: map[int64]int{}, done: map[int64]bool{}}
+	pub := &deadlinePublisher{}
+	NewProjectReactivationDrainer(outbox, pub, time.Second, 3).DrainOnce(context.Background())
+	if pub.remaining <= 0 || pub.remaining > projectReactivationPublishTimeout {
+		t.Errorf("publish deadline = %s away, want within %s", pub.remaining, projectReactivationPublishTimeout)
 	}
 }

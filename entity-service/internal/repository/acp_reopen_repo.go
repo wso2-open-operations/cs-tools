@@ -53,10 +53,13 @@ type ACPReopenRepository interface {
 		beforeCommit func(ctx context.Context, outcome domain.ACPReopenOutcome) error,
 		notice func(outcome domain.ACPReopenOutcome) (json.RawMessage, error),
 	) (outcome domain.ACPReopenOutcome, done bool, err error)
-	// AnyACPSuspendedInvoiceTrack reports whether any project has its invoice
-	// track suspended by ACP. An invoice event can only reopen such a
-	// project, so without one it needs no Salesforce call at all.
-	AnyACPSuspendedInvoiceTrack(ctx context.Context) (bool, error)
+	// ACPSuspendedInvoiceTrackFor reports whether a project the invoice
+	// (by Salesforce id) may belong to has its invoice track suspended by
+	// ACP. An invoice event can only reopen such a project, so without one it
+	// needs no Salesforce call at all. The invoice's projects are read from
+	// the local tables (sf_invoice -> sf_opportunity_link); when the invoice
+	// or its opportunity is not there yet, every project is considered.
+	ACPSuspendedInvoiceTrackFor(ctx context.Context, invoiceSfID string) (bool, error)
 	// ListACPNotedProjects returns, in id order after afterID ("" for the
 	// start), up to limit projects with a Salesforce id whose
 	// suspensionProcessState still records an ACP suspension on a track
@@ -190,17 +193,40 @@ func acpSectionSuspended(key string) string {
 	return `COALESCE(p.suspension_process_state -> '` + key + `' ->> 'event_type', '') = 'suspend'`
 }
 
-// AnyACPSuspendedInvoiceTrack implements ACPReopenRepository.
-func (r *acpReopenRepo) AnyACPSuspendedInvoiceTrack(ctx context.Context) (bool, error) {
+// ACPSuspendedInvoiceTrackFor implements ACPReopenRepository. A local
+// invoice row with an opportunity answers for the projects linked to that
+// opportunity only. With none (the invoice is new, or the local tables are
+// behind) it falls back to whether any project at all has such a track: the
+// local tables may only narrow the check, never hide a project from it.
+func (r *acpReopenRepo) ACPSuspendedInvoiceTrackFor(ctx context.Context, invoiceSfID string) (bool, error) {
 	ctx = WithSystemIdentity(ctx)
-	var found bool
-	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM project p
-		WHERE p.invoice_due_date_closure_state::TEXT LIKE 'SUSPENDED%' AND `+acpSectionSuspended("based_on_due_invoices")+`)`).Scan(&found)
+	var known, found bool
+	err := r.db.QueryRow(ctx, `
+		WITH opp AS (
+			SELECT DISTINCT i.opportunity_id FROM sf_invoice i
+			WHERE i.opportunity_id IS NOT NULL AND i.sf_id IN ($1, LEFT($1, 15))
+		)
+		SELECT EXISTS (SELECT 1 FROM opp),
+		       EXISTS (SELECT 1 FROM opp
+		               JOIN sf_opportunity_link l ON l.opportunity_id = opp.opportunity_id
+		               JOIN project p ON p.id = l.project_id
+		               WHERE `+acpInvoiceTrackSuspended+`)`, invoiceSfID).Scan(&known, &found)
+	if err != nil {
+		return false, fmt.Errorf("acp reopen: look for an ACP-suspended invoice track for invoice %s: %w", invoiceSfID, err)
+	}
+	if known {
+		return found, nil
+	}
+	err = r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM project p WHERE `+acpInvoiceTrackSuspended+`)`).Scan(&found)
 	if err != nil {
 		return false, fmt.Errorf("acp reopen: look for an ACP-suspended invoice track: %w", err)
 	}
 	return found, nil
 }
+
+// acpInvoiceTrackSuspended matches a project p whose invoice track ACP
+// suspended.
+var acpInvoiceTrackSuspended = `p.invoice_due_date_closure_state::TEXT LIKE 'SUSPENDED%' AND ` + acpSectionSuspended("based_on_due_invoices")
 
 // ListACPNotedProjects implements ACPReopenRepository.
 func (r *acpReopenRepo) ListACPNotedProjects(ctx context.Context, afterID string, limit int) ([]domain.ACPReopenProject, error) {

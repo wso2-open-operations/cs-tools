@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	acpTestSfID      = "a0dE200000CZ9ZNIA1"
-	acpTestProjectID = "e3e87599-1bc7-6650-182c-0dc5604bcb68"
-	acpOtherSfID     = "a0dE200000CZ9ZOIA1"
+	acpTestSfID      = "a0d000000000001AAA"
+	acpTestProjectID = "acf00000-0000-4000-8000-000000000008"
+	acpOtherSfID     = "a0d000000000002AAA"
 )
 
 var acpTestNow = time.Date(2026, 10, 29, 9, 30, 0, 0, time.UTC)
@@ -50,8 +50,9 @@ type acpFakeRepo struct {
 	getErr    error
 	// notices are the "Back to Open state" notices queued with a reopen.
 	notices []events.ProjectReactivatedPayload
-	// invoiceTrackChecks counts AnyACPSuspendedInvoiceTrack calls.
-	invoiceTrackChecks int
+	// invoiceTrackChecks are the invoices ACPSuspendedInvoiceTrackFor was
+	// asked about.
+	invoiceTrackChecks []string
 }
 
 func (r *acpFakeRepo) GetProjectBySfID(_ context.Context, sfID string) (*domain.ACPReopenProject, error) {
@@ -128,8 +129,8 @@ func (r *acpFakeRepo) Reopen(ctx context.Context, projectID string,
 	return outcome, true, nil
 }
 
-func (r *acpFakeRepo) AnyACPSuspendedInvoiceTrack(context.Context) (bool, error) {
-	r.invoiceTrackChecks++
+func (r *acpFakeRepo) ACPSuspendedInvoiceTrackFor(_ context.Context, invoiceSfID string) (bool, error) {
+	r.invoiceTrackChecks = append(r.invoiceTrackChecks, invoiceSfID)
 	for _, p := range r.projects {
 		ev, _ := acpSectionEventType(p.SuspensionProcessState, acpInvoiceSection)
 		if strings.HasPrefix(acpLabel(p.InvoiceDueDateClosureState), "SUSPENDED") && ev == acpSuspendEventType {
@@ -242,7 +243,7 @@ func (p *acpFakePublisher) Close() {}
 // it on the end-date track.
 func acpSuspendedProject() *domain.ACPReopenProject {
 	return &domain.ACPReopenProject{
-		ID: acpTestProjectID, SfID: acpTestSfID, Name: "[S] ACP Test Project", Key: "APPSUB",
+		ID: acpTestProjectID, SfID: acpTestSfID, Name: "[S] ACP Test Project", Key: "ACPTEST",
 		EndDateClosureState:        acpStr("CLOSED"),
 		InvoiceDueDateClosureState: acpStr("OPEN"),
 		ClosureState:               acpStr("SUSPENDED"),
@@ -254,8 +255,9 @@ func acpSuspendedProject() *domain.ACPReopenProject {
 func acpRenewedSF() *acpFakeSF {
 	return &acpFakeSF{
 		project: salesentity.Project{
-			Name: acpStr("[S] ACP Test Project"), Key: acpStr("APPSUB"),
+			Name: acpStr("[S] ACP Test Project"), Key: acpStr("ACPTEST"),
 			StartDate: acpStr("2026-10-28"), EndDate: acpStr("2027-10-27"), CustomerID: acpStr("001ACC"),
+			Status: acpStr(salesentity.ProjectStatusSuspended),
 		},
 		customer: salesentity.Customer{
 			ID:             "001ACC",
@@ -306,7 +308,7 @@ func TestACPReopen_RenewalReopensTheProject(t *testing.T) {
 	}
 	got := repo.notices[0]
 	want := events.ProjectReactivatedPayload{
-		ProjectID: acpTestProjectID, ProjectSfID: acpTestSfID, ProjectName: "[S] ACP Test Project", ProjectKey: "APPSUB",
+		ProjectID: acpTestProjectID, ProjectSfID: acpTestSfID, ProjectName: "[S] ACP Test Project", ProjectKey: "ACPTEST",
 		AccountOwnerName: "Alex Owner", AccountOwnerEmail: "owner@example.com",
 		StartDate: "2026-10-28", EndDate: "2027-10-27",
 		Reasons:       []string{events.ProjectReactivatedReasonRenewal},
@@ -412,10 +414,9 @@ func TestACPReopen_SalesforceRefusalRollsBackAndIsRetried(t *testing.T) {
 	sf.statusErr = errors.New("sales-entity-service unavailable")
 	pub := &acpFakePublisher{}
 	svc := newACPTestService(repo, sf, pub, nil)
-	// The failure is logged and left to the daily check: the event itself,
-	// whose ingest succeeded, is not failed.
-	if err := svc.HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err != nil {
-		t.Fatalf("a reopen failure failed the event: %v", err)
+	// The failure fails the event, so Service Bus delivers it again.
+	if err := svc.HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err == nil {
+		t.Fatal("a reopen failure did not fail the event")
 	}
 	if acpLabel(repo.projects[acpTestSfID].EndDateClosureState) != "CLOSED" || len(repo.notices) != 0 {
 		t.Errorf("the reopen was kept: end=%s published=%d", acpLabel(repo.projects[acpTestSfID].EndDateClosureState), len(repo.notices))
@@ -528,26 +529,35 @@ func TestACPReopen_PartnerWithoutPrimaryPartnerHasNoInvoiceTrack(t *testing.T) {
 	}
 }
 
-// A failure a retry can fix is returned by the check itself (the daily check
-// counts it), but never fails the Salesforce event: its ingest succeeded.
-func TestACPReopen_FailuresAreReportedButNeverFailTheEvent(t *testing.T) {
+// A failure a retry can fix fails the Salesforce event, so it is delivered
+// again; a dry run, which wrote nothing, only logs it.
+func TestACPReopen_FailuresFailTheEventUnlessDryRun(t *testing.T) {
 	repo := &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: acpSuspendedProject()}}
 	sf := acpRenewedSF()
 	sf.getProjectErr = errors.New("salesforce down")
-	svc := newACPTestService(repo, sf, nil, nil)
-	if err := svc.HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err != nil {
-		t.Errorf("a Salesforce read failure failed the event: %v", err)
+	if err := newACPTestService(repo, sf, nil, nil).HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err == nil {
+		t.Error("a Salesforce read failure did not fail the event")
 	}
-	if _, err := svc.acpReopen.reopenProject(context.Background(), acpTestSfID); err == nil {
-		t.Error("a Salesforce read failure was not reported by the check")
+	dryRun := func(r *ACPReopen) { r.DryRun = true }
+	if err := newACPTestService(repo, sf, nil, dryRun).HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err != nil {
+		t.Errorf("a dry run failed the event: %v", err)
 	}
 	repo.getErr = errors.New("database down")
-	svc = newACPTestService(repo, acpRenewedSF(), nil, nil)
-	if err := svc.HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err != nil {
-		t.Errorf("a database failure failed the event: %v", err)
+	if err := newACPTestService(repo, acpRenewedSF(), nil, nil).HandleEvent(context.Background(), acpProjectEvent(domain.SalesforceEventUpdated)); err == nil {
+		t.Error("a database failure did not fail the event")
 	}
-	if _, err := svc.acpReopen.reopenProject(context.Background(), acpTestSfID); err == nil {
-		t.Error("a database failure was not reported by the check")
+	invoice := domain.SalesforceEventRequest{EventType: domain.SalesforceEventUpdated, Entity: domain.SalesforceEntityInvoice, ReferenceID: "INV1"}
+	p := acpSuspendedProject()
+	p.EndDateClosureState = acpStr("OPEN")
+	p.InvoiceDueDateClosureState = acpStr("SUSPENDED")
+	p.SuspensionProcessState = json.RawMessage(`{"based_on_due_invoices":{"event_type":"suspend"}}`)
+	repo = &acpFakeRepo{projects: map[string]*domain.ACPReopenProject{acpTestSfID: p}}
+	sf = acpRenewedSF()
+	sf.invoice = salesentity.Invoice{ID: acpStr("INV1"), OpportunityID: acpStr("006A")}
+	sf.linksByOpp = map[string][]salesentity.LinkedOpportunity{"006A": {{ID: "L1", ProjectID: acpStr(acpTestSfID)}}}
+	sf.getProjectErr = errors.New("salesforce down")
+	if err := newACPTestService(repo, sf, nil, nil).HandleEvent(context.Background(), invoice); err == nil {
+		t.Error("a failure after an invoice event did not fail the event")
 	}
 }
 

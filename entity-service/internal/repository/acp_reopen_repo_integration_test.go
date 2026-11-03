@@ -39,6 +39,11 @@ const (
 	acpReopenTestProjectID = "acf00000-0000-4000-8000-000000000001"
 	acpReopenTestSfID      = "a0dACPREOPENTEST01"
 	acpReopenTestTag       = "acp-reopen-test"
+
+	acpReopenTestOpportunityID = "acf00000-0000-4000-8000-000000000101"
+	acpReopenTestInvoiceID     = "acf00000-0000-4000-8000-000000000102"
+	acpReopenTestLinkID        = "acf00000-0000-4000-8000-000000000103"
+	acpReopenTestInvoiceSfID   = "a0IACPREOPENTEST01"
 )
 
 // seedACPReopenProject writes one project with the given closure states and
@@ -61,6 +66,42 @@ func seedACPReopenProject(t *testing.T, pool *pgxpool.Pool, endState, invoiceSta
 		acpReopenTestProjectID, acpReopenTestTag, acpReopenTestSfID, endState, invoiceState, blob)
 	if err != nil {
 		t.Fatalf("seed project: %v", err)
+	}
+}
+
+// seedACPReopenInvoice writes one invoice (acpReopenTestInvoiceSfID) on an
+// opportunity linked to the test project when linked is true, and to no
+// project otherwise, removed again when the test ends.
+func seedACPReopenInvoice(t *testing.T, pool *pgxpool.Pool, linked bool) {
+	t.Helper()
+	ctx := context.Background()
+	cleanup := func() {
+		for _, del := range []struct{ query, id string }{
+			{`DELETE FROM sf_opportunity_link WHERE id = $1`, acpReopenTestLinkID},
+			{`DELETE FROM sf_invoice WHERE id = $1`, acpReopenTestInvoiceID},
+			{`DELETE FROM sf_opportunity WHERE id = $1`, acpReopenTestOpportunityID},
+		} {
+			if _, err := pool.Exec(ctx, del.query, del.id); err != nil {
+				t.Fatalf("clean invoice: %v", err)
+			}
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	if _, err := pool.Exec(ctx, `INSERT INTO sf_opportunity (id, created_on, updated_on, created_by, updated_by)
+		VALUES ($1, now(), now(), $2, $2)`, acpReopenTestOpportunityID, acpReopenTestTag); err != nil {
+		t.Fatalf("seed opportunity: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO sf_invoice (id, created_on, updated_on, created_by, updated_by, sf_id, opportunity_id)
+		VALUES ($1, now(), now(), $2, $2, $3, $4)`, acpReopenTestInvoiceID, acpReopenTestTag, acpReopenTestInvoiceSfID, acpReopenTestOpportunityID); err != nil {
+		t.Fatalf("seed invoice: %v", err)
+	}
+	if !linked {
+		return
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO sf_opportunity_link (id, created_on, updated_on, created_by, updated_by, opportunity_id, project_id)
+		VALUES ($1, now(), now(), $2, $2, $3, $4)`, acpReopenTestLinkID, acpReopenTestTag, acpReopenTestOpportunityID, acpReopenTestProjectID); err != nil {
+		t.Fatalf("seed opportunity link: %v", err)
 	}
 }
 
@@ -302,6 +343,17 @@ func TestACPReopenRepoIntegration_NoticeIsQueuedWithTheReopen(t *testing.T) {
 	if n := countQueued(); n != 1 {
 		t.Errorf("a failed publish removed the notice: queued = %d", n)
 	}
+	// Its backoff has not passed: another replica that listed it before the
+	// failure must not publish it at once.
+	if processed, err := outbox.Process(ctx, id, func(context.Context, string, json.RawMessage) error {
+		t.Error("a notice was published inside its backoff")
+		return nil
+	}); err != nil || processed {
+		t.Fatalf("Process inside the backoff: processed=%v err=%v", processed, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE event_outbox SET last_attempt_on = NOW() - INTERVAL '1 minute' WHERE id = $1`, id); err != nil {
+		t.Fatalf("move the failure back: %v", err)
+	}
 	var gotProject string
 	var gotPayload json.RawMessage
 	if processed, err := outbox.Process(ctx, id, func(_ context.Context, projectID string, payload json.RawMessage) error {
@@ -362,8 +414,18 @@ func TestACPReopenRepoIntegration_SuspendedListings(t *testing.T) {
 	}
 
 	seedACPReopenProject(t, pool, "OPEN", "SUSPENDED", `{"based_on_due_invoices": {"event_type": "suspend"}}`)
-	if found, err := repo.AnyACPSuspendedInvoiceTrack(ctx); err != nil || !found {
-		t.Errorf("AnyACPSuspendedInvoiceTrack = %v, %v, want true", found, err)
+	// An invoice the local tables do not know: every project is considered.
+	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, "a0IACPREOPENNONE01"); err != nil || !found {
+		t.Errorf("ACPSuspendedInvoiceTrackFor(unknown invoice) = %v, %v, want true", found, err)
+	}
+	// A known invoice answers for its own projects only.
+	seedACPReopenInvoice(t, pool, false)
+	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, acpReopenTestInvoiceSfID); err != nil || found {
+		t.Errorf("ACPSuspendedInvoiceTrackFor(invoice of another project) = %v, %v, want false", found, err)
+	}
+	seedACPReopenInvoice(t, pool, true)
+	if found, err := repo.ACPSuspendedInvoiceTrackFor(ctx, acpReopenTestInvoiceSfID); err != nil || !found {
+		t.Errorf("ACPSuspendedInvoiceTrackFor(invoice of the project) = %v, %v, want true", found, err)
 	}
 	if !listed() {
 		t.Error("an ACP-suspended project is not listed for the daily check")

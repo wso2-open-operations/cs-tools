@@ -571,6 +571,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			slog.Info("acp reopen check enabled",
 				"dryRun", cfg.ACPReopenDryRun, "testProjectOnly", cfg.ACPReopenTestProjectSfID != "",
 				"publishes", projectEventPublisher != nil, "mirrors", snWritebackDispatcher != nil)
+			if !cfg.ACPReopenDryRun {
+				// This service cannot see the other half of the pair: say it
+				// at every start, where the deployment is checked.
+				slog.Warn("acp reopen check is live: the daily check (ACP_REOPEN_CHECK_ENABLED=true in csm-scheduled-tasks) must be on too; " +
+					"without it a reopen that fails past Service Bus's redeliveries is never retried, and a project set back to Open by hand is never finished")
+			}
 			reopen := service.ACPReopen{
 				Projects:        repository.NewACPReopenRepository(repository.NewScoped(db)),
 				SalesEntity:     salesEntityClient,
@@ -595,7 +601,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			// the ingest retry worker, before the producers close.
 			if projectEventPublisher != nil {
 				drainer := service.NewProjectReactivationDrainer(repository.NewACPReactivationOutbox(repository.NewScoped(db)),
-					projectEventPublisher, cfg.IncidentReportPollInterval, service.ProjectReactivationMaxAttempts)
+					projectEventPublisher, cfg.ACPReactivationPollInterval, service.ProjectReactivationMaxAttempts)
 				ingestRetryWG.Add(1)
 				go func() {
 					defer ingestRetryWG.Done()
@@ -816,15 +822,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		projectOpportunityLinkHandler = handler.NewProjectOpportunityLinkHandler(service.NewProjectOpportunityLinkService(sfReadRepo, accessSvc))
 	}
 
-	// snWritebackDispatcher is the single shared SNWritebackDispatcher for
-	// every DATA_SOURCE=postgres-servicenow-dual-write best-effort mirror
-	// write (see SNWritebackDispatcher's own doc comment) -- one dispatcher,
-	// one small worker pool, reused by every entity's mirror rather than each
-	// constructing its own: project (immediately below), and case,
-	// call_request, time_card, comment, change_request, and case tags/watch
-	// list (all further below, riding on the case dispatch). nil in every
-	// other mode. Originally constructed only inline for the case pilot;
-	// hoisted here once a second entity (project) needed the same instance.
 	projectRepo := repository.NewProjectRepository(repository.NewScoped(db))
 	pgProjectSvc := service.NewProjectService(projectRepo, accessSvc)
 	var activeProjectSvc service.ProjectService
@@ -2045,8 +2042,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /salesforce/events", salesforceEventHandler.HandleEvent)
 	}
 	if acpReopenCheckHandler != nil {
-		// The daily ACP reopen check (csm-scheduled-tasks): internal only.
-		mux.HandleFunc("POST /acp/reopen-check", internalOnly(accessSvc, acpReopenCheckHandler.Check))
+		// The daily ACP reopen check (csm-scheduled-tasks): its service
+		// credential only. A user token, internal or not, is refused: the
+		// check writes to every ACP-suspended project and queues emails.
+		mux.HandleFunc("POST /acp/reopen-check", serviceOnly(accessSvc, acpReopenCheckHandler.Check))
 	}
 	if salesforcePartnerHandler != nil {
 		mux.HandleFunc("POST /salesforce/accounts/{sfId}/refresh-partners", salesforcePartnerHandler.RefreshPartners)

@@ -68,3 +68,15 @@ func TestPublish_RecordsWhenFailuresConfigured(t *testing.T) {
 		t.Fatalf("CreateEventPublishFailure calls = %d, want 1", store.calls)
 	}
 }
+
+func TestPublish_SkipsRecordWhenTheCallerKeepsItsOwn(t *testing.T) {
+	store := &recordingFailures{}
+	pub := NewEventPublisherService(failKafka{}, store)
+	err := pub.Publish(withoutPublishFailureRecord(context.Background()), events.TypeCaseCreated, "case-1", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("expected publish error")
+	}
+	if store.calls != 0 {
+		t.Fatalf("CreateEventPublishFailure calls = %d, want 0", store.calls)
+	}
+}

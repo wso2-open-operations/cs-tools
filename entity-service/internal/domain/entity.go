@@ -10242,13 +10242,15 @@ type ACPReopenCheckRequest struct {
 // ACPReopenCheckResponse reports one page of the daily check. Checked is
 // every project looked at; Reopened those with a track set back to Open;
 // Finished those a person had already set back to Open, now finished
-// (Salesforce Open, the email queued); FailedProjectIDs those whose check
+// (Salesforce Open; the email queued only for a suspension in the last 7
+// days); SkippedSetByHand those left alone as set by hand; FailedProjectIDs those whose check
 // failed (the error is logged). More is true while projects are left: call
 // again with NextCursor as the cursor. More false means every project is done.
 type ACPReopenCheckResponse struct {
 	Checked          int      `json:"checked"`
 	Reopened         int      `json:"reopened"`
 	Finished         int      `json:"finished"`
+	SkippedSetByHand int      `json:"skippedSetByHand"`
 	Failed           int      `json:"failed"`
 	FailedProjectIDs []string `json:"failedProjectIds"`
 	NextCursor       string   `json:"nextCursor"`

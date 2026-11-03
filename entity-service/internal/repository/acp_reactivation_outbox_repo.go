@@ -39,7 +39,7 @@ type ACPReactivationOutbox interface {
 	// Process locks one notice and hands it to publish; the notice is
 	// marked published, in the same transaction, only when publish
 	// succeeds. processed is false when the row was taken or finished
-	// meanwhile.
+	// meanwhile, or its backoff has not passed (it failed meanwhile).
 	Process(ctx context.Context, outboxID int64, publish func(ctx context.Context, projectID string, payload json.RawMessage) error) (processed bool, err error)
 	// RecordFailure counts a failed attempt, and parks the notice (marks it
 	// published, with the error kept) once maxAttempts is reached.
@@ -55,17 +55,20 @@ func NewACPReactivationOutbox(db *Scoped) ACPReactivationOutbox {
 	return &acpReactivationOutbox{db: db}
 }
 
-// Pending implements ACPReactivationOutbox. The backoff is the incident
-// report flows': 30s, doubling, at most an hour.
+// acpReactivationDue matches a notice whose backoff has passed: the incident
+// report flows' backoff, 30s, doubling, at most an hour.
+const acpReactivationDue = `(last_attempt_on IS NULL
+		       OR last_attempt_on + LEAST(INTERVAL '1 hour',
+		                                  INTERVAL '30 seconds' * POWER(2, GREATEST(attempts - 1, 0)))
+		          <= NOW())`
+
+// Pending implements ACPReactivationOutbox.
 func (r *acpReactivationOutbox) Pending(ctx context.Context, limit int) ([]int64, error) {
 	ctx = WithSystemIdentity(ctx)
 	rows, err := r.db.Query(ctx, `
 		SELECT id FROM event_outbox
 		WHERE published_on IS NULL AND entity_type = $1
-		  AND (last_attempt_on IS NULL
-		       OR last_attempt_on + LEAST(INTERVAL '1 hour',
-		                                  INTERVAL '30 seconds' * POWER(2, GREATEST(attempts - 1, 0)))
-		          <= NOW())
+		  AND `+acpReactivationDue+`
 		ORDER BY id
 		LIMIT $2`, ACPReactivationOutboxEntityType, limit)
 	if err != nil {
@@ -91,9 +94,12 @@ func (r *acpReactivationOutbox) Process(ctx context.Context, outboxID int64, pub
 		var projectID string
 		var payload []byte
 		// SKIP LOCKED: a row another replica is publishing is that replica's.
+		// The backoff is checked again: a row listed while another replica
+		// held it may have just failed there, and must wait its turn.
 		err := tx.QueryRow(ctx, `
 			SELECT entity_id::text, snapshot FROM event_outbox
 			WHERE id = $1 AND entity_type = $2 AND published_on IS NULL
+			  AND `+acpReactivationDue+`
 			FOR UPDATE SKIP LOCKED`, outboxID, ACPReactivationOutboxEntityType).Scan(&projectID, &payload)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

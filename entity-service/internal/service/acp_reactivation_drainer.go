@@ -34,11 +34,19 @@ const ProjectReactivationMaxAttempts = 20
 // projectReactivationBatch is how many queued notices one pass takes.
 const projectReactivationBatch = 50
 
+// projectReactivationPublishTimeout bounds one publish: it runs while the
+// notice's row is locked and a pool connection is held, so a hung producer
+// must not hold them for long.
+const projectReactivationPublishTimeout = 30 * time.Second
+
 // ProjectReactivationDrainer publishes the "Back to Open state" notices the
 // ACP reopen queued (repository.ACPReactivationOutbox) as project.reactivated
 // on the project topic. A notice is marked done only once Event Hub took it;
 // a failure is retried with backoff, and parked (logged at ERROR, kept in
-// event_outbox with its last error) after maxAttempts. Delivery is at least
+// event_outbox with its last error) after maxAttempts. A failed attempt is
+// not also written to the publish-failure table (withoutPublishFailureRecord):
+// event_outbox is the one record, so nothing re-drives a notice the drainer
+// is still retrying. Delivery is at least
 // once: a publish that succeeded just before its row could be marked done is
 // published again.
 type ProjectReactivationDrainer struct {
@@ -89,7 +97,9 @@ func (d *ProjectReactivationDrainer) DrainOnce(ctx context.Context) {
 			return
 		}
 		_, err := d.outbox.Process(ctx, id, func(ctx context.Context, projectID string, payload json.RawMessage) error {
-			return d.publisher.Publish(ctx, events.TypeProjectReactivated, projectID, payload)
+			publishCtx, cancel := context.WithTimeout(withoutPublishFailureRecord(ctx), projectReactivationPublishTimeout)
+			defer cancel()
+			return d.publisher.Publish(publishCtx, events.TypeProjectReactivated, projectID, payload)
 		})
 		if err == nil {
 			continue
