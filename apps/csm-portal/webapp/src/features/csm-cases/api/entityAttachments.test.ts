@@ -430,6 +430,64 @@ describe("with the files held by the portal backend", () => {
     expect(post).not.toHaveBeenCalled(); // no link is requested
   });
 
+  // A response that delivers `text` and then breaks, like a dropped connection.
+  const brokenResponse = (text: string, total: number) => {
+    let sentFirst = false;
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        // Deliver the bytes on the first read and fail on the next, as a dropped
+        // connection does (erroring straight after enqueue would drop the bytes).
+        pull(controller) {
+          if (sentFirst) controller.error(new Error("connection reset"));
+          else controller.enqueue(new TextEncoder().encode(text));
+          sentFirst = true;
+        },
+      }),
+      { status: 200, headers: { "Content-Length": String(total), "Content-Disposition": 'attachment; filename="r.bin"' } },
+    );
+  };
+  const blobText = (blob: Blob) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+
+  it("resumes a broken download with a Range request and joins the bytes", async () => {
+    const getResponse = vi
+      .fn()
+      .mockResolvedValueOnce(brokenResponse("0123", 10))
+      .mockResolvedValueOnce(new Response("456789", { status: 206 }));
+    const save = vi.fn();
+    const done = await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    expect(done).toBe(true);
+    expect(getResponse).toHaveBeenCalledTimes(2);
+    expect(getResponse.mock.calls[1][1]).toEqual({ headers: { Range: "bytes=4-" } });
+    expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
+    expect(save.mock.calls[0][1]).toBe("r.bin");
+  });
+
+  it("starts over when the resumed response is a 200 instead of a 206", async () => {
+    const getResponse = vi
+      .fn()
+      .mockResolvedValueOnce(brokenResponse("0123", 10))
+      .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+    const save = vi.fn();
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
+  });
+
+  it("gives up with an interruption error after three failed attempts", async () => {
+    const getResponse = vi.fn().mockImplementation(async () => brokenResponse("01", 10));
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(getResponse).toHaveBeenCalledTimes(3);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("reports false on a 404 so the older flow can be tried, and throws for a removed file", async () => {
     const save = vi.fn();
     const missing = vi.fn().mockRejectedValue(apiError(404));
