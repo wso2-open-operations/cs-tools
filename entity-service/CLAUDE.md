@@ -71,6 +71,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SFTPGO_ALLOW_INSECURE_HTTP` | no | `false` | `Validate` requires `SFTPGO_URL` and `SFTPGO_PUBLIC_URL` to be https (the service password and every share id would otherwise cross the wire in clear text, and an http public URL is blocked as mixed content on an https portal). `true` allows http, for local development only |
 | `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
 | `ATTACHMENT_READ_LINK_TTL` / `ATTACHMENT_UPLOAD_LINK_TTL` | no | `1m` / `15m` | How long a download / upload link stays valid |
+| `ATTACHMENT_STORAGE_MODE` | no | `sftpgo` | Who holds attachment files: `sftpgo` (this service reaches SFTPGo and issues share links) or `backend` (the portal backends hold the files; this service only authorizes and records, and needs no `SFTPGO_*` settings). Anything else refuses to start. See "Attachment files held by the portal backends" |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1822,6 +1823,80 @@ Verification: unit tests use a fake SFTPGo (`httptest`) and in-memory fakes; the
 integration test needs `STORED_ATTACHMENT_TEST_DSN` (a role that does not bypass RLS, all
 migrations applied). Two SFTPGo calls were not confirmed against a live server: the folder listing
 JSON shape and the ranged read (`ListDir`, `ReadHead`).
+
+## Attachment files held by the portal backends
+
+`ATTACHMENT_STORAGE_MODE=backend` moves the files out of SFTPGo and into storage the portal backends
+(`apps/customer-portal/backend-v2`, `apps/csm-portal/backend`) read and write themselves (Azure Blob
+Storage, through `libs/azblobstore`). **This service never touches a file in that mode**: there is no
+SFTPGo client (`NewBackendStoredAttachmentService` has no file store, and a call that reached for one
+would panic on the nil), and no SFTPGo setting is needed. It keeps what it always owned: the access
+checks (the caller's own row-level security), the three attachment tables, the size and type rules,
+and the storage key layout (`filestore.Key`, unchanged, so a file's key is the same in either mode).
+The default (`sftpgo`) is untouched; the switch exists so the cutover can be rolled back.
+
+**Routes in this mode.** Registered: `POST /attachments/upload`, `.../upload/{id}/confirm`,
+`POST /attachments/delete`, `POST /attachments/uploads/cleanup` (all kept, with changed internals
+below), plus three new ones: `POST /attachments/upload/{id}/authorize`, `POST /attachments/locate`
+and `GET /attachments/inline/{id}/location`. **Not registered (404):** `POST /attachments/download`,
+`GET /attachments/inline/{id}/content` and `POST /attachments/shares/cleanup`, which only make sense
+with SFTPGo. In `sftpgo` mode the three new routes are not registered and the service answers
+`NotFoundError` if called directly.
+
+**The storage key is internal.** `authorize`, `locate` and `inline/{id}/location` return a
+`storageKey`. It is for the portal backend that asked and **must never be sent to a browser**: a
+backend must strip it from anything it forwards. Every response is `Cache-Control: no-store`.
+
+**The flow.**
+
+1. `POST /attachments/upload` records the `PENDING` row exactly as before (RLS as the caller, the
+   closed-work-item refusal, size and type checks) and returns `attachmentId`, `number`, `maxBytes`
+   and `expiresAt`, with no `uploadUrl`/`fieldName`. `expiresAt` is when an unconfirmed upload may be
+   cleaned up (`abandonedUploadAge`, 24h), not a link deadline. Still charged one unit of the
+   per-caller allowance.
+2. The backend receives the file from the browser in chunks and, **for every chunk**, calls
+   `POST /attachments/upload/{id}/authorize` (`{type}`). It checks, as the caller, that the upload is
+   theirs, still `PENDING` and its work item still open, and returns `storageKey`, the declared
+   `sizeBytes`/`contentType`, `maxBytes` and `name`. So access removed part-way stops the upload, and
+   the backend never takes a path from the browser. Not charged against the allowance (a 100 MiB file
+   is a handful of calls).
+3. After the last chunk the backend commits the file, then calls
+   `POST /attachments/upload/{id}/confirm` with `{type, sizeBytes, contentType?}`. This service cannot
+   look at the file, so it trusts what the (internal) backend reports but **checks it against the
+   declaration and the limits**: `sizeBytes` is required (400 without it, and that does not fail the
+   upload), must equal the declared size and not exceed the limit, and for a comment image
+   `contentType` (the type the backend found by reading the bytes) must be PNG, JPEG or WebP. A refusal
+   records the row `FAILED` and **the backend must then delete the file it committed**. The row is
+   marked `COMPLETE` with the key from `storageKeyFor`. A repeated confirm answers the same.
+4. Read: `POST /attachments/locate` (`{type, id}`) checks the caller may see the attachment and returns
+   its `storageKey`, or `available: false` with a reason (`NOT_STORED`, `FAILED`, `DELETED`); an
+   attachment the caller cannot see is 404. Charged one unit of the per-caller allowance, like a link
+   used to be (the 429 message still says "links"). `GET /attachments/inline/{id}/location` is the
+   same for an inline image, with `findInlineImage` shared with `OpenInlineImage` so the lookup and
+   refusals (comment row first, then a migrated work-item image; `410 attachment_removed`) are
+   identical. Not charged, as streaming an image never was.
+5. Delete: `POST /attachments/delete` marks the row `DELETED` with the same rules (only the uploader,
+   never once the work item is closed) and **does not remove the file**: the backend removes it
+   afterwards, so it should `locate` first to get the key.
+
+**What this service cannot do in this mode, and what stands in.**
+
+- *Remove files.* Nothing here deletes a blob. The backend removes the file after a delete or a
+  rejected confirm. `POST /attachments/uploads/cleanup` still marks abandoned rows `FAILED` (an
+  upload that was never confirmed leaves nothing in storage: uncommitted blocks expire by
+  themselves) and the unlinked comment images `DELETED`, and **returns the storage keys of those
+  images in `orphanedKeys`** for the caller to remove. A row marked `DELETED` whose blob was never
+  removed is an orphan nothing else will find, so run the cleanup from something that can delete.
+- *Store an image pasted into a comment.* `ExtractInlineImages` returns the content unchanged: a
+  base64 image stays embedded in the comment, as it did before the stored-attachment flow. The
+  portals upload a pasted image as a `comment` attachment before saving, so this only affects a
+  client that still embeds one.
+- *Create links.* There are none; `ResolveLinks`/`OpenInlineImage` answer `NotFoundError`.
+
+Code: `internal/service/stored_attachment_backend.go` (the three new calls, `confirmFromBackend`,
+`NewBackendStoredAttachmentService`), `internal/config` (`AttachmentStorageMode`), the wiring in
+`internal/server/routes.go` (`storedAttachmentBackend`). Tests:
+`stored_attachment_backend_test.go` (service) and the new cases in `stored_attachment_handler_test.go`.
 
 ## Portal-driven membership writes
 
