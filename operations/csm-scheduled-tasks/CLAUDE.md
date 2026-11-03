@@ -446,21 +446,19 @@ task", and the message lists the registered names.
 | `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
 | `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
 | `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
-| `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's audience for this one run: the configured lists and the registry-derived audience are both ignored, never merged. Same two tasks. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
+| `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
 
 `--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
 implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
 supported by task <name>`. The hook can only tighten the task's configured values, never loosen them. Do not add
 per-task flags to a task that does not need them.
 
-The window and recipient flags are valid only with `--run-now` and only for the two CS Worklogs report tasks
-(each lists them in `registry.Task.RunNowFlags`; any other task exits non-zero with `<flag> is not supported by
-task <name>`, and the two worklog tasks refuse `--dry-run`, `--limit` and `--states` the same way). They are
+The window flags are valid only with `--run-now` and only for the two CS Worklogs report tasks, and the recipient
+flags only for report tasks (each lists them in `registry.Task.RunNowFlags`; any other task exits non-zero with
+`<flag> is not supported by task <name>`, and the report tasks refuse `--dry-run`, `--limit` and `--states` the same way). They are
 refused together with `TRYOUT_TASK`, like every run-now, so they cannot weaken the tryout's debug-recipients rule.
-`--recipients` is also refused when the task has a `debug` list in `SUB_CRON_RECIPIENTS`: debug mail mode would
-redirect the mail and ignore the override. `ALERTS_ENABLED=false` still silences the mail (logged as a WARN). The
-subject of an override run is prefixed `[Test]` (recipients replaced) and/or `[Manual range]` (window given); a
-scheduled run's subject is unchanged. The log carries counts of replaced recipients, never the addresses.
+`--recipients` wins over a `debug` list in `SUB_CRON_RECIPIENTS`. The subject of a window run is prefixed
+`[Manual range]`, and `[Test copy]` when recipients are replaced; a scheduled run's subject is unchanged.
 
 Example (test a custom week to one inbox, nothing reaches the real audience):
 
@@ -468,6 +466,27 @@ Example (test a custom week to one inbox, nothing reaches the real audience):
 csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 --to-date=2030-01-15 \
   --recipients=jane.doe@example.com --cc=john.roe@example.com
 ```
+
+**Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
+`migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
+`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
+`RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
+flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
+`--recipients`, `build` gets `notify.ForRunNow(raw, recipients, cc)`: the mail goes to the given addresses only, the
+Cc is the `--cc` list or empty, the subject is prefixed `[Test copy]`, and a notice at the top of the body names the
+real To and Cc, which are never addressed. The To passed to the handler is the task's real To, or the override list
+when it has none (`orRecipients`), so a task that skips or errors on an empty audience still sends. The explicit list
+wins over the task's `debug` list (the override sender wraps the raw client, not the debug-mode one); without
+`--recipients` a run-now still honours the debug list. Failure alerts to `ALERT_RECIPIENTS` are not affected. The
+rota reminders send to the rota's people, not a report audience, and are not covered. Refused with `TRYOUT_TASK` and
+without `--run-now`; `--cc` needs `--recipients`; `ALERTS_ENABLED=false` still silences the mail. The log carries
+counts of replaced recipients, never the addresses. A report that sends nothing when it has nothing to report stays
+silent, and a query-hour notification whose account has no internal owner is still skipped (that task also
+recomputes thresholds, as every run of it does).
+
+Example: `csm-scheduled-tasks --run-now=migration_case_report --recipients=jane.doe@example.com`. It needs the normal
+env (entity-service, email service, `ALERTS_ENABLED=true`) but no recipient config.
 
 **Ledger.** An override run writes **no ledger row**, like every run-now: `runOnDemand` runs the handler and exits
 without the engine, so `ledger.Attempt`, `Complete` and `Fail` are never called (`cmd/server/main.go`, the run-now
