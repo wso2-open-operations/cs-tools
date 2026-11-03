@@ -32,13 +32,18 @@ seven days, so an upload that is never finished leaves nothing in the container.
 ## Reading and deleting
 
 ```go
-obj, err := store.Open(ctx, key, nil)                         // whole blob
-obj, err := store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 16 << 20})
+// Either the whole blob...
+obj, err := store.Open(ctx, key, nil)
+// ...or one range of it (Length 0 reads to the end).
+obj, err = store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 16 << 20})
+if err != nil { /* ErrNotFound, ErrRangeNotSatisfiable, ... */ }
 defer obj.Body.Close()                                         // obj.Partial, obj.ContentRange for a range
 
 info, err := store.Stat(ctx, key)                              // ErrNotFound if absent
 err = store.Delete(ctx, key)                                   // already gone is not an error
 ```
+
+A missing container is an error, not `ErrNotFound`: only a missing blob is.
 
 Keys are validated: empty, absolute, `.`/`..` folders and backslashes are
 refused with `ErrInvalidKey`. That is a second line of defence. The access
