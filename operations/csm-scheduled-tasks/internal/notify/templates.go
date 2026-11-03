@@ -30,9 +30,6 @@ import (
 //go:embed templates/alert.html
 var alertTemplateRaw string
 
-//go:embed templates/stale_cases_report.html
-var staleCasesReportTemplateRaw string
-
 //go:embed templates/open_cases_report.html
 var openCasesReportTemplateRaw string
 
@@ -57,7 +54,6 @@ func bakeLogo(raw string) string {
 }
 
 var alertTemplate = bakeLogo(alertTemplateRaw)
-var staleCasesReportTemplate = bakeLogo(staleCasesReportTemplateRaw)
 var openCasesReportTemplate = bakeLogo(openCasesReportTemplateRaw)
 var unresolvedProductsReportTemplate = bakeLogo(unresolvedProductsReportTemplateRaw)
 
@@ -117,42 +113,6 @@ func RenderAlertEmail(data AlertEmailData) string {
 	return replacer.Replace(alertTemplate)
 }
 
-// StaleCasesReportData holds every value substituted into the "cases open
-// too long" HTML email template.
-type StaleCasesReportData struct {
-	ThresholdDays int
-	Cases         []entitycases.Case
-	// TotalCases is the true number of matching cases. When it exceeds
-	// len(Cases) the search hit its row cap and the email says so, rather
-	// than presenting the oldest-first slice as the whole backlog.
-	TotalCases int
-}
-
-// RenderStaleCasesReport fills in the "cases open too long" HTML email
-// template — one table row per case, oldest (by CreatedOn) first, exactly
-// the order internal/entitycases.Client.SearchOpenCasesOlderThan already
-// returns them in. [YEAR] is today's year, the same footer-only detail
-// RenderAlertEmail's own doc comment describes.
-func RenderStaleCasesReport(data StaleCasesReportData) string {
-	replacer := strings.NewReplacer(
-		"<!-- [CASE_COUNT] -->", strconv.Itoa(max(data.TotalCases, len(data.Cases))),
-		"<!-- [TRUNCATION_NOTE] -->", staleCasesTruncationNote(len(data.Cases), data.TotalCases),
-		"<!-- [THRESHOLD_DAYS] -->", strconv.Itoa(data.ThresholdDays),
-		"<!-- [CASE_ROWS] -->", renderCaseRows(data.Cases),
-		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
-	)
-	return replacer.Replace(staleCasesReportTemplate)
-}
-
-// staleCasesTruncationNote is the "showing the oldest N" line under the
-// stale-cases headline, or "" when the table is the whole result.
-func staleCasesTruncationNote(shown, total int) string {
-	if total <= shown {
-		return ""
-	}
-	return fmt.Sprintf(`<p style="margin:0 0 30px; color:#b3261e;"><strong>Showing only the oldest %d of %d.</strong> The rest are not listed; close or triage these to see newer ones.</p>`, shown, total)
-}
-
 // OpenCasesReportData holds every value substituted into the "cases still in
 // Open state" HTML email template.
 type OpenCasesReportData struct {
@@ -160,8 +120,7 @@ type OpenCasesReportData struct {
 }
 
 // RenderOpenCasesReport fills in the "cases still in Open state" HTML email
-// template — shares renderCaseRows with RenderStaleCasesReport (the table
-// shape is identical), but its own template file/copy per this component's
+// template. It uses renderCaseRows, with its own template file/copy per this component's
 // own CLAUDE.md ("Per-task report emails" — each report-sending sub-cron
 // owns its own template).
 func RenderOpenCasesReport(data OpenCasesReportData) string {
@@ -366,7 +325,7 @@ func RenderRotaReminderFailure(data RotaReminderFailureData) string {
 	return b.String()
 }
 
-// renderCaseRows builds one <tr> per case for RenderStaleCasesReport. A case
+// renderCaseRows builds one <tr> per case for RenderOpenCasesReport. A case
 // with no account or no assignee (nil AssignedEngineer/AccountDetails on
 // entity-service's side, already flattened to "" by entitycases.Client)
 // shows an em dash rather than a blank cell, so the report never reads as

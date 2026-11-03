@@ -73,7 +73,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | Task name (ledger key) | Default schedule | Enabled | What it does |
 |---|---|---|---|
 | `housekeeping_cleanup` | `0 3 * * *` | Always | Deletes resolved (succeeded or superseded) ledger rows older than `HOUSEKEEPING_RETENTION_DAYS`. Open or failed rows are never deleted. |
-| `stale_cases_report` | `0 7 * * *` | Always | Emails a report of cases not closed and created at least 30 days ago (fixed threshold). Does nothing and still succeeds if the task has no `to` recipients. |
+| `stale_cases_report` | `0 7 * * *` | Always | Emails the long-open cases report from entity-service (`GET /reports/long-open-cases`, deploy entity-service first): cases open for more than 30 days (fixed window), in two tables, "Ongoing cases" and "Ongoing cases on onboarding projects". Sends nothing and still succeeds when both tables are empty or the task has no `to` recipients. |
 | `open_cases_report` | `0 8 * * *` | Always | Emails a report of cases still in the `open` state that were created before the start of yesterday (UTC calendar-day boundary). Does nothing and still succeeds if the task has no `to` recipients. |
 | `migration_case_report` | `30 22 * * 0` | Always | Emails the weekly migration case scan: migration engagements still open after `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS`, in three tables (customer asked to hold, waiting on the accounts team, neither). Sent to the mail groups of the teams entity-service is configured with (`MIGRATION_CASE_REPORT_TEAM_KEYS` there) plus this task's own `to`/`cc`; fails the run when that audience is empty. Always sent, even with empty tables. |
 | `cs_worklogs_daily_report` | `55 3 * * *` | Always | Emails the CS Worklogs daily report for yesterday. 03:55 UTC is 09:25 Asia/Colombo, when the ServiceNow original sends. The reported day is derived in Asia/Colombo, not UTC. Does nothing and still succeeds if the task has no `to` recipients. |
@@ -190,6 +190,7 @@ csm-scheduled-tasks/
 │   ├── availability/             # Client + handler for availability_recalculation
 │   ├── housekeeping/             # Handler for housekeeping_cleanup
 │   ├── stalecases/               # Handler for stale_cases_report
+│   ├── longopenreport/           # Client + types for entity-service's long-open cases report
 │   ├── opencases/                # Handler for open_cases_report
 │   ├── migrationscan/            # Handler for migration_case_report
 │   ├── migrationreport/          # Client + types for entity-service's migration case scan
@@ -320,7 +321,7 @@ treated as unset, except where noted. All example values are placeholders.
 
 Notes:
 
-- Not configurable by environment: the stale-cases age threshold (fixed at 30 days) and the
+- Not configurable by environment: the stale cases report's age window (fixed at 30 days) and the
   per-request HTTP timeouts.
 - The component sets no execution timeout of its own; the platform's scheduled-task time limit
   bounds a run. On `SIGTERM` it cancels in-flight requests and exits.
