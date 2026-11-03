@@ -15,7 +15,7 @@
 // under the License.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
+import { isBackendAttachmentStorage, isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 
 afterEach(() => {
   window.config = {} as typeof window.config;
@@ -39,5 +39,18 @@ describe("isEntityAttachmentsEnabled", () => {
       window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: raw } as unknown as typeof window.config;
       expect(isEntityAttachmentsEnabled()).toBe(true);
     }
+  });
+});
+
+describe("isBackendAttachmentStorage", () => {
+  it("is on only for the mode `backend`, ignoring case and spaces", () => {
+    window.config = {} as typeof window.config;
+    expect(isBackendAttachmentStorage()).toBe(false);
+    for (const raw of ["sftpgo", "", true, 1]) {
+      window.config = { CSM_PORTAL_ATTACHMENT_STORAGE_MODE: raw } as unknown as typeof window.config;
+      expect(isBackendAttachmentStorage()).toBe(false);
+    }
+    window.config = { CSM_PORTAL_ATTACHMENT_STORAGE_MODE: " Backend " } as unknown as typeof window.config;
+    expect(isBackendAttachmentStorage()).toBe(true);
   });
 });

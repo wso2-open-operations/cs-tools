@@ -36,9 +36,9 @@ afterEach(() => {
 });
 
 describe("entityAttachmentMaxBytes", () => {
-  it("defaults to 10 MB", () => {
+  it("defaults to 100 MB", () => {
     setConfig({});
-    expect(entityAttachmentMaxBytes()).toBe(10 * MB);
+    expect(entityAttachmentMaxBytes()).toBe(100 * MB);
   });
 
   it("reads a number or a numeric string of megabytes", () => {
@@ -53,15 +53,15 @@ describe("entityAttachmentMaxBytes", () => {
   it("falls back to the default for anything unusable", () => {
     for (const raw of ["abc", "", "  ", 0, -5, "-5", "0", NaN, Infinity, null, true, {}]) {
       setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: raw });
-      expect(entityAttachmentMaxBytes()).toBe(10 * MB);
+      expect(entityAttachmentMaxBytes()).toBe(100 * MB);
     }
   });
 });
 
 describe("inlineImageMaxBytes", () => {
-  it("defaults to 1 MB and reads its own key", () => {
+  it("defaults to 10 MB and reads its own key", () => {
     setConfig({});
-    expect(inlineImageMaxBytes()).toBe(1 * MB);
+    expect(inlineImageMaxBytes()).toBe(10 * MB);
     setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: "5", CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 });
     expect(inlineImageMaxBytes()).toBe(5 * MB);
   });
@@ -69,7 +69,7 @@ describe("inlineImageMaxBytes", () => {
   it("falls back to the default for anything unusable", () => {
     for (const raw of ["x", 0, -1]) {
       setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: raw });
-      expect(inlineImageMaxBytes()).toBe(1 * MB);
+      expect(inlineImageMaxBytes()).toBe(10 * MB);
     }
   });
 });

@@ -31,3 +31,14 @@ export function isEntityAttachmentsEnabled(): boolean {
   const raw = window.config?.CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED;
   return !(raw === false || (typeof raw === "string" && raw.trim().toLowerCase() === "false"));
 }
+
+/**
+ * Whether the portal backend holds the attachment files itself (Azure Blob
+ * Storage): uploads go to it in chunks and downloads stream from it, with no
+ * link to SFTPGo. True only when `CSM_PORTAL_ATTACHMENT_STORAGE_MODE` is
+ * `backend`; it must match the backend's `ATTACHMENT_STORAGE_MODE`.
+ */
+export function isBackendAttachmentStorage(): boolean {
+  const mode = window.config?.CSM_PORTAL_ATTACHMENT_STORAGE_MODE;
+  return typeof mode === "string" && mode.trim().toLowerCase() === "backend";
+}
