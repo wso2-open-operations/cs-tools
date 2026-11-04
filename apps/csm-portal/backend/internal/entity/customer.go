@@ -105,6 +105,13 @@ func (c *CustomerEntityClient) PatchCase(ctx context.Context, caseID string, bod
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/cases/%s", url.PathEscape(caseID)), body)
 }
 
+// CreatePendingVerification calls POST /pending-verifications on the entity
+// service to add a case to the Pending Verification list.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreatePendingVerification(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/pending-verifications", body)
+}
+
 // CreateCaseComment calls POST /cases/{id}/comments on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error) {
