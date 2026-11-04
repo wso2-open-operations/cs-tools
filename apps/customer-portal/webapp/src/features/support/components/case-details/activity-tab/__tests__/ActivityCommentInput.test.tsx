@@ -318,6 +318,22 @@ describe("ActivityCommentInput", () => {
       expect(mockMutate.mock.calls[0][0].body.content).toContain(`src="/${ID}"`);
     });
 
+    it("uploads an image once when its preview appears twice in the comment", async () => {
+      mockUpload.mockResolvedValue({ id: ID, status: "COMPLETE" });
+      renderInput();
+
+      fireEvent.click(screen.getByRole("button", { name: "add image" }));
+      typeComment(`${withImage}<img src="${PREVIEW}" alt="copy">`);
+      await waitFor(() => expect(sendButton()).not.toBeDisabled());
+      fireEvent.click(sendButton());
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(mockUpload).toHaveBeenCalledTimes(1);
+      const content = mockMutate.mock.calls[0][0].body.content as string;
+      expect(content.match(new RegExp(`src="/${ID}"`, "g"))).toHaveLength(2);
+      expect(content).not.toContain("blob:");
+    });
+
     it("tells the user a comment can have at most 5 images", async () => {
       renderInput();
       fireEvent.click(

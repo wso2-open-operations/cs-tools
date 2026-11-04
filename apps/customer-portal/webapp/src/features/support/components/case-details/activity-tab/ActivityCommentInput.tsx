@@ -171,7 +171,8 @@ export default function ActivityCommentInput({
   // first one that fails; the ones already stored are kept, so sending again
   // uploads only the rest.
   const uploadQueuedImages = async (html: string): Promise<boolean> => {
-    const toUpload = blobImageSources(html).filter(
+    // The same preview can appear more than once (a copied image): upload it once.
+    const toUpload = Array.from(new Set(blobImageSources(html))).filter(
       (url) => !imageIdsRef.current.has(url) && queuedImagesRef.current.has(url),
     );
     if (toUpload.length === 0) return true;
