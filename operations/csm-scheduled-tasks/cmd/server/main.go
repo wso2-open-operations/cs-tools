@@ -428,6 +428,9 @@ func main() {
 	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", false)
 	var incidentAutocloseClient *incidentautoclose.Client
 	var incidentAutocloseCfg incidentautoclose.Config
+	// INCIDENT_AUTOCLOSE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK
+	// find it) but not fired by the engine tick, as for case_autoclosure.
+	incidentAutocloseUnscheduled := false
 	if incidentAutocloseEnabled {
 		// A malformed value refuses to start rather than falling back: a mistyped
 		// dry run must not become a real one.
@@ -1219,12 +1222,39 @@ func main() {
 			slog.Warn("TRYOUT_TASK is incident_autoclose: running as a dry run, nothing will be closed; set INCIDENT_AUTOCLOSE_DRY_RUN=true explicitly to silence this")
 			incidentAutocloseCfg.DryRun = true
 		}
+		// INCIDENT_AUTOCLOSE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=incident_autoclose).
+		// Anything but a boolean refuses to start, like the other
+		// INCIDENT_AUTOCLOSE_* settings.
+		incidentAutocloseScheduled, err := parseStrictBool("INCIDENT_AUTOCLOSE_SCHEDULED", os.Getenv("INCIDENT_AUTOCLOSE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !incidentAutocloseScheduled {
+			incidentAutocloseUnscheduled = true
+			slog.Info("incident_autoclose is not scheduled (INCIDENT_AUTOCLOSE_SCHEDULED=false): it runs only with --run-now=incident_autoclose")
+		}
+		// An on-demand run uses the configured settings narrowed by its arguments
+		// and writes no ledger row, like every run-now. That is safe beside the
+		// scheduled run: entity-service re-checks each incident under its row lock
+		// and recomputes the daily budget from its own data on every call.
+		incidentRunNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowIncidentAutoclose(incidentAutocloseCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			return incidentautoclose.Run(incidentAutocloseClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit}, nil
+		}
 		tasks = append(tasks, registry.Task{
-			Name:     incidentAutocloseTaskName,
-			Schedule: scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
-			Handler:  incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
-			To:       incidentAutocloseTo,
-			Cc:       incidentAutocloseCc,
+			Name:         incidentAutocloseTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
+			Handler:      incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
+			RunNowNarrow: incidentRunNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit"},
+			To:           incidentAutocloseTo,
+			Cc:           incidentAutocloseCc,
 		})
 	}
 	// entity-service's daily ACP reopen check -- see internal/acp's
@@ -1312,7 +1342,10 @@ func main() {
 
 	engineTasks := tasks
 	if autoclosureUnscheduled {
-		engineTasks = withoutTask(tasks, autoclosureTaskName)
+		engineTasks = withoutTask(engineTasks, autoclosureTaskName)
+	}
+	if incidentAutocloseUnscheduled {
+		engineTasks = withoutTask(engineTasks, incidentAutocloseTaskName)
 	}
 	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 

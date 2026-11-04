@@ -98,6 +98,10 @@ type Request struct {
 	ResolvedForDays int  `json:"resolvedForDays"`
 	Limit           int  `json:"limit,omitempty"`
 	DryRun          bool `json:"dryRun,omitempty"`
+	// DailyLimit caps the incidents closed per UTC day, counting manual closes;
+	// 0 is omitted and means no cap. entity-service recomputes the remaining
+	// budget from its own data on every call.
+	DailyLimit int `json:"dailyLimit,omitempty"`
 }
 
 // Closed is one incident closed (or, in a dry run, that would be).
@@ -116,12 +120,15 @@ type Failed struct {
 }
 
 // Response is entity-service's answer for one page. More is true when the page
-// was full, so there may be more due.
+// was full, so there may be more due. DailyLimitReached is true when the daily
+// budget is exhausted (before the call, by it, or in a dry run by what it would
+// close); More is then always false.
 type Response struct {
-	DryRun bool     `json:"dryRun"`
-	Closed []Closed `json:"closed"`
-	Failed []Failed `json:"failed"`
-	More   bool     `json:"more"`
+	DryRun            bool     `json:"dryRun"`
+	Closed            []Closed `json:"closed"`
+	Failed            []Failed `json:"failed"`
+	More              bool     `json:"more"`
+	DailyLimitReached bool     `json:"dailyLimitReached"`
 }
 
 // AutoClose asks entity-service to close one page of due incidents.

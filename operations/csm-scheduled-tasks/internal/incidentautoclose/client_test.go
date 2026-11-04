@@ -52,33 +52,34 @@ func TestClient_AutoClosePostsTheRequest(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
 		_, _ = w.Write([]byte(`{"dryRun":true,"closed":[{"id":"1","number":"INC1","resolvedOn":"2026-10-01T00:00:00Z"}],` +
-			`"failed":[{"id":"2","number":"INC2","error":"x"}],"more":true}`))
+			`"failed":[{"id":"2","number":"INC2","error":"x"}],"more":false,"dailyLimitReached":true}`))
 	})
-	resp, err := c.AutoClose(context.Background(), Request{ResolvedForDays: 14, Limit: 200, DryRun: true})
+	resp, err := c.AutoClose(context.Background(), Request{ResolvedForDays: 14, Limit: 200, DryRun: true, DailyLimit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if path != "/incidents/autoclose" || auth != "Bearer test-token" {
 		t.Errorf("path=%q auth=%q", path, auth)
 	}
-	if body["resolvedForDays"] != float64(14) || body["limit"] != float64(200) || body["dryRun"] != true {
+	if body["resolvedForDays"] != float64(14) || body["limit"] != float64(200) || body["dryRun"] != true || body["dailyLimit"] != float64(50) {
 		t.Errorf("body = %v", body)
 	}
-	if !resp.DryRun || !resp.More || len(resp.Closed) != 1 || resp.Closed[0].Number != "INC1" || resp.Failed[0].Number != "INC2" {
+	if !resp.DryRun || resp.More || !resp.DailyLimitReached || len(resp.Closed) != 1 || resp.Closed[0].Number != "INC1" || resp.Failed[0].Number != "INC2" {
 		t.Errorf("resp = %+v", resp)
 	}
 }
 
 // entity-service's handler uses DisallowUnknownFields, so a key outside the
-// agreed request {resolvedForDays, limit, dryRun} would fail every run with a
+// agreed request {resolvedForDays, limit, dryRun, dailyLimit} would fail every run with a
 // 400. dryRun and limit are omitempty: a real run with the defaults sends only
 // resolvedForDays.
 func TestClient_SendsOnlyContractFields(t *testing.T) {
-	allowed := map[string]bool{"resolvedForDays": true, "limit": true, "dryRun": true}
+	allowed := map[string]bool{"resolvedForDays": true, "limit": true, "dryRun": true, "dailyLimit": true}
 	for _, req := range []Request{
 		{ResolvedForDays: 14},
 		{ResolvedForDays: 14, Limit: PageSize},
 		{ResolvedForDays: 14, Limit: PageSize, DryRun: true},
+		{ResolvedForDays: 14, Limit: PageSize, DailyLimit: 100},
 	} {
 		var body map[string]any
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -96,6 +97,9 @@ func TestClient_SendsOnlyContractFields(t *testing.T) {
 		}
 		if _, ok := body["dryRun"]; ok != req.DryRun {
 			t.Errorf("request %+v: body = %v, want dryRun present only for a dry run", req, body)
+		}
+		if _, ok := body["dailyLimit"]; ok != (req.DailyLimit != 0) {
+			t.Errorf("request %+v: body = %v, want dailyLimit present only when set", req, body)
 		}
 	}
 }

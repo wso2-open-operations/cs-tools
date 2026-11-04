@@ -37,6 +37,8 @@ const (
 	// is kept small enough to finish well inside entity-service's 60s
 	// REQUEST_TIMEOUT (see callTimeout).
 	PageSize = 200
+	// MaxDailyLimit is the largest dailyLimit entity-service accepts.
+	MaxDailyLimit = 100000
 	// maxLimit is the largest limit entity-service accepts.
 	maxLimit = 1000
 	// MaxPages bounds one run: 20 pages of 200 is 4,000 incidents an hour,
@@ -55,10 +57,13 @@ type Config struct {
 	Days int
 	// DryRun asks entity-service which incidents are due without closing any.
 	DryRun bool
+	// DailyLimit caps the incidents closed per UTC day, manual closes included
+	// (entity-service counts them from its own data). 0 means no cap.
+	DailyLimit int
 }
 
-// ConfigFromEnv reads INCIDENT_AUTOCLOSE_DAYS and INCIDENT_AUTOCLOSE_DRY_RUN
-// through getenv (os.Getenv in main). Unlike the tuning knobs main reads with a
+// ConfigFromEnv reads INCIDENT_AUTOCLOSE_DAYS, INCIDENT_AUTOCLOSE_DRY_RUN and
+// INCIDENT_AUTOCLOSE_DAILY_LIMIT through getenv (os.Getenv in main). Unlike the tuning knobs main reads with a
 // logged fallback, a malformed value here is an error so the process refuses to
 // start: falling back to the default would turn a mistyped dry run into a real
 // one, or a mistyped threshold into closing incidents on a different day.
@@ -77,6 +82,13 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("INCIDENT_AUTOCLOSE_DRY_RUN %q is not a boolean", v)
 		}
 		cfg.DryRun = b
+	}
+	if v := strings.TrimSpace(getenv("INCIDENT_AUTOCLOSE_DAILY_LIMIT")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > MaxDailyLimit {
+			return Config{}, fmt.Errorf("INCIDENT_AUTOCLOSE_DAILY_LIMIT %q must be a whole number from 0 (no cap) to %d", v, MaxDailyLimit)
+		}
+		cfg.DailyLimit = n
 	}
 	return cfg, nil
 }
@@ -101,18 +113,22 @@ type closer interface {
 // failed, at maxLimit). The second fails the run and says that later due
 // incidents were not reached.
 //
+// When entity-service reports dailyLimitReached the day's budget is spent: that
+// is a normal stop, logged at Info, not an error and not an alert, and the next
+// run (or the next UTC day) continues.
+//
 // It returns an error when a call fails or any incident failed, naming the
 // incidents, so the engine alerts and retries. That is safe: closed incidents
 // are no longer due.
 func Run(client closer, cfg Config) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
-		req := Request{ResolvedForDays: cfg.Days, DryRun: cfg.DryRun}
+		req := Request{ResolvedForDays: cfg.Days, DryRun: cfg.DryRun, DailyLimit: cfg.DailyLimit}
 		// dryRun is what entity-service actually did, which the summary reports.
 		dryRun := cfg.DryRun
 		closed, pages := 0, 0
 		var failures []string
 		failedSeen := map[string]bool{}
-		more := false
+		more, limitReached := false, false
 		var callErr error
 		for pages < MaxPages {
 			if err := ctx.Err(); err != nil {
@@ -150,6 +166,12 @@ func Run(client closer, cfg Config) func(ctx context.Context) error {
 				failures = append(failures, fmt.Sprintf("%s: %s", f.Number, truncate(f.Error, maxErrorLen)))
 			}
 			more = resp.More
+			if resp.DailyLimitReached {
+				limitReached, more = true, false
+				slog.InfoContext(ctx, "incident autoclose: daily limit reached; the rest are left for the next run",
+					"dailyLimit", cfg.DailyLimit, "closed", closed, "dryRun", dryRun)
+				break
+			}
 			if !more || callErr != nil {
 				break
 			}
@@ -170,7 +192,8 @@ func Run(client closer, cfg Config) func(ctx context.Context) error {
 		}
 
 		slog.InfoContext(ctx, "incident autoclose: run complete", "dryRun", dryRun, "resolvedForDays", cfg.Days,
-			"pages", pages, "closed", closed, "failed", len(failures), "more", more)
+			"pages", pages, "closed", closed, "failed", len(failures), "more", more,
+			"dailyLimit", cfg.DailyLimit, "dailyLimitReached", limitReached)
 
 		var msgs []string
 		if callErr != nil {

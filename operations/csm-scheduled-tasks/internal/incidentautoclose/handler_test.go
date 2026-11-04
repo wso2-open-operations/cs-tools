@@ -84,6 +84,65 @@ func TestRun_SendsDaysLimitAndDryRun(t *testing.T) {
 	}
 }
 
+func TestRun_SendsDailyLimitOnEveryPage(t *testing.T) {
+	f := &fakeCloser{pages: []Response{closedPage("a", 3, true), closedPage("b", 1, false)}}
+	if err := Run(f, Config{Days: 14, DailyLimit: 40})(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 2 {
+		t.Fatalf("calls = %d, want 2", len(f.calls))
+	}
+	for i, c := range f.calls {
+		if c.DailyLimit != 40 {
+			t.Errorf("call %d dailyLimit = %d, want 40", i+1, c.DailyLimit)
+		}
+	}
+}
+
+// The budget being spent is a normal stop: no error (so no alert), no further
+// pages, and an Info line.
+func TestRun_DailyLimitReachedStopsCleanly(t *testing.T) {
+	logged := captureLogs(t)
+	page2 := closedPage("b", 2, false)
+	page2.DailyLimitReached = true
+	f := &fakeCloser{pages: []Response{closedPage("a", 3, true), page2, closedPage("c", 3, true)}}
+	if err := Run(f, Config{Days: 14, DailyLimit: 5})(context.Background()); err != nil {
+		t.Fatalf("a spent daily budget must not fail the run: %v", err)
+	}
+	if len(f.calls) != 2 {
+		t.Errorf("calls = %d, want 2 (stop at the page that reports the limit)", len(f.calls))
+	}
+	out := logged.String()
+	if !strings.Contains(out, "daily limit reached") || !strings.Contains(out, "level=INFO") || strings.Contains(out, "level=WARN") {
+		t.Errorf("want an Info line and no warning, got: %s", out)
+	}
+	if !strings.Contains(out, "dailyLimitReached=true") {
+		t.Errorf("summary lacks dailyLimitReached: %s", out)
+	}
+}
+
+// Budget already spent before the call: empty lists, still a clean run.
+func TestRun_DailyLimitAlreadySpent(t *testing.T) {
+	f := &fakeCloser{pages: []Response{{DailyLimitReached: true}}}
+	if err := Run(f, Config{Days: 14, DailyLimit: 5})(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 1 {
+		t.Errorf("calls = %d, want 1", len(f.calls))
+	}
+}
+
+// Failures on the page that hit the limit are still reported.
+func TestRun_DailyLimitReachedStillReportsFailures(t *testing.T) {
+	page := failedPage("x", 1, false)
+	page.DailyLimitReached = true
+	f := &fakeCloser{pages: []Response{page}}
+	err := Run(f, Config{Days: 14, DailyLimit: 5})(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "could not be closed") {
+		t.Fatalf("err = %v, want the failure named", err)
+	}
+}
+
 func TestRun_PagesWhileMore(t *testing.T) {
 	f := &fakeCloser{pages: []Response{closedPage("a", 3, true), closedPage("b", 3, true), closedPage("c", 1, false)}}
 	if err := Run(f, Config{Days: 14})(context.Background()); err != nil {
@@ -250,6 +309,15 @@ func TestConfigFromEnv_Values(t *testing.T) {
 	}
 }
 
+func TestConfigFromEnv_DailyLimit(t *testing.T) {
+	for in, want := range map[string]int{"": 0, "0": 0, " 250 ": 250, "100000": 100000} {
+		cfg, err := ConfigFromEnv(env(map[string]string{"INCIDENT_AUTOCLOSE_DAILY_LIMIT": in}))
+		if err != nil || cfg.DailyLimit != want {
+			t.Errorf("%q: cfg = %+v, err = %v, want %d", in, cfg, err, want)
+		}
+	}
+}
+
 func TestConfigFromEnv_RejectsBadValues(t *testing.T) {
 	for _, m := range []map[string]string{
 		{"INCIDENT_AUTOCLOSE_DAYS": "0"},
@@ -257,6 +325,10 @@ func TestConfigFromEnv_RejectsBadValues(t *testing.T) {
 		{"INCIDENT_AUTOCLOSE_DAYS": "14d"},
 		{"INCIDENT_AUTOCLOSE_DAYS": "3651"},
 		{"INCIDENT_AUTOCLOSE_DRY_RUN": "yes please"},
+		{"INCIDENT_AUTOCLOSE_DAILY_LIMIT": "-1"},
+		{"INCIDENT_AUTOCLOSE_DAILY_LIMIT": "100001"},
+		{"INCIDENT_AUTOCLOSE_DAILY_LIMIT": "abc"},
+		{"INCIDENT_AUTOCLOSE_DAILY_LIMIT": "1.5"},
 	} {
 		if _, err := ConfigFromEnv(env(m)); err == nil {
 			t.Errorf("%v was accepted", m)
