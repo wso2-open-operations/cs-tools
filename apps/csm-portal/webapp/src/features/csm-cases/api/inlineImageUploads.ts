@@ -26,16 +26,19 @@ import {
  * `comment` attachments instead of being embedded in the comment as base64.
  *
  * While the comment is being written the editor shows the file through a local
- * `blob:` URL and the upload runs in the background. This module remembers, per
- * blob URL, how that upload went. When the comment is sent every blob URL in its
- * HTML is replaced by `/<attachment id>`, the reference entity-service and the
- * comment display already use, so a `blob:` URL never leaves the browser.
+ * `blob:` URL and nothing is sent. The upload starts when the comment is sent
+ * ({@link uploadQueuedImages}), so an image that is removed or never posted
+ * leaves nothing behind on the server. This module remembers, per blob URL, the
+ * file and how its upload went. Once the comment's images are stored every blob
+ * URL in its HTML is replaced by `/<attachment id>`, the reference entity-service
+ * and the comment display already use, so a `blob:` URL never leaves the browser.
  *
  * It is kept at module level, not in the comment input, because the composer's
  * draft is held by its parent and outlives the input component.
  */
 
 type UploadState =
+  | { status: "queued"; file: File }
   | { status: "pending" }
   | { status: "done"; id: string }
   | { status: "failed"; message: string };
@@ -64,45 +67,60 @@ function blobSources(html: string): string[] {
 }
 
 /**
- * Starts uploading `file` as an image of the case's comments and returns the
- * `blob:` URL to show in the editor meanwhile. The file must already have passed
- * the editor's type and size checks; entity-service checks them again.
+ * Keeps `file` for the comment's images and returns the `blob:` URL to show in
+ * the editor. Nothing is uploaded yet: {@link uploadQueuedImages} does that when
+ * the comment is sent. The file must already have passed the editor's type and
+ * size checks; entity-service checks them again.
  */
-export function startInlineImageUpload(
+export function queueInlineImage(file: File): string {
+  const previewUrl = URL.createObjectURL(file);
+  uploads.set(previewUrl, { status: "queued", file });
+  publish();
+  return previewUrl;
+}
+
+/**
+ * Uploads, one after another, the images in `html` that have not been uploaded
+ * yet, as images of the case's comments. It does not throw: each image ends up
+ * `done` or `failed`, which {@link inspectInlineImages} reports. An image that
+ * already failed is not tried again (the person removes it and adds it again).
+ */
+export async function uploadQueuedImages(
   api: BackendApi,
   parentId: string,
-  file: File,
-): string {
-  const previewUrl = URL.createObjectURL(file);
-  uploads.set(previewUrl, { status: "pending" });
-  publish();
-  uploadEntityAttachment(api, {
-    type: "comment",
-    parentId,
-    file,
-    name: file.name || "image",
-  }).then(
-    (confirmed) => {
+  html: string,
+): Promise<void> {
+  for (const previewUrl of blobSources(html)) {
+    const state = uploads.get(previewUrl);
+    if (state?.status !== "queued") continue;
+    uploads.set(previewUrl, { status: "pending" });
+    publish();
+    try {
+      const confirmed = await uploadEntityAttachment(api, {
+        type: "comment",
+        parentId,
+        file: state.file,
+        name: state.file.name || "image",
+      });
       // The draft was cleared while this ran: do not bring the entry back.
-      if (!uploads.has(previewUrl)) return;
+      if (!uploads.has(previewUrl)) continue;
       uploads.set(previewUrl, { status: "done", id: confirmed.id.toLowerCase() });
-      publish();
-    },
-    (err: unknown) => {
-      if (!uploads.has(previewUrl)) return;
+    } catch (err: unknown) {
+      if (!uploads.has(previewUrl)) continue;
       uploads.set(previewUrl, {
         status: "failed",
         message: entityAttachmentErrorMessage(err, "An image could not be uploaded."),
       });
-      publish();
-    },
-  );
-  return previewUrl;
+    }
+    publish();
+  }
 }
 
 export interface InlineImageStatus {
-  /** Images still uploading. */
+  /** Images being uploaded right now. */
   pending: number;
+  /** Images added to the comment that have not been uploaded yet. */
+  queued: number;
   /** The message of the first image whose upload failed. */
   failedMessage: string | null;
   /** `blob:` images this page did not upload (e.g. pasted in from another tab). */
@@ -111,11 +129,12 @@ export interface InlineImageStatus {
 
 /** How the uploads of the images in `html` stand. */
 export function inspectInlineImages(html: string): InlineImageStatus {
-  const status: InlineImageStatus = { pending: 0, failedMessage: null, unknown: 0 };
+  const status: InlineImageStatus = { pending: 0, queued: 0, failedMessage: null, unknown: 0 };
   for (const src of blobSources(html)) {
     const state = uploads.get(src);
     if (!state) status.unknown += 1;
     else if (state.status === "pending") status.pending += 1;
+    else if (state.status === "queued") status.queued += 1;
     else if (state.status === "failed") status.failedMessage ??= state.message;
   }
   return status;

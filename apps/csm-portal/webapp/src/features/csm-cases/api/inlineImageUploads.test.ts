@@ -29,9 +29,10 @@ import {
   dropFailedImages,
   hasBlobSource,
   inspectInlineImages,
+  queueInlineImage,
   releaseInlineImages,
   resolveInlineImageSources,
-  startInlineImageUpload,
+  uploadQueuedImages,
 } from "@features/csm-cases/api/inlineImageUploads";
 
 const CASE_ID = "22222222-2222-4222-8222-222222222222";
@@ -60,78 +61,110 @@ afterEach(() => {
   created.forEach((url) => releaseInlineImages(`<img src="${url}">`));
 });
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const img = (src: string) => `<p>hi</p><img src="${src}" alt="x">`;
 
-describe("startInlineImageUpload", () => {
-  it("uploads the file as a comment attachment of the case and returns a local preview URL", async () => {
-    upload.mockResolvedValue({ id: IMAGE_ID } as never);
-    const src = startInlineImageUpload(api, CASE_ID, file);
+const none = { pending: 0, queued: 0, failedMessage: null, unknown: 0 };
+
+describe("queueInlineImage", () => {
+  it("keeps the file and returns a local preview URL without uploading anything", () => {
+    const src = queueInlineImage(file);
 
     expect(src).toBe("blob:https://csm.example.com/1");
+    expect(upload).not.toHaveBeenCalled();
+    expect(inspectInlineImages(img(src))).toEqual({ ...none, queued: 1 });
+  });
+});
+
+describe("uploadQueuedImages", () => {
+  it("uploads the file as a comment attachment of the case", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const src = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(src));
+
     expect(upload).toHaveBeenCalledWith(api, {
       type: "comment",
       parentId: CASE_ID,
       file,
       name: "shot.png",
     });
-    expect(inspectInlineImages(img(src))).toEqual({ pending: 1, failedMessage: null, unknown: 0 });
-    await flush();
-    expect(inspectInlineImages(img(src))).toEqual({ pending: 0, failedMessage: null, unknown: 0 });
+    expect(inspectInlineImages(img(src))).toEqual(none);
   });
 
   it("swaps the preview URL for the lowercase attachment id once the upload is done", async () => {
     upload.mockResolvedValue({ id: IMAGE_ID } as never);
-    const src = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
+    const src = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(src));
 
     const out = resolveInlineImageSources(img(src));
     expect(out).toBe(img(`/${IMAGE_ID.toLowerCase()}`));
     expect(hasBlobSource(out)).toBe(false);
   });
 
-  it("reports a failed upload with its message and never resolves it", async () => {
+  it("uploads only the images the comment still shows", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const kept = queueInlineImage(file);
+    const removed = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(kept));
+
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(inspectInlineImages(img(removed)).queued).toBe(1);
+  });
+
+  it("reports a failed upload with its message, never resolves it and does not try it again", async () => {
     upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
-    const src = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
+    const src = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(src));
 
     expect(inspectInlineImages(img(src)).failedMessage).toContain("Could not upload shot.png");
     expect(hasBlobSource(resolveInlineImageSources(img(src)))).toBe(true);
+
+    await uploadQueuedImages(api, CASE_ID, img(src));
+    expect(upload).toHaveBeenCalledTimes(1);
   });
 
-  it("flags a blob: image it did not upload", () => {
+  it("goes on with the next image after one fails", async () => {
+    upload.mockRejectedValueOnce(new Error("nope")).mockResolvedValue({ id: IMAGE_ID } as never);
+    const first = queueInlineImage(file);
+    const second = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(first) + img(second));
+
+    expect(inspectInlineImages(img(first)).failedMessage).toBe("nope");
+    expect(inspectInlineImages(img(second))).toEqual(none);
+  });
+
+  it("flags a blob: image it did not queue", () => {
     expect(inspectInlineImages(img("blob:https://csm.example.com/other")).unknown).toBe(1);
   });
 
   it("ignores images that are not local previews", () => {
     const html = img("/11111111-1111-4111-8111-111111111111") + img("data:image/png;base64,AAAA");
-    expect(inspectInlineImages(html)).toEqual({ pending: 0, failedMessage: null, unknown: 0 });
+    expect(inspectInlineImages(html)).toEqual(none);
     expect(resolveInlineImageSources(html)).toBe(html);
   });
 });
 
 describe("dropFailedImages", () => {
   it("removes only the images whose upload failed", async () => {
-    upload.mockRejectedValueOnce(new Error("nope")).mockReturnValue(new Promise(() => {}));
-    const failed = startInlineImageUpload(api, CASE_ID, file);
-    const pending = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
-    const html = `<p>a</p><img src="${failed}" alt="x"><img src='${pending}'>`;
-    expect(dropFailedImages(html)).toBe(`<p>a</p><img src="${pending}">`);
+    upload.mockRejectedValueOnce(new Error("nope"));
+    const failed = queueInlineImage(file);
+    const queued = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(failed));
+    const html = `<p>a</p><img src="${failed}" alt="x"><img src='${queued}'>`;
+    expect(dropFailedImages(html)).toBe(`<p>a</p><img src="${queued}">`);
   });
 
   it("removes the whole element when an attribute holds a >", async () => {
     upload.mockRejectedValueOnce(new Error("nope"));
-    const failed = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
+    const failed = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(failed));
     const html = `<p>a</p><img alt="a>b" src="${failed}" title='x > y'><p>c</p>`;
     expect(dropFailedImages(html)).toBe("<p>a</p><p>c</p>");
   });
 
   it("keeps uploaded, unknown and ordinary images", async () => {
-    upload.mockResolvedValue({ id: IMAGE_ID });
-    const done = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const done = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(done));
     const html = img(done) + img("blob:https://csm.example.com/other") + img("/11111111-1111-4111-8111-111111111111");
     expect(dropFailedImages(html)).toBe(html);
   });
@@ -140,8 +173,8 @@ describe("dropFailedImages", () => {
 describe("releaseInlineImages", () => {
   it("revokes the preview URLs and forgets them", async () => {
     upload.mockResolvedValue({ id: IMAGE_ID } as never);
-    const src = startInlineImageUpload(api, CASE_ID, file);
-    await flush();
+    const src = queueInlineImage(file);
+    await uploadQueuedImages(api, CASE_ID, img(src));
 
     releaseInlineImages(img(src));
 
@@ -152,25 +185,27 @@ describe("releaseInlineImages", () => {
   it("ignores an upload that finishes after its image was released", async () => {
     let finish: (v: { id: string }) => void = () => {};
     upload.mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
-    const src = startInlineImageUpload(api, CASE_ID, file);
+    const src = queueInlineImage(file);
+    const running = uploadQueuedImages(api, CASE_ID, img(src));
 
     releaseInlineImages(img(src));
     finish({ id: IMAGE_ID });
-    await flush();
+    await running;
 
     // Still unknown: the late success did not bring the entry back.
-    expect(inspectInlineImages(img(src))).toEqual({ pending: 0, failedMessage: null, unknown: 1 });
+    expect(inspectInlineImages(img(src))).toEqual({ ...none, unknown: 1 });
   });
 
   it("ignores an upload that fails after its image was released", async () => {
     let fail: (e: Error) => void = () => {};
     upload.mockReturnValue(new Promise((_, reject) => (fail = reject)) as never);
-    const src = startInlineImageUpload(api, CASE_ID, file);
+    const src = queueInlineImage(file);
+    const running = uploadQueuedImages(api, CASE_ID, img(src));
 
     releaseInlineImages(img(src));
     fail(new Error("boom"));
-    await flush();
+    await running;
 
-    expect(inspectInlineImages(img(src))).toEqual({ pending: 0, failedMessage: null, unknown: 1 });
+    expect(inspectInlineImages(img(src))).toEqual({ ...none, unknown: 1 });
   });
 });
