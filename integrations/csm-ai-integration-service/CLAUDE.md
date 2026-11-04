@@ -103,7 +103,8 @@ joins back into the same text (`TestTheBuiltInCatalogueSplitAtHeadingsJoinsBackU
 
 **`catalogue-parts/` is generated: never edit it by hand.** `make catalogue-parts` (`cmd/splitcatalogue`)
 cuts the built-in `catalogue.md` with `catalogue.Split` into parts of at most `catalogue.MaxPartBytes`
-(20,000 bytes, under 20 KB however it is counted). It cuts before `## ` sections and packs whole sections
+(19,000 bytes: a margin under 20 KB however it is counted, and shown as 19 KB, never 20 KB, by a
+file manager that rounds to the nearest KB). It cuts before `## ` sections and packs whole sections
 into as few parts as fit; a section too large for one part is cut before its `### ` subsections, then at
 blank lines (a single paragraph over the limit is an error). It writes `catalogue-01.md`, `catalogue-02.md`,
 ... and removes old `catalogue-NN.md` files, so a shorter catalogue leaves no stale part. `Split` refuses a
