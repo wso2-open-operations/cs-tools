@@ -904,18 +904,23 @@ paths:
         Change Request flagged as needing formal customer sign-off. Has no
         ServiceNow equivalent — always backed by Postgres. addedBy is never
         accepted from the caller; it is resolved server-side from the
-        caller's own authenticated identity. Two distinct callers hit this
-        endpoint: a customer, manually adding a closed record from its own
-        detail page (addedReason=MANUAL, no previousStatus); and the
-        auto-closure automation — the existing ServiceNow-driven staged
-        closure sequence already tracked on work_item
-        (autoclosure_step/autoclosure_state_on, see CaseView's own
-        AutoclosureStep/AutoclosureStateTime) — which is expected to call
-        this endpoint itself the moment it auto-closes a case out of Awaiting
-        Info or Solution Proposed (addedReason=AUTO_CLOSED, previousStatus
-        set to whichever of the two it closed from). That integration is not
-        part of this feature; this endpoint is simply what it is expected to
-        call once built.
+        caller's own authenticated identity. Three callers hit this endpoint
+        today: a customer, manually adding a closed record from its own
+        detail page (addedReason=MANUAL, no previousStatus); the CSM portal
+        backend, which calls this itself immediately after an engineer
+        closes a case through that portal (addedReason=AUTO_CLOSED,
+        previousStatus set to whichever of Work In Progress/Solution
+        Proposed the case was closed from -- the only two states that
+        portal's own case state machine ever closes a case out of); and the
+        separately-built, not-yet-implemented auto-closure automation — the
+        existing ServiceNow-driven staged closure sequence already tracked
+        on work_item (autoclosure_step/autoclosure_state_on, see CaseView's
+        own AutoclosureStep/AutoclosureStateTime) — which is expected to
+        call this endpoint itself the moment it auto-closes a case out of
+        Awaiting Info or Solution Proposed (addedReason=AUTO_CLOSED,
+        previousStatus set to whichever of the two it closed from). That
+        integration is not part of this feature; this endpoint is simply
+        what it is expected to call once built.
       operationId: createPendingVerification
       requestBody:
         required: true
@@ -37579,13 +37584,15 @@ components:
           type: string
           enum: [AUTO_CLOSED, MANUAL]
           description: >-
-            MANUAL = added by a customer; AUTO_CLOSED = added by the
-            auto-closure automation when it closed this case itself — see
+            MANUAL = added by a customer; AUTO_CLOSED = added by the CSM
+            portal backend when an engineer closes the case through that
+            portal, or by the (separately built, not-yet-implemented)
+            auto-closure automation — see
             CreatePendingVerificationRequest.addedReason for the full
             caller-side contract.
         previousStatus:
           type: string
-          enum: [SOLUTION_PROPOSED, AWAITING_INFO]
+          enum: [SOLUTION_PROPOSED, AWAITING_INFO, WORK_IN_PROGRESS]
           nullable: true
           description: Set iff addedReason is AUTO_CLOSED — the state the case was auto-closed from.
         addedOn:
@@ -37617,19 +37624,25 @@ components:
           type: string
           enum: [AUTO_CLOSED, MANUAL]
           description: >-
-            MANUAL is a customer adding a closed record themselves. AUTO_CLOSED
-            is the auto-closure automation (ServiceNow's existing staged
-            closure sequence, work_item.autoclosure_step/autoclosure_state_on)
-            calling this endpoint itself at the moment it auto-closes a case —
-            that caller is not part of this feature, this is just the
-            contract it is expected to call.
+            MANUAL is a customer adding a closed record themselves.
+            AUTO_CLOSED is the CSM portal backend calling this endpoint
+            itself immediately after an engineer closes a case through that
+            portal, or (separately built, not yet implemented) the
+            auto-closure automation (ServiceNow's existing staged closure
+            sequence, work_item.autoclosure_step/autoclosure_state_on)
+            calling this endpoint itself at the moment it auto-closes a
+            case.
         previousStatus:
           type: string
-          enum: [SOLUTION_PROPOSED, AWAITING_INFO]
+          enum: [SOLUTION_PROPOSED, AWAITING_INFO, WORK_IN_PROGRESS]
           description: >-
             Required iff addedReason is AUTO_CLOSED, must be omitted when
             MANUAL. The state the case was auto-closed from, so the
-            Pending Verification entry's history shows why it needed sign-off.
+            Pending Verification entry's history shows why it needed
+            sign-off. WORK_IN_PROGRESS covers the CSM portal's own close
+            flow (its case state machine only ever reaches Closed from Work
+            In Progress or Solution Proposed); Awaiting Info is specific to
+            the auto-closure automation above.
         note:
           type: string
 
