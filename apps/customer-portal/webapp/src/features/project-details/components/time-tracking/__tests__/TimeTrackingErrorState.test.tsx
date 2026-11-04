@@ -15,19 +15,18 @@
 // under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import TimeTrackingErrorState from "@time-tracking/TimeTrackingErrorState";
-
-// Mock @components/error/Error500Page
-vi.mock("@components/error/Error500Page", () => ({
-  default: () => <div data-testid="error-icon" />,
-}));
 
 describe("TimeTrackingErrorState", () => {
   it("should render error icon and error message", () => {
-    render(<TimeTrackingErrorState />);
+    const { container } = render(<TimeTrackingErrorState />);
 
-    expect(screen.getByTestId("error-icon")).toBeInTheDocument();
+    // The illustration is decorative: an <img> hidden from assistive tech.
+    const illustration = container.querySelector("img");
+    expect(illustration).toBeInTheDocument();
+    expect(illustration).toHaveAttribute("aria-hidden", "true");
+    expect(illustration).toHaveAttribute("alt", "");
     expect(
       screen.getByText(
         "Error loading time tracking details. Please try again later.",

@@ -68,7 +68,6 @@ type stubCaseRepo struct {
 	searchCases                func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
 	createCaseAttachment       func(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error)
 	createCaseAttachmentFromSN func(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
-	recordCRAttachmentFromSN   func(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, createdByEmail string) (time.Time, error)
 	searchCaseAttachments      func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	searchWorkItemAttachments  func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	getCaseAttachmentByID      func(ctx context.Context, id string) (domain.Attachment, error)
@@ -201,12 +200,6 @@ func (s *stubCaseRepo) CreateCaseAttachment(ctx context.Context, req domain.Crea
 func (s *stubCaseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
 	if s.createCaseAttachmentFromSN != nil {
 		return s.createCaseAttachmentFromSN(ctx, req, id, sizeBytes, uploadedBy)
-	}
-	panic("not implemented")
-}
-func (s *stubCaseRepo) RecordChangeRequestAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, createdByEmail string) (time.Time, error) {
-	if s.recordCRAttachmentFromSN != nil {
-		return s.recordCRAttachmentFromSN(ctx, req, id, sizeBytes, createdByEmail)
 	}
 	panic("not implemented")
 }

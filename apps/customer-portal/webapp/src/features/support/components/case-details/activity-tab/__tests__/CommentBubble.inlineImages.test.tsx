@@ -53,6 +53,7 @@ function renderBubble(content: string) {
         <CommentBubble
           comment={comment}
           isCurrentUser={false}
+          caseId="case-1"
           primaryBg="rgba(250,123,63,0.1)"
         />
       </ThemeProvider>
@@ -73,7 +74,7 @@ describe("CommentBubble inline images (migrated content)", () => {
     const { container } = renderBubble(
       `[code]<p><img src="/${UUID}"><br></p>[/code]`,
     );
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], "case-1");
     expect(container.querySelector("img")?.getAttribute("src")).toBe(DATA);
   });
 
@@ -81,7 +82,7 @@ describe("CommentBubble inline images (migrated content)", () => {
     const { container } = renderBubble(
       `[code]<p><img src="/${HEX}.iix"><br></p>[/code]`,
     );
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+    expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], "case-1");
     expect(container.querySelector("img")?.getAttribute("src")).toBe(DATA);
   });
 });

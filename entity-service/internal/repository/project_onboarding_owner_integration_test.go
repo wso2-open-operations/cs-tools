@@ -67,7 +67,7 @@ func TestProjectOnboardingOwnerIntegration(t *testing.T) {
 
 	insert := func(id, key string, owner *string) {
 		mustExec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, name, sf_id, onboarding_owner_id)
-			VALUES ($1, now(), now(), 'poo-test', 'poo-test', $2, $2, 'sf-'||$2, $3)`, id, key, owner)
+			VALUES ($1, now(), now(), 'poo-test', 'poo-test', $2::text, $2::text, 'sf-'||$2::text, $3)`, id, key, owner)
 	}
 	full, noMail, blank := pooUserFull, pooUserNoMail, pooUserBlank
 	insert(pooProjOwner, "POOWNER", &full)

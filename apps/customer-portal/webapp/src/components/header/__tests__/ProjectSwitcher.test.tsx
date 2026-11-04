@@ -71,14 +71,18 @@ vi.mock("@components/select-menu-load-more-row/SelectMenuLoadMoreRow", () => ({
   SelectMenuLoadMoreRow: () => null,
 }));
 
-vi.mock("@features/project-hub/constants/projectHubConstants", () => ({
+vi.mock("@features/project-hub/constants/projectHubConstants", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@features/project-hub/constants/projectHubConstants")
+  >()),
   PROJECT_HUB_PROJECTS_PAGE_SIZE: 10,
   PROJECT_HUB_SEARCH_DEBOUNCE_MS: 300,
   PROJECT_HUB_SEARCH_PLACEHOLDER: "Search projects...",
 }));
 
 // Mock @wso2/oxygen-ui
-vi.mock("@wso2/oxygen-ui", () => ({
+vi.mock("@wso2/oxygen-ui", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@wso2/oxygen-ui")>()),
   Box: ({ children, onScroll, onKeyDown, onMouseDown, onClick }: any) => (
     <div onScroll={onScroll} onKeyDown={onKeyDown} onMouseDown={onMouseDown} onClick={onClick}>
       {children}
@@ -101,30 +105,6 @@ vi.mock("@wso2/oxygen-ui", () => ({
       onChange={onChange}
     />
   ),
-  ComplexSelect: Object.assign(
-    ({ value, onChange, children }: any) => (
-      <select
-        data-testid="project-select"
-        value={value}
-        onChange={(e) => onChange(e)}
-      >
-        {children}
-      </select>
-    ),
-    {
-      ListHeader: ({ children }: any) => <option disabled>{children}</option>,
-      MenuItem: Object.assign(
-        ({ value, children }: any) => <option value={value}>{children}</option>,
-        {
-          Text: ({ primary, secondary }: any) => (
-            <>
-              {primary} {secondary}
-            </>
-          ),
-        },
-      ),
-    },
-  ),
   Header: {
     Switchers: ({ children }: any) => <div>{children}</div>,
   },
@@ -135,7 +115,8 @@ vi.mock("@wso2/oxygen-ui", () => ({
 }));
 
 // Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => ({
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@wso2/oxygen-ui-icons-react")>()),
   FolderOpen: () => <svg data-testid="icon-FolderOpen" />,
   Search: () => <svg data-testid="icon-Search" />,
   Info: () => <svg data-testid="icon-Info" />,
@@ -167,14 +148,15 @@ describe("ProjectSwitcher", () => {
       />,
     );
 
-    expect(screen.getByTestId("project-select")).toBeInTheDocument();
-    mockProjects.forEach((project) => {
-      expect(
-        screen.getByText(project.name, { exact: false }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(project.key, { exact: false }),
-      ).toBeInTheDocument();
+    // The dropdown is a popover that opens from the trigger.
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Project A", { exact: false }));
+
+    const items = screen.getAllByRole("menuitem");
+    expect(items).toHaveLength(mockProjects.length);
+    mockProjects.forEach((project, index) => {
+      expect(items[index]).toHaveTextContent(project.name);
+      expect(items[index]).toHaveTextContent(project.key);
     });
   });
 
@@ -186,8 +168,10 @@ describe("ProjectSwitcher", () => {
       />,
     );
 
-    const select = screen.getByTestId("project-select");
-    fireEvent.change(select, { target: { value: mockProjects[1].id } });
+    fireEvent.click(screen.getByText("Project A", { exact: false }));
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: /Project B/ }),
+    );
 
     expect(mockOnProjectChange).toHaveBeenCalledWith(mockProjects[1].id);
   });

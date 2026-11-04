@@ -93,26 +93,26 @@ vi.mock("@wso2/oxygen-ui", async (importOriginal) => {
 });
 
 vi.mock("../CasesTableHeader", () => ({
-  default: ({
-    onFilterClick,
-    onRemoveFilter,
-    onUpdateFilter,
-    onClearAll,
-  }: any) => (
+  default: ({ activeFiltersCount, isFiltersOpen, onFilterToggle }: any) => (
     <div data-testid="cases-table-header">
-      <button onClick={onFilterClick} data-testid="filter-button">
+      <span data-testid="active-filters-count">{activeFiltersCount}</span>
+      <span data-testid="filters-open">{String(isFiltersOpen)}</span>
+      <button onClick={onFilterToggle} data-testid="filter-button">
         Filter
       </button>
-      <button
-        onClick={() => onRemoveFilter("statusId")}
-        data-testid="remove-status-button"
-      >
-        Remove status
+    </div>
+  ),
+}));
+
+vi.mock("../CasesFilters", () => ({
+  default: ({ filterFields, onFilterChange }: any) => (
+    <div data-testid="cases-filters">
+      <span data-testid="filter-field-ids">
+        {filterFields.map((f: any) => f.id).join(",")}
+      </span>
+      <button onClick={() => onFilterChange("severityIds", ["2"])}>
+        Set severity
       </button>
-      <button onClick={() => onUpdateFilter("priority", "High")}>
-        Update priority
-      </button>
-      <button onClick={onClearAll}>Clear All</button>
     </div>
   ),
 }));
@@ -141,22 +141,6 @@ vi.mock("../CasesList", () => ({
       )}
     </div>
   ),
-}));
-
-vi.mock("@components/filter-panel/FilterPopover", () => ({
-  default: ({ open, onClose, onSearch, isLoading, isError }: any) =>
-    open ? (
-      <div data-testid="filter-popover">
-        {isLoading && (
-          <span data-testid="filters-loading">Filters Loading</span>
-        )}
-        {isError && <span data-testid="filters-error">Filters Error</span>}
-        <button onClick={onClose}>Close</button>
-        <button onClick={() => onSearch({ statusId: "1", severityId: "2" })}>
-          Search
-        </button>
-      </div>
-    ) : null,
 }));
 
 describe("CasesTable", () => {
@@ -193,58 +177,71 @@ describe("CasesTable", () => {
       expect.objectContaining({
         sortBy: { field: "updatedOn", order: "desc" },
       }),
-      expect.any(Number),
-      expect.any(Number),
+      0,
+      5,
+      { enabled: true },
     );
   });
 
-  it("should open and close filter popover", () => {
+  it("should open and close the inline filters when the filter toggle is pressed", () => {
     render(
       <ThemeProvider theme={theme}>
         <CasesTable projectId={mockProjectId} />
       </ThemeProvider>,
     );
 
-    expect(screen.queryByTestId("filter-popover")).toBeNull();
+    expect(screen.queryByTestId("cases-filters")).toBeNull();
 
-    // Open filter
-    fireEvent.click(screen.getByText("Filter"));
-    expect(screen.getByTestId("filter-popover")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("filter-button"));
+    expect(screen.getByTestId("cases-filters")).toBeInTheDocument();
+    // The Created By filter sits alongside the metadata-driven filters.
+    expect(screen.getByTestId("filter-field-ids")).toHaveTextContent(
+      "createdBy",
+    );
 
-    // Close filter
-    fireEvent.click(screen.getByText("Close"));
-    expect(screen.queryByTestId("filter-popover")).toBeNull();
+    fireEvent.click(screen.getByTestId("filter-button"));
+    expect(screen.queryByTestId("cases-filters")).toBeNull();
   });
 
-  it("should update filters and fetch data when searching", async () => {
-    mockUseGetProjectCasesPage.mockReturnValue({
-      data: {
-        cases: [
-          { id: "1", status: { id: "1" }, severity: { id: "2" } } as never,
-          { id: "2", status: { id: "2" }, severity: { id: "2" } } as never,
-        ],
-        totalRecords: 2,
-        offset: 0,
-        limit: 10,
-      },
-      isFetching: false,
-      isError: false,
-    } as unknown as ReturnType<typeof useGetProjectCasesPage>);
-
+  it("should send the selected filter to the page query and reset to the first page", async () => {
     render(
       <ThemeProvider theme={theme}>
         <CasesTable projectId={mockProjectId} />
       </ThemeProvider>,
     );
 
-    // Open filter and search
-    fireEvent.click(screen.getByText("Filter"));
-    fireEvent.click(screen.getByText("Search"));
+    fireEvent.click(screen.getByText("Change Page"));
+    fireEvent.click(screen.getByTestId("filter-button"));
+    fireEvent.click(screen.getByText("Set severity"));
 
     await waitFor(() => {
-      // After opening filter and clicking Search (no filter values set), API returns 2 cases; list shows both
-      expect(screen.getByTestId("case-count")).toHaveTextContent("2");
-      expect(screen.getByTestId("total-records")).toHaveTextContent("2");
+      const calls = mockUseGetProjectCasesPage.mock.calls;
+      const lastCall = calls.at(-1)!;
+      expect(lastCall[1]?.filters?.severityIds).toEqual([2]);
+      expect(lastCall[2]).toBe(0); // offset reset by the filter change
+    });
+    expect(screen.getByTestId("active-filters-count")).toHaveTextContent("1");
+  });
+
+  it("should clear active filters when the filter toggle is pressed with filters applied", async () => {
+    render(
+      <ThemeProvider theme={theme}>
+        <CasesTable projectId={mockProjectId} />
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("filter-button"));
+    fireEvent.click(screen.getByText("Set severity"));
+    await waitFor(() =>
+      expect(screen.getByTestId("active-filters-count")).toHaveTextContent("1"),
+    );
+
+    fireEvent.click(screen.getByTestId("filter-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-filters-count")).toHaveTextContent("0");
+      const calls = mockUseGetProjectCasesPage.mock.calls;
+      expect(calls.at(-1)![1]?.filters?.severityIds).toBeUndefined();
     });
   });
 
@@ -352,27 +349,10 @@ describe("CasesTable", () => {
     const caseTitleButton = screen.getByTestId("case-title-click");
     fireEvent.click(caseTitleButton);
 
+    // useModifierAwareNavigate forwards (path, options) to navigate.
     expect(mockNavigate).toHaveBeenCalledWith(
-      `/${mockProjectId}/support/cases/case-1`,
+      `/projects/${mockProjectId}/support/cases/case-1`,
+      undefined,
     );
-  });
-
-  it("should propagate loading and error states to FilterPopover", () => {
-    mockUseGetCasesFilters.mockReturnValue({
-      isFetching: true,
-      isError: true,
-    } as unknown as ReturnType<typeof useGetProjectFilters>);
-
-    render(
-      <ThemeProvider theme={theme}>
-        <CasesTable projectId={mockProjectId} />
-      </ThemeProvider>,
-    );
-
-    // Open filter
-    fireEvent.click(screen.getByText("Filter"));
-
-    expect(screen.getByTestId("filters-loading")).toBeInTheDocument();
-    expect(screen.getByTestId("filters-error")).toBeInTheDocument();
   });
 });

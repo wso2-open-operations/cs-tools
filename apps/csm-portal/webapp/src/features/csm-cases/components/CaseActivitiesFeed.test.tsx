@@ -31,6 +31,10 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: vi.fn().mockResolvedValue({ users: [] }) }),
 }));
 
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1" }, isLoading: false, isError: false }),
+}));
+
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import type { BeAlertDetail, BeCallRequestView } from "@api/backend/types";
@@ -201,7 +205,7 @@ describe("CaseActivitiesFeed", () => {
     expect(screen.getByText("State:")).toBeInTheDocument();
     // The line reads "State: In Progress → Resolved" across sibling text nodes
     // (muted old value, arrow, then new value) — assert on combined row text.
-    expect(container.textContent).toContain("In Progress");
+    expect(container.textContent).toContain("In progress");
     expect(container.textContent).toContain("→");
     expect(container.textContent).toContain("Resolved");
     expect(screen.getByText(/Jane Doe/)).toBeInTheDocument();

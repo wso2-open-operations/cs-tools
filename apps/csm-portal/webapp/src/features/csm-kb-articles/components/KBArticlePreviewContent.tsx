@@ -107,8 +107,7 @@ export default function KBArticlePreviewContent({
             overflowY: "auto",
             pr: 1,
           }}
-          // eslint-disable-next-line react/no-danger -- article.body is
-          // author-authored rich text HTML from our own Lexical editor,
+          // article.body is author-authored rich text HTML from our own Lexical editor,
           // sanitized below since the Lexical editor is not a security
           // boundary on its own (CodeRabbit XSS finding).
           dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(article.body) }}

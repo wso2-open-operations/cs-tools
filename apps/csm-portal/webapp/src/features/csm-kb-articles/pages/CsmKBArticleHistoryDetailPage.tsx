@@ -96,8 +96,7 @@ function SideBySideView({ oldBody, newBody }: { oldBody: string; newBody: string
         </Typography>
         <Box
           sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2, lineHeight: 1.7 }}
-          // eslint-disable-next-line react/no-danger -- author-authored rich
-          // text HTML from our own Lexical editor.
+          // author-authored rich text HTML from our own Lexical editor.
           dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(oldBody) }}
         />
       </Box>
@@ -107,7 +106,6 @@ function SideBySideView({ oldBody, newBody }: { oldBody: string; newBody: string
         </Typography>
         <Box
           sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2, lineHeight: 1.7 }}
-          // eslint-disable-next-line react/no-danger -- see above.
           dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(newBody) }}
         />
       </Box>

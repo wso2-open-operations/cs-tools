@@ -18,6 +18,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import VariableFormFields from "@features/operations/components/service-requests/VariableFormFields";
 
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({
+  useErrorBanner: () => ({ showError: vi.fn() }),
+}));
+
 vi.mock("@components/rich-text-editor/Editor", () => ({
   default: () => <div data-testid="rich-text-editor" />,
 }));

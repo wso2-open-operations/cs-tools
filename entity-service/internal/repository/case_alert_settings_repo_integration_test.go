@@ -288,8 +288,8 @@ func TestCaseAlertIntegration_Values(t *testing.T) {
 	if err := repo.SaveValues(ctx, caseAlertActor, "SRE", map[string][]byte{"timing interval": []byte(`"5m"`)}); err == nil {
 		t.Fatal("a key with a space was stored")
 	}
-	if err := repo.SaveValues(ctx, caseAlertActor, "SME", map[string][]byte{"onLeave": []byte(`"skip"`)}); err == nil {
-		t.Fatal("an SME value was stored")
+	if err := repo.SaveValues(ctx, caseAlertActor, "XYZ", map[string][]byte{"onLeave": []byte(`"skip"`)}); err == nil {
+		t.Fatal("a value for a ladder that does not exist was stored")
 	}
 
 	if found, err := repo.DeleteValue(ctx, caseAlertActor, interval.ID); err != nil || !found {
@@ -301,6 +301,28 @@ func TestCaseAlertIntegration_Values(t *testing.T) {
 	if n := caseAlertCount(t, pool, `SELECT count(*) FROM team_schedule_audit
 		WHERE table_name = 'paging_ladder_value' AND actor = $1 AND changed_at >= $2`, caseAlertActor, since); n != 4 {
 		t.Fatalf("audited value changes = %d, want 4 (two inserts, one update, one delete)", n)
+	}
+
+	// SME is a ladder of its own: its values save and read back, then go away
+	// so nothing after this sees them.
+	if err := repo.SaveValues(ctx, caseAlertActor, "SME", map[string][]byte{"onLeave": []byte(`"skip"`)}); err != nil {
+		t.Fatalf("SaveValues SME: %v", err)
+	}
+	smeValues, err := repo.ListValues(ctx)
+	if err != nil {
+		t.Fatalf("ListValues after SME save: %v", err)
+	}
+	var sme *CaseAlertValueRow
+	for i := range smeValues {
+		if smeValues[i].Key == "onLeave" && smeValues[i].Ladder == "SME" {
+			sme = &smeValues[i]
+		}
+	}
+	if sme == nil || string(sme.Value) != `"skip"` {
+		t.Fatalf("SME onLeave did not read back: %+v", smeValues)
+	}
+	if found, err := repo.DeleteValue(ctx, caseAlertActor, sme.ID); err != nil || !found {
+		t.Fatalf("DeleteValue SME = %v, %v", found, err)
 	}
 
 	// The lookups the checks use.

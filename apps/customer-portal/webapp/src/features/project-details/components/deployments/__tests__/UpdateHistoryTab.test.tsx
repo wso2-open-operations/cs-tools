@@ -19,6 +19,19 @@ import { describe, it, expect, vi } from "vitest";
 import UpdateHistoryTab from "@features/project-details/components/deployments/UpdateHistoryTab";
 import type { ProductUpdate } from "@features/project-details/types/products";
 
+vi.mock("@features/updates/api/useGetProductUpdateLevels", () => ({
+  useGetProductUpdateLevels: () => ({ data: [], isLoading: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@features/updates/api/usePostUpdateLevelsSearch", () => ({
   usePostUpdateLevelsSearch: () => ({
     data: null,
