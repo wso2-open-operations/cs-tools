@@ -97,15 +97,22 @@ func ensureUserProvisioned(ctx context.Context, entity entityUserProvisioningCli
 	}
 
 	body, err := json.Marshal(struct {
-		FirstName string   `json:"firstName"`
-		LastName  string   `json:"lastName"`
-		Email     string   `json:"email"`
-		Roles     []string `json:"roles"`
+		FirstName         string   `json:"firstName"`
+		LastName          string   `json:"lastName"`
+		Email             string   `json:"email"`
+		Roles             []string `json:"roles"`
+		SystemProvisioned bool     `json:"systemProvisioned"`
 	}{
 		FirstName: firstName,
 		LastName:  lastName,
 		Email:     user.Email,
 		Roles:     []string{"internal"},
+		// SystemProvisioned: this is the system provisioning a row on behalf
+		// of a first-time worknote/escalation author, not that person (or an
+		// admin) deliberately creating it -- entity-service attributes
+		// created_by/updated_by to "SYSTEM" instead of the new user's own
+		// forwarded email. See entity-service's domain.CreateUserRequest.
+		SystemProvisioned: true,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "ensureUserProvisioned: marshal create-user request failed", "userID", user.UserID, "err", err)

@@ -35,6 +35,19 @@ import { useReportCaseTabMeta } from "@features/case-tabs/hooks/useReportCaseTab
 import { useQueryParamTabs } from "@hooks/useSectionTabs";
 import { MAX_OPEN_CASE_TABS } from "@context/case-tabs/caseTabsTypes";
 
+// `useSectionTabs` now also exports `useRouteTabs`, which reads
+// `usePortalAccess`/the signed-in user's id -- pulling in the real
+// `@api/backend/client`/`@config/apiConfig` transitively at module load, even
+// though this file only uses the unrelated `useQueryParamTabs`. Same
+// boilerplate this repo's own convention already uses wherever a test
+// transitively imports those two modules.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
+}));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
+
 const ENABLED_STORAGE_KEY = "csm.caseTabs.enabled";
 const CAP_MODE_STORAGE_KEY = "csm.caseTabs.capMode";
 

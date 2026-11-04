@@ -18,14 +18,67 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ApiErrorState from "@components/error/ApiErrorState";
+import { ApiError } from "@utils/ApiError";
 
 vi.mock("@api/useAttachmentPreview", () => ({
   useAttachmentPreview: () => ({ data: null, isLoading: false }),
+}));
+
+vi.mock("@components/error/ErrorRecoveryAction", () => ({
+  default: () => <button type="button">Recovery action</button>,
 }));
 
 describe("ApiErrorState", () => {
   it("renders", () => {
     render(<ApiErrorState />);
     expect(screen.getByText(/Something went wrong/)).toBeInTheDocument();
+  });
+
+  it.each([
+    [403, "Forbidden"],
+    [404, "Not Found"],
+  ])("omits the recovery action for %i by default (embedded panels)", (status, text) => {
+    render(<ApiErrorState error={new ApiError(status, text)} />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [403, "Forbidden"],
+    [404, "Not Found"],
+  ])("renders the recovery action for %i when showRecoveryAction is set", (status, text) => {
+    render(<ApiErrorState error={new ApiError(status, text)} showRecoveryAction />);
+    expect(screen.getByRole("button", { name: "Recovery action" })).toBeInTheDocument();
+  });
+
+  it("never renders the recovery action for 5xx, even when requested", () => {
+    render(<ApiErrorState error={new ApiError(500, "Server Error")} showRecoveryAction />);
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("uses accessMessage for 403 and 404 but not for 500", () => {
+    const { unmount } = render(
+      <ApiErrorState error={new ApiError(403, "Forbidden")} accessMessage="No access here." />,
+    );
+    expect(screen.getByText("No access here.")).toBeInTheDocument();
+    unmount();
+
+    const { unmount: unmount404 } = render(
+      <ApiErrorState
+        error={new ApiError(404, "Not Found")}
+        fallbackMessage="Load failed."
+        accessMessage="No access here."
+      />,
+    );
+    expect(screen.getByText("No access here.")).toBeInTheDocument();
+    unmount404();
+
+    render(
+      <ApiErrorState
+        error={new ApiError(500, "Server Error")}
+        fallbackMessage="Load failed."
+        accessMessage="No access here."
+      />,
+    );
+    expect(screen.queryByText("No access here.")).not.toBeInTheDocument();
   });
 });

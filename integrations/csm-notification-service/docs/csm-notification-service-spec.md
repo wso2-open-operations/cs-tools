@@ -521,13 +521,39 @@ customer's name or contact details on the alert itself.
 
 An SLA-tracking component inside the service watches each case's own
 timeline and sends a chat alert when a case crosses a warning or breach
-threshold (partway elapsed, and fully breached). These alerts follow the
-same team-aware decision as the frustration alert above (section 2.1.3) —
-team space first, general monitoring space otherwise, plus the onboarding/
+threshold (50%, 75%, and fully breached). These alerts follow the same
+team-aware decision as the frustration alert above (section 2.1.3) — team
+space first, general monitoring space otherwise, plus the onboarding/
 overnight/weekend additions — except that an SLA alert is never able to
 resolve the evaluation-account or onboarding-status checks in practice,
 since the information those two checks need isn't available to this part
 of the service (also noted in section 2.1.3).
+
+**What starts a clock, and for how long, is decided entirely by the core
+entity service's own SLA policy table — not a fixed table of durations per
+severity.** Each case can have a Response, Workaround and/or Resolution
+clock, and which of those actually start, their exact duration, and the
+conditions that pause, resume, cancel or complete them, come from whichever
+real policy definition matches the case's own type, severity and project at
+the moment it's evaluated. A case can match more than one policy for the
+same clock type at once (confirmed real: a case can legitimately run two
+separate Resolution clocks side by side), in which case this service alerts
+on each independently. Most clocks run on ordinary continuous time, but a
+clock can instead run on a Monday-to-Friday business-day calendar (skipping
+weekends entirely) when its policy says so — this changes how "50%
+elapsed"/"breached" is calculated and when the alert actually fires, but
+does not change anything about who receives it or where.
+
+Pause and resume are driven by the same per-policy conditions, read live
+from the core entity service rather than inferred from a fixed list of case
+states here — a case moving to a particular status pauses a clock only if
+that clock's own policy says that status should pause it. If the service
+can't briefly reach the core entity service to check whether a clock is
+really due (a transient outage), it retries a few times rather than sending
+based on stale information; if it still can't confirm after retrying, the
+alert is deferred to the next successful check rather than sent without
+being able to verify it hasn't already been resolved — an outage delays an
+alert, it never risks sending a duplicate or a false one.
 
 One known limitation: the alert is meant to name the team's own lead, but
 that information is not currently available to this part of the service, so

@@ -60,6 +60,42 @@ export function zoneAbbreviation(tz: string, at: Date = new Date()): string {
   }
 }
 
+/** The zone's UTC offset at `at`, as Intl writes it ("GMT-7"), or "" if unknown. */
+function utcOffset(tz: string, at: Date): string {
+  try {
+    return (
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" })
+        .formatToParts(at)
+        .find((p) => p.type === "timeZoneName")?.value ?? ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+/** Whether the zone changes its clocks during the year (Los Angeles does, Colombo does not). */
+export function observesDaylightSaving(tz: string, year: number = new Date().getFullYear()): boolean {
+  const winter = utcOffset(tz, new Date(Date.UTC(year, 0, 15, 12)));
+  const summer = utcOffset(tz, new Date(Date.UTC(year, 6, 15, 12)));
+  return winter !== "" && summer !== "" && winter !== summer;
+}
+
+/**
+ * A name for the zone that holds all year, for a setting rather than a moment:
+ * "PT" for Los Angeles (not PDT in summer and PST in winter), "IST" for Colombo.
+ */
+export function zoneNameAllYear(tz: string): string {
+  if (!observesDaylightSaving(tz)) return zoneAbbreviation(tz);
+  try {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortGeneric" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value;
+    return name ?? tz;
+  } catch {
+    return tz;
+  }
+}
+
 
 /**
  * An instant broken into the calendar date and minutes-past-midnight that a
@@ -344,6 +380,39 @@ export function standingWindowKey(shift: ScheduleShift | undefined, fallback: st
     shift.authoringTimeZone,
     shift.dayScope,
   ].join(":");
+}
+
+/**
+ * The rotation a standing window is stored on the hours of, on a weekday or a
+ * weekend: AEST regular hours sit on the Morning rotation's 06:00-09:00, so
+ * the people on them are listed with that rotation (tagged with their own
+ * window), not as a window of their own. Same family, same hours on the same
+ * clock, a plain turn (not on-call, not escalation) worked on that kind of day. Undefined for a
+ * rotation, or a standing window no rotation shares its hours with.
+ */
+export function rotationHostOf(
+  window: ScheduleShift | undefined,
+  shifts: Iterable<ScheduleShift>,
+  weekend: boolean,
+): ScheduleShift | undefined {
+  if (!window || window.isRotation) return undefined;
+  for (const s of shifts) {
+    if (
+      s.isRotation &&
+      !s.isOnCall &&
+      !s.isEscalation &&
+      s.family === window.family &&
+      // Minutes are on the window's own clock: the same numbers on another
+      // clock are other hours.
+      s.authoringTimeZone === window.authoringTimeZone &&
+      s.startMinute === window.startMinute &&
+      s.endMinute === window.endMinute &&
+      (s.dayScope === "ANY" || (s.dayScope === "WEEKEND") === weekend)
+    ) {
+      return s;
+    }
+  }
+  return undefined;
 }
 
 /** One zone's row of the escalation grid: which window each tier goes on. */

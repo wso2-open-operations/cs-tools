@@ -252,6 +252,13 @@ func (r *Resolver) ChangeRequestLink(audience, changeRequestID, projectID string
 	return fmt.Sprintf("%s/operations/change-requests/%s", r.csmBase, url.PathEscape(changeRequestID))
 }
 
+// ProjectLink is a project's page in the CSM portal (/customers/projects/<id>,
+// the route the portal's project list opens; /projects/<id> only redirects
+// there).
+func (r *Resolver) ProjectLink(projectID string) string {
+	return fmt.Sprintf("%s/customers/projects/%s", r.csmBase, url.PathEscape(projectID))
+}
+
 // OutageLink is an outage's page in the CSM portal, the route the portal's own
 // outage list navigates to.
 func (r *Resolver) OutageLink(outageID string) string {

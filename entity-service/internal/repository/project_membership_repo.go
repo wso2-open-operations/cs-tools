@@ -643,7 +643,7 @@ func upsertMembershipTx(ctx context.Context, tx pgx.Tx, in domain.SalesforceMemb
 	}
 
 	// 7. project groups — this is where ADMIN is now recorded, per project.
-	if err := syncProjectGroups(ctx, tx, res.ProjectContactID, in.ProjectGroups, actor); err != nil {
+	if err := syncProjectGroups(ctx, tx, res.ProjectContactID, in.ProjectGroups, in.KeepStaleProjectGroups, actor); err != nil {
 		return res, err
 	}
 
@@ -1033,7 +1033,7 @@ func upsertProjectContact(ctx context.Context, tx pgx.Tx, in domain.SalesforceMe
 	return id, false, previousState, nil
 }
 
-func syncProjectGroups(ctx context.Context, tx pgx.Tx, projectContactID string, groups []string, actor string) error {
+func syncProjectGroups(ctx context.Context, tx pgx.Tx, projectContactID string, groups []string, keepStale bool, actor string) error {
 	groupIDs := map[string]string{}
 	if len(groups) > 0 {
 		rows, err := tx.Query(ctx, `SELECT id, "group" FROM project_group WHERE "group" = ANY($1::text[])`, groups)
@@ -1063,12 +1063,15 @@ func syncProjectGroups(ctx context.Context, tx pgx.Tx, projectContactID string, 
 	for _, id := range groupIDs {
 		wanted = append(wanted, id)
 	}
-	// Remove memberships outside the target set (an empty set removes all).
-	if _, err := tx.Exec(ctx, `
+	// Remove memberships outside the target set (an empty set removes all),
+	// unless the caller only adds (the admin resync never deletes).
+	if !keepStale {
+		if _, err := tx.Exec(ctx, `
 		DELETE FROM project_contact_group
 		WHERE project_contact_id = $1 AND NOT (project_group_id::text = ANY($2::text[]))`,
-		projectContactID, wanted); err != nil {
-		return fmt.Errorf("upsert membership: remove project groups: %w", err)
+			projectContactID, wanted); err != nil {
+			return fmt.Errorf("upsert membership: remove project groups: %w", err)
+		}
 	}
 	// Add the missing ones.
 	for _, gid := range wanted {

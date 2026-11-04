@@ -51,6 +51,9 @@ func (f *fakeCandidatePolicyRepo) FindPolicyByName(context.Context, string, stri
 func (f *fakeCandidatePolicyRepo) GetCaseFacts(context.Context, string) (repository.CaseFacts, error) {
 	panic("not implemented")
 }
+func (f *fakeCandidatePolicyRepo) GetIncidentFacts(context.Context, string) (repository.IncidentFacts, error) {
+	panic("not implemented")
+}
 func (f *fakeCandidatePolicyRepo) RegisterClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
 	panic("not implemented")
 }

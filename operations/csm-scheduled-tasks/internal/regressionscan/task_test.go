@@ -93,7 +93,7 @@ func TestSendReportMailsTheConfiguredRecipients(t *testing.T) {
 		"(September 2026)",
 		"2 Cases",
 		"WSO2 Product: WSO2 Identity Server <span", "(2)</span>",
-		`<a href="https://support.example.com/cases/CS0000001" target="_blank" style="color:#ff7300;">ACME-1</a>`,
+		`<a href="https://support.example.com/cases/11111111-1111-1111-1111-111111111111" target="_blank" style="color:#ff7300;">ACME-1</a>`,
 		"[IS 7.1.0] Error while executing migration client",
 		"Identity Server 7.1.0 All In One",
 		"removing &lt;tenant&gt; from UI",

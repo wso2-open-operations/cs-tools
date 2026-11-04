@@ -1125,22 +1125,27 @@ type DeployedProductVersionRef struct {
 	Name           string     `json:"name"`
 	ReleasedDate   *time.Time `json:"releasedDate"`
 	SupportEoLDate *time.Time `json:"supportEoLDate"`
+	// DeploymentProfile is the version's deployment profile; nil when the
+	// version has none or entity-service runs against ServiceNow.
+	DeploymentProfile *string `json:"deploymentProfile"`
 }
 
 func (v *DeployedProductVersionRef) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID             string `json:"id"`
-		Name           string `json:"name"`
-		ReleasedDate   any    `json:"releasedDate"`
-		ReleasedOn     any    `json:"releasedOn"`
-		SupportEoLDate any    `json:"supportEoLDate"`
-		EndOfLifeOn    any    `json:"endOfLifeOn"`
+		ID                string  `json:"id"`
+		Name              string  `json:"name"`
+		ReleasedDate      any     `json:"releasedDate"`
+		ReleasedOn        any     `json:"releasedOn"`
+		SupportEoLDate    any     `json:"supportEoLDate"`
+		EndOfLifeOn       any     `json:"endOfLifeOn"`
+		DeploymentProfile *string `json:"deploymentProfile"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	v.ID = raw.ID
 	v.Name = raw.Name
+	v.DeploymentProfile = raw.DeploymentProfile
 
 	rel := raw.ReleasedDate
 	if rel == nil {
@@ -1678,8 +1683,12 @@ type ProductVersionView struct {
 	ReleaseDate                    *string `json:"releaseDate,omitempty"`
 	SupportEOLDate                 *string `json:"supportEolDate,omitempty"`
 	EarliestPossibleSupportEOLDate *string `json:"earliestPossibleSupportEolDate,omitempty"`
-	CreatedOn                      *string `json:"createdOn,omitempty"`
-	UpdatedOn                      *string `json:"updatedOn,omitempty"`
+	// DeploymentProfile is product_version.deployment_profile ("All In One",
+	// "API Control Plane", ...). Several version rows share one Version label
+	// and differ only by this. Absent when the version has none.
+	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+	CreatedOn         *string `json:"createdOn,omitempty"`
+	UpdatedOn         *string `json:"updatedOn,omitempty"`
 }
 
 // SearchProductVersionsResponse is entity-service's response for POST /products/{id}/versions/search.

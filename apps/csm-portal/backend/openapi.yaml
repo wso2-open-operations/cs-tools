@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -45,8 +45,9 @@ paths:
       summary: >-
         Aggregating dependency health check. Distinct from GET /health (a pure
         liveness probe): this checks SCIM Service, Updates Service, CSM
-        Notification Service, CSM Integration Service and Engineering Entity
-        Service (each optional except SCIM/Updates). This backend's own core
+        Notification Service, CSM Integration Service, Engineering Entity
+        Service and CSM AI Integration Service (each optional except
+        SCIM/Updates). This backend's own core
         entity-service is not checked here. Do not wire this up as the
         liveness/restart probe — a downstream blip here must not restart or
         drain an otherwise-healthy instance.
@@ -2644,6 +2645,140 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /salesforce/resync/preview:
+    post:
+      summary: "Compare one account's or project's Salesforce data with the database."
+      description: "Admin only. Read-only: writes nothing. Returns, per component of the scope, the records that differ with a field-by-field diff. For scope account the components are account, partners, projects, opportunities, linkedOpportunities, invoices, contacts and memberships; for scope project they are project, opportunities, linkedOpportunities, invoices and memberships. When the Salesforce call cap or the request time limit stops a component, capped is true with a cappedReason and that component is reported as skipped. Synchronous and slow: it can take about a minute."
+      operationId: postSalesforceResyncPreview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncRequest'
+      responses:
+        "200":
+          description: "The comparison, one entry per component of the scope."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncPreview'
+        "400":
+          description: "Unknown scope, missing id, a component outside the scope, no components, or a target with no Salesforce id."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "The caller is not an internal admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "The account or project does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "A resync is already running for this account or project."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: "Request body too large."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "Salesforce or an upstream service is temporarily unavailable."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /salesforce/resync/apply:
+    post:
+      summary: "Overwrite the chosen components of one account or project from Salesforce."
+      description: "Admin only. Re-ingests only the listed components, parents before children. Never deletes a row. A component with any record that could not be written has status failed, with the counts and the first errors; records left alone because they changed in Salesforce after they were read are counted as skippedStale. One resync per target at a time (409 otherwise). Synchronous and slow: it can take about a minute."
+      operationId: postSalesforceResyncApply
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesforceResyncApplyRequest'
+      responses:
+        "200":
+          description: "The outcome of each requested component."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SalesforceResyncApplyResponse'
+        "400":
+          description: "Unknown scope, missing id, a component outside the scope, no components, or a target with no Salesforce id."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: "Unauthorized."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: "The caller is not an internal admin."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: "The account or project does not exist."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: "A resync is already running for this account or project."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: "Request body too large."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: "Internal server error."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: "Salesforce or an upstream service is temporarily unavailable."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /accounts/search:
     post:
       summary: Search accounts.
@@ -4587,6 +4722,994 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /dashboards/generate:
+    post:
+      summary: Generate a dashboard from a chat message.
+      description: >
+        Turns the user's latest message on the Custom Dashboards generate page
+        (and the dashboard being edited, if any) into a dashboard to preview,
+        plus a chat reply. The dashboard is in the same shape as
+        GET /dashboards/{dashboardId}. Nothing is stored. CS engineers and
+        admins only. 400 when the prompt is missing, blank or over 2000
+        characters, checked before any other work, or when the dashboard being
+        edited cannot be read. With the AI integration service configured
+        (CSM_AI_INTEGRATION_SERVICE_BASE_URL) the dashboard comes from the
+        model through that service (the dashboard id is always given by the
+        backend: the draft's id when it is a UUID, else a new one); without
+        it, a sample dashboard is returned for every valid request. A team named in a
+        creTeam / sreTeam filter (its team registry key) is turned into that
+        team's group id before the reply. 422 when the model declines (the
+        message says why), refuses, or names a team that cannot be filtered
+        (unknown, in the wrong field, or with no group configured; the message
+        says which); 502 when its answer is not
+        a usable dashboard or the model cannot be reached; 504 when it takes
+        too long; 503 when generation is unavailable (no sample loaded, or the
+        AI integration service has no model key). 413 when the dashboard being edited is over
+        64 KiB as a definition (the size a saved one may be), checked before
+        any model call. 429, with Retry-After in seconds, when the caller has
+        started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)
+        generations in the last minute or DASHBOARD_GENERATE_LIMIT_PER_DAY
+        (default 100) in the last 24 hours; a refused prompt does not count.
+      operationId: generateDashboard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "429":
+          description: Over the caller's generate limit (per minute or per 24 hours).
+          headers:
+            Retry-After:
+              description: Seconds until the caller may generate again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: BadGateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "504":
+          description: GatewayTimeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom:
+    get:
+      summary: List the caller's saved custom dashboards.
+      description: >
+        The dashboards the caller saved to My Dashboards, ordered by name,
+        without their definitions (for the dropdown). An empty list is
+        `{"dashboards": []}`. Stored in entity-service against the caller. CS
+        engineers and admins only.
+      operationId: listCustomDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}:
+    get:
+      summary: Get one of the caller's saved custom dashboards.
+      description: >
+        A dashboard the caller saved to My Dashboards, in the same shape as
+        GET /dashboards/{dashboardId} so it is drawn with the same components.
+        The stored definition is checked again the way it was when saved; 422
+        when it no longer passes because the dashboard rules changed since it
+        was saved (the message asks the user to generate it again). 404 when
+        the caller has no dashboard with this id, including another user's.
+        CS engineers and admins only.
+      operationId: getCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Save one of the caller's custom dashboards.
+      description: >
+        Saves the generate page's draft to My Dashboards: creates the dashboard
+        with this id, or replaces it when the caller already saved one with
+        this id (200 either way). The draft is in the GET /dashboards/{dashboardId}
+        shape; its id, when present, must match the path. It is checked the
+        same way a generated dashboard is before it is stored (400 when it is
+        not a valid dashboard, has a blank or over-255-character name, or is
+        over 64 KB). The name is the dashboard's displayName. Stored in
+        entity-service against the caller; 409 when the caller already has
+        another dashboard with that name, 400 at 50 saved dashboards (the
+        message says which), 404 when the id is another user's dashboard. CS
+        engineers and admins only.
+      operationId: saveCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCustomDashboardRequest'
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: PayloadTooLarge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Delete one of the caller's saved custom dashboards.
+      description: >
+        Removes a dashboard from the caller's My Dashboards (204). 404 when the
+        caller has no dashboard with this id, including another user's, which
+        is left as it is. CS engineers and admins only.
+      operationId: deleteCustomDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/shares:
+    get:
+      summary: List who one of the caller's saved dashboards is shared with.
+      description: >
+        The people the caller shared this dashboard with (view only), ordered
+        by name. Owner only: 404 when the caller has no dashboard with this id,
+        including another user's. CS engineers and admins only.
+      operationId: listCustomDashboardShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/shares/{userId}:
+    put:
+      summary: Share one of the caller's saved dashboards with a user.
+      description: >
+        No request body. The user can view the dashboard in Shared Dashboards
+        (the owner's current version), not change it. Owner only. 400 when the
+        user is the caller or is not internal staff (the message says which);
+        404 when the dashboard is not the caller's or there is no such user.
+        Sharing again is a 200. The response is the dashboard's shares after
+        the change. CS engineers and admins only.
+      operationId: addCustomDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved dashboards with a user.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's or is not
+        shared with that user. CS engineers and admins only.
+      operationId: removeCustomDashboardShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/team-shares:
+    get:
+      summary: List the teams one of the caller's saved dashboards is shared with.
+      description: >
+        The teams the caller shared this dashboard with (view only), ordered
+        by name, each by registry key, name and family. A team no longer in
+        the registry is listed with an empty key. Owner only: 404 when the
+        caller has no dashboard with this id, including another user's. CS
+        engineers and admins only.
+      operationId: listCustomDashboardTeamShares
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/custom/{id}/team-shares/{teamKey}:
+    put:
+      summary: Share one of the caller's saved dashboards with a team.
+      description: >
+        No request body. Whoever is in the team when the dashboard is read
+        (internal staff, not its owner) can view it in Shared Dashboards: the
+        membership is live, so someone who joins later sees it and someone who
+        leaves stops seeing it. Only teams in the team registry with a group id
+        can be chosen; any other key is a 404 without an upstream call. Owner
+        only: 404 when the dashboard is not the caller's. Sharing again is a
+        200. The response is the dashboard's team shares after the change. CS
+        engineers and admins only.
+      operationId: addCustomDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardTeamShareList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    delete:
+      summary: Stop sharing one of the caller's saved dashboards with a team.
+      description: >
+        Owner only. 404 when the dashboard is not the caller's, is not shared
+        with that team, or the key is not a registry team. CS engineers and
+        admins only.
+      operationId: removeCustomDashboardTeamShare
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: teamKey
+          in: path
+          required: true
+          description: The team's registry key (CSM_TEAM_REGISTRY), e.g. rigel, castor, americas, apollo.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: NoContent
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared:
+    get:
+      summary: List the dashboards other users shared with the caller.
+      description: >
+        View only. Each entry names its owner (who shared it); ordered by name,
+        without definitions (for the Shared Dashboards switcher). An empty list
+        is `{"dashboards": []}`. The caller's own dashboards are not listed.
+        Every portal role that can view dashboards (a dashboard can be shared
+        with any internal user or team).
+      operationId: listSharedDashboards
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedDashboardList'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /dashboards/shared/{id}:
+    get:
+      summary: Get one dashboard shared with the caller.
+      description: >
+        View only: the owner's current version, in the same shape as
+        GET /dashboards/{dashboardId}, with who shared it. The stored
+        definition is checked again; 422 when it no longer passes because the
+        dashboard rules changed since it was saved (the message asks the
+        recipient to have the owner update it). 404 when it is not shared with
+        the caller, including the caller's own. Every portal role that can view
+        dashboards; each widget's data is read with the caller's own
+        permissions.
+      operationId: getSharedDashboard
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedDashboardResponse'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "422":
+          description: UnprocessableEntity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /deployments:
     post:
       summary: Create a new deployment.
@@ -6783,7 +7906,13 @@ paths:
         filters.supportGroupsOnly true the result is limited to the groups an
         incident can be created in with an explicit assignmentGroupId: active
         groups that are the support group of at least one service (their ids
-        are what assignmentGroupId takes).
+        are what assignmentGroupId takes). With filters.incidentExtraGroupsOnly
+        true the result is limited to the active groups on the incident extra
+        assignment group allowlist (for example the security operations
+        group), which an incident can also be created in; when the allowlist
+        is empty the result is empty. If both filters are sent,
+        incidentExtraGroupsOnly takes precedence and supportGroupsOnly is
+        ignored.
       operationId: searchGroups
       security:
         - bearerAuth: []
@@ -6802,6 +7931,14 @@ paths:
                     supportGroupsOnly:
                       type: boolean
                       default: false
+                    incidentExtraGroupsOnly:
+                      type: boolean
+                      default: false
+                      description: >-
+                        Optional. When true, only active groups on the
+                        incident extra assignment group allowlist are
+                        returned; an empty allowlist returns no groups. Wins
+                        over supportGroupsOnly when both are sent.
                 pagination:
                   type: object
                   properties:
@@ -10770,6 +11907,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a product to the catalogue.
+      description: >
+        Creates a product (name and class required). Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "201":
+          description: The new product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /abt-teams:
     get:
@@ -13307,7 +14498,9 @@ paths:
         The Rota Reminders card on the Rota access tab. The entity service's payload, forwarded
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
-        by shift code), copyTo, updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        by shift code), inviteRotations (whether each rotation's reminders carry a calendar
+        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
+        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -13386,8 +14579,23 @@ paths:
                       start: { type: string, example: "08:00" }
                       end: { type: string, example: "18:00" }
                       timeZone: { type: string, example: America/Los_Angeles }
+                inviteRotations:
+                  type: object
+                  description: >-
+                    Whether each rotation's reminders carry a calendar invitation, by the shift code
+                    of its window. A rotation not named does. Optional: when absent the stored value
+                    is kept.
+                  additionalProperties: { type: boolean }
+                  example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  maxItems: 20
+                  items: { type: string, format: email }
+                weekendCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the weekend summary email only. Optional: when absent the stored
+                    value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
@@ -13486,7 +14694,7 @@ paths:
               type: object
               required: [kind]
               properties:
-                kind: { type: string, enum: [weekday, weekend] }
+                kind: { type: string, enum: [morning, evening, weekend, weekday] }
                 test:
                   type: boolean
                   description: Send it only to the person asking, as a test copy; their own queue, 2 minutes apart.
@@ -13517,7 +14725,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: "One of the same kind is already waiting to be sent."
+          description: "One that sends any of the same emails is already waiting to be sent."
           content:
             application/json:
               schema:
@@ -17249,6 +18457,743 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
 
+  /products/{id}:
+    get:
+      summary: One product with its catalogue fields.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product.
+      description: >
+        A present field sets it, null clears an optional one, an absent field is left alone. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /products/{id}/versions:
+    post:
+      summary: Add a version with all its deployment profiles.
+      description: >
+        Creates one row per profile, all sharing one public listing (new, or the publicId given), in one transaction. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProductVersions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionCreate'
+      responses:
+        "201":
+          description: The new rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/search:
+    post:
+      summary: Product versions of every product.
+      description: >
+        One row per (product, version, deployment profile), ordered by product name, release date (newest first), version and profile; paged (limit up to 1000). excludeRetired leaves retired rows out; feed restricts to the live rows on that public feed. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: searchAllProductVersions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionSearch'
+      responses:
+        "200":
+          description: One page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionPage'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}:
+    get:
+      summary: One product version row.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersion'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product version.
+      description: >
+        Listing-wide fields apply to every live row of its public listing (same publicId); deploymentProfile and publicId change this row only. The EOL date may not be before the release date. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionUpdate'
+      responses:
+        "200":
+          description: The rows changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}/retire:
+    post:
+      summary: Retire a version.
+      description: >
+        Retires every live row of its public listing (only this row when it has no publicId), taking it off the catalogue and both public feeds. No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The rows retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines:
+    get:
+      summary: Release lines.
+      description: >
+        Live release lines by name; includeRetired=true adds retired ones. Only includeRetired is forwarded. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listReleaseLines
+      parameters:
+        - name: includeRetired
+          in: query
+          required: false
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: The release lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLineList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a release line.
+      description: >
+        Name required. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createReleaseLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "201":
+          description: The new release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}:
+    patch:
+      summary: Edit a release line.
+      description: >
+        Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}/retire:
+    post:
+      summary: Retire a release line.
+      description: >
+        No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-platform-history:
+    get:
+      summary: Carbon platform history (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonPlatformHistory
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistoryList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-kernel-releases:
+    get:
+      summary: Carbon kernel releases (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonKernelReleases
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelReleaseList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /portal-banners:
     get:
       summary: Banners for the CSM portal.
@@ -17457,6 +19402,114 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "503":
           description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sla-status/manage:
+    get:
+      summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
+      description: >
+        A CSM admin. Same limit/offset/severity/caseType/search/elapsedBucket query
+        params as entity-service's own GET /sla-status (each forwarded verbatim,
+        blank omitted); responses are Cache-Control no-store. Typically polled right
+        after POST /sla-engine/recalculate to show which clocks are currently running.
+      operationId: searchActiveSLAStatusesManage
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: severity
+          in: query
+          description: One of catastrophic, critical, high, medium, low.
+          schema:
+            type: string
+            enum: [catastrophic, critical, high, medium, low]
+        - name: caseType
+          in: query
+          description: One of case, engagement, service_request, security_report_analysis, announcement.
+          schema:
+            type: string
+            enum: [case, engagement, service_request, security_report_analysis, announcement]
+        - name: search
+          in: query
+          description: Matches only the case's own id (exact), number, or WSO2 case id (substring).
+          schema:
+            type: string
+        - name: elapsedBucket
+          in: query
+          description: One of under50, 50to75, 75to100, over100.
+          schema:
+            type: string
+            enum: [under50, 50to75, 75to100, over100]
+      responses:
+        "200":
+          description: Every currently-active SLA clock, paginated.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can view this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /sla-engine/recalculate:
+    post:
+      summary: Recalculate SLA — the CSM admin action.
+      description: >
+        A CSM admin. Publishes a request for integrations/csm-notification-service to
+        rebuild its own Redis-held SLA tracking from entity-service's durable record —
+        for recovering from a Redis state that no longer agrees with reality. No request
+        body. Responses are Cache-Control no-store.
+      operationId: requestSLARecalculation
+      responses:
+        "204":
+          description: >
+            The request was published. The actual rebuild happens asynchronously — this
+            means "requested", not "done". Poll GET /sla-status/manage for progress.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: SLA recalculation is not available in this deployment.
           content:
             application/json:
               schema:
@@ -18185,6 +20238,234 @@ components:
             phone gaps are listed errors first, then by this tier. A missing number is an error
             except for the 2nd and 3rd responders (called together with the 1st), where it is a
             warning.
+    GenerateDashboardRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: >
+            The user's latest chat message. Trimmed; must not be empty or only
+            whitespace, and at most 2000 characters (counted in characters, not
+            bytes). Otherwise 400 with a message meant for the user.
+        current:
+          description: >
+            The dashboard being edited (the previous reply's dashboard), so a
+            follow-up message can change it. Omitted for the first message.
+          allOf:
+            - $ref: '#/components/schemas/Dashboard'
+    GenerateDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - reply
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        reply:
+          type: string
+          description: The chat message to show for this turn.
+    SaveCustomDashboardRequest:
+      type: object
+      required:
+        - dashboard
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+    CustomDashboardSummary:
+      type: object
+      required:
+        - id
+        - name
+        - createdOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CustomDashboardList:
+      type: object
+      required:
+        - dashboards
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardSummary'
+    CustomDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - createdOn
+        - updatedOn
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    CustomDashboardPerson:
+      type: object
+      required:
+        - id
+        - email
+        - name
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        email:
+          type: string
+        name:
+          type: string
+    CustomDashboardShare:
+      type: object
+      required:
+        - user
+        - sharedOn
+      properties:
+        user:
+          $ref: '#/components/schemas/CustomDashboardPerson'
+        sharedOn:
+          type: string
+          format: date-time
+    CustomDashboardShareList:
+      type: object
+      required:
+        - shares
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardShare'
+    CustomDashboardTeamShareTeam:
+      type: object
+      required:
+        - key
+        - name
+      properties:
+        key:
+          type: string
+          description: The team's registry key; empty when the team is no longer in the registry.
+        name:
+          type: string
+        family:
+          type: string
+          description: The team's family, e.g. cre-abt, cre, sre-abt.
+    CustomDashboardTeamShare:
+      type: object
+      required:
+        - team
+        - sharedOn
+      properties:
+        team:
+          $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
+        sharedOn:
+          type: string
+          format: date-time
+    CustomDashboardTeamShareList:
+      type: object
+      required:
+        - shares
+      properties:
+        shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomDashboardTeamShare'
+    SharedViaTeam:
+      type: object
+      nullable: true
+      description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name).
+      required:
+        - id
+        - name
+        - type
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          description: The team's type, e.g. cre-abt, sre-abt.
+    SharedDashboardSummary:
+      type: object
+      required:
+        - id
+        - name
+        - owner
+        - sharedViaTeam
+        - sharedOn
+        - updatedOn
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardPerson'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          $ref: '#/components/schemas/SharedViaTeam'
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+          description: When the owner last changed the dashboard.
+    SharedDashboardList:
+      type: object
+      required:
+        - dashboards
+      properties:
+        dashboards:
+          type: array
+          items:
+            $ref: '#/components/schemas/SharedDashboardSummary'
+    SharedDashboardResponse:
+      type: object
+      required:
+        - dashboard
+        - owner
+        - sharedViaTeam
+        - sharedOn
+        - updatedOn
+      properties:
+        dashboard:
+          $ref: '#/components/schemas/Dashboard'
+        owner:
+          allOf:
+            - $ref: '#/components/schemas/CustomDashboardPerson'
+          nullable: true
+          description: Who shared the dashboard (its owner); null once that user has been deleted.
+        sharedViaTeam:
+          $ref: '#/components/schemas/SharedViaTeam'
+        sharedOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
     ImportRotaRequest:
       type: object
       description: The rota import file, schema version 1.
@@ -18412,6 +20693,381 @@ components:
       properties:
         subject: { type: string, maxLength: 512 }
         content: { type: string, maxLength: 8000 }
+    CatalogProduct:
+      type: object
+      description: >
+        One product: the fields of POST /products/search plus its catalogue fields and
+        version counts.
+      required: [id, name, class, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        class: {type: string, enum: [software, service]}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        code: {type: string, nullable: true}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        versionCount: {type: integer, description: Live (not retired) versions of the product.}
+        retiredVersionCount: {type: integer, description: Retired versions of the product.}
+        activeVersionCount: {type: integer, description: Live versions whose support has not ended (not discontinued).}
+    CatalogProductCreate:
+      type: object
+      description: The fields of a product. name and class are required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        class: {type: string, enum: [software, service]}
+        code: {type: string, nullable: true, maxLength: 64}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true, maxLength: 2000}
+    CatalogVersion:
+      type: object
+      description: >
+        One product_version row (one deployment profile). A public listing is the live
+        rows sharing publicId. Dates are RFC 3339 timestamps; currentSupportStatus is
+        upper case.
+      required: [id, productId, version]
+      properties:
+        id: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        version: {type: string}
+        currentSupportStatus: {type: string, nullable: true, enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]}
+        releaseDate: {type: string, format: date-time, nullable: true}
+        supportEolDate: {type: string, format: date-time, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date-time, nullable: true}
+        deploymentProfile: {type: string, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        productName: {type: string}
+        productCode: {type: string, nullable: true}
+        serialNumber: {type: string, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date-time, nullable: true}
+        publicId: {type: integer, format: int64, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        releaseLinks: {type: string, nullable: true}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        releaseLineName: {type: string, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+        retiredOn: {type: string, format: date-time, nullable: true}
+    CatalogVersionFields:
+      type: object
+      description: >
+        The listing fields of a version. Dates are YYYY-MM-DD; status and type are
+        accepted in either case. On PATCH a present field sets it, null clears it, an
+        absent field is left alone.
+      properties:
+        currentSupportStatus: {type: string, nullable: true}
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        releaseLinks: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+    CatalogVersionCreate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          required: [version, profiles]
+          properties:
+            version: {type: string, maxLength: 20}
+            profiles:
+              type: array
+              minItems: 1
+              description: One row per profile; "" is a row with no profile.
+              items: {type: string}
+            publicId: {type: integer, format: int64, description: Join an existing public listing instead of starting a new one.}
+    CatalogVersionUpdate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          properties:
+            deploymentProfile: {type: string, nullable: true, description: This row only.}
+            publicId: {type: integer, format: int64, nullable: true, description: This row only.}
+    CatalogVersionRows:
+      type: object
+      required: [productVersions]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+    CatalogVersionSearch:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery: {type: string}
+        deploymentProfile: {type: string}
+        productId: {type: string, format: uuid}
+        excludeRetired: {type: boolean}
+        feed: {type: string, enum: [support-matrix, release-matrix]}
+        publicId: {type: integer, format: int64}
+    CatalogVersionPage:
+      type: object
+      required: [productVersions, total, limit, offset, hasMore]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+        hasMore: {type: boolean}
+    CatalogReleaseLine:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        startDate: {type: string, format: date-time, nullable: true}
+        status: {type: string, nullable: true}
+        legacyId: {type: integer, format: int64, nullable: true}
+        versionCount: {type: integer, description: Live versions on the line.}
+        retiredOn: {type: string, format: date-time, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    CatalogReleaseLineList:
+      type: object
+      required: [releaseLines]
+      properties:
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogReleaseLine'
+    CatalogReleaseLineSave:
+      type: object
+      description: name is required on create. startDate is YYYY-MM-DD.
+      properties:
+        name: {type: string, maxLength: 100}
+        startDate: {type: string, format: date, nullable: true}
+        status: {type: string, nullable: true, maxLength: 50}
+    CatalogCarbon:
+      type: object
+      description: The Carbon platform of a version.
+      properties:
+        platformRelease: {type: string, nullable: true}
+        platformVersion: {type: string, nullable: true}
+        carbonKernelVersion: {type: string, nullable: true}
+        releaseChunk: {type: string, nullable: true}
+        kernelPatchNo: {type: string, nullable: true}
+    CarbonPlatformHistoryList:
+      type: object
+      description: >
+        Carbon platform history rows: id, carbonVersion, releaseDate, releaseDateText and one
+        nullable *Version string per legacy product column, named as the legacy Product API
+        names them.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              id: {type: integer}
+              carbonVersion: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              releaseDateText: {type: string, nullable: true}
+    CarbonKernelReleaseList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer}
+              kernelRelease: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              carbonPlatform: {type: string, nullable: true}
+    SalesforceResyncRequest:
+      type: object
+      description: "The target of a Salesforce resync."
+      required: [scope, id]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+          description: "Whether id names an account or a project."
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+    SalesforceResyncApplyRequest:
+      type: object
+      description: "The target of a Salesforce resync apply and the components to overwrite."
+      required: [scope, id, components]
+      properties:
+        scope:
+          type: string
+          enum: [account, project]
+          description: "Whether id names an account or a project."
+        id:
+          type: string
+          format: uuid
+          description: "The CSM id of the account or project."
+        components:
+          type: array
+          minItems: 1
+          description: "Component keys to overwrite from Salesforce; each must belong to the scope."
+          items:
+            type: string
+            enum: [account, partners, projects, project, opportunities, linkedOpportunities, invoices, contacts, memberships]
+    SalesforceResyncTarget:
+      type: object
+      properties:
+        scope:
+          type: string
+        id:
+          type: string
+        sfId:
+          type: string
+        name:
+          type: string
+          nullable: true
+    SalesforceResyncCounts:
+      type: object
+      properties:
+        inSync:
+          type: integer
+        differs:
+          type: integer
+        missingInCsm:
+          type: integer
+        onlyInCsm:
+          type: integer
+    SalesforceResyncFieldDiff:
+      type: object
+      description: "One field that differs. When wouldTruncate is true, sfValue is the full Salesforce value, which the ingest would cut to fit its column."
+      properties:
+        field:
+          type: string
+        csmValue:
+          type: string
+          nullable: true
+        sfValue:
+          type: string
+          nullable: true
+        wouldTruncate:
+          type: boolean
+    SalesforceResyncRecord:
+      type: object
+      description: "One record that is not in sync. fields is empty for a record that exists on one side only."
+      properties:
+        sfId:
+          type: string
+        label:
+          type: string
+        state:
+          type: string
+          enum: [differs, missing_in_csm, only_in_csm]
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncFieldDiff'
+    SalesforceResyncComponent:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        status:
+          type: string
+          enum: [in_sync, differs, skipped]
+        skippedReason:
+          type: string
+          nullable: true
+        counts:
+          $ref: '#/components/schemas/SalesforceResyncCounts'
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncRecord'
+    SalesforceResyncPreview:
+      type: object
+      properties:
+        target:
+          $ref: '#/components/schemas/SalesforceResyncTarget'
+        capped:
+          type: boolean
+        cappedReason:
+          type: string
+          nullable: true
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncComponent'
+    SalesforceResyncApplyError:
+      type: object
+      properties:
+        sfId:
+          type: string
+        message:
+          type: string
+    SalesforceResyncApplyComponent:
+      type: object
+      description: "The outcome of one applied component. skippedStale counts records left alone because they changed in Salesforce after the apply read them; they are neither succeeded nor failed."
+      properties:
+        key:
+          type: string
+        status:
+          type: string
+          enum: [applied, failed, skipped]
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        skippedReason:
+          type: string
+          nullable: true
+        skippedStale:
+          type: integer
+        skippedStaleSfIds:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncApplyError'
+    SalesforceResyncApplyResponse:
+      type: object
+      properties:
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesforceResyncApplyComponent'
     ErrorPayload:
       type: object
       description: >-
@@ -18466,7 +21122,7 @@ components:
             properties:
               name:
                 type: string
-                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service]
+                enum: [SCIM Service, Updates Service, CSM Notification Service, CSM Integration Service, Engineering Entity Service, CSM AI Integration Service]
               status:
                 type: string
                 description: >-
@@ -21075,7 +23731,7 @@ components:
           type: array
           items:
             type: string
-            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, admin]
+            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, product_catalog_manager, admin]
           description: >
             The portal roles the caller holds, decided from the roles on their token. A caller can
             hold several. Always present; empty when they hold none. This is not the entity
@@ -26305,7 +28961,9 @@ components:
             otherwise) and forwards the body unchanged; the entity service
             decides the group. Sent: used when it is an active group that is
             the support group of at least one service (POST /groups/search
-            with filters.supportGroupsOnly lists them), otherwise 400. Not
+            with filters.supportGroupsOnly lists them), or when it is an
+            active group on the incident extra assignment group allowlist
+            (filters.incidentExtraGroupsOnly lists them), otherwise 400. Not
             sent: the service's support group; when the service has none, the
             default team (GET /incidents/create-defaults); with neither, the
             incident is created unassigned. A work note records the choice.

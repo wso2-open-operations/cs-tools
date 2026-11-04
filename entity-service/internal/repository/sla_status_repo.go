@@ -32,15 +32,18 @@ import (
 type SLAStatusRepository interface {
 	// SearchActiveSLAStatuses returns every currently-active (sla.is_active =
 	// true) clock across every case-like work item, one row per
-	// (work_item, sla_policy.target), paginated. sourceFilter, when
-	// non-empty, must be a real sla_source_enum label ("CSM"/"SERVICENOW")
-	// and narrows the result to just that source -- added for
-	// csm-notification-service's own Redis-recovery reconciliation pass
-	// (source=CSM), which only ever needs this engine's own rows and would
-	// otherwise pay the cost of scanning the full, much larger
-	// previous-system-synced row set for nothing. Empty means no filter, the
-	// original, unscoped behavior.
-	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, sourceFilter string) ([]domain.SLAStatus, int, error)
+	// (work_item, sla_policy.target), paginated. There used to be a
+	// sourceFilter parameter here, scoping the result to sla.source='CSM' or
+	// 'SERVICENOW' -- that column is gone (migration TODO): this engine's
+	// own clock registration and the previous system's own sync job no
+	// longer both write into "sla" at cutover, so there is nothing left to
+	// distinguish a row by. Every caller (the CSM Portal's own SLA tab,
+	// csm-notification-service's Redis-recovery reconciliation pass) now
+	// gets every active clock, full stop. filters narrows the result by
+	// severity/case type/case id-or-number-or-WSO2-id search/elapsed-percentage
+	// bucket -- see domain.SLAStatusFilters' own doc comment; its zero value
+	// applies no filtering at all.
+	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error)
 
 	// GetClockState returns the single most recently-started "sla" row for
 	// (workItemID, target) -- regardless of is_active -- so a caller can
@@ -54,12 +57,10 @@ type SLAStatusRepository interface {
 	// suppressing a genuine alert over an unrelated registration failure,
 	// or confirming the wrong clock incarnation after a severity revision.
 	// target must be a real sla_policy_target_enum label ("RESPONSE"/
-	// "WORKAROUND"/"RESOLUTION"); sourceFilter follows the same convention
-	// as SearchActiveSLAStatuses's own (empty/"CSM"/"SERVICENOW").
-	// domain.SLAClockState.Found is false, every other field at its zero
-	// value, when no row exists for this (workItemID, target, source) at
-	// all.
-	GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error)
+	// "WORKAROUND"/"RESOLUTION"). domain.SLAClockState.Found is false, every
+	// other field at its zero value, when no row exists for this
+	// (workItemID, target) at all.
+	GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error)
 }
 
 type slaStatusRepo struct {
@@ -85,12 +86,6 @@ func NewSLAStatusRepository(db *Scoped) SLAStatusRepository {
 // scanSLAStatus can apply the same business-day correction GetClockState
 // already applies to a single clock -- see scanSLAStatus's own comment.
 //
-// sourceArgIndex, when > 0, adds "AND s.source = $<sourceArgIndex>" -- the
-// placeholder's position differs between the count query (which otherwise
-// binds nothing) and the data query (which already binds limit/offset/the
-// evaluation-subscription project type name), so the caller passes whichever
-// index is next free in its own query rather than this function assuming one.
-// 0 means no source filter at all, the original unscoped behavior.
 // Known, deliberate limitation (see entity-service/CLAUDE.md's own note):
 // `DISTINCT ON (s.work_item_id, sp.target)` picks exactly one row per
 // target, but the per-policy registration guard allows two policies to both
@@ -103,24 +98,22 @@ func NewSLAStatusRepository(db *Scoped) SLAStatusRepository {
 // updated_on DESC` below picks the more recently started/updated one.
 // Keying this read by clock id or policy instead of target would be the
 // real fix, deliberately out of scope here.
-func activeSLAStatusCTE(sourceArgIndex int) string {
-	sourceFilter := ""
-	if sourceArgIndex > 0 {
-		sourceFilter = fmt.Sprintf(" AND s.source = $%d::sla_source_enum", sourceArgIndex)
-	}
-	return `
+const activeSLAStatusCTE = `
 	WITH active_sla AS (
 		SELECT DISTINCT ON (s.work_item_id, sp.target)
 			s.work_item_id, sp.target, s.live_elapsed_percentage AS business_elapsed_percentage,
 			s.live_has_breached AS has_breached, s.live_stage AS stage, s.start_on,
-			s.paused_on, s.pause_duration, s.duration,
+			s.paused_on, s.pause_duration, sp.duration,
+			-- sp.duration, not s.duration: see migration 0272's own doc
+			-- comment -- the stored sla.duration snapshot can be permanently
+			-- wrong, sla_policy.duration can't stay wrong for more than the
+			-- window of whatever corrupted it.
 			COALESCE(sp.schedule, '') AS schedule, s.business_pause_duration
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
-		WHERE s.is_active AND sp.target IS NOT NULL` + sourceFilter + `
+		WHERE s.is_active AND sp.target IS NOT NULL
 		ORDER BY s.work_item_id, sp.target, s.start_on DESC NULLS LAST, s.updated_on DESC
 	)`
-}
 
 // activeSLAStatusFromJoins resolves each row's case-like display data --
 // mirrors caseRepo.GetCaseByID's own product/severity joins exactly (see
@@ -139,7 +132,15 @@ const activeSLAStatusFromJoins = `
 	LEFT JOIN product_version pv ON pv.id = dp.version_id
 	LEFT JOIN account a ON a.id = wi.account_id
 	LEFT JOIN "group" cre ON cre.id = a.cre_team_id
-	LEFT JOIN "user" teamlead ON teamlead.id = cre.manager_id
+	LEFT JOIN team cre_team ON cre_team.id = a.cre_team_id
+	LEFT JOIN LATERAL (
+		SELECT tm.user_id
+		FROM team_member tm
+		WHERE tm.team_id = a.cre_team_id AND tm.role = 'lead'
+		ORDER BY tm.created_on, tm.user_id
+		LIMIT 1
+	) lead_tm ON TRUE
+	LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
 	LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
 	LEFT JOIN project p ON p.id = wi.project_id
 	LEFT JOIN project_type pt ON pt.id = p.project_type_id
@@ -249,32 +250,96 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	return s, nil
 }
 
+// appendSLAStatusFilterSQL appends filters' own bind values to *args (whose
+// current contents already occupy $1..$len(*args)) and returns the
+// "AND ..." SQL fragment referencing the newly appended placeholders. Used
+// for both the count and data queries below, which otherwise share no
+// argument numbering (the data query has its own leading
+// evaluationSubscriptionProjectTypeName arg the count query doesn't need) --
+// each call starts from that query's own *args, so the placeholder numbers
+// always line up with what was actually appended to it.
+//
+// Severity/CaseType/Search are plain, already-selected columns with no
+// business-day-correction problem (unlike ElapsedBucket -- see
+// SearchActiveSLAStatuses' own doc comment on why that one is filtered in Go
+// instead), so a WHERE clause here keeps SQL-side pagination intact for
+// every search that doesn't also filter by elapsed-percentage bucket.
+func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
+	var b strings.Builder
+	if f.Severity != "" {
+		if code, ok := caseSeverityToEnum[f.Severity]; ok {
+			*args = append(*args, code)
+			fmt.Fprintf(&b, " AND c.severity = $%d", len(*args))
+		}
+	}
+	if f.CaseType != "" {
+		*args = append(*args, f.CaseType)
+		fmt.Fprintf(&b, " AND wi.type::TEXT = $%d", len(*args))
+	}
+	if f.Search != "" {
+		// Case id: exact match (it's a UUID, not a prefix/substring the way
+		// number/WSO2 id are). Number/WSO2 id: case-insensitive substring,
+		// sharing one wildcarded arg between both ILIKEs. escapeLikeWildcards
+		// (plg_users_repo.go) makes a literal "%" or "_" in the search term
+		// match itself rather than acting as an ILIKE pattern -- same
+		// convention every other ILIKE search in this package follows.
+		*args = append(*args, f.Search)
+		exactIdx := len(*args)
+		*args = append(*args, "%"+escapeLikeWildcards(f.Search)+"%")
+		likeIdx := len(*args)
+		fmt.Fprintf(&b, " AND (wi.id::TEXT = $%d OR wi.number ILIKE $%d ESCAPE '\\' OR wi.wso2_id ILIKE $%d ESCAPE '\\')", exactIdx, likeIdx, likeIdx)
+	}
+	return b.String()
+}
+
+// slaElapsedBucketMatches reports whether pct falls in the named bucket --
+// the four fixed ranges the CSM Portal's SLA Engine admin table filters by
+// (domain.SLAElapsedBucket* constants). "" (no bucket filter requested)
+// always matches, so a caller that never asks for one can share this
+// unconditionally. 75to100 is inclusive of exactly 100% (its own label reads
+// "75% - 100%"); over100 is exclusive of it (its own label reads "Over
+// 100%") -- a clock at exactly 100% belongs in the former, not the latter.
+func slaElapsedBucketMatches(bucket string, pct float64) bool {
+	switch bucket {
+	case domain.SLAElapsedBucketUnder50:
+		return pct < 50
+	case domain.SLAElapsedBucket50To75:
+		return pct >= 50 && pct < 75
+	case domain.SLAElapsedBucket75To100:
+		return pct >= 75 && pct <= 100
+	case domain.SLAElapsedBucketOver100:
+		return pct > 100
+	default:
+		return true
+	}
+}
+
 // SearchActiveSLAStatuses implements SLAStatusRepository.
-func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, sourceFilter string) ([]domain.SLAStatus, int, error) {
-	// Placeholder numbering: the count query binds only the source filter
-	// (if present, as $1); the data query already binds limit/offset/the
-	// evaluation-subscription project type name as $1-$3, so the source
-	// filter there is $4. activeSLAStatusCTE takes 0 to omit the filter
-	// entirely, keeping both queries' SQL text byte-identical to before this
-	// parameter existed when sourceFilter is "".
+//
+// ElapsedBucket can't be a SQL WHERE/HAVING clause the way the other three
+// filters are: scanSLAStatus's own BusinessElapsedPercent is only final
+// after its Go-side business-day correction (see that function's own doc
+// comment) -- the raw column a SQL predicate would have to filter on,
+// als.business_elapsed_percentage, is wrong for exactly the still-running,
+// 'WSO2 Business days'-scheduled clocks a bucket filter most needs to get
+// right. So whenever ElapsedBucket is set, this fetches every row matching
+// the OTHER filters with no SQL LIMIT/OFFSET, corrects and buckets each one
+// in Go (scanSLAStatus already does the correction), and paginates the
+// filtered slice in Go instead -- bounded by the same modest active-clock
+// total maxSLAStatusLimit's own doc comment already describes (around 5,500
+// rows checked live), not a new, unbounded read.
+func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error) {
+	bucketed := filters.ElapsedBucket != ""
+
 	countArgs := []any{}
-	countSourceArg := 0
-	if sourceFilter != "" {
-		countSourceArg = 1
-		countArgs = append(countArgs, sourceFilter)
-	}
-	dataArgs := []any{pagination.Limit, pagination.Offset, evaluationSubscriptionProjectTypeName}
-	dataSourceArg := 0
-	if sourceFilter != "" {
-		dataSourceArg = 4
-		dataArgs = append(dataArgs, sourceFilter)
-	}
-
-	countQuery := activeSLAStatusCTE(countSourceArg) + `
+	countFilterSQL := appendSLAStatusFilterSQL(filters, &countArgs)
+	countQuery := activeSLAStatusCTE + `
 		SELECT COUNT(*)
-		` + activeSLAStatusFromJoins
+		` + activeSLAStatusFromJoins + countFilterSQL
 
-	dataQuery := activeSLAStatusCTE(dataSourceArg) + `
+	dataArgs := []any{evaluationSubscriptionProjectTypeName}
+	dataFilterSQL := appendSLAStatusFilterSQL(filters, &dataArgs)
+	dataQuery := activeSLAStatusCTE + `
 		SELECT als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM als.duration), 0)::BIGINT,
@@ -282,12 +347,15 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
-		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
-		       cre.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $1, FALSE),
+		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
-		` + activeSLAStatusFromJoins + `
-		ORDER BY als.work_item_id, als.target
-		LIMIT $1 OFFSET $2`
+		` + activeSLAStatusFromJoins + dataFilterSQL + `
+		ORDER BY als.work_item_id, als.target`
+	if !bucketed {
+		dataArgs = append(dataArgs, pagination.Limit, pagination.Offset)
+		dataQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(dataArgs)-1, len(dataArgs))
+	}
 
 	var total int
 	var statuses []domain.SLAStatus
@@ -305,6 +373,44 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 	// runSearch, all of which take an explicit scope rather than relying on
 	// whatever identity ctx already carries.
 	ctx = WithCallerIdentity(ctx, SearchScope{Unrestricted: true})
+
+	if bucketed {
+		// One query, no SQL pagination: every matching row is corrected and
+		// bucketed in Go below, so the count and the page both come from
+		// this same result set rather than a separate COUNT(*).
+		rows, err := r.db.Query(ctx, dataQuery, dataArgs...)
+		if err != nil {
+			return nil, 0, fmt.Errorf("query active sla statuses: %w", err)
+		}
+		defer rows.Close()
+		// Non-nil even with zero rows: SearchSLAStatusResponse.Statuses has
+		// no omitempty, so a nil slice here would serialize as JSON null
+		// instead of [] -- the webapp reads statuses.length unconditionally.
+		matched := make([]domain.SLAStatus, 0)
+		for rows.Next() {
+			st, err := scanSLAStatus(rows)
+			if err != nil {
+				return nil, 0, fmt.Errorf("scan sla status: %w", err)
+			}
+			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) {
+				matched = append(matched, st)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, 0, fmt.Errorf("iterate active sla statuses: %w", err)
+		}
+		total = len(matched)
+		start := pagination.Offset
+		if start > total {
+			start = total
+		}
+		end := start + pagination.Limit
+		if end > total {
+			end = total
+		}
+		statuses = matched[start:end]
+		return statuses, total, nil
+	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
@@ -344,12 +450,16 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // sla_live (not the raw "sla" table), matching SearchActiveSLAStatuses's
 // own convention, so a still-live clock's stage/has_breached reflect the
 // current, recomputed-at-read-time truth rather than whatever
-// RecomputeActive's last periodic pass happened to write. Reads directly
-// against "sla"/"sla_policy" with no work_item/case/announcement join at
-// all -- unlike SearchActiveSLAStatuses, this never needs to resolve any
-// case-like display data, so there's nothing here that depends on
-// row-level security (confirmed: the "sla" table itself carries none).
+// RecomputeActive's last periodic pass happened to write. Joins
+// work_item/account/"group"/"user" only for the four display-only
+// AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName fields -- the same
+// joins SearchActiveSLAStatuses's own activeSLAStatusFromJoins already
+// makes for the identical fields -- added once csm-notification-service's
+// SLA breach email reaction needed them from the exact same call it
+// already makes before sending a breach alert, rather than resolve any
+// other case-like display data this method still has no need for.
 //
+
 // BusinessElapsedPercent is NOT simply read off sla_live's own
 // live_elapsed_percentage for every row: that view has no business-day
 // calendar of its own (it only knows the flat wall-clock formula --
@@ -362,13 +472,8 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 // of schedule -- reads the view's own value directly, which is already
 // correct for those (a PAUSED/terminal row's figure was already frozen
 // correctly, business-day-aware, at the moment it was written).
-func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, sourceFilter string) (domain.SLAClockState, error) {
+func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target string) (domain.SLAClockState, error) {
 	args := []any{workItemID, target}
-	sourceFilterSQL := ""
-	if sourceFilter != "" {
-		sourceFilterSQL = " AND s.source = $3::sla_source_enum"
-		args = append(args, sourceFilter)
-	}
 
 	// Known, deliberate limitation (see entity-service/CLAUDE.md's own note
 	// on this): the per-policy registration guard lets two policies
@@ -390,12 +495,26 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 		SELECT s.is_active, s.live_stage::TEXT, s.live_has_breached, s.start_on,
 		       s.paused_on, EXTRACT(EPOCH FROM s.pause_duration)::BIGINT,
 		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0),
-		       COALESCE(EXTRACT(EPOCH FROM s.duration), 0),
+		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0),
 		       COALESCE(s.live_elapsed_percentage, 0),
-		       COALESCE(sp.schedule, '')
+		       COALESCE(sp.schedule, ''),
+		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
+		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
 		FROM sla_live s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
-		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2` + sourceFilterSQL + `
+		JOIN work_item wi ON wi.id = s.work_item_id
+		LEFT JOIN account a ON a.id = wi.account_id
+		LEFT JOIN team cre_team ON cre_team.id = a.cre_team_id
+		LEFT JOIN LATERAL (
+			SELECT tm.user_id
+			FROM team_member tm
+			WHERE tm.team_id = a.cre_team_id AND tm.role = 'lead'
+			ORDER BY tm.created_on, tm.user_id
+			LIMIT 1
+		) lead_tm ON TRUE
+		LEFT JOIN "user" teamlead ON teamlead.id = lead_tm.user_id
+		LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id
+		WHERE s.work_item_id = $1::uuid AND sp.target::TEXT = $2
 		ORDER BY s.start_on DESC NULLS LAST, s.updated_on DESC
 		LIMIT 1`
 
@@ -411,10 +530,12 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	var pauseDurationSeconds *int64
 	var businessPauseSeconds, durationSeconds, viewPercent float64
 	var schedule string
+	var teamEmail, teamLeadName, assigneeName, assigneeEmail *string
 	err := r.db.QueryRow(ctx, query, args...).Scan(
 		&state.IsActive, &state.Stage, &state.HasBreached, &state.StartedOn,
 		&state.PausedOn, &pauseDurationSeconds,
 		&businessPauseSeconds, &durationSeconds, &viewPercent, &schedule,
+		&teamEmail, &teamLeadName, &assigneeName, &assigneeEmail,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.SLAClockState{}, nil
@@ -431,6 +552,10 @@ func (r *slaStatusRepo) GetClockState(ctx context.Context, workItemID, target, s
 	state.BusinessElapsedPercent = viewPercent
 	state.Schedule = schedule
 	state.BusinessPauseDurationSeconds = int64(businessPauseSeconds)
+	state.TeamEmail = stringOrEmpty(teamEmail)
+	state.TeamLeadName = stringOrEmpty(teamLeadName)
+	state.AssigneeName = stringOrEmpty(assigneeName)
+	state.AssigneeEmail = stringOrEmpty(assigneeEmail)
 
 	if correctedStage, breached, pct, ok := businessDayCorrectedLiveState(schedule, state.Stage, state.StartedOn, businessPauseSeconds, durationSeconds); ok {
 		// Stage AND HasBreached are now corrected together with the

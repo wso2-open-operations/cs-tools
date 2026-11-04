@@ -318,17 +318,23 @@ func (c *WSClient) NotifyAgent(ctx context.Context, sessionID, payload string) e
 	defer conn.Close()
 	conn.SetReadLimit(maxMessageBytes)
 
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
-		return fmt.Errorf("aichatagent: write notification: %w", err)
-	}
-
-	// One deadline for the whole exchange, set before the loop rather than
-	// inside it. Refreshing it per frame would let an upstream sending
+	// One deadline for the whole exchange, set before the write rather than
+	// refreshed per frame. Refreshing it would let an upstream sending
 	// non-terminal frames faster than sideChannelTimeout keep this waiting
 	// indefinitely — and the caller is on a request path.
 	deadline := time.Now().Add(sideChannelTimeout)
 	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
 		deadline = dl
+	}
+
+	// The write needs its own deadline: SetReadDeadline governs reads only, and
+	// a context deadline does not interrupt a socket write already in progress.
+	// A peer that stops reading would otherwise block WriteMessage past
+	// notifyAgentTimeout and strand this goroutine and its connection, once per
+	// case created.
+	_ = conn.SetWriteDeadline(deadline)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
+		return fmt.Errorf("aichatagent: write notification: %w", err)
 	}
 	_ = conn.SetReadDeadline(deadline)
 

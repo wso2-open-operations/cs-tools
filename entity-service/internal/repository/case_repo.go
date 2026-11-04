@@ -3815,6 +3815,16 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	return where, filterArgs, argIdx, nil
 }
 
+// formatSearchTimestamp renders a nullable timestamp the way the search
+// response's createdOn/updatedOn are rendered (UTC RFC3339), or nil when unset.
+func formatSearchTimestamp(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	s := t.UTC().Format(time.RFC3339)
+	return &s
+}
+
 // SearchCases implements CaseRepository.
 func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesRequest, scope SearchScope) ([]domain.SearchCaseView, int, error) {
 	// WithCallerIdentity from the explicit scope parameter -- see
@@ -3902,7 +3912,8 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 		        pw.id, pw.number,
 		        rc_wi.id, rc_wi.number,
 		        a.id, a.name, a.support_tier::TEXT,
-		        cre.id, cre.name, sre.id, sre.name
+		        cre.id, cre.name, sre.id, sre.name,
+		        `+caseLikeResolvedOnColumn+`, `+caseLikeClosedOnColumn+`
 		 FROM (SELECT wi.id FROM work_item wi %s %s
 		       ORDER BY %s %s NULLS LAST, wi.id
 		       LIMIT $%d OFFSET $%d) page
@@ -3939,6 +3950,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			var creTeamID, creTeamName, sreTeamID, sreTeamName *string
 			var creatorEmail string
 			var bestCaseEta, mostLikelyEta, worstCaseEta *time.Time
+			var resolvedOn, closedOn *time.Time
 			if err := rows.Scan(
 				&cv.ID, &cv.Number, &internalID,
 				&caseType, &subject, &description, &severity, &issueType, &state,
@@ -3954,6 +3966,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 				&rcID, &rcNumber,
 				&accountID, &accountName, &accountTier,
 				&creTeamID, &creTeamName, &sreTeamID, &sreTeamName,
+				&resolvedOn, &closedOn,
 			); err != nil {
 				return fmt.Errorf("scan case: %w", err)
 			}
@@ -4001,6 +4014,8 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 			}
 			cv.CreatedOn = createdAt.UTC().Format(time.RFC3339)
 			cv.UpdatedOn = updatedAt.UTC().Format(time.RFC3339)
+			cv.ResolvedOn = formatSearchTimestamp(resolvedOn)
+			cv.ClosedOn = formatSearchTimestamp(closedOn)
 			// best_case_eta/most_likely_eta/worst_case_eta are DATE columns --
 			// formatted the same way GetCaseByID already does, so a caller
 			// reading either endpoint sees the identical "YYYY-MM-DD" shape.
@@ -4693,20 +4708,29 @@ func updateCaseFieldsTx(ctx context.Context, tx pgx.Tx, req domain.UpdateCaseReq
 		wiArgs = append(wiArgs, *req.DeployedProductID)
 		widx++
 	}
-	if req.BestCaseFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("best_case_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.BestCaseFixEta)
+	// Server-side "fix ETA shared" stamp: eta_shared_on is re-stamped whenever
+	// a written date differs from the stored one (or was unset), so it needs
+	// no request field and works for a caller with no end-user identity. The
+	// CASE reads the pre-update row, all in the one statement.
+	var etaChanged []string
+	for _, c := range []struct {
+		col string
+		val *string
+	}{
+		{"best_case_eta", req.BestCaseFixEta},
+		{"most_likely_eta", req.MostLikelyFixEta},
+		{"worst_case_eta", req.WorstCaseFixEta},
+	} {
+		if c.val == nil {
+			continue
+		}
+		wiSets = append(wiSets, fmt.Sprintf("%s = $%d::date", c.col, widx))
+		etaChanged = append(etaChanged, fmt.Sprintf("%s IS DISTINCT FROM $%d::date", c.col, widx))
+		wiArgs = append(wiArgs, *c.val)
 		widx++
 	}
-	if req.MostLikelyFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("most_likely_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.MostLikelyFixEta)
-		widx++
-	}
-	if req.WorstCaseFixEta != nil {
-		wiSets = append(wiSets, fmt.Sprintf("worst_case_eta = $%d::date", widx))
-		wiArgs = append(wiArgs, *req.WorstCaseFixEta)
-		widx++
+	if len(etaChanged) > 0 {
+		wiSets = append(wiSets, "eta_shared_on = CASE WHEN "+strings.Join(etaChanged, " OR ")+" THEN NOW() ELSE eta_shared_on END")
 	}
 	if req.WorkaroundProvided != nil {
 		if *req.WorkaroundProvided {
@@ -5002,6 +5026,10 @@ var caseActivityFieldChangeLabelOverrides = map[string]string{
 	"acknowledged_by_user_id": "Acknowledged by",
 	"parent_id":               "Parent case",
 	"workaround_provided_on":  "Workaround Provided",
+	"best_case_eta":           "Best Case Fix ETA",
+	"most_likely_eta":         "Most Likely Fix ETA",
+	"worst_case_eta":          "Worst Case Fix ETA",
+	"eta_shared_on":           "Fix ETA Shared",
 	"fix_issued_on":           "Update Released",
 	"assignment_group_id":     "Assignment group",
 	"service_id":              "Service",

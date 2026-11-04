@@ -352,6 +352,23 @@ type Config struct {
 	// nothing refreshes partners and the route is not registered, because
 	// csm-sync-service still copies account_relationship from ServiceNow.
 	CSMMigrationSalesforcePartnerIngestEnabled bool
+	// ACPReopenEnabled turns on the ACP reopen check after Project__c and
+	// Invoice__c events (internal/service/acp_reopen.go), from
+	// CSM_ACP_REOPEN_ENABLED=true. Defaults to false: no project is reopened.
+	// It also needs a pool and the SALES_ENTITY_* client.
+	ACPReopenEnabled bool
+	// ACPReopenDryRun makes the reopen check decide and log only, writing
+	// nothing (CSM_ACP_REOPEN_DRY_RUN). Defaults to true; anything that does
+	// not parse as a boolean keeps it true.
+	ACPReopenDryRun bool
+	// ACPReopenTestProjectSfID limits the reopen check to one Salesforce
+	// project (CSM_ACP_REOPEN_TEST_PROJECT_SF_ID). Empty: every project.
+	ACPReopenTestProjectSfID string
+	// ACPReactivationPollInterval is how often ProjectReactivationDrainer
+	// looks for queued "Back to Open state" notices
+	// (ACP_REACTIVATION_POLL_INTERVAL, default 5s), on its own so tuning
+	// another drainer never changes it.
+	ACPReactivationPollInterval time.Duration
 	// CSMMigrationMembershipRegistrationEnabled turns on POST /users/me/memberships/register,
 	// which marks the signed-in user's still-INVITED memberships as
 	// REGISTERED in Salesforce (see membership_registration_service.go). Defaults to
@@ -557,6 +574,15 @@ type Config struct {
 	MigrationCaseReportHoldTag     string
 	MigrationCaseReportAccountsTag string
 	MigrationCaseReportTeamKeys    []string
+	// LongOpenCasesReportProjectTypes are the project type names (compared
+	// exactly) a case's project must have to appear in the long-open cases
+	// report (GET /reports/long-open-cases). LongOpenCasesReportExcludedTags
+	// are tag names (compared ignoring case) that remove a case from it.
+	// A blank value falls back to the defaults rather than emptying the
+	// list: no project types would silently produce an empty report, and no
+	// excluded tags would list cases the team has set aside.
+	LongOpenCasesReportProjectTypes []string
+	LongOpenCasesReportExcludedTags []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -714,6 +740,12 @@ type Config struct {
 	// setting. Matched exactly, as the portal does. Empty means nobody is (the
 	// portal's own rule for an unset role).
 	AuthAdminRoles []string
+	// AuthProductCatalogManagerRoles is AUTH_PRODUCT_CATALOG_MANAGER_ROLES,
+	// comma-separated: the same variable, with the same value, as
+	// csm-portal-backend's -- the token roles that may edit the product
+	// catalogue. AUTH_ADMIN_ROLES may edit it too.
+	// Matched exactly. Empty means only admins can.
+	AuthProductCatalogManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -988,11 +1020,14 @@ func Load() *Config {
 		MigrationCaseReportHoldTag:                    getEnvOrDefault("MIGRATION_CASE_REPORT_HOLD_TAG", "s_mig_hold"),
 		MigrationCaseReportAccountsTag:                getEnvOrDefault("MIGRATION_CASE_REPORT_ACCOUNTS_TAG", "s_acc"),
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
+		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
+		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
+		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),
@@ -1057,6 +1092,10 @@ func Load() *Config {
 	cfg.CSMMigrationSalesforceProjectIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED")
 	cfg.CSMMigrationSalesforceProjectInsertEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED")
 	cfg.CSMMigrationSalesforcePartnerIngestEnabled = envFlagOn("CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED")
+	cfg.ACPReopenEnabled = os.Getenv("CSM_ACP_REOPEN_ENABLED") == "true"
+	cfg.ACPReopenDryRun = getBoolOrDefault("CSM_ACP_REOPEN_DRY_RUN", true)
+	cfg.ACPReopenTestProjectSfID = strings.TrimSpace(os.Getenv("CSM_ACP_REOPEN_TEST_PROJECT_SF_ID"))
+	cfg.ACPReactivationPollInterval = envDuration("ACP_REACTIVATION_POLL_INTERVAL", 5*time.Second)
 	cfg.CSMMigrationCustomerEngagementIngestEnabled = envFlagOn("CSM_MIGRATION_CUSTOMER_ENGAGEMENT_INGEST_ENABLED")
 	cfg.CustomerEngagementFirefightingTypeID = strings.TrimSpace(os.Getenv("CUSTOMER_ENGAGEMENT_FIREFIGHTING_TYPE_ID"))
 	cfg.RedisURL = strings.TrimSpace(os.Getenv("REDIS_URL"))
@@ -1159,6 +1198,18 @@ func getBoolOrDefault(key string, defaultVal bool) bool {
 // splitComma parses a comma-separated env var into a trimmed, non-empty
 // slice ("" for an unset/empty var, matching integrations/csm-notification-service's
 // own copy of this exact helper).
+
+// defaultLongOpenCasesReportProjectTypes and defaultLongOpenCasesReportExcludedTags
+// are the long-open cases report's filter sets when the environment does not
+// override them.
+var (
+	defaultLongOpenCasesReportProjectTypes = []string{
+		"Subscription", "Managed Cloud Subscription", "Cloud Support", "Development Support", "Professional Services",
+	}
+	// "migrartion" is a historic misspelling that exists as stored on
+	// real cases; it must stay exactly as is to match them.
+	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
 
 func splitComma(s string) []string {
 	if s == "" {

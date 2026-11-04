@@ -140,6 +140,18 @@ type CreateUserRequest struct {
 	LastName  string     `json:"lastName"`
 	Email     string     `json:"email"`
 	Roles     []UserRole `json:"roles"`
+	// SystemProvisioned, when true, attributes this create to the fixed
+	// SystemActor instead of the caller's own forwarded x-user-id-token
+	// email. Honored only when the caller is verified, through
+	// AccessService.ResolveScope, as apps/csm-portal/backend forwarding a
+	// real WSO2-domain user token (see UserService.CreateUser) -- this is
+	// what ensureUserProvisioned (that backend's own on-demand "user" row
+	// provisioning for a first-time worknote/escalation author) sets, so the
+	// row it creates is not self-attributed to the very person it is
+	// provisioning. Ignored, with the usual token-derived actor used
+	// instead, for any other caller -- it is never a caller-supplied actor
+	// override.
+	SystemProvisioned bool `json:"systemProvisioned,omitempty"`
 }
 
 // SearchUsersRequest is the input for a user search operation.
@@ -762,6 +774,10 @@ const (
 	SalesforceEntityOpportunity       = "Opportunity"
 	SalesforceEntityProject           = "Project__c"
 	SalesforceSyncActor               = "salesforce-sync"
+	// SystemActor is created_by/updated_by for a "user" row created on a
+	// caller's own behalf by the system rather than by a deliberate actor --
+	// see CreateUserRequest.SystemProvisioned.
+	SystemActor = "SYSTEM"
 	// PortalMembershipWriteActor is created_by/updated_by for a membership
 	// written by a portal rather than by the Salesforce ingest, so the two
 	// origins stay distinguishable in the audit columns even though they
@@ -896,6 +912,11 @@ type SalesforceMembershipUpsert struct {
 
 	ProjectSfID string
 	ProjectKey  string
+
+	// KeepStaleProjectGroups skips the removal of the membership's project
+	// groups that ProjectGroups does not list, so the write only adds rows.
+	// Only the admin resync sets it (it never deletes anything).
+	KeepStaleProjectGroups bool
 
 	// IsPrimaryContact is the contact's Salesforce primary_contact__c,
 	// written to account_contact.is_primary_contact on insert and update.
@@ -2110,6 +2131,19 @@ type Product struct {
 	Class     ProductClass `json:"class"`
 	CreatedOn time.Time    `json:"createdOn"`
 	UpdatedOn time.Time    `json:"updatedOn"`
+
+	// Product catalogue fields (migration 0270 onward). unit, businessUnit
+	// and manufacturer are the lowercase enum values.
+	Code         *string `json:"code"`
+	Unit         *string `json:"unit"`
+	BusinessUnit *string `json:"businessUnit"`
+	Manufacturer *string `json:"manufacturer"`
+	Description  *string `json:"description"`
+	// VersionCount is the live (not retired) versions, RetiredVersionCount the
+	// retired ones, ActiveVersionCount the live ones not discontinued.
+	VersionCount        int `json:"versionCount"`
+	RetiredVersionCount int `json:"retiredVersionCount"`
+	ActiveVersionCount  int `json:"activeVersionCount"`
 }
 
 // SearchProductsRequest is the input for a product search operation.
@@ -2199,6 +2233,26 @@ type ProductVersion struct {
 	DeploymentProfile *string   `json:"deploymentProfile"`
 	CreatedOn         time.Time `json:"createdOn"`
 	UpdatedOn         time.Time `json:"updatedOn"`
+
+	// Product catalogue fields (migrations 0270-0272). The public feeds group
+	// the live rows sharing PublicID into one listing.
+	ProductName                string         `json:"productName"`
+	ProductCode                *string        `json:"productCode"`
+	SerialNumber               *string        `json:"serialNumber"`
+	SupportEOLAnnouncementDate *time.Time     `json:"supportEolAnnouncementDate"`
+	PublicID                   *int64         `json:"publicId"`
+	PublicName                 *string        `json:"publicName"`
+	PublicAbbreviation         *string        `json:"publicAbbreviation"`
+	Description                *string        `json:"description"`
+	IsPublic                   bool           `json:"isPublic"`
+	ShowInSupportMatrix        bool           `json:"showInSupportMatrix"`
+	Tags                       []string       `json:"tags"`
+	ReleaseLinks               *string        `json:"releaseLinks"`
+	LegacyStatus               bool           `json:"legacyStatus"`
+	ReleaseLineID              *string        `json:"releaseLineId"`
+	ReleaseLineName            *string        `json:"releaseLineName"`
+	Carbon                     *CatalogCarbon `json:"carbon"`
+	RetiredOn                  *time.Time     `json:"retiredOn"`
 }
 
 // SearchProductVersionsRequest is the input for a product version search operation.
@@ -2213,6 +2267,14 @@ type SearchProductVersionsRequest struct {
 	// Omitted (or empty) applies no profile filter and returns every profile.
 	// Postgres data source only.
 	DeploymentProfile *string `json:"deploymentProfile,omitempty"`
+	// ExcludeRetired leaves out retired rows. Omitted (false) returns every
+	// row, retired ones included, as before the catalogue existed.
+	ExcludeRetired bool `json:"excludeRetired,omitempty"`
+	// Feed (support-matrix or release-matrix) restricts to the live rows with
+	// a public listing on that feed. POST /product-versions/search only.
+	Feed string `json:"feed,omitempty"`
+	// PublicID restricts to the rows of one public listing.
+	PublicID *int64 `json:"publicId,omitempty"`
 }
 
 // SearchProductVersionsResponse is the paginated result of a product version search.
@@ -2408,6 +2470,13 @@ type DeployedProductVersionRef struct {
 	Name           string     `json:"name"`
 	ReleasedDate   *time.Time `json:"releasedDate"`
 	SupportEoLDate *time.Time `json:"supportEoLDate"`
+	// DeploymentProfile is product_version.deployment_profile (e.g. "All In
+	// One", "API Control Plane"); null when the version has none. Several
+	// version rows can share a Name and differ only by this, so without it a
+	// caller cannot tell which of them a deployed product points at.
+	// Postgres data source only -- the ServiceNow version record carries no
+	// profile, so it stays null there.
+	DeploymentProfile *string `json:"deploymentProfile"`
 }
 
 // DeployedProductView is the enriched search result for a deployed product.
@@ -3542,6 +3611,12 @@ type SearchCaseView struct {
 	// EscalationLevel is the case's current escalation level -- see
 	// CaseView.EscalationLevel's doc comment.
 	EscalationLevel *string `json:"escalationLevel"`
+	// ResolvedOn is the time the case moved to solution proposed, as a UTC
+	// RFC 3339 string. Null if it never did.
+	ResolvedOn *string `json:"resolvedOn"`
+	// ClosedOn is the time the case was closed, as a UTC RFC 3339 string.
+	// Null if it is not closed.
+	ClosedOn *string `json:"closedOn"`
 }
 
 // SearchCasesResponse is the paginated result of a case search. When the
@@ -6078,6 +6153,13 @@ type SearchGroupsFilters struct {
 	// (the ones assignmentGroupId takes), not team-registry ids, which the
 	// search returns without this filter on the Postgres data source.
 	SupportGroupsOnly bool `json:"supportGroupsOnly,omitempty"`
+	// IncidentExtraGroupsOnly limits the result to the active groups the
+	// deployment has configured as extra incident assignment groups (and none
+	// when none are configured). Ids are "group" ids, as with SupportGroupsOnly.
+	// The set may include a group that is also a service's support group, so it
+	// can overlap SupportGroupsOnly results. It wins over SupportGroupsOnly when
+	// both are set. Other data sources return an empty result.
+	IncidentExtraGroupsOnly bool `json:"incidentExtraGroupsOnly,omitempty"`
 }
 
 // SearchGroupsRequest is the input for POST /groups/search.
@@ -7097,7 +7179,7 @@ type IncidentView struct {
 	ResolvedOn      *string `json:"resolvedOn"`
 	// ClosedOn / ClosedBy are when the incident entered Closed and who it is
 	// attributed to (the closer's name), read from incident.closed_on /
-	// closed_by_id (migration 0255) on the Postgres data sources. Null for an
+	// closed_by_id (migration 0273) on the Postgres data sources. Null for an
 	// incident closed before that migration, and when incidents are not read from
 	// Postgres (DATA_SOURCE=servicenow).
 	ClosedOn *string `json:"closedOn"`
@@ -8907,12 +8989,29 @@ type SLAStatus struct {
 	// addressed by these fields. AssigneeName/AssigneeEmail resolve
 	// work_item.assigned_to_id the same way GetCaseByID's own
 	// AssignedEngineer join does; "" when the case has no assignee.
-	// TeamEmail/TeamLeadName resolve from the SAME "group" row Team
-	// already comes from (account.cre_team_id) -- "group".group_email and
-	// "group".manager_id -> "user".name respectively; "" when the case has
-	// no account, the account has no CRE team, or that team has no
-	// group_email/manager_id set. All four are best-effort display/routing
-	// enrichment, not part of the SLA clock itself.
+	// TeamEmail is NOT the "group" row Team's own display name comes from
+	// (account.cre_team_id -> "group") -- it is team.group_email, on the
+	// team row with the SAME id (team.id and "group".id coincide for a
+	// properly-synced CRE team -- see TeamLeadName's own doc comment
+	// below), since "group".group_email and team.group_email are two
+	// different, independently-synced values for the same team and
+	// team.group_email is the one other proven code (TeamGroupEmails,
+	// migration_case_report_repo.go) already relies on. "" when the case
+	// has no account, the account has no CRE team, or that team has no
+	// group_email set. TeamLeadName does NOT come from that same "group"
+	// row at all either -- "group".manager_id is an unrelated field (a real,
+	// reported bug: an earlier version of this resolved TeamLeadName from
+	// it, which for most teams simply isn't set, and for any team where it
+	// is set names the wrong person). The real team lead is
+	// team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id -- the identical join CaseTeamLeads already uses
+	// for the escalation ladder's own team-lead notifications
+	// (escalation_repo.go), just picking one (oldest membership first) for
+	// this single-string field, since a team can genuinely have more than
+	// one lead (team_member.role has no uniqueness constraint for 'lead',
+	// unlike the one-per-team 'americas_team_lead' role). All four are
+	// best-effort display/routing enrichment, not part of the SLA clock
+	// itself.
 	AssigneeName  string `json:"assigneeName,omitempty"`
 	AssigneeEmail string `json:"assigneeEmail,omitempty"`
 	TeamEmail     string `json:"teamEmail,omitempty"`
@@ -8941,6 +9040,47 @@ type SearchSLAStatusResponse struct {
 	Total    int         `json:"total"`
 	Limit    int         `json:"limit"`
 	Offset   int         `json:"offset"`
+}
+
+// SLA elapsed-percentage bucket keys -- GET /sla-status's own elapsedBucket
+// query param, and SLAStatusFilters.ElapsedBucket's accepted values. Fixed,
+// named ranges rather than an open gte/lte pair (unlike the unrelated,
+// generic taskSLABusinessElapsedPercent case-search filter in
+// internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
+// offers exactly these four buckets, not an arbitrary range.
+const (
+	SLAElapsedBucketUnder50 = "under50"
+	SLAElapsedBucket50To75  = "50to75"
+	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
+// SLA Engine admin table. Every field's zero value ("") means "don't filter
+// on this" -- a caller passing none of them gets exactly
+// SearchActiveSLAStatuses' previous, unfiltered behavior, so this is purely
+// additive for every existing caller (csm-notification-service's own
+// startup reconciliation included).
+type SLAStatusFilters struct {
+	// Severity is one of CaseSeverity's own values (catastrophic/critical/
+	// high/medium/low) -- a case-like row whose type carries no severity at
+	// all (service_request/announcement) never matches a non-empty value.
+	Severity CaseSeverity
+	// CaseType is one of the five case-like work_item_type_enum labels,
+	// uppercase (CASE/ENGAGEMENT/SERVICE_REQUEST/SECURITY_REPORT_ANALYSIS/
+	// ANNOUNCEMENT).
+	CaseType string
+	// Search matches ONLY the case's own id (exact), number, or WSO2 case id
+	// (both substring, case-insensitive) -- deliberately never title,
+	// product, or any other field: this is a case-identity lookup, not a
+	// general-purpose search box.
+	Search string
+	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
+	// "" for no bucket filter. Applied AFTER the same business-day
+	// correction scanSLAStatus already applies to BusinessElapsedPercent --
+	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
+	// why this can't be a plain SQL WHERE/HAVING clause.
+	ElapsedBucket string
 }
 
 // SLAClockState is GET /sla-status/clock-state's response — the full,
@@ -9020,6 +9160,23 @@ type SLAClockState struct {
 	// weekends/holidays the pause spanned. Always 0 for a 24x7-scheduled
 	// clock (nothing ever writes this column for one).
 	BusinessPauseDurationSeconds int64 `json:"businessPauseDurationSeconds"`
+	// AssigneeName/AssigneeEmail/TeamEmail/TeamLeadName mirror SLAStatus's
+	// own fields of the same name and the SAME resolution -- see that
+	// type's own doc comment, in particular for why TeamLeadName is NOT
+	// the account's CRE "group" row's own manager_id (a real, fixed bug)
+	// but team_member.role = 'lead' on the team whose id is
+	// account.cre_team_id, the same join CaseTeamLeads already uses.
+	// Added so csm-notification-service's SLA breach email reaction can
+	// read all four from the exact same read it already makes right
+	// before sending a breach alert (GetClockState, for its own
+	// stale-alert suppression check) rather than needing a second round
+	// trip to GET /sla-status. "" when not resolvable (no assignee, no
+	// team, or the team has no group_email/lead set) -- same as
+	// SLAStatus's own posture.
+	AssigneeName  string `json:"assigneeName,omitempty"`
+	AssigneeEmail string `json:"assigneeEmail,omitempty"`
+	TeamEmail     string `json:"teamEmail,omitempty"`
+	TeamLeadName  string `json:"teamLeadName,omitempty"`
 }
 
 // SLADurationPolicyItem is one (severity, clockType) duration row, computed
@@ -9876,6 +10033,12 @@ type PendingVerificationPreviousStatus string
 const (
 	PendingVerificationPreviousStatusSolutionProposed PendingVerificationPreviousStatus = "SOLUTION_PROPOSED"
 	PendingVerificationPreviousStatusAwaitingInfo     PendingVerificationPreviousStatus = "AWAITING_INFO"
+	// PendingVerificationPreviousStatusWorkInProgress covers the CSM portal's
+	// own close flow (apps/csm-portal/backend's state machine only ever
+	// reaches Closed from Work In Progress or Solution Proposed), added
+	// (migration 0269) once that backend needed to record an auto-closed
+	// entry's real previous state instead of falling back to a manual entry.
+	PendingVerificationPreviousStatusWorkInProgress PendingVerificationPreviousStatus = "WORK_IN_PROGRESS"
 )
 
 // PendingVerification is a single entry in a project's Pending Verification
@@ -10304,4 +10467,68 @@ type GetRiskActionItemsResponse struct {
 // /action-items/{id}/comments.
 type GetActionItemCommentsResponse struct {
 	Comments []ActionItemComment `json:"comments"`
+}
+
+// ACPReopenActor is updated_by on a project the ACP reopen check sets back to
+// Open (internal/service/acp_reopen.go).
+const ACPReopenActor = "acp-reopen"
+
+// ACPReopenProject is what the ACP reopen check reads of a CSM project. The
+// three closure sub-states and ClosureState are the raw enum labels
+// ("CLOSED", "SUSPENDED", "OPEN"), nil when unset.
+type ACPReopenProject struct {
+	ID                              string
+	SfID                            string
+	Name                            string
+	Key                             string
+	EndDateClosureState             *string
+	InvoiceDueDateClosureState      *string
+	ComplianceViolationClosureState *string
+	ClosureState                    *string
+	SuspensionProcessState          json.RawMessage
+}
+
+// ACPReopenWrite is one reopen of an ACP-suspended project: which tracks go
+// back to OPEN and the suspensionProcessState to store with them.
+// SectionsOnly writes the suspensionProcessState with no track change: the
+// daily check finishing a project a person already set back to Open.
+type ACPReopenWrite struct {
+	ReopenEndDate          bool
+	ReopenInvoice          bool
+	SectionsOnly           bool
+	SuspensionProcessState json.RawMessage
+}
+
+// ACPReopenOutcome is the project after an ACPReopenWrite: Open reports that
+// the overall closure state (recomputed from the three sub-states) is OPEN.
+type ACPReopenOutcome struct {
+	ClosureState *string
+	Open         bool
+}
+
+// ACPReopenCheckRequest is the body of POST /acp/reopen-check, the daily
+// safety net over every project ACP suspended. Projects are taken in id
+// order after Cursor (empty: from the start), at most Limit of them (default
+// 10, at most 50); a call that runs short of time stops early.
+type ACPReopenCheckRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// ACPReopenCheckResponse reports one page of the daily check. Checked is
+// every project looked at; Reopened those with a track set back to Open;
+// Finished those a person had already set back to Open, now finished
+// (Salesforce Open; the email queued only for a suspension in the last 7
+// days); SkippedSetByHand those left alone as set by hand; FailedProjectIDs those whose check
+// failed (the error is logged). More is true while projects are left: call
+// again with NextCursor as the cursor. More false means every project is done.
+type ACPReopenCheckResponse struct {
+	Checked          int      `json:"checked"`
+	Reopened         int      `json:"reopened"`
+	Finished         int      `json:"finished"`
+	SkippedSetByHand int      `json:"skippedSetByHand"`
+	Failed           int      `json:"failed"`
+	FailedProjectIDs []string `json:"failedProjectIds"`
+	NextCursor       string   `json:"nextCursor"`
+	More             bool     `json:"more"`
 }

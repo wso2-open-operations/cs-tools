@@ -26,6 +26,7 @@ import {
   navSectionForPath,
   navViewForSearch,
 } from "@config/csmNavItems";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 
 describe("nav tree invariants", () => {
   it("gives every node a unique id", () => {
@@ -83,6 +84,7 @@ describe("top-level nav order", () => {
       "security-center",
       "customers",
       "kb-articles",
+      "products",
       "plg",
       "updates",
       "time-cards",
@@ -93,6 +95,59 @@ describe("top-level nav order", () => {
       "admin",
       "help",
     ]);
+  });
+});
+
+describe("products section", () => {
+  it("sits directly below Knowledge and is staff-only", () => {
+    const ids = CSM_NAV_ITEMS.map((section) => section.id);
+    expect(ids.indexOf("products")).toBe(ids.indexOf("kb-articles") + 1);
+    expect(navNodeById("products")?.requires).toBe("canViewStaffSections");
+  });
+
+  it("has the Catalogue and Release lines tabs, none narrower than the section", () => {
+    expect(navNodeById("products")?.children?.map((tab) => tab.id)).toEqual([
+      "products.catalogue",
+      "products.release-lines",
+    ]);
+    expect(navNodeById("products.catalogue")?.requires).toBeUndefined();
+  });
+
+  it("resolves each tab's route, and a section-level path to the section", () => {
+    expect(navNodeMatchForPath("/products/release-lines")).toMatchObject({
+      node: { id: "products.release-lines" },
+    });
+    expect(navNodeMatchForPath("/products")).toMatchObject({
+      node: { id: "products" },
+    });
+  });
+});
+
+describe("Updates vs Time cards gating", () => {
+  it("gates Updates (nav and help) on canViewUpdates", () => {
+    expect(navNodeById("updates")?.requires).toBe("canViewUpdates");
+    expect(navNodeById("help.updates")?.requires).toBe("canViewUpdates");
+  });
+
+  it("keeps Time cards (nav and help) on canUseTimeCardsAndUpdates", () => {
+    expect(navNodeById("time-cards")?.requires).toBe("canUseTimeCardsAndUpdates");
+    expect(navNodeById("help.time-cards")?.requires).toBe("canUseTimeCardsAndUpdates");
+  });
+
+  it("shows a viewer Updates but not Time cards, and leaves other roles unchanged", () => {
+    const visible = (roles: string[], id: string): boolean => {
+      const key = navNodeById(id)?.requires;
+      return key ? getPortalAccess(roles)[key] : true;
+    };
+    expect(visible(["viewer"], "updates")).toBe(true);
+    expect(visible(["viewer"], "help.updates")).toBe(true);
+    expect(visible(["viewer"], "time-cards")).toBe(false);
+    expect(visible(["viewer"], "help.time-cards")).toBe(false);
+    for (const role of ["cs_engineer", "admin", "timecard_approver"]) {
+      expect(visible([role], "updates")).toBe(true);
+      expect(visible([role], "time-cards")).toBe(true);
+    }
+    expect(visible(["escalator"], "updates")).toBe(false);
   });
 });
 

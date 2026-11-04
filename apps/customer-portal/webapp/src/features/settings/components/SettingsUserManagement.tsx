@@ -63,8 +63,10 @@ import {
   SETTINGS_USER_EDIT_TOOLTIP,
   SETTINGS_USER_EMPTY_MESSAGE,
   SETTINGS_USER_INVITE_ALREADY_RUNNING,
+  SETTINGS_USER_ADDING_NOTICE,
   SETTINGS_USER_INVITE_SUCCESS,
   SETTINGS_USER_INVITING_NOTICE,
+  SETTINGS_USER_SYSTEM_USER_ADD_SUCCESS,
   SETTINGS_USER_PAGE_SIZE,
   SETTINGS_USER_PENDING_PROCESSING_TOOLTIP,
   SETTINGS_USER_PENDING_STATUS,
@@ -75,6 +77,8 @@ import {
   SETTINGS_USER_RESEND_SUCCESS,
   SETTINGS_USER_RESEND_TOOLTIP,
   SETTINGS_USER_RETRY_TOOLTIP,
+  SETTINGS_USER_SYSTEM_USER_PENDING_PROCESSING_TOOLTIP,
+  SETTINGS_USER_SYSTEM_USER_RETRY_TOOLTIP,
   SETTINGS_USER_ROLE_PERMISSIONS_TITLE,
   SETTINGS_USER_SEARCH_PLACEHOLDER,
   SETTINGS_USER_SECURITY_UPDATE_SUCCESS,
@@ -181,7 +185,10 @@ export default function SettingsUserManagement({
       await queryClient.refetchQueries({ queryKey, type: "all" });
       return queryClient.getQueryData<ProjectContact[]>(queryKey);
     },
-    onInvited: (email) => showSuccess(`${SETTINGS_USER_INVITE_SUCCESS}: ${email}`),
+    onInvited: (email, request) =>
+      showSuccess(
+        `${request.isCsIntegrationUser ? SETTINGS_USER_SYSTEM_USER_ADD_SUCCESS : SETTINGS_USER_INVITE_SUCCESS}: ${email}`,
+      ),
     onFailed: (email, message) => showError(`${email}: ${message}`),
   });
 
@@ -204,7 +211,11 @@ export default function SettingsUserManagement({
         return;
       }
       setIsAddModalOpen(false);
-      showSuccess(`Inviting ${data.contactEmail}. ${SETTINGS_USER_INVITING_NOTICE}`);
+      showSuccess(
+        data.isCsIntegrationUser
+          ? `Adding ${data.contactEmail}. ${SETTINGS_USER_ADDING_NOTICE}`
+          : `Inviting ${data.contactEmail}. ${SETTINGS_USER_INVITING_NOTICE}`,
+      );
     },
     [pendingInvites, showSuccess, showError],
   );
@@ -487,7 +498,7 @@ export default function SettingsUserManagement({
                           justifyContent: "flex-end",
                         }}
                       >
-                        {contact.canResendInvitation && (
+                        {contact.canResendInvitation && !contact.isCsIntegrationUser && (
                           <Tooltip title={SETTINGS_USER_RESEND_TOOLTIP}>
                             <span>
                               <IconButton
@@ -685,13 +696,22 @@ function PendingInviteRow({
     isCsIntegrationUser: !!request.isCsIntegrationUser,
   } as ProjectContact;
 
+  const retryLabel = request.isCsIntegrationUser
+    ? SETTINGS_USER_SYSTEM_USER_RETRY_TOOLTIP
+    : SETTINGS_USER_RETRY_TOOLTIP;
+  const dismissLabel = request.isCsIntegrationUser ? "Dismiss" : "Dismiss invitation";
+
   const statusChip =
     status === "inviting" ? (
       <Chip
         size="small"
         variant="outlined"
         icon={<CircularProgress size={12} color="inherit" aria-hidden />}
-        label={SETTINGS_USER_PENDING_STATUS.inviting}
+        label={
+          request.isCsIntegrationUser
+            ? SETTINGS_USER_PENDING_STATUS.adding
+            : SETTINGS_USER_PENDING_STATUS.inviting
+        }
         sx={{ typography: "caption" }}
       />
     ) : status === "failed" ? (
@@ -705,7 +725,13 @@ function PendingInviteRow({
         />
       </Tooltip>
     ) : (
-      <Tooltip title={SETTINGS_USER_PENDING_PROCESSING_TOOLTIP}>
+      <Tooltip
+        title={
+          request.isCsIntegrationUser
+            ? SETTINGS_USER_SYSTEM_USER_PENDING_PROCESSING_TOOLTIP
+            : SETTINGS_USER_PENDING_PROCESSING_TOOLTIP
+        }
+      >
         <Chip
           size="small"
           variant="outlined"
@@ -775,15 +801,15 @@ function PendingInviteRow({
         <TableCell align="right">
           <Box sx={{ display: "flex", gap: 0.5, justifyContent: "flex-end" }}>
             {status !== "inviting" && (
-              <Tooltip title={SETTINGS_USER_RETRY_TOOLTIP}>
-                <IconButton size="small" aria-label="Retry invitation" onClick={() => onRetry(email)}>
+              <Tooltip title={retryLabel}>
+                <IconButton size="small" aria-label={retryLabel} onClick={() => onRetry(email)}>
                   <RefreshCw size={16} />
                 </IconButton>
               </Tooltip>
             )}
             {status !== "inviting" && (
               <Tooltip title={SETTINGS_USER_DISMISS_TOOLTIP}>
-                <IconButton size="small" aria-label="Dismiss invitation" onClick={() => onDismiss(email)}>
+                <IconButton size="small" aria-label={dismissLabel} onClick={() => onDismiss(email)}>
                   <X size={16} />
                 </IconButton>
               </Tooltip>

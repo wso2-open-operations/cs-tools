@@ -38,6 +38,7 @@ import (
 type fakeFullSLAEngineRepo struct {
 	candidatesByTarget map[string][]repository.SLAPolicyRef
 	factsByCase        map[string]repository.CaseFacts
+	factsByIncident    map[string]repository.IncidentFacts
 	activeByCaseTarget map[string]repository.SLAPolicyRef
 
 	registered     []string // "caseID|policyID"
@@ -62,6 +63,7 @@ func newFakeFullSLAEngineRepo() *fakeFullSLAEngineRepo {
 	return &fakeFullSLAEngineRepo{
 		candidatesByTarget: map[string][]repository.SLAPolicyRef{},
 		factsByCase:        map[string]repository.CaseFacts{},
+		factsByIncident:    map[string]repository.IncidentFacts{},
 		activeByCaseTarget: map[string]repository.SLAPolicyRef{},
 		registerOK:         true,
 	}
@@ -83,6 +85,13 @@ func (r *fakeFullSLAEngineRepo) GetCaseFacts(_ context.Context, workItemID strin
 		return repository.CaseFacts{}, r.getCaseFactsErr
 	}
 	return r.factsByCase[workItemID], nil
+}
+
+func (r *fakeFullSLAEngineRepo) GetIncidentFacts(_ context.Context, workItemID string) (repository.IncidentFacts, error) {
+	if r.getCaseFactsErr != nil {
+		return repository.IncidentFacts{}, r.getCaseFactsErr
+	}
+	return r.factsByIncident[workItemID], nil
 }
 
 func (r *fakeFullSLAEngineRepo) RegisterClock(_ context.Context, workItemID string, policy repository.SLAPolicyRef, _ time.Time) (bool, error) {
@@ -308,33 +317,79 @@ func TestSLAEngineService_CompleteResponseClock(t *testing.T) {
 	}
 }
 
-func TestSLAEngineService_CompleteWorkaroundClock(t *testing.T) {
+// TestSLAEngineService_ApplyCaseFieldEffects_WorkaroundProvidedPauses is the
+// regression guard for a real bug in the old design: WorkaroundProvided=true
+// used to hard-complete the workaround clock directly. The real
+// WORKAROUND-target policies' own pause_condition
+// ("...ORu_workaround_providedISNOTEMPTY") says providing a workaround
+// should PAUSE that clock, not complete it -- it only actually stops on
+// stateINCLOSED or fix_eta_sharedISNOTEMPTY (see caseStateEffectsPolicies'
+// own WORKAROUND policy). ApplyCaseFieldEffects lets that condition text
+// decide, with no state override and no CLOSED safety net.
+func TestSLAEngineService_ApplyCaseFieldEffects_WorkaroundProvidedPauses(t *testing.T) {
 	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", WorkaroundProvided: true}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
 	svc := NewSLAEngineService(repo)
 
-	svc.CompleteWorkaroundClock(context.Background(), "case-5")
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", nil, nil)
+
+	if len(repo.completed) != 0 {
+		t.Errorf("completed = %v, want none -- providing a workaround pauses, it does not complete", repo.completed)
+	}
+	if len(repo.paused) != 1 || repo.paused[0] != "case-5|WORKAROUND|true" {
+		t.Errorf("paused = %v, want [case-5|WORKAROUND|true]", repo.paused)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseFieldEffects_OverridesWinOverAStaleFreshRead
+// is the regression guard for a CodeRabbit-caught gap: snCaseService's own
+// dual-write PATCH lands on the previous system first, and entity-service's
+// own Postgres mirror of that case is only caught up by a separate,
+// continuously-running sync job on its own schedule -- a fresh
+// repository.CaseFacts read taken immediately afterward can still show the
+// OLD value. workaroundProvidedOverride/fixEtaSharedOverride exist so a
+// caller that already knows the authoritative, just-applied value can
+// supply it directly rather than trust a fresh read that may not have
+// caught up yet.
+func TestSLAEngineService_ApplyCaseFieldEffects_OverridesWinOverAStaleFreshRead(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	// The fresh read still says "not provided, not shared" -- simulating a
+	// Postgres mirror that hasn't caught up to the PATCH yet.
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", WorkaroundProvided: false, FixEtaShared: false}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
+	svc := NewSLAEngineService(repo)
+
+	workaroundProvided := true
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", &workaroundProvided, nil)
+
+	if len(repo.paused) != 1 || repo.paused[0] != "case-5|WORKAROUND|true" {
+		t.Errorf("paused = %v, want [case-5|WORKAROUND|true] -- the override should have won over the stale fresh read", repo.paused)
+	}
+}
+
+// TestSLAEngineService_ApplyCaseFieldEffects_FixEtaSharedCompletesWorkaround
+// verifies the fix-ETA fields (BestCaseFixEta/MostLikelyFixEta/
+// WorstCaseFixEta -- any one of them, via repository.CaseFacts.FixEtaShared's
+// own doc comment) complete the workaround clock through its own
+// stop_condition, replacing the old design's hardcoded
+// CompleteFixEtaSharedClocks hook (which also force-completed the resolution
+// clock regardless of that clock's own condition text -- the resolution
+// policy here has no fix_eta_shared clause at all, so it is correctly left
+// running).
+func TestSLAEngineService_ApplyCaseFieldEffects_FixEtaSharedCompletesWorkaround(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	repo.factsByCase["case-5"] = repository.CaseFacts{CaseType: "case", FixEtaShared: true}
+	repo.activeByCaseTarget = caseStateEffectsPolicies("case-5")
+	svc := NewSLAEngineService(repo)
+
+	svc.ApplyCaseFieldEffects(context.Background(), "case-5", nil, nil)
 
 	if len(repo.completed) != 1 || repo.completed[0] != "case-5|WORKAROUND" {
 		t.Errorf("completed = %v, want [case-5|WORKAROUND]", repo.completed)
 	}
-}
-
-// TestSLAEngineService_CompleteFixEtaSharedClocks verifies sharing a fix ETA
-// with the customer completes BOTH the workaround and resolution clocks.
-func TestSLAEngineService_CompleteFixEtaSharedClocks(t *testing.T) {
-	repo := newFakeFullSLAEngineRepo()
-	svc := NewSLAEngineService(repo)
-
-	svc.CompleteFixEtaSharedClocks(context.Background(), "case-5")
-
-	want := []string{"case-5|WORKAROUND", "case-5|RESOLUTION"}
-	if len(repo.completed) != len(want) {
-		t.Fatalf("completed = %v, want %v", repo.completed, want)
-	}
-	for i, w := range want {
-		if repo.completed[i] != w {
-			t.Errorf("completed[%d] = %q, want %q", i, repo.completed[i], w)
-		}
+	if len(repo.paused) != 0 {
+		t.Errorf("paused = %v, want none", repo.paused)
 	}
 }
 

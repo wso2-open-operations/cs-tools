@@ -141,7 +141,7 @@ func TestIncidentReport_StateTable(t *testing.T) {
 		{"in progress to resolved writes report", map[string]map[string]any{"state": {"from": "IN_PROGRESS", "to": "RESOLVED"}}, false, true},
 		{"to on hold does nothing", map[string]map[string]any{"state": {"from": "IN_PROGRESS", "to": "ON_HOLD"}}, false, false},
 		{"to closed does nothing", map[string]map[string]any{"state": {"from": "RESOLVED", "to": "CLOSED"}}, false, false},
-		// What the incident auto-close (and, since migration 0255, a manual
+		// What the incident auto-close (and, since migration 0273, a manual
 		// close) records: the state plus closed_on / closed_by_id.
 		{"auto-close diff does nothing", map[string]map[string]any{
 			"state":        {"from": "RESOLVED", "to": "CLOSED"},

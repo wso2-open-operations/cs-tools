@@ -19,6 +19,7 @@ package rotareminder
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -135,7 +136,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 
 	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
-	if summary.subject != "[CRE Operations] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
+	if summary.subject != "[CRE] Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026" ||
 		strings.Join(summary.to, ",") != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com" ||
 		len(summary.attachments) != 0 ||
 		!strings.Contains(summary.body, "A calendar invitation for your team&#39;s rotation follows in a separate email") {
@@ -146,7 +147,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 		"allocated for weekend support the coming weekend (2026-10-24 and 2026-10-25)",
 		"<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>",
 		"<b>Sunday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)</p>",
-		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support</td></tr>",
+		"<tr><td>LK Weekend<br/><span style=\"color:#666666; font-size:12px;\">3 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>IST General support<br/><span style=\"color:#666666; font-size:12px;\">The 15-hour window is shared: the 3 members can divide the 15 hours into morning and evening shifts, so support is covered from start to end.</span></td></tr>",
 		"<tr><td>Americas Weekend<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>PDT General support</td></tr>",
 		"<tr><td>LK On-call<br/><span style=\"color:#666666; font-size:12px;\">Saturday 1, Sunday 0</span></td><td>08:00 AM &#8211; 06:00 PM PDT</td><td>15:00 &#8211; 01:00</td><td>On-call</td></tr>",
 		"IST = Asia/Colombo (UTC+5:30) &#8226; PDT = America/Los_Angeles (UTC&#8722;7)<br/>Local times are fixed. The Americas Weekend Rotation UTC window moves by one hour on 01 Nov 2026, when daylight saving ends.",
@@ -166,7 +167,7 @@ func TestWeekendNotice_AFullWeekendIsAnnouncedOnce(t *testing.T) {
 	}
 	for _, c := range cases {
 		m := emailWith(t, mail.sent, c.subject)
-		if !strings.HasPrefix(m.subject, "[CRE Operations] "+c.subject) || strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
+		if !strings.HasPrefix(m.subject, "[CRE] "+c.subject) || strings.Join(m.to, ",") != c.to || len(m.attachments) != 1 {
 			t.Errorf("%q to %v with %d attachments", c.subject, m.to, len(m.attachments))
 			continue
 		}
@@ -221,7 +222,7 @@ func TestWeekendNotice_AnIncompleteWeekendAsksTheRotaAdmins(t *testing.T) {
 	}
 	m := mail.sent[0]
 	if strings.Join(m.to, ",") != "zoe@example.com" ||
-		m.subject != "[CRE Operations] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
+		m.subject != "[CRE] Action needed: the weekend rota for Saturday, 24 and Sunday, 25 October 2026 is not complete" ||
 		!strings.Contains(m.body, "<p>Dear Zoe Admin,</p>") ||
 		!strings.Contains(m.body, row("Saturday, 24 October", "LK Weekend Rotation", "2", "3")) ||
 		!strings.Contains(m.body, row("Sunday, 25 October", "Americas Weekend Rotation", "0", "1")) ||
@@ -551,5 +552,225 @@ func TestWeekendReminder_AdminsAreToldOnlyAfterTheSummary(t *testing.T) {
 			subjects = append(subjects, m.subject)
 		}
 		t.Fatalf("order: %v", subjects)
+	}
+}
+
+// Americas Weekend's invitations turned off after Sunday's went out: Friday
+// sends the summary and the two LK invitations only, neither updates nor
+// withdraws the Americas event already sent, and keeps it in the record.
+func TestWeekendReminder_InvitesTurnedOffForOneRotationKeepsWhatWasSent(t *testing.T) {
+	const americasSat = "cre-rota-2026-10-24-cre_weekend_night@csm-team-schedule"
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: americasSat, Sequence: 1, Attendees: []string{"ivy@example.com", "jay@example.com"}},
+		}},
+	}}
+	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	var subjects []string
+	for _, m := range mail.sent {
+		subjects = append(subjects, m.subject)
+		if strings.Contains(m.subject, "Americas Weekend") || strings.Contains(m.subject, "Cancelled:") {
+			t.Errorf("sent %q although Americas Weekend's invitations are off", m.subject)
+		}
+	}
+	if len(mail.sent) != 3 {
+		t.Fatalf("sent %d emails, want the summary and the two LK invitations:\n%s", len(mail.sent), strings.Join(subjects, "\n"))
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if !strings.Contains(summary.body, "follows in a separate email") {
+		t.Errorf("the summary no longer mentions the LK invitations:\n%s", summary.body)
+	}
+	kept := false
+	for _, inv := range store.recorded[0].invites {
+		if inv.UID == americasSat && inv.Sequence == 1 && len(inv.Attendees) == 2 {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("the Americas invitation already sent is not kept in the record: %+v", store.recorded[0].invites)
+	}
+}
+
+// Americas Weekend's invitations turned off, and Saturday's Americas window
+// then taken off the rota: its invitation already sent is still neither
+// withdrawn nor dropped from the record.
+func TestWeekendReminder_InvitesTurnedOffKeepsAWindowGoneFromTheRota(t *testing.T) {
+	const americasSat = "cre-rota-2026-10-24-cre_weekend_night@csm-team-schedule"
+	store := &fakeStore{records: map[string]*teamschedule.ReminderRecord{
+		"2026-10-24": {Invites: []teamschedule.ReminderInvite{
+			{UID: americasSat, Sequence: 1, Attendees: []string{"ivy@example.com", "jay@example.com"}},
+		}},
+	}}
+	var rota []teamschedule.Assignment
+	for _, a := range fullWeekend() {
+		if a.RotaDate == "2026-10-24" && baseCode(a.ShiftCode) == "CRE_WEEKEND_NIGHT" {
+			continue
+		}
+		rota = append(rota, a)
+	}
+	cfg := weekendConfig("2026-10-23 15:00", "rota_weekend_reminder")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendReminder(&fakeRota{assignments: rota}, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	for _, m := range mail.sent {
+		if strings.Contains(m.subject, "Cancelled:") {
+			t.Errorf("sent %q although Americas Weekend's invitations are off", m.subject)
+		}
+	}
+	kept := false
+	for _, inv := range store.recorded[0].invites {
+		if inv.UID == americasSat && inv.Sequence == 1 && len(inv.Attendees) == 2 {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Errorf("the Americas invitation already sent is not kept in the record: %+v", store.recorded[0].invites)
+	}
+}
+
+// Every weekend rotation's invitations off: the summary alone, and it does not
+// promise an invitation.
+func TestWeekendNotice_AllWeekendInvitesOff(t *testing.T) {
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.InvitesOff = map[string]bool{"CRE_WEEKEND": true, "CRE_WEEKEND_NIGHT": true}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Contains(mail.sent[0].body, "follows in a separate email") {
+		t.Fatalf("sent %d emails; summary:\n%s", len(mail.sent), mail.sent[0].body)
+	}
+}
+
+// A weekend-only copy is on the Cc of the summary and nothing else: not the
+// invitation emails. The every-reminder copy is on both, and an address on
+// both lists is copied once.
+func TestWeekendNotice_WeekendCopyIsOnTheSummaryOnly(t *testing.T) {
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Copy = []string{"lead@example.com"}
+	cfg.WeekendCopy = []string{"head@example.com", "Lead@example.com"}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 24 and Sunday, 25 October 2026")
+	if strings.Join(summary.cc, ",") != "lead@example.com,head@example.com" {
+		t.Errorf("summary cc = %v, want the lead and the head once each", summary.cc)
+	}
+	for _, m := range mail.sent {
+		if strings.Contains(m.subject, "Calendar invitation") && slices.Contains(m.cc, "head@example.com") {
+			t.Errorf("the weekend-only copy is on %q", m.subject)
+		}
+	}
+}
+
+// sreWeekend is the SRE weekend of 24-25 October: the SaaS weekend day turn
+// (L1, L2) and the TZ3 night (L1) each day, and an IaaS day turn the CRE
+// summary does not list.
+func sreWeekend() []teamschedule.Assignment {
+	tiered := func(a teamschedule.Assignment, tier string) teamschedule.Assignment {
+		a.Tier = tier
+		return a
+	}
+	var out []teamschedule.Assignment
+	for _, d := range []string{"2026-10-24", "2026-10-25"} {
+		next := map[string]string{"2026-10-24": "2026-10-25", "2026-10-25": "2026-10-26"}[d]
+		l2 := map[string]struct{ name, email string }{"2026-10-24": {"Lee", "lee@example.com"}, "2026-10-25": {"Oli", "oli@example.com"}}[d]
+		out = append(out,
+			tiered(assignment("Max", "max@example.com", "apollo", "SRE_TZ3", d, d+" 21:00", next+" 06:00"), "L1"),
+			tiered(assignment(l2.name, l2.email, "apollo", "SRE_WE_TZ1", d, d+" 06:00", d+" 21:00"), "L2"),
+			tiered(assignment("Kim", "kim@example.com", "apollo", "SRE_WE_TZ1", d, d+" 06:00", d+" 21:00"), "L1"),
+			assignment("Pat", "pat@example.com", "iaas", "SRE_IAAS_DAY", d, d+" 08:00", d+" 20:00"),
+		)
+	}
+	return out
+}
+
+// The CRE weekend summary also lists the SRE people on the SaaS weekend and
+// TZ3 turns, defines those two rotations, and goes to them; they get no
+// invitation and the IaaS turn is not listed.
+func TestWeekendNotice_ListsTheSREWeekendTurns(t *testing.T) {
+	rota := &fakeRota{assignments: fullWeekend(), other: map[string][]teamschedule.Assignment{"SRE": sreWeekend()}}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 5 {
+		t.Fatalf("sent %d emails, want the summary and the four CRE invitations", len(mail.sent))
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	if got := strings.Join(summary.to, ","); got != "ann@example.com,ben@example.com,cid@example.com,ivy@example.com,jay@example.com,"+
+		"kim@example.com,lee@example.com,max@example.com,oli@example.com" {
+		t.Errorf("summary to %s", got)
+	}
+	for _, want := range []string{
+		"<b>SRE Weekend Support</b>",
+		"<b>Saturday:</b> Kim (SRE Weekend, L1)<br/>Lee (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
+		"<b>Sunday:</b> Kim (SRE Weekend, L1)<br/>Oli (SRE Weekend, L2)<br/>Max (SRE Night, L1)</p>",
+		"<td>SRE Weekend (TZ1 + TZ2)<br/><span style=\"color:#666666; font-size:12px;\">2 members</span></td><td>06:00 AM &#8211; 09:00 PM IST</td><td>00:30 &#8211; 15:30</td><td>SRE support (L1 &#8594; L2)</td>",
+		"<td>SRE Night (TZ3)<br/><span style=\"color:#666666; font-size:12px;\">1 member</span></td><td>09:00 PM &#8211; 06:00 AM IST</td><td>15:30 &#8211; 00:30</td><td>SRE support (L1)</td>",
+		"The SRE turns are listed for information; they get no calendar invitation from this email.",
+	} {
+		if !strings.Contains(summary.body, want) {
+			t.Errorf("summary lacks %q:\n%s", want, summary.body)
+		}
+	}
+	if strings.Contains(summary.body, "Pat") {
+		t.Errorf("summary lists the IaaS turn:\n%s", summary.body)
+	}
+	for _, m := range mail.sent {
+		if m.subject == summary.subject {
+			continue
+		}
+		if slices.ContainsFunc(m.to, func(a string) bool { return strings.HasPrefix(a, "kim@") || strings.HasPrefix(a, "max@") }) {
+			t.Errorf("an SRE person got %q", m.subject)
+		}
+	}
+	// The CRE days are listed as before: the SRE turns are not in them.
+	if !strings.Contains(summary.body, "<b>Saturday Team</b></p>\n<p style=\"margin-top:0;\">Ann (LK Weekend)<br/>Ben (LK Weekend)<br/>Cid (LK Weekend)<br/>Ivy (Americas Weekend)<br/>Jay (LK On-call)</p>") {
+		t.Errorf("the Saturday Team changed:\n%s", summary.body)
+	}
+}
+
+// The SRE turns are for information: a failed read of the SRE rota sends the
+// CRE summary without them, and SRE people never make a weekend fully marked.
+func TestWeekendNotice_SRETurnsAreInformationOnly(t *testing.T) {
+	rota := &fakeRota{assignments: fullWeekend(), otherErr: errors.New("entity-service down")}
+	mail := &fakeEmail{}
+	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
+	cfg.Support = SREWeekendSupport()
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation")
+	if strings.Contains(summary.body, "SRE") || len(summary.to) != 5 {
+		t.Errorf("a failed SRE read changed the summary: to %v\n%s", summary.to, summary.body)
+	}
+
+	// One LK Weekend person short: the rota admins are asked, nobody on
+	// either rota is emailed, and the SRE rota is not even read.
+	short := slices.DeleteFunc(fullWeekend(), func(a teamschedule.Assignment) bool {
+		return a.Engineer.Name == "Cid" && a.RotaDate == "2026-10-25"
+	})
+	rota = &fakeRota{assignments: short, other: map[string][]teamschedule.Assignment{"SRE": sreWeekend()}}
+	mail = &fakeEmail{}
+	store := &fakeStore{admins: []teamschedule.RotaAdmin{{Name: "Ada", Email: "ada@example.com"}}}
+	if err := WeekendNotice(rota, store, mail, cfg)(context.Background()); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if len(mail.sent) != 1 || strings.Join(mail.sent[0].to, ",") != "ada@example.com" {
+		t.Fatalf("sent %d emails (%v), want only the rota admins' one", len(mail.sent), mail.sent)
+	}
+	if rota.reads != 2 { // the catalogue and the CRE rota
+		t.Errorf("read the rota %d times, want 2", rota.reads)
 	}
 }

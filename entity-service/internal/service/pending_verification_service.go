@@ -38,6 +38,7 @@ var validPendingVerificationAddedReason = map[domain.PendingVerificationAddedRea
 var validPendingVerificationPreviousStatus = map[domain.PendingVerificationPreviousStatus]bool{
 	domain.PendingVerificationPreviousStatusSolutionProposed: true,
 	domain.PendingVerificationPreviousStatusAwaitingInfo:     true,
+	domain.PendingVerificationPreviousStatusWorkInProgress:   true,
 }
 
 // validPendingVerificationRecordType narrows filters.workItemTypes to CASE,
@@ -94,7 +95,7 @@ func (s *pendingVerificationService) CreatePendingVerification(ctx context.Conte
 		return domain.CreatePendingVerificationResponse{}, &apierror.ValidationError{Msg: "previousStatus must not be set when addedReason is manual"}
 	}
 	if req.PreviousStatus != nil && !validPendingVerificationPreviousStatus[*req.PreviousStatus] {
-		return domain.CreatePendingVerificationResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("previousStatus must be one of Solution Proposed/Awaiting Info, got %q", *req.PreviousStatus)}
+		return domain.CreatePendingVerificationResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("previousStatus must be one of Solution Proposed/Awaiting Info/Work In Progress, got %q", *req.PreviousStatus)}
 	}
 
 	// AUTO_CLOSED claims the system itself closed the case -- only an

@@ -38,6 +38,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/mailpaging"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
@@ -375,7 +377,12 @@ func main() {
 		// resolveFullCaseDescription/resolveFullCommentContent).
 		WithFullContentFetcher(customerEntityClient).
 		WithIncidentChatFanout(incidentChatFanout).
-		WithIncidentRoutes(incidentRoutes)
+		WithIncidentRoutes(incidentRoutes).
+		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
+		// (project.reactivated), e.g. the customer lifecycle and billing lists;
+		// checked by acpReactivationCC, which stops startup on a bad entry.
+		// The email goes only to @wso2.com addresses: it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), "@wso2.com")
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -575,6 +582,9 @@ func main() {
 			redisOpts = &redis.Options{Addr: redisAddr, Password: os.Getenv("REDIS_PASSWORD")}
 		}
 		redisClient = redis.NewClient(redisOpts)
+		// The "Back to Open state" email's duplicate guard: a notice already
+		// sent is not sent again when its event is redelivered.
+		dispatcher.WithACPReactivationLedger(dispatch.NewRedisReactivationLedger(redisClient))
 
 		// slaengine.EntityClient talks to the exact same entity-service as
 		// customerEntityClient above — not a different backend — so it
@@ -640,8 +650,16 @@ func main() {
 		// entity-service client it already has, wired to RegisterClocks/
 		// reconcileClock. A failure of the (unrelated) rung-email duration
 		// fetch above must not also disable SLA breach tracking.
-		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled)
+		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
 		dispatcher = dispatcher.WithSLAEngine(slaEngine)
+
+		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
+		// own doc comment: closes the restart/rebalance redelivery gap the
+		// in-memory done map alone can't. Shares this same redisClient with
+		// slaengine.NewStore above -- no second Redis connection, no new
+		// env var, same optional-per-deployment posture (nil without
+		// REDIS_ADDR/REDIS_URL, exactly as before this feature existed).
+		dispatcher = dispatcher.WithDurableDedup(redisClient)
 
 		// One-shot reconciliation: rebuilds every currently-open clock's
 		// Redis state from entity-service's own durable record (see
@@ -782,6 +800,37 @@ func main() {
 			"allowListed", len(testCallCfg.AllowedNumbers) > 0, "sending", callSendingEnabled)
 	} else {
 		slog.Warn("paging test calls need Redis and CUSTOMER_ENTITY_BASE_URL; paging.test_call_requested will be ignored")
+	}
+
+	// Alert-email phone escalation (mail.alert.received, published by
+	// csm-mail-paging-service). Off unless MAIL_ESCALATION_CONFIG names the
+	// ladder file and Redis and entity-service are configured; without any of
+	// them the event is acknowledged and ignored. Its own engine and Redis keys, nothing shared
+	// with internal/paging but the Twilio client.
+	var mailPaging *mailpaging.Engine
+	if path := os.Getenv("MAIL_ESCALATION_CONFIG"); path != "" {
+		switch mailCfg, err := mailpaging.Load(path); {
+		case err != nil:
+			slog.Error("invalid MAIL_ESCALATION_CONFIG; mail alert paging is off", "err", err)
+		case redisClient == nil:
+			slog.Error("MAIL_ESCALATION_CONFIG needs Redis (REDIS_URL or REDIS_ADDR); mail alert paging is off")
+		case os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "":
+			slog.Error("MAIL_ESCALATION_CONFIG needs CUSTOMER_ENTITY_BASE_URL (phone numbers are looked up there); mail alert paging is off")
+		default:
+			// The same entity-service lookup the incident ladders use for a
+			// person's number: their profile number, else the paging-only one.
+			phones := paging.NewEntityClient(paging.EntityConfig{
+				BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+				TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+				ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+				ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+			})
+			mailPaging = mailpaging.NewEngine(mailCfg, mailpaging.NewRedisStore(redisClient), phones, twilioClient, callSendingEnabled)
+			dispatcher = dispatcher.WithMailAlertPaging(mailPaging)
+			go mailPaging.RunTicker(ctx, envDuration("MAIL_ESCALATION_TICK_INTERVAL", 5*time.Second))
+			slog.Info("mail alert paging is enabled", "rules", len(mailCfg.Rules), "sending", callSendingEnabled)
+		}
 	}
 
 	// incident.special_ops_alert (sre-events) pages the SME through the SRE
@@ -1822,4 +1871,30 @@ func applyIncidentRoutes(sre paging.LadderConfig, chat *notifications.GoogleChat
 	if !fallback {
 		slog.Warn("incident cards: the SRE ladder has no shared room (sre.chat), so an incident whose group maps to no team room still gets no card")
 	}
+}
+
+// acpReactivationCC reads ACP_REACTIVATION_CC, the CC list of the "Back to
+// Open state" email, and stops startup when an entry is not an address: the
+// email service would reject every send, each one retried and then
+// dead-lettered.
+func acpReactivationCC() []string {
+	cc, err := parseACPReactivationCC(os.Getenv("ACP_REACTIVATION_CC"))
+	if err != nil {
+		slog.Error("invalid ACP_REACTIVATION_CC", "err", err)
+		os.Exit(1)
+	}
+	return cc
+}
+
+// parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries
+// trimmed, empty ones dropped) and refuses an entry that is not an address,
+// naming it by position, never by value.
+func parseACPReactivationCC(raw string) ([]string, error) {
+	cc := splitComma(raw)
+	for i, a := range cc {
+		if !events.LooksLikeEmail(a) {
+			return nil, fmt.Errorf("entry %d is not an email address", i+1)
+		}
+	}
+	return cc, nil
 }

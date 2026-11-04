@@ -22,9 +22,14 @@ import type { BeGroup, BeGroupSearchPayload, BeGroupSearchResponse } from "@api/
 /** A single page of matches is plenty for a type-ahead picker. */
 const GROUP_SEARCH_LIMIT = 20;
 
+/** The extra-group allowlist is a handful of groups; one page covers it. */
+const INCIDENT_EXTRA_GROUPS_LIMIT = 50;
+
 export interface SearchGroupsOptions {
   /** Only groups that are the support group of at least one service. */
   supportGroupsOnly?: boolean;
+  /** Only the extra groups an incident may be assigned to besides the support groups. */
+  incidentExtraGroupsOnly?: boolean;
 }
 
 /**
@@ -47,17 +52,27 @@ export function useSearchGroups(
   const api = useBackendApi();
   const q = query.trim();
   const supportGroupsOnly = typeof options === "object" && options.supportGroupsOnly === true;
+  const incidentExtraGroupsOnly =
+    typeof options === "object" && options.incidentExtraGroupsOnly === true;
+  const extra = incidentExtraGroupsOnly
+    ? { incidentExtraGroupsOnly }
+    : supportGroupsOnly
+      ? { supportGroupsOnly }
+      : null;
 
   return useQuery<BeGroup[], Error>({
-    queryKey: supportGroupsOnly
-      ? [ApiQueryKeys.GROUPS_SEARCH, q, { supportGroupsOnly }]
+    queryKey: extra
+      ? [ApiQueryKeys.GROUPS_SEARCH, q, extra]
       : [ApiQueryKeys.GROUPS_SEARCH, q],
     queryFn: async (): Promise<BeGroup[]> => {
       const res = await api.post<BeGroupSearchPayload, BeGroupSearchResponse>(
         "/groups/search",
         {
-          filters: supportGroupsOnly ? { searchQuery: q, supportGroupsOnly } : { searchQuery: q },
-          pagination: { offset: 0, limit: GROUP_SEARCH_LIMIT },
+          filters: extra ? { searchQuery: q, ...extra } : { searchQuery: q },
+          pagination: {
+            offset: 0,
+            limit: incidentExtraGroupsOnly ? INCIDENT_EXTRA_GROUPS_LIMIT : GROUP_SEARCH_LIMIT,
+          },
         },
       );
       return res.groups ?? [];
@@ -78,4 +93,16 @@ export function useSearchSupportGroups(
   enabled: boolean,
 ): UseQueryResult<BeGroup[], Error> {
   return useSearchGroups(query, enabled, { supportGroupsOnly: true });
+}
+
+/**
+ * {@link useSearchGroups} narrowed to the extra groups an incident may be
+ * assigned to besides the support groups. Stable module-level hook, same
+ * reason as {@link useSearchSupportGroups}.
+ */
+export function useSearchIncidentExtraGroups(
+  query: string,
+  enabled: boolean,
+): UseQueryResult<BeGroup[], Error> {
+  return useSearchGroups(query, enabled, { incidentExtraGroupsOnly: true });
 }

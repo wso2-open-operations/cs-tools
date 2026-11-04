@@ -20,16 +20,32 @@ import { useState, type JSX, type ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation, type To } from "react-router";
 import "@testing-library/jest-dom/vitest";
 import {
+  type SectionTab,
   enabledPathTabKeys,
   firstEnabledPathTab,
+  routeTabForPath,
   usePathSectionTabs,
   useQueryParamTabs,
+  useRouteTabs,
 } from "@hooks/useSectionTabs";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
 import {
   CaseRouteOverrideProvider,
   type CaseRouteOverrideValue,
 } from "@context/case-tabs/CaseRouteOverrideContext";
+
+// `useRouteTabs` reads `usePortalAccess`/the signed-in user's id, which
+// transitively load the real `@api/backend/client`/`@config/apiConfig` --
+// mocked up front per this repo's own convention, even though no test here
+// cares about their real values (no `CurrentUserProvider` is rendered, so
+// `usePortalAccess` resolves to "no access", which the sections exercised
+// here -- none of whose tabs carry a `requires` -- are unaffected by).
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
+}));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
 
 function setOverrides(value: unknown): void {
   window.config = {
@@ -129,6 +145,66 @@ describe("usePathSectionTabs", () => {
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/operations/change-requests",
     );
+  });
+});
+
+// --- useRouteTabs -----------------------------------------------------------
+
+function RouteTabsProbe({ sectionId }: { sectionId: string }): JSX.Element {
+  const { activeKey } = useRouteTabs(sectionId);
+  return <div data-testid="active-key">{activeKey}</div>;
+}
+
+function renderRouteTabsAt(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <RouteTabsProbe sectionId="customers" />
+    </MemoryRouter>,
+  );
+}
+
+describe("useRouteTabs", () => {
+  it("selects the tab whose path the page is on", () => {
+    renderRouteTabsAt("/customers/projects");
+
+    expect(screen.getByTestId("active-key")).toHaveTextContent("/customers/projects");
+  });
+
+  it("keeps a tab selected on a page below it", () => {
+    renderRouteTabsAt("/customers/accounts/11111111-1111-1111-1111-111111111111");
+
+    expect(screen.getByTestId("active-key")).toHaveTextContent("/customers/accounts");
+  });
+});
+
+function routeTab(key: string): SectionTab {
+  return {
+    key,
+    label: key,
+    state: "enabled",
+    node: { id: key, label: key, href: key },
+    previewedOnly: false,
+  };
+}
+
+describe("routeTabForPath", () => {
+  // A section whose first tab sits at the section's own root path.
+  const tabs = [routeTab("/dashboard"), routeTab("/dashboard/my"), routeTab("/dashboard/shared")];
+
+  it("picks the longest matching tab, not the first, when one tab's path is a prefix of another's", () => {
+    expect(routeTabForPath(tabs, "/dashboard/my")?.key).toBe("/dashboard/my");
+    expect(routeTabForPath(tabs, "/dashboard/my/new")?.key).toBe("/dashboard/my");
+    expect(routeTabForPath(tabs, "/dashboard/shared")?.key).toBe("/dashboard/shared");
+  });
+
+  it("leaves the root tab selected for its own pages", () => {
+    expect(routeTabForPath(tabs, "/dashboard")?.key).toBe("/dashboard");
+    expect(routeTabForPath(tabs, "/dashboard/some-dashboard/some-team")?.key).toBe("/dashboard");
+  });
+
+  it("matches whole path segments only", () => {
+    expect(routeTabForPath(tabs, "/dashboard/mystery")?.key).toBe("/dashboard");
+    expect(routeTabForPath(tabs, "/dashboards")).toBeUndefined();
   });
 });
 

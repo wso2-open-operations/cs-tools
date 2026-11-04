@@ -45,13 +45,13 @@ func NewRotaReminderSettingsRepository(db *pgxpool.Pool) RotaReminderSettingsRep
 	return &rotaReminderSettingsRepository{db: db}
 }
 
-const rotaReminderSettingsColumns = `family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, copy_to, updated_by, updated_on`
+const rotaReminderSettingsColumns = `family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, updated_by, updated_on`
 
 func scanRotaReminderSettings(row pgx.Row) (domain.RotaReminderSettings, error) {
 	var out domain.RotaReminderSettings
-	var required, windows []byte
+	var required, windows, inviteRotations []byte
 	if err := row.Scan(&out.Family, &out.WeekdayEnabled, &out.WeekendEnabled, &out.InvitesEnabled, &required, &windows,
-		&out.CopyTo, &out.UpdatedBy, &out.UpdatedOn); err != nil {
+		&inviteRotations, &out.CopyTo, &out.WeekendCopyTo, &out.UpdatedBy, &out.UpdatedOn); err != nil {
 		return domain.RotaReminderSettings{}, err
 	}
 	out.WeekendRequired = map[string]int{}
@@ -62,8 +62,15 @@ func scanRotaReminderSettings(row pgx.Row) (domain.RotaReminderSettings, error) 
 	if err := json.Unmarshal(windows, &out.Windows); err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("decode windows: %w", err)
 	}
+	out.InviteRotations = map[string]bool{}
+	if err := json.Unmarshal(inviteRotations, &out.InviteRotations); err != nil {
+		return domain.RotaReminderSettings{}, fmt.Errorf("decode invite_rotations: %w", err)
+	}
 	if out.CopyTo == nil {
 		out.CopyTo = []string{}
+	}
+	if out.WeekendCopyTo == nil {
+		out.WeekendCopyTo = []string{}
 	}
 	return out, nil
 }
@@ -89,6 +96,9 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 	if s.Windows == nil {
 		s.Windows = map[string]domain.ReminderWindow{}
 	}
+	if s.InviteRotations == nil {
+		s.InviteRotations = map[string]bool{}
+	}
 	required, err := json.Marshal(s.WeekendRequired)
 	if err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("encode weekend_required: %w", err)
@@ -97,9 +107,17 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 	if err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("encode windows: %w", err)
 	}
+	inviteRotations, err := json.Marshal(s.InviteRotations)
+	if err != nil {
+		return domain.RotaReminderSettings{}, fmt.Errorf("encode invite_rotations: %w", err)
+	}
 	copyTo := s.CopyTo
 	if copyTo == nil {
 		copyTo = []string{}
+	}
+	weekendCopyTo := s.WeekendCopyTo
+	if weekendCopyTo == nil {
+		weekendCopyTo = []string{}
 	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -111,19 +129,21 @@ func (r *rotaReminderSettingsRepository) Save(ctx context.Context, actor string,
 	}
 	out, err := scanRotaReminderSettings(tx.QueryRow(ctx, `
 		INSERT INTO team_schedule_reminder_setting
-		       (family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, copy_to, created_by, updated_by)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $8)
+		       (family, weekday_enabled, weekend_enabled, invites_enabled, weekend_required, windows, invite_rotations, copy_to, weekend_copy_to, created_by, updated_by)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $10)
 		ON CONFLICT (family) DO UPDATE
 		   SET weekday_enabled  = EXCLUDED.weekday_enabled,
 		       weekend_enabled  = EXCLUDED.weekend_enabled,
 		       invites_enabled  = EXCLUDED.invites_enabled,
 		       weekend_required = EXCLUDED.weekend_required,
 		       windows          = EXCLUDED.windows,
+		       invite_rotations = EXCLUDED.invite_rotations,
 		       copy_to          = EXCLUDED.copy_to,
+		       weekend_copy_to  = EXCLUDED.weekend_copy_to,
 		       updated_by       = EXCLUDED.updated_by,
 		       updated_on       = now()
 		RETURNING `+rotaReminderSettingsColumns,
-		s.Family, s.WeekdayEnabled, s.WeekendEnabled, s.InvitesEnabled, string(required), string(windows), copyTo, actor))
+		s.Family, s.WeekdayEnabled, s.WeekendEnabled, s.InvitesEnabled, string(required), string(windows), string(inviteRotations), copyTo, weekendCopyTo, actor))
 	if err != nil {
 		return domain.RotaReminderSettings{}, fmt.Errorf("save rota reminder settings: %w", err)
 	}

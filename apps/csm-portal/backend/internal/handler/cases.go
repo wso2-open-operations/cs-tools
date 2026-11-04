@@ -123,6 +123,10 @@ type entityCaseClient interface {
 	// comment) to provision a worknote_creator-/escalator-only caller who
 	// has no "user" row yet.
 	CreateUser(ctx context.Context, body []byte) ([]byte, error)
+	// CreatePendingVerification calls POST /pending-verifications on the
+	// entity service — used by recordPendingVerificationEntry to add every
+	// case closed through this portal to the Pending Verification list.
+	CreatePendingVerification(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -1572,6 +1576,11 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		WorstCaseFixEta    *string `json:"worstCaseFixEta"`
 	}
 	patchErr := json.Unmarshal(body, &patch)
+	// previousCaseState is the case's state immediately before this PATCH,
+	// read below purely for transition validation; recordPendingVerificationEntry
+	// (closing branch, below) reuses it so closing a case doesn't need a
+	// second GetCase round trip just to know what state it's leaving.
+	var previousCaseState string
 	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
@@ -1587,6 +1596,7 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
+		previousCaseState = currentCase.State
 		if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
 			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
 			return
@@ -1659,7 +1669,94 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// Every case closed through the CSM portal is sent to the Pending
+	// Verification list, so a customer eventually gets a chance to confirm the
+	// fix holds. addedReason is AUTO_CLOSED, recording the case's real
+	// previous state in previousStatus — entity-service's
+	// pending_verification_previous_status_enum originally only covered
+	// SOLUTION_PROPOSED/AWAITING_INFO, neither of which fit work_in_progress
+	// (the state most CSM-portal closes actually come from — see state.go's
+	// own transition table: closed is only reachable from work_in_progress or
+	// solution_proposed), so migration 0269 added WORK_IN_PROGRESS
+	// specifically for this. recordPendingVerificationEntry falls back to
+	// MANUAL only for a previous state that still isn't representable (should
+	// never happen given that transition table). Best-effort and
+	// fire-and-forget, same reasoning as the two notes above: the close PATCH
+	// already succeeded, so this must not delay the response or fail the
+	// request if it errors — including the common, expected case where
+	// Pending Verification is simply disabled for this project (entity-service
+	// 403s) or the case already has an unverified entry from an earlier round
+	// (409).
+	if patchErr == nil && patch.State != nil && *patch.State == caseStateClosed {
+		detached := context.WithoutCancel(r.Context())
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, 15*time.Second)
+			defer cancel()
+			h.recordPendingVerificationEntry(ctx, user, caseID, previousCaseState)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, result)
+}
+
+// pendingVerificationPreviousStatus maps this handler's own lowercase
+// case-state wire values to entity-service's PendingVerificationPreviousStatus
+// enum (pending_verification_previous_status_enum). Only the two states
+// state.go's own transition table allows immediately before "closed" are
+// listed here — recordPendingVerificationEntry falls back to addedReason
+// MANUAL for anything else, which should never actually happen.
+var pendingVerificationPreviousStatus = map[string]string{
+	caseStateWorkInProgress:   "WORK_IN_PROGRESS",
+	caseStateSolutionProposed: "SOLUTION_PROPOSED",
+}
+
+// recordPendingVerificationEntry adds this case to the Pending Verification
+// list (POST /pending-verifications on the entity service) immediately after
+// the CSM portal closes it. addedReason is AUTO_CLOSED whenever previousState
+// maps to a legal previousStatus value (see pendingVerificationPreviousStatus
+// above) — which, per state.go's own transition table, is always, since
+// "closed" is only ever reached from "work_in_progress" or
+// "solution_proposed" — falling back to MANUAL (with the state folded into
+// the note instead) only as a last resort, so this call can never send
+// entity-service a combination its own chk_previous_status_matches_reason
+// CHECK constraint would reject outright. Best-effort: failures (including
+// the project simply not having Pending Verification enabled, or the case
+// already carrying an unverified entry) are logged, never surfaced to the
+// caller, since the primary close PATCH already succeeded by the time this
+// runs.
+func (h *CaseHandler) recordPendingVerificationEntry(ctx context.Context, user *middleware.UserInfo, caseID, previousState string) {
+	req := map[string]string{
+		"workItemId": caseID,
+		"note":       "Automatically added for verification — case closed by WSO2 Support.",
+	}
+	if status, ok := pendingVerificationPreviousStatus[previousState]; ok {
+		// previousStatus is its own structured field here, and the webapp
+		// already renders it as its own "From <state>" chip (isAutoClosed &&
+		// record.previousStatus in PendingVerificationCard.tsx) -- repeating
+		// it in the note text would just be redundant.
+		req["addedReason"] = "AUTO_CLOSED"
+		req["previousStatus"] = status
+	} else {
+		// Should never happen (see pendingVerificationPreviousStatus's own doc
+		// comment) -- MANUAL forbids previousStatus, so this is the only
+		// place left to record the case's real prior state.
+		label, ok := caseStateToDisplay[previousState]
+		if !ok {
+			label = previousState
+		}
+		req["addedReason"] = "MANUAL"
+		req["note"] += " Previous status: " + label + "."
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build pending verification request body", "userID", user.UserID, "caseID", caseID, "err", err)
+		return
+	}
+
+	if _, err := h.entity.CreatePendingVerification(ctx, body); err != nil {
+		slog.WarnContext(ctx, "failed to add case to pending verification on close", "userID", user.UserID, "caseID", caseID, "err", err)
+	}
 }
 
 // formatHoldDate renders an auto-closure hold timestamp (RFC3339, as sent by the

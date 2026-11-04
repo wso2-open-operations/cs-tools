@@ -58,6 +58,28 @@ failure also hides the tab). And the All Skills tab's create/edit/(de)activate a
 `usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
 manager table are always sent to the backend, never done in the browser.
 
+**Products** (`features/csm-products`, `/products`) is another deliberate exception, on top of a real backend
+gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
+New release line, and the Retire action inside each edit dialog) renders only for `usePortalAccess().canManageProductCatalog` (`product_catalog_manager` or `admin`). The
+backend's `PermManageProductCatalog` refuses the catalogue write routes of the products API (`POST /products`,
+`POST /products/{id}/versions`, `PATCH`/`retire` on `/product-versions/{id}`, `/release-lines`) to anyone else, so for a
+reader each control would only ever 403. A save applies at once (there is no draft step): a PATCH carries only the
+changed keys (`utils/catalogChange.ts`), and the backend applies a version's listing-wide fields to every live
+deployment-profile row of the version (the rows sharing its `publicId`, or for an unpublished version the live rows
+with the same product and version), in one transaction, which the edit dialog spells out before saving. The edit
+dialog sends one PATCH with only the support fields it shows (`buildVersionSupportPayload`), and one retire call
+for the whole version; Add version creates every profile in one call. The API sends dates as RFC 3339 timestamps
+and the support status upper case; `utils/catalogWire.ts` turns them into the `YYYY-MM-DD` / lower-case shapes
+the feature works with, in the read hooks only. The Catalogue never lists cloud (SaaS)
+products or end-of-life products (every version retired or discontinued), nor retired or discontinued versions or
+retired release lines, so there is no Restore (`isListedProduct`, `listedVersions`, `utils/catalogProducts.ts`). Adding a version pre-fills
+its publishing settings from the product's latest live version (`listingFormFrom`), shown in a collapsed "Advanced
+configuration" section (on a release-date tie the "All In One" row, then the lowest `publicId`, so a profile that
+is its own listing is not copied), and creates one row per deployment profile in a single
+`POST /products/{id}/versions` (`useAddCatalogVersion`); if the product's versions fail to load, the dialog warns
+instead of prefilling. A refusal's message is shown inside the
+dialog; a success closes it and goes to `useSuccessBanner`.
+
 **`AddUserDialog.tsx` only collects an email — there are no first/last name fields.** The backend
 (`apps/csm-portal/backend`'s own `CLAUDE.md`, "Creating a user") looks that email up in SCIM and fills
 `firstName`/`lastName`/phone from that record; a 400 from SCIM having no matching user (or a match with
@@ -123,6 +145,47 @@ dialog reads the body to tell a partial failure from a full one), so a partial f
 failed role(s) still checked for a quick retry rather than clearing the whole form. This section only
 ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
 itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
+
+## `useRouteTabs`: must read `PortalAccess`/Feature Preview itself, not rely on its caller to
+
+`useSectionTabs.ts`'s shared `tabsFor` helper used to call `visibleNavChildren(section)`/`featureState(node.id)`
+with **no `access` and no Feature Preview overrides at all** — not even for `useRouteTabs`, the flavour behind
+every route-backed tab strip (Customers, Settings, Dashboards, Knowledge). A `requires`-gated tab (e.g.
+`dashboard.my`, `requires: "canWrite"`) was therefore dropped from `allTabs.tabs` purely on the deployment's
+`CSM_PORTAL_FEATURE_OVERRIDES` state, before any capability check or admin preview promotion ever ran — so
+marking a tab `"hidden"` to preview it later (the intended Feature Preview workflow) silently never worked:
+an admin who switched it on in their own Feature Preview dialog still couldn't see it, because the tab was
+excluded one layer up, inside `tabsFor` itself, before `CsmDashboardsLayout`'s own (separate, and in practice
+redundant) capability filter ever ran. Reported live as "I enabled it in Feature Preview but still can't see
+it". Fixed by having `useRouteTabs` read `usePortalAccess()`/`useFeaturePreviewOverrides(useSafeCurrentUserId())`
+itself (mirroring how `CsmSideBar.tsx`/`QuickNav.tsx` already do it) and thread both into `tabsFor`, which now
+also exposes `isPreviewedOnly` (`featureFlags.ts`) so each resolved `SectionTab` carries `previewedOnly: boolean`.
+`CsmDashboardsLayout.tsx` was simplified in the same change — its own post-filter re-deriving `activeKey` is
+now redundant, since `useRouteTabs` already returns the fully-resolved, capability-and-preview-aware list.
+
+**Deliberately scoped to `useRouteTabs` only** — `useQueryTabs`/`usePathSectionTabs` (Operations, Security
+Center) still resolve tabs from `CSM_PORTAL_FEATURE_OVERRIDES` alone, with no `access`/preview wiring, same as
+before this fix. Operations/Security Center have no `requires`-gated child tabs today, so this wasn't a live
+bug there yet — widening it to those two flavours too, if they ever need it, is a separate, deliberate change,
+not an oversight.
+
+**A tab visible only via an admin's own Feature Preview toggle now gets a distinct, filled "Preview" chip**
+(`SectionTabs.tsx`, `tab.previewedOnly`) — solid, in the theme's own primary (button) colour
+(`color="primary" variant="filled"`), deliberately different from the WIP tab's outlined `color="warning"`
+chip, so an admin previewing a still-restricted feature is never left thinking "I can see this" means "this
+shipped for everyone." The tab itself stays fully enabled and clickable (unlike a WIP tab, which is
+`disabled`) — only the chip marks it as preview-only. `isPreviewedOnly` (`featureFlags.ts`) compares `id`'s
+resolved state WITH the real preview overrides against its state with none, rather than checking
+`previewOverrides[id]` directly — a parent node can be promoted purely because one of its own DESCENDANTS was
+previewed (`featureState`'s own `hasPreviewedDescendant` promotion), with no override on the parent itself,
+and the direct check misses that case entirely (found by a CodeRabbit review on the PR that introduced this).
+
+**The sidebar carries the identical badge** (`CsmSideBar.tsx`, `Sidebar.ItemBadge color="primary"`) on a
+top-level item, a submenu parent (the same descendant-promotion case), and a submenu child — the same
+`isPreviewedOnly` call, same three render paths `featureState(..., "wip")` already has its own WIP badge/dim
+treatment in. A sibling descendant that is not itself previewed, under a still-hidden ancestor, is not
+rendered at all (not a bug — it inherits "hidden" the same as it always did); only the admin's own previewed
+node(s) get resurrected.
 
 ## Code organization
 
@@ -815,6 +878,7 @@ pnpm run lint      # eslint .
 
 ## Security
 
+- **Sign-in/sign-out redirect URLs are optional.** `CSM_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` / `CSM_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` are not required in `public/config.js`; `authConfig.ts` passes `undefined` (blank counts as unset) and `AsgardeoProvider` then defaults both to `window.location.origin`, so the app signs in on whatever host and port it is served from. The origin must still be a registered redirect URI on the IdP application. Set a key only to override it (e.g. a proxy whose public origin differs from the browser's).
 - **Never commit secrets or runtime config** — `public/config.js` (the real, per-deployment file copied from `public/config.js.example`) is git-ignored on purpose. It only ever holds *public* runtime values (IdP base URL, OAuth **client id** — not a secret, this is a PKCE/SPA flow with no client secret — backend base URL, theme, log level, feature flags); if a value you're adding isn't safe to ship to a browser, it doesn't belong in `window.config` at all.
 - **Auth is Asgardeo's job, not ours** — `AsgardeoProvider` (`AppWithConfig.tsx`) and `useAsgardeo()`/`AuthGuard.tsx` own the whole auth lifecycle; the app **never reads or writes auth tokens itself** (no token in `localStorage`/`sessionStorage` anywhere in this codebase — the SDK manages that internally). Don't add code that pulls a token out of storage or a hook return value to attach it manually; use the existing API client wiring instead. The `sessionStorage` keys outside the SDK are `POST_LOGIN_REDIRECT_KEY` (a post-login redirect **path**) and `csm.sidebar.lastSection` (`CsmSideBar.tsx` — the last-resolved nav section id, so a reload on a route with no owning section, e.g. `/people/:id`, re-highlights it instead of resetting to Dashboard) — neither ever holds a token.
 - **Sanitize before `dangerouslySetInnerHTML`, always** — every current use (case-comment rendering, rich-text description/plan fields, product-update content, the admin-configured top banner/announcement HTML) goes through `DOMPurify.sanitize` first (`src/utils/sanitizeHtml.ts` for the shared cases). `sanitizeHtml.ts` also force-hardens every sanitized `target="_blank"` link with `rel="noopener noreferrer"` against reverse tabnabbing — match that when adding any other `target="_blank"` link by hand. Never add a new `dangerouslySetInnerHTML` call that skips sanitization, even for content that looks like it's "our own" (e.g. admin-authored) — an admin-configured field is still attacker-controlled if that admin account is ever compromised.

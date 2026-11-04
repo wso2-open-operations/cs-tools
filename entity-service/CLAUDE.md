@@ -72,6 +72,10 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project__c` envelopes (see "Salesforce Project ingest" below); off, they are acknowledged and ignored. Update-only unless the insert switch is on too |
 | `CSM_MIGRATION_SALESFORCE_PROJECT_INSERT_ENABLED` | no | `false` | With the project flag on, lets the Project ingest and `EnsureProject` insert projects CSM does not have. Keep it off while csm-sync-service still inserts `project` rows (different id schemes and a UNIQUE `key`: its insert would fail forever); turn it on at cutover |
 | `CSM_MIGRATION_SALESFORCE_PARTNER_INGEST_ENABLED` | no | `false` | Must be `"true"` for the partner-link refresh (`account_relationship` "Is Partner Of" / "Is Customer Of") to run after Account events and partner-contact membership events, and for `POST /salesforce/accounts/{sfId}/refresh-partners` to be registered (see "Salesforce partner relationships" below). Keep it off while csm-sync-service still copies `account_relationship` from ServiceNow |
+| `CSM_ACP_REOPEN_ENABLED` | no | `false` | Must be `"true"` for the ACP reopen check to run after `Project__c` / `Invoice__c` events (see "ACP reopen" below). Also needs a pool and the `SALES_ENTITY_*` client. Independent of the ingest flags |
+| `CSM_ACP_REOPEN_DRY_RUN` | no | `true` | The reopen check decides and logs `acp reopen: dry run, would reopen`, and writes nothing. Only an explicit `false` turns it off; an unparseable value keeps it on |
+| `CSM_ACP_REOPEN_TEST_PROJECT_SF_ID` | no | — | When set, the reopen check acts on this one Salesforce project only (15- or 18-character id). For staging tests |
+| `ACP_REACTIVATION_POLL_INTERVAL` | no | `5s` | How often `ProjectReactivationDrainer` looks for queued "Back to Open state" notices. Its own setting, so tuning `INCIDENT_REPORT_POLL_INTERVAL` never changes it |
 | `SALESFORCE_INGEST_RETRY_INTERVAL` | no | `5m` | How often the Salesforce ingest retry worker re-runs memberships whose DATABASE step FAILED because their project or account was not in CSM yet, and how old such a failure must be before it is re-run (see "Salesforce ingest ledger and the delayed-retry job" below). `0` disables the job, and so does an unparseable or negative value (logged as a warning; it fails closed rather than falling back to `5m`). Only runs when `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED=true` |
 | `CSM_MIGRATION_PORTAL_WRITES_ENABLED` | no | `false` | Must be `"true"` to register the four portal-driven membership write routes under `/projects/{id}/contacts` (see "Portal-driven membership writes" below). Also needs `DATA_SOURCE=postgres`, a pool, and the full `SALES_ENTITY_*` set (`Config.HasPortalMembershipWrites`). Off means the routes are **not registered at all**, not 403 |
 | `SALESFORCE_DEFERRED_WRITES_ENABLED` | no | `false` | Must be `"true"` to let a portal invitation survive a sales-entity-service outage: the rows commit with NULL `sf_id`, a `salesforce_write_request` row is recorded, and `salesforce.membership_write.requested` is published for this service's own consumer to finish (see "Deferred Salesforce writes" under "Portal-driven membership writes"). Also needs `HasPortalMembershipWrites` and `EVENT_HUB_BROKER` + `EVENT_PUBLISHING_ENABLED=true`; without them it is logged and stays off. Off = an outage fails the invitation with 503 as before |
@@ -92,6 +96,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_HOLD_TAG` | no | `s_mig_hold` | Tag (ignoring case) for the weekly migration scan's "customer requested to hold" table |
 | `MIGRATION_CASE_REPORT_ACCOUNTS_TAG` | no | `s_acc` | Tag (ignoring case) for its "waiting on accounts team" table |
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
+| `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
+| `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -798,6 +804,11 @@ acknowledged and ignored). Code: `internal/service/salesforce_opportunity_ingest
   **Never written:** `type`, `owner`, `engagement_code`, `query_hour_state`
   (ServiceNow-derived; `TestSfOpportunitySQL_NeverTouchesServiceNowColumns` pins the
   column lists). Values longer than their VARCHAR (migration 0080) are truncated and logged.
+  Migration 0254 widened the line-item columns to fit the upstream field lengths:
+  `name` is VARCHAR(376); `eng_product_code`, `product_name` and `product_code` are VARCHAR(255) (`eng_product_code`
+  is a comma-separated list of product abbreviations and runs past 200 characters) and
+  `product_description` is TEXT, never truncated. `product_unit`, `classification` and
+  `environment` stay VARCHAR(40).
 - **Line items (derived path):** the embedded `subscriptionLineItems` replace the
   opportunity's `sf_opportunity_product` rows as a set, in the same transaction:
   update by `line_item_sf_id` (else insert), then delete the rows under this
@@ -928,7 +939,8 @@ the linked-opportunity, invoice and line-item families).
   opportunity is re-ingested at its current version — then one
   transaction under `"sf-invoice:"+sfId`: update every `sf_invoice` row with the `sf_id`,
   else insert, plus the SUCCEEDED ledger row. Every data column is written (`name`,
-  `description`, `classification` — VARCHAR(40), truncated with a warning —
+  `description`, `classification` — VARCHAR(80), VARCHAR(255) and VARCHAR(40) since
+  migration 0254, truncated with a warning —
   `opportunity_id`, `invoiced_amount`, `invoice_date`, `invoiced_due_date`,
   `original_invoice_due_date` = `originalInvoiceDueDate ?? dueDate`, `invoiced_paid_date`,
   `service_start_date`, `service_end_date`, `sync_time_stamp`). An invoice with no
@@ -967,6 +979,150 @@ the linked-opportunity, invoice and line-item families).
 ## Allocation events (`POST /customer-engagements/allocation-events`)
 
 Ports ServiceNow `processAllocationEvent` for allocation-app events, in one transaction, exactly as ServiceNow does: allocation types 76/83 find or create the Firefighting engagement by engagement id; every other type finds by line item only, or skips. Internal clients only. A skip answers 200 with a `reason`; only 5xx is retryable. Migration 0187's unique indexes back the `ON CONFLICT` upserts that make repeats safe. Stages and tasks are not ported. Stop csm-sync's `u_customer_engagement*` jobs before turning the flag on: their `delete_sync` removes rows written here.
+
+## ACP reopen (back to Open state)
+
+The Account Closure Process (ACP: the `acp_closure` sub-cron of `operations/csm-scheduled-tasks`)
+suspends a project when its end date passes (end-date track: `end_date_closure_state = CLOSED`) or an
+invoice stays unpaid past its suspend date (invoice track: `invoice_due_date_closure_state =
+SUSPENDED`). It never reopens one. The previous process reopened automatically on a renewal or a
+payment ("Back to Open state" email); this ports that. Code: `internal/service/acp_reopen.go` (flow
+and the daily check), `acp_reopen_rules.go` (the ACP rules), `acp_reactivation_drainer.go` (the
+email), `internal/repository/acp_reopen_repo.go`, `acp_reactivation_outbox_repo.go`,
+`internal/salesentity/acp_reopen.go`. Off unless `CSM_ACP_REOPEN_ENABLED=true` (with a database, a
+Postgres-authoritative `DATA_SOURCE` and the `SALES_ENTITY_*` client, else a startup warning says it
+stays off), and dry run unless `CSM_ACP_REOPEN_DRY_RUN=false`.
+
+**Go live with the daily check.** `CSM_ACP_REOPEN_DRY_RUN=false` here and `ACP_REOPEN_CHECK_ENABLED=true`
+in csm-scheduled-tasks are a pair: switch them on together. Without the daily check a reopen that fails
+past Service Bus's redeliveries is never retried, a project set back to Open by hand is never finished,
+and its stale "suspend" record is never cleared. This service cannot see the other flag, so a live
+reopen logs a WARN at every start as the reminder.
+
+- **Two ways it runs.** (1) After a `Project__c` or `Invoice__c` envelope on `POST /salesforce/events`
+  (CREATED / UPDATED / RESTORED, never DELETED), once the ingest returned no error, whether or not the
+  Project / Opportunity ingest flags are on (it reads Salesforce itself). (2) **The daily check**,
+  `POST /acp/reopen-check` (any internal service credential, a client in `M2M_CLIENT_IDS`, via
+  `serviceOnly`: a user token, internal or not, gets 403; csm-scheduled-tasks' `acp_reopen_check`
+  sub-cron calls it
+  page by page): every project whose `suspension_process_state` still records an ACP suspension is
+  checked the same way (the caller calls again from `nextCursor` while `more` is true). It catches what an event missed (lost, dead-lettered, or sent while the check
+  was off or in a dry run: switching the dry run off is followed by the next daily check reopening
+  every "would reopen"), a reopen that failed, a project ACP suspended on data read just before a
+  renewal arrived, and a project a person set back to Open (below). Body `{cursor?, limit?}` (limit
+  default 10, max 50); answer `{checked, reopened, finished, skippedSetByHand, failed, failedProjectIds,
+  nextCursor, more}`. A page short of time stops early, but only after its first project, so every call makes
+  progress whatever `REQUEST_TIMEOUT` is; `more` says whether to call again.
+- **A failure fails the Salesforce event** (live mode), so Service Bus delivers it again (five
+  redeliveries within seconds, then the dead-letter queue): a customer who renewed or paid is reopened
+  at once, not at the next daily check. The ingest before it is safe to run again. In a dry run, which
+  wrote nothing, a failure is only logged. Bad data is never a failure (see the last point). An
+  `Invoice__c` event first asks the database whether a project of that invoice has an ACP-suspended
+  invoice track (`ACPSuspendedInvoiceTrackFor`: `sf_invoice` -> its opportunity -> `sf_opportunity_link`
+  -> project); with none, which is nearly always, it makes no Salesforce call. When the local tables do
+  not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
+  back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
+  is not ACP-suspended.
+- **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
+  its `suspension_process_state` section (`based_on_subscription_end_date` /
+  `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project
+  suspended by hand has no such record and is never touched. **A project whose overall closure state
+  was set by hand** (the admin "Edit closure state" action: `wso2_closure_state` differs from what
+  `wso2ClosureStateRule` gives for its sub-states) is left alone too, checked before any Salesforce
+  call and again under the row lock. Such a skip is a WARN and is counted in the daily check's
+  `skippedSetByHand`. Migrated rows whose overall state the legacy system computed differently match
+  too, without anyone having touched them. **Before going live**, count them read-only; if the count is
+  not near zero, fix the rule or the data first:
+
+  ```sql
+  SELECT COUNT(*) FROM project p
+  WHERE (p.suspension_process_state -> 'based_on_subscription_end_date' ->> 'event_type' = 'suspend'
+         OR p.suspension_process_state -> 'based_on_due_invoices' ->> 'event_type' = 'suspend')
+    AND p.wso2_closure_state::TEXT IS DISTINCT FROM CASE
+          WHEN p.end_date_closure_state::TEXT IN ('CLOSED', 'SUSPENDED')
+            OR p.invoice_due_date_closure_state::TEXT LIKE 'SUSPENDED%'
+            OR p.compliance_violation_closure_state::TEXT = 'SUSPENDED' THEN 'SUSPENDED'
+          WHEN p.end_date_closure_state::TEXT = 'RESTRICTED'
+            OR p.invoice_due_date_closure_state::TEXT LIKE 'RESTRICTED%' THEN 'RESTRICTED'
+          ELSE 'OPEN' END;
+  ```
+- **The decision is ACP's own**, read live from Salesforce as ACP reads it. The rules are copied in
+  `acp_reopen_rules.go`; `testdata/acp_rules_parity.json` holds the cases both copies must agree on
+  (`TestACPRulesParity` here, ACP's parity tests over the same file), since a disagreement makes ACP
+  suspend a project every day and this check reopen it:
+  - end-date track: the Salesforce project end date is set and in the future (`acpDaysBetween > 0`;
+    ACP suspends at 0 or less);
+  - invoice track: no counted invoice is past its suspend date. Counted = opportunity stage
+    "50 - Closed Won" with a EULA that is present and not "Customer contract" (an empty EULA text
+    counts, as in ACP); invoice unpaid, has a due date, not PP/CO/TAM, not "Auto Created PS", not due
+    before the project start. The earliest due one decides; its suspend date is the due date, or with
+    the grace period (primary partner, or EULA 3.3 or older) the invoice date + 60 days unless the due
+    date is later. A Partner account with no primary partner has no invoice track, so it is clear. A
+    date that cannot be read keeps the track suspended.
+- **Writes, in one transaction** (`ACPReopenRepository.Reopen`): lock the project row, re-check under
+  the lock (still ACP-suspended, not set by hand), set the track to `OPEN`, set its section to
+  `{"event_type":"open"}` (every other section kept byte for byte) so ACP's reminders start over,
+  `updated_by = acp-reopen`, recompute `wso2_closure_state` with `wso2ClosureStateRule`. Then, still
+  inside the transaction and **only when the overall state is now OPEN** (every track, compliance
+  included), `PATCH /projects/{sfId} {"status":"Open"}` on sales-entity-service (Salesforce removes
+  "[S]" from the name), with its own 20 s deadline (token refresh and retry included), so the row
+  lock is held at most that long. A refusal rolls the database back; the daily check tries again. A
+  commit failure after Salesforce accepted leaves the project suspended in CSM: the daily check
+  reopens it and sets Salesforce Open again, which is harmless. Finally, in the same transaction, the
+  notice is queued (below).
+- **Dual-write.** On `DATA_SOURCE=postgres-servicenow-dual-write` a committed reopen is copied to the
+  previous system's project through the shared `SNWritebackDispatcher`, with the fields PATCH
+  /projects/{id} copies for ACP's suspension (`endDateClosureState` / `invoiceDueDateClosureState`
+  "Open", `suspensionProcessState`); a failed copy lands in `sn_writeback_failures`.
+- **A project a person set back to Open.** When a person sets the remaining suspended track to Open
+  (PATCH /projects/{id}), the project is Open in CSM but Salesforce still says Suspended, no email
+  went out, and the section still says "suspend". The daily check finishes it: sections set to
+  "open", Salesforce Open, the notice queued with no reason ("The following project has been
+  reopened."), and the copy to the previous system. It reads the Salesforce project first: one
+  already Open is not written again, and one in a state ACP never sets (neither Open nor Suspended)
+  is left as it is, with a WARN. **The notice goes only for a recent suspension**: a section dated
+  (`suspended_on`, which ACP writes with "suspend") at most 7 days ago. An older one, and an undated
+  one (every record written before ACP dated them), is finished silently: the first live run finds
+  every project ever reopened by hand, and those must not all get an email that day. Run the daily
+  check in dry run first: `would finish ... notice=true/false` shows how many there are. Finishing
+  also clears a stale "suspend" record, so a later manual suspension of that project is not mistaken
+  for ACP's; nothing else clears it (PATCH /projects/{id} does not), which is one more reason the daily
+  check must be live.
+- **Email: queued, then published.** The "Back to Open state" notice (`project.reactivated`,
+  `events.ProjectReactivatedPayload`) is written to `event_outbox` (entity_type
+  `project_reactivated`, the notice as the snapshot) in the reopen transaction, so a reopen and its
+  notice commit or roll back together. `ProjectReactivationDrainer` (started in routes.go when an
+  event publisher is configured, every `ACP_REACTIVATION_POLL_INTERVAL`) publishes it to
+  `PROJECT_EVENT_HUB_TOPIC` keyed by the project id, each publish bounded to 30 s (it runs under the
+  row lock), and marks it done only when Event Hub took it; a failure is retried with backoff (30 s
+  doubling, at most an hour, checked again when the row is locked, so a second replica never retries
+  early) and parked after 20 attempts. A failed attempt is **not** written to
+  `event_publish_failures`: the outbox row is the one record, so nobody re-drives a notice the drainer
+  is still retrying
+  (logged at ERROR, the row kept with its last error; re-drive with `UPDATE event_outbox SET
+  published_on = NULL, attempts = 0 WHERE id = ...`). Delivery is at least once. Payload: project id
+  / Salesforce id / name (as Salesforce had it before the reopen, "[S]" included, as the legacy
+  email showed it) / key, start and end date, account owner name and email, `reasons` (`renewal`,
+  `invoice_paid`, none for a project opened by hand), `recipients` and `reactivatedOn`.
+  **Recipients** are the account owner, renewal account manager and technical owner, each once,
+  keeping only well-formed plain addresses in `@wso2.com` (`acpInternalAddress`): it is an internal
+  notice, the technical owner in Salesforce is sometimes a customer's person, and the notification
+  service rejects the whole event for one bad address. csm-notification-service sends the email and
+  adds its own CC list. **Deploy csm-notification-service with `project.reactivated` first**: it
+  rejects an unknown event type, retries and drops it.
+- **Races with ACP.** ACP writes its "suspend" record only in the same update as the suspended
+  closure state, after Salesforce took State__c=Suspended (csm-scheduled-tasks, #3126). So a reopen
+  running in between, after an event or the Salesforce echo of ACP's own write, finds nothing
+  ACP-suspended and no stale record, and the project ends suspended everywhere; if it was in fact
+  renewed or paid, the next daily check reopens it. (Written before the suspension, a half-done
+  suspension looked like a project set back to Open by hand, and would have been "finished".)
+- **Bad data** (a corrupt `suspension_process_state`, a date that is not a date) is logged and
+  acknowledged.
+
+Tests: `acp_reopen_test.go` / `acp_reopen_check_test.go` / `acp_reopen_rules_test.go` /
+`acp_rules_parity_test.go` (service), `internal/salesentity/acp_reopen_test.go`,
+`acp_reopen_repo_integration_test.go` (real Postgres, including the queued notice and the daily
+check's listing; skipped without `ENTITY_TEST_DATABASE_URL`).
 
 ## Salesforce partner relationships
 
@@ -1649,7 +1805,7 @@ gap ("with servicenow data source all are shown").
   `case.status_changed`'s sake) is now unconditional whenever `req.State` or
   `req.WorkState` is set, since the activity write needs the prior value
   regardless of whether Event Hub is configured at all.
-- **Workaround and update released**: `updateCaseFields` logs
+- **Workaround, fix ETAs, update released**: `updateCaseFields` logs
   `workaround_provided_on` (set stores the new timestamp, recall stores the
   prior timestamp as old and an empty new; a recall of an unset workaround
   logs nothing). It reads the prior stamp via `GetCaseWorkaroundProvidedOn`
@@ -1657,16 +1813,22 @@ gap ("with servicenow data source all are shown").
   source) only when `WorkaroundProvided` is in the request; a failed read is
   logged and never fails the update. `updateCaseMarkFixIssued` logs `fix_issued_on` as
   "Update Released" only when `!alreadySet`. Timestamps are RFC 3339 UTC so
-  the feed renders them as date-times. Fix ETA values are deliberately not
-  logged: they are internal until shared with the customer, and the
-  customer portal can request field-change rows. Both paths resolve the
+  the feed renders them as date-times. `best_case_eta`/`most_likely_eta`/
+  `worst_case_eta` are logged only when a date actually changed (`YYYY-MM-DD`,
+  old empty when previously unset), read from a best-effort `GetCaseByID`
+  before-state taken only when an ETA date is in the request; a failed read
+  skips the ETA entries, never the update. `CaseRepository.UpdateCaseFields`
+  also stamps `work_item.eta_shared_on = NOW()` server-side in the same
+  UPDATE whenever a written date differs from the stored one (no request
+  field, so a pure M2M caller stamps it too); that stamp is logged as
+  `eta_shared_on` (RFC 3339 UTC) and makes the fix-ETA SLA clocks complete
+  via `CompleteFixEtaSharedClocks`. Both paths resolve the
   actor with `resolveActorOrM2M`, so a pure M2M caller is attributed to its
   client id (the same value already stamped on `work_item.updated_by`)
   instead of being dropped by the blank-email guard; such a row has no
   matching `"user"` record, so the feed shows the client id and no display
   name. The rest of the plain-field bundle (Subject/Description/
-  DeploymentID/DeployedProductID/fix ETAs/RelatedCaseID) writes no activity
-  entry.
+  DeploymentID/DeployedProductID/RelatedCaseID) writes no activity entry.
 
 Every helper above runs **synchronously** (not detached/async the way
 `apps/csm-portal/backend`'s own `internal/handler/cases.go` `publishAsync`
@@ -2160,17 +2322,18 @@ in one bulk list with no per-project/per-case filtering, so it has its own
 pagination cap (`normalizeSLAStatusPagination` — default `500`, max `2000`)
 well above the generic `20`/`50` `normalizePagination` uses everywhere else.
 
-**`source` (query param, `csm`/`servicenow`) narrows the result to one
-`sla.source` value** — added so `csm-notification-service`'s Redis engine
-could call this endpoint again for exactly one purpose: rebuilding its own
-tracking state from Postgres if its Redis instance is ever wiped (a
-one-shot reconciliation pass at process startup, not a recurring poll — see
-that repo's own `CLAUDE.md`). `source=csm` scopes the query to just this
-engine's own, much smaller row set (`WHERE s.source = 'CSM'`, injected into
-`activeSLAStatusCTE`), so that reconciliation read never pays the cost of
-scanning the full ServiceNow-synced table the old, abandoned poll design
-choked on. Omitted (the default, and every other caller's behavior)
-means no filter, identical to this endpoint's original, unscoped shape.
+**There used to be a `source` query param (`csm`/`servicenow`) narrowing the
+result to one `sla.source` value — removed along with the column itself
+(migration `0268`).** It existed so `csm-notification-service`'s Redis
+engine could scope its own reconciliation read to just this engine's own,
+much smaller row set, separate from the previous system's own
+continuously-running sync job's rows in the same table. At cutover, that
+sync job stops writing SLA rows into this table at all, so there is only
+ever one writer left and nothing to distinguish a row by — `source=csm` and
+`source=servicenow` would always have meant the same thing. `GET
+/sla-status`/`GET /sla-status/clock-state` now simply return every active
+clock, unconditionally; a caller that still sends `source` is just ignored,
+not rejected.
 
 **`is_active` is now actually cleared when a clock finishes — a real,
 reported bug.** `SLAEngineRepository.CompleteClock`/`ReviseClocks` used to
@@ -2220,6 +2383,21 @@ most recently-started row for `(workItemID, target[, source])`,
 **regardless of `is_active`**, with `Found=false` (every other field zero)
 when no row exists at all. `StartedOn` is what lets the caller compare
 clock *incarnations*, not just clock types, after a severity revision.
+
+**`GetClockState` also resolves `AssigneeName`/`AssigneeEmail`/`TeamEmail`/
+`TeamLeadName`** (`work_item`/`account`/`"group"`/`"user"` joins, the exact
+same joins/column expressions `SearchActiveSLAStatuses`'s own
+`activeSLAStatusFromJoins`/`scanSLAStatus` already use for the identical
+fields on `GET /sla-status`) — added once `csm-notification-service`'s SLA
+breach email reaction needed them, specifically from this call rather than
+a second round trip: that service already calls `GetClockState` once per
+tier crossing, right before sending its Chat card, for the stale-alert
+suppression check above. Resolving the email fields here too means that
+one existing call now serves both purposes, with no second query against
+`GET /sla-status`. This is the one deliberate widening of this method's
+otherwise narrow scope (see its own doc comment on why it has no
+work_item/case/announcement join otherwise) — purely for these four
+display-only fields, nothing else case-like is added.
 
 **`GET /sla-status` is internal-caller-only** (`slaStatusService.
 requireInternalCaller`, mirroring `onboarding_step_service.go`'s own helper
@@ -2282,14 +2460,30 @@ assignee/team-group emails sent alongside the existing Chat alert — see that
 repo's own `CLAUDE.md`, "SLA breach-alerting engine") — not used by anything
 in this service itself. `AssigneeEmail`/`AssigneeName` resolve via a
 `LEFT JOIN "user" ae ON ae.id = wi.assigned_to_id`; `TeamEmail` is
-`"group".group_email` (the same `"group"` row `team` already joins through)
-and `TeamLeadName` resolves via a second `LEFT JOIN "user" teamlead ON
-teamlead.id = cre.manager_id` — the group's manager, not a dedicated "team
-lead" column, since none exists on this schema today. All four are
-best-effort, same posture as `ProjectOnboardingStatus`/`IsEvaluationAccount`
-above: a work item with no assignee/group simply reports empty strings. A
-dedicated team table may replace the `"group"` lookup for `TeamEmail`/
-`TeamLeadName` later — noted, not yet needed.
+`team.group_email` — **not** `"group".group_email`, a real, reported
+documentation bug: the two are different, independently-synced values for
+the same team, and `team.group_email` is the one other proven code
+(`TeamGroupEmails`, `migration_case_report_repo.go`) already relies on.
+
+**`TeamLeadName` does NOT come from `"group".manager_id` — a real, reported
+bug in an earlier version of this field, now fixed.** That earlier version
+noted (wrongly) that "no dedicated team lead column exists on this schema" —
+it does: `team_member.role = 'lead'` on the team whose id is
+`account.cre_team_id`, the identical join `EscalationRepository.CaseTeamLeads`
+already uses to notify team leads from the escalation ladder
+(`escalation_repo.go`). `"group".manager_id` is an unrelated field — for most
+teams it's simply unset (manual, staging-only edits aside), and even where
+it is set, it does not name the team's actual lead. The fix is a
+`LEFT JOIN LATERAL` picking one `team_member` row with `role = 'lead'`
+(oldest membership first, `tm.created_on`) per `account.cre_team_id`, then
+the usual `LEFT JOIN "user" teamlead` on that row's `user_id` — a team can
+genuinely have more than one lead (`team_member.role` has no per-team
+uniqueness constraint for `'lead'`, unlike the one-per-team
+`'americas_team_lead'` role — see migration `0185`'s own doc comment), so
+this field, being a single string, only ever shows one. All four fields are
+still best-effort, same posture as `ProjectOnboardingStatus`/
+`IsEvaluationAccount` above: a work item with no assignee/account/CRE
+team/lead simply reports an empty string for the ones that don't resolve.
 
 ### `GET /sla-duration-policy` — now computed from `sla_policy`, not a static table
 
@@ -2365,6 +2559,102 @@ the one signal entity-service is uniquely positioned to compute, since it
 owns the role data. `case.created`/`case.status_changed` already carry
 everything else that service's own tracking needs (`Priority`/`CreatedAt`,
 `NewStatus`), so neither payload needed any change for this.
+
+**The CSM portal's "Recalculate SLA" admin action**
+(`SLAStatusService.RequestRecalculation`, `POST /sla-engine/recalculate`) —
+for recovering `csm-notification-service`'s own Redis-held SLA tracking
+(the 50/75/100% tier wake index that service's own `internal/slaengine`
+keeps, nowhere else — see that repo's own CLAUDE.md, "SLA breach-alerting
+engine") when it no longer agrees with this service's durable record (e.g.
+after a bulk resync of the underlying case data changes which `sla` rows
+exist). Scoped to `GET /sla-status`'s own case-like work item types —
+incidents have no breach-alerting tracking of any kind in
+`csm-notification-service` today (not a gap this action introduces; see
+that repo's own CLAUDE.md), so they're deliberately out of scope here too.
+Admin-gated the same way `portalBannerService` is, not the way
+`skillService`/`rotaAccessService`'s own admin checks are: `RequireInternalCaller`
+(reached through the portal BFF, not a bare end-user token) plus trusting
+the caller's client id (`CSM_PORTAL_BACKEND_CLIENT_ID`), not a second,
+independently-configured `AUTH_ADMIN_ROLES` role list —
+`requireCSMPortalBackendCaller` (`sla_status_service.go`), mirroring
+`portalBannerService.requireCSMPortalBackendCaller` exactly. This replaced
+an `AUTH_ADMIN_ROLES` check that caused a real, reported bug: a genuine
+admin, already past csm-portal-backend's own PermAdmin gate on this route,
+got a 403 from entity-service whenever its own, separately-configured
+`AUTH_ADMIN_ROLES` list didn't happen to include that admin's exact role
+name. `SearchActiveSLAStatuses`'s own `admin=true` request is gated the
+same way, on the same `SLAStatusService`:
+it publishes `events.TypeSLARecalculationRequested` (a fixed `"sla-engine"`
+partition key — there is no single case this request is "about") and
+returns, carrying no instruction of its own beyond "rebuild everything" —
+the actual wipe-and-rebuild logic lives entirely on the consuming side,
+since that is where the Redis state and the entity-service client it
+rebuilds from already live. A nil `EventPublisherService` (Event Hub
+publishing not configured) is a `ServiceUnavailableError`, not a silent
+no-op — unlike every other `publishXxx`-style call site in this service,
+the entire point of this action is telling the caller whether the request
+actually went out.
+
+**`GET /sla-status` itself grew an `admin` query param rather than gaining
+a second `/manage` route for this**, since `RequireInternalCaller` already
+let any CSM portal caller through with no role check at all (the portal
+backend's own OAuth2 client id unlocks `Unrestricted` scope for any
+`@wso2.com` caller — see `AccessService.ResolveScope`'s own
+`CSMPortalBackendClientID` branch) — a second route gated identically
+would not have actually restricted anything a query param on the
+original couldn't. `admin=true` additionally requires
+`requireCSMPortalBackendCaller` (the caller's client id, not
+`AUTH_ADMIN_ROLES` — see "The CSM portal's 'Recalculate SLA' admin action"
+above for why); omitting it (every pre-existing caller,
+`csm-notification-service`'s own startup reconciliation included) is
+byte-identical to before this parameter existed — it only ever narrows
+who may ask for the admin view, never widens the plain one. The portal's
+admin page sends it to show which clocks are currently running,
+typically right after `POST /sla-engine/recalculate`.
+
+**Why this is a published Kafka event rather than a direct call into
+`csm-notification-service`**: that service deliberately has no inbound
+HTTP surface beyond `GET /health` any more (see that repo's own CLAUDE.md,
+"Event-driven notifications" — its last inbound endpoints were removed on
+purpose, once the backends started producing to Event Hub directly) —
+adding one back just for this one admin action would mean inventing new
+inbound auth for a service that has never needed any. Publishing instead
+reuses the exact same event-bus path every other cross-service signal in
+this file already takes.
+
+## Portal banners: admin-gated on the caller's client id, not `AUTH_ADMIN_ROLES`
+
+`PortalBannerService` (`internal/service/portal_banner_service.go`) is the one
+admin-gated feature in this service that does **not** check
+`holdsAnyRole(id.Roles, cfg.AuthAdminRoles)` the way its siblings (rota
+access, SLA status's `admin=true`, skills, schedule admin) do. Its own
+`requireCSMPortalBackendCaller` instead checks `id.ClientID ==
+cfg.CSMPortalBackendClientID` directly — the same config value
+`AccessService.ResolveScope` already uses to grant `Unrestricted` scope for a
+`@<CSM_PORTAL_USER_DOMAIN>` caller, read here a second time for a narrower
+purpose. **Deliberate, reported-live decision**: `AUTH_ADMIN_ROLES` has to be
+configured identically in two separately-deployed services (csm-portal-backend
+and this one) for the two to agree on who is an admin, and nothing in code
+enforces that — a real admin was rejected here (403 "only a CSM admin can
+change banners") because this service's own copy of `AUTH_ADMIN_ROLES` was
+unset while csm-portal-backend's was correctly configured, even though
+csm-portal-backend's own `PermAdmin` gate on this exact route (and the
+webapp's identical frontend gate) had already recognized the caller as an
+admin. Since every real "is this person an admin" decision for banners
+already happens exactly once, in csm-portal-backend's `PermAdmin` check
+before it ever proxies the request here, re-deriving the same answer from a
+second, independently-configured role list added nothing but a second place
+for the two services to silently disagree. Trusting the caller's client id
+instead means there is only one admin check left for banners, and it lives
+in the one service that actually resolves it from the live, normalized
+`GET /users/me` role list the frontend also trusts — not a stale or
+differently-shaped copy. This is narrower than csm-portal-backend's own
+`AUTH_ADMIN_ROLES`-based `PermAdmin` gate being wrong in general: it only
+removes the second, redundant check here, for this one feature, by explicit
+decision — the other `AUTH_ADMIN_ROLES`-gated features above were not
+touched, since each of them is reachable by more than just csm-portal-backend
+(or is reasoned about independently) and a blanket switch away from
+`AUTH_ADMIN_ROLES` was never the ask.
 
 ## Real, condition-driven SLA clock engine
 
@@ -2470,10 +2760,34 @@ the Query/SecReport Analysis family) on no severity at all.
   (`"SecReport Analysis response (1 hour)"` and `"P1 - Response (Open
   Source)"`'s own SRA branch, confirmed against real staging data: same
   target, same duration, same trigger) once every-match registration
-  shipped — not yet resolved; needs a decision on which of the two,
-  if either, should be retired or narrowed. Zero matches is logged and
-  treated as "no clock registered", exactly like the old design's absent
-  map entry.
+  shipped — **resolved**: the dedicated SRA policy was kept and the SRA
+  branch stripped out of `"P1 - Response (Open Source)"` entirely (data
+  migration, not code — applied directly to staging, same convention as
+  every other `sla_policy` row fix; see "Database migrations" below). Zero
+  matches is logged and treated as "no clock registered", exactly like the
+  old design's absent map entry.
+- **Clock registration at CREATE time is scoped to `slaClockEligibleCreateTypes`
+  (`sla_engine_service.go`)**, not every case-like `req.Type` — checked at all
+  three creation call sites (`case_service.go`'s `CreateCase` and
+  `createCaseSNFirst`, `sn_case_service.go`'s `CreateCase`) before calling
+  `RegisterCaseClocks`/`registerCaseSLAClocksEvent`. This used to be
+  hardcoded to `"case"` alone, on the (now outdated) assumption that no other
+  type had sla_policy coverage this resolver could cleanly match.
+  `security_report_analysis` and `service_request` have since been confirmed
+  clean (one RESPONSE, one RESOLUTION policy each — see the duplicate-policy
+  fix just above and "Database migrations" below) and were added to the set.
+  A real, confirmed-live gap this closed: every `service_request` case ever
+  created — Customer Portal included — had registered **zero** SLA clocks
+  from creation onward, despite `"ServiceRequest SLA"` being an active,
+  correctly-matching RESPONSE policy the whole time; the gate, not the
+  policy, was the problem. `engagement`/`announcement` remain excluded — no
+  clean, confirmed sla_policy coverage exists for either yet, and
+  registering clocks against the wrong or duplicate policy is worse than
+  registering none. `ReviseCaseClocks`/`ApplyCaseStateEffects` (severity and
+  state changes, below) are **not** gated this way — they already run for
+  every case-like type, so a case of an eligible type that somehow missed
+  clock registration at creation still picks it up on its first severity or
+  state change.
 - **`RegisterCaseClocks`/`ReviseCaseClocks`** iterate all three targets
   (`slaTargetOrder`) and resolve each independently — a clock target is
   registered only when some real policy's `start_condition` actually
@@ -2544,24 +2858,62 @@ the Query/SecReport Analysis family) on no severity at all.
   (`sla_engine_repo.go`) for a live business-day row and leave every other
   row (24x7, or `PAUSED`/terminal regardless of schedule) reading
   `sla_live`'s own value unchanged, since those are already correct.
-- **This engine's own clocks are tagged `source='CSM'`** (migration `0134`'s
-  enum) — this is migration `0134`'s own original intent, unchanged:
-  `'CSM'` rows are exclusively owned by this in-process engine, `'SERVICENOW'`
-  rows are exclusively owned by the external sync job that populates
-  `sla_policy`/`sla` (a separate, continuously-running process sharing this
-  database — not this repo), and the two never share a row. `'SERVICENOW'`
-  must never be used for an engine-managed clock: doing so would let this
-  engine's writes collide with that sync job's rows for the same
-  `(work_item_id, target)` pair on a dual-write-mode case, each silently
-  overwriting state the other owns. See `repository.SLAEngineRepository`'s
-  own doc comment for the full reasoning. Every `GetClockState`/
-  `SearchActiveSLAStatuses` caller that wants only this engine's own clocks
-  (not just the bulk listing — `GetClockState`'s own single-clock lookup
-  matters just as much, since `csm-notification-service`'s pre-alert check
-  reads through it) must pass `source=csm` explicitly. `sla_engine_repo.go`
-  is the only code path in this repo that writes to the `sla` table, under
-  every `DATA_SOURCE` mode — the external sync job is the only other writer,
-  and it is outside this repo entirely.
+- **`sla_live` computes live figures from `sla_policy.duration` (joined on
+  `sla_policy_id`), not from `sla.duration` (migration `0272`) — a real
+  production incident, not a preemptive change.** `sla.duration` used to be
+  the only input: a one-time snapshot of `sla_policy.duration`, copied in by
+  `registerClockExec` at clock registration and never re-read after. That
+  was only as safe as `sla_policy.duration` being trustworthy at the exact
+  instant a clock registered — and it wasn't: the external sync job that
+  populates `sla_policy` intermittently wrote a transient, wrong duration
+  into it (the previous system has no real value configured for this field
+  on several policies at all, and parsing its placeholder encoding can yield
+  a small non-zero number instead of NULL), and any clock that happened to
+  register during that window permanently baked the wrong number into its
+  own `sla.duration`, with no way to self-correct once `sla_policy.duration`
+  was right again moments later — confirmed against real production rows
+  across more than a day of ordinary case/incident creation, not a single
+  bulk event. Migration `0267`'s own fix (excluding a zero/NULL duration
+  from `ListCandidatePolicies`' own candidate matching) only ever prevented
+  a clock from registering AT ALL against a zero-duration policy; it did
+  nothing for a transient NON-zero-but-wrong value, which is exactly what
+  kept recurring. `sla.duration` itself is unchanged by this fix — still
+  written at registration, still a useful historical record of what a clock's
+  target was understood to be — it's simply no longer trusted for any LIVE
+  calculation (`sla_engine_repo.go`'s own `cancelClock`/`completeClock`/
+  `setPaused`/`ReviseClocks`, flat and business-day branches alike, read
+  `sp.duration` the same way, everywhere `sla_policy` is already joined).
+  Fixing only `sla_live` and leaving the rest reading the stale column would
+  have left every one of those write paths free to keep baking in a
+  wrong value read moments before a sync correction. A live join can never
+  itself go stale the way a snapshot can: a future recurrence of the same
+  upstream sync bug can only be wrong for as long as `sla_policy.duration`
+  itself is wrong, and self-corrects the moment that's fixed — no backfill
+  of already-registered clocks is ever needed again for this specific
+  failure mode. (Already-broken clocks from before this fix still needed a
+  one-time manual backfill of their stored `sla.duration` — not a migration,
+  since it's data, not schema.)
+- **`sla.source` is gone (migration `0268`) — this engine's clocks used to be
+  tagged `source='CSM'`, kept apart from a separate, continuously-running
+  external sync job's own `'SERVICENOW'`-tagged rows in the same table.**
+  That column (migration `0134`'s enum) existed purely to stop the two from
+  colliding on the same `(work_item_id, target)` pair, each silently
+  overwriting state the other owned — see `repository.SLAEngineRepository`'s
+  own doc comment, still accurate on the mechanism even though the column
+  itself is gone. At the cutover migration `0268` ships with, that sync job
+  stops writing SLA rows into this table at all, so there is only ever one
+  writer left (`sla_engine_repo.go`, under every `DATA_SOURCE` mode) and
+  nothing left to tag a row by. Every row already in the table at cutover —
+  regardless of what it was previously tagged — is simply adopted in place:
+  its own `start_on`/`duration`/`pause_duration` already reflect genuine
+  elapsed and paused time, so this engine's stop/pause/resume/cancel
+  evaluation picks it up and continues it correctly with no separate
+  backfill step. `RegisterClock`'s own per-`(work_item, sla_policy)`
+  uniqueness guard (`NOT EXISTS` against `sla`, no source filter any more)
+  means a case that already has a row for a given policy simply keeps using
+  that same row going forward — a fresh insert for the same pair is
+  correctly refused, not duplicated. `GetClockState`/`SearchActiveSLAStatuses`
+  no longer take a `source` parameter at all (see "SLA status" above).
 - **Raw, vendor-encoded condition text is translated at evaluation time, not
   pre-decoded by a migration.** `sla_policy` is written by the external sync
   job on a recurring schedule, mapping its own `start`/`stop`/`pause`/
@@ -2894,6 +3246,38 @@ regardless of severity.
   of at read time. Resuming leaves these three columns alone — once the
   clock goes back to `IN_PROGRESS`, `sla_live` resumes computing them live
   on every read regardless of whatever stale snapshot is still stored.
+- **Cancellation now freezes the same three columns `CompleteClock`/
+  `SetPaused` already freeze at their own transitions — a real, reported
+  gap, confirmed against a live case.** `cancelClockFlat`/
+  `cancelClockBusinessDays` (`CancelClock`/`CancelClockByPolicy`) and
+  `ReviseClocks`' own `flatCancelQuery`/`reviseClocksCancelBusinessDays`
+  (the severity-change cancellation path — by far the most common real
+  trigger for a CANCELLED row) used to set only `has_breached` on
+  cancellation, leaving `business_elapsed_percentage`/`business_duration`/
+  `remaining_business_duration` at whatever they were before — effectively
+  0 for a clock that had never paused, since nothing else writes these
+  columns during `IN_PROGRESS` (`sla_live` computes them live for that
+  stage; the stored columns are reached only by a PAUSED/terminal row's
+  fallback — see that view's own doc comment). A clock cancelled by a
+  severity change therefore displayed 0% elapsed and 0 business duration no
+  matter how much real time had passed — confirmed live: three clocks that
+  had genuinely run for over two minutes each, cancelled by a severity
+  change, all read `business_elapsed_percentage = 0`. All four cancellation
+  code paths now freeze the real elapsed figure at the moment of
+  cancellation, reusing `completedElapsedExpr` on the flat side exactly the
+  way `CompleteClock` does, and the same `businessdays.Elapsed`-based
+  per-row computation `completeClockBusinessDays` already does on the
+  business-day side. Unlike completion, a cancelled clock's `has_breached`
+  can still be true (the two are independent facts: did it run past its
+  duration, and was it later cancelled rather than satisfied) — this
+  doesn't change that, only how much of the clock's own elapsed time is
+  shown. Fixed intentionally, not accidentally: an earlier version of
+  `cancelClockBusinessDays`'s own doc comment argued a cancelled clock "was
+  never actually satisfied, so there's no real outcome to freeze" — true of
+  the ACHIEVED/CANCELLED distinction itself, but `sla_live`'s own fallback
+  for ANY non-live stage is these columns regardless of which terminal
+  stage it is, so leaving them at 0 was never actually "no outcome", it was
+  a wrong one.
 - **A case closing now finalizes all three clock types, not just
   resolution.** `ApplyCaseStateEffects`'s `CaseStateClosed` branch used to
   only resume+complete `resolution` and merely pause `workaround` forever
@@ -2969,26 +3353,36 @@ regardless of severity.
     change (unlike the state hook above), reusing the same `GetCaseByID`
     fetch the `case.severity_changed` publish already does, rather than a
     second round trip.
-- **The workaround clock could never actually complete, on either code
-  path, until now — a separate, previously-accepted gap this also
-  closes.** `ApplyCaseStateEffects` only ever pauses/resumes the workaround
-  clock (even on close, per its own doc comment — there was no "workaround
-  provided" signal wired into it). `WorkaroundProvided` (a real field on
-  `UpdateCaseRequest`/`CaseView`, the "Provide Workaround" action) is the
-  one genuine such signal that exists anywhere in the domain model, and
-  it simply wasn't connected to the SLA engine at all. `SLAEngineService`
-  now has its own `CompleteWorkaroundClock`, called from both `caseService.
-  updateCaseFields` and `snCaseService.UpdateCase` whenever
-  `WorkaroundProvided` is set to `true` — `false` (a recall) deliberately
-  does **not** reopen a completed clock; `SLAEngineRepository` has no
-  "uncomplete" operation, and a recall is rare enough that this stays a
-  known, accepted gap rather than something built speculatively.
+- **The workaround clock's own "provided" signal used to force-complete it
+  directly — a confirmed bug, now fixed.** `WorkaroundProvided` (a real
+  field on `UpdateCaseRequest`/`CaseView`, the "Provide Workaround" action)
+  is the one genuine "workaround was provided" signal anywhere in the domain
+  model, but the real WORKAROUND-target policies' own `pause_condition` text
+  already reads `"...ORu_workaround_providedISNOTEMPTY"` — providing a
+  workaround is supposed to PAUSE that clock (the engineer is now waiting on
+  the customer), not complete it outright; it only actually stops on
+  `stateINCLOSED` or `fix_eta_sharedISNOTEMPTY`. A hardcoded
+  `SLAEngineService.CompleteWorkaroundClock` hook, called whenever
+  `WorkaroundProvided` was set `true`, bypassed that condition text entirely
+  and force-completed the clock anyway. Fixed by replacing that hook (and
+  `CompleteFixEtaSharedClocks` below) with `SLAEngineService.
+  ApplyCaseFieldEffects` — the same stop/cancel/pause/resume condition
+  evaluation `ApplyCaseStateEffects` already runs on a state change, just
+  triggered by a field change instead, with no state override and no
+  CLOSED safety net (see that method's own doc comment). Called from both
+  `caseService.updateCaseFields` and `snCaseService.UpdateCase` whenever the
+  PATCH sets `WorkaroundProvided` or any of the three fix-ETA fields. One
+  side benefit: a workaround RECALL (`WorkaroundProvided` back to `false`)
+  is now picked up for free by the same policies' own `resume_condition`
+  (`"u_workaround_providedISEMPTY^..."`) — there's no separate "uncomplete a
+  clock" gap to accept any more, since nothing completes it in the first
+  place.
 - **That only fixed this engine's own Postgres-side clock — reported live as
   a separate, distinct gap: `csm-notification-service`'s own, independent
   Redis-based SLA engine had no way to hear about a workaround being
   provided at all.** Setting `workaroundProvided:true` published no event
   whatsoever — `updateCaseFields`/`snCaseService.UpdateCase`'s own
-  `CompleteWorkaroundClock` call above is deliberately independent of
+  `ApplyCaseFieldEffects` call above is deliberately independent of
   `s.publisher` (it never touches Event Hub), and no other code path
   published anything either, unlike response (a qualifying comment, already
   carried by `case.comment_added`'s own `IsSupportEngineerResponse`) or
@@ -3003,43 +3397,136 @@ regardless of severity.
   `Recipients`/email reaction and no Chat alert, a pure tracking signal),
   published by the shared `publishWorkaroundProvidedEvent` function
   (`sn_case_service.go`) from both `caseService.updateCaseFields` and
-  `snCaseService.UpdateCase`, in the identical place and under the identical
-  `WorkaroundProvided != nil && *req.WorkaroundProvided` gate as the
-  `CompleteWorkaroundClock` call above, but independent of it — `false` is
-  never published either, matching that call's own "no uncomplete
-  operation" posture. `csm-notification-service` consumes it directly via a
+  `snCaseService.UpdateCase`, gated on `WorkaroundProvided != nil &&
+  *req.WorkaroundProvided` — narrower than the `ApplyCaseFieldEffects` call
+  above, which also fires on `false` (a recall) to let the matching
+  `resume_condition` run; `false` is never published here, since
+  csm-notification-service's own Redis engine has no recall handling to
+  trigger (see that repo's own `CLAUDE.md`). `csm-notification-service`
+  consumes it directly via a
   new `dispatch.handleWorkaroundProvided` → `slaengine.Engine.
   CompleteWorkaroundClock`, the same direct-call wiring `RegisterClocks`/
   `ApplyStateEffects`/`CompleteResponseClock` already get — see that repo's
   own `CLAUDE.md` for the consuming side.
-- **Sharing a fix ETA with the customer completes BOTH the workaround and
-  resolution clocks, not just one.** The webapp's "Share fix ETA with
-  customer" action (`SetFixEtaDialog.tsx`, ServiceNow-only on the wire —
-  `req.AddPublicComment` alongside a fix-ETA date) once WSO2 has committed a
-  fix timeline to the customer, neither clock has anything further to
-  track. **The trigger is `work_item.eta_shared_on` becoming non-null, not
-  `req.AddPublicComment` itself** — that request flag has no guaranteed
-  connection to *when* the ETA-share actually lands in Postgres (whatever
-  external process populates `eta_shared_on` does so on its own schedule,
-  not synchronously with this one PATCH), so `CaseService.GetCaseEtaSharedOn`
-  (`domain.CaseView.EtaSharedOn`, sourced from Postgres on **every** data
-  source — see that field's own doc comment for why ServiceNow has no
-  equivalent column at all) is checked on every `UpdateCase` call instead,
-  on both `caseService` (Postgres) and `snCaseService` (ServiceNow, via
-  `pgFallback` when configured, else always nil/no-op). Cheap and
-  idempotent, same as every other completion check here: a case's clocks
-  get completed the next time anything about it changes, once the shared
-  fact is persisted, not strictly on the PATCH that shared it.
-  `SLAEngineService.CompleteFixEtaSharedClocks` calls `CompleteClock` for
-  both targets, same real, uncapped elapsed-time-at-this-moment semantics
-  every other completion path uses (see `SLAEngineRepository.CompleteClock`'s
-  own doc comment) — not an unconditional 100%. Independent of
-  `WorkaroundProvided`'s own hook just above: a caller can set both signals
-  at once, in which case `CompleteWorkaroundClock` simply becomes a no-op
-  for whichever of the two runs second. Postgres's own `GetCaseByID` now
-  also selects `best_case_eta`/`most_likely_eta`/`worst_case_eta`/
-  `eta_shared_on` for the first time — previously write-only columns on
-  this data source, never read back into a `CaseView` at all.
+- **`fix_eta_shared` used to be answered from `work_item.eta_shared_on` — a
+  confirmed bug, now answered from the ETA values themselves.**
+  `repository.CaseFacts.FixEtaShared` (the fact behind every policy's own
+  `"...fix_eta_sharedISNOTEMPTY"` clause) used to be
+  `wi.eta_shared_on IS NOT NULL`. `eta_shared_on` records a separate,
+  explicit "Share fix ETA with customer" action (`domain.CaseView.
+  EtaSharedOn`'s own doc comment — there is no equivalent column on
+  ServiceNow's own `GET /cases/{id}` at all, unlike `BestCaseFixEta`/
+  `MostLikelyFixEta`/`WorstCaseFixEta`, which are real ServiceNow fields),
+  with no reliable connection to when the ETA values themselves were set —
+  a case can sit for a long time with an ETA set but not yet shared, during
+  which the real policy text already expects the clock to stop. Confirmed
+  against a real case where setting an ETA value left the workaround clock
+  running under the `eta_shared_on`-based reading. Fixed:
+  `CaseFacts.FixEtaShared` is now `TRUE` when ANY of
+  `best_case_eta`/`most_likely_eta`/`worst_case_eta` is set
+  (`sla_engine_repo.go`'s `GetCaseFacts` query).
+  A second, related hardcoded hook — `SLAEngineService.
+  CompleteFixEtaSharedClocks`, which force-completed BOTH the workaround and
+  resolution clocks whenever `GetCaseEtaSharedOn` returned non-nil,
+  regardless of either clock's own condition text — was replaced at the
+  same time by the generic `ApplyCaseFieldEffects` call described in the
+  workaround bullet just above, now also triggered whenever any of the
+  three fix-ETA fields is set. `eta_shared_on` itself is untouched and still
+  read back into `CaseView.EtaSharedOn` for display — only the SLA
+  condition fact changed what it's derived from.
+- **`ApplyCaseFieldEffects` takes two overrides, `workaroundProvidedOverride`/
+  `fixEtaSharedOverride` — a CodeRabbit-caught gap on `snCaseService`'s own
+  call site specifically.** `snCaseService.UpdateCase` PATCHes the previous
+  system first; entity-service's own Postgres mirror of that same case is
+  only caught up by a separate, continuously-running sync job on its own
+  schedule, not synchronously within this request. A fresh
+  `repository.CaseFacts` read taken immediately after that PATCH can
+  therefore still see the OLD workaround/fix-ETA value — the same mirror-lag
+  reason `RegisterCaseClocks`'/`ApplyCaseStateEffects`' own severity/state
+  parameters already exist for, which this call had no equivalent of at
+  first. `snCaseService.UpdateCase` now passes `req.WorkaroundProvided`
+  straight through as its own override, and `true` for `fixEtaSharedOverride`
+  whenever any of the three fix-ETA fields is set in that same request (the
+  one it didn't touch keeps the fresh read's value, already correct). Both
+  are always `nil` on `caseService`'s own identical call site: the write
+  that just happened there IS this service's own Postgres row, already
+  committed by the time `ApplyCaseFieldEffects` runs, so a fresh read is
+  already correct and needs no override.
+- **Incidents are now wired into this same condition-driven engine too —
+  previously case-only.** `repository.IncidentFacts`/`GetIncidentFacts`
+  (small, no project/product/account-presence/response-comment concepts at
+  all — an incident has none of those in this engine's vocabulary),
+  `service.incidentConditionFacts` (the `slacondition.Facts` adapter),
+  `isIncidentPolicy` (classifies a candidate the same strict-inclusion way
+  `isCasePolicy` does, on `"business_service"` — the one marker confirmed
+  incident-exclusive in the real table), and three new `SLAEngineService`
+  methods — `RegisterIncidentClocks`/`ReviseIncidentClocks`/
+  `ApplyIncidentStateEffects` — mirroring `RegisterCaseClocks`/
+  `ReviseCaseClocks`/`ApplyCaseStateEffects` exactly. Wired into incident
+  CREATE (`incidentService.createIncidentPortal`/`createIncidentSNFirst`,
+  `snIncidentService.CreateIncident`) and UPDATE (both services' own
+  `UpdateIncident`, gated on `req.State`/a genuine priority change the same
+  way the case side gates on a genuine severity change). `slaEngineRepo`'s
+  write operations (`RegisterClock`/`CancelClock(ByPolicy)`/
+  `CompleteClock(ByPolicy)`/`SetPaused(ByPolicy)`/`ActiveClockPolicies`/
+  `ReviseClocks`) needed **no changes at all** — they were already generic
+  over `workItemID`, since `sla` is keyed by `work_item_id`, not anything
+  case-specific. `WithIncidentSLAEngine` is one decorator handling both
+  `*incidentService` and `*snIncidentService` (type switch), not a
+  constructor parameter on either — both constructors already have several
+  positional-argument test call sites, unlike `caseService`'s/
+  `snCaseService`'s own `slaEngine` constructor parameters.
+
+  **A separate translator was required, not a branch in the existing
+  one — a real vocabulary collision, not a style choice.** Case and
+  incident `sla_policy` rows share raw field *names* (`"priority"`,
+  `"state"`) over completely different ServiceNow numeric code vocabularies:
+  case state code `3` = `CLOSED`, incident state code `3` = `ON_HOLD`; case
+  state code `6` = `SOLUTION_PROPOSED`, incident state code `6` = `RESOLVED`.
+  Running an incident policy's condition text through the existing
+  `translateSLACondition`/`slaCaseStateCodes` would have silently
+  mistranslated `"Cloud Incident - High Priority"`'s own
+  `stop_condition` (`stateIN3,6,7`) into `stateINCLOSED,SOLUTION_PROPOSED,7`
+  — wrong on every value, confirmed by a test that asserts the two
+  translators must NEVER agree on this input
+  (`TestTranslateIncidentSLACondition_StateCodesDifferFromCaseTranslator`).
+  `service.translateIncidentSLACondition` (`incident_sla_condition_translate.go`)
+  is a fully separate function with its own `slaIncidentPriorityCodes`
+  (`1`-`5` → `CRITICAL`/`HIGH`/`MODERATE`/`LOW`/`PLANNING`) and
+  `slaIncidentStateCodes` (`1,2,3,6,7,8` →
+  `NEW`/`IN_PROGRESS`/`ON_HOLD`/`RESOLVED`/`CLOSED`/`CANCELED`) maps — new
+  `"business_service"`/`"category"` fields need no value translation at
+  all, since ServiceNow's own raw sys_id/lowercase-label spellings already
+  match `IncidentFacts`' output under `slacondition`'s case-insensitive
+  comparison. Same "runs at evaluation time on every read, not a one-time
+  migration" posture as the case translator, for the identical reason: the
+  external sync job rewrites `sla_policy`'s raw text on every delta sync.
+
+  **`incident_state_enum`'s real stored `CANCELED` value is spelled with
+  ONE L; `domain.IncidentStateCancelled`'s Go constant is spelled
+  `"CANCELLED"` with two** — confirmed directly against both the migration
+  (`0058_incident_table.sql`) and staging. A pre-existing, unrelated
+  mismatch, not fixed here — but `slaIncidentStateCodes`/`IncidentFacts`/
+  the new `incidentStateDBLabel` map (`sla_engine_service.go`, normalizing
+  an `ApplyIncidentStateEffects` caller's state override to the real DB
+  spelling) all deliberately use `"CANCELED"` (one L), not the Go constant's
+  string value — getting this wrong would make a just-cancelled incident's
+  own clock silently fail to cancel by one letter, with no visible error
+  (`slacondition`'s unknown/mismatched-clause failure mode is silent by
+  design). Covered by
+  `TestSLAEngineService_ApplyIncidentStateEffects_StateDBLabelNormalizesCancelledTypo`.
+
+  **Only one real `sla_policy` row matches anything today** —
+  `"Cloud Incident - High Priority"` (RESOLUTION, 4h, Choreo + Asgardeo
+  `business_service` only, Critical/High priority,
+  `category=service_interruption`), confirmed directly against the table,
+  not assumed. No RESPONSE/WORKAROUND policy exists for incidents at all,
+  and nothing covers Moderate/Low/Planning or any other service — the
+  engine is wired generically (the same way `engagement`/`announcement`
+  sit case-side with no confirmed policy coverage yet), but only this one
+  policy actually registers a clock until more policy data exists. No new
+  `sla_policy` row/migration was added as part of this — a pure code
+  change.
 
 ## Customer-reply state transition
 
@@ -3162,6 +3649,28 @@ repositories over `ENTITY_TEST_DATABASE_URL`, run as the superuser and as
 `csm_app`: both record types from both states move with the lifecycle entry,
 a `work_item.type`/row mismatch moves, Open/Closed/already-waiting stay, a
 staff comment and a customer's work note change nothing).
+
+### A relayed GitHub comment moves an Awaiting Info case
+
+A customer-visible comment whose text starts with the GitHub relay header
+(`@user (GitHub Comment) https://github.com/...`, the link optionally in
+brackets; `IsGithubRelayedComment`) moves its case from **Awaiting Info** to
+**Waiting on WSO2**, whoever posted it. Only Awaiting Info: Solution Proposed
+is left alone. It runs from two places: `createCaseCommentAs` (in place of the
+customer check above) and `githubSyncService.handleComment`, which writes the
+comment through the mutation repository and so never reaches the case
+service (wired with `WithGithubCaseStates` in `routes.go`). Both call
+`caseService.MoveAwaitingInfoToWaitingOnWSO2`, which reads and moves the case
+under the system identity through the ordinary `UpdateCase`, so the
+activity entry, `case.status_changed`, SLA effects and the dual-write mirror
+happen as for a manual move. With a user token the move is that user's;
+without one (the webhook relay) the context carries `withSystemActor` ("System
+user"), so the activity entry is still written. Unlike `withAutoclosureActor`
+it grants no transition. When the move does not happen the customer-reply rule
+still runs. Best effort: a failure is logged and never fails
+the comment. A GitHub comment that reaches Postgres only through the
+ServiceNow sync does not pass through here. Tests:
+`github_comment_state_test.go`.
 
 ## Scheduled task runs
 
@@ -4298,6 +4807,16 @@ Needs a decision from the team before enabling under dual-write (not verifiable 
 **Comment text** lives in `autoclosureDefaultTemplates` (`awaiting_info.` / `solution_proposed.` x
 `first_reminder` / `second_reminder` / `closure`). A caller may send overrides by key in `templates`; the
 scheduled task reads them from `AUTOCLOSURE_TEMPLATES`, so wording changes need no deploy of this service.
+The defaults and any override are **HTML**: comments are rendered as HTML where customers read them, so plain
+line breaks would collapse into one paragraph. Each default is a `<p>` per paragraph with `<br/>` inside the
+sign-off, opens with `Dear Customer,`, is signed `Kind regards,<br/>Customer Success Team`, and the two closure texts end their body with "Thank you
+for contacting us." No default may say "Support Team". An override is posted verbatim, never
+transformed, so it must carry its own tags.
+Closing keeps the case's existing close notes when it has any (as the legacy process did, which never wrote its
+message there), and only when there are none does it set the plain-text form of the closure wording
+(`autoclosurePlainText`: any `<br>` to a newline, the end of a list item to a newline, the end of any other block element such as `p`/`div`/`ul` to a blank line, other tags dropped, entities left as they are), because closing an
+internal-caller case in dual-write requires non-empty close notes. The closure message itself is the
+customer-visible HTML comment posted after the close.
 
 **Decisions worth knowing.**
 - A ticket moves at most one stage per run, and an advance changes its step and clock, so it is no candidate
@@ -4357,11 +4876,11 @@ database error's text is only logged) and does not stop the rest; the incident s
 again. A dry run lists what is due as `closed` and changes nothing, so a repeated dry-run call returns the same
 page.
 
-- **Migrations.** 0255 adds `incident.closed_on` and `incident.closed_by_id` (`REFERENCES "user"(id) ON DELETE SET
+- **Migrations.** 0273 adds `incident.closed_on` and `incident.closed_by_id` (`REFERENCES "user"(id) ON DELETE SET
   NULL`, as `resolved_by_id` in 0058) under a 5 s `lock_timeout`, as 0249 does; nothing is backfilled.
-  0257 (`closed_by_id`) and 0258 (the partial `ON incident (resolved_on) WHERE state = 'RESOLVED'` the listing
+  0274 (`closed_by_id`) and 0275 (the partial `ON incident (resolved_on) WHERE state = 'RESOLVED'` the listing
   reads) build the indexes `CONCURRENTLY`, one per file, as 0263 does. `GetIncidentByID` selects the two columns,
-  so **apply 0255 before deploying this build**.
+  so **apply 0273 before deploying this build**.
 - **A manual close records them too** (`updateIncidentLifecycleTx`): entering CLOSED from another state stamps
   `closed_on = NOW()` and `closed_by_id` = the acting user (NULL for a caller with no user row). Re-sending CLOSED,
   or re-opening, leaves both as they were. Read back as `closedOn` / `closedBy` on `IncidentView`.
@@ -8743,7 +9262,10 @@ The **support-group set** is `supportGroupSetSQL` (`support_group_repo.go`): act
 service, matched by id never by name). The create check (`IncidentRepository.IsSupportGroup`) and
 `POST /groups/search` with `filters.supportGroupsOnly` (`GroupRepository.SearchSupportGroups`, which
 reads `"group"`, not the `team` registry) share the incident-assignable set, so the picker never
-offers a group the create refuses. The case-alert route options (`case_alert_settings_repo.go`) keep
+offers a group the create refuses. `filters.incidentExtraGroupsOnly` (`SearchIncidentExtraGroups`,
+`incidentExtraGroupSQL`) narrows the search to the active allowlisted groups alone (empty allowlist:
+empty result; wins over `supportGroupsOnly`; the set may include a group that is also a service's
+support group, so it can overlap `supportGroupsOnly`; the ServiceNow service returns an empty result). The case-alert route options (`case_alert_settings_repo.go`) keep
 reading plain `supportGroupSetSQL` and never gain the extra groups. The allowlist reaches the
 repositories through `NewIncidentRepository` / `NewGroupRepository` (variadic ids). A work note records the choice ("Assignment group set from service X's
 support group" / "Assignment group chosen by <actor>" / "Service X has no support group; assigned
@@ -10883,6 +11405,21 @@ The acting caller is resolved from `x-user-id-token` (`emailFromJWT`, the same h
 and stamped as `created_by`/`updated_by` — this service still has no notion of "admin" itself;
 restricting who may call this is `apps/csm-portal/backend`'s job (see that repo's own `CLAUDE.md`).
 
+**`req.SystemProvisioned` overrides that actor to `domain.SystemActor` ("SYSTEM").** Found live:
+`apps/csm-portal/backend`'s `ensureUserProvisioned` (its own `CLAUDE.md`, "Provisioning a `user` row
+on demand") auto-creates a `"user"` row for a first-time worknote/escalation author by calling this
+same `POST /users` with that caller's own forwarded `x-user-id-token` — so the row ended up
+self-attributed, `created_by`/`updated_by` equal to the very email being provisioned, which reads as
+though the brand-new user created their own account record. `userService.CreateUser` honors the flag
+only when `AccessService.ResolveScope` resolves the caller to the one combination its
+`CSMPortalBackendClientID` branch alone produces — `Unrestricted && HasInternalAccess` together with a
+non-empty `ViewerEmail` (every other branch leaves at least one of the three unset or empty, see
+`AccessService`'s own doc comment) — i.e. a verified call from `apps/csm-portal/backend` forwarding a
+real `CSMPortalUserDomain` user token, never a caller-supplied actor override. Any other caller setting
+the flag has it silently ignored and keeps the ordinary token-derived actor. The admin-facing Add User
+flow (`UsersHandler.CreateUser` in that backend) never sets it, so an admin-created row still carries
+the admin's own email as usual.
+
 **`userService.CreateUser` also rejects granting an internal-resolving role to a non-`@wso2.com`
 email.** `internalUserTypeRoles` (`user_service.go`, next to `emailRE`) is `["admin", "internal"]` —
 the same two names `recompute_user_type`'s trigger maps to `user_type = INTERNAL` — and
@@ -11420,6 +11957,89 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
   changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+
+## Product catalogue (products API, Postgres only)
+
+The product and EOL data the wso2.com Support Matrix and Release Matrix publish (it used to come from the
+retired wso2-product-service; `integrations/legacy-product-api` serves that old read contract from here) is
+part of the products API. `Product` and `ProductVersion` carry the catalogue fields, so
+`POST /products/search` and `POST /products/{id}/versions/search` return them (existing fields and behaviour
+unchanged: retired rows are still returned unless `excludeRetired`). The rest is `ProductCatalogService`
+(`internal/service/product_catalog_service.go`) behind `ProductCatalogHandler`: `GET/PATCH /products/{id}`,
+`POST /products`, `POST /products/{id}/versions`, `POST /product-versions/search`, `GET/PATCH
+/product-versions/{id}`, `POST /product-versions/{id}/retire`, `/release-lines` (+ `/{id}`, `/{id}/retire`),
+`GET /carbon-platform-history`, `GET /carbon-kernel-releases`. Tables: migrations 0270-0272
+(`product_version` public/EOL columns, `product_version_carbon`, `release_line`, `carbon_platform_history`,
+`carbon_kernel_release`). Registered only with a database
+pool and not in the ServiceNow data source (there the two searches read ServiceNow).
+
+- **Who.** Reads: any internal caller (CSM staff tokens, allow-listed M2M clients). Writes: a token role in
+  `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` or `AUTH_ADMIN_ROLES`, matched exactly; the caller's email is the actor.
+- **A write applies at once.** There are no drafts. A body carries only the keys being set (null clears).
+  `prepareCatalogChange` validates it against a fixed field table (key → column, SQL cast, kind); the column
+  names and casts come from that table, never the request. `ApplyChange` writes the rows in one transaction
+  (`created_by` / `updated_by` / `retired_by` name the person); it returns the ids written and the service
+  answers with the rows read back. There is no catalogue-specific audit: the platform's database-level audit
+  covers these tables.
+- **Wire formats.** Reads keep the existing conventions: dates are RFC 3339 timestamps, `currentSupportStatus`
+  the uppercase enum text. Writes take `YYYY-MM-DD` and either case.
+- **Public listings.** The feeds publish one row per version, but `product_version` has one row per
+  deployment profile, so the profile rows of one listing share `public_id` (legacy ids kept; new listings take
+  `product_version_public_id_seq`, from 1100). `POST /products/{id}/versions` creates every profile
+  (`profiles`) of a new version in one transaction on one listing, under a row lock on the product, and refuses a
+  profile the version already has (NULL profiles are distinct to the unique constraint, so it would not). A PATCH
+  or retire of a live version row applies to all live rows of the version: its listing, or, without a
+  `public_id`, the unpublished rows of the same product and version; on a retired row it touches only that row.
+  `deploymentProfile` and `publicId` are row-only: `publicId` may only name a live listing of the same
+  product and version, and a `deploymentProfile` the version already has (NULL included) is refused under the same
+  product lock.
+- **Error messages are in request terms.** The CSM portal shows a write's 400 reason to the user, so `changeError`
+  maps each catalogue constraint to a field or rule (`catalogConstraintMessages`, `catalogColumnFields`) and never
+  echoes `pgErr.Detail` or `pgErr.Message`.
+- **Rules, checked in the write transaction on the rows as written** (`checkVersionRules`), so a body is always
+  judged with the stored values it leaves alone: release <= earliest possible EOL <= EOL, announcement <= EOL, and
+  a row on a public feed needs `public_abbreviation` or a product `code`, checked when a write publishes a row or
+  sets its abbreviation (five legacy rows are published without one and stay editable); a product PATCH that
+  clears the code is refused while it has published rows that rely on it. A listing's live rows must agree on the listing fields a write sets (all of
+  them when a row joins a listing), so a listing split by the import on another field can still be edited.
+- **Never delete a version.** Deployments, work items and change requests reference it (change requests by
+  cascade). Retire sets `retired_on` on every live row of the listing; retired rows leave the feeds. A product
+  cannot be retired.
+- **csm-sync-service also writes `product_version`.** Every column added is nullable or defaulted, and the
+  catalogue tables have no row-level security.
+
+Tests: `product_catalog_service_test.go` (unit).
+
+## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
+
+An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per
+component, then overwrites chosen components from Salesforce. Code: `internal/service/salesforce_resync_*.go`
+(service, pure comparison in `_compare.go`/`_diff.go`, apply in `_apply.go`), `internal/repository/salesforce_resync_read_repo.go`
+(read-only), the list searches in `internal/salesentity/resync_search.go`. Wired in `routes.go` over the same
+ingest service as `POST /salesforce/events`, with no flag of its own: a component whose ingest flag is off or whose
+ingest is not built is reported `skipped` with a reason, by both endpoints.
+
+- **Who.** Internal caller with a user token whose roles hold one of `AUTH_ADMIN_ROLES` (the check the skill catalogue
+  uses). One resync per target at a time, per process: a second request for the same account/project is a 409.
+- **Components.** Account scope: `account`, `partners`, `projects`, `opportunities` (line items embedded),
+  `linkedOpportunities`, `invoices`, `contacts`, `memberships`. Project scope: `project`, `opportunities` (via the
+  project's links), `linkedOpportunities`, `invoices`, `memberships`. Apply runs the requested ones in that order.
+- **Preview writes nothing**, not even the `salesforce_ingest_state` ledger. It diffs the ingest's own mapper output
+  (`mapSalesEntity*`, `buildContactUpsert`, `buildMembershipUpsert`) against the stored columns of the same names, so a
+  CSM-only column cannot appear. `wouldTruncate` is set when the length guard (`truncateSfColumn`, account column limits)
+  still cuts the Salesforce value; `sfValue` is then the full Salesforce value. A row only CSM holds is `only_in_csm`:
+  informational, never makes a component differ. An account's person references (owner, technical owner, ...) are not
+  compared: resolving them can create a user.
+- **Apply never deletes a row**, and skips what the event path does after a write. It runs the per-record ingest
+  functions (`ingestOpportunityRecord`, `upsertProjectRecord`, ...) with the list it already read (no per-record
+  re-read) on a context marked by `withResyncApply`: the duplicate-event guard does not skip (`shouldSkipIngest`, the
+  membership step guard), stale line items, partner links (`AddPartners` instead of `ReplacePartners`) and project
+  groups are kept, no `project_contact.invited`/`registered` event is published, and no partner refresh starts behind a
+  membership. The event path never sets that mark and behaves as before.
+- **Call cap.** At most `resyncMaxSalesforceCalls` (200) sales-entity calls per request; opportunities are read 50 per
+  call (they carry line items), lists use keyset paging (`minLastModifiedDate` + `minId`). A component the cap (or the
+  request deadline, `resyncTimeMargin`) stops is `skipped` as a whole and `capped` is set; apply reads a component
+  completely before writing any of it. The server's `REQUEST_TIMEOUT` still bounds a request.
 
 ## Adding a new entity
 

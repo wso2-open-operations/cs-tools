@@ -28,8 +28,11 @@
 // ⚠️ WRITES:
 //
 // - `hasAgent` on the project, which changes Get Help for every other spec. The
-//   restore runs from `finally`, and the restore is best-effort so a run
-//   that died mid-flow is corrected by the next one.
+//   restore runs from `finally` through the same Settings toggle that switched
+//   it on (setNoveraEnabled) — the direct API PATCH is rejected by staging, so
+//   restoring through it silently left the assistant on. A restore that fails
+//   now fails the test rather than being swallowed. Only a test that switched
+//   it on switches it off, so a project that already had it on keeps it.
 // - a conversation per test, and a case from the second, none of which can be
 //   deleted — so a full run leaves two conversations and one case behind.
 //
@@ -55,7 +58,7 @@ import { expectSuccess } from "../../utils/caseFlows";
 import { conversationSearchWith } from "../../utils/listSearch";
 import {
   NOVERA_REPLY_SETTLE_MS,
-  setNoveraViaApi,
+  setNoveraEnabled,
 } from "../../utils/noveraFlows";
 import { idPattern, projectPathPattern } from "../../utils/ids";
 
@@ -70,6 +73,54 @@ test.describe("Novera Chat", () => {
   test.describe.configure({ timeout: 180_000 });
 
   const project = PROJECTS[NOVERA_CHAT_INPUT.projectType];
+
+  /** Whether this test switched Novera on itself. Set just before the write, so
+   * a failure after it still reverts it; teardown leaves a pre-existing "on"
+   * alone. */
+  let turnedNoveraOn = false;
+  test.beforeEach(() => {
+    turnedNoveraOn = false;
+  });
+
+  /**
+   * Teardown: switches Novera back off only if this test switched it on, so the
+   * project is left in its pre-test state either way.
+   *
+   * @param page - Test page.
+   * @returns Resolves once the restore (if any) is confirmed.
+   */
+  async function restoreNovera(page: Page): Promise<void> {
+    if (turnedNoveraOn) await setNoveraEnabled(page, project.id, false);
+  }
+
+  /**
+   * Makes sure the AI Chat Assistant (Novera) is on, through Settings → AI
+   * Assistant — the same control the "get help" test drives.
+   *
+   * Replaces setNoveraViaApi for switching ON: staging's PATCH /projects/{id}
+   * from a direct API call has been rejected (502 "Failed to resolve user
+   * roles", then 401) while the app's own toggle and the account-level flag
+   * keep Novera active. Only toggles when it is not already ticked, so a run
+   * normally writes nothing.
+   *
+   * @param page - Test page.
+   * @returns Resolves once Settings reports Novera Active.
+   */
+  async function ensureNoveraOn(page: Page): Promise<void> {
+    const settings = new SettingsPage(page);
+    await settings.openViaSideNav(project.id);
+    await settings.openTab(SETTINGS.tabs.aiAssistant);
+    await expect(settings.noveraToggle()).toBeEnabled({ timeout: 30_000 });
+    if (!(await settings.noveraToggle().isChecked())) {
+      turnedNoveraOn = true;
+      await settings.setNovera(project.id, true);
+    }
+    await expect(
+      settings.noveraChip(SETTINGS.aiAssistant.novera.activeChip),
+      "Novera must report Active before the chat flow can be exercised — " +
+        "Get Help opens the create-case form while it is off",
+    ).toBeVisible({ timeout: 30_000 });
+  }
 
   /**
    * Enables the assistant, opens Get Help and submits the question.
@@ -92,24 +143,9 @@ test.describe("Novera Chat", () => {
     // of the chat, and the failure then surfaces several steps later pointing at
     // the wrong thing entirely.
     //
-    // Enabled through the API rather than the Settings toggle: the toggle's own
-    // PATCH currently aborts in the browser, so clicking it cannot turn the
-    // assistant on at all. See setNoveraViaApi for the detail. The toggle
-    // remains covered by settings.spec.ts, which drives the real control.
-    await page.goto(`/projects/${project.id}/dashboard`);
-    await setNoveraViaApi(page, project.id, true);
-
-    // Then confirm it through the UI, in Settings → AI Assistant → Support
-    // Capabilities: the chip is what a user sees, and reading it back proves the
-    // write actually landed rather than merely returning 2xx.
-    const settings = new SettingsPage(page);
-    await settings.open(project.id);
-    await settings.openTab(SETTINGS.tabs.aiAssistant);
-    await expect(
-      settings.noveraChip(SETTINGS.aiAssistant.novera.activeChip),
-      "Novera must report Active before the chat flow can be exercised — " +
-        "Get Help opens the create-case form while it is off",
-    ).toBeVisible({ timeout: 30_000 });
+    // Through the Settings toggle (ensureNoveraOn), not setNoveraViaApi: the
+    // direct API PATCH is currently rejected by staging (live 2026-10-22).
+    await ensureNoveraOn(page);
 
     const chat = new NoveraChatPage(page);
 
@@ -393,6 +429,7 @@ test.describe("Novera Chat", () => {
       // is rejected, so the assertions that follow are what establish the state
       // — not the click.
       if (!(await settings.noveraToggle().isChecked())) {
+        turnedNoveraOn = true;
         await settings.setNovera(project.id, true);
       }
 
@@ -445,9 +482,10 @@ test.describe("Novera Chat", () => {
       // conversation is not aborted mid-creation.
       await page.waitForTimeout(SUBMIT_SETTLE_MS);
     } finally {
-      // Off again whatever happened: leaving the assistant on sends every
-      // create-case spec to the chat instead of the form.
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      // Off again whatever happened, if this test turned it on: leaving the
+      // assistant on sends every create-case spec to the chat instead of the
+      // form. One that was already on is left as it was found.
+      await restoreNovera(page);
     }
   });
 
@@ -467,7 +505,7 @@ test.describe("Novera Chat", () => {
           `conversation`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await restoreNovera(page);
     }
   });
 
@@ -537,7 +575,7 @@ test.describe("Novera Chat", () => {
           `${conversationId} and posted "${NOVERA_CHAT_INPUT.followUp}"`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await restoreNovera(page);
     }
   });
 
@@ -586,7 +624,7 @@ test.describe("Novera Chat", () => {
           `offers View only`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await restoreNovera(page);
     }
   });
 
@@ -651,10 +689,81 @@ test.describe("Novera Chat", () => {
         `Novera chat: viewed closed ${chatNumber} (${conversationId})`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await restoreNovera(page);
     }
   });
 
+
+  // ✅ READ-ONLY. Opens an existing conversation from Support → Chat History and
+  // checks its details; creates nothing, so it needs no fresh chat of its own.
+  test("opens a chat from Support → Chat History and shows its details", async ({
+    page,
+  }) => {
+    test.skip(
+      !project.id,
+      `${NOVERA_CHAT_INPUT.projectType} needs a project id.`,
+    );
+
+    // Support in the side menu, then the Chat History card's full list.
+    const chat = await openChatHistory(page);
+
+    // A project id does not mean the project has any conversations, so wait for
+    // the list to settle either way and skip on an empty one — this test only
+    // reads, and has nothing to open without an existing chat.
+    const empty = page.getByText(NOVERA_CHAT.history.emptyMessage, {
+      exact: true,
+    });
+    await expect(chat.historyRows().first().or(empty)).toBeVisible({
+      timeout: 60_000,
+    });
+    test.skip(
+      await empty.isVisible(),
+      `${NOVERA_CHAT_INPUT.projectType} has no conversations in its Chat History.`,
+    );
+
+    // Prefer a closed conversation's View — it only reads. Fall back to the
+    // newest row's Resume, which opens the same details page.
+    const viewable = chat.historyRows().filter({
+      has: page.getByRole("button", {
+        name: NOVERA_CHAT.history.viewButton,
+        exact: true,
+      }),
+    });
+    const row = (await viewable.count()) > 0
+      ? viewable.first()
+      : chat.historyRows().first();
+    const chatNumber = NOVERA_CHAT.history.numberPattern.exec(
+      await row.innerText(),
+    )?.[0];
+    expect(chatNumber, "the row should show its chat number").toBeTruthy();
+
+    await row
+      .getByRole("button", {
+        name: new RegExp(
+          `^(${NOVERA_CHAT.history.viewButton}|${NOVERA_CHAT.history.resumeButton})$`,
+        ),
+      })
+      .first()
+      .click();
+
+    // The conversation's own page, describing that chat.
+    await expect(page).toHaveURL(NOVERA_CHAT.resumedConversationPattern, {
+      timeout: 60_000,
+    });
+    const session = NOVERA_CHAT.session;
+    for (const label of [
+      session.section,
+      session.statusLabel,
+      session.chatNumberLabel,
+    ]) {
+      await expect(chat.sessionLabel(label).first(), label).toBeVisible({
+        timeout: 60_000,
+      });
+    }
+    await expect(chat.sessionLabel(chatNumber!).first()).toBeVisible();
+
+    console.log(`Novera chat: opened ${chatNumber} from Chat History`);
+  });
 
   test("view case", async ({ page }) => {
     test.skip(
@@ -706,7 +815,7 @@ test.describe("Novera Chat", () => {
           `${created.number ?? created.id}`,
       );
     } finally {
-      await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+      await restoreNovera(page);
     }
   });
 
@@ -1032,8 +1141,7 @@ test.describe("Novera Chat", () => {
     async function openDescribeIssue(page: Page): Promise<NoveraChatPage> {
       // Same first step as the flows above, and for the same reason: the
       // describe-issue page only exists while the assistant is on.
-      await page.goto(`/projects/${project.id}/dashboard`);
-      await setNoveraViaApi(page, project.id, true);
+      await ensureNoveraOn(page);
 
       const chat = new NoveraChatPage(page);
       await chat.openViaGetHelp(project.id);
@@ -1073,7 +1181,7 @@ test.describe("Novera Chat", () => {
 
         console.log(`Novera chat: whitespace-only text cannot be submitted`);
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await restoreNovera(page);
       }
     });
 
@@ -1118,7 +1226,7 @@ test.describe("Novera Chat", () => {
           `Novera chat: ${max} characters accepted, ${max + 1} refused`,
         );
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await restoreNovera(page);
       }
     });
 
@@ -1160,7 +1268,7 @@ test.describe("Novera Chat", () => {
             `conversation ${conversationId}`,
         );
       } finally {
-        await setNoveraViaApi(page, project.id, false).catch(() => undefined);
+        await restoreNovera(page);
       }
     });
   });

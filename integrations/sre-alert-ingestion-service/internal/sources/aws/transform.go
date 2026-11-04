@@ -64,8 +64,8 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying operator overrides and tagger (optional) the tags of a budget alert's budget.
+func Transform(raw []byte, cfg Config, tagger BudgetTagFetcher) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -95,7 +95,7 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	var messageObj map[string]any
 	if err := jsonnum.Unmarshal([]byte(messageRaw), &messageObj); err != nil {
 		if subject := utils.Str(envelope, "Subject"); isBudget(subject, messageRaw) {
-			return fromBudget(subject, messageRaw, base), nil
+			return fromBudget(subject, messageRaw, base, tagger), nil
 		}
 		// SNS Message isn't valid JSON; still produces a real alert, matching the reference script's own fallback.
 		base.MetricName = "SNS Message Parse Error"

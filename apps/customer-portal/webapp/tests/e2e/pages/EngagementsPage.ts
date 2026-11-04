@@ -173,4 +173,115 @@ export class EngagementsPage {
     await select.click();
     await this.page.getByRole("option", { name: label, exact: true }).click();
   }
+
+  //
+  // Engagement Type filter. Lives inside the Filters panel, so it only exists
+  // once that panel is open.
+  //
+
+  /** The Engagement Type select. */
+  engagementTypeSelect(): Locator {
+    return this.main().getByRole("combobox", {
+      name: ENGAGEMENTS.engagementType.label,
+    });
+  }
+
+  /**
+   * Opens the Filters panel and waits for the Engagement Type select.
+   *
+   * The select is rendered only when the project has engagement types to offer
+   * (`engagementTypeOptions.length > 0`), so a caller that finds nothing here is
+   * looking at a project without a breakdown rather than a broken panel.
+   */
+  async openFilters(): Promise<void> {
+    await expect(this.filtersButton()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.filtersButton().click();
+  }
+
+  /**
+   * The open select's options, rendered in a portal at the document root.
+   *
+   * Scoped to the listbox that carries the select's own accessible name rather
+   * than matching options page-wide: the Filters panel holds several selects,
+   * and an unscoped lookup would be ambiguous the moment another menu were
+   * open.
+   */
+  private engagementTypeOptions(): Locator {
+    return this.page
+      .getByRole("listbox", { name: ENGAGEMENTS.engagementType.label })
+      .getByRole("option");
+  }
+
+  /**
+   * Opens the Engagement Type menu and reads the labels it offers.
+   *
+   * Which options exist is project data — the breakdown omits types the project
+   * has none of — so tests read them rather than assuming the full four.
+   *
+   * The menu is left OPEN: it is a multi-select, so a caller typically picks
+   * from the list this returns.
+   *
+   * @returns The offered labels, in render order.
+   */
+  async openEngagementTypeMenu(): Promise<string[]> {
+    await expect(this.engagementTypeSelect()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    await this.engagementTypeSelect().click();
+    await expect(this.engagementTypeOptions().first()).toBeVisible({
+      timeout: LOAD_TIMEOUT_MS,
+    });
+    return this.engagementTypeOptions().allInnerTexts();
+  }
+
+  /**
+   * The backend ids behind a breakdown option.
+   *
+   * Read off the option's `data-value`, which carries the comma-joined ids that
+   * the request later splits into `engagementTypeKeys`. Needed because one
+   * display name can group several backend types, so the ids cannot be derived
+   * from the label.
+   *
+   * Requires the menu to be open.
+   *
+   * @param label - The option's display name.
+   * @returns Its ids, as numbers.
+   */
+  async engagementTypeIds(label: string): Promise<number[]> {
+    const option = this.engagementTypeOptions().filter({ hasText: label });
+    await expect(option.first()).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+    const value = (await option.first().getAttribute("data-value")) ?? "";
+    return value
+      .split(",")
+      .map(Number)
+      .filter((id) => Number.isFinite(id) && id !== 0);
+  }
+
+  /**
+   * Ticks an option in the open Engagement Type menu.
+   *
+   * @param label - The option's display name.
+   */
+  async chooseEngagementType(label: string): Promise<void> {
+    await this.engagementTypeOptions()
+      .filter({ hasText: label })
+      .first()
+      .click();
+  }
+
+  /**
+   * Closes the still-open multi-select menu.
+   *
+   * A multi-select stays open after a pick so more can be made, and its backdrop
+   * covers the list underneath — so anything asserting on rows has to dismiss it
+   * first.
+   */
+  async closeEngagementTypeMenu(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.engagementTypeOptions()).toHaveCount(0, {
+      timeout: LOAD_TIMEOUT_MS,
+    });
+  }
 }

@@ -19,10 +19,14 @@ import type { JSX } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import WallboardStatTile from "@features/csm-dashboard/components/WallboardStatTile";
 import {
+  WALLBOARD_MODE_MEDIA,
+  WALLBOARD_FILL,
   sortByFixedOrder,
   SRE_SUBROW_ORDER,
   SRE_SUBSECTION_ORDER,
   sreSubsectionFor,
+  WALLBOARD_FONT_SIZE,
+  wb,
 } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardSreSectionProps {
@@ -55,27 +59,58 @@ export default function WallboardSreSection({
   }
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: 1, minHeight: 0 }}>
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        gap: wb(8),
+        ...WALLBOARD_FILL,
+        // Lets each sub-row size its columns from this panel's own width
+        // (the `@container` rule below) rather than the screen's — between
+        // 900px and 1200px wide two panels sit side by side, so a wide
+        // screen can still mean a narrow SRE panel.
+        containerType: "inline-size",
+      }}
+    >
       {SRE_SUBSECTION_ORDER.map((subsection) => {
         const rawRowWidgets = groups.get(subsection);
         if (!rawRowWidgets || rawRowWidgets.length === 0) return null;
         const rowWidgets = sortByFixedOrder(rawRowWidgets, SRE_SUBROW_ORDER[subsection]);
         return (
-          <Box key={subsection} sx={{ display: "flex", flexDirection: "column", gap: 0.5, flex: 1, minHeight: 0 }}>
+          <Box key={subsection} sx={{ display: "flex", flexDirection: "column", gap: wb(4), ...WALLBOARD_FILL }}>
             <Typography
               sx={{
-                fontSize: "0.55rem",
+                fontSize: WALLBOARD_FONT_SIZE.subsection,
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 color: "#34d399",
                 borderBottom: "1px solid rgba(4,120,87,0.5)",
-                pb: 0.25,
+                pb: wb(2),
               }}
             >
               {subsection}
             </Typography>
-            <Box sx={{ display: "flex", gap: 0.75, flex: 1, minHeight: 0 }}>
+            <Box
+              sx={{
+                display: "grid",
+                // At most 3 tiles per row while the panel is narrow, so the 5
+                // change-request tiles wrap to 3 + 2 instead of squeezing a
+                // multi-digit count and a 3-line label into ~100px each. One
+                // row of every tile once the panel itself is >= 620px wide,
+                // and always in wall mode, whose sizes scale to fit.
+                gridTemplateColumns: `repeat(${Math.min(rowWidgets.length, 3)}, 1fr)`,
+                "@container (min-width: 620px)": { gridTemplateColumns: `repeat(${rowWidgets.length}, 1fr)` },
+                gap: wb(6),
+                ...WALLBOARD_FILL,
+                // Merged with WALLBOARD_FILL's own wall-mode rules (same media
+                // key), not a second key that would replace them.
+                [WALLBOARD_MODE_MEDIA]: {
+                  ...WALLBOARD_FILL[WALLBOARD_MODE_MEDIA],
+                  gridTemplateColumns: `repeat(${rowWidgets.length}, 1fr)`,
+                },
+              }}
+            >
               {rowWidgets.map((widget) => (
                 <WallboardStatTile
                   key={widget.widgetId}

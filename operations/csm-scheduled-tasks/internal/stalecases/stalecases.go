@@ -14,28 +14,28 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package stalecases is the "cases open too long" report sub-cron: it finds
-// every case that's been open for more than a configured threshold and
-// emails a report of them. This is the first sub-cron in this component to
-// send an email on success rather than only on failure — see this
-// component's own CLAUDE.md ("Future: per-task report emails") for why that
-// wasn't built as a generic engine feature: the report itself is sent from
-// inside SendReport's returned handler, using recipients the caller supplies
-// directly, not through engine.Engine's failure-alert path at all.
+// Package stalecases is the "cases open too long" report sub-cron: it fetches
+// entity-service's long-open cases report and mails it, as two tables (cases,
+// and cases on onboarding projects), to this task's own recipients. It sends
+// nothing on a day both tables are empty. The report logic itself (which cases
+// count as ongoing, how they are split and capped) lives in entity-service;
+// this package only fetches, renders and sends. The mail is sent on success
+// from inside the handler, not through engine.Engine's failure-alert path; see
+// this component's CLAUDE.md ("Per-task report emails").
 package stalecases
 
 import (
 	"context"
 	"fmt"
-	"time"
+	"log/slog"
 
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 )
 
-// CaseSearcher is the subset of *entitycases.Client this package depends on.
-type CaseSearcher interface {
-	SearchOpenCasesOlderThan(ctx context.Context, olderThan time.Duration) ([]entitycases.Case, error)
+// ReportFetcher is the subset of *longopenreport.Client this package depends on.
+type ReportFetcher interface {
+	Report(ctx context.Context, olderThanDays int) (longopenreport.Report, error)
 }
 
 // EmailSender is the subset of *notify.Client this package depends on.
@@ -43,44 +43,46 @@ type EmailSender interface {
 	SendEmail(ctx context.Context, to, cc []string, subject, htmlBody string) error
 }
 
-// SendReport returns a registry.Task.Handler that finds every case open for
-// more than olderThan and emails to/cc a report of them. Recipients are
-// exactly this task's own SUB_CRON_RECIPIENTS entry (see
-// cmd/server/main.go) — deliberately not merged with the standing
-// ALERT_RECIPIENTS audience, which is about failure alerting, not report
-// distribution; a deployment that wants the same people getting both
-// configures the same addresses in both places.
+// SendReport returns a registry.Task.Handler that fetches the long-open cases
+// report for cases open more than olderThanDays and emails it to to/cc.
+// Recipients are exactly this task's own SUB_CRON_RECIPIENTS entry (see
+// cmd/server/main.go), deliberately not merged with the standing
+// ALERT_RECIPIENTS audience, which is about failure alerting.
+//
+// caseLinkBase is the CSM portal's base URL (CSM_PORTAL_WEB_BASE_URL); when
+// set, the case cells link to <caseLinkBase>/cases/<internal id>, else they are plain text.
 //
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED, the same global kill
-// switch engine.Engine.AlertsEnabled uses — despite the env var's name, it
-// silences every email this component sends, not just failure alerts, since
-// this report is the other kind. When false, the returned handler still
-// succeeds (the ledger records success, the task doesn't retry) but sends
-// nothing.
+// switch engine.Engine.AlertsEnabled uses: it silences every email this
+// component sends. If emailsEnabled is false or to is empty, the handler skips
+// the fetch entirely and succeeds, without contacting entity-service.
 //
-// If emailsEnabled is false or to is empty, the returned handler skips the
-// case search entirely and returns nil (success) without contacting
-// entity-service at all — nothing would be done with the result anyway, so
-// there's no reason to spend an entity-service query on every tick, in a
-// deployment that hasn't configured this task's recipients yet or has gone
-// quiet.
-func SendReport(cases CaseSearcher, email EmailSender, olderThan time.Duration, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+// When both tables of the report are empty the handler sends nothing and
+// succeeds: the report omits itself on a day with nothing to act on.
+func SendReport(reports ReportFetcher, email EmailSender, olderThanDays int, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
 		}
 
-		found, err := cases.SearchOpenCasesOlderThan(ctx, olderThan)
+		report, err := reports.Report(ctx, olderThanDays)
 		if err != nil {
-			return fmt.Errorf("stalecases: search open cases: %w", err)
+			return fmt.Errorf("stalecases: fetch long-open cases report: %w", err)
 		}
 
-		thresholdDays := int(olderThan.Hours() / 24)
-		subject := fmt.Sprintf("[Action-Required][Report] Cases open for more than %d days", thresholdDays)
-		body := notify.RenderStaleCasesReport(notify.StaleCasesReportData{
-			ThresholdDays: thresholdDays,
-			Cases:         found,
-		})
+		if len(report.Cases) == 0 && len(report.OnboardingCases) == 0 {
+			slog.Info("no long-open cases; the stale cases report is not sent",
+				"olderThanDays", olderThanDays)
+			return nil
+		}
+		slog.Info("sending the stale cases report",
+			"olderThanDays", olderThanDays,
+			"cases", len(report.Cases), "casesTotal", report.CasesTotal,
+			"onboardingCases", len(report.OnboardingCases), "onboardingCasesTotal", report.OnboardingCasesTotal,
+			"to", len(to), "cc", len(cc))
+
+		subject := fmt.Sprintf("[Action-Required][Report] Cases open for more than %d days", olderThanDays)
+		body := notify.RenderLongOpenCasesReport(report, olderThanDays, caseLinkBase)
 		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
 			return fmt.Errorf("stalecases: send report email: %w", err)
 		}

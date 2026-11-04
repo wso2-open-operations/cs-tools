@@ -134,6 +134,42 @@ VALUES ($1::uuid, now(), now(), 'test', 'test', $3, 'SVC-TEST-X1', $2::uuid)`, s
 		t.Errorf("picker without allowlist: got %v", got)
 	}
 
+	// incidentExtraGroupsOnly lists the active allowlisted groups alone: not the
+	// service support group, not an inactive or missing allowlisted id, not a
+	// non-allowlisted group; an empty allowlist lists nothing.
+	extraIDs := func(repo GroupRepository, q string, limit, offset int) (map[string]bool, int) {
+		t.Helper()
+		groups, total, err := repo.SearchIncidentExtraGroups(ctx, q, limit, offset)
+		if err != nil {
+			t.Fatalf("SearchIncidentExtraGroups(%q): %v", q, err)
+		}
+		out := map[string]bool{}
+		for _, g := range groups {
+			out[g.ID] = true
+		}
+		return out, total
+	}
+	for _, q := range []string{prefix, ""} {
+		got, total := extraIDs(NewGroupRepository(pool, allow...), q, 50, 0)
+		if !got[extra] || got[supported] || got[extraInactive] || got[extraNoRow] || got[other] || len(got) != 1 || total != 1 {
+			t.Errorf("extra-only with allowlist, q=%q: got %v total %d", q, got, total)
+		}
+	}
+	if got, total := extraIDs(NewGroupRepository(pool), prefix, 50, 0); len(got) != 0 || total != 0 {
+		t.Errorf("extra-only without allowlist: got %v total %d, want empty", got, total)
+	}
+	// searchQuery narrows within the allowlist; pagination keeps the total.
+	if got, total := extraIDs(NewGroupRepository(pool, allow...), prefix+" supported", 50, 0); len(got) != 0 || total != 0 {
+		t.Errorf("extra-only, query matching only a non-allowlisted group: got %v total %d", got, total)
+	}
+	wide := append(append([]string{}, allow...), supported)
+	if got, total := extraIDs(NewGroupRepository(pool, wide...), prefix, 1, 0); len(got) != 1 || total != 2 {
+		t.Errorf("extra-only page 1 of 2: got %v total %d, want 1 row of total 2", got, total)
+	}
+	if got, total := extraIDs(NewGroupRepository(pool, wide...), prefix, 1, 1); len(got) != 1 || total != 2 {
+		t.Errorf("extra-only page 2 of 2: got %v total %d, want 1 row of total 2", got, total)
+	}
+
 	// Case-alert route options keep the plain support-group set: an allowlisted
 	// group never appears there, and is not found by id.
 	alerts := NewCaseAlertSettingsRepository(pool)

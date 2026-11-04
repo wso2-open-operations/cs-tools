@@ -1851,7 +1851,7 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		// Resolved by this update itself, not by its parent's cascade.
 		incSets = append(incSets, "resolved_on = NOW()", "resolved_with_parent = FALSE")
 	}
-	// Entering Closed records when and by whom (migration 0255). A re-open
+	// Entering Closed records when and by whom (migration 0273). A re-open
 	// leaves both as they were.
 	if u.State != nil && *u.State == "CLOSED" && currentState != "CLOSED" {
 		incSets = append(incSets, "closed_on = NOW()")

@@ -1,0 +1,35 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+// Package apierror defines a typed error returned by ACP's HTTP clients
+// when the service they call responds with a non-2xx status.
+package apierror
+
+import "fmt"
+
+// Error is returned when the called service responds with a non-2xx status.
+type Error struct {
+	StatusCode int
+	// Body is an excerpt of the upstream error response, for code that
+	// needs it. It is deliberately left out of Error(): the error text ends
+	// up in the logs, and an upstream body can echo personal data (e.g. a
+	// rejected recipient address).
+	Body string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("upstream returned %d", e.StatusCode)
+}

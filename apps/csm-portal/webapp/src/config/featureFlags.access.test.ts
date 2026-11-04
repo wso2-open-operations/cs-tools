@@ -60,13 +60,12 @@ describe("feature visibility by portal access", () => {
   // (by 1, then by 3 more) every time an unrelated section was added to the
   // nav tree without this test being updated alongside it -- exactly the
   // kind of break a plain content comparison can't hide.
-  it("hides Operations, Security Center, PLG, Updates, Time cards, Team Schedule, Knowledge, Usage Metrics and Settings from a view-only role, and keeps the other sections", () => {
+  it("hides Operations, Security Center, PLG, Time cards, Team Schedule, Knowledge, Usage Metrics and Settings from a view-only role, and keeps the other sections", () => {
     const ids = visibleNavSections(viewer).map((s) => s.id);
     for (const hidden of [
       "operations",
       "security-center",
       "plg",
-      "updates",
       "time-cards",
       "team-schedule",
       "kb-articles",
@@ -82,6 +81,8 @@ describe("feature visibility by portal access", () => {
       "allocations",
       "announcements",
       "customers",
+      // Updates is read-only, so the viewer role keeps it (Time cards stay hidden).
+      "updates",
       "help",
     ]);
   });
@@ -195,7 +196,7 @@ describe("feature visibility by portal access", () => {
 
   it("hides Updates and Time cards from roles without time-card access, and shows them otherwise", () => {
     const ids = (a: ReturnType<typeof getPortalAccess>) => visibleNavSections(a).map((s) => s.id);
-    for (const role of ["viewer", "escalator", "attachment_downloader", "usage_metrics_viewer", "dashboard_designer"]) {
+    for (const role of ["escalator", "attachment_downloader", "usage_metrics_viewer", "dashboard_designer"]) {
       const access = getPortalAccess([role]);
       expect(ids(access)).not.toContain("updates");
       expect(ids(access)).not.toContain("time-cards");
@@ -208,6 +209,15 @@ describe("feature visibility by portal access", () => {
       expect(ids(access)).toContain("time-cards");
       expect(featureStateForPath("/time-cards", access)).toBe("enabled");
     }
+  });
+
+  it("a viewer sees Updates (route and section) but not Time cards", () => {
+    const access = getPortalAccess(["viewer"]);
+    const ids = visibleNavSections(access).map((s) => s.id);
+    expect(ids).toContain("updates");
+    expect(ids).not.toContain("time-cards");
+    expect(featureStateForPath("/updates", access)).toBe("enabled");
+    expect(featureStateForPath("/time-cards", access)).toBe("hidden");
   });
 
   it("a time-card approver sees Time cards and Updates but not Operations", () => {
@@ -227,9 +237,10 @@ describe("feature visibility by portal access", () => {
       expect.arrayContaining(["help.operations", "help.security-center", "help.updates", "help.time-cards"]),
     );
     const viewerTopics = topics(getPortalAccess(["viewer"]));
-    for (const id of ["help.operations", "help.security-center", "help.updates", "help.time-cards", "help.settings"]) {
+    for (const id of ["help.operations", "help.security-center", "help.time-cards", "help.settings"]) {
       expect(viewerTopics).not.toContain(id);
     }
+    expect(viewerTopics).toContain("help.updates");
     expect(viewerTopics).toContain("help.overview");
     expect(viewerTopics).toContain("help.support");
 

@@ -249,7 +249,9 @@ func MapEntityProjectContact(c entity.ProjectContact) Contact {
 	if c.RegistrationState != "" {
 		state := c.RegistrationState
 		out.MembershipStatus = &state
-		out.CanResendInvitation = invitationOutstanding(state)
+		// An integration (system) user is activated immediately and is never
+		// sent an invitation, so there is nothing to resend.
+		out.CanResendInvitation = invitationOutstanding(state) && !c.IsCsIntegrationUser
 	}
 	return out
 }

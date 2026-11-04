@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmintegration"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmnotification"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -50,6 +51,9 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/updates"
 )
 
+// main loads the configuration, builds every upstream client and handler,
+// registers the routes and serves until SIGINT or SIGTERM, then shuts down
+// gracefully. Invalid required configuration stops the start.
 func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
@@ -102,6 +106,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// integrations/csm-ai-integration-service makes the generator's model
+	// calls when CSM_AI_INTEGRATION_SERVICE_BASE_URL is set (see below).
+	aiCfg, err := loadAIIntegrationConfig(os.Getenv)
+	if err != nil {
+		slog.Error("invalid AI integration service configuration", "err", err)
+		os.Exit(1)
+	}
+	// Per-user limits on POST /dashboards/generate: each call is a model call.
+	generateLimits, err := loadGenerateRateLimits(os.Getenv)
+	if err != nil {
+		slog.Error("invalid dashboard generate limit configuration", "err", err)
+		os.Exit(1)
+	}
+	if aiCfg.Enabled() && aiCfg.Timeout >= reqTimeouts.RESTWrite {
+		slog.Warn("CSM_AI_INTEGRATION_SERVICE_TIMEOUT should be shorter than REST_WRITE_TIMEOUT",
+			"aiTimeout", aiCfg.Timeout, "writeTimeout", reqTimeouts.RESTWrite)
+	}
+
 	// All upstream service clients (entity, updates, SCIM, and future notification
 	// channels) authenticate as the same OAuth2 client-credentials app; only the
 	// base URL and scopes differ per service.
@@ -146,6 +168,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	salesforceResyncHandler := handler.NewSalesforceResyncHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -331,7 +354,23 @@ func main() {
 	if engineeringEntityClient != nil {
 		engineeringPinger = engineeringEntityClient
 	}
-	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger)
+	// aiClient stays nil (and aiPinger an untyped nil) when the service is
+	// not configured; see notificationPinger above for the typed-nil pitfall.
+	var aiClient *csmai.Client
+	var aiPinger handler.HealthPinger
+	if aiCfg.Enabled() {
+		aiClient = csmai.NewClient(csmai.Config{
+			BaseURL:      aiCfg.BaseURL,
+			TokenURL:     oauth2TokenURL,
+			ClientID:     oauth2ClientID,
+			ClientSecret: oauth2ClientSecret,
+			Scopes:       aiCfg.Scopes,
+			Timeout:      aiCfg.Timeout,
+		})
+		aiPinger = aiClient
+	}
+	healthHandler := handler.NewHealthHandler(scimClient, updatesClient, notificationPinger, integrationPinger, engineeringPinger).
+		WithAIIntegration(aiPinger)
 
 	// timecardApproverRoleIDs is optional: empty means none of
 	// AUTH_TIMECARD_APPROVER_ROLES' real role names has a configured ID, in
@@ -348,6 +387,20 @@ func main() {
 		WithGrantableRoles(grantableRoles)
 	grantableRolesHandler := handler.NewGrantableRolesHandler(grantableRoles)
 	dashboardHandler := handler.NewDashboardHandler(accessGuard)
+	// The AI integration service makes the model calls when configured
+	// (CSM_AI_INTEGRATION_SERVICE_BASE_URL); without it, the generate page
+	// answers with a fixed sample. This backend holds no model client.
+	dashboardGenerator := handler.NewSampleDashboardGenerator()
+	if aiClient != nil {
+		dashboardGenerator = handler.NewServiceDashboardGenerator(aiClient, dir.TeamResults())
+	}
+	slog.Info("dashboard generation", "aiIntegrationService", aiClient != nil, "timeout", aiCfg.Timeout)
+	// A team named in a generated dashboard's creTeam / sreTeam filter (its
+	// registry key) becomes the team's group id, once, here.
+	dashboardGenerator = handler.WithDashboardTeams(dashboardGenerator, dir.TeamResults())
+	dashboardGenerateHandler := handler.NewDashboardGenerateHandler(dashboardGenerator).
+		WithRateLimit(handler.NewGenerateRateLimiter(generateLimits.PerMinute, generateLimits.PerDay))
+	customDashboardHandler := handler.NewCustomDashboardHandler(customerEntityClient).WithTeams(dir.TeamResults())
 	caseHandler = caseHandler.WithAccessGuard(accessGuard)
 	projectHandler = projectHandler.WithAccessGuard(accessGuard)
 	timeCardHandler = timeCardHandler.WithAccessGuard(accessGuard)
@@ -454,8 +507,35 @@ func main() {
 	route("GET /dashboards/filter-presets", handler.PermView, dashboardHandler.GetFilterPresets)
 	route("GET /dashboards/sections", handler.PermView, dashboardHandler.GetSharedSections)
 	route("GET /dashboards/{dashboardId}", handler.PermView, dashboardHandler.GetDashboardDetail)
-	route("GET /updates/product-update-levels", handler.PermTimeCardsAndUpdates, updatesHandler.GetProductUpdateLevels)
-	route("POST /updates/levels/search", handler.PermTimeCardsAndUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
+	// Custom Dashboards' generate page. PermWrite (cs_engineer, admin) matches
+	// the webapp's `canWrite` on that menu section. A literal path, so it never
+	// collides with the {dashboardId} wildcard, which is GET only anyway.
+	route("POST /dashboards/generate", handler.PermWrite, dashboardGenerateHandler.GenerateDashboard)
+	// My Dashboards: the caller's own saved dashboards, stored in entity-service.
+	// Same permission as generating one. "custom" is a literal segment, so it
+	// never collides with the {dashboardId} wildcard.
+	route("GET /dashboards/custom", handler.PermWrite, customDashboardHandler.ListCustomDashboards)
+	route("GET /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.GetCustomDashboard)
+	route("PUT /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.SaveCustomDashboard)
+	route("DELETE /dashboards/custom/{id}", handler.PermWrite, customDashboardHandler.DeleteCustomDashboard)
+	// Sharing one of the caller's dashboards, view only (owner only).
+	route("GET /dashboards/custom/{id}/shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardShares)
+	route("PUT /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.AddCustomDashboardShare)
+	route("DELETE /dashboards/custom/{id}/shares/{userId}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardShare)
+	// Sharing a saved dashboard with a registry team (by team key); whoever
+	// is in the team sees it under Shared Dashboards.
+	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
+	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
+	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Dashboards other users shared with the caller, view only. "shared" is a
+	// literal segment, like "custom", so it never collides with {dashboardId}.
+	// PermView, like the system dashboards: anyone a dashboard can be shared
+	// with (any internal user, any member of a team) can open it, and its
+	// widgets query with the viewer's own permissions.
+	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
+	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
+	route("GET /updates/product-update-levels", handler.PermViewUpdates, updatesHandler.GetProductUpdateLevels)
+	route("POST /updates/levels/search", handler.PermViewUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
 	route("PATCH /users/me", handler.PermAuthenticated, usersHandler.PatchMe)
 	route("GET /users/me/saved-filter-views", handler.PermAuthenticated, usersHandler.ListSavedFilterViews)
@@ -509,6 +589,12 @@ func main() {
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
 	// staff role should be able to set it.
 	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
+	// Admin-only: compare one account's or project's Salesforce data with the
+	// database, then overwrite the chosen components. Synchronous and slow
+	// (up to about a minute); entity-service re-checks admin and serialises
+	// per target.
+	route("POST /salesforce/resync/preview", handler.PermAdmin, salesforceResyncHandler.Preview)
+	route("POST /salesforce/resync/apply", handler.PermAdmin, salesforceResyncHandler.Apply)
 	route("POST /accounts/search", handler.PermViewSharedEntity, accountHandler.SearchAccounts)
 	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)
@@ -557,6 +643,25 @@ func main() {
 	route("POST /products/search", handler.PermView, productHandler.SearchProducts)
 	route("GET /products/github-repo", handler.PermView, productHandler.GetProductRepoMapping)
 	route("POST /products/{id}/versions/search", handler.PermView, productHandler.SearchProductVersions)
+	// Product catalogue (the data behind the public Support Matrix and Release
+	// Matrix), served by entity-service's products API under the same paths:
+	// reads are PermView; writes (applied at once) are PermManageProductCatalog,
+	// which entity-service re-checks.
+	productCatalogHandler := handler.NewProductCatalogHandler(customerEntityClient)
+	route("GET /products/{id}", handler.PermView, productCatalogHandler.GetProduct)
+	route("POST /products", handler.PermManageProductCatalog, productCatalogHandler.CreateProduct)
+	route("PATCH /products/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProduct)
+	route("POST /products/{id}/versions", handler.PermManageProductCatalog, productCatalogHandler.CreateProductVersions)
+	route("POST /product-versions/search", handler.PermView, productCatalogHandler.SearchAllProductVersions)
+	route("GET /product-versions/{id}", handler.PermView, productCatalogHandler.GetProductVersion)
+	route("PATCH /product-versions/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProductVersion)
+	route("POST /product-versions/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireProductVersion)
+	route("GET /release-lines", handler.PermView, productCatalogHandler.ListReleaseLines)
+	route("POST /release-lines", handler.PermManageProductCatalog, productCatalogHandler.CreateReleaseLine)
+	route("PATCH /release-lines/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateReleaseLine)
+	route("POST /release-lines/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireReleaseLine)
+	route("GET /carbon-platform-history", handler.PermView, productCatalogHandler.ListCarbonPlatformHistory)
+	route("GET /carbon-kernel-releases", handler.PermView, productCatalogHandler.ListCarbonKernelReleases)
 	route("POST /deployments", handler.PermWrite, deploymentHandler.PostDeployment)
 	route("POST /kb-articles", handler.PermWrite, kbArticleHandler.CreateKBArticle)
 	route("GET /kb-articles/{id}", handler.PermView, kbArticleHandler.GetKBArticle)
@@ -754,6 +859,10 @@ func main() {
 	route("GET /portal-banners/manage", handler.PermAdmin, bannerHandler.ListManagedBanners)
 	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
 	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
+
+	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)
+	route("GET /sla-status/manage", handler.PermAdmin, slaEngineHandler.SearchActiveSLAStatusesManage)
+	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
@@ -1105,7 +1214,7 @@ func loadDirectory() *directory.Directory {
 //	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
 //	AUTH_DASHBOARD_DESIGNER_ROLES, AUTH_SALES_SOLUTIONS_ROLES,
 //	AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES,
-//	AUTH_SECURITY_TEAM_ROLES
+//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_SECURITY_TEAM_ROLES
 //	    Each is a comma-separated list of role names; a caller whose token's
 //	    "roles" claim holds any one of them has that role.
 //
@@ -1116,7 +1225,8 @@ func loadDirectory() *directory.Directory {
 // nobody can use the portal.
 //
 // AUTH_SALES_SOLUTIONS_ROLES, AUTH_WORKNOTE_CREATOR_ROLES,
-// AUTH_COMMENT_UPDATER_ROLES and AUTH_ONBOARDING_LEAD_ROLES are unlike the rest:
+// AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES and
+// AUTH_PRODUCT_CATALOG_MANAGER_ROLES are unlike the rest:
 // leaving any of them unset
 // does not warn. sales_solutions is a normal, expected unconfigured state (CS
 // Portal alone still works fine) rather than a misconfiguration nobody can
@@ -1127,7 +1237,8 @@ func loadDirectory() *directory.Directory {
 // AccessConfig.WorknoteCreator's/CommentUpdater's own doc comments), so
 // leaving either empty is purely "this extra role isn't provisioned yet,"
 // never a state that locks anyone out. onboarding_lead is the same: admin
-// already holds PermManageOnboarding regardless.
+// already holds PermManageOnboarding regardless; and product_catalog_manager:
+// admin already holds PermManageProductCatalog regardless.
 func loadAccessConfig() handler.AccessConfig {
 	var unset []string
 	roles := func(name string) []string {
@@ -1160,14 +1271,16 @@ func loadAccessConfig() handler.AccessConfig {
 		// unset variable here a normal, no-op state.
 		SecurityTeam: roles("AUTH_SECURITY_TEAM_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES,
-		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES or
-		// AUTH_ONBOARDING_LEAD_ROLES is a normal, supported state (see this
-		// function's own doc comment for why each is), so all four deliberately bypass the roles() helper
+		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES,
+		// AUTH_ONBOARDING_LEAD_ROLES or AUTH_PRODUCT_CATALOG_MANAGER_ROLES is a
+		// normal, supported state (see this function's own doc comment for why
+		// each is), so all five deliberately bypass the roles() helper
 		// to avoid adding themselves to the unset-variable warning below.
-		SalesSolutions:  splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
-		WorknoteCreator: splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
-		CommentUpdater:  splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
-		OnboardingLead:  splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		SalesSolutions:        splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
+		WorknoteCreator:       splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
+		CommentUpdater:        splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
+		OnboardingLead:        splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		ProductCatalogManager: splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 	}
 	if len(unset) > 0 {
 		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)

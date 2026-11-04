@@ -17,14 +17,19 @@
 package aws
 
 import (
+	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	"sre-alert-ingestion-service/utils"
 )
 
 // budgetSubjectPrefix starts the Subject of every AWS Budgets notification.
 const budgetSubjectPrefix = "AWS Budgets:"
+
+// budgetTagTimeout caps the budget tag lookup per alert so a slow AWS call never stalls ingestion.
+const budgetTagTimeout = 5 * time.Second
 
 var (
 	budgetNameLine = regexp.MustCompile(`(?m)^\s*Budget Name:\s*(.+?)\s*$`)
@@ -39,7 +44,8 @@ func isBudget(subject, message string) bool {
 }
 
 // fromBudget maps an AWS Budgets alert: one incident per budget and account, whichever threshold or forecast fired.
-func fromBudget(subject, message string, base Alert) Alert {
+// A budget alert defaults to critical; the budget's own tags stand in for the AlarmDescription overrides budgets lack.
+func fromBudget(subject, message string, base Alert, tagger BudgetTagFetcher) Alert {
 	name := ""
 	if m := budgetNameLine.FindStringSubmatch(message); m != nil {
 		name = m[1]
@@ -58,7 +64,36 @@ func fromBudget(subject, message string, base Alert) Alert {
 	}
 	base.SourceAccount = utils.FirstNonEmpty(account, base.SourceAccount)
 	base.Description = budgetSummary(message)
+	base.Severity = "critical"
+	base.Category = "service_interruption"
+
+	if tagger != nil && name != "" && base.SourceAccount != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), budgetTagTimeout)
+		defer cancel()
+		// A failed lookup (no credentials, another account's budget, no such budget) keeps the configured values.
+		if tags, err := tagger.Tags(ctx, base.SourceAccount, name); err == nil {
+			base.Service = utils.FirstNonEmpty(tagValue(tags, "service"), base.Service)
+			base.Environment = utils.FirstNonEmpty(tagValue(tags, "environment"), base.Environment)
+			base.Severity = utils.FirstNonEmpty(tagValue(tags, "severity"), base.Severity)
+			base.Category = utils.FirstNonEmpty(tagValue(tags, "category"), base.Category)
+			base.AssignmentGroup = tagValue(tags, "assignment_group")
+		}
+	}
 	return base
+}
+
+// tagValue reads a budget tag by key: the exact key wins, else the lexically first case-insensitive match ("Service").
+func tagValue(tags map[string]string, key string) string {
+	if v, ok := tags[key]; ok {
+		return strings.TrimSpace(v)
+	}
+	match := ""
+	for k := range tags {
+		if strings.EqualFold(k, key) && (match == "" || k < match) {
+			match = k
+		}
+	}
+	return strings.TrimSpace(tags[match])
 }
 
 // budgetSummary is the "You requested that we alert you ..." sentence, or the whole message when it has none.

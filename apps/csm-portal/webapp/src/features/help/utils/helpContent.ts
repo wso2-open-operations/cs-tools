@@ -37,6 +37,7 @@ import updatesMd from "../content/updates.md?raw";
 import timeCardsMd from "../content/time-cards.md?raw";
 import announcementsMd from "../content/announcements.md?raw";
 import customersMd from "../content/customers.md?raw";
+import productsMd from "../content/products.md?raw";
 import peopleAccessMd from "../content/people-access.md?raw";
 import settingsMd from "../content/settings.md?raw";
 
@@ -57,6 +58,7 @@ export const HELP_TOPIC_CONTENT: Record<string, string> = {
   "time-cards": timeCardsMd,
   announcements: announcementsMd,
   customers: customersMd,
+  products: productsMd,
   "people-access": peopleAccessMd,
   settings: settingsMd,
 };

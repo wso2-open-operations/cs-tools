@@ -16,7 +16,7 @@
 
 // Integration tests for the incident auto-close (IncidentAutocloseRepository
 // and the incident service it closes through) and for the
-// closed_on / closed_by_id a manual close now records (migration 0255),
+// closed_on / closed_by_id a manual close now records (migration 0273),
 // against a real Postgres with every migration applied. Skipped unless
 // INCIDENT_AUTOCLOSE_TEST_DSN is set.
 //

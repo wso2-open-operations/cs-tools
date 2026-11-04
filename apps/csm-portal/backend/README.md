@@ -429,6 +429,7 @@ unset one (except the three marked optional).
 | `AUTH_SECURITY_TEAM_ROLES` | Yes | Read-only `view`, `view_operations`, `security_center`; never any state-changing permission |
 | `AUTH_WORKNOTE_CREATOR_ROLES` | No (optional) | Posting a `work_note` comment on a case only; none of `write`'s other actions |
 | `AUTH_COMMENT_UPDATER_ROLES` | No (optional) | Reaching comment edit/delete, and editing or deleting **any** comment (a plain `cs_engineer` only succeeds on their own); also `security_center` |
+| `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` | No (optional) | Editing the product catalogue (the create, PATCH and retire routes under `/products`, `/product-versions` and `/release-lines`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can. entity-service re-checks the same role names |
 | `AUTH_ONBOARDING_LEAD_ROLES` | No (optional) | Setting a project's onboarding status, owner and dates (`PATCH /projects/{id}`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can |
 | `AUTH_SALES_SOLUTIONS_ROLES` | No (optional) | Only `view_shared_entity` (the shared case, account, project and team-member reads); also reported by `GET /users/me` so the webapp can pick a navigation |
 
@@ -452,6 +453,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
 | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
+| `manage_product_catalog` | `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/versions`, `PATCH /product-versions/{id}`, `POST /product-versions/{id}/retire`, `POST /release-lines`, `PATCH /release-lines/{id}`, `POST /release-lines/{id}/retire` (applied at once). `product_catalog_manager` and `admin`. Reading the catalogue (`GET /products/{id}`, `POST /product-versions/search`, `GET /product-versions/{id}`, `GET /release-lines`, `GET /carbon-platform-history`, `GET /carbon-kernel-releases`) is `view` |
 | `use_plg`, `manage_playbooks` | The `/plg/*` routes: `cs_engineer` and `admin` use them; authoring playbook templates is `admin` only |
 
 A caller with none of the required roles gets `403`. Some actions need more than the role: posting a
@@ -475,6 +477,12 @@ differ.
 | `CSM_NOTIFICATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `notify.read` |
 | `CSM_INTEGRATION_SERVICE_BASE_URL` | No | unset | Integration service, used only by `GET /health/dependencies` today. `https` base URL | `https://integration.example.com` |
 | `CSM_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `integration.read` |
+| `CSM_AI_INTEGRATION_SERVICE_BASE_URL` | No | unset | AI integration service: makes the dashboard generator's model calls; unset, the generate page answers with a sample. `https`, or `http` for a local host only | `https://ai.example.com` |
+| `CSM_AI_INTEGRATION_SERVICE_SCOPES` | No | none | Comma list of scopes | `ai.generate` |
+| `CSM_AI_INTEGRATION_SERVICE_TIMEOUT` | No | `55s` | One generate call's timeout (Go duration, > 0, shorter than `REST_WRITE_TIMEOUT`) | `55s` |
+| `DASHBOARD_GENERATE_LIMIT_PER_MINUTE` | No | `10` | Most `POST /dashboards/generate` calls one user may start in any minute (whole number > 0); over it answers 429 with `Retry-After`. Counted per backend instance | `10` |
+| `DASHBOARD_GENERATE_LIMIT_PER_DAY` | No | `100` | The same over any 24 hours; not below the per-minute limit | `100` |
+| `SALES_ENTITY_BASE_URL` | No | unset | Sales entity GraphQL service backing `POST /scan-user`; unset makes only those lookups fail at call time. `https` base URL. Not listed in `.env.example` as active | `https://sales-entity.example.com` |
 | `GOOGLE_DRIVE_CLIENT_ID` | No | unset | OAuth2 client id for the Drive folder-browsing routes (`/files`) | `your-drive-client-id` |
 | `GOOGLE_DRIVE_CLIENT_SECRET` | No | unset | Matching client secret | `your-drive-client-secret` |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | No | unset | Refresh token for the OAuth2 refresh-token grant | `your-refresh-token` |

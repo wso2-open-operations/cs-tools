@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"regexp"
 	"time"
@@ -67,6 +68,46 @@ const caseActivityStreamHeartbeat = 15 * time.Second
 type StreamHandler struct {
 	entityClient entityCaseClient
 	hub          *stream.BroadcastHub
+	// maxLifetime is the base bounded lifetime of one stream; 0 means
+	// unbounded. Each connection gets its own jittered copy (see
+	// jitteredLifetime).
+	maxLifetime time.Duration
+}
+
+// streamReconnectEvent is the final frame written when a stream reaches its
+// maximum lifetime, so a client can tell the end was intentional and simply
+// reconnect.
+const streamReconnectEvent = "event: reconnect\ndata: {}\n\n"
+
+// maxLifetimeJitter is the fraction by which each connection's lifetime is
+// randomly spread around the configured base, so clients that connected
+// together do not all reconnect at the same instant.
+const maxLifetimeJitter = 0.1
+
+// StreamOption customises a StreamHandler.
+type StreamOption func(*StreamHandler)
+
+// WithMaxLifetime bounds how long each stream stays open before the server
+// ends it cleanly (the client is expected to reconnect). Zero or a negative
+// value disables the bound.
+func WithMaxLifetime(d time.Duration) StreamOption {
+	return func(h *StreamHandler) {
+		if d < 0 {
+			d = 0
+		}
+		h.maxLifetime = d
+	}
+}
+
+// jitteredLifetime scales base by (1 + j) where j is uniform in
+// [-maxLifetimeJitter, +maxLifetimeJitter], derived from u in [0, 1).
+// A base of zero or less returns zero (unbounded).
+func jitteredLifetime(base time.Duration, u float64) time.Duration {
+	if base <= 0 {
+		return 0
+	}
+	j := (u*2 - 1) * maxLifetimeJitter
+	return time.Duration(float64(base) * (1 + j))
 }
 
 // entityCaseClient is the minimal interface StreamHandler needs from the
@@ -77,8 +118,12 @@ type entityCaseClient interface {
 
 // NewStreamHandler constructs a StreamHandler. hub may be nil —
 // StreamCaseActivities checks for that before registering.
-func NewStreamHandler(entityClient entityCaseClient, hub *stream.BroadcastHub) *StreamHandler {
-	return &StreamHandler{entityClient: entityClient, hub: hub}
+func NewStreamHandler(entityClient entityCaseClient, hub *stream.BroadcastHub, opts ...StreamOption) *StreamHandler {
+	h := &StreamHandler{entityClient: entityClient, hub: hub}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // StreamCaseActivities handles GET /cases/{id}/activities/stream.
@@ -133,10 +178,27 @@ func (h *StreamHandler) StreamCaseActivities(w http.ResponseWriter, r *http.Requ
 	ticker := time.NewTicker(caseActivityStreamHeartbeat)
 	defer ticker.Stop()
 
+	// A nil channel blocks forever, which is how an unbounded stream
+	// (maxLifetime == 0) skips the lifetime case below.
+	var lifetimeC <-chan time.Time
+	if lifetime := jitteredLifetime(h.maxLifetime, rand.Float64()); lifetime > 0 {
+		lifetimeTimer := time.NewTimer(lifetime)
+		defer lifetimeTimer.Stop()
+		lifetimeC = lifetimeTimer.C
+	}
+
 	slog.InfoContext(ctx, "case activity stream connected", "userID", user.UserID, "caseID", caseID)
 
 	for {
 		select {
+		case <-lifetimeC:
+			// End the response normally so the client sees a terminating
+			// chunk rather than a connection cut mid-body by a proxy.
+			if _, err := fmt.Fprint(w, streamReconnectEvent); err == nil {
+				flusher.Flush()
+			}
+			slog.InfoContext(ctx, "case activity stream max lifetime reached", "userID", user.UserID, "caseID", caseID)
+			return
 		case <-ctx.Done():
 			slog.InfoContext(ctx, "case activity stream disconnected", "userID", user.UserID, "caseID", caseID)
 			return

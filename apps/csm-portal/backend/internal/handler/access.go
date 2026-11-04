@@ -48,6 +48,13 @@ const (
 	// broader than approving one — see PermApproveTimeCard below, which is what's
 	// actually narrowed to the approver role.
 	PermTimeCardsAndUpdates
+	// PermViewUpdates is reading the Updates area: the update-level lookups
+	// (GET /updates/product-update-levels, POST /updates/levels/search). Held by
+	// everyone PermTimeCardsAndUpdates covers, plus Viewer. It is a separate
+	// permission rather than adding cfg.Viewer to PermTimeCardsAndUpdates because
+	// that one also gates every time-card route, and a read-only Viewer must not
+	// gain time cards. Both update routes are read-only lookups.
+	PermViewUpdates
 	// PermEscalate is escalating a case. Held by the CS engineer, the
 	// escalator role and admin. It is NOT a route permission: POST
 	// /cases/{id}/escalations only requires PermView, and
@@ -307,6 +314,16 @@ const (
 	// every other field, so an onboarding_lead-only caller can still never edit
 	// anything but the two onboarding fields.
 	PermUpdateProject
+	// PermManageProductCatalog is editing the product catalogue (products,
+	// versions and release lines published to the public Support Matrix and
+	// Release Matrix): the create, edit (PATCH) and retire routes of the
+	// products API (/products, /product-versions, /release-lines), applied at
+	// once. Held ONLY by the
+	// product_catalog_manager role and admin -- NOT the CS engineer. Reading
+	// the catalogue stays PermView. It grants no read access: a holder needs a
+	// viewing role separately to see the catalogue at all. entity-service
+	// re-checks the same role on every change.
+	PermManageProductCatalog
 )
 
 // AccessConfig names, per portal role, the role names on the token that grant
@@ -364,6 +381,12 @@ type AccessConfig struct {
 	// and no other write. Like comment_updater, an unset variable is not a
 	// lockout: admin already holds PermManageOnboarding regardless.
 	OnboardingLead []string
+	// ProductCatalogManager grants PermManageProductCatalog (see that
+	// permission's own doc comment) -- editing the product catalogue -- and
+	// nothing else: no read access and no other write. Like
+	// onboarding_lead, an unset variable is not a lockout: admin already holds
+	// PermManageProductCatalog regardless.
+	ProductCatalogManager []string
 	// SecurityTeam grants PermView, PermViewOperations,
 	// PermViewSecurityCenter and PermViewSecurityReportCases -- the
 	// dedicated role for security-team staff who need to see the Operations
@@ -462,7 +485,8 @@ type portalRole struct {
 // AccessConfig.SecurityTeam's own doc comment. onboarding_lead implies only
 // PermManageOnboarding and the PermUpdateProject route floor -- no View, no
 // PermWrite -- and admin alone also holds PermManageOnboarding; cs_engineer
-// deliberately does not.
+// deliberately does not. product_catalog_manager is the same shape: it implies
+// only PermManageProductCatalog, which admin alone also holds.
 func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 	build := func(lists ...[]string) map[string]struct{} {
 		set := make(map[string]struct{})
@@ -488,6 +512,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			{key: "announcement_creator", names: build(cfg.AnnouncementCreator)},
 			{key: "comment_updater", names: build(cfg.CommentUpdater)},
 			{key: "onboarding_lead", names: build(cfg.OnboardingLead)},
+			{key: "product_catalog_manager", names: build(cfg.ProductCatalogManager)},
 			{key: "security_team", names: build(cfg.SecurityTeam)},
 		},
 		allowed: map[Permission]map[string]struct{}{
@@ -496,6 +521,7 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 				cfg.SecurityTeam),
 			PermViewOperations:      build(cfg.CsEngineer, cfg.Admin, cfg.SecurityTeam),
 			PermTimeCardsAndUpdates: build(cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover),
+			PermViewUpdates:         build(cfg.Viewer, cfg.CsEngineer, cfg.Admin, cfg.TimecardApprover),
 			PermEscalate:            build(cfg.Escalator, cfg.CsEngineer, cfg.Admin),
 			PermDownloadAttachment:  build(cfg.AttachmentDownloader, cfg.CsEngineer, cfg.Admin),
 			PermWrite:               build(cfg.CsEngineer, cfg.Admin),
@@ -556,6 +582,10 @@ func NewAccessGuard(cfg AccessConfig) *AccessGuard {
 			// PermUpdateProject's own doc comment for the in-handler checks
 			// that narrow what each holder may actually set.
 			PermUpdateProject: build(cfg.CsEngineer, cfg.Admin, cfg.OnboardingLead),
+			// product_catalog_manager and admin only -- cs_engineer
+			// deliberately does NOT hold it. See PermManageProductCatalog's
+			// own doc comment.
+			PermManageProductCatalog: build(cfg.ProductCatalogManager, cfg.Admin),
 		},
 	}
 }

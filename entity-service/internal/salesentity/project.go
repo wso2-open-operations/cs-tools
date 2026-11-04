@@ -31,10 +31,12 @@ const projectSearchPath = "/projects/search"
 // Project_Type__c and customerId is Account__c. Dates are Salesforce Date
 // values ("2026-09-29"); lastModifiedDate is a DateTime.
 //
-// Sales Entity also returns status, closureStates, infraCostMode,
-// useCaseCategory and muteQuietReportUntil. They are left out on purpose:
-// the closure states flow from CSM to Salesforce, not back
-// (SALESFORCE_SYNC_PLAN.md §6), and the rest have no CSM column.
+// status is State__c, read only by the ACP reopen (finishing a project set
+// back to Open by hand looks at it before writing it). Sales Entity also
+// returns closureStates, infraCostMode, useCaseCategory and
+// muteQuietReportUntil. They are left out on purpose: the closure states flow
+// from CSM to Salesforce, not back (SALESFORCE_SYNC_PLAN.md §6), and the rest
+// have no CSM column.
 type Project struct {
 	ID                      string  `json:"id"`
 	Name                    *string `json:"name"`
@@ -47,6 +49,7 @@ type Project struct {
 	GoLiveDate              *string `json:"goLiveDate"`
 	CustomerID              *string `json:"customerId"`
 	LastModifiedDate        *string `json:"lastModifiedDate"`
+	Status                  *string `json:"status"`
 }
 
 // GetProject fetches one Salesforce Project__c via POST /projects/search

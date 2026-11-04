@@ -84,6 +84,106 @@ export class DashboardPage {
   }
 
   /**
+   * The number a clickable stat card shows, read once the card has settled.
+   *
+   * Polled rather than read once, because a card passes through two
+   * non-numeric states first: a skeleton while the stats query is loading, and
+   * "--" for the moment the query is still disabled waiting on the project
+   * context (react-query reports a disabled query as not loading, so the grid
+   * falls through to its "no value" branch). Neither is the card's answer.
+   *
+   * The value is not in the button's accessible name, so it is parsed from the
+   * card's rendered text: the one line that is a bare integer.
+   *
+   * @param label - The card's label. Must be one of the clickable cards.
+   * @returns The card's value, or null when it settled on the error indicator.
+   */
+  async statCardValue(label: string): Promise<number | null> {
+    const card = this.statCardButton(label);
+    let value: number | null = null;
+    await expect(async () => {
+      if ((await card.getByTestId(DASHBOARD.errorIndicatorTestId).count()) > 0) {
+        value = null;
+        return;
+      }
+      const line = (await card.innerText())
+        .split("\n")
+        .map((part) => part.trim())
+        .find((part) => /^\d+$/.test(part));
+      expect(line, `the ${label} card should show a number`).toBeDefined();
+      value = Number(line);
+    }).toPass({ timeout: LOAD_TIMEOUT_MS });
+    return value;
+  }
+
+  /**
+   * The accordion section headers on a dashboard item page — "Cases",
+   * "Service Requests" and the rest of {@link DASHBOARD.itemSections}.
+   *
+   * Each header is the accordion's button, and its text is the section label
+   * followed by the count chip — or by nothing while that section's search is
+   * still loading, when the chip is a skeleton.
+   */
+  itemSectionHeaders(): Locator {
+    const labels = DASHBOARD.itemSections.map(escapeForRegExp).join("|");
+    return this.main().getByRole("button", {
+      name: new RegExp(`^(${labels})\\s*\\d*$`),
+    });
+  }
+
+  /**
+   * The total each section of a dashboard item page reports, from its count
+   * chip, once every section has finished loading.
+   *
+   * The chips — not the rows — are the list's totals: each holds the section
+   * search's `totalRecords`, while the rows beneath stop at the first page of
+   * 10. A section with nothing in it is not rendered at all, so the result
+   * holds only the sections the page shows, and is empty when the page shows
+   * its empty-state copy instead.
+   *
+   * @param emptyMessage - The mode's empty-state copy, which settles the page
+   *   as "nothing listed" rather than leaving the wait to time out.
+   * @returns Section label to its total.
+   */
+  async itemSectionTotals(
+    emptyMessage: string,
+  ): Promise<Record<string, number>> {
+    const labels = DASHBOARD.itemSections.map(escapeForRegExp).join("|");
+    const loaded = new RegExp(`^(${labels}) (\\d+)$`);
+    let totals: Record<string, number> = {};
+
+    await expect(async () => {
+      if (await this.emptyItemsMessage(emptyMessage).isVisible()) {
+        totals = {};
+        return;
+      }
+      const headers = (await this.itemSectionHeaders().allInnerTexts()).map(
+        (text) => text.replace(/\s+/g, " ").trim(),
+      );
+      expect(
+        headers.length,
+        "the item page should list a section or say it has none",
+      ).toBeGreaterThan(0);
+
+      const read: Record<string, number> = {};
+      for (const header of headers) {
+        const match = loaded.exec(header);
+        expect(match, `section "${header}" should have loaded its total`).not.toBeNull();
+        read[(match as RegExpExecArray)[1]] = Number((match as RegExpExecArray)[2]);
+      }
+      totals = read;
+    }).toPass({ timeout: LOAD_TIMEOUT_MS });
+
+    return totals;
+  }
+
+  /** Error indicators anywhere in the main area — a failed section search
+   * renders one in place of its rows and leaves its chip reading 0. */
+  errorIndicators(): Locator {
+    return this.main().getByTestId(DASHBOARD.errorIndicatorTestId);
+  }
+
+  /**
    * A section heading below the stat cards.
    *
    * Returns every match rather than narrowing to one: "Outstanding Support
@@ -99,16 +199,35 @@ export class DashboardPage {
   }
 
   /**
-   * An entry in one of the donut legends — severity, or operations.
+   * An entry in one of the donut legends — severity, operations or
+   * engagements.
    *
    * Located by text rather than by role: the entries carry no button role, and
    * the legend row itself is what handles the click.
    *
+   * Unscoped by default, which suits the severity and operations labels — they
+   * are distinctive enough to occur once on the page. Pass `chartHeading` for
+   * plain-word labels such as "Migration" or "Follow Up", which a case title in
+   * the table below could equally carry; the entry is then looked up inside
+   * that chart card only (see {@link chartByHeading}).
+   *
    * @param label - The legend entry, e.g. "S1 - Critical".
+   * @param chartHeading - The chart card to scope to, if any.
    * @returns Locator for the entry.
    */
-  legendEntry(label: string): Locator {
-    return this.main().getByText(label, { exact: true });
+  legendEntry(label: string, chartHeading?: string): Locator {
+    const scope = chartHeading ? this.chartByHeading(chartHeading) : this.main();
+    return scope.getByText(label, { exact: true });
+  }
+
+  /**
+   * The copy the Outstanding Engagements card shows in place of its donut and
+   * legend when the project has no outstanding engagements.
+   */
+  engagementsChartEmpty(): Locator {
+    return this.main().getByText(DASHBOARD.engagementsChartEmptyMessage, {
+      exact: true,
+    });
   }
 
   /**
@@ -345,27 +464,86 @@ export class DashboardPage {
 
   /** The Severity filter Select, addressed by the element id the field sets. */
   severityFilterSelect(): Locator {
-    return this.main().locator(
-      `#${DASHBOARD.casesTable.filters.severity.selectId}`,
-    );
+    return this.filterSelect(DASHBOARD.casesTable.filters.severity.selectId);
+  }
+
+  /**
+   * A filter Select in the cases table's filter panel.
+   *
+   * Addressed by the element id CasesFilters gives each field — its `filterKey`
+   * (see {@link DASHBOARD.casesTable.filters}). The Selects' accessible names
+   * would serve too, but a multi-select's name also carries its current value,
+   * so the id is the one handle that does not change as options are ticked.
+   *
+   * @param selectId - The field's `filterKey`, e.g. "statusIds".
+   * @returns Locator for the Select trigger.
+   */
+  filterSelect(selectId: string): Locator {
+    return this.main().locator(`#${selectId}`);
+  }
+
+  /**
+   * A filter Select's floating label. CasesFilters ids it `<filterKey>-label`
+   * and points the Select's `aria-labelledby` at it.
+   *
+   * @param selectId - The field's `filterKey`.
+   * @returns Locator for the label.
+   */
+  filterLabel(selectId: string): Locator {
+    return this.main().locator(`#${selectId}-label`);
   }
 
   /**
    * Chooses a severity in the cases table's filter panel.
    *
-   * The Select is multi-select, so its menu stays open after a click — Escape
-   * closes it, which both commits the choice and clears the overlay that would
-   * otherwise intercept clicks on the table beneath.
-   *
-   * The option list renders in a portal at the document root, so it is looked up
-   * page-wide rather than inside the panel.
-   *
    * @param label - Option label, e.g. "S4(Query)".
    */
   async selectSeverityFilter(label: string): Promise<void> {
-    await this.severityFilterSelect().click();
-    await this.page.getByRole("option", { name: label, exact: true }).click();
+    await this.selectFilterOptions(
+      DASHBOARD.casesTable.filters.severity.selectId,
+      [label],
+    );
+  }
+
+  /**
+   * Ticks one or more options of a multi-select filter, then closes its menu.
+   *
+   * Every filter on this table is multi-select, so the menu stays open after a
+   * click — Escape closes it, which both commits the choice and clears the
+   * overlay that would otherwise intercept clicks on the table beneath. Each
+   * tick re-queries the table on its own, so a caller waiting on the request
+   * should wait for the one carrying the full selection.
+   *
+   * The option list renders in a portal at the document root, so it is looked
+   * up page-wide rather than inside the panel.
+   *
+   * @param selectId - The field's `filterKey`.
+   * @param labels - Option labels to tick, in order.
+   */
+  async selectFilterOptions(
+    selectId: string,
+    labels: readonly string[],
+  ): Promise<void> {
+    await this.filterSelect(selectId).click();
+    for (const label of labels) {
+      await this.page
+        .getByRole("listbox")
+        .getByRole("option", { name: label, exact: true })
+        .click();
+    }
     await this.page.keyboard.press("Escape");
+  }
+
+  /**
+   * The case numbers the cases table is showing, one per row.
+   *
+   * @returns Case numbers, e.g. "CS0001234", in row order.
+   */
+  async casesTableCaseNumbers(): Promise<string[]> {
+    const rows = await this.casesTableRows().allInnerTexts();
+    return rows
+      .map((row) => DASHBOARD.casesTable.rowCaseNumberPattern.exec(row)?.[1])
+      .filter((value): value is string => !!value);
   }
 
   /** The cases table's next-page control. Disabled on the last page. */

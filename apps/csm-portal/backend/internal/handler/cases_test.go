@@ -2016,6 +2016,241 @@ func TestPatchCase(t *testing.T) {
 	})
 }
 
+// ----- PatchCase: closing a case sends it to Pending Verification -----
+
+func TestPatchCase_PendingVerification(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const closePayload = `{"state":"closed"}`
+
+	t.Run("closing from work_in_progress adds it as auto-closed with that previous status", func(t *testing.T) {
+		var body []byte
+		called := make(chan struct{})
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				close(called)
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		select {
+		case <-called:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called after closing the case")
+		}
+
+		var req struct {
+			WorkItemID     string `json:"workItemId"`
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.WorkItemID != testCaseID {
+			t.Errorf("workItemId = %q, want %q", req.WorkItemID, testCaseID)
+		}
+		if req.AddedReason != "AUTO_CLOSED" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "AUTO_CLOSED")
+		}
+		if req.PreviousStatus != "WORK_IN_PROGRESS" {
+			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "WORK_IN_PROGRESS")
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("closing from solution_proposed adds it as auto-closed with that previous status", func(t *testing.T) {
+		var body []byte
+		called := make(chan struct{})
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"solution_proposed"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				close(called)
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		select {
+		case <-called:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called after closing the case")
+		}
+
+		var req struct {
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.AddedReason != "AUTO_CLOSED" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "AUTO_CLOSED")
+		}
+		if req.PreviousStatus != "SOLUTION_PROPOSED" {
+			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "SOLUTION_PROPOSED")
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("falls back to manual with the previous state folded into the note for a state the auto-closed mapping doesn't cover", func(t *testing.T) {
+		// Exercises recordPendingVerificationEntry directly rather than through
+		// PatchCase: state.go's own isValidStateTransition would reject any
+		// close whose previous state isn't work_in_progress or
+		// solution_proposed before this hook ever ran, so there is no way to
+		// reach this fallback branch through the full HTTP handler. It should
+		// never happen in practice; this only guards the fallback itself.
+		var body []byte
+		client := &mockEntityCaseClient{
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		h.recordPendingVerificationEntry(context.Background(), &middleware.UserInfo{UserID: "u-1"}, testCaseID, caseStateOpen)
+
+		var req struct {
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.AddedReason != "MANUAL" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "MANUAL")
+		}
+		if req.PreviousStatus != "" {
+			t.Errorf("previousStatus = %q, want empty (MANUAL forbids it)", req.PreviousStatus)
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support. Previous status: Open."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("still succeeds when the pending verification call fails", func(t *testing.T) {
+		// Covers the common, expected failures too: Pending Verification disabled
+		// for the project (entity-service 403s) and an already-unverified entry
+		// from an earlier round (409) — both must never fail the close response.
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return nil, errors.New("pending verification is not enabled for this project")
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("PATCH that does not close the case does not call CreatePendingVerification", func(t *testing.T) {
+		var pvCalled atomic.Bool
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"open"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				pvCalled.Store(true)
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"state":"work_in_progress"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		// No signal to wait on here (nothing should fire); a short grace period
+		// gives an incorrect async call a chance to land before asserting absence.
+		time.Sleep(100 * time.Millisecond)
+		if pvCalled.Load() {
+			t.Error("CreatePendingVerification was called for a PATCH that did not close the case")
+		}
+	})
+
+	t.Run("pending verification call survives the request context being canceled after the handler returns", func(t *testing.T) {
+		ctxDone := make(chan struct{})
+		var gotErr error
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(ctx context.Context, _ []byte) ([]byte, error) {
+				gotErr = ctx.Err()
+				close(ctxDone)
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		reqCtx, cancel := context.WithCancel(context.Background())
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)).WithContext(reqCtx))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		cancel()
+
+		select {
+		case <-ctxDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called")
+		}
+		if gotErr != nil {
+			t.Errorf("pending-verification context was already canceled (%v) once the request context was — it must be detached", gotErr)
+		}
+	})
+}
+
 // ----- GetCase -----
 
 func TestGetCase(t *testing.T) {

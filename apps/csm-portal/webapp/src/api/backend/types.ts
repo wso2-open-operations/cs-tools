@@ -1206,6 +1206,10 @@ export interface BeCaseSearchView {
   createdOn?: string;
   /** Often absent on the search view (unlike the GET view); tolerate it missing. */
   updatedOn?: string;
+  /** When the case moved to solution proposed (kept through closure). */
+  resolvedOn?: string | null;
+  /** Only set once the case is closed. */
+  closedOn?: string | null;
   /** Canonical reference to the case creator. `id` is always null here. See
    * {@link BeUserReference}. */
   createdBy?: BeUserReference | null;
@@ -3286,6 +3290,10 @@ export interface BeGroupSearchPayload {
      * groups an incident may be assigned to on create. Omitted (not `false`)
      * when unset, so older callers send the same body as before. */
     supportGroupsOnly?: boolean;
+    /** Only the extra groups an incident may be assigned to besides the
+     * support groups (the security operations group). Wins over
+     * `supportGroupsOnly`. Omitted when unset. */
+    incidentExtraGroupsOnly?: boolean;
   };
   pagination: BePagination;
 }

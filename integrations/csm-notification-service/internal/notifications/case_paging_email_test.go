@@ -22,7 +22,7 @@ import (
 )
 
 func TestCasePagingSubject(t *testing.T) {
-	if got, want := CasePagingSubject("S0", "CS0099001"), "[Case Alerts] S0 CS0099001 not acknowledged"; got != want {
+	if got, want := CasePagingSubject("S0", "CS0099001"), "[Attention needed] [Case Alerts] S0 CS0099001 Respond to avoid Response SLA breach"; got != want {
 		t.Errorf("subject = %q, want %q", got, want)
 	}
 	if got, want := CasePagingRungLine("S0", 1, "Atlas ABT Team Lead"), "S0 alert at L1 for Atlas ABT Team Lead"; got != want {
@@ -37,7 +37,8 @@ func TestRenderCasePagingEmail(t *testing.T) {
 	body := RenderCasePagingEmail(CasePagingEmailData{
 		Greeting:        "ABT Team Leads",
 		RungLine:        "S1 alert at L2 for all ABT Team Leads",
-		Opening:         "Case CS0099001 (S1) is still in open state and response SLA remaining time is 42m.",
+		Opening:         "Case CS0099001 (S1) is still in open state",
+		OpeningSLA:      "response SLA remaining time is 42m",
 		CaseNumber:      "CS0099001",
 		WSO2CaseID:      "WSO2-1000",
 		Title:           "Gateway <down> & out",
@@ -57,6 +58,8 @@ func TestRenderCasePagingEmail(t *testing.T) {
 		`color:#7a2e04;">S1 alert at L2 for all ABT Team Leads</p>`, // S1's callout
 		"background-color:#e8590c;",                                 // S1's bar
 		"Hi ABT Team Leads,",
+		// The SLA part is highlighted in the severity's colours.
+		`is still in open state and <span style="padding:1px 6px; background-color:#fff4e6; border:1px solid #e8590c; border-radius:3px; font-weight:bold; color:#7a2e04;">response SLA remaining time is 42m</span>.</p>`,
 		">Case number</td>", ">CS0099001</td>",
 		">WSO2 case ID</td>", ">WSO2-1000</td>",
 		">Short description</td>", ">Gateway &lt;down&gt; &amp; out</td>",
@@ -85,6 +88,23 @@ func TestRenderCasePagingEmail(t *testing.T) {
 		if r > 127 {
 			t.Fatalf("non-ASCII %q at byte %d", r, i)
 		}
+	}
+}
+
+// A breached SLA is highlighted in red whatever the severity; with no SLA the
+// sentence just ends.
+func TestRenderCasePagingEmail_SLAHighlight(t *testing.T) {
+	late := RenderCasePagingEmail(CasePagingEmailData{SeverityCode: "S2", Opening: "Case CS1 (S2) is still in open state",
+		OpeningSLA: "the response SLA was breached 3m ago", SLABreached: true})
+	if want := `background-color:#fdecec; border:1px solid #d92626; border-radius:3px; font-weight:bold; color:#7f1d1d;">the response SLA was breached 3m ago</span>.`; !strings.Contains(late, want) {
+		t.Errorf("a breached SLA is not highlighted in red: no %q", want)
+	}
+	none := RenderCasePagingEmail(CasePagingEmailData{SeverityCode: "S2", Opening: "Case CS1 (S2) is still in open state"})
+	if !strings.Contains(none, ">Case CS1 (S2) is still in open state.</p>") {
+		t.Error("with no SLA the opening does not end in a full stop")
+	}
+	if strings.Contains(none, "<span") {
+		t.Error("an SLA highlight was rendered with no SLA")
 	}
 }
 
