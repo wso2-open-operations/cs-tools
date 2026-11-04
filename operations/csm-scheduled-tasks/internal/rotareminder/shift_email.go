@@ -179,12 +179,17 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 	// Each rotation once, in rota order, described from its first turn.
 	var codes []string
 	first := map[string]teamschedule.Assignment{}
-	perDay := map[string]map[string]map[string]bool{} // code -> date -> person
+	perDay := map[string]map[string]map[string]bool{}          // code -> date -> person
+	dayTurn := map[string]map[string]teamschedule.Assignment{} // code -> date -> its first turn
 	for _, a := range rostered {
 		if _, ok := first[a.ShiftCode]; !ok {
 			first[a.ShiftCode] = a
 			codes = append(codes, a.ShiftCode)
 			perDay[a.ShiftCode] = map[string]map[string]bool{}
+			dayTurn[a.ShiftCode] = map[string]teamschedule.Assignment{}
+		}
+		if _, ok := dayTurn[a.ShiftCode][a.RotaDate]; !ok {
+			dayTurn[a.ShiftCode][a.RotaDate] = a
 		}
 		if perDay[a.ShiftCode][a.RotaDate] == nil {
 			perDay[a.ShiftCode][a.RotaDate] = map[string]bool{}
@@ -196,18 +201,23 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamsc
 	for _, code := range codes {
 		a := first[code]
 		clock := clockOf(cfg, code)
-		s, e := a.StartsAt.In(clock), a.EndsAt.In(clock)
+		s := a.StartsAt.In(clock)
 		role, note := zoneName(s)+" General support", splitNote(days, perDay[code], a.EndsAt.Sub(a.StartsAt))
 		if a.IsOnCall || strings.HasSuffix(code, "_OC") {
 			role, note = "On-call", ""
 		}
 		data.Definitions = append(data.Definitions, notify.RotationDefinition{
-			Rotation:  cfg.Rotations[code],
-			Members:   memberCount(days, perDay[code]),
-			LocalTime: s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s),
-			UTCWindow: a.StartsAt.UTC().Format("15:04") + " – " + a.EndsAt.UTC().Format("15:04"),
-			Role:      role,
-			RoleNote:  note,
+			Rotation: cfg.Rotations[code],
+			Members:  memberCount(days, perDay[code]),
+			LocalTime: perDayText(dayTurn[code], func(t teamschedule.Assignment) string {
+				ls, le := t.StartsAt.In(clock), t.EndsAt.In(clock)
+				return ls.Format("03:04 PM") + " – " + le.Format("03:04 PM") + " " + zoneName(ls)
+			}),
+			UTCWindow: perDayText(dayTurn[code], func(t teamschedule.Assignment) string {
+				return t.StartsAt.UTC().Format("15:04") + " – " + t.EndsAt.UTC().Format("15:04")
+			}),
+			Role:     role,
+			RoleNote: note,
 		})
 		if _, ok := zones[clock.String()]; !ok {
 			zones[clock.String()] = clock
@@ -620,14 +630,45 @@ func greeting(names []string) string {
 }
 
 // windowText writes a shift window in the rota's zone: "06:00–09:00 IST", or,
-// past midnight, "21:00 IST to 06:00 IST on Sunday".
+// across midnight, both days: "Saturday 21:00 IST to Sunday 06:00 IST". A
+// window told on another clock can start the day before its rota day there,
+// so the start's own day is always named.
 func windowText(start, end time.Time, zone *time.Location) string {
 	s, e := start.In(zone), end.In(zone)
 	z := zoneName(s)
 	if s.YearDay() == e.YearDay() && s.Year() == e.Year() {
 		return fmt.Sprintf("%s–%s %s", s.Format("15:04"), e.Format("15:04"), z)
 	}
-	return fmt.Sprintf("%s %s to %s %s on %s", s.Format("15:04"), z, e.Format("15:04"), z, e.Format("Monday"))
+	return fmt.Sprintf("%s %s %s to %s %s %s", s.Format("Monday"), s.Format("15:04"), z, e.Format("Monday"), e.Format("15:04"), z)
+}
+
+// perDayText is one rotation's hours over the days it is rostered: the text
+// once when every day reads the same, else each day's ("Saturday: …; Sunday:
+// …"). A window kept on one clock and told on another reads differently on
+// the two sides of a daylight saving change (31 Oct and 1 Nov 2026).
+func perDayText(byDay map[string]teamschedule.Assignment, text func(teamschedule.Assignment) string) string {
+	dates := make([]string, 0, len(byDay))
+	for d := range byDay {
+		dates = append(dates, d)
+	}
+	slices.Sort(dates)
+	parts := make([]string, 0, len(dates))
+	same := true
+	for i, d := range dates {
+		t := text(byDay[d])
+		if i > 0 && t != text(byDay[dates[0]]) {
+			same = false
+		}
+		day := d
+		if when, err := time.Parse(dateLayout, d); err == nil {
+			day = when.Format("Monday")
+		}
+		parts = append(parts, day+": "+t)
+	}
+	if same && len(dates) > 0 {
+		return text(byDay[dates[0]])
+	}
+	return strings.Join(parts, "; ")
 }
 
 // dateOf is a rota day (YYYY-MM-DD) in zone.

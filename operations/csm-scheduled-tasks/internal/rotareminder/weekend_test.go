@@ -803,3 +803,41 @@ func TestWeekendNotice_AmericasRotationsReadPDTWhateverTheSavedZone(t *testing.T
 		t.Errorf("an Americas rotation still reads in IST:\n%s", summary.body)
 	}
 }
+
+// A window kept in IST reads on the Los Angeles clock an hour earlier after
+// US daylight saving ends, so the summary tells each day's hours on the
+// weekend of the change (31 Oct and 1 Nov 2026).
+func TestWeekendNotice_AmericasHoursPerDayAcrossTheClockChange(t *testing.T) {
+	cfg := weekendConfig("2026-10-25 20:00", "rota_weekend_notice")
+	windows, err := ParseWindows("CRE_WEEKEND_NIGHT=20:30-06:30 Asia/Colombo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Windows = windows
+	rota := &fakeRota{}
+	for _, d := range []string{"2026-10-31", "2026-11-01"} {
+		for _, p := range []string{"ann", "ben", "cid"} {
+			rota.assignments = append(rota.assignments, assignment(p, p+"@example.com", "vega", "CRE_WEEKEND", d, d+" 06:00", d+" 21:00"))
+		}
+		rota.assignments = append(rota.assignments, assignment("Ivy", "ivy@example.com", "americas", "CRE_WEEKEND_NIGHT", d, d+" 21:00", d+" 23:59"))
+	}
+	mail := &fakeEmail{}
+	if err := WeekendNotice(rota, &fakeStore{}, mail, cfg)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	summary := emailWith(t, mail.sent, "Weekend Rotation – Saturday, 31 October and Sunday, 1 November 2026")
+	if want := "Saturday: 08:00 AM &#8211; 06:00 PM PDT; Sunday: 07:00 AM &#8211; 05:00 PM PDT"; !strings.Contains(summary.body, want) {
+		t.Errorf("summary does not hold %q:\n%s", want, summary.body)
+	}
+}
+
+func TestWindowTextNamesBothDaysAcrossMidnight(t *testing.T) {
+	colombo, _ := time.LoadLocation("Asia/Colombo")
+	start := time.Date(2026, 10, 24, 8, 0, 0, 0, colombo)
+	if got, want := windowText(start, start.Add(10*time.Hour), losAngeles), "Friday 19:30 PDT to Saturday 05:30 PDT"; got != want {
+		t.Errorf("windowText = %q, want %q", got, want)
+	}
+	if got, want := windowText(start, start.Add(3*time.Hour), colombo), "08:00–11:00 IST"; got != want {
+		t.Errorf("same-day windowText = %q, want %q", got, want)
+	}
+}
