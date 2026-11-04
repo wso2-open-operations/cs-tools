@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { JSX } from "react";
 import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
@@ -29,12 +30,19 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
     lines,
   }: {
     data: Record<string, unknown>[];
-    lines: { dataKey: string; name?: string; stroke?: string }[];
+    lines: {
+      dataKey: string;
+      name?: string;
+      stroke?: string;
+      activeDot?: boolean | ((props: { cx?: number; cy?: number; index?: number }) => JSX.Element);
+    }[];
   }) => (
     <div>
       {lines.map((line) => (
         <div key={line.dataKey} data-testid={`line-${line.dataKey}`} data-stroke={line.stroke}>
           {line.name}: {data.map((row) => `${row.label}=${row[line.dataKey]}`).join(", ")}
+          {/* The hovered point's dot, as recharts would draw it for row 1. */}
+          {typeof line.activeDot === "function" && <svg>{line.activeDot({ cx: 10, cy: 20, index: 1 })}</svg>}
         </div>
       ))}
     </div>
@@ -111,6 +119,38 @@ describe("DashboardLineChart", () => {
     );
     const lines = screen.getAllByTestId(/^line-/).map((el) => el.getAttribute("data-testid"));
     expect(lines).toEqual(["line-opened", "line-closed"]);
+  });
+
+  it("reports the clicked point's day and line when points are clickable", () => {
+    const onPointClick = vi.fn();
+    render(
+      <DashboardLineChart points={POINTS} isLoading={false} isError={false} onPointClick={onPointClick} />,
+    );
+
+    fireEvent.click(screen.getByTestId("line-point-closed"));
+    expect(onPointClick).toHaveBeenCalledWith("2026-09-02", "closed");
+    fireEvent.click(screen.getByTestId("line-point-opened"));
+    expect(onPointClick).toHaveBeenLastCalledWith("2026-09-02", "opened");
+  });
+
+  it("makes only the drawn line's points clickable", () => {
+    const onPointClick = vi.fn();
+    render(
+      <DashboardLineChart
+        points={POINTS}
+        isLoading={false}
+        isError={false}
+        series={["opened"]}
+        onPointClick={onPointClick}
+      />,
+    );
+    expect(screen.getByTestId("line-point-opened")).toBeInTheDocument();
+    expect(screen.queryByTestId("line-point-closed")).not.toBeInTheDocument();
+  });
+
+  it("has no clickable points without onPointClick", () => {
+    render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} />);
+    expect(screen.queryByTestId(/^line-point-/)).not.toBeInTheDocument();
   });
 
   it("counts only the drawn line for the empty state", () => {

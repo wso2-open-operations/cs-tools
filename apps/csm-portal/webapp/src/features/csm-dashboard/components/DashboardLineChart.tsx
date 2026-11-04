@@ -32,7 +32,20 @@ interface DashboardLineChartProps {
    * draws both. Drawn in the fixed order Opened, Closed whatever the order
    * given. */
   series?: BeLineSeries[];
+  /** Makes each point clickable: called with the point's day (`YYYY-MM-DD`,
+   * a UTC calendar day) and its line. Absent, the points are not clickable,
+   * as on a system dashboard. */
+  onPointClick?: (date: string, series: BeLineSeries) => void;
 }
+
+/** What recharts hands a function `activeDot` for the hovered point. */
+interface ActiveDotProps {
+  cx?: number;
+  cy?: number;
+  index?: number;
+}
+
+const ACTIVE_DOT_RADIUS_PX = 5;
 
 const ALL_SERIES: readonly BeLineSeries[] = ["opened", "closed"];
 
@@ -54,22 +67,22 @@ function formatDateLabel(date: string): string {
 /**
  * Two-line (Opened/Closed) trend chart for a `shape: "line"` dashboard
  * widget — the one resourceType/shape combination not resolved via a
- * per-slice/per-bucket fan-out (see `useCaseVolumeTrendData`), so unlike
- * `DashboardPieChart`/`DashboardBarChart` there is no per-point
- * click-through: a day's Opened/Closed counts aren't a single filterable
- * selector the case list's own search can scope to the way a pie slice's
- * `query` is. Colors are this app's own semantic palette (`info` for Opened,
+ * per-slice/per-bucket fan-out (see `useCaseVolumeTrendData`). A point is one
+ * day and one line, which the tile turns into that day's cases query
+ * (`linePointQuery`) when the page allows it. Colors are this app's own semantic palette (`info` for Opened,
  * `success` for Closed) rather than an arbitrary chart-library rotation —
  * matching how severity/status colors are already assigned by meaning
  * elsewhere in this app, not by picking hues. `series` leaves one of the two
  * lines out (its legend entry too); the empty state then counts only the
- * lines drawn.
+ * lines drawn. `onPointClick` makes the hovered point's dot clickable (the
+ * dashboard page decides whether to pass it).
  */
 export default function DashboardLineChart({
   points,
   isLoading,
   isError,
   series,
+  onPointClick,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
@@ -191,6 +204,31 @@ export default function DashboardLineChart({
             strokeWidth: 2,
             dot: false,
             isAnimationActive: false,
+            // The hovered point's dot, drawn by this function so a click on
+            // it knows both the day (recharts' row `index`) and the line
+            // (`key`); the library's object form gets the event only.
+            ...(onPointClick && {
+              activeDot: ({ cx, cy, index }: ActiveDotProps) => {
+                const point = index === undefined ? undefined : points[index];
+                if (cx === undefined || cy === undefined || !point) return <g />;
+                return (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={ACTIVE_DOT_RADIUS_PX}
+                    fill={lineStyles[key].color}
+                    stroke={theme.palette.background.paper}
+                    strokeWidth={2}
+                    style={{ cursor: "pointer" }}
+                    data-testid={`line-point-${key}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPointClick(point.date, key);
+                    }}
+                  />
+                );
+              },
+            }),
           }))}
         />
       </Box>
