@@ -114,7 +114,7 @@ import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-oper
 import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
 import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
 import { looksLikeHtml, sanitizeStructuredHtml } from "@utils/sanitizeHtml";
-import { linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
+import { hasCommentContent, linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
 import { withRenderedIncidentNotes } from "@features/csm-operations/utils/incidentNoteHtml";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
@@ -937,9 +937,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
+                  if (hasCommentContent(bodyHtml)) {
                     await postComment.mutateAsync({
                       incidentId: id,
                       bodyHtml,

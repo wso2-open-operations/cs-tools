@@ -318,3 +318,13 @@ export function hasPublicComment(
     (comment) => !comment.internal && hasDisplayableContent(comment),
   );
 }
+
+/**
+ * Whether a comment composer's HTML has something to post: some text, or an
+ * inline image (an image has no text, but a comment that is only an image is
+ * still a comment). Attachment-only sends are decided separately by the caller.
+ */
+export function hasCommentContent(html: string): boolean {
+  const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+  return text.length > 0 || /<img\b/i.test(html);
+}

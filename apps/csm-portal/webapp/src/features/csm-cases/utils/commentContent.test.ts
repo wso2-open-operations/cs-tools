@@ -20,6 +20,7 @@ import {
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
   convertCodeTagsToHtml,
+  hasCommentContent,
   hasDisplayableContent,
   hasPublicComment,
   hasSingleCodeWrapper,
@@ -395,5 +396,22 @@ describe("preprocessCommentBodyHtml: laid-out HTML source", () => {
     });
     expect(html).toContain("<li>one</li>");
     expect(html).toContain("\n");
+  });
+});
+
+describe("hasCommentContent", () => {
+  it("is true for text", () => {
+    expect(hasCommentContent("<p>hello</p>")).toBe(true);
+  });
+
+  it("is true for an image with no text", () => {
+    expect(hasCommentContent('<p><img src="/11111111-1111-4111-8111-111111111111" alt="x"></p>')).toBe(true);
+    expect(hasCommentContent('<IMG src="data:image/png;base64,AAAA">')).toBe(true);
+  });
+
+  it("is false when nothing but markup and blank space is left", () => {
+    expect(hasCommentContent("")).toBe(false);
+    expect(hasCommentContent("<p>&nbsp;</p><br>")).toBe(false);
+    expect(hasCommentContent("<p> </p>")).toBe(false);
   });
 });
