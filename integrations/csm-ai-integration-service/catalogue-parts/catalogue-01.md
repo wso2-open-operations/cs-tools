@@ -84,7 +84,7 @@ Do not use any other dashboard field.
 | `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day. | **Only with `resourceType: "case"`.** `days` 1 to 90 (default 30). |
+| `line` | Cases opened vs closed per day. | **Only with `resourceType: "case"`.** `days` 1 to 90 (default 30). Optional `series`: `["opened"]` draws only the cases opened per day, `["closed"]` only the cases closed per day; leave it out to draw both (section 8). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project or day, counting cards or summing hours; no `line`).
@@ -94,6 +94,6 @@ with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count
 with `groupBy.bucket` (section 5d) or rating `slices` (no `line`).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
-`slices`/`groupBy` on pie/bar only, `days` on line only).
+`slices`/`groupBy` on pie/bar only, `days`/`series` on line only).
 
 ---

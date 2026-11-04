@@ -71,7 +71,11 @@
 | "high and above" | `severity in ["catastrophic", "critical", "high"]` |
 | "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 |
 | "last N days/weeks" | `createdOn gte __daysAgo:N__` (weeks x 7) |
-| "trend", "over time", "opened vs closed" | a `line` widget |
+| "trend", "over time", "opened vs closed" | a `line` widget, no `series` (both lines) |
+| "new cases per day", "cases opened per day", "case intake trend" | a `line` widget with `series: ["opened"]` |
+| "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
+| editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
+| editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
 | "cases" with no other type named | `resourceType: "case"` |
@@ -102,7 +106,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, `days` 1-90.
+5. `line` only on `resourceType: "case"`, `days` 1-90; `series` absent (both lines) or exactly
+   `["opened"]` or `["closed"]`. An edit keeps a line widget's `series` unless the request changes it.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),
