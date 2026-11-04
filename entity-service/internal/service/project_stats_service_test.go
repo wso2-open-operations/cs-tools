@@ -48,6 +48,9 @@ type fakeProjectStatsRepo struct {
 
 	timeLoggedStart string
 	timeLoggedEnd   string
+	// report is what TimeCardReport returns (nil means "project not found").
+	report               *domain.ProjectTimeCardReportResponse
+	reportFrom, reportTo string
 	// crStatesSeen is the change request outstanding state list the service
 	// passed to OutstandingCounts.
 	crStatesSeen []string
@@ -56,6 +59,10 @@ type fakeProjectStatsRepo struct {
 func (f *fakeProjectStatsRepo) TimeLoggedMinutes(_ context.Context, _, startDate, endDate string) (int, int, error) {
 	f.timeLoggedStart, f.timeLoggedEnd = startDate, endDate
 	return f.billableMinutes, f.nonBillableMinutes, nil
+}
+func (f *fakeProjectStatsRepo) TimeCardReport(_ context.Context, _, from, to string) (*domain.ProjectTimeCardReportResponse, error) {
+	f.reportFrom, f.reportTo = from, to
+	return f.report, nil
 }
 func (f *fakeProjectStatsRepo) DeploymentCount(context.Context, string) (int, error) {
 	return f.deployments, nil
@@ -446,6 +453,7 @@ func TestProjectStats_OutOfScopeProjectIsNotFound(t *testing.T) {
 	_, calls["GetProjectDeploymentStats"] = svc.GetProjectDeploymentStats(ctx, testUUID)
 	_, calls["GetProjectTimeCardStats"] = svc.GetProjectTimeCardStats(ctx, testUUID, "", "")
 	_, calls["GetProjectChangeRequestStats"] = svc.GetProjectChangeRequestStats(ctx, testUUID)
+	_, calls["GetProjectTimeCardReport"] = svc.GetProjectTimeCardReport(ctx, testUUID, "2026-01-01", "2026-01-31")
 
 	for name, err := range calls {
 		var notFound *apierror.NotFoundError
@@ -512,5 +520,57 @@ func TestProjectChangeRequestStats_AuthorizeIsOutstandingForCustomersOnly(t *tes
 	}
 	if containsString(staffRepo.crStatesSeen, "AUTHORIZE") {
 		t.Errorf("the dashboard's outstanding states for staff = %v, want AUTHORIZE left out", staffRepo.crStatesSeen)
+	}
+}
+
+func TestGetProjectTimeCardReport_ReturnsRepositoryRowsAndEchoesRange(t *testing.T) {
+	name := "Acme Corp Support"
+	repo := &fakeProjectStatsRepo{report: &domain.ProjectTimeCardReportResponse{
+		Project: domain.ProjectTimeCardReportProject{ID: testUUID, Key: "ACME-1", Name: &name},
+		Totals:  domain.ProjectTimeCardReportTotals{TotalMinutes: 135, BillableMinutes: 90, NonBillableMinutes: 45, PatchingMinutes: 15},
+		Cases:   []domain.ProjectTimeCardReportCase{{CaseID: testUUID, CaseNumber: "CS0000001", TotalMinutes: 135}},
+	}}
+
+	resp, err := newStatsService(repo).GetProjectTimeCardReport(context.Background(), testUUID, "2026-01-01", "2026-01-31")
+	if err != nil {
+		t.Fatalf("GetProjectTimeCardReport: %v", err)
+	}
+	if repo.reportFrom != "2026-01-01" || repo.reportTo != "2026-01-31" {
+		t.Errorf("range = %q..%q, want it forwarded to the repository", repo.reportFrom, repo.reportTo)
+	}
+	if resp.Project.Key != "ACME-1" || resp.Totals.TotalMinutes != 135 || len(resp.Cases) != 1 {
+		t.Errorf("response = %+v, want the repository's report", resp)
+	}
+}
+
+func TestGetProjectTimeCardReport_ValidatesRange(t *testing.T) {
+	svc := newStatsService(&fakeProjectStatsRepo{report: &domain.ProjectTimeCardReportResponse{}})
+	for _, tt := range []struct{ name, from, to string }{
+		{"missing from", "", "2026-01-31"},
+		{"missing to", "2026-01-01", ""},
+		{"bad from", "not-a-date", "2026-01-31"},
+		{"bad to", "2026-01-01", "2026-13-45"},
+		{"wrong layout", "01/02/2026", "2026-01-31"},
+		{"from after to", "2026-02-01", "2026-01-31"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.GetProjectTimeCardReport(context.Background(), testUUID, tt.from, tt.to)
+			var validationErr *apierror.ValidationError
+			if !errors.As(err, &validationErr) {
+				t.Fatalf("error = %v, want a ValidationError", err)
+			}
+		})
+	}
+	// A single-day range is valid.
+	if _, err := svc.GetProjectTimeCardReport(context.Background(), testUUID, "2026-01-31", "2026-01-31"); err != nil {
+		t.Errorf("from == to: %v", err)
+	}
+}
+
+func TestGetProjectTimeCardReport_MissingProjectIsNotFound(t *testing.T) {
+	_, err := newStatsService(&fakeProjectStatsRepo{}).GetProjectTimeCardReport(context.Background(), testUUID, "2026-01-01", "2026-01-31")
+	var notFound *apierror.NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("error = %v, want NotFoundError when the repository finds no project", err)
 	}
 }

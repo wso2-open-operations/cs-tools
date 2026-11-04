@@ -18,11 +18,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // StateCount is one state group of a stats aggregation. State is empty for a
@@ -67,6 +70,13 @@ type ProjectStatsRepository interface {
 	// not time_card.customer_project_id, matching SearchCaseTimeCards' own
 	// choice -- one case can otherwise fragment across projects.
 	TimeLoggedMinutes(ctx context.Context, projectID, startDate, endDate string) (billable, nonBillable int, err error)
+
+	// TimeCardReport returns the project's APPROVED time cards whose work date
+	// falls within [from, to] (inclusive, yyyy-MM-dd), aggregated per case and
+	// ordered by case number. Every figure, including billable, non-billable and
+	// patching, is scoped to the project. Totals are the sum of the case rows.
+	// It returns (nil, nil) when the project does not exist.
+	TimeCardReport(ctx context.Context, projectID, from, to string) (*domain.ProjectTimeCardReportResponse, error)
 
 	// DeploymentCount returns the project's active deployments.
 	DeploymentCount(ctx context.Context, projectID string) (int, error)
@@ -167,6 +177,63 @@ func (r *projectStatsRepo) TimeLoggedMinutes(ctx context.Context, projectID, sta
 		return 0, 0, fmt.Errorf("project stats: time logged: %w", err)
 	}
 	return billable, nonBillable, nil
+}
+
+// TimeCardReport implements ProjectStatsRepository. The project comes from the
+// time card's case (work_item.project_id), as in TimeLoggedMinutes. A NULL
+// minute column contributes zero, a card with is_billable NULL counts as
+// non-billable, and patching minutes are part of the total (they are one of
+// the five activity columns).
+func (r *projectStatsRepo) TimeCardReport(ctx context.Context, projectID, from, to string) (*domain.ProjectTimeCardReportResponse, error) {
+	resp := &domain.ProjectTimeCardReportResponse{From: from, To: to, Cases: []domain.ProjectTimeCardReportCase{}}
+
+	err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx,
+			`SELECT id::text, key, name FROM project WHERE id = $1::uuid`, projectID).
+			Scan(&resp.Project.ID, &resp.Project.Key, &resp.Project.Name)
+		if err != nil {
+			return err
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT wi.id::text, wi.number, wi.wso2_id, LOWER(wi.type::text),
+			       COALESCE(SUM(`+timeCardMinutesExpr+`), 0),
+			       COALESCE(SUM(`+timeCardMinutesExpr+`) FILTER (WHERE tc.is_billable IS TRUE), 0),
+			       COALESCE(SUM(`+timeCardMinutesExpr+`) FILTER (WHERE tc.is_billable IS NOT TRUE), 0),
+			       COALESCE(SUM(COALESCE(tc.patching_minutes, 0)), 0)
+			  FROM time_card tc
+			  JOIN work_item wi ON wi.id = tc.case_id
+			 WHERE wi.project_id = $1::uuid
+			   AND tc.state = 'APPROVED'
+			   AND tc.work_date >= $2::date
+			   AND tc.work_date <= $3::date
+			 GROUP BY wi.id, wi.number, wi.wso2_id, wi.type
+			 ORDER BY wi.number ASC, wi.id ASC`, projectID, from, to)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c domain.ProjectTimeCardReportCase
+			if err := rows.Scan(&c.CaseID, &c.CaseNumber, &c.ExternalCaseID, &c.CaseType,
+				&c.TotalMinutes, &c.BillableMinutes, &c.NonBillableMinutes, &c.PatchingMinutes); err != nil {
+				return err
+			}
+			resp.Cases = append(resp.Cases, c)
+			resp.Totals.TotalMinutes += c.TotalMinutes
+			resp.Totals.BillableMinutes += c.BillableMinutes
+			resp.Totals.NonBillableMinutes += c.NonBillableMinutes
+			resp.Totals.PatchingMinutes += c.PatchingMinutes
+		}
+		return rows.Err()
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("project stats: time card report: %w", err)
+	}
+	return resp, nil
 }
 
 // DeploymentCount implements ProjectStatsRepository.

@@ -2099,6 +2099,44 @@ type ProjectTimeCardStatsResponse struct {
 	NonBillableHours float64 `json:"nonBillableHours"`
 }
 
+// ProjectTimeCardReportProject identifies the project a time-card report is for.
+type ProjectTimeCardReportProject struct {
+	ID   string  `json:"id"`
+	Key  string  `json:"key"`
+	Name *string `json:"name"`
+}
+
+// ProjectTimeCardReportTotals is the project-wide sum of a time-card report's
+// per-case rows. All figures are minutes.
+type ProjectTimeCardReportTotals struct {
+	TotalMinutes       int `json:"totalMinutes"`
+	BillableMinutes    int `json:"billableMinutes"`
+	NonBillableMinutes int `json:"nonBillableMinutes"`
+	PatchingMinutes    int `json:"patchingMinutes"`
+}
+
+// ProjectTimeCardReportCase is one case's row in a time-card report. All
+// figures are minutes.
+type ProjectTimeCardReportCase struct {
+	CaseID             string  `json:"caseId"`
+	CaseNumber         string  `json:"caseNumber"`
+	ExternalCaseID     *string `json:"externalCaseId"`
+	CaseType           *string `json:"caseType"`
+	TotalMinutes       int     `json:"totalMinutes"`
+	BillableMinutes    int     `json:"billableMinutes"`
+	NonBillableMinutes int     `json:"nonBillableMinutes"`
+	PatchingMinutes    int     `json:"patchingMinutes"`
+}
+
+// ProjectTimeCardReportResponse is the response for GET /projects/{id}/time-cards/report.
+type ProjectTimeCardReportResponse struct {
+	Project ProjectTimeCardReportProject `json:"project"`
+	From    string                       `json:"from"`
+	To      string                       `json:"to"`
+	Totals  ProjectTimeCardReportTotals  `json:"totals"`
+	Cases   []ProjectTimeCardReportCase  `json:"cases"`
+}
+
 // ProjectChangeRequestStatsResponse is the response for GET /projects/{id}/change-requests/stats.
 type ProjectChangeRequestStatsResponse struct {
 	TotalCount          int                    `json:"totalCount"`
