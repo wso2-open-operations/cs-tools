@@ -103,7 +103,7 @@ function SavedDashboardView({ id }: { id: string }): JSX.Element {
   }
   return (
     <Box sx={frame}>
-      <DashboardWidgetGrid widgets={saved.data.dashboard.widgets} />
+      <DashboardWidgetGrid widgets={saved.data.dashboard.widgets} linePointClickThrough />
     </Box>
   );
 }

@@ -150,6 +150,11 @@ export interface DashboardWidgetGridProps {
   dateRangeFrom?: string;
   /** The `to` half of {@link dateRangeFrom}. */
   dateRangeTo?: string;
+  /** Lets a click on a `shape: "line"` widget's point open that day's cases
+   * (see `DashboardWidgetTile`'s prop of the same name). My Dashboards and
+   * Shared Dashboards turn it on; system dashboards, the dashboard builder
+   * and the generate preview leave it off. */
+  linePointClickThrough?: boolean;
 }
 
 /**
@@ -172,6 +177,7 @@ export default function DashboardWidgetGrid({
   trailingContent,
   dateRangeFrom,
   dateRangeTo,
+  linePointClickThrough = false,
 }: DashboardWidgetGridProps): JSX.Element {
   const queryClient = useQueryClient();
   // Which widget's own slice (if any) is currently expanded into a
@@ -305,6 +311,7 @@ export default function DashboardWidgetGrid({
           sortBy={widget.sortBy}
           days={widget.days}
           series={widget.series}
+          linePointClickThrough={linePointClickThrough}
           inlineDrilldown={widget.inlineDrilldown}
           inlineLabels={widget.inlineLabels}
           selectedTeamCreGroupId={selectedTeamCreGroupId}
