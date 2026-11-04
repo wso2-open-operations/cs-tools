@@ -9938,6 +9938,12 @@ type PendingVerificationPreviousStatus string
 const (
 	PendingVerificationPreviousStatusSolutionProposed PendingVerificationPreviousStatus = "SOLUTION_PROPOSED"
 	PendingVerificationPreviousStatusAwaitingInfo     PendingVerificationPreviousStatus = "AWAITING_INFO"
+	// PendingVerificationPreviousStatusWorkInProgress covers the CSM portal's
+	// own close flow (apps/csm-portal/backend's state machine only ever
+	// reaches Closed from Work In Progress or Solution Proposed), added
+	// (migration 0269) once that backend needed to record an auto-closed
+	// entry's real previous state instead of falling back to a manual entry.
+	PendingVerificationPreviousStatusWorkInProgress PendingVerificationPreviousStatus = "WORK_IN_PROGRESS"
 )
 
 // PendingVerification is a single entry in a project's Pending Verification
