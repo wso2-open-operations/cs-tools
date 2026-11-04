@@ -230,6 +230,13 @@ const STATE_TRACK = "minmax(110px, 150px)";
  * (a far-future "Nd from now") from being cut off by a fixed width. */
 const UPDATED_TRACK = "minmax(90px, max-content)";
 
+/**
+ * The cases table shared by the Cases page, View more, project work items and
+ * dashboard widgets: optional columns, server-side sort, row selection and a
+ * quick preview. A row opens its case with `{ from, parentState }` (this
+ * page's URL and its own state), so the case's Back returns here with this
+ * page's own Back intact.
+ */
 export default function CasesList({
   cases,
   isLoading,

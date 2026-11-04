@@ -404,6 +404,14 @@ function buildFixEtaShareComment(fields: {
   return `<p>ETA information for the fix will be as follows.</p><p>${lines.join("<br>")}</p>`;
 }
 
+/**
+ * The detail page of a case and of every case-like record (service request,
+ * engagement, announcement, security report), mounted on its own route or in
+ * an open case tab. Back goes to `state.from` with `state.parentState` (the
+ * list the case was opened from, with that list's own state), else to the
+ * record type's list; a case reached on another type's route is redirected to
+ * its own route with that state kept.
+ */
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when

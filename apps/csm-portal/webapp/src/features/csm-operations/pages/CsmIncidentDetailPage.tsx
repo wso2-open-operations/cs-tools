@@ -258,6 +258,12 @@ const INCIDENT_TAB_IDS: readonly IncidentTabId[] = TAB_DEFS.map((t) => t.id);
 export const HANDOFF_NEEDS_ASSIGNEE_REASON =
   "Assign the incident to an engineer first: the assignee is responsible for the page to the SME on duty.";
 
+/**
+ * The incident detail page, mounted on its own route or in an open case tab.
+ * Back goes to `state.from` with `state.parentState` (the list the incident
+ * was opened from, with that list's own state), else to the Operations
+ * Incidents tab.
+ */
 export default function CsmIncidentDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
