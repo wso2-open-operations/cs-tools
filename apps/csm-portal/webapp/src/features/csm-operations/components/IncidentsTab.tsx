@@ -123,6 +123,7 @@ function formatDate(value?: string | null): string {
   );
 }
 
+/** The cell of one optional column (see `INCIDENT_OPTIONAL_COLUMNS`) for an incident row; "—" when the value is missing. */
 function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident): JSX.Element {
   switch (id) {
     case "category":

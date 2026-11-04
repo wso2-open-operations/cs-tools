@@ -147,6 +147,7 @@ function renderOptionalCell(
 const DEFAULT_ROWS_PER_PAGE = 20;
 const ROWS_PER_PAGE_OPTIONS = [10, 20, 50];
 
+/** A backend timestamp as a short date ("Nov 4, 2026"), or "—" when it is missing or cannot be read. */
 function formatDate(value?: string | null): string {
   return (
     formatBackendTimestampForDisplay(value, {
