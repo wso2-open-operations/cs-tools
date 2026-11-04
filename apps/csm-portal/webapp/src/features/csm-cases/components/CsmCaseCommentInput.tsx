@@ -52,6 +52,7 @@ import { useBackendApi } from "@api/backend/client";
 import { getMaxAttachmentSizeBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
+  dropFailedImages,
   hasBlobSource,
   inspectInlineImages,
   releaseInlineImages,
@@ -241,6 +242,8 @@ export default function CsmCaseCommentInput({
   const uploadingImages = imageStatus.pending > 0;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The draft for which the failed-image notice was shown (see the send handler).
+  const failedWarnedHtmlRef = useRef<string | null>(null);
   const [sourceMode, setSourceMode] = useDraftState(
     draftSourceMode,
     onDraftSourceModeChange,
@@ -438,15 +441,28 @@ export default function CsmCaseCommentInput({
       setError("Wait for the images to finish uploading.");
       return;
     }
+    let sendHtml = html;
     if (images.failedMessage) {
-      setError(`${images.failedMessage} Remove that image and add it again.`);
-      return;
+      // The first press says what happened. Pressing Send again with nothing
+      // changed posts the comment without the image(s) that did not upload.
+      if (failedWarnedHtmlRef.current !== html) {
+        failedWarnedHtmlRef.current = html;
+        setError(
+          `${images.failedMessage} Press Send again to post the comment without it, or remove it and add it again.`,
+        );
+        return;
+      }
+      sendHtml = dropFailedImages(html);
+      if (isEmpty(sendHtml) && attachments.length === 0) {
+        setError("Add a comment or an attachment.");
+        return;
+      }
     }
     if (images.unknown > 0) {
       setError("An image in the comment could not be uploaded. Remove it and add it again.");
       return;
     }
-    const body = resolveInlineImageSources(html);
+    const body = resolveInlineImageSources(sendHtml);
     if (hasBlobSource(body)) {
       setError("An image in the comment could not be uploaded. Remove it and add it again.");
       return;
@@ -456,6 +472,7 @@ export default function CsmCaseCommentInput({
     try {
       await onSubmit(body, internal, attachments);
       releaseInlineImages(html);
+      failedWarnedHtmlRef.current = null;
       setHtml("");
       setAttachments([]);
       resetTriggerRef.current += 1;

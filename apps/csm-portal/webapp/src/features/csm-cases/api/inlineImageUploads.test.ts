@@ -26,6 +26,7 @@ vi.mock("@features/csm-cases/api/entityAttachments", () => ({
 import type { BackendApi } from "@api/backend/client";
 import { uploadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
 import {
+  dropFailedImages,
   hasBlobSource,
   inspectInlineImages,
   releaseInlineImages,
@@ -106,6 +107,25 @@ describe("startInlineImageUpload", () => {
     const html = img("/11111111-1111-4111-8111-111111111111") + img("data:image/png;base64,AAAA");
     expect(inspectInlineImages(html)).toEqual({ pending: 0, failedMessage: null, unknown: 0 });
     expect(resolveInlineImageSources(html)).toBe(html);
+  });
+});
+
+describe("dropFailedImages", () => {
+  it("removes only the images whose upload failed", async () => {
+    upload.mockRejectedValueOnce(new Error("nope")).mockReturnValue(new Promise(() => {}));
+    const failed = startInlineImageUpload(api, CASE_ID, file);
+    const pending = startInlineImageUpload(api, CASE_ID, file);
+    await flush();
+    const html = `<p>a</p><img src="${failed}" alt="x"><img src='${pending}'>`;
+    expect(dropFailedImages(html)).toBe(`<p>a</p><img src='${pending}'>`);
+  });
+
+  it("keeps uploaded, unknown and ordinary images", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID });
+    const done = startInlineImageUpload(api, CASE_ID, file);
+    await flush();
+    const html = img(done) + img("blob:https://csm.example.com/other") + img("/11111111-1111-4111-8111-111111111111");
+    expect(dropFailedImages(html)).toBe(html);
   });
 });
 

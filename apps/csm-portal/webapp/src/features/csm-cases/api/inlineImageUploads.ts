@@ -133,6 +133,19 @@ export function resolveInlineImageSources(html: string): string {
   });
 }
 
+/** An `<img>` tag whose `src` is a local preview. */
+const BLOB_IMG = /<img\b[^>]*\bsrc\s*=\s*(["'])(blob:[^"']*)\1[^>]*>/gi;
+
+/**
+ * Removes the images whose upload failed, so the comment can be sent without
+ * them. Images still uploading, uploaded or unknown are left as they are.
+ */
+export function dropFailedImages(html: string): string {
+  return html.replace(BLOB_IMG, (whole, _quote: string, src: string) =>
+    uploads.get(src)?.status === "failed" ? "" : whole,
+  );
+}
+
 /** Whether `html` still has a `blob:` source in it. */
 export function hasBlobSource(html: string): boolean {
   return blobSources(html).length > 0;
