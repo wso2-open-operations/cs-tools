@@ -986,6 +986,71 @@ func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey stri
 // delay Handle's own return.
 const durableDedupReleaseTimeout = 5 * time.Second
 
+// recordRef is a best-effort set of identifying fields pulled from an
+// event's envelope and payload, for attribution on an error returned from
+// Handle only — never used for dispatch logic. A field is left empty when
+// the envelope couldn't be decoded far enough to have one (the raw bytes
+// aren't valid JSON) or the payload simply doesn't carry it. The payload
+// read is deliberately lenient (plain json.Unmarshal, not decodeStrict): a
+// payload events.Validate rejects for ONE missing required field has still
+// decoded every other field it did carry (decodeStrict's own unmarshal step
+// runs to completion before the required-field check does), so caseNumber/
+// wso2CaseId/commentId are there to read even on a validation failure.
+type recordRef struct {
+	entityID   string
+	commentID  string
+	caseNumber string
+	wso2CaseID string
+}
+
+func recordRefFor(env events.Envelope) recordRef {
+	ref := recordRef{entityID: env.EntityID}
+	var common struct {
+		CommentID  string `json:"commentId"`
+		CaseNumber string `json:"caseNumber"`
+		WSO2CaseID string `json:"wso2CaseId"`
+	}
+	_ = json.Unmarshal(env.Payload, &common)
+	ref.commentID = common.CommentID
+	ref.caseNumber = common.CaseNumber
+	ref.wso2CaseID = common.WSO2CaseID
+	return ref
+}
+
+// String renders this ref for appending to an error. wso2CaseId is
+// preferred over caseNumber when both are present — they identify the same
+// row, so reporting both is redundant; caseNumber only appears when
+// wso2CaseId is not available.
+func (r recordRef) String() string {
+	var parts []string
+	if r.entityID != "" {
+		parts = append(parts, "caseId="+r.entityID)
+	}
+	if r.commentID != "" {
+		parts = append(parts, "commentId="+r.commentID)
+	}
+	if r.wso2CaseID != "" {
+		parts = append(parts, "wso2CaseId="+r.wso2CaseID)
+	} else if r.caseNumber != "" {
+		parts = append(parts, "caseNumber="+r.caseNumber)
+	}
+	return strings.Join(parts, " ")
+}
+
+// wrapWithRef appends ref's identifying fields to err, so the
+// "eventbus: handler failed" log line (which only ever logs err's own text —
+// see internal/eventbus's own package doc for why that package stays
+// payload-agnostic) carries enough to find the record without a DB query.
+func wrapWithRef(err error, ref recordRef) error {
+	if err == nil {
+		return nil
+	}
+	if s := ref.String(); s != "" {
+		return fmt.Errorf("%w [%s]", err, s)
+	}
+	return err
+}
+
 // Handle implements eventbus.Handle. A non-nil return causes the caller
 // (eventbus.Consumer) to retry — see its package doc for the retry policy.
 func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
@@ -993,15 +1058,18 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	if err := json.Unmarshal(record.Value, &env); err != nil {
 		return fmt.Errorf("dispatch: decode envelope: %w", err)
 	}
+	// Known even when env.Type turns out to be unrecognized or env.Payload
+	// fails events.Validate below — see recordRefFor's own doc comment.
+	ref := recordRefFor(env)
 	if !env.Type.IsKnown() {
-		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
+		return wrapWithRef(fmt.Errorf("dispatch: unknown event type %q", env.Type), ref)
 	}
 	// The only validation boundary left in this service: callers publish
 	// directly to the event bus now (see events.Validate's doc comment), so
 	// nothing has checked this record's required fields before it reaches
 	// here.
 	if err := events.Validate(env.EntityID, env.Type, env.Payload); err != nil {
-		return fmt.Errorf("dispatch: invalid payload: %w", err)
+		return wrapWithRef(fmt.Errorf("dispatch: invalid payload: %w", err), ref)
 	}
 
 	// Checked before dispatching to any handler, and independent of every
@@ -1011,7 +1079,7 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// already fully handled is skipped outright, never reaching a single
 	// handler.
 	if ownsItsDedup(env.Type) {
-		return d.dispatchByType(ctx, record, env)
+		return wrapWithRef(d.dispatchByType(ctx, record, env), ref)
 	}
 	baseKey := recordBaseKey(record)
 	if !d.durablyClaimRecord(ctx, baseKey) {
@@ -1032,7 +1100,7 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	} else {
 		d.markRecordDone(releaseCtx, baseKey)
 	}
-	return err
+	return wrapWithRef(err, ref)
 }
 
 // ownsItsDedup reports whether an event type's handler keeps its own durable

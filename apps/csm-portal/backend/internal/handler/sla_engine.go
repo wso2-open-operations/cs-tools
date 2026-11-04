@@ -21,13 +21,14 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
 // entitySLAEngineClient is the entity-service calls the SLA engine admin
 // action needs.
 type entitySLAEngineClient interface {
-	SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string) ([]byte, error)
+	SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string, filters entity.SLAStatusManageFilters) ([]byte, error)
 	RequestSLARecalculation(ctx context.Context) ([]byte, error)
 }
 
@@ -50,7 +51,9 @@ func NewSLAEngineHandler(entity entitySLAEngineClient) *SLAEngineHandler {
 
 // SearchActiveSLAStatusesManage handles GET /sla-status/manage -- what the
 // admin page polls to show which clocks are currently running, typically
-// right after RequestRecalculation.
+// right after RequestRecalculation. severity/caseType/search/elapsedBucket
+// are the admin table's own optional filters, forwarded to entity-service
+// as-is (it validates each) -- see entity.SLAStatusManageFilters.
 func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if middleware.UserInfoFromContext(r.Context()) == nil {
@@ -58,7 +61,13 @@ func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, 
 		return
 	}
 	q := r.URL.Query()
-	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"))
+	filters := entity.SLAStatusManageFilters{
+		Severity:      q.Get("severity"),
+		CaseType:      q.Get("caseType"),
+		Search:        q.Get("search"),
+		ElapsedBucket: q.Get("elapsedBucket"),
+	}
+	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"), filters)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchActiveSLAStatusesManage failed", "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to load SLA clocks.")

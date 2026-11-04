@@ -319,7 +319,12 @@ type SLAStatusService interface {
 	// admin=false caller (csm-notification-service's own startup
 	// reconciliation included) is completely unaffected by this parameter's
 	// existence.
-	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, admin bool) (domain.SearchSLAStatusResponse, error)
+	// filters narrows the result by severity/case type/case
+	// id-or-number-or-WSO2-id search/elapsed-percentage bucket -- see
+	// domain.SLAStatusFilters' own doc comment; its zero value applies no
+	// filtering at all, so an existing caller that never sends one is
+	// unaffected.
+	SearchActiveSLAStatuses(ctx context.Context, req domain.Pagination, admin bool, filters domain.SLAStatusFilters) (domain.SearchSLAStatusResponse, error)
 
 	// GetClockState returns the full, current state of one (work item,
 	// clock target) "sla" row, regardless of whether it's currently
