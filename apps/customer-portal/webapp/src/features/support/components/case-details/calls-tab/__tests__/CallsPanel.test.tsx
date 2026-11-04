@@ -22,6 +22,7 @@ import { useGetCallRequests } from "@features/support/api/useGetCallRequests";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import {
   CALL_REQUEST_STATE_CANCELLED,
+  CALL_REQUEST_STATE_CONCLUDED,
   CALL_REQUEST_STATE_CUSTOMER_REJECTED,
   CALL_REQUEST_STATE_PENDING_ON_WSO2,
 } from "@features/support/constants/supportConstants";
@@ -173,6 +174,118 @@ describe("CallsPanel", () => {
 
     const [, , stateKeys] = vi.mocked(useGetCallRequests).mock.calls[0];
     expect(stateKeys).toBeUndefined();
+  });
+
+  const listedCall = {
+    isPending: false,
+    data: {
+      pages: [
+        {
+          callRequests: [
+            {
+              id: "cr-1",
+              case: { id: "case-1", label: "Case" },
+              state: { id: "canceled", label: "Canceled" },
+            },
+          ],
+          totalRecords: 1,
+          offset: 0,
+          limit: 10,
+        },
+      ],
+    },
+    isError: false,
+    refetch: vi.fn(),
+    fetchNextPage: vi.fn(),
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    isFetchNextPageError: false,
+  } as unknown as ReturnType<typeof useGetCallRequests>;
+
+  const lastStateKeys = () =>
+    vi.mocked(useGetCallRequests).mock.calls.at(-1)?.[2];
+
+  it("searches every state until a status is chosen, then only that status's states", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue(listedCall);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    expect(lastStateKeys()).toBeUndefined();
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Cancelled" }));
+    expect(lastStateKeys()).toEqual([CALL_REQUEST_STATE_CANCELLED]);
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Completed" }));
+    expect(lastStateKeys()).toEqual([CALL_REQUEST_STATE_CONCLUDED]);
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "All statuses" }));
+    expect(lastStateKeys()).toBeUndefined();
+  });
+
+  it("searches every state that is neither Canceled nor Concluded for Pending", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue(listedCall);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Pending" }));
+
+    const keys = lastStateKeys() ?? [];
+    expect([...keys].sort()).toEqual([1, 2, 3, 4, 5, 7]);
+    expect(keys).not.toContain(CALL_REQUEST_STATE_CANCELLED);
+    expect(keys).not.toContain(CALL_REQUEST_STATE_CONCLUDED);
+  });
+
+  it("keeps the dropdown, with a status-specific message, when a status has no call requests", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue(listedCall);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    vi.mocked(useGetCallRequests).mockReturnValue({
+      ...listedCall,
+      data: {
+        pages: [{ callRequests: [], totalRecords: 0, offset: 0, limit: 10 }],
+      },
+    } as unknown as ReturnType<typeof useGetCallRequests>);
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Completed" }));
+
+    expect(screen.getByText(/No call requests have this status/i)).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+  });
+
+  it("shows only the plain empty state, with no dropdown, when the case has no call requests", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue({
+      ...listedCall,
+      data: {
+        pages: [{ callRequests: [], totalRecords: 0, offset: 0, limit: 10 }],
+      },
+    } as unknown as ReturnType<typeof useGetCallRequests>);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.getByText(/No call requests found for this case/i)).toBeInTheDocument();
   });
 
   it("should render error state", () => {
