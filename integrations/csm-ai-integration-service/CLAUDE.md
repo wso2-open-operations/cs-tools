@@ -80,13 +80,27 @@ Every model call writes one line, `dashboard generate: token usage` (`logUsage` 
 | `model` | `CLAUDE_MODEL` |
 | `outcome` | `ok`, `declined`, `refused`, `truncated`, `unusable`, or `failed` (no reply: a gateway error, a connection failure or a timeout, with 0 tokens) |
 | `stopReason` | the model's, empty when `failed` |
-| `inputTokens`, `outputTokens` | the reply's `usage` |
+| `inputTokens` | input neither read from nor written to the prompt cache: mostly the user message once the system prompt is cached (see "Prompt caching") |
+| `cacheCreationInputTokens`, `cacheReadInputTokens` | input written to / read from the prompt cache: the system prompt, on a call that found no cache / within its lifetime |
+| `outputTokens` | the reply's |
 | `durationMs` | the model call alone, the SDK's retry included |
 
 The line goes to the service's log (stderr), like every other line, so in Choreo it is under the
 component's Observability -> Logs; search for `token usage`, or a `userID`. No file is written: a
 Choreo container's file system is read-only apart from `/tmp`, which a restart wipes. A request that
 fails before the call (an invalid body, `not_configured`) writes no usage line.
+
+## Prompt caching
+
+The system prompt (the catalogue and the Teams section) is the same for every user and call of one
+deployment, so `Generate` marks it with `cache_control` (`ephemeral`, the default 5-minute lifetime, renewed
+by each hit). A call within that time reads it at the model's cache-hit price (0.05 times the input
+price on Sonnet 5.5, the default, and Opus 5.5; 0.1 times on most other models); the first call after it
+expires writes it at 1.25 times. Generation happens in short sessions (a prompt, then follow-ups), so the
+5-minute lifetime fits: a 1-hour cache would cost 2 times at the start of nearly every session. Anything
+that changes per request must stay after the system prompt (the prompt and the draft are in the user
+message), or no call would find the cache. A deployment's input is `inputTokens` plus the two cache counts
+of the token usage line; a warm call shows most of it in `cacheReadInputTokens`.
 
 ## Catalogue
 
