@@ -262,14 +262,19 @@ usePostCsmCaseAttachmentMock.mockReturnValue({
   variables: undefined,
   uploadProgress: null,
 });
+const refetchCaseFeedbackMock = vi.fn();
+const useGetCsmCaseFeedbackMock = vi.fn();
 vi.mock("@features/csm-cases/api/useCsmCaseFeedback", () => ({
-  useGetCsmCaseFeedback: () => ({
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-    isFetching: false,
-  }),
+  useGetCsmCaseFeedback: (caseId: string | undefined, isClosed: boolean) => {
+    useGetCsmCaseFeedbackMock(caseId, isClosed);
+    return {
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      refetch: refetchCaseFeedbackMock,
+      isFetching: false,
+    };
+  },
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   useGetCsmCaseAttachments: () => ({
@@ -1872,6 +1877,42 @@ describe("CsmCaseDetailPage — role-based controls", () => {
     expect(
       screen.queryByRole("button", { name: "Load all activity timeline entries" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("enables the case feedback query only for a closed case, and refresh never refetches it otherwise", () => {
+    const withState = (state: string) =>
+      useGetCsmCaseDetailMock.mockImplementation((id: string | undefined) => ({
+        ...(defaultCaseDetailImpl(id) as object),
+        data: id ? { ...buildCase(id), state } : undefined,
+      }));
+    const refreshLabel = { name: "Refresh activity timeline" };
+
+    withState("open");
+    useGetCsmCaseFeedbackMock.mockClear();
+    refetchCaseFeedbackMock.mockClear();
+    let view = renderPage();
+    expect(useGetCsmCaseFeedbackMock).toHaveBeenCalled();
+    for (const call of useGetCsmCaseFeedbackMock.mock.calls) expect(call[1]).toBe(false);
+    fireEvent.click(screen.getByRole("button", refreshLabel));
+    expect(refetchCaseFeedbackMock).not.toHaveBeenCalled();
+    view.unmount();
+
+    // Case detail not loaded yet: stays disabled.
+    useGetCsmCaseDetailMock.mockImplementation(() => ({
+      ...(defaultCaseDetailImpl(undefined) as object),
+      isLoading: true,
+    }));
+    useGetCsmCaseFeedbackMock.mockClear();
+    view = renderPage();
+    for (const call of useGetCsmCaseFeedbackMock.mock.calls) expect(call[1]).toBe(false);
+    view.unmount();
+
+    withState("closed");
+    useGetCsmCaseFeedbackMock.mockClear();
+    view = renderPage();
+    expect(useGetCsmCaseFeedbackMock.mock.calls.at(-1)?.[1]).toBe(true);
+    fireEvent.click(screen.getByRole("button", refreshLabel));
+    expect(refetchCaseFeedbackMock).toHaveBeenCalledTimes(1);
   });
 
   it("a viewer's own note offers no edit or delete (both are write-only on the backend)", () => {
