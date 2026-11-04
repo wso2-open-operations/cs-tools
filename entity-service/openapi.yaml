@@ -32231,9 +32231,9 @@ components:
         name: {type: string, maxLength: 100}
         class: {type: string, enum: [software, service]}
         code: {type: string, maxLength: 64, nullable: true}
-        unit: {type: string, enum: [integration, iot, iam, choreo, asgardeo, apim, analytics, devant, bijira], nullable: true}
-        businessUnit: {type: string, enum: [integration_software, integration_cloud, iam, corporate], nullable: true}
-        manufacturer: {type: string, enum: [wso2, wso2_cloud], nullable: true}
+        unit: {type: string, enum: [integration, iot, iam, choreo, asgardeo, apim, analytics, devant, bijira, null], nullable: true}
+        businessUnit: {type: string, enum: [integration_software, integration_cloud, iam, corporate, null], nullable: true}
+        manufacturer: {type: string, enum: [wso2, wso2_cloud, null], nullable: true}
         description: {type: string, maxLength: 2000, nullable: true}
     ProductVersionPatch:
       type: object
@@ -32244,7 +32244,7 @@ components:
           type: string
           nullable: true
           description: Case-insensitive; reads return the uppercase form.
-          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED]
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
         releaseDate: {type: string, format: date, nullable: true}
         earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
         supportEolDate: {type: string, format: date, nullable: true}
@@ -32289,7 +32289,7 @@ components:
           type: string
           nullable: true
           description: Case-insensitive; reads return the uppercase form.
-          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED]
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
         releaseDate: {type: string, format: date, nullable: true}
         earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
         supportEolDate: {type: string, format: date, nullable: true}
