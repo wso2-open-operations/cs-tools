@@ -22,8 +22,8 @@
  * "Saved views" menu this tab now shares with them.
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, useSearchParams } from "react-router";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation, useSearchParams } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
@@ -149,5 +149,36 @@ describe("ProblemsTab — Saved views", () => {
     fireEvent.click(screen.getByText("New problems"));
 
     expect(screen.getByTestId("url").textContent).toContain("probStates=NEW");
+  });
+});
+
+describe("ProblemsTab — rows keep the page's own way back", () => {
+  // Operations reached from a dashboard is `{ from: <dashboard> }`; a row
+  // nests that as `parentState`, so the problem's Back can hand it back and
+  // the Operations page keeps its own Back button.
+  function StateProbe(): JSX.Element {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  it("passes the page's own state as parentState", async () => {
+    mockResult({
+      data: { problems: [{ id: "prb-1", number: "PRB0000001", subject: "Recurring outage" }], total: 1 },
+    } as never);
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/operations", search: "?tab=problems", state: { from: "/dashboard/my/d-1" } }]}>
+        <Routes>
+          <Route path="/operations" element={<ProblemsTab />} />
+          <Route path="/operations/problems/:id" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText("PRB0000001"));
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+        from: "/operations?tab=problems",
+        parentState: { from: "/dashboard/my/d-1" },
+      }),
+    );
   });
 });

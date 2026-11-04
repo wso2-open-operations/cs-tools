@@ -513,7 +513,12 @@ export default function IncidentsTab(): JSX.Element {
                     onClick={() =>
                       incident.id &&
                       navigate(`/operations/incidents/${incident.id}`, {
-                        state: { from: `${location.pathname}${location.search}` },
+                        // `parentState` keeps this tab's own state (e.g.
+                        // `{ from: <dashboard> }`) for the detail page's Back.
+                        state: {
+                          from: `${location.pathname}${location.search}`,
+                          parentState: location.state ?? null,
+                        },
                       })
                     }
                     selected={selection.isSelected(incident)}

@@ -276,8 +276,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
   // for a bookmarked or directly-linked incident.
+  // `parentState` is the state that list was itself carrying (e.g.
+  // `{ from: <dashboard> }`), handed back on Back so it keeps its own Back.
   const backState = (routeOverride ? routeOverride.state : routedLocationState) as
-    | { from?: string }
+    | { from?: string; parentState?: unknown }
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_INCIDENTS_PATH;
   const { data, isLoading, isError } = useGetIncident(id);
@@ -542,7 +544,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   );
 
   const back = (): void => {
-    navigate(backTarget);
+    navigate(backTarget, { state: backState?.parentState ?? undefined });
   };
 
   const BackButton = (

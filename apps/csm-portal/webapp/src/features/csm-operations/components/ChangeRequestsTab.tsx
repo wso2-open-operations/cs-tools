@@ -521,7 +521,12 @@ export default function ChangeRequestsTab(): JSX.Element {
                     hover
                     onClick={() =>
                       navigate(`/operations/change-requests/${cr.id}`, {
-                        state: { from: `${location.pathname}${location.search}` },
+                        // `parentState` keeps this tab's own state (e.g.
+                        // `{ from: <dashboard> }`) for the detail page's Back.
+                        state: {
+                          from: `${location.pathname}${location.search}`,
+                          parentState: location.state ?? null,
+                        },
                       })
                     }
                     selected={selection.isSelected(cr)}
