@@ -39,8 +39,11 @@ type SLAStatusRepository interface {
 	// longer both write into "sla" at cutover, so there is nothing left to
 	// distinguish a row by. Every caller (the CSM Portal's own SLA tab,
 	// csm-notification-service's Redis-recovery reconciliation pass) now
-	// gets every active clock, full stop.
-	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination) ([]domain.SLAStatus, int, error)
+	// gets every active clock, full stop. filters narrows the result by
+	// severity/case type/case id-or-number-or-WSO2-id search/elapsed-percentage
+	// bucket -- see domain.SLAStatusFilters' own doc comment; its zero value
+	// applies no filtering at all.
+	SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error)
 
 	// GetClockState returns the single most recently-started "sla" row for
 	// (workItemID, target) -- regardless of is_active -- so a caller can
@@ -247,15 +250,95 @@ func scanSLAStatus(row interface{ Scan(...any) error }) (domain.SLAStatus, error
 	return s, nil
 }
 
-// SearchActiveSLAStatuses implements SLAStatusRepository.
-func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination) ([]domain.SLAStatus, int, error) {
-	countArgs := []any{}
-	dataArgs := []any{pagination.Limit, pagination.Offset, evaluationSubscriptionProjectTypeName}
+// appendSLAStatusFilterSQL appends filters' own bind values to *args (whose
+// current contents already occupy $1..$len(*args)) and returns the
+// "AND ..." SQL fragment referencing the newly appended placeholders. Used
+// for both the count and data queries below, which otherwise share no
+// argument numbering (the data query has its own leading
+// evaluationSubscriptionProjectTypeName arg the count query doesn't need) --
+// each call starts from that query's own *args, so the placeholder numbers
+// always line up with what was actually appended to it.
+//
+// Severity/CaseType/Search are plain, already-selected columns with no
+// business-day-correction problem (unlike ElapsedBucket -- see
+// SearchActiveSLAStatuses' own doc comment on why that one is filtered in Go
+// instead), so a WHERE clause here keeps SQL-side pagination intact for
+// every search that doesn't also filter by elapsed-percentage bucket.
+func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
+	var b strings.Builder
+	if f.Severity != "" {
+		if code, ok := caseSeverityToEnum[f.Severity]; ok {
+			*args = append(*args, code)
+			fmt.Fprintf(&b, " AND c.severity = $%d", len(*args))
+		}
+	}
+	if f.CaseType != "" {
+		*args = append(*args, f.CaseType)
+		fmt.Fprintf(&b, " AND wi.type::TEXT = $%d", len(*args))
+	}
+	if f.Search != "" {
+		// Case id: exact match (it's a UUID, not a prefix/substring the way
+		// number/WSO2 id are). Number/WSO2 id: case-insensitive substring,
+		// sharing one wildcarded arg between both ILIKEs. escapeLikeWildcards
+		// (plg_users_repo.go) makes a literal "%" or "_" in the search term
+		// match itself rather than acting as an ILIKE pattern -- same
+		// convention every other ILIKE search in this package follows.
+		*args = append(*args, f.Search)
+		exactIdx := len(*args)
+		*args = append(*args, "%"+escapeLikeWildcards(f.Search)+"%")
+		likeIdx := len(*args)
+		fmt.Fprintf(&b, " AND (wi.id::TEXT = $%d OR wi.number ILIKE $%d ESCAPE '\\' OR wi.wso2_id ILIKE $%d ESCAPE '\\')", exactIdx, likeIdx, likeIdx)
+	}
+	return b.String()
+}
 
+// slaElapsedBucketMatches reports whether pct falls in the named bucket --
+// the four fixed ranges the CSM Portal's SLA Engine admin table filters by
+// (domain.SLAElapsedBucket* constants). "" (no bucket filter requested)
+// always matches, so a caller that never asks for one can share this
+// unconditionally. 75to100 is inclusive of exactly 100% (its own label reads
+// "75% - 100%"); over100 is exclusive of it (its own label reads "Over
+// 100%") -- a clock at exactly 100% belongs in the former, not the latter.
+func slaElapsedBucketMatches(bucket string, pct float64) bool {
+	switch bucket {
+	case domain.SLAElapsedBucketUnder50:
+		return pct < 50
+	case domain.SLAElapsedBucket50To75:
+		return pct >= 50 && pct < 75
+	case domain.SLAElapsedBucket75To100:
+		return pct >= 75 && pct <= 100
+	case domain.SLAElapsedBucketOver100:
+		return pct > 100
+	default:
+		return true
+	}
+}
+
+// SearchActiveSLAStatuses implements SLAStatusRepository.
+//
+// ElapsedBucket can't be a SQL WHERE/HAVING clause the way the other three
+// filters are: scanSLAStatus's own BusinessElapsedPercent is only final
+// after its Go-side business-day correction (see that function's own doc
+// comment) -- the raw column a SQL predicate would have to filter on,
+// als.business_elapsed_percentage, is wrong for exactly the still-running,
+// 'WSO2 Business days'-scheduled clocks a bucket filter most needs to get
+// right. So whenever ElapsedBucket is set, this fetches every row matching
+// the OTHER filters with no SQL LIMIT/OFFSET, corrects and buckets each one
+// in Go (scanSLAStatus already does the correction), and paginates the
+// filtered slice in Go instead -- bounded by the same modest active-clock
+// total maxSLAStatusLimit's own doc comment already describes (around 5,500
+// rows checked live), not a new, unbounded read.
+func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination domain.Pagination, filters domain.SLAStatusFilters) ([]domain.SLAStatus, int, error) {
+	bucketed := filters.ElapsedBucket != ""
+
+	countArgs := []any{}
+	countFilterSQL := appendSLAStatusFilterSQL(filters, &countArgs)
 	countQuery := activeSLAStatusCTE + `
 		SELECT COUNT(*)
-		` + activeSLAStatusFromJoins
+		` + activeSLAStatusFromJoins + countFilterSQL
 
+	dataArgs := []any{evaluationSubscriptionProjectTypeName}
+	dataFilterSQL := appendSLAStatusFilterSQL(filters, &dataArgs)
 	dataQuery := activeSLAStatusCTE + `
 		SELECT als.work_item_id::TEXT, als.target::TEXT, COALESCE(als.business_elapsed_percentage, 0), COALESCE(als.has_breached, FALSE), COALESCE(als.stage::TEXT, ''), als.start_on,
 		       als.paused_on, EXTRACT(EPOCH FROM als.pause_duration)::BIGINT,
@@ -264,12 +347,15 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 		       wi.number, wi.wso2_id, wi.subject, wi.type::TEXT,
 		       prod.name || COALESCE(' ' || pv.version, ''), COALESCE(c.severity::TEXT, ''),
 		       ` + caseLikeStateColumn + `,
-		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $3, FALSE),
+		       cre.name, p.onboarding_status::TEXT, COALESCE(pt.name = $1, FALSE),
 		       cre_team.group_email, COALESCE(teamlead.name, NULLIF(TRIM(CONCAT_WS(' ', teamlead.first_name, teamlead.last_name)), '')),
 		       COALESCE(ae.name, NULLIF(TRIM(CONCAT_WS(' ', ae.first_name, ae.last_name)), '')), ae.email
-		` + activeSLAStatusFromJoins + `
-		ORDER BY als.work_item_id, als.target
-		LIMIT $1 OFFSET $2`
+		` + activeSLAStatusFromJoins + dataFilterSQL + `
+		ORDER BY als.work_item_id, als.target`
+	if !bucketed {
+		dataArgs = append(dataArgs, pagination.Limit, pagination.Offset)
+		dataQuery += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(dataArgs)-1, len(dataArgs))
+	}
 
 	var total int
 	var statuses []domain.SLAStatus
@@ -287,6 +373,44 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 	// runSearch, all of which take an explicit scope rather than relying on
 	// whatever identity ctx already carries.
 	ctx = WithCallerIdentity(ctx, SearchScope{Unrestricted: true})
+
+	if bucketed {
+		// One query, no SQL pagination: every matching row is corrected and
+		// bucketed in Go below, so the count and the page both come from
+		// this same result set rather than a separate COUNT(*).
+		rows, err := r.db.Query(ctx, dataQuery, dataArgs...)
+		if err != nil {
+			return nil, 0, fmt.Errorf("query active sla statuses: %w", err)
+		}
+		defer rows.Close()
+		// Non-nil even with zero rows: SearchSLAStatusResponse.Statuses has
+		// no omitempty, so a nil slice here would serialize as JSON null
+		// instead of [] -- the webapp reads statuses.length unconditionally.
+		matched := make([]domain.SLAStatus, 0)
+		for rows.Next() {
+			st, err := scanSLAStatus(rows)
+			if err != nil {
+				return nil, 0, fmt.Errorf("scan sla status: %w", err)
+			}
+			if slaElapsedBucketMatches(filters.ElapsedBucket, st.BusinessElapsedPercent) {
+				matched = append(matched, st)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, 0, fmt.Errorf("iterate active sla statuses: %w", err)
+		}
+		total = len(matched)
+		start := pagination.Offset
+		if start > total {
+			start = total
+		}
+		end := start + pagination.Limit
+		if end > total {
+			end = total
+		}
+		statuses = matched[start:end]
+		return statuses, total, nil
+	}
 
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

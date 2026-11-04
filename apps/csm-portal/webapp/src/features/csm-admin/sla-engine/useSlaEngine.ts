@@ -23,6 +23,18 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { useBackendApi } from "@api/backend/client";
+import type { BeCaseSeverity, BeCaseType } from "@api/backend/types";
+
+/** GET /sla-status's own four fixed elapsed-percentage buckets -- see
+ * entity-service's domain.SLAElapsedBucket* constants. */
+export type SlaElapsedBucket = "under50" | "50to75" | "75to100" | "over100";
+
+export const SLA_ELAPSED_BUCKET_LABEL: Record<SlaElapsedBucket, string> = {
+  under50: "Under 50%",
+  "50to75": "50% - 75%",
+  "75to100": "75% - 100%",
+  over100: "Over 100%",
+};
 
 /** One row of GET /sla-status/manage -- entity-service's raw SLAStatus shape, passed through unchanged. */
 export interface ActiveSlaStatus {
@@ -49,7 +61,19 @@ interface SearchActiveSlaStatusResponse {
   offset: number;
 }
 
-interface ActiveSlaStatusesRequest {
+/** Server-side filters for useActiveSlaStatuses -- mirror entity-service's
+ * own GET /sla-status query params one-to-one (service.ParseSLAStatusFilters
+ * validates each). Every field is optional; omitting all of them is the
+ * endpoint's original, unfiltered behavior. */
+export interface ActiveSlaStatusFilters {
+  severity?: BeCaseSeverity;
+  caseType?: BeCaseType;
+  /** Matches ONLY the case's own id, number, or WSO2 case id -- never title. */
+  search?: string;
+  elapsedBucket?: SlaElapsedBucket;
+}
+
+interface ActiveSlaStatusesRequest extends ActiveSlaStatusFilters {
   limit: number;
   offset: number;
 }
@@ -60,7 +84,9 @@ const ACTIVE_SLA_STATUSES_KEY = ["admin", "sla-status", "manage"] as const;
  * Every currently-active SLA clock, for the Recalculate SLA admin page.
  * entity-service's GET /sla-status already supports limit+offset+total -- see
  * that endpoint's own doc comment -- this just exercises it instead of
- * fetching a single, uncapped first page.
+ * fetching a single, uncapped first page. severity/caseType/search/
+ * elapsedBucket are forwarded as query params verbatim and are entirely
+ * server-side -- this hook never filters a fetched page itself.
  */
 export function useActiveSlaStatuses(
   request: ActiveSlaStatusesRequest,
@@ -68,10 +94,24 @@ export function useActiveSlaStatuses(
   const api = useBackendApi();
   return useQuery<SearchActiveSlaStatusResponse, Error>({
     queryKey: [...ACTIVE_SLA_STATUSES_KEY, request],
-    queryFn: async () =>
-      (await api.get<SearchActiveSlaStatusResponse>(
-        `/sla-status/manage?limit=${request.limit}&offset=${request.offset}`,
-      )) ?? { statuses: [], total: 0, limit: request.limit, offset: request.offset },
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        limit: String(request.limit),
+        offset: String(request.offset),
+      });
+      if (request.severity) params.set("severity", request.severity);
+      if (request.caseType) params.set("caseType", request.caseType);
+      if (request.search) params.set("search", request.search);
+      if (request.elapsedBucket) params.set("elapsedBucket", request.elapsedBucket);
+      return (
+        (await api.get<SearchActiveSlaStatusResponse>(`/sla-status/manage?${params.toString()}`)) ?? {
+          statuses: [],
+          total: 0,
+          limit: request.limit,
+          offset: request.offset,
+        }
+      );
+    },
     placeholderData: keepPreviousData,
   });
 }

@@ -17591,8 +17591,9 @@ paths:
     get:
       summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
       description: >
-        A CSM admin. Same limit/offset query params as entity-service's own
-        GET /sla-status; responses are Cache-Control no-store. Typically polled right
+        A CSM admin. Same limit/offset/severity/caseType/search/elapsedBucket query
+        params as entity-service's own GET /sla-status (each forwarded verbatim,
+        blank omitted); responses are Cache-Control no-store. Typically polled right
         after POST /sla-engine/recalculate to show which clocks are currently running.
       operationId: searchActiveSLAStatusesManage
       parameters:
@@ -17604,6 +17605,29 @@ paths:
           in: query
           schema:
             type: integer
+        - name: severity
+          in: query
+          description: One of catastrophic, critical, high, medium, low.
+          schema:
+            type: string
+            enum: [catastrophic, critical, high, medium, low]
+        - name: caseType
+          in: query
+          description: One of case, engagement, service_request, security_report_analysis, announcement.
+          schema:
+            type: string
+            enum: [case, engagement, service_request, security_report_analysis, announcement]
+        - name: search
+          in: query
+          description: Matches only the case's own id (exact), number, or WSO2 case id (substring).
+          schema:
+            type: string
+        - name: elapsedBucket
+          in: query
+          description: One of under50, 50to75, 75to100, over100.
+          schema:
+            type: string
+            enum: [under50, 50to75, 75to100, over100]
       responses:
         "200":
           description: Every currently-active SLA clock, paginated.

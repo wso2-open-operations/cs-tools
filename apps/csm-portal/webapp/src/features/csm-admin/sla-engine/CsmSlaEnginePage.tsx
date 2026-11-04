@@ -25,6 +25,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  MenuItem,
   Paper,
   Skeleton,
   Table,
@@ -34,27 +35,42 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type MouseEvent } from "react";
 import { Link as RouterLink, useNavigate } from "react-router";
 import SeverityChip from "@components/SeverityChip";
-import { severityFromBe } from "@api/backend/mappers";
+import { severityFromBe, priorityFromSeverity } from "@api/backend/mappers";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import {
+  ALL_CASE_TYPES,
   CASE_TYPE_COLOR,
   CASE_TYPE_LABEL,
   caseTypeDetailBasePath,
   caseTypeHasSeverity,
 } from "@features/csm-cases/utils/caseType";
 import type { BeCaseType } from "@api/backend/types";
-import { useActiveSlaStatuses, useRequestSlaRecalculation } from "@features/csm-admin/sla-engine/useSlaEngine";
+import {
+  SLA_ELAPSED_BUCKET_LABEL,
+  useActiveSlaStatuses,
+  useRequestSlaRecalculation,
+  type ActiveSlaStatusFilters,
+  type SlaElapsedBucket,
+} from "@features/csm-admin/sla-engine/useSlaEngine";
+import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
+import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
+import { useDebouncedValue } from "@hooks/useDebouncedValue";
 
 const DEFAULT_ROWS_PER_PAGE = 25;
 const ROWS_PER_PAGE_OPTIONS = [25, 50, 100];
 const TABLE_COLUMN_COUNT = 8;
 const SLA_ENGINE_PAGE_PATH = "/admin/sla-engine";
+/** Only S0-S4 -- "unset" has no entity-service-side filter value. */
+const SEVERITY_FILTER_OPTIONS: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
+const ELAPSED_BUCKET_FILTER_OPTIONS: SlaElapsedBucket[] = ["under50", "50to75", "75to100", "over100"];
+const SEARCH_DEBOUNCE_MS = 400;
 
 function formatTimestamp(value: string | null): string {
   if (!value) return "—";
@@ -85,7 +101,51 @@ export default function CsmSlaEnginePage(): JSX.Element {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
-  const request = useMemo(() => ({ limit: rowsPerPage, offset: page * rowsPerPage }), [page, rowsPerPage]);
+
+  const [severityFilter, setSeverityFilter] = useState<Severity | "">("");
+  const [caseTypeFilter, setCaseTypeFilter] = useState<BeCaseType | "">("");
+  const [elapsedBucketFilter, setElapsedBucketFilter] = useState<SlaElapsedBucket | "">("");
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
+
+  const hasActiveFilters = severityFilter !== "" || caseTypeFilter !== "" || elapsedBucketFilter !== "" || searchInput !== "";
+  const handleClearFilters = (): void => {
+    setSeverityFilter("");
+    setCaseTypeFilter("");
+    setElapsedBucketFilter("");
+    setSearchInput("");
+    setPage(0);
+  };
+  const handleSeverityChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setSeverityFilter(e.target.value as Severity | "");
+    setPage(0);
+  };
+  const handleCaseTypeChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setCaseTypeFilter(e.target.value as BeCaseType | "");
+    setPage(0);
+  };
+  const handleElapsedBucketChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setElapsedBucketFilter(e.target.value as SlaElapsedBucket | "");
+    setPage(0);
+  };
+  const handleSearchChange = (e: ChangeEvent<HTMLInputElement>): void => {
+    setSearchInput(e.target.value);
+    setPage(0);
+  };
+
+  const filters: ActiveSlaStatusFilters = useMemo(
+    () => ({
+      severity: severityFilter ? priorityFromSeverity(severityFilter) : undefined,
+      caseType: caseTypeFilter || undefined,
+      elapsedBucket: elapsedBucketFilter || undefined,
+      search: debouncedSearch.trim() || undefined,
+    }),
+    [severityFilter, caseTypeFilter, elapsedBucketFilter, debouncedSearch],
+  );
+  const request = useMemo(
+    () => ({ limit: rowsPerPage, offset: page * rowsPerPage, ...filters }),
+    [page, rowsPerPage, filters],
+  );
   const activeStatuses = useActiveSlaStatuses(request);
   const recalculate = useRequestSlaRecalculation();
 
@@ -177,6 +237,53 @@ export default function CsmSlaEnginePage(): JSX.Element {
           Currently active clocks
           {activeStatuses.data && ` (${activeStatuses.data.total})`}
         </Typography>
+
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, mb: 2, alignItems: "flex-start" }}>
+          <TextField
+            label="Search (case id, number, or WSO2 case id)"
+            value={searchInput}
+            onChange={handleSearchChange}
+            size="small"
+            sx={{ minWidth: 260 }}
+          />
+          <TextField select label="Severity" value={severityFilter} onChange={handleSeverityChange} size="small" sx={{ minWidth: 160 }}>
+            <MenuItem value="">All</MenuItem>
+            {SEVERITY_FILTER_OPTIONS.map((sev) => (
+              <MenuItem key={sev} value={sev}>
+                {SEVERITY_LABEL[sev]}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField select label="Type" value={caseTypeFilter} onChange={handleCaseTypeChange} size="small" sx={{ minWidth: 180 }}>
+            <MenuItem value="">All</MenuItem>
+            {ALL_CASE_TYPES.map((type) => (
+              <MenuItem key={type} value={type}>
+                {CASE_TYPE_LABEL[type]}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="Elapsed"
+            value={elapsedBucketFilter}
+            onChange={handleElapsedBucketChange}
+            size="small"
+            sx={{ minWidth: 150 }}
+          >
+            <MenuItem value="">All</MenuItem>
+            {ELAPSED_BUCKET_FILTER_OPTIONS.map((bucket) => (
+              <MenuItem key={bucket} value={bucket}>
+                {SLA_ELAPSED_BUCKET_LABEL[bucket]}
+              </MenuItem>
+            ))}
+          </TextField>
+          {hasActiveFilters && (
+            <Button size="small" onClick={handleClearFilters} sx={{ alignSelf: "center" }}>
+              Clear filters
+            </Button>
+          )}
+        </Box>
+
         {activeStatuses.isError && <Alert severity="error">Failed to load active SLA clocks.</Alert>}
         {activeStatuses.isLoading && <Skeleton variant="rounded" height={200} />}
         {activeStatuses.data && (
@@ -283,6 +390,9 @@ export default function CsmSlaEnginePage(): JSX.Element {
                             )}
                             {status.hasBreached && (
                               <Chip size="small" variant="outlined" color="error" label="Breached" />
+                            )}
+                            {!status.isPaused && !status.hasBreached && (
+                              <Chip size="small" variant="outlined" color="success" label="In progress" />
                             )}
                           </TableCell>
                           <TableCell>{formatTimestamp(status.startedOn)}</TableCell>

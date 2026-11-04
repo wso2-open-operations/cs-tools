@@ -23,18 +23,21 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 )
 
 type stubSLAEngineClient struct {
 	searchLimit, searchOffset string
+	searchFilters             entity.SLAStatusManageFilters
 	searchResult              []byte
 	searchErr                 error
 	recalcCalled              bool
 	recalcErr                 error
 }
 
-func (s *stubSLAEngineClient) SearchActiveSLAStatusesManage(_ context.Context, limit, offset string) ([]byte, error) {
+func (s *stubSLAEngineClient) SearchActiveSLAStatusesManage(_ context.Context, limit, offset string, filters entity.SLAStatusManageFilters) ([]byte, error) {
 	s.searchLimit, s.searchOffset = limit, offset
+	s.searchFilters = filters
 	return s.searchResult, s.searchErr
 }
 
@@ -74,6 +77,24 @@ func TestSLAEngineHandler_SearchActiveSLAStatusesManage_ForwardsQueryAndResult(t
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("Cache-Control = %q, want no-store", cc)
+	}
+}
+
+func TestSLAEngineHandler_SearchActiveSLAStatusesManage_ForwardsFilters(t *testing.T) {
+	client := &stubSLAEngineClient{searchResult: []byte(`{"statuses":[]}`)}
+	h := NewSLAEngineHandler(client)
+	rec := httptest.NewRecorder()
+	req := withUser(httptest.NewRequest(http.MethodGet,
+		"/sla-status/manage?severity=critical&caseType=case&search=CS0001&elapsedBucket=over100", nil))
+
+	h.SearchActiveSLAStatusesManage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	want := entity.SLAStatusManageFilters{Severity: "critical", CaseType: "case", Search: "CS0001", ElapsedBucket: "over100"}
+	if client.searchFilters != want {
+		t.Errorf("filters forwarded = %+v, want %+v", client.searchFilters, want)
 	}
 }
 
