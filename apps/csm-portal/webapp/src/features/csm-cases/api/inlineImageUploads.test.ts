@@ -117,7 +117,15 @@ describe("dropFailedImages", () => {
     const pending = startInlineImageUpload(api, CASE_ID, file);
     await flush();
     const html = `<p>a</p><img src="${failed}" alt="x"><img src='${pending}'>`;
-    expect(dropFailedImages(html)).toBe(`<p>a</p><img src='${pending}'>`);
+    expect(dropFailedImages(html)).toBe(`<p>a</p><img src="${pending}">`);
+  });
+
+  it("removes the whole element when an attribute holds a >", async () => {
+    upload.mockRejectedValueOnce(new Error("nope"));
+    const failed = startInlineImageUpload(api, CASE_ID, file);
+    await flush();
+    const html = `<p>a</p><img alt="a>b" src="${failed}" title='x > y'><p>c</p>`;
+    expect(dropFailedImages(html)).toBe("<p>a</p><p>c</p>");
   });
 
   it("keeps uploaded, unknown and ordinary images", async () => {

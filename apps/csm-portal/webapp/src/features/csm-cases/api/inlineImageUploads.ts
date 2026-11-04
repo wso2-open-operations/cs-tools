@@ -133,17 +133,21 @@ export function resolveInlineImageSources(html: string): string {
   });
 }
 
-/** An `<img>` tag whose `src` is a local preview. */
-const BLOB_IMG = /<img\b[^>]*\bsrc\s*=\s*(["'])(blob:[^"']*)\1[^>]*>/gi;
-
 /**
  * Removes the images whose upload failed, so the comment can be sent without
- * them. Images still uploading, uploaded or unknown are left as they are.
+ * them. Images still uploading, uploaded or unknown are left as they are. The
+ * HTML is parsed, so a whole `<img>` element goes whatever its attributes hold
+ * (an `alt` with a `>` in it, say); a comment with no failed image is returned
+ * untouched, not re-serialized.
  */
 export function dropFailedImages(html: string): string {
-  return html.replace(BLOB_IMG, (whole, _quote: string, src: string) =>
-    uploads.get(src)?.status === "failed" ? "" : whole,
-  );
+  const isFailed = (src: string | null) => !!src && uploads.get(src)?.status === "failed";
+  if (!blobSources(html).some(isFailed)) return html;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  body.querySelectorAll("img").forEach((image) => {
+    if (isFailed(image.getAttribute("src"))) image.remove();
+  });
+  return body.innerHTML;
 }
 
 /** Whether `html` still has a `blob:` source in it. */
