@@ -89,6 +89,17 @@ describe("useDeployedProductOptions", () => {
     expect(result.current.data).toHaveLength(53);
   });
 
+  it("rejects instead of returning a partial list when the page bound is exhausted", async () => {
+    const full = Array.from({ length: 50 }, (_, i) => ({ id: `dp-${i}`, product: { name: `P${i}` } }));
+    postMock.mockResolvedValue({ deployedProducts: full, hasMore: true });
+    const { result } = renderHook(() => useDeployedProductOptions("dep-1"), { wrapper });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(200);
+    expect(result.current.data).toBeUndefined();
+  });
+
   it("does not call the backend while no deployment id is given", () => {
     renderHook(() => useDeployedProductOptions(undefined), { wrapper });
     expect(postMock).not.toHaveBeenCalled();

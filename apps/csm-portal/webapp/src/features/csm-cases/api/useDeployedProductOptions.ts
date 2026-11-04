@@ -24,6 +24,12 @@ import type {
 } from "@api/backend/types";
 
 const PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
+/** Safety bound on pages per deployment: 200 pages * BE_MAX_PAGE_LIMIT is far
+ * beyond any real deployment, this only stops an unbounded loop if the BE's
+ * `hasMore` were ever wrong. Same convention as `MAX_ATTACHMENT_PAGES`, except
+ * exhausting it throws: callers classify the whole list, so a silently
+ * truncated one would be misleading. */
+const MAX_DEPLOYED_PRODUCT_PAGES = 200;
 
 export interface DeployedProductOption {
   /** Deployed-product id — the value the case-create payload needs. */
@@ -73,7 +79,9 @@ export function useDeployedProductOptions(
       // one page, and callers (e.g. the service-request picker) classify the
       // whole list client-side.
       const deployed: BeDeployedProduct[] = [];
-      for (let offset = 0; ; offset += PAGE_LIMIT) {
+      let exhausted = true;
+      for (let page = 0; page < MAX_DEPLOYED_PRODUCT_PAGES; page += 1) {
+        const offset = page * PAGE_LIMIT;
         const dpRes = await api.post<
           BeDeployedProductSearchPayload,
           BeDeployedProductSearchResponse
@@ -83,9 +91,15 @@ export function useDeployedProductOptions(
             ? { productCategories }
             : {}),
         });
-        const page = dpRes.deployedProducts ?? [];
-        deployed.push(...page);
-        if (page.length < PAGE_LIMIT || dpRes.hasMore === false) break;
+        const rows = dpRes.deployedProducts ?? [];
+        deployed.push(...rows);
+        if (rows.length < PAGE_LIMIT || dpRes.hasMore === false) {
+          exhausted = false;
+          break;
+        }
+      }
+      if (exhausted) {
+        throw new Error("Too many deployed products to load for this deployment.");
       }
 
       return deployed.map((d) => {

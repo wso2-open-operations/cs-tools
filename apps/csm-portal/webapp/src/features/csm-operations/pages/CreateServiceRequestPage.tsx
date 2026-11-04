@@ -205,6 +205,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
   )
     ? ""
     : selectedDeployedProductId;
+  // Reason tooltips open on pointer hover and on keyboard focus of a disabled
+  // option, so keyboard users can read why it can't be chosen.
+  const [hoveredProductId, setHoveredProductId] = useState<string | null>(null);
+  const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
   const catalogs = useSearchCatalogs(deployedProductId || undefined);
   const variables = useCatalogItemVariables(
     catalogId || undefined,
@@ -274,6 +278,14 @@ export default function CreateServiceRequestPage(): JSX.Element {
     setAnswers({});
   };
   const onDeployedProductChange = (next: string): void => {
+    // Disabled options are keyboard-focusable (so their reason is
+    // discoverable), and the Select still routes Enter/Space on one through
+    // its change handler. Ineligible products must never become the value.
+    if (
+      deployedProductOptions.some((o) => o.id === next && o.ineligibleReason !== null)
+    ) {
+      return;
+    }
     setDeployedProductId(next);
     setCatalogId("");
     setCatalogItemId("");
@@ -316,6 +328,11 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstFailingValidation === null &&
       !isIneligibleForSr &&
       !hasNoSrReadAccess &&
+      // A prefilled product is kept until classification can run, so don't
+      // allow submit while the product list or the project's category
+      // restriction is still loading (it might turn out to be ineligible).
+      !deployedProducts.isLoading &&
+      !projectMetadata.isLoading &&
       // Fail closed while a selected project's eligibility is still loading
       // or couldn't be confirmed at all — see projectLoadFailed above.
       (!projectId || (!selectedProject.isLoading && !projectLoadFailed)) &&
@@ -332,6 +349,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstFailingValidation,
       isIneligibleForSr,
       hasNoSrReadAccess,
+      deployedProducts.isLoading,
+      projectMetadata.isLoading,
       selectedProject.isLoading,
       projectLoadFailed,
       submitting,
@@ -508,12 +527,21 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 onChange={(e) => onDeployedProductChange(String(e.target.value))}
                 disabled={!deploymentId || deployedProducts.isLoading}
                 notched={deployedProductId !== ""}
+                // Let keyboard users reach disabled options (the reason is
+                // exposed on them); selection is still refused in
+                // onDeployedProductChange.
+                MenuProps={{ MenuListProps: { disabledItemsFocusable: true } }}
               >
                 {deployedProductOptions.map((dp) => (
                   <MenuItem
                     key={dp.id}
                     value={dp.id}
                     disabled={dp.ineligibleReason !== null}
+                    aria-description={dp.ineligibleReason ?? undefined}
+                    onFocus={() => setFocusedProductId(dp.id)}
+                    onBlur={() =>
+                      setFocusedProductId((cur) => (cur === dp.id ? null : cur))
+                    }
                   >
                     {dp.ineligibleReason !== null ? (
                       // A disabled MenuItem has `pointer-events: none`, so the
@@ -523,7 +551,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
                       // unselectable. `describeChild` keeps the option's
                       // accessible name as the product label and exposes the
                       // reason as its description.
-                      <Tooltip title={dp.ineligibleReason} describeChild>
+                      <Tooltip
+                        title={dp.ineligibleReason}
+                        describeChild
+                        open={hoveredProductId === dp.id || focusedProductId === dp.id}
+                        onOpen={() => setHoveredProductId(dp.id)}
+                        onClose={() =>
+                          setHoveredProductId((cur) => (cur === dp.id ? null : cur))
+                        }
+                      >
                         <Box
                           component="span"
                           sx={{ display: "block", width: "100%", pointerEvents: "auto" }}
