@@ -224,14 +224,14 @@ schedules assume `TZ=UTC` like every other here.
   a shift and its on-call variant (`<CODE>_OC`), which share hours: Morning (with its on-call
   person) and Evening. The email lists its window's people.
 - **Weekend: one summary email plus one invitation email per team per day.** The summary goes
-  to everybody on the weekend, LK and Americas (with the LK on-call person) alike, in the layout the
+  to everybody on the weekend, LK and Americas (with the Americas On-call person) alike, in the layout the
   CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
   ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
   the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
   window longer than 10 hours that has 2+ people every day asking them to split it into morning
   and evening shifts), the zone
   legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
-  The Americas Weekend's hours, and the LK On-call's that cover it, are 08:00-18:00
+  The Americas Weekend's hours, and the Americas On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
   invitations use the same hours. Then each window (LK
   Saturday, Americas Saturday, LK Sunday, Americas Sunday) gets its own email to its own people,
@@ -866,7 +866,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
-| `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
+| `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the Americas On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |

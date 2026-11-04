@@ -42,7 +42,7 @@ const INVITE_ROTATIONS = [
     key: "inviteAmericasWeekend",
     // Followed by the zone of the hours below, which the invitations are timed in.
     label: "Americas Weekend",
-    help: "With the LK On-call person. Saturday and Sunday, one event each.",
+    help: "With the Americas On-call person. Saturday and Sunday, one event each.",
   },
 ] as const;
 
@@ -167,10 +167,10 @@ function buildBody(
   if (typeof americas === "string") return { error: americas };
 
   if (!form.start || !form.end) {
-    return { error: "Set both the start and the end of the Americas Weekend and LK On-call hours." };
+    return { error: "Set both the start and the end of the Americas Weekend and Americas On-call hours." };
   }
   if (form.start === form.end) {
-    return { error: "The start and the end of the Americas Weekend and LK On-call hours must differ." };
+    return { error: "The start and the end of the Americas Weekend and Americas On-call hours must differ." };
   }
 
   const copyTo = addresses(form.copyTo);
@@ -213,7 +213,7 @@ function buildBody(
  * The CRE rota reminders card on the Rota Access tab: whether the weekday and
  * weekend reminder emails and the calendar invitations go out, how many people
  * a weekend rotation needs before it is announced, the hours of the Americas
- * Weekend and LK On-call rotations, and who is copied on every reminder.
+ * Weekend and Americas On-call rotations, and who is copied on every reminder.
  *
  * Until something is saved the reminders run on their built-in settings, which
  * the form shows. The server decides who may save (a CSM admin or the CRE rota
@@ -448,7 +448,7 @@ export default function RotaReminderSettings(): JSX.Element {
               </div>
 
               <fieldset className="rrs-win" aria-describedby={movesWithClocks ? id("window-help") : undefined}>
-                <legend>Americas Weekend and LK On-call hours</legend>
+                <legend>Americas Weekend and Americas On-call hours</legend>
                 <div className="rrs-times">
                   <div className="rrs-field">
                     <label htmlFor={id("start")}>Start</label>
