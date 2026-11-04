@@ -115,6 +115,7 @@ func widgetTemplates(views []dashboardWidgetView) []dashboard.WidgetTemplate {
 			InlineDrilldown: v.InlineDrilldown,
 			InlineLabels:    v.InlineLabels,
 			Days:            v.Days,
+			Series:          v.Series,
 			DistinctBy:      v.DistinctBy,
 		})
 	}

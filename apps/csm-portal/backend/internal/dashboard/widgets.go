@@ -94,6 +94,14 @@ const (
 	ShapeLine Shape = "line"
 )
 
+// LineSeries is one of a Shape line widget's two lines (WidgetTemplate.Series).
+type LineSeries string
+
+const (
+	LineSeriesOpened LineSeries = "opened" // cases created per day
+	LineSeriesClosed LineSeries = "closed" // cases closed per day
+)
+
 // GroupByConfig configures a Shape "pie"/"bar" widget to resolve via a single
 // server-side aggregation call instead of one search per literal Slices
 // entry -- the alternative for a resourceType/field with too many distinct
@@ -344,6 +352,13 @@ type WidgetTemplate struct {
 	// a value outside 1-90 at load time, the same range the endpoint itself
 	// enforces.
 	Days int `json:"days,omitempty"`
+	// Series is only meaningful for Shape line: which of its two lines to
+	// draw. Omitted draws both, which is what every line widget written
+	// before this field did, so no saved or served dashboard changes. The
+	// registry rejects an empty list, an unknown or repeated value, and the
+	// field on any other shape. The endpoint still returns both counts; the
+	// frontend only leaves the other line out.
+	Series []LineSeries `json:"series,omitempty"`
 
 	// legacyFilters holds a pre-rename config's "filters" key so
 	// migrateLegacyWidgetKeys can move it into Query. Unexported so it can

@@ -76,6 +76,10 @@ type dashboardWidgetView struct {
 	// dashboard.WidgetTemplate.Days. Forwarded verbatim: the frontend passes
 	// it straight through as POST /cases/volume-trend's own "days" field.
 	Days int `json:"days,omitempty"`
+	// Series is only meaningful for Shape "line" — see
+	// dashboard.WidgetTemplate.Series. Forwarded verbatim: the frontend draws
+	// only the lines it names, both when it is absent.
+	Series []dashboard.LineSeries `json:"series,omitempty"`
 }
 
 // filterPresetView is one entry of the shared filter-preset catalogue,
@@ -271,6 +275,7 @@ func widgetViews(templates []dashboard.WidgetTemplate) []dashboardWidgetView {
 			InlineDrilldown: tpl.InlineDrilldown,
 			InlineLabels:    tpl.InlineLabels,
 			Days:            tpl.Days,
+			Series:          tpl.Series,
 		})
 	}
 	return views

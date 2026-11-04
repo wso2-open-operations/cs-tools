@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -865,6 +866,30 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			want: `widget "w": "days" is 91; it must be between 1 and 90`,
 		},
 		{
+			name: "line widget with an empty series",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": []}`,
+			want: `widget "w": "series" is empty; leave it out to draw both lines`,
+		},
+		{
+			name: "line widget with an unknown series",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": ["resolved"]}`,
+			want: `widget "w": unknown "series" value "resolved" (want "opened" or "closed")`,
+		},
+		{
+			name: "line widget with a series twice",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "series": ["opened", "opened"]}`,
+			want: `widget "w": "series" lists "opened" twice`,
+		},
+		{
+			name: "series on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "series": ["opened"]}`,
+			want: `widget "w": "series" is only meaningful for shape "line", got "bar"`,
+		},
+		{
 			name: "groupBy with an unknown linkResourceType",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
 			 "query": {}, "groupBy": {"field": "account", "linkResourceType": "bogus"}}`,
@@ -968,6 +993,39 @@ func TestLoadDir_AcceptsLineWidget(t *testing.T) {
 	}
 	if w.Days != 30 {
 		t.Errorf("days = %d, want 30", w.Days)
+	}
+	if w.Series != nil {
+		t.Errorf("series = %v, want nil (both lines) when omitted", w.Series)
+	}
+}
+
+// A "line" widget may name the lines it draws: one of them, or both.
+func TestLoadDir_AcceptsLineWidgetSeries(t *testing.T) {
+	for _, tc := range []struct {
+		series string
+		want   []LineSeries
+	}{
+		{`["opened"]`, []LineSeries{LineSeriesOpened}},
+		{`["closed"]`, []LineSeries{LineSeriesClosed}},
+		{`["closed", "opened"]`, []LineSeries{LineSeriesClosed, LineSeriesOpened}},
+	} {
+		t.Run(tc.series, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, "series": `+tc.series+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			if got := dashboards[0].Widgets[0].Series; !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("series = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

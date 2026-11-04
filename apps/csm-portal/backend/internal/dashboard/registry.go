@@ -783,6 +783,30 @@ var validWidgetShapes = map[Shape]bool{
 // validGroupByBuckets below for its own endpoint's enum.
 const maxWidgetLineDays = 90
 
+// validateLineSeries checks a line widget's Series: absent (nil) draws both
+// lines; present, it names at least one of them, each once. An empty list is
+// refused rather than read as "both", so a definition that means both says so
+// by leaving the field out.
+func validateLineSeries(series []LineSeries) error {
+	if series == nil {
+		return nil
+	}
+	if len(series) == 0 {
+		return fmt.Errorf("\"series\" is empty; leave it out to draw both lines")
+	}
+	seen := make(map[LineSeries]bool, len(series))
+	for _, s := range series {
+		if s != LineSeriesOpened && s != LineSeriesClosed {
+			return fmt.Errorf("unknown \"series\" value %q (want %q or %q)", s, LineSeriesOpened, LineSeriesClosed)
+		}
+		if seen[s] {
+			return fmt.Errorf("\"series\" lists %q twice", s)
+		}
+		seen[s] = true
+	}
+	return nil
+}
+
 // validGroupByBuckets are the legal values of GroupByConfig.Bucket -- the
 // same enum POST /cases/feedback/aggregate documents on the entity-service
 // side (see AggregateFeedbackRequest.bucket in openapi.yaml). Kept here
@@ -934,6 +958,12 @@ func validateWidgets(d Dashboard, source string) error {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"days\" is %d; it must be between 1 and %d (or omitted for the default)",
 					source, d.ID, w.ID, w.Days, maxWidgetLineDays)
 			}
+			if err := validateLineSeries(w.Series); err != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: %w", source, d.ID, w.ID, err)
+			}
+		} else if w.Series != nil {
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"series\" is only meaningful for shape %q, got %q",
+				source, d.ID, w.ID, ShapeLine, w.Shape)
 		}
 	}
 

@@ -226,7 +226,7 @@ func TestSaveCustomDashboard_StoresCheckedDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored definition does not parse: %v\n%s", err, client.gotDefinition)
 	}
-	if len(stored.Widgets) != 7 || strings.Contains(client.gotDefinition, "widgetId") {
+	if len(stored.Widgets) != 8 || strings.Contains(client.gotDefinition, "widgetId") {
 		t.Errorf("stored definition = %s", client.gotDefinition)
 	}
 
