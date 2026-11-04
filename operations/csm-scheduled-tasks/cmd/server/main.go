@@ -685,7 +685,7 @@ func main() {
 			Name:     staleCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, staleCasesTaskName, "0 7 * * *"),
 			Handler: stalecases.SendReport(longOpenReportClient, staleCasesEmail,
-				staleCaseOlderThanDays, staleCasesTo, staleCasesCc, alertsEnabled),
+				staleCaseOlderThanDays, staleCasesTo, staleCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
@@ -693,7 +693,7 @@ func main() {
 			RunNowNarrow: reportRunNow(staleCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
 					return stalecases.SendReport(longOpenReportClient, email,
-						staleCaseOlderThanDays, orRecipients(staleCasesTo, rec), staleCasesCc, alertsEnabled)
+						staleCaseOlderThanDays, orRecipients(staleCasesTo, rec), staleCasesCc, worklogCaseLinkBase, alertsEnabled)
 				}),
 		},
 		// Products that deployment nodes report but the product catalogue does not

@@ -19,6 +19,7 @@ package notify
 import (
 	_ "embed"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -42,20 +43,21 @@ const longOpenReportColumns = 8
 // RenderLongOpenCasesReport fills in the stale cases report's HTML email
 // template: an introduction naming the age threshold, then the report's two
 // tables, "Ongoing cases" first and "Ongoing cases on onboarding projects"
-// second. Case numbers are plain text. A table
+// second. Both case columns link to the case page in the CSM portal when
+// caseLinkBase is set, and are plain text otherwise. A table
 // entity-service cut at its cap carries a "Showing N of TOTAL" note, and an
 // empty table says "No cases" in place of an empty grid. [YEAR] is today's
 // year, the footer-only detail every template here has.
-func RenderLongOpenCasesReport(r longopenreport.Report, olderThanDays int) string {
+func RenderLongOpenCasesReport(r longopenreport.Report, olderThanDays int, caseLinkBase string) string {
 	loc, err := time.LoadLocation(longOpenReportTimezone)
 	if err != nil {
 		loc = time.UTC
 	}
 	replacer := strings.NewReplacer(
 		"<!-- [OLDER_THAN_DAYS] -->", strconv.Itoa(olderThanDays),
-		"<!-- [CASES_ROWS] -->", renderLongOpenRows(r.Cases, loc),
+		"<!-- [CASES_ROWS] -->", renderLongOpenRows(r.Cases, caseLinkBase, loc),
 		"<!-- [CASES_NOTE] -->", longOpenTruncationNote(len(r.Cases), r.CasesTotal, r.CasesTruncated),
-		"<!-- [ONBOARDING_CASES_ROWS] -->", renderLongOpenRows(r.OnboardingCases, loc),
+		"<!-- [ONBOARDING_CASES_ROWS] -->", renderLongOpenRows(r.OnboardingCases, caseLinkBase, loc),
 		"<!-- [ONBOARDING_CASES_NOTE] -->", longOpenTruncationNote(len(r.OnboardingCases), r.OnboardingCasesTotal, r.OnboardingCasesTruncated),
 		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
 	)
@@ -74,7 +76,7 @@ func longOpenTruncationNote(shown, total int, truncated bool) string {
 // renderLongOpenRows builds one <tr> per case, in the order given (oldest
 // first, as entity-service returns them). An empty table says so rather than
 // rendering a header over nothing.
-func renderLongOpenRows(rows []longopenreport.Row, loc *time.Location) string {
+func renderLongOpenRows(rows []longopenreport.Row, caseLinkBase string, loc *time.Location) string {
 	if len(rows) == 0 {
 		return fmt.Sprintf(`<tr><td colspan="%d" style="padding:12px 8px; text-align:center; color:#8a8f98;">No cases.</td></tr>`, longOpenReportColumns)
 	}
@@ -84,15 +86,48 @@ func renderLongOpenRows(rows []longopenreport.Row, loc *time.Location) string {
 	var b strings.Builder
 	for _, row := range rows {
 		b.WriteString("<tr>")
-		fmt.Fprintf(&b, nowrapCell, orDash(escapeHTML(row.Number)))
-		fmt.Fprintf(&b, nowrapCell, orDash(escapeHTML(row.InternalID)))
+		fmt.Fprintf(&b, nowrapCell, longOpenCaseLink(caseLinkBase, row, row.Number))
+		fmt.Fprintf(&b, nowrapCell, longOpenCaseLink(caseLinkBase, row, row.InternalID))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.CsTeam)))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.AssignedEngineer)))
 		fmt.Fprintf(&b, cell, orDash(escapeHTML(humanizeState(row.State))))
-		fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Severity)))
+		fmt.Fprintf(&b, cell, orDash(escapeHTML(severityLabel(row.Severity))))
 		fmt.Fprintf(&b, nowrapCell, escapeHTML(row.UpdatedOn.In(loc).Format(stamp)))
 		fmt.Fprintf(&b, nowrapCell, escapeHTML(row.CreatedOn.In(loc).Format(stamp)))
 		b.WriteString("</tr>")
 	}
 	return b.String()
+}
+
+// longOpenCaseLink is a case cell linked to the case page in the CSM portal
+// (<caseLinkBase>/cases/<internal id>, the id the portal routes on, not the case
+// number) when a base URL is configured; plain text otherwise. The id is
+// path-escaped because it is data.
+func longOpenCaseLink(caseLinkBase string, row longopenreport.Row, text string) string {
+	if text == "" {
+		return "-"
+	}
+	if caseLinkBase == "" || row.InternalID == "" {
+		return escapeHTML(text)
+	}
+	href := strings.TrimRight(caseLinkBase, "/") + "/cases/" + url.PathEscape(row.InternalID)
+	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
+}
+
+// severityLabel is the S0-S4 label the support team reads, for the API's
+// severity words; an unknown value is shown as it came.
+func severityLabel(severity string) string {
+	switch strings.ToLower(severity) {
+	case "catastrophic":
+		return "S0"
+	case "critical":
+		return "S1"
+	case "high":
+		return "S2"
+	case "medium":
+		return "S3"
+	case "low":
+		return "S4"
+	}
+	return severity
 }

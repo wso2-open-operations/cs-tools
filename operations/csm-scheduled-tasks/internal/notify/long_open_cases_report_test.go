@@ -44,11 +44,11 @@ func longOpenFixture() longopenreport.Report {
 }
 
 func TestRenderLongOpenCasesReport(t *testing.T) {
-	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30)
+	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30, "")
 
 	for _, want := range []string{
 		"<strong>30 days</strong>", "need action",
-		"CS0000001", "WSO2-1001", "Team Alpha", "Jane Doe", "Work In Progress", "high",
+		"CS0000001", "WSO2-1001", "Team Alpha", "Jane Doe", "Work In Progress", "S2",
 		"Waiting On WSO2",
 		"2026-10-30 15:30", "2026-08-01 09:35", // Asia/Colombo
 		"Showing only the oldest 2 of 1500.",
@@ -64,7 +64,7 @@ func TestRenderLongOpenCasesReport(t *testing.T) {
 	if ongoing < 0 || onboarding < 0 || ongoing > onboarding {
 		t.Errorf("headings missing or out of order: ongoing=%d onboarding=%d", ongoing, onboarding)
 	}
-	cols := []string{">Case<", ">WSO2 Case ID<", ">Integration CS Team<", ">Assignee<", ">State<", ">Priority<", ">Last updated<", ">Created<"}
+	cols := []string{">Case<", ">WSO2 Case ID<", ">Integration CS Team<", ">Assignee<", ">State<", ">Severity<", ">Last updated<", ">Created<"}
 	pos := 0
 	for _, c := range cols {
 		i := strings.Index(body[pos:], c)
@@ -90,7 +90,7 @@ func TestRenderLongOpenCasesReport(t *testing.T) {
 }
 
 func TestRenderLongOpenCasesReportCaseNumbersArePlainText(t *testing.T) {
-	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30)
+	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30, "")
 	if strings.Contains(body, "<a ") || !strings.Contains(body, "CS0000001") {
 		t.Errorf("case numbers must be plain text, never links")
 	}
@@ -100,7 +100,7 @@ func TestRenderLongOpenCasesReportBothTruncated(t *testing.T) {
 	r := longOpenFixture()
 	r.OnboardingCases = []longopenreport.Row{{Number: "CS0000009"}}
 	r.OnboardingCasesTotal, r.OnboardingCasesTruncated = 40, true
-	body := notify.RenderLongOpenCasesReport(r, 30)
+	body := notify.RenderLongOpenCasesReport(r, 30, "")
 	if !strings.Contains(body, "Showing only the oldest 1 of 40.") || strings.Count(body, "Showing only") != 2 {
 		t.Errorf("both tables should carry a note")
 	}
@@ -113,8 +113,24 @@ func TestRenderLongOpenCasesReportToFile(t *testing.T) {
 	if out == "" {
 		t.Skip("LONG_OPEN_HTML_OUT is not set")
 	}
-	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30)
+	body := notify.RenderLongOpenCasesReport(longOpenFixture(), 30, "")
 	if err := os.WriteFile(out, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRenderLongOpenCasesReportLinksAndSeverity(t *testing.T) {
+	r := longOpenFixture()
+	r.Cases[0].InternalID = "id with/slash"
+	body := notify.RenderLongOpenCasesReport(r, 30, "https://portal.example.com/")
+	if !strings.Contains(body, `href="https://portal.example.com/cases/id%20with%2Fslash"`) {
+		t.Errorf("case cell is not linked by the escaped internal id")
+	}
+	if strings.Contains(body, "high</td>") || !strings.Contains(body, ">S2</td>") {
+		t.Errorf("severity should read S2, not the word")
+	}
+	plain := notify.RenderLongOpenCasesReport(r, 30, "")
+	if strings.Contains(plain, "<a href") {
+		t.Errorf("no base URL must render plain text")
 	}
 }

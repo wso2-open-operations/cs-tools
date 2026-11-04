@@ -512,7 +512,7 @@ func TestOverrideRunsOfRealReportHandlers(t *testing.T) {
 	rec := []string{"jane.doe@example.com"}
 	cases := map[string]func(email notify.Sender) func(context.Context) error{
 		"stale": func(email notify.Sender) func(context.Context) error {
-			return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(nil, rec), nil, true)
+			return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(nil, rec), nil, "", true)
 		},
 		"open": func(email notify.Sender) func(context.Context) error {
 			return opencases.SendReport(fakeOpen{}, email, orRecipients(nil, rec), nil, true)

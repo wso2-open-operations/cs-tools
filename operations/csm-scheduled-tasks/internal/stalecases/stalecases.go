@@ -49,6 +49,9 @@ type EmailSender interface {
 // cmd/server/main.go), deliberately not merged with the standing
 // ALERT_RECIPIENTS audience, which is about failure alerting.
 //
+// caseLinkBase is the CSM portal's base URL (CSM_PORTAL_WEB_BASE_URL); when
+// set, the case cells link to <caseLinkBase>/cases/<internal id>, else they are plain text.
+//
 // emailsEnabled is cmd/server/main.go's ALERTS_ENABLED, the same global kill
 // switch engine.Engine.AlertsEnabled uses: it silences every email this
 // component sends. If emailsEnabled is false or to is empty, the handler skips
@@ -56,7 +59,7 @@ type EmailSender interface {
 //
 // When both tables of the report are empty the handler sends nothing and
 // succeeds: the report omits itself on a day with nothing to act on.
-func SendReport(reports ReportFetcher, email EmailSender, olderThanDays int, to, cc []string, emailsEnabled bool) func(ctx context.Context) error {
+func SendReport(reports ReportFetcher, email EmailSender, olderThanDays int, to, cc []string, caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if !emailsEnabled || len(to) == 0 {
 			return nil
@@ -79,7 +82,7 @@ func SendReport(reports ReportFetcher, email EmailSender, olderThanDays int, to,
 			"to", len(to), "cc", len(cc))
 
 		subject := fmt.Sprintf("[Action-Required][Report] Cases open for more than %d days", olderThanDays)
-		body := notify.RenderLongOpenCasesReport(report, olderThanDays)
+		body := notify.RenderLongOpenCasesReport(report, olderThanDays, caseLinkBase)
 		if err := email.SendEmail(ctx, to, cc, subject, body); err != nil {
 			return fmt.Errorf("stalecases: send report email: %w", err)
 		}
