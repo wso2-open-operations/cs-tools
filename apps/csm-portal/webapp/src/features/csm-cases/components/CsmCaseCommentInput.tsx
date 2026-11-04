@@ -55,9 +55,10 @@ import {
   dropFailedImages,
   hasBlobSource,
   inspectInlineImages,
+  queueInlineImage,
   releaseInlineImages,
   resolveInlineImageSources,
-  startInlineImageUpload,
+  uploadQueuedImages,
   useInlineImageStatus,
 } from "@features/csm-cases/api/inlineImageUploads";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
@@ -113,8 +114,8 @@ interface CsmCaseCommentInputProps {
   autoFocus?: boolean;
   /**
    * The case's id. When set (and entity attachments are on), an image pasted or
-   * picked into the comment is uploaded to the case as it is added and the
-   * comment carries only a reference to it, not the image as base64. Leave unset
+   * picked into the comment is uploaded to the case when the comment is sent
+   * and the comment carries only a reference to it, not the image as base64. Leave unset
    * where the comment's work item is not a case: images are embedded as before.
    */
   imageUploadParentId?: string;
@@ -157,6 +158,15 @@ const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 function isEmpty(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   return text.length === 0;
+}
+
+/**
+ * Whether there is nothing to send: no text and no image. An inline image counts
+ * as content even though it has no text; `isEmpty` stays text-only, for the
+ * checks that are about what the reply says.
+ */
+function isBlank(html: string): boolean {
+  return isEmpty(html) && !/<img\b/i.test(html);
 }
 
 /**
@@ -234,9 +244,9 @@ export default function CsmCaseCommentInput({
   const onImageUpload = useMemo(
     () =>
       imageUploadParentId && isEntityAttachmentsEnabled()
-        ? (file: File) => startInlineImageUpload(api, imageUploadParentId, file)
+        ? (file: File) => queueInlineImage(file)
         : undefined,
-    [api, imageUploadParentId],
+    [imageUploadParentId],
   );
   const imageStatus = useInlineImageStatus(html);
   const uploadingImages = imageStatus.pending > 0;
@@ -405,7 +415,7 @@ export default function CsmCaseCommentInput({
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
     // Allow an attachment-only post (no text) — the case still gets the files.
-    if (isEmpty(html) && attachments.length === 0) {
+    if (isBlank(html) && attachments.length === 0) {
       setError("Add a comment or an attachment.");
       return;
     }
@@ -433,9 +443,19 @@ export default function CsmCaseCommentInput({
       );
       return;
     }
-    // Images added to the comment upload as they are added. Send only once each
-    // is stored, with its reference in place of the local preview; a `blob:`
-    // address must never reach the backend.
+    // Images added to the comment are uploaded now, not when they were added, so
+    // one that was removed or never posted leaves nothing on the server. Send only
+    // once each is stored, with its reference in place of the local preview; a
+    // `blob:` address must never reach the backend.
+    if (imageUploadParentId && inspectInlineImages(html).queued > 0) {
+      setError(null);
+      setSubmitting(true);
+      try {
+        await uploadQueuedImages(api, imageUploadParentId, html);
+      } finally {
+        setSubmitting(false);
+      }
+    }
     const images = inspectInlineImages(html);
     if (images.pending > 0) {
       setError("Wait for the images to finish uploading.");
@@ -453,7 +473,7 @@ export default function CsmCaseCommentInput({
         return;
       }
       sendHtml = dropFailedImages(html);
-      if (isEmpty(sendHtml) && attachments.length === 0) {
+      if (isBlank(sendHtml) && attachments.length === 0) {
         setError("Add a comment or an attachment.");
         return;
       }
@@ -495,6 +515,8 @@ export default function CsmCaseCommentInput({
     overSizeLimit,
     sizeError,
     submitting,
+    api,
+    imageUploadParentId,
   ]);
 
   // Customer replies are blocked for this case state. The composer is locked to
@@ -769,7 +791,7 @@ export default function CsmCaseCommentInput({
                 disabled ||
                 submitting ||
                 uploadingImages ||
-                (isEmpty(html) && attachments.length === 0) ||
+                (isBlank(html) && attachments.length === 0) ||
                 overSizeLimit ||
                 // Safety net: a public reply with text while replies are locked.
                 // Normally unreachable — the toggle is forced to work-note mode.
