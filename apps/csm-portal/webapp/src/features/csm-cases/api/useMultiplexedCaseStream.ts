@@ -24,6 +24,7 @@ import {
   invalidateCaseById,
   invalidateCaseLists,
   invalidateCaseQueries,
+  invalidateCaseThreadById,
   reconnectDelay,
 } from "@features/csm-cases/api/caseStreamShared";
 
@@ -125,10 +126,31 @@ export function useMultiplexedCaseStream(
   // (an id-set change tears one connection down and opens the next).
   const openedIdsRef = useRef<Set<string> | null>(null);
 
-  useEffect(() => {
-    if (!settledKey || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+  // Lower-cased ids of the previous settled set; null until the first settle
+  // with the stream enabled.
+  const settledIdsRef = useRef<Set<string> | null>(null);
 
-    const ids = settledKey.split(",");
+  useEffect(() => {
+    if (!apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+
+    const ids = settledKey ? settledKey.split(",") : [];
+
+    // An id that re-enters the set after being absent got no frames while it
+    // was unsubscribed, and its comments/activities may still be inside their
+    // staleTime when its view remounts, so revalidate them. The first settle
+    // is skipped: nothing was ever cached for an id that was never absent
+    // (mount fetches it). Ids that stay subscribed are left alone. Runs even
+    // when `ids` is empty so that a later reopen of the last closed case counts
+    // as re-entering.
+    const previousSettled = settledIdsRef.current;
+    settledIdsRef.current = new Set(ids.map((id) => id.toLowerCase()));
+    if (previousSettled) {
+      for (const id of ids) {
+        if (!previousSettled.has(id.toLowerCase())) invalidateCaseThreadById(queryClient, id);
+      }
+    }
+
+    if (ids.length === 0) return;
 
     const requested = new Map(ids.map((id) => [id.toLowerCase(), id]));
     let cancelled = false;

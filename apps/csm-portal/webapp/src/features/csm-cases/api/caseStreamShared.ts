@@ -78,6 +78,34 @@ export function invalidateCaseById(queryClient: QueryClient, caseId: string): vo
 }
 
 /**
+ * A comments/activities query fetched this recently is not revalidated when
+ * its case id (re)joins the stream: a first-time open has just fetched it, and
+ * refetching would double the two heaviest case queries for nothing. Sits above
+ * the stream's id-set debounce (300ms) plus a typical fetch time.
+ */
+export const RECENT_FETCH_MS = 2_000;
+
+/**
+ * Revalidates only the comments and activities of a case whose id has just
+ * (re)joined the subscribed stream set. While a case is not subscribed it
+ * receives no frames, so cached comments/activities can be missing updates
+ * that landed in the gap, yet still be inside CASE_QUERY_STALE_TIME_MS when the
+ * case view remounts.
+ *
+ * Only a query that holds cached data older than RECENT_FETCH_MS is
+ * invalidated. One with no data yet (never fetched, or still on its first
+ * fetch) or fetched moments ago is already current.
+ */
+export function invalidateCaseThreadById(queryClient: QueryClient, caseId: string): void {
+  for (const key of [ApiQueryKeys.CSM_CASE_COMMENTS, ApiQueryKeys.CSM_CASE_ACTIVITIES]) {
+    const queryKey = [key, caseId];
+    const { dataUpdatedAt = 0 } = queryClient.getQueryState(queryKey) ?? {};
+    if (dataUpdatedAt === 0 || Date.now() - dataUpdatedAt < RECENT_FETCH_MS) continue;
+    void queryClient.invalidateQueries({ queryKey });
+  }
+}
+
+/**
  * Invalidates the case-scoped list-shaped queries by prefix, since they carry
  * filter params the stream layer does not have. Only mounted queries refetch,
  * the rest are just marked stale.
