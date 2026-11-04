@@ -26,6 +26,7 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
@@ -75,6 +76,23 @@ function isOfferedProject(project: BeProject): boolean {
   return canRaiseServiceRequests(project.subscriptionType);
 }
 
+/**
+ * Why a deployed product can't be used for a service request, or `null` when
+ * it can. Only called when the project restricts service requests to a set of
+ * product categories.
+ */
+function getIneligibleReason(
+  category: string | null | undefined,
+  allowed: string[],
+): string | null {
+  const allowedLabel = allowed.map((c) => c.toUpperCase()).join(", ");
+  if (category == null || category === "") {
+    return "This product has no category set. Set a category on the deployed product to raise a service request.";
+  }
+  if (allowed.includes(category)) return null;
+  return `Service requests can only be raised against products in these categories: ${allowedLabel}. This product's category is ${category.toUpperCase()}.`;
+}
+
 export default function CreateServiceRequestPage(): JSX.Element {
   const navigate = useNavTransition();
   const { showError } = useErrorBanner();
@@ -113,7 +131,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const [projectId, setProjectId] = useState(lockedProjectId);
   const [deploymentId, setDeploymentId] = useState(relatedCaseState?.deploymentId ?? "");
-  const [deployedProductId, setDeployedProductId] = useState(
+  // Raw selection (possibly prefilled from the related case). The effective
+  // `deployedProductId` below drops it when that product turns out to be
+  // ineligible for service requests.
+  const [selectedDeployedProductId, setDeployedProductId] = useState(
     relatedCaseState?.deployedProductId ?? "",
   );
   const [catalogId, setCatalogId] = useState("");
@@ -143,12 +164,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // Service requests are only raisable against a subset of a project's
   // deployed products, keyed by category — mirrors CP's
   // CreateServiceRequestPage, which restricts its deployed-product picker the
-  // same way. Fetched independently of deployedProducts and applied both
-  // server-side (below, via useDeployedProductOptions' productCategories
-  // param — the entity service narrows the search itself) and client-side
-  // (the memo below) as a defensive backstop. A missing/empty/failed-to-load
-  // srProductCategories must never narrow the list to zero when it would
-  // otherwise show options — fail open, not closed.
+  // same way. Ineligible products are still listed (disabled, with a reason
+  // tooltip) so the engineer can see why a product can't be used, rather than
+  // wondering where it went. The backend remains the authority and rejects
+  // creation against them; this is a display of data eligibility only.
+  // The full, unnarrowed product list is therefore fetched and classified
+  // client-side. A missing/empty/failed-to-load srProductCategories never
+  // disables anything: fail open, not closed.
   const projectMetadata = useProjectMetadata(projectId || undefined);
   const srProductCategories = projectMetadata.data?.features?.srProductCategories;
   // `hasServiceRequestReadAccess` gates the SR feature itself (viewer
@@ -161,17 +183,28 @@ export default function CreateServiceRequestPage(): JSX.Element {
     projectMetadata.data?.features?.hasServiceRequestReadAccess === false;
 
   const deployments = useSearchDeployments(projectId || undefined);
-  const deployedProducts = useDeployedProductOptions(
-    deploymentId || undefined,
-    srProductCategories ?? undefined,
-  );
+  const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const deployedProductOptions = useMemo(() => {
     const options = deployedProducts.data ?? [];
-    if (!srProductCategories || srProductCategories.length === 0) return options;
-    return options.filter(
-      (o) => o.category != null && srProductCategories.includes(o.category),
-    );
+    const restricted = !!srProductCategories && srProductCategories.length > 0;
+    return options.map((o) => ({
+      ...o,
+      ineligibleReason: restricted
+        ? getIneligibleReason(o.category, srProductCategories)
+        : null,
+    }));
   }, [deployedProducts.data, srProductCategories]);
+  const eligibleProductCount = deployedProductOptions.filter(
+    (o) => o.ineligibleReason === null,
+  ).length;
+  // A prefilled (or otherwise stale) selection that resolves to an ineligible
+  // product is treated as unselected, so the form can't submit a doomed
+  // request. A product not (yet) in the list is left alone.
+  const deployedProductId = deployedProductOptions.some(
+    (o) => o.id === selectedDeployedProductId && o.ineligibleReason !== null,
+  )
+    ? ""
+    : selectedDeployedProductId;
   const catalogs = useSearchCatalogs(deployedProductId || undefined);
   const variables = useCatalogItemVariables(
     catalogId || undefined,
@@ -477,8 +510,30 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 notched={deployedProductId !== ""}
               >
                 {deployedProductOptions.map((dp) => (
-                  <MenuItem key={dp.id} value={dp.id}>
-                    {dp.label}
+                  <MenuItem
+                    key={dp.id}
+                    value={dp.id}
+                    disabled={dp.ineligibleReason !== null}
+                  >
+                    {dp.ineligibleReason !== null ? (
+                      // A disabled MenuItem has `pointer-events: none`, so the
+                      // Tooltip target re-enables pointer events on its own
+                      // span. The item itself stays a direct Select child, so
+                      // it remains skipped by keyboard navigation and
+                      // unselectable. `describeChild` keeps the option's
+                      // accessible name as the product label and exposes the
+                      // reason as its description.
+                      <Tooltip title={dp.ineligibleReason} describeChild>
+                        <Box
+                          component="span"
+                          sx={{ display: "block", width: "100%", pointerEvents: "auto" }}
+                        >
+                          {dp.label}
+                        </Box>
+                      </Tooltip>
+                    ) : (
+                      dp.label
+                    )}
                   </MenuItem>
                 ))}
               </Select>
@@ -490,6 +545,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 <FormHelperText>Loading products…</FormHelperText>
               ) : deployedProductOptions.length === 0 ? (
                 <FormHelperText>No deployed products found for this deployment.</FormHelperText>
+              ) : eligibleProductCount === 0 ? (
+                <FormHelperText>
+                  No products in this deployment can be used for a service request.
+                </FormHelperText>
               ) : null}
             </FormControl>
           </Grid>

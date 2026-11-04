@@ -33,9 +33,13 @@ let projectMetadataResult: {
   isError: boolean;
 } = { data: undefined, isLoading: false, isError: false };
 
+// Mutable router state, so a test can simulate arriving from a related case
+// with a prefilled deployed product.
+let locationState: Record<string, unknown> | undefined;
+
 vi.mock("react-router", () => ({
   useNavigate: () => navigateMock,
-  useLocation: () => ({ state: undefined }),
+  useLocation: () => ({ state: locationState }),
   useSearchParams: () => [new URLSearchParams()],
 }));
 vi.mock("@context/error-banner/ErrorBannerContext", () => ({
@@ -168,9 +172,10 @@ describe("CreateServiceRequestPage — deployed-product filtering by srProductCa
     postCaseMutateAsyncMock.mockReset();
     showErrorMock.mockReset();
     projectMetadataResult = { data: undefined, isLoading: false, isError: false };
+    locationState = undefined;
   });
 
-  it("shows only deployed products whose category is in the project's srProductCategories", () => {
+  it("lists every product but disables those outside the project's srProductCategories", () => {
     projectMetadataResult = {
       data: { features: { srProductCategories: ["ms"] } },
       isLoading: false,
@@ -180,9 +185,18 @@ describe("CreateServiceRequestPage — deployed-product filtering by srProductCa
     selectProjectAndDeployment();
 
     fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
-    expect(screen.getByRole("option", { name: "API Manager 4.3.0" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Choreo Connect 1.0" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Unknown Product" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "API Manager 4.3.0" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: "Choreo Connect 1.0" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("option", { name: "Unknown Product" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("shows every deployed product when srProductCategories is absent (no restriction configured)", () => {
@@ -308,5 +322,79 @@ describe("CreateServiceRequestPage — project picker offers eligible subscripti
 
   it("does not offer cloud_evaluation_support", () => {
     expect(offered("cloud_evaluation_support")).toBe(false);
+  });
+});
+
+/** The closed/open select's combobox element (the label also matches the
+ * listbox while the menu is open, so getByLabelText would be ambiguous). */
+function productCombobox(): HTMLElement {
+  return screen.getByRole("combobox", { name: /deployed product/i });
+}
+
+describe("CreateServiceRequestPage — ineligible deployed products are listed disabled with a reason", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    projectMetadataResult = {
+      data: { features: { srProductCategories: ["ms"] } },
+      isLoading: false,
+      isError: false,
+    };
+    locationState = undefined;
+  });
+
+  it("keeps an eligible product selectable", () => {
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+    fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
+    fireEvent.click(screen.getByRole("option", { name: "API Manager 4.3.0" }));
+    expect(productCombobox()).toHaveTextContent("API Manager 4.3.0");
+  });
+
+  it("explains an other-category product in a tooltip and does not select it", async () => {
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+    fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
+
+    fireEvent.mouseOver(screen.getByText("Choreo Connect 1.0"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Service requests can only be raised against products in these categories: MS. This product's category is PC.",
+    );
+
+    fireEvent.click(screen.getByRole("option", { name: "Choreo Connect 1.0" }));
+    expect(productCombobox()).not.toHaveTextContent("Choreo Connect 1.0");
+  });
+
+  it("explains a product with no category in a tooltip", async () => {
+    render(<CreateServiceRequestPage />);
+    selectProjectAndDeployment();
+    fireEvent.mouseDown(screen.getByLabelText(/deployed product/i));
+
+    fireEvent.mouseOver(screen.getByText("Unknown Product"));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "This product has no category set. Set a category on the deployed product to raise a service request.",
+    );
+  });
+
+  it("clears a prefilled product that is ineligible, keeping submit blocked", () => {
+    locationState = {
+      projectId: "proj-1",
+      deploymentId: "dep-1",
+      deployedProductId: "dp-pc",
+    };
+    render(<CreateServiceRequestPage />);
+
+    expect(screen.getByLabelText(/deployed product/i)).not.toHaveTextContent("Choreo Connect 1.0");
+    expect(screen.getByRole("button", { name: /create service request/i })).toBeDisabled();
+  });
+
+  it("keeps a prefilled eligible product selected", () => {
+    locationState = {
+      projectId: "proj-1",
+      deploymentId: "dep-1",
+      deployedProductId: "dp-ms",
+    };
+    render(<CreateServiceRequestPage />);
+
+    expect(screen.getByLabelText(/deployed product/i)).toHaveTextContent("API Manager 4.3.0");
   });
 });
