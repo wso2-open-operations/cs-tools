@@ -41,7 +41,7 @@ func TestStaleCasesRunNowOverride(t *testing.T) {
 			raw := &recordingSender{}
 			hook := reportRunNow(notify.ForReport(raw, nil), raw,
 				func(email notify.Sender, rec []string) func(context.Context) error {
-					return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(realTo, rec), []string{"standing-cc@example.com"}, true)
+					return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(realTo, rec), []string{"standing-cc@example.com"}, "", true)
 				})
 			h, _, err := hook(registry.RunNowOptions{Recipients: override, Cc: overrideCc})
 			if err != nil {
