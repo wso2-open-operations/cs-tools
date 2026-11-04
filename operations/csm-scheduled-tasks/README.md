@@ -163,6 +163,25 @@ reminders are not affected.
   and the real account owners never get those notices later. The run-now log says so.
 - Refused without `--run-now`, and with `TRYOUT_TASK`. A plain `--run-now=<task>` and the scheduled run are unchanged.
 
+### Monthly time card report on demand
+
+`time_card_report` mails each project in `TIME_CARD_REPORT_PROJECT_KEYS` its contacts' previous-month time card
+report on the 2nd at 05:30 UTC (unset keys: it does nothing). It is the one task whose `--run-now` flags can widen
+a run, so a single customer's report can be sent on demand:
+
+| Flag | Meaning |
+|---|---|
+| `--project-key=PRJ-1` | Run only this project, whether or not it is configured |
+| `--to=a@example.com,b@example.com` | Replace the project's contacts with this list (one mail, all in To); at most 50 |
+| `--cc=c@example.com` | Extra Cc on every mail |
+
+```
+csm-scheduled-tasks --run-now=time_card_report --project-key=PRJ-1 --to=jane.doe@example.com
+```
+
+A derived audience gets one mail per address, so customers never see each other. A run-now writes no ledger row and
+can mail a period that was already sent. Details: CLAUDE.md, "Monthly time card report".
+
 ### Alerting
 
 - `ALERT_RECIPIENTS` is a standing audience emailed on every failed attempt of every task.

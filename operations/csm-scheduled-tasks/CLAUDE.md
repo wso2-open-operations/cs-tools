@@ -634,6 +634,7 @@ task", and the message lists the registered names.
 | `--states=a,b` | Work only these states, each among the configured ones. Same tasks as `--dry-run` |
 | `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
 | `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
+| `--project-key=KEY` `--to=a@x,b@y` `--cc=c@x` | **Only `time_card_report`** (see "Monthly time card report" below). `--project-key` runs one project, configured or not; `--to` replaces the project's derived contacts with your list (one mail, all in To); `--cc` adds copies. Same address rules as `--recipients`, at most 50 addresses per list, one bare key. `--to` and `--recipients` cannot be combined; every other task refuses `--to` and `--project-key` |
 
 `--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
 implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
@@ -699,7 +700,8 @@ reading the handlers' code and doc comments (a judgement, not a test):
   `rota_manual_reminder` (claims waiting requests, each reported once).
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
-  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports.
+  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `time_card_report` (customer-facing: a repeat mails every contact of the project again).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
   confirmed), `query_hours_usage_notifications` (mails crossings it derives in process; whether a repeat re-sends
@@ -874,6 +876,7 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
+| `TIME_CARD_REPORT_PROJECT_KEYS` | No (default empty) | Comma-separated project keys the `time_card_report` sub-cron mails each month (spaces trimmed, empties and duplicates dropped). Empty or unset: the task is registered but does nothing, with a log line, so a deployment sends nothing until it names its projects. Needs `EMAIL_BASE_URL` when set (checked at startup) — see "Monthly time card report" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
@@ -918,6 +921,69 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `ALERT_RECIPIENTS` only.
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
+## Monthly time card report
+
+`internal/timecardreport.SendReports`, registered as `"time_card_report"`, emails each project's contacts the
+previous calendar month's approved effort, per case. It is **customer-facing**: the recipients are the project's
+own contacts, not an internal list. Layering is the usual one: `internal/timecards` (entity-service client and wire
+types), `internal/timecardreport` (the task), `internal/notify` (`RenderTimeCardReport`, `TimeCardReportSubject`,
+`FormatMinutes`, template `templates/time_card_report.html`: table layout, inline styles, no vendor name or logo).
+
+- **Projects.** `TIME_CARD_REPORT_PROJECT_KEYS`, comma-separated keys. Empty or unset is a logged no-op, never an
+  error. Each key is resolved to a project id with `POST /projects/search` (a substring match on name, key and
+  subscription type), keeping only the result whose `key` equals the configured one ignoring case; none, or more than
+  one, fails that project.
+- **Window.** The calendar month before the **period key's** month, in UTC (`PreviousMonth`): the first through the
+  last day, so January reaches back to December of the previous year and February is 28 or 29 days. It derives
+  from the period key (the cron firing), never the clock, so every retry of a period asks for the same window.
+  Default schedule `30 5 2 * *` (05:30 UTC on the 2nd), overridable in `SUB_CRON_SCHEDULES`. Consequence for
+  `--run-now`: it uses the period the schedule is in *now*, so run on the 1st before the 05:30 firing of the 2nd and
+  it reports the month before last. The run-now log line has the exact from and to.
+- **Report data.** `GET /projects/{id}/time-cards/report?from=&to=` (approved cards only, durations in whole minutes).
+  A month with no approved time is **still sent**, with a "No time card data found for the selected period." card in
+  place of the summary cards and table. Durations are formatted once, from integer minutes, as `<h>h <m>m`
+  (`FormatMinutes`: 119 is `1h 59m`, 60 is `1h 0m`, never `60m`). Case type is humanised (`service_request` is
+  `Service request`). Subject: `Time Card Report - <project name> - <Month YYYY>` (the key stands in for a missing name).
+- **Recipients.** `POST /projects/{id}/contacts/search` (all pages): every contact with a non-empty email,
+  de-duplicated ignoring case. One filter beyond legacy's none: integration users (`isCsIntegrationUser`, machine
+  accounts that never read mail) are left out. Deactivated memberships are already excluded by entity-service.
+  Invited-but-unregistered contacts ARE included, as legacy did. A project with no recipients is skipped with a
+  WARN (project key and counts, never addresses) and does not fail the run.
+- **Privacy.** The mail client has no Bcc, so a derived audience gets **one mail per address**: no customer ever sees
+  another's address. Any Cc (manual runs only) is on every one of those mails.
+- **Failures and retries.** Projects are independent: one failing never stops the rest, and the handler returns a
+  single error naming every failed project key (`N of M projects failed (PRJ-2, PRJ-4)`), with each project's reason
+  (status codes only, never addresses). A project whose mails partly failed counts as failed. **The handler has no
+  memory of what it sent**, so when any project fails the engine retries the whole run on a later tick and the
+  projects that already succeeded are mailed again. The only brake is `MaxAttempts: 2` on the task (one retry; the
+  failure alert says no retry is coming), the same device `acp_closure` uses; there is no per-project ledger.
+  To re-send one project after that, use `--run-now=time_card_report --project-key=KEY`.
+- **Failure alerts.** `SUB_CRON_RECIPIENTS` `to`/`cc` for this task are the failure-alert audience, as for every
+  task (the customers' addresses are never configured anywhere). A `debug` list redirects every mail to it (so one
+  copy per would-be recipient), with `[Test copy]` in the subject.
+- **`ALERTS_ENABLED=false`** silences it like every report.
+
+**On-demand run (`--run-now=time_card_report`).** The one task whose run-now flags can **widen** a run, which is why
+it is the deliberate exception to the "narrowing only" rule of `registry.Task.RunNowNarrow`: an operator has to be
+able to send one customer's report (a missed month, a retry) or send a test to themselves, and neither is a subset of
+the configured projects and contacts.
+
+| Flags | Projects | Mailed to |
+|---|---|---|
+| none | `TIME_CARD_REPORT_PROJECT_KEYS` | each project's derived contacts (as scheduled) |
+| `--project-key=KEY` | only `KEY`, whether configured or not | its derived contacts |
+| `--project-key=KEY --to=a@x,b@y` | only `KEY` | the list, one mail, all in To |
+| `--to=a@x,b@y` | every configured project | the list, one mail per project |
+| any of the above plus `--cc=c@x` | unchanged | unchanged, plus Cc on every mail |
+
+`--to` goes out with the **raw mail client**: no `[Test copy]` rewrite and it wins over a `debug` list (the operator
+chose the audience, and may be re-sending to a customer on purpose). Without `--to` the task's normal sender
+(debug mode included) is used. Each address is validated with `net/mail` (bare address, no display name, any invalid
+one is refused, at most 50 per list); contacts are not fetched when `--to` is given. Like every run-now it writes **no
+ledger row**, so it can mail a period the schedule already sent, and the start-of-run WARN says so. The window,
+project count and recipient counts are logged (counts only, never addresses). The other tasks refuse `--to` and
+`--project-key` as `not supported by task <name>`.
 
 ## Per-task report emails
 
