@@ -96,10 +96,13 @@ type WidgetItem = Record<string, unknown>;
  * embed their own tab's real list component and so already get this for
  * free — see `CasesList`'s own `useLocation()` call), so the destination
  * page's own Back button can return to this exact dashboard instead of
- * falling through to a hardcoded/generic destination. */
-function useDashboardReturnState(): { from: string } {
+ * falling through to a hardcoded/generic destination. `parentState` nests
+ * this page's OWN inherited state (on View more, `{ from: <dashboard> }`), so
+ * the destination's Back can restore it and this page's own Back still
+ * returns to that dashboard. */
+function useDashboardReturnState(): { from: string; parentState: unknown } {
   const location = useLocation();
-  return { from: `${location.pathname}${location.search}` };
+  return { from: `${location.pathname}${location.search}`, parentState: location.state ?? null };
 }
 
 function formatDate(value?: string | null): string {
