@@ -445,7 +445,15 @@ export default function CasesList({
             {!isLoading &&
               cases.map((c) => {
                 const rowBasePath = detailBasePath ?? caseTypeDetailBasePath(c.caseType);
-                const rowState = { from: `${location.pathname}${location.search}` };
+                // `parentState` nests this list's OWN inherited state (e.g.
+                // `{ from: <dashboard> }`) so the detail page's Back can
+                // restore it — otherwise a dashboard → list → case → Back
+                // round trip lands on this list with no `from`, dropping its
+                // own Back button.
+                const rowState = {
+                  from: `${location.pathname}${location.search}`,
+                  parentState: location.state ?? null,
+                };
                 const rowLabel = c.wso2CaseId || c.caseNumber || c.subject;
                 return (
                   <Box

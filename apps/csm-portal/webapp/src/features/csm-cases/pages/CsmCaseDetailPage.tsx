@@ -479,9 +479,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // forward as router state, so the back button below returns to that exact
   // list view — filters, search text, sort — instead of a bare list path.
   // Falls back to the hardcoded backPath for a bookmarked or directly-linked
-  // detail page, which never got the state set.
-  const fromListState = location.state as { from?: string } | undefined;
+  // detail page, which never got the state set. `parentState` is the state
+  // that list was itself carrying (e.g. `{ from: <dashboard> }`), handed back
+  // to it on Back so the list keeps its own Back button.
+  const fromListState = location.state as { from?: string; parentState?: unknown } | undefined;
   const resolvedBackPath = fromListState?.from ?? backPath;
+  const backNavState = fromListState?.parentState ?? undefined;
+  const goBack = (): void => navigate(resolvedBackPath, { state: backNavState });
   const {
     data,
     isLoading,
@@ -552,7 +556,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     // report and got redirected to its real route.
     navigate(
       { pathname: canonicalDetailPath, search: location.search, hash: location.hash },
-      { replace: true, state: { from: resolvedBackPath } },
+      { replace: true, state: { from: resolvedBackPath, parentState: backNavState ?? null } },
     );
   }, [
     isMisrouted,
@@ -560,6 +564,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     caseId,
     navigate,
     resolvedBackPath,
+    backNavState,
     location.search,
     location.hash,
   ]);
@@ -2324,7 +2329,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2345,7 +2350,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2440,7 +2445,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           size="small"
           className="csm-print-hide"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
