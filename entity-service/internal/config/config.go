@@ -740,6 +740,12 @@ type Config struct {
 	// setting. Matched exactly, as the portal does. Empty means nobody is (the
 	// portal's own rule for an unset role).
 	AuthAdminRoles []string
+	// AuthProductCatalogManagerRoles is AUTH_PRODUCT_CATALOG_MANAGER_ROLES,
+	// comma-separated: the same variable, with the same value, as
+	// csm-portal-backend's -- the token roles that may edit the product
+	// catalogue. AUTH_ADMIN_ROLES may edit it too.
+	// Matched exactly. Empty means only admins can.
+	AuthProductCatalogManagerRoles []string
 	// CaseAlertsSecretKey is CASE_ALERTS_SECRET_KEY: 32 bytes, base64, the
 	// AES-256-GCM key that seals the Case Alerts chat-room webhook URLs
 	// (migration 0233). One per environment, so a database copied from
@@ -1021,6 +1027,7 @@ func Load() *Config {
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
 		AuthClockSkew:                                 envDuration("AUTH_CLOCK_SKEW", 30*time.Second),
 		AuthAdminRoles:                                splitComma(os.Getenv("AUTH_ADMIN_ROLES")),
+		AuthProductCatalogManagerRoles:                splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 		CaseAlertsSecretKey:                           strings.TrimSpace(os.Getenv("CASE_ALERTS_SECRET_KEY")),
 		CaseAlertsSecretKeyID:                         getEnvOrDefault("CASE_ALERTS_SECRET_KEY_ID", "1"),
 		CaseAlertsRuntimeClientIDs:                    splitComma(os.Getenv("CASE_ALERTS_RUNTIME_CLIENT_IDS")),

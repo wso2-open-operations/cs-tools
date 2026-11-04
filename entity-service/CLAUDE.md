@@ -11896,6 +11896,58 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
 
+## Product catalogue (products API, Postgres only)
+
+The product and EOL data the wso2.com Support Matrix and Release Matrix publish (it used to come from the
+retired wso2-product-service; `integrations/legacy-product-api` serves that old read contract from here) is
+part of the products API. `Product` and `ProductVersion` carry the catalogue fields, so
+`POST /products/search` and `POST /products/{id}/versions/search` return them (existing fields and behaviour
+unchanged: retired rows are still returned unless `excludeRetired`). The rest is `ProductCatalogService`
+(`internal/service/product_catalog_service.go`) behind `ProductCatalogHandler`: `GET/PATCH /products/{id}`,
+`POST /products`, `POST /products/{id}/versions`, `POST /product-versions/search`, `GET/PATCH
+/product-versions/{id}`, `POST /product-versions/{id}/retire`, `/release-lines` (+ `/{id}`, `/{id}/retire`),
+`GET /carbon-platform-history`, `GET /carbon-kernel-releases`. Tables: migrations 0270-0272
+(`product_version` public/EOL columns, `product_version_carbon`, `release_line`, `carbon_platform_history`,
+`carbon_kernel_release`). Registered only with a database
+pool and not in the ServiceNow data source (there the two searches read ServiceNow).
+
+- **Who.** Reads: any internal caller (CSM staff tokens, allow-listed M2M clients). Writes: a token role in
+  `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` or `AUTH_ADMIN_ROLES`, matched exactly; the caller's email is the actor.
+- **A write applies at once.** There are no drafts. A body carries only the keys being set (null clears).
+  `prepareCatalogChange` validates it against a fixed field table (key → column, SQL cast, kind); the column
+  names and casts come from that table, never the request. `ApplyChange` writes the rows in one transaction
+  (`created_by` / `updated_by` / `retired_by` name the person); it returns the ids written and the service
+  answers with the rows read back. There is no catalogue-specific audit: the platform's database-level audit
+  covers these tables.
+- **Wire formats.** Reads keep the existing conventions: dates are RFC 3339 timestamps, `currentSupportStatus`
+  the uppercase enum text. Writes take `YYYY-MM-DD` and either case.
+- **Public listings.** The feeds publish one row per version, but `product_version` has one row per
+  deployment profile, so the profile rows of one listing share `public_id` (legacy ids kept; new listings take
+  `product_version_public_id_seq`, from 1100). `POST /products/{id}/versions` creates every profile
+  (`profiles`) of a new version in one transaction on one listing, under a row lock on the product, and refuses a
+  profile the version already has (NULL profiles are distinct to the unique constraint, so it would not). A PATCH
+  or retire of a live version row applies to all live rows of the version: its listing, or, without a
+  `public_id`, the unpublished rows of the same product and version; on a retired row it touches only that row.
+  `deploymentProfile` and `publicId` are row-only: `publicId` may only name a live listing of the same
+  product and version, and a `deploymentProfile` the version already has (NULL included) is refused under the same
+  product lock.
+- **Error messages are in request terms.** The CSM portal shows a write's 400 reason to the user, so `changeError`
+  maps each catalogue constraint to a field or rule (`catalogConstraintMessages`, `catalogColumnFields`) and never
+  echoes `pgErr.Detail` or `pgErr.Message`.
+- **Rules, checked in the write transaction on the rows as written** (`checkVersionRules`), so a body is always
+  judged with the stored values it leaves alone: release <= earliest possible EOL <= EOL, announcement <= EOL, and
+  a row on a public feed needs `public_abbreviation` or a product `code`, checked when a write publishes a row or
+  sets its abbreviation (five legacy rows are published without one and stay editable); a product PATCH that
+  clears the code is refused while it has published rows that rely on it. A listing's live rows must agree on the listing fields a write sets (all of
+  them when a row joins a listing), so a listing split by the import on another field can still be edited.
+- **Never delete a version.** Deployments, work items and change requests reference it (change requests by
+  cascade). Retire sets `retired_on` on every live row of the listing; retired rows leave the feeds. A product
+  cannot be retired.
+- **csm-sync-service also writes `product_version`.** Every column added is nullable or defaulted, and the
+  catalogue tables have no row-level security.
+
+Tests: `product_catalog_service_test.go` (unit).
+
 ## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
 
 An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per

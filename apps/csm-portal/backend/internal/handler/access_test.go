@@ -33,20 +33,21 @@ import (
 // never depend on real role names.
 func testAccessConfig() AccessConfig {
 	return AccessConfig{
-		Viewer:               []string{"test-viewer"},
-		Escalator:            []string{"test-escalator"},
-		AttachmentDownloader: []string{"test-attachment-downloader"},
-		UsageMetricsViewer:   []string{"test-usage-metrics-viewer"},
-		CsEngineer:           []string{"test-cs-engineer"},
-		Admin:                []string{"test-admin"},
-		TimecardApprover:     []string{"test-timecard-approver"},
-		DashboardDesigner:    []string{"test-dashboard-designer"},
-		SalesSolutions:       []string{"test-sales-solutions"},
-		WorknoteCreator:      []string{"test-worknote-creator"},
-		AnnouncementCreator:  []string{"test-announcement-creator"},
-		CommentUpdater:       []string{"test-comment-updater"},
-		OnboardingLead:       []string{"test-onboarding-lead"},
-		SecurityTeam:         []string{"test-security-team"},
+		Viewer:                []string{"test-viewer"},
+		Escalator:             []string{"test-escalator"},
+		AttachmentDownloader:  []string{"test-attachment-downloader"},
+		UsageMetricsViewer:    []string{"test-usage-metrics-viewer"},
+		CsEngineer:            []string{"test-cs-engineer"},
+		Admin:                 []string{"test-admin"},
+		TimecardApprover:      []string{"test-timecard-approver"},
+		DashboardDesigner:     []string{"test-dashboard-designer"},
+		SalesSolutions:        []string{"test-sales-solutions"},
+		WorknoteCreator:       []string{"test-worknote-creator"},
+		AnnouncementCreator:   []string{"test-announcement-creator"},
+		CommentUpdater:        []string{"test-comment-updater"},
+		OnboardingLead:        []string{"test-onboarding-lead"},
+		ProductCatalogManager: []string{"test-product-catalog-manager"},
+		SecurityTeam:          []string{"test-security-team"},
 	}
 }
 
@@ -595,7 +596,7 @@ func TestAccessGuard_SecurityReportCasesAlsoAllowsViewer(t *testing.T) {
 
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
-	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject} {
+	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog} {
 		if status, _ := serveWithRoles(g, perm, []string{"test-admin", "test-viewer", ""}); status != http.StatusForbidden {
 			t.Errorf("permission %d with no roles configured: status = %d, want 403", perm, status)
 		}
@@ -880,6 +881,37 @@ func TestAccessGuard_OnboardingPermissions(t *testing.T) {
 	}
 	if got := g.RolesFor([]string{"test-onboarding-lead"}); len(got) != 1 || got[0] != "onboarding_lead" {
 		t.Errorf("RolesFor = %v, want [onboarding_lead]", got)
+	}
+}
+
+// TestAccessGuard_ProductCatalogPermissions pins who holds
+// PermManageProductCatalog (product_catalog_manager and admin only -- never
+// cs_engineer), and that product_catalog_manager grants neither read nor
+// write access of its own.
+func TestAccessGuard_ProductCatalogPermissions(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for _, role := range []string{"test-product-catalog-manager", "test-admin"} {
+		if status, _ := serveWithRoles(g, PermManageProductCatalog, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s PermManageProductCatalog: status = %d, want 204", role, status)
+		}
+	}
+	for _, role := range []string{
+		"test-cs-engineer", "test-viewer", "test-escalator", "test-attachment-downloader",
+		"test-usage-metrics-viewer", "test-timecard-approver", "test-dashboard-designer",
+		"test-comment-updater", "test-announcement-creator", "test-security-team",
+		"test-onboarding-lead", "test-worknote-creator", "test-sales-solutions",
+	} {
+		if status, _ := serveWithRoles(g, PermManageProductCatalog, []string{role}); status != http.StatusForbidden {
+			t.Errorf("%s must not hold PermManageProductCatalog: status = %d, want 403", role, status)
+		}
+	}
+	for _, perm := range []Permission{PermView, PermViewSharedEntity, PermWrite, PermAdmin, PermManageOnboarding} {
+		if status, _ := serveWithRoles(g, perm, []string{"test-product-catalog-manager"}); status != http.StatusForbidden {
+			t.Errorf("product_catalog_manager must not hold permission %d: status = %d, want 403", perm, status)
+		}
+	}
+	if got := g.RolesFor([]string{"test-product-catalog-manager"}); len(got) != 1 || got[0] != "product_catalog_manager" {
+		t.Errorf("RolesFor = %v, want [product_catalog_manager]", got)
 	}
 }
 

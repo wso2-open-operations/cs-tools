@@ -11907,6 +11907,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a product to the catalogue.
+      description: >
+        Creates a product (name and class required). Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "201":
+          description: The new product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /abt-teams:
     get:
@@ -18403,6 +18457,743 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
 
+  /products/{id}:
+    get:
+      summary: One product with its catalogue fields.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product.
+      description: >
+        A present field sets it, null clears an optional one, an absent field is left alone. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProduct
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreate'
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogProduct'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /products/{id}/versions:
+    post:
+      summary: Add a version with all its deployment profiles.
+      description: >
+        Creates one row per profile, all sharing one public listing (new, or the publicId given), in one transaction. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createProductVersions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionCreate'
+      responses:
+        "201":
+          description: The new rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/search:
+    post:
+      summary: Product versions of every product.
+      description: >
+        One row per (product, version, deployment profile), ordered by product name, release date (newest first), version and profile; paged (limit up to 1000). excludeRetired leaves retired rows out; feed restricts to the live rows on that public feed. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: searchAllProductVersions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionSearch'
+      responses:
+        "200":
+          description: One page of versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionPage'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}:
+    get:
+      summary: One product version row.
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: getProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersion'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    patch:
+      summary: Edit a product version.
+      description: >
+        Listing-wide fields apply to every live row of its public listing (same publicId); deploymentProfile and publicId change this row only. The EOL date may not be before the release date. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogVersionUpdate'
+      responses:
+        "200":
+          description: The rows changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /product-versions/{id}/retire:
+    post:
+      summary: Retire a version.
+      description: >
+        Retires every live row of its public listing (only this row when it has no publicId), taking it off the catalogue and both public feeds. No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireProductVersion
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The rows retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogVersionRows'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines:
+    get:
+      summary: Release lines.
+      description: >
+        Live release lines by name; includeRetired=true adds retired ones. Only includeRetired is forwarded. Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listReleaseLines
+      parameters:
+        - name: includeRetired
+          in: query
+          required: false
+          schema: {type: boolean}
+      responses:
+        "200":
+          description: The release lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLineList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    post:
+      summary: Add a release line.
+      description: >
+        Name required. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: createReleaseLine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "201":
+          description: The new release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}:
+    patch:
+      summary: Edit a release line.
+      description: >
+        Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: updateReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReleaseLineSave'
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /release-lines/{id}/retire:
+    post:
+      summary: Retire a release line.
+      description: >
+        No body. Needs the product_catalog_manager or admin role; entity-service re-checks it. Applied at once. Responses are Cache-Control no-store.
+      operationId: retireReleaseLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReleaseLine'
+        "400":
+          description: Invalid id or body, or (writes) the change breaks a catalogue rule; a write keeps the entity service reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — needs the product_catalog_manager or admin role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict, e.g. a duplicate; the reason is in the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-platform-history:
+    get:
+      summary: Carbon platform history (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonPlatformHistory
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistoryList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /carbon-kernel-releases:
+    get:
+      summary: Carbon kernel releases (reference data).
+      description: >
+        Any caller with view permission. Responses are Cache-Control no-store.
+      operationId: listCarbonKernelReleases
+      responses:
+        "200":
+          description: The rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelReleaseList'
+        "400":
+          description: Invalid id, query or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /portal-banners:
     get:
       summary: Banners for the CSM portal.
@@ -19902,6 +20693,223 @@ components:
       properties:
         subject: { type: string, maxLength: 512 }
         content: { type: string, maxLength: 8000 }
+    CatalogProduct:
+      type: object
+      description: >
+        One product: the fields of POST /products/search plus its catalogue fields and
+        version counts.
+      required: [id, name, class, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        class: {type: string, enum: [software, service]}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        code: {type: string, nullable: true}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        versionCount: {type: integer, description: Live (not retired) versions of the product.}
+        retiredVersionCount: {type: integer, description: Retired versions of the product.}
+        activeVersionCount: {type: integer, description: Live versions whose support has not ended (not discontinued).}
+    CatalogProductCreate:
+      type: object
+      description: The fields of a product. name and class are required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        class: {type: string, enum: [software, service]}
+        code: {type: string, nullable: true, maxLength: 64}
+        unit: {type: string, nullable: true}
+        businessUnit: {type: string, nullable: true}
+        manufacturer: {type: string, nullable: true}
+        description: {type: string, nullable: true, maxLength: 2000}
+    CatalogVersion:
+      type: object
+      description: >
+        One product_version row (one deployment profile). A public listing is the live
+        rows sharing publicId. Dates are RFC 3339 timestamps; currentSupportStatus is
+        upper case.
+      required: [id, productId, version]
+      properties:
+        id: {type: string, format: uuid}
+        productId: {type: string, format: uuid}
+        version: {type: string}
+        currentSupportStatus: {type: string, nullable: true, enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]}
+        releaseDate: {type: string, format: date-time, nullable: true}
+        supportEolDate: {type: string, format: date-time, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date-time, nullable: true}
+        deploymentProfile: {type: string, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+        productName: {type: string}
+        productCode: {type: string, nullable: true}
+        serialNumber: {type: string, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date-time, nullable: true}
+        publicId: {type: integer, format: int64, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        releaseLinks: {type: string, nullable: true}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        releaseLineName: {type: string, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+        retiredOn: {type: string, format: date-time, nullable: true}
+    CatalogVersionFields:
+      type: object
+      description: >
+        The listing fields of a version. Dates are YYYY-MM-DD; status and type are
+        accepted in either case. On PATCH a present field sets it, null clears it, an
+        absent field is left alone.
+      properties:
+        currentSupportStatus: {type: string, nullable: true}
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, nullable: true}
+        publicAbbreviation: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        releaseLinks: {type: string, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          items: {type: string}
+        legacyStatus: {type: boolean, nullable: true}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CatalogCarbon'
+    CatalogVersionCreate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          required: [version, profiles]
+          properties:
+            version: {type: string, maxLength: 20}
+            profiles:
+              type: array
+              minItems: 1
+              description: One row per profile; "" is a row with no profile.
+              items: {type: string}
+            publicId: {type: integer, format: int64, description: Join an existing public listing instead of starting a new one.}
+    CatalogVersionUpdate:
+      allOf:
+        - $ref: '#/components/schemas/CatalogVersionFields'
+        - type: object
+          properties:
+            deploymentProfile: {type: string, nullable: true, description: This row only.}
+            publicId: {type: integer, format: int64, nullable: true, description: This row only.}
+    CatalogVersionRows:
+      type: object
+      required: [productVersions]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+    CatalogVersionSearch:
+      type: object
+      properties:
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+        searchQuery: {type: string}
+        deploymentProfile: {type: string}
+        productId: {type: string, format: uuid}
+        excludeRetired: {type: boolean}
+        feed: {type: string, enum: [support-matrix, release-matrix]}
+        publicId: {type: integer, format: int64}
+    CatalogVersionPage:
+      type: object
+      required: [productVersions, total, limit, offset, hasMore]
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogVersion'
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+        hasMore: {type: boolean}
+    CatalogReleaseLine:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        startDate: {type: string, format: date-time, nullable: true}
+        status: {type: string, nullable: true}
+        legacyId: {type: integer, format: int64, nullable: true}
+        versionCount: {type: integer, description: Live versions on the line.}
+        retiredOn: {type: string, format: date-time, nullable: true}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    CatalogReleaseLineList:
+      type: object
+      required: [releaseLines]
+      properties:
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CatalogReleaseLine'
+    CatalogReleaseLineSave:
+      type: object
+      description: name is required on create. startDate is YYYY-MM-DD.
+      properties:
+        name: {type: string, maxLength: 100}
+        startDate: {type: string, format: date, nullable: true}
+        status: {type: string, nullable: true, maxLength: 50}
+    CatalogCarbon:
+      type: object
+      description: The Carbon platform of a version.
+      properties:
+        platformRelease: {type: string, nullable: true}
+        platformVersion: {type: string, nullable: true}
+        carbonKernelVersion: {type: string, nullable: true}
+        releaseChunk: {type: string, nullable: true}
+        kernelPatchNo: {type: string, nullable: true}
+    CarbonPlatformHistoryList:
+      type: object
+      description: >
+        Carbon platform history rows: id, carbonVersion, releaseDate, releaseDateText and one
+        nullable *Version string per legacy product column, named as the legacy Product API
+        names them.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              id: {type: integer}
+              carbonVersion: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              releaseDateText: {type: string, nullable: true}
+    CarbonKernelReleaseList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: integer}
+              kernelRelease: {type: string, nullable: true}
+              releaseDate: {type: string, format: date, nullable: true}
+              carbonPlatform: {type: string, nullable: true}
     SalesforceResyncRequest:
       type: object
       description: "The target of a Salesforce resync."
@@ -22723,7 +23731,7 @@ components:
           type: array
           items:
             type: string
-            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, admin]
+            enum: [viewer, escalator, attachment_downloader, cs_engineer, usage_metrics_viewer, timecard_approver, dashboard_designer, onboarding_lead, product_catalog_manager, admin]
           description: >
             The portal roles the caller holds, decided from the roles on their token. A caller can
             hold several. Always present; empty when they hold none. This is not the entity
