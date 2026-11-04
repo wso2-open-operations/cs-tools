@@ -930,17 +930,22 @@ export default function MonthRoster({
       // Every key starts with the day (ISO), a zone column's too.
       for (const m of [row.days, row.zoned, row.allocs, row.zonedBase]) for (const [k, c] of m) fromCell(c, k.slice(0, 10));
     }
-    // What an unmarked weekday reads as on each team in view (LK, or NLK on
-    // the Americas team), so the most common chip on the grid is explained.
+    // What an unmarked weekday reads as on each team in view (IST, or PDT on
+    // the Americas team), so the most common chip on the grid is explained:
+    // once on each side of zoneChipsFrom, as a grid that spans it draws both
+    // (LK in October, IST from November).
     for (const row of rows) {
+      const sides = new Set<boolean>();
       for (const d of days) {
         if (d.getDay() === 0 || d.getDay() === 6) continue;
         const iso = toIsoDate(d);
-        if (row.days.has(iso)) continue;
+        const after = iso >= zoneChipsFrom;
+        if (sides.has(after) || row.days.has(iso)) continue;
         const dflt = defaultFor(row, iso);
         if (dflt) {
           fromCell(dflt, iso);
-          break;
+          sides.add(after);
+          if (sides.size === 2) break;
         }
       }
     }
@@ -973,8 +978,16 @@ export default function MonthRoster({
       if (!kind.movesToTeamKey || !kind.worksRotaThere || !kind.showsAsShiftCode || kind.retired) continue;
       if (kind.family && kind.family !== family) continue;
       // Only this rota's windows: the picker offers no other family's hours.
+      // Named as it reads on the last day in view (see zoneChipsFrom).
       const sh = shifts.get(kind.showsAsShiftCode);
-      if (sh && sh.family === family) put({ key: `s|${sh.shortCode}|${sh.colourToken}|`, group: "Hours", code: sh.shortCode, token: sh.colourToken, label: sh.label });
+      if (sh && sh.family === family && days.length > 0) {
+        const code = chipCodeOn(
+          { code: sh.shortCode, token: sh.colourToken, title: sh.label, isRotation: false },
+          toIsoDate(days[days.length - 1]),
+          zoneChipsFrom,
+        );
+        put({ key: `s|${code}|${sh.colourToken}|`, group: "Hours", code, token: sh.colourToken, label: sh.label });
+      }
     }
     // Only when a marker is on a row in view: the legend explains what is
     // drawn, and the marker is not a code a lead can mark.

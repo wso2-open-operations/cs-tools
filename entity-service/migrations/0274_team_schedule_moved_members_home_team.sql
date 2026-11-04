@@ -30,16 +30,19 @@
 --   * they are a member of a team a move tag moves people to (T), and not of
 --     the home team their latest span onto T names (H);
 --   * a span onto T naming H runs today or later, or something is filed under
---     H after their last span onto T ended (leave, a turn);
+--     H after their last span onto T ended and after they joined T (leave, a
+--     turn): work on H from before they joined T says nothing about today;
 --   * the membership on T is an engineer or sub_lead (a lead decides who Case
 --     Alerts calls and is never moved);
 --   * T and H are CRE teams (a team whose type is neither SRE nor SME, as the
 --     schedule decides a team's family). SRE's SaaS Night cover and every SME
 --     team are left as they are.
 -- The membership on T stays when it carries an alert tier, a rota manager
--- grant, or a turn on T from today on that a lead placed by hand (a MOVE turn
--- is the span's own and goes with it); they are then on both teams, which a
--- rota admin can finish from Rota Access.
+-- grant, or a turn on T that a lead placed by hand and that is not over yet:
+-- from today on, or started earlier and still running (an overnight turn). A
+-- MOVE turn is the span's own and goes with it. They are then on both teams,
+-- which a rota admin can finish from Rota Access. Someone with two rows on T
+-- gets one row on H, as a sub_lead if either row was one.
 --
 -- Data only: no table, column, type or constraint changes. Names nobody.
 -- Re-runnable: a second run finds them on their own team and changes nothing.
@@ -81,19 +84,24 @@ SELECT m.id AS member_id, m.user_id, m.role, m.alert_tier,
                    AND (a.ends_on IS NULL OR a.ends_on >= CURRENT_DATE))
      OR EXISTS (SELECT 1 FROM team_schedule_absence o
                  WHERE o.user_id = m.user_id AND lower(o.team_key) = s.home_key
+                   AND o.starts_on >= m.created_on::date
                    AND o.starts_on > (SELECT MAX(a.ends_on) FROM span a
                                        WHERE a.user_id = m.user_id AND a.target_key = lower(tt.key)))
      OR EXISTS (SELECT 1 FROM team_schedule_assignment o
                  WHERE o.user_id = m.user_id AND lower(o.team_key) = s.home_key
+                   AND o.rota_date >= m.created_on::date
                    AND o.rota_date > (SELECT MAX(a.ends_on) FROM span a
                                        WHERE a.user_id = m.user_id AND a.target_key = lower(tt.key)))
    );
 
--- Back on their own team, as the same engineer or sub_lead.
+-- Back on their own team, as the same engineer or sub_lead: one row per
+-- person and team, a sub_lead when either of two rows on T was one.
 INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, role, group_id)
-SELECT gen_random_uuid(), now(), now(), 'migration:0274', 'migration:0274', mm.home_id, mm.user_id, mm.role,
-       (SELECT g.id FROM "group" g WHERE g.id = mm.home_id)
-  FROM _moved_member mm;
+SELECT gen_random_uuid(), now(), now(), 'migration:0274', 'migration:0274', one.home_id, one.user_id, one.role,
+       (SELECT g.id FROM "group" g WHERE g.id = one.home_id)
+  FROM (SELECT DISTINCT ON (mm.user_id, mm.home_id) mm.user_id, mm.home_id, mm.role
+          FROM _moved_member mm
+         ORDER BY mm.user_id, mm.home_id, (mm.role = 'sub_lead') DESC) one;
 
 -- Off the move's team, unless something there still needs the membership.
 DELETE FROM team_member m
@@ -105,6 +113,6 @@ DELETE FROM team_member m
    AND NOT EXISTS (SELECT 1 FROM team_schedule_assignment a
                     WHERE a.user_id = mm.user_id AND lower(a.team_key) = lower(mm.target_key)
                       AND a.source IS DISTINCT FROM 'MOVE'
-                      AND a.rota_date >= CURRENT_DATE);
+                      AND (a.rota_date >= CURRENT_DATE OR a.ends_at > now()));
 
 COMMIT;

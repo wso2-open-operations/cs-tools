@@ -1521,5 +1521,9 @@ describe("MonthRoster: the chips before 1 Nov 2026", () => {
     const drawn = [...container.querySelectorAll("tbody tr")[0].querySelectorAll("td .chip.dflt")].map((c) => c.textContent);
     expect(drawn[0]).toBe("LK");
     expect(drawn[drawn.length - 1]).toBe("IST");
+    // The legend explains both, as the grid draws both.
+    const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
+    expect(legend).toContain("LK");
+    expect(legend).toContain("IST");
   });
 });
