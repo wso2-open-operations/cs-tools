@@ -62,6 +62,15 @@ func withSettings(ctx context.Context, cfg Config, weekend bool) (Config, bool, 
 	// them off (ROTA_REMINDER_INVITES_ENABLED, or no organizer): a save
 	// cannot override a setting nobody changed on the card.
 	cfg.Invites = cfg.Invites && s.InvitesEnabled
+	// A rotation turned off on the card gets no invitation; one it does not
+	// name keeps them.
+	off := map[string]bool{}
+	for code, on := range s.InviteRotations {
+		if !on {
+			off[code] = true
+		}
+	}
+	cfg.InvitesOff = off
 	// Saved minimums and hours override the configured ones code by code; a
 	// code the saved settings do not name keeps the configured value, so a
 	// save that left a rotation untouched never replaces the deployment's
@@ -87,6 +96,7 @@ func withSettings(ctx context.Context, cfg Config, weekend bool) (Config, bool, 
 		cfg.Windows = windows
 	}
 	cfg.Copy = without(append(append([]string{}, cfg.Copy...), s.CopyTo...), nil)
+	cfg.WeekendCopy = without(append(append([]string{}, cfg.WeekendCopy...), s.WeekendCopyTo...), nil)
 	return cfg, true, nil
 }
 

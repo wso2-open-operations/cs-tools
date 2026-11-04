@@ -20,15 +20,27 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/opencases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhours"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/queryhoursreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
 )
 
 // TestAutoclosureDefaultScheduleFiresDaily pins the 02:30 UTC slot, weekends
@@ -76,6 +88,14 @@ func TestParseRunNowArgs(t *testing.T) {
 		{name: "zero limit", args: []string{"--run-now=case_autoclosure", "--limit=0"}, wantErr: "must be a positive number"},
 		{name: "negative limit", args: []string{"--run-now=case_autoclosure", "--limit=-3"}, wantErr: "must be a positive number"},
 		{name: "non-numeric limit", args: []string{"--run-now=case_autoclosure", "--limit=abc"}, wantErr: "bad arguments"},
+		{name: "recipients and cc parse",
+			args: []string{"--run-now=stale_cases_report", "--recipients=jane.doe@example.com", "--cc=john.roe@example.com"},
+			want: &runNowArgs{Task: "stale_cases_report",
+				Options: registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}, Cc: []string{"john.roe@example.com"}},
+				Given:   []string{"--recipients", "--cc"}}},
+		{name: "bad recipient", args: []string{"--run-now=stale_cases_report", "--recipients=bad"}, wantErr: "not a plain email address"},
+		{name: "cc without recipients", args: []string{"--run-now=stale_cases_report", "--cc=john.roe@example.com"}, wantErr: "--cc needs --recipients"},
+		{name: "recipients without run-now", args: []string{"--recipients=jane.doe@example.com"}, wantErr: "only valid together with --run-now"},
 		{name: "empty states", args: []string{"--run-now=case_autoclosure", "--states="}, wantErr: "--states is empty"},
 	}
 	for _, tc := range tests {
@@ -113,6 +133,7 @@ func resolveFixture(simpleRan, hookedRan *int, gotOpts *registry.RunNowOptions) 
 	return []registry.Task{
 		{Name: "simple_task", Handler: func(context.Context) error { *simpleRan++; return nil }},
 		{Name: "hooked_task", Handler: func(context.Context) error { return errors.New("plain handler must not be used") },
+			RunNowFlags: []string{"--dry-run", "--limit", "--states"},
 			RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
 				*gotOpts = o
 				if o.Limit > 10 {
@@ -192,7 +213,8 @@ func TestAutoclosureHookNarrows(t *testing.T) {
 	cfg := autoclosure.RunConfig{DailyLimit: 500, States: []string{"solution_proposed", "awaiting_info"}}
 	var got autoclosure.RunConfig
 	task := registry.Task{Name: "case_autoclosure",
-		Handler: func(context.Context) error { return nil },
+		Handler:     func(context.Context) error { return nil },
+		RunNowFlags: []string{"--dry-run", "--limit", "--states"},
 		RunNowNarrow: func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
 			c, err := narrowAutoclosure(cfg, o)
 			got = c
@@ -307,5 +329,263 @@ func TestUnscheduledTaskIsNotFiredByTick(t *testing.T) {
 	eng.Tick(context.Background(), time.Now())
 	if closureRuns != 1 {
 		t.Fatalf("scheduled task ran %d times, want 1", closureRuns)
+	}
+}
+
+type recordingSender struct {
+	calls         int
+	to, cc        []string
+	subject, body string
+}
+
+func (r *recordingSender) SendEmail(_ context.Context, to, cc []string, subject, body string) error {
+	r.calls++
+	r.to, r.cc, r.subject, r.body = to, cc, subject, body
+	return nil
+}
+
+// bodyOf is a minimal report body, so the notice goes just inside it.
+const bodyOf = "<html><body><p>report</p></body></html>"
+
+// reportFixture builds the way main does: a normal sender in debug mail mode
+// and the raw one, and a handler that mails a fixed report to the To and Cc it
+// is built with.
+func reportFixture(realTo, realCc []string, debug []string) (hook func(registry.RunNowOptions) (func(context.Context) error, []any, error), raw, debugInbox *recordingSender) {
+	raw = &recordingSender{}
+	normal := notify.ForReport(raw, debug)
+	hook = reportRunNow(normal, raw, func(email notify.Sender, rec []string) func(context.Context) error {
+		return func(ctx context.Context) error {
+			return email.SendEmail(ctx, orRecipients(realTo, rec), realCc, "Weekly", bodyOf)
+		}
+	})
+	return hook, raw, raw
+}
+
+func TestReportRunNowOverrideReplacesWholeAudience(t *testing.T) {
+	ctx := context.Background()
+	real, realCc := []string{"real@example.com"}, []string{"realcc@example.com"}
+
+	// Recipients only: no Cc at all, real To and Cc only in the banner.
+	hook, raw, _ := reportFixture(real, realCc, nil)
+	h, settings, err := hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err != nil || h(ctx) != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if !reflect.DeepEqual(raw.to, []string{"jane.doe@example.com"}) || len(raw.cc) != 0 {
+		t.Errorf("to=%v cc=%v, want only the given To and no Cc", raw.to, raw.cc)
+	}
+	if raw.subject != "[Test copy] Weekly" {
+		t.Errorf("subject = %q", raw.subject)
+	}
+	for _, want := range []string{"real@example.com", "realcc@example.com"} {
+		if !strings.Contains(raw.body, want) {
+			t.Errorf("banner lacks %s", want)
+		}
+	}
+	if !reflect.DeepEqual(settings, []any{"recipientsReplaced", true, "toCount", 1, "ccCount", 0}) {
+		t.Errorf("settings = %v", settings)
+	}
+
+	// With --cc: that Cc only.
+	h, _, _ = hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}, Cc: []string{"john.roe@example.com"}})
+	_ = h(ctx)
+	if !reflect.DeepEqual(raw.cc, []string{"john.roe@example.com"}) {
+		t.Errorf("cc = %v, want only the --cc list", raw.cc)
+	}
+
+	// A task with no audience of its own still sends in an override run.
+	hook, raw, _ = reportFixture(nil, nil, nil)
+	h, _, _ = hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err := h(ctx); err != nil || raw.calls != 1 || !reflect.DeepEqual(raw.to, []string{"jane.doe@example.com"}) {
+		t.Errorf("empty-audience task: err=%v calls=%d to=%v", err, raw.calls, raw.to)
+	}
+}
+
+func TestReportRunNowRecipientsWinOverDebugList(t *testing.T) {
+	ctx := context.Background()
+	hook, raw, _ := reportFixture([]string{"real@example.com"}, nil, []string{"debug@example.com"})
+
+	// With --recipients the debug inbox is not addressed.
+	h, _, err := hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err != nil {
+		t.Fatalf("a debug list must no longer refuse --recipients: %v", err)
+	}
+	_ = h(ctx)
+	if !reflect.DeepEqual(raw.to, []string{"jane.doe@example.com"}) || strings.Contains(raw.body, "Debug mail mode") {
+		t.Errorf("to=%v, the override must win over the debug list", raw.to)
+	}
+
+	// Without it, a run-now still honours the debug list, as today.
+	h, settings, err := hook(registry.RunNowOptions{})
+	if err != nil || len(settings) != 0 {
+		t.Fatalf("plain: err=%v settings=%v", err, settings)
+	}
+	_ = h(ctx)
+	if !reflect.DeepEqual(raw.to, []string{"debug@example.com"}) || raw.subject != "[Test copy] Weekly" {
+		t.Errorf("plain run-now to=%v subject=%q, want the debug inbox", raw.to, raw.subject)
+	}
+
+	// --cc alone is refused by the hook as well as the parser.
+	if _, _, err := hook(registry.RunNowOptions{Cc: []string{"john.roe@example.com"}}); err == nil ||
+		!strings.Contains(err.Error(), "--cc needs --recipients") {
+		t.Errorf("--cc alone must be refused, got %v", err)
+	}
+}
+
+func TestReportTasksTakeRecipientFlags(t *testing.T) {
+	want := []string{
+		"cs_worklogs_daily_report", "cs_worklogs_weekly_report", "migration_case_report",
+		"open_cases_report", "stale_cases_report", "unresolved_products_digest",
+		"query_hours_usage_notifications", "query_hours_weekly_report",
+		"product_regression_report_apim", "product_regression_report_iam", "product_regression_report_integration",
+	}
+	got := reportTaskNames()
+	slices.Sort(got)
+	slices.Sort(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reportTaskNames = %v, want %v", got, want)
+	}
+	hook := func(registry.RunNowOptions) (func(context.Context) error, []any, error) { return nil, nil, nil }
+	var tasks []registry.Task
+	for _, n := range want {
+		flags := reportRunNowFlags
+		if strings.HasPrefix(n, "cs_worklogs") {
+			flags = worklogsRunNowFlags
+		}
+		tasks = append(tasks, registry.Task{Name: n, RunNowNarrow: hook, RunNowFlags: flags})
+	}
+	if m := tasksMissingReportRunNow(tasks, want); len(m) != 0 {
+		t.Fatalf("missing: %v", m)
+	}
+	// A task without the hook, without a flag, or unregistered is reported.
+	tasks[0].RunNowNarrow = nil
+	tasks[1].RunNowFlags = []string{"--recipients"}
+	tasks = tasks[:len(tasks)-1]
+	if m := tasksMissingReportRunNow(tasks, want); len(m) != 3 {
+		t.Fatalf("missing = %v, want 3", m)
+	}
+}
+
+func TestWorklogsRunNowRecipientsAndWindow(t *testing.T) {
+	ctx := context.Background()
+	raw := &recordingSender{}
+	normal := notify.ForReport(raw, []string{"debug@example.com"})
+	var gotWin worklogsreport.Override
+	var gotRec []string
+	hook := worklogsRunNow(worklogreport.CadenceWeekly, normal, raw,
+		func(email notify.Sender, win worklogsreport.Override, rec []string) func(context.Context) error {
+			return func(ctx context.Context) error {
+				gotWin, gotRec = win, rec
+				return email.SendEmail(ctx, orRecipients([]string{"real@example.com"}, rec), nil, "Worklogs", bodyOf)
+			}
+		})
+
+	// Recipients win over the debug list; no Cc.
+	h, _, err := hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err != nil || h(ctx) != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if !reflect.DeepEqual(raw.to, []string{"jane.doe@example.com"}) || len(raw.cc) != 0 || raw.subject != "[Test copy] Worklogs" || gotWin.HasWindow() {
+		t.Errorf("to=%v cc=%v subject=%q win=%v", raw.to, raw.cc, raw.subject, gotWin)
+	}
+	// A window alone still goes to the debug list.
+	day := time.Date(2030, 1, 7, 0, 0, 0, 0, time.UTC)
+	h, settings, err := hook(registry.RunNowOptions{FromDate: day, ToDate: day.AddDate(0, 0, 6)})
+	if err != nil || h(ctx) != nil || !reflect.DeepEqual(raw.to, []string{"debug@example.com"}) || !gotWin.HasWindow() || gotRec != nil {
+		t.Fatalf("window only: err=%v to=%v rec=%v", err, raw.to, gotRec)
+	}
+	if len(settings) != 4 {
+		t.Errorf("settings = %v", settings)
+	}
+	// Cc alone and a bad window are refused.
+	if _, _, err := hook(registry.RunNowOptions{Cc: []string{"john.roe@example.com"}}); err == nil {
+		t.Error("--cc alone must be refused")
+	}
+	if _, _, err := hook(registry.RunNowOptions{FromDate: day, ToDate: day.AddDate(0, 0, -1)}); err == nil {
+		t.Error("an inverted window must be refused")
+	}
+}
+
+// The real handlers, built the way main builds them for an override run.
+func TestOverrideRunsOfRealReportHandlers(t *testing.T) {
+	ctx := context.Background()
+	rec := []string{"jane.doe@example.com"}
+	cases := map[string]func(email notify.Sender) func(context.Context) error{
+		"stale": func(email notify.Sender) func(context.Context) error {
+			return stalecases.SendReport(fakeStale{}, email, 30, orRecipients(nil, rec), nil, true)
+		},
+		"open": func(email notify.Sender) func(context.Context) error {
+			return opencases.SendReport(fakeOpen{}, email, orRecipients(nil, rec), nil, true)
+		},
+		"migration": func(email notify.Sender) func(context.Context) error {
+			return migrationscan.SendReport(fakeMigration{}, email, 180, orRecipients(nil, rec), nil, "", true)
+		},
+		"queryhours weekly": func(email notify.Sender) func(context.Context) error {
+			return queryhoursreport.SendWeeklyReport(fakeQueryHours{}, email, orRecipients(nil, rec), nil, nil, true)
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw := &recordingSender{}
+			// The task has debug mode on and no audience of its own.
+			hook := reportRunNow(notify.ForReport(raw, []string{"debug@example.com"}), raw,
+				func(email notify.Sender, _ []string) func(context.Context) error { return build(email) })
+			h, _, err := hook(registry.RunNowOptions{Recipients: rec})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if raw.calls != 1 || !reflect.DeepEqual(raw.to, rec) || len(raw.cc) != 0 || !strings.HasPrefix(raw.subject, "[Test copy] ") {
+				t.Errorf("calls=%d to=%v cc=%v subject=%q", raw.calls, raw.to, raw.cc, raw.subject)
+			}
+		})
+	}
+}
+
+type fakeStale struct{}
+
+// fakeStale returns one case so the report is not empty (an empty report is
+// not sent at all).
+func (fakeStale) Report(context.Context, int) (longopenreport.Report, error) {
+	return longopenreport.Report{
+		Cases: []longopenreport.Row{{Number: "CS0000001"}}, CasesTotal: 1,
+	}, nil
+}
+
+type fakeOpen struct{}
+
+func (fakeOpen) SearchCasesInStateCreatedBeforeYesterday(context.Context, string) ([]entitycases.Case, error) {
+	return nil, nil
+}
+
+type fakeMigration struct{}
+
+func (fakeMigration) Report(context.Context, int) (migrationreport.Report, error) {
+	return migrationreport.Report{}, nil
+}
+
+type fakeQueryHours struct{}
+
+func (fakeQueryHours) WeeklyReport(context.Context) (queryhours.Report, error) {
+	return queryhours.Report{}, nil
+}
+func (fakeQueryHours) Recompute(context.Context) ([]queryhours.Transition, error) { return nil, nil }
+
+func TestConsumesCrossingsWarnsOnlyWithRecipients(t *testing.T) {
+	hook := consumesCrossings(func(o registry.RunNowOptions) (func(context.Context) error, []any, error) {
+		return func(context.Context) error { return nil }, []any{"base", true}, nil
+	})
+	_, plain, err := hook(registry.RunNowOptions{})
+	if err != nil || len(plain) != 2 {
+		t.Fatalf("plain run: settings=%v err=%v, want the base settings only", plain, err)
+	}
+	_, withRec, err := hook(registry.RunNowOptions{Recipients: []string{"jane.doe@example.com"}})
+	if err != nil {
+		t.Fatalf("recipients run: %v", err)
+	}
+	if len(withRec) != 4 || withRec[2] != "warning" {
+		t.Fatalf("recipients run settings = %v, want a trailing warning key", withRec)
 	}
 }

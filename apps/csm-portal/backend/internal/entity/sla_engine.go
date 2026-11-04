@@ -22,6 +22,18 @@ import (
 	"net/url"
 )
 
+// SLAStatusManageFilters are the CSM Portal's SLA Engine admin table's own
+// optional filters, forwarded to entity-service's GET /sla-status one-to-one
+// -- see that endpoint's own doc comment (service.ParseSLAStatusFilters)
+// for the accepted values of each. Every field is optional; the zero value
+// applies no filtering, matching this endpoint's original behavior.
+type SLAStatusManageFilters struct {
+	Severity      string
+	CaseType      string
+	Search        string
+	ElapsedBucket string
+}
+
 // SearchActiveSLAStatusesManage calls GET /sla-status?admin=true on the
 // entity service -- the CSM-admin-facing request of that endpoint (the
 // plain, admin=false request is internal-callers-only and not exposed by
@@ -29,14 +41,28 @@ import (
 // so entity-service applies its own default. There used to be a source
 // param forwarded here too -- dropped along with entity-service's own
 // sla.source column (migration 0268 there); entity-service already ignores
-// one if it's still sent, but there's no reason to keep sending it.
-func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string) ([]byte, error) {
+// one if it's still sent, but there's no reason to keep sending it. filters
+// are forwarded the same way -- a blank field is simply omitted, so a caller
+// sending none of them sees entity-service's original, unfiltered behavior.
+func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context, limit, offset string, filters SLAStatusManageFilters) ([]byte, error) {
 	q := url.Values{"admin": {"true"}}
 	if limit != "" {
 		q.Set("limit", limit)
 	}
 	if offset != "" {
 		q.Set("offset", offset)
+	}
+	if filters.Severity != "" {
+		q.Set("severity", filters.Severity)
+	}
+	if filters.CaseType != "" {
+		q.Set("caseType", filters.CaseType)
+	}
+	if filters.Search != "" {
+		q.Set("search", filters.Search)
+	}
+	if filters.ElapsedBucket != "" {
+		q.Set("elapsedBucket", filters.ElapsedBucket)
 	}
 	return c.do(ctx, http.MethodGet, "/sla-status?"+q.Encode(), nil)
 }

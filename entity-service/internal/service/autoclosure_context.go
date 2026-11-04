@@ -38,6 +38,20 @@ func withAutoclosureActor(ctx context.Context, email string) context.Context {
 	return context.WithValue(ctx, autoclosureActorKey{}, email)
 }
 
+// systemActorKey names who a system-initiated UpdateCase is attributed to when the request carries no user token.
+type systemActorKey struct{}
+
+// withSystemActor attributes a system-initiated UpdateCase to name; unlike withAutoclosureActor it grants no transition.
+func withSystemActor(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, systemActorKey{}, name)
+}
+
+// systemActorFromContext returns the name set by withSystemActor, if any.
+func systemActorFromContext(ctx context.Context) (string, bool) {
+	name, ok := ctx.Value(systemActorKey{}).(string)
+	return name, ok && name != ""
+}
+
 // autoclosureActorFromContext returns the system user's email set by
 // withAutoclosureActor, if any.
 func autoclosureActorFromContext(ctx context.Context) (string, bool) {

@@ -55,6 +55,26 @@ function renderWeek(over: Partial<React.ComponentProps<typeof WeekTable>> = {}) 
 }
 
 describe("WeekTable", () => {
+  it("lists people on AEST regular hours on the Morning row, untagged, not a row of their own", () => {
+    const morning = shift({ code: "CRE_MORNING", shortCode: "6-9am", label: "Morning 6-9am", startMinute: 360, endMinute: 540, sortOrder: 10 });
+    const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", colourToken: "AEST", isRotation: false, startMinute: 360, endMinute: 540 });
+    const { container } = renderWeek({
+      shifts: shiftMap(REGULAR, EVENING, morning, aest),
+      assignments: [
+        assignment({ name: "Ben", rotaDate: "2026-09-21", shiftCode: morning.code }),
+        assignment({ name: "Ava", rotaDate: "2026-09-21", shiftCode: aest.code, teamKey: "australia" }),
+        assignment({ name: "Ava", rotaDate: "2026-09-22", shiftCode: aest.code, teamKey: "australia" }),
+      ],
+    });
+    expect(screen.queryByText("AEST regular hours")).not.toBeInTheDocument();
+    const row = [...container.querySelectorAll("tbody tr")].find((r) => r.textContent?.includes("Morning 6-9am"))!;
+    expect(row).toHaveTextContent("Ben");
+    const ava = [...row.querySelectorAll(".nm")].filter((n) => n.textContent?.includes("Ava"));
+    expect(ava).toHaveLength(2);
+    expect(ava[0].querySelector(".tier-t")).toBeNull();
+    expect(row).not.toHaveTextContent(/AEST/);
+  });
+
   it("holds regular hours and the India region shift in one row", () => {
     // Both are 09:00-18:00 in the same zone on the same days: the code says
     // which team works it, not a different working day. The row lists teams,
@@ -343,6 +363,25 @@ describe("WeekTable: a rota admin editing the week", () => {
     renderWeek({ assignments: WEEK, edit });
     fireEvent.click(screen.getByRole("button", { name: "Take Jane Doe off Evening 6-9pm on Mon 21" }));
     expect(edit.onRemove).toHaveBeenCalledWith(expect.objectContaining({ shiftCode: EVENING.code, rotaDate: "2026-09-21" }));
+  });
+
+  it("keeps the AEST person on the Morning cell while editing, with no way to take them off it", () => {
+    const morning = shift({ code: "CRE_MORNING", shortCode: "6-9am", label: "Morning 6-9am", startMinute: 360, endMinute: 540, sortOrder: 10 });
+    const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", isRotation: false, startMinute: 360, endMinute: 540 });
+    const edit = editControls();
+    renderWeek({
+      shifts: shiftMap(REGULAR, EVENING, morning, aest),
+      assignments: [
+        assignment({ name: "Ben", userId: "u-ben", rotaDate: "2026-09-21", shiftCode: morning.code }),
+        assignment({ name: "Ava", userId: "u-ava", rotaDate: "2026-09-21", shiftCode: aest.code, teamKey: "australia" }),
+      ],
+      edit,
+    });
+    const add = screen.getByRole("combobox", { name: "Add someone to Morning 6-9am on Mon 21" });
+    const cell = add.closest("td")!;
+    expect(cell).toHaveTextContent("Ava");
+    expect(within(cell).getByRole("button", { name: "Take Ben off Morning 6-9am on Mon 21" })).toBeInTheDocument();
+    expect(within(cell).queryByRole("button", { name: /Take Ava off/ })).not.toBeInTheDocument();
   });
 
   it("leaves regular hours and a weekday rotation's weekend alone", () => {

@@ -644,6 +644,67 @@ func TestEngines_CaseSeverityChanges(t *testing.T) {
 	}
 }
 
+// A chain a severity change started stops on any engineer's public comment,
+// on both ladders, even when the case's assignment was never seen here. A
+// customer's comment and a work note still do not stop it, and a new case
+// still needs its assignee's.
+func TestEngines_CaseSeverityChangeStopsOnAnyEngineersComment(t *testing.T) {
+	ctx := context.Background()
+	creStore, sreStore := newMemStore(), newMemStore()
+	creChat := &fakeChat{}
+	cre, sre := ladderEngine(LadderCRE, creChat, creStore), ladderEngine(LadderSRE, &fakeChat{}, sreStore)
+	both := func(r eventbus.Record) {
+		t.Helper()
+		for _, e := range []*Engine{cre, sre} {
+			if err := e.Handle(ctx, r); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	creRunning := func() bool { _, found, _ := creStore.Get(ctx, testIncidentID); return found }
+	sreRunning := func() bool { _, found, _ := sreStore.Get(ctx, testIncidentID); return found }
+
+	both(caseCreated(t, "Atlas", "HIGH"))
+	both(caseComment(t, "other@example.com", false, true))
+	if !creRunning() {
+		t.Fatal("an engineer's comment stopped a new case's chain; it needs the assignee's")
+	}
+
+	// Lowered by the engineer working it; nobody's assignment was ever seen.
+	both(severityChanged(t, "HIGH", "MEDIUM"))
+	st, found, _ := creStore.Get(ctx, testIncidentID)
+	if !found {
+		t.Fatal("the severity change did not start a new chain")
+	}
+	// The first rung posts, so the room is told when the chain stops.
+	if err := cre.Tick(ctx, st.Plan.Calls[0].At); err != nil {
+		t.Fatal(err)
+	}
+	both(caseComment(t, "customer@example.com", false, false))
+	both(caseComment(t, "eng@example.com", true, true))
+	if !creRunning() {
+		t.Fatal("a customer's comment or a work note stopped the severity-change chain")
+	}
+	both(caseComment(t, "eng@example.com", false, true))
+	if creRunning() {
+		t.Fatal("the severity-change chain kept paging after an engineer's public comment")
+	}
+	if n := len(creChat.stopped); n != 1 || !creChat.stopped[0].Answered ||
+		!strings.Contains(creChat.stopped[0].Detail, "a public comment by an engineer") {
+		t.Fatalf("stopped replies = %+v; want one acknowledged by an engineer's comment", creChat.stopped)
+	}
+
+	// Raised to S0: both ladders run, and any engineer's comment stops both.
+	both(severityChanged(t, "MEDIUM", "CATASTROPHIC"))
+	if !creRunning() || !sreRunning() {
+		t.Fatal("S3 -> S0 did not start both chains")
+	}
+	both(caseComment(t, "other@example.com", false, true))
+	if creRunning() || sreRunning() {
+		t.Fatalf("an engineer's comment after the raise left CRE %v, SRE %v; want both stopped", creRunning(), sreRunning())
+	}
+}
+
 // A closed case stops both chains.
 func TestEngines_ClosedCaseStopsBoth(t *testing.T) {
 	ctx := context.Background()

@@ -36,7 +36,7 @@ func TestEmailNotifier_Send_InvoiceNoticeLinksOpenInSalesforceWhenInvoiceSfIDPre
 	_, err := n.Send(context.Background(), Notice{
 		Subject:      "subject",
 		Body:         invoiceReminderBody(),
-		InvoiceSfIDs: []string{"a0IE2000006XBu5MAG"},
+		InvoiceSfIDs: []string{"a0I000000000001AAA"},
 		Recipients:   Recipients{AccountOwner: recipients.Contact{Email: "am@wso2.com"}},
 	})
 	if err != nil {
@@ -44,7 +44,7 @@ func TestEmailNotifier_Send_InvoiceNoticeLinksOpenInSalesforceWhenInvoiceSfIDPre
 	}
 	got := sender.calls[0].htmlBody
 
-	want := `<a href="https://wso2.my.salesforce.com/a0IE2000006XBu5MAG" style="color:#2c66bd;font-weight:700;text-decoration:none;" target="_blank">Open in Salesforce</a>`
+	want := `<a href="https://wso2.my.salesforce.com/a0I000000000001AAA" style="color:#2c66bd;font-weight:700;text-decoration:none;" target="_blank">Open in Salesforce</a>`
 	if !strings.Contains(got, want) {
 		t.Errorf("htmlBody missing the invoice's Open in Salesforce link.\nwant substring: %s\ngot: %s", want, got)
 	}
@@ -90,7 +90,7 @@ func TestEmailNotifier_Send_CustomerNoticeNeverGetsOpenInSalesforce(t *testing.T
 	_, err := n.Send(context.Background(), Notice{
 		Subject:      "subject",
 		Body:         "Your invoice US12345 is due.",
-		InvoiceSfIDs: []string{"a0IE2000006XBu5MAG"},
+		InvoiceSfIDs: []string{"a0I000000000001AAA"},
 		Recipients: Recipients{
 			AccountOwner: recipients.Contact{Email: "am@wso2.com"},
 			Customers:    []recipients.Contact{{Email: "customer@wso2.com"}},

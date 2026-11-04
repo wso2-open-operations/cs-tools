@@ -33,6 +33,19 @@ import (
 // longer tied to the caller's own deadline.
 const recordFailureTimeout = 10 * time.Second
 
+// skipFailureRecordKey marks a context whose failed publish must not be
+// recorded (withoutPublishFailureRecord).
+type skipFailureRecordKey struct{}
+
+// withoutPublishFailureRecord returns ctx marked so a failed Publish is not
+// recorded with CreateEventPublishFailure. For a caller that retries from its
+// own queue (an outbox drainer): its row already holds the attempts and the
+// last error, and a failure row per attempt is one more copy someone could
+// re-drive while the drainer still retries, sending the event twice.
+func withoutPublishFailureRecord(ctx context.Context) context.Context {
+	return context.WithValue(ctx, skipFailureRecordKey{}, true)
+}
+
 // kafkaProducer abstracts eventbus.Producer for testability.
 type kafkaProducer interface {
 	Publish(ctx context.Context, key, value []byte) error
@@ -81,6 +94,9 @@ func (s *eventPublisherService) Publish(ctx context.Context, eventType events.Ty
 	// durable to record the failure in that case, so log loudly and return the
 	// original publish error — the alternative, dereferencing a nil service,
 	// would turn a recoverable publish failure into a panic.
+	if skip, _ := ctx.Value(skipFailureRecordKey{}).(bool); skip {
+		return fmt.Errorf("eventpublisher: publish %s for entity %s: %w", eventType, entityID, pubErr)
+	}
 	if s.failures == nil {
 		slog.ErrorContext(ctx, "eventpublisher: publish failed and no database is configured to record it", "eventType", eventType, "entityId", entityID, "publishErr", pubErr)
 		return fmt.Errorf("eventpublisher: publish %s for entity %s: %w", eventType, entityID, pubErr)

@@ -2437,6 +2437,64 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /acp/reopen-check:
+    post:
+      summary: >-
+        The daily ACP reopen check: every project whose suspensionProcessState
+        still records an ACP suspension is checked as a Salesforce event would
+        check it, reopening a track whose reason is gone and finishing a
+        project a person already set back to Open. One page per call, in
+        project id order; call again with nextCursor while more is true. A
+        page short of time stops early, after at least one project. For any
+        internal service credential (a client in M2M_CLIENT_IDS); a user token,
+        internal or not, is refused. Its caller is csm-scheduled-tasks.
+        Registered only when CSM_ACP_REOPEN_ENABLED is true.
+      operationId: checkACPReopen
+      security:
+        - clientAssertion: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ACPReopenCheckRequest'
+      responses:
+        "200":
+          description: What the page did.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ACPReopenCheckResponse'
+        "400":
+          description: Bad request (a cursor that is not a project id).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not an internal service credential (a user token is refused).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: The projects could not be listed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The caller's identity could not be verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /autoclosure/candidates:
     post:
       summary: >-
@@ -10235,8 +10293,9 @@ paths:
       description: >
         "Send now" on the Rota Access tab. A CSM admin or a rota admin of the
         family, with a user token. Queued for csm-scheduled-tasks, which sends
-        it at its next run. Refused while one of the same kind is waiting (409)
-        and within 10 minutes of the last one (429).
+        it at its next run. Refused while one that sends any of the same emails is
+        waiting (409) and within 10 minutes of the last one (429): weekday is the
+        Morning and the Evening together, so it and either of them refuse each other.
       operationId: createRotaReminderRequest
       security:
         - clientAssertion: []
@@ -10258,8 +10317,8 @@ paths:
               properties:
                 kind:
                   type: string
-                  enum: [weekday, weekend]
-                  description: weekday is the next working day's Morning and Evening; weekend the coming weekend, sent even if not fully marked.
+                  enum: [morning, evening, weekend, weekday]
+                  description: morning is the next working day's Morning with its on-call; evening its Evening; weekday both at once; weekend the coming weekend, sent even if not fully marked.
                 test:
                   type: boolean
                   default: false
@@ -10299,7 +10358,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: "One of the same kind is already waiting to be sent."
+          description: "One that sends any of the same emails is already waiting to be sent."
           content:
             application/json:
               schema:
@@ -11942,6 +12001,75 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
           description: The scan's tags are not configured on this deployment, or the caller's identity could not be checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reports/long-open-cases:
+    get:
+      summary: >-
+        Build the long-open cases report: the cases still being worked on
+        after a given age, in two tables by their project's onboarding
+        status. Read-only. Internal callers only.
+      description: >-
+        A case is listed when it is open, in progress, waiting on WSO2 or
+        reopened (not awaiting information, solution proposed or closed);
+        was created on or before the start of the day `olderThanDays` days
+        ago in the report's timezone (Asia/Colombo); belongs to a project
+        whose project type is one of the configured types (a case with no
+        project is not listed); is a plain case rather than another kind of
+        work item; carries none of the configured excluded tags; and has
+        never had an ETA shared. A case whose project onboarding status is
+        in progress or not started is listed under `onboardingCases`; every
+        other case, including one whose project has no onboarding status,
+        under `cases`. Each table is oldest first. Each table is capped at
+        5000 rows as a safeguard; `casesTotal` and `onboardingCasesTotal`
+        always hold the full size, and the matching `...Truncated` flag is
+        true when a table was cut. The caller supplies the recipients.
+      operationId: getLongOpenCaseReport
+      parameters:
+        - name: olderThanDays
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 3650
+            default: 30
+          description: The age a case must have reached to be listed.
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LongOpenCaseReport'
+        "400":
+          description: olderThanDays is not a whole number of days in range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The report's project types are not configured on this deployment, or the caller's identity could not be checked.
           content:
             application/json:
               schema:
@@ -25426,6 +25554,16 @@ components:
           description: >-
             The case's current escalation level -- see CaseView.escalationLevel's
             description.
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Time the case moved to solution proposed (UTC, RFC 3339), null if never."
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: "Time the case was closed (UTC, RFC 3339), null if not closed."
 
     SearchCasesResponse:
       type: object
@@ -30022,8 +30160,27 @@ components:
           description: A rotation's hours on its own clock, by shift code.
           additionalProperties:
             $ref: '#/components/schemas/ReminderWindow'
+        inviteRotations:
+          type: object
+          description: >-
+            Whether each rotation's reminders carry a calendar invitation, by the shift code of its
+            window (CRE_MORNING, CRE_EVENING, CRE_WEEKEND, CRE_WEEKEND_NIGHT). A rotation not named
+            does; invitesEnabled off turns them all off. Optional on a save: when absent, the stored
+            value is kept.
+          additionalProperties:
+            type: boolean
+          example: {CRE_MORNING: true, CRE_WEEKEND_NIGHT: false}
         copyTo:
           type: array
+          maxItems: 20
+          items:
+            type: string
+            format: email
+        weekendCopyTo:
+          type: array
+          description: >-
+            Copied (Cc) on the weekend summary email only; copyTo is copied on every reminder.
+            Optional on a save: when absent, the stored value is kept.
           maxItems: 20
           items:
             type: string
@@ -30054,7 +30211,7 @@ components:
           enum: [CRE, SRE, SME]
         kind:
           type: string
-          enum: [weekday, weekend]
+          enum: [morning, evening, weekend, weekday]
         status:
           type: string
           enum: [QUEUED, SENDING, SENT, FAILED]
@@ -31946,6 +32103,71 @@ components:
           type: string
         technicalOwner:
           type: string
+    LongOpenCaseReport:
+      type: object
+      description: The long-open cases report.
+      required: [generatedAt, olderThanDays, createdBefore, cases, onboardingCases, casesTotal, onboardingCasesTotal, casesTruncated, onboardingCasesTruncated]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        olderThanDays:
+          type: integer
+          description: The age every listed case has reached.
+        createdBefore:
+          type: string
+          format: date-time
+          description: Every listed case was created on or before this instant.
+        cases:
+          type: array
+          description: Long-open cases whose project is not being onboarded, oldest first.
+          items:
+            $ref: '#/components/schemas/LongOpenCaseReportRow'
+        onboardingCases:
+          type: array
+          description: Long-open cases whose project onboarding is in progress or not started, oldest first.
+          items:
+            $ref: '#/components/schemas/LongOpenCaseReportRow'
+        casesTotal:
+          type: integer
+          description: The full size of `cases`, before the per-table cap.
+        onboardingCasesTotal:
+          type: integer
+          description: The full size of `onboardingCases`, before the per-table cap.
+        casesTruncated:
+          type: boolean
+          description: True when `cases` holds fewer rows than `casesTotal`.
+        onboardingCasesTruncated:
+          type: boolean
+          description: True when `onboardingCases` holds fewer rows than `onboardingCasesTotal`.
+    LongOpenCaseReportRow:
+      type: object
+      description: One long-open case.
+      required: [number, internalId, createdOn, updatedOn, state, severity, assignedEngineer, csTeam]
+      properties:
+        number:
+          type: string
+        internalId:
+          type: string
+          description: The case's internal identifier, or empty.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [open, work_in_progress, waiting_on_wso2, reopened]
+        severity:
+          type: string
+          description: The case's severity (catastrophic, critical, high, medium or low), or empty when none is set.
+        assignedEngineer:
+          type: string
+          description: Display name of the assignee, or empty.
+        csTeam:
+          type: string
+          description: Name of the CS team that owns the case's account, or empty.
     WorklogReport:
       type: object
       description: >-
@@ -38920,6 +39142,56 @@ components:
     AutoclosureStage:
       type: string
       enum: [release_hold, first_reminder, second_reminder, close]
+    ACPReopenCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        cursor:
+          type: string
+          format: uuid
+          description: The last project id of the previous page; omit for the first page.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+          description: Projects to check in this call (default 10, at most 50).
+    ACPReopenCheckResponse:
+      type: object
+      required: [checked, reopened, finished, skippedSetByHand, failed, failedProjectIds, nextCursor, more]
+      properties:
+        checked:
+          type: integer
+          description: Projects looked at in this page.
+        reopened:
+          type: integer
+          description: Projects with a track set back to Open.
+        finished:
+          type: integer
+          description: >-
+            Projects a person had set back to Open, now finished (Salesforce
+            Open; the email queued only when ACP suspended the project in the
+            last 7 days).
+        skippedSetByHand:
+          type: integer
+          description: >-
+            Projects left alone because their overall closure state does not
+            match their sub-states (set by hand, or migrated data the legacy
+            rule computed). Should stay near zero; see CLAUDE.md "ACP reopen".
+        failed:
+          type: integer
+          description: Projects whose check failed (the error is logged; the next run tries again).
+        failedProjectIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        nextCursor:
+          type: string
+          description: Where the next page starts (the last project id checked).
+        more:
+          type: boolean
+          description: True while projects are left; call again with nextCursor. False once every project is done.
     AutoclosureCandidatesRequest:
       type: object
       required: [stage]

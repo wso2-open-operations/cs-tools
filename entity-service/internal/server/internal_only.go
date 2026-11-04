@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
@@ -59,4 +60,18 @@ func internalOnly(access service.AccessService, next http.HandlerFunc) http.Hand
 		}
 		next(w, r)
 	}
+}
+
+// serviceOnly is internalOnly for a route only a service may call: an
+// internal service credential passes, a user token is refused with 403 even
+// when the user is internal (the check requireService applies to the team
+// schedule reminders).
+func serviceOnly(access service.AccessService, next http.HandlerFunc) http.HandlerFunc {
+	return internalOnly(access, func(w http.ResponseWriter, r *http.Request) {
+		if auth.IdentityFromContext(r.Context()).UserEmail != "" {
+			apierror.WriteJSON(w, http.StatusForbidden, "this resource is only available to a service credential, not a user")
+			return
+		}
+		next(w, r)
+	})
 }

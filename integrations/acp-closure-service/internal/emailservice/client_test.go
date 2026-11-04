@@ -126,7 +126,7 @@ func TestTokenFetchTimeout(t *testing.T) {
 }
 
 // TestSendEmail_Success verifies the request is built correctly and a 2xx
-// response is treated as success. Confirms the wire shape against Rashmika's
+// response is treated as success. Confirms the wire shape against the
 // real csm-notification-service client (integrations/csm-notification-service/
 // internal/notifications/email.go, dev-app-csm-portal branch): POST
 // /send-email with {to, cc, from, subject, template}.

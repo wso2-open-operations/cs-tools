@@ -43,6 +43,11 @@ import (
 //     on a case already assigned when it became S0 -- when the assignee posts
 //     a public comment. Only gestures after the chain started count; a
 //     customer's comment and a work note never stop paging.
+//   - A chain a severity change started stops, on either ladder, on any
+//     engineer's public comment: the case was already being worked, and the
+//     assignee is known here only from a case.assigned this service saw, so
+//     an assignment made earlier left the assignee's own comment unmatched
+//     and the calls running (seen on prod, 2026-11-03).
 //   - A closed case stops both.
 //
 // The case events that start a chain carry no assignee, so the current one is
@@ -52,6 +57,7 @@ import (
 const (
 	cancelCaseAcknowledged cancelReason = "Acknowledged (assigned and public comment)"
 	cancelAssigneeComment  cancelReason = "Public comment by the assignee"
+	cancelEngineerComment  cancelReason = "Public comment by an engineer after a severity change"
 	cancelCaseClosed       cancelReason = "Case closed"
 )
 
@@ -176,6 +182,10 @@ func (e *Engine) caseGesture(ctx context.Context, caseID string, g caseGesture, 
 		// A stop that did not finish (the summary or the delete failed):
 		// finish it with the reason it was stopped for.
 		return e.stopLadder(ctx, caseID, st, cancelReason(st.CancelReason))
+	}
+	if st.Plan.Trigger.Kind == TriggerSeverityChanged &&
+		(g == gestureAssigneeComment || g == gestureEngineerComment) {
+		return e.stopLadder(ctx, caseID, st, cancelEngineerComment)
 	}
 
 	switch g {

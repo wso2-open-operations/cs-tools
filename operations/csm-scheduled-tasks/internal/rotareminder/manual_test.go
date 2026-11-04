@@ -114,6 +114,46 @@ func TestManual_SeveralRequestsAndWhatIsReported(t *testing.T) {
 	}
 }
 
+// "Send now" can ask for one weekday window: morning is the Morning with its
+// on-call, evening the Evening, each sent alone.
+func TestManual_MorningOrEveningSendsThatWindowOnly(t *testing.T) {
+	rota := func() *fakeRota {
+		return &fakeRota{assignments: []teamschedule.Assignment{
+			assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-20", "2026-10-20 06:00", "2026-10-20 09:00"),
+			assignment("Ben", "ben@example.com", "nova", "CRE_MORNING_OC", "2026-10-20", "2026-10-20 06:00", "2026-10-20 09:00"),
+			assignment("Cid", "cid@example.com", "vega", "CRE_EVENING", "2026-10-20", "2026-10-20 18:00", "2026-10-20 21:00"),
+		}}
+	}
+	for _, c := range []struct{ kind, subject, to string }{
+		{"morning", "Morning Rotation", "ann@example.com,ben@example.com"},
+		{"evening", "Evening Rotation", "cid@example.com"},
+	} {
+		weekday, weekend := manualConfigs("2026-10-19 10:00")
+		mail := &fakeEmail{}
+		queue := &fakeQueue{waiting: []teamschedule.ReminderRequest{{ID: "r1", Kind: c.kind}}}
+		if err := ManualReminder(rota(), &fakeStore{}, queue, mail, weekday, weekend)(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(mail.sent) != 1 || !strings.Contains(mail.sent[0].subject, c.subject) || strings.Join(mail.sent[0].to, ",") != c.to {
+			t.Fatalf("%s: sent %+v", c.kind, mail.sent)
+		}
+		if len(queue.reports) != 1 || queue.reports[0] != "r1 SENT Sent 1 email." {
+			t.Fatalf("%s: reports %v", c.kind, queue.reports)
+		}
+	}
+
+	// A window the deployment does not announce is reported, not sent.
+	weekday, weekend := manualConfigs("2026-10-19 10:00")
+	weekday.Rotations = map[string]string{"CRE_MORNING": "Morning"}
+	queue := &fakeQueue{waiting: []teamschedule.ReminderRequest{{ID: "r2", Kind: "evening"}}}
+	if err := ManualReminder(rota(), &fakeStore{}, queue, &fakeEmail{}, weekday, weekend)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.reports) != 1 || !strings.HasPrefix(queue.reports[0], "r2 FAILED no evening rotation is set up") {
+		t.Fatalf("reports %v", queue.reports)
+	}
+}
+
 // A failed send is reported FAILED with its reason and the run succeeds; a
 // failed claim fails the run.
 func TestManual_FailuresAreReported(t *testing.T) {
@@ -148,7 +188,7 @@ func TestManual_ATestGoesOnlyToWhoAsked(t *testing.T) {
 		t.Fatalf("sent %d, reports %v, recorded %d", len(mail.sent), queue.reports, len(store.recorded))
 	}
 	for _, m := range mail.sent {
-		if strings.Join(m.to, ",") != "zoe@example.com" || len(m.cc) != 0 || !strings.HasPrefix(m.subject, "[Test] [CRE Operations]") ||
+		if strings.Join(m.to, ",") != "zoe@example.com" || len(m.cc) != 0 || !strings.HasPrefix(m.subject, "[Test] [CRE]") ||
 			!strings.Contains(m.body, "[Test copy] Not sent to the rota.") {
 			t.Errorf("%q to %v cc %v", m.subject, m.to, m.cc)
 		}

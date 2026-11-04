@@ -33,6 +33,14 @@ import (
 // being dropped), without trying to be a real email validator.
 var emailPattern = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 
+// LooksLikeEmail reports whether s passes emailPattern: the same loose
+// "local@domain.tld" check Validate applies, for callers that filter
+// addresses instead of rejecting an event (project.reactivated) and for
+// configuration checked at startup.
+func LooksLikeEmail(s string) bool {
+	return emailPattern.MatchString(s)
+}
+
 // e164Pattern matches E.164 phone numbers (e.g. "+14155552671") — a leading
 // "+", a non-zero first digit, then up to 14 more digits.
 var e164Pattern = regexp.MustCompile(`^\+[1-9]\d{1,14}$`)
@@ -248,6 +256,19 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 		if _, err := time.Parse(time.RFC3339, p.ChangedOn); err != nil {
 			return fmt.Errorf("events: %s changedOn %q is not RFC3339", t, p.ChangedOn)
 		}
+	case TypeMailAlertReceived:
+		var p MailAlertReceivedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		// The ruleName picks the ladder and the dedupeKey is what stops a
+		// redelivery starting a second one.
+		if p.RuleName == "" || p.MessageID == "" || p.DedupeKey == "" {
+			return fmt.Errorf("events: missing required field for %s", t)
+		}
+		if entityID != "" && entityID != p.MessageID {
+			return fmt.Errorf("events: %s entityId does not match payload messageId", t)
+		}
 	case TypePagingTestCallRequested:
 		var p PagingTestCallRequestedPayload
 		if err := decodeStrict(raw, &p); err != nil {
@@ -459,6 +480,28 @@ func Validate(entityID string, t Type, raw json.RawMessage) error {
 			if _, err := time.Parse(time.RFC3339Nano, p.EventModifiedOn); err != nil {
 				return fmt.Errorf("events: eventModifiedOn %q is not RFC 3339: %w", p.EventModifiedOn, err)
 			}
+		}
+	case TypeProjectReactivated:
+		var p ProjectReactivatedPayload
+		if err := decodeStrict(raw, &p); err != nil {
+			return err
+		}
+		if p.ProjectID == "" || strings.TrimSpace(p.ProjectName) == "" {
+			return fmt.Errorf("events: missing or invalid required field for %s", t)
+		}
+		if p.ProjectID != entityID {
+			return fmt.Errorf("events: payload projectId %q does not match entityId %q", p.ProjectID, entityID)
+		}
+		// Recipients are not checked here: one malformed address (the
+		// technical owner is free text upstream) must not dead-letter the
+		// email for everyone else. handleProjectReactivated drops it.
+		for _, reason := range p.Reasons {
+			if reason != ProjectReactivatedReasonRenewal && reason != ProjectReactivatedReasonInvoicePaid {
+				return fmt.Errorf("events: unknown reason %q for %s", reason, t)
+			}
+		}
+		if _, err := time.Parse(time.RFC3339Nano, p.ReactivatedOn); err != nil {
+			return fmt.Errorf("events: reactivatedOn %q is not RFC 3339: %w", p.ReactivatedOn, err)
 		}
 	case TypeSRCreated:
 		var p SRCreatedPayload

@@ -82,8 +82,19 @@ func (s *salesforceEventService) RetryInvoiceIngest(ctx context.Context, invoice
 	return s.ingestInvoice(ctx, invoiceSfID, domain.SalesforceEventUpdated)
 }
 
-// handleInvoiceEvent is the Invoice__c branch of HandleEvent.
+// handleInvoiceEvent is the Invoice__c branch of HandleEvent: the invoice
+// ingest, then the ACP reopen check (acp_reopen.go) for the projects the
+// invoice belongs to, which runs only once the ingest succeeded and whether or
+// not the ingest is on.
 func (s *salesforceEventService) handleInvoiceEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
+	if err := s.ingestInvoiceEvent(ctx, req); err != nil {
+		return err
+	}
+	return s.reopenAfterInvoiceEvent(ctx, req)
+}
+
+// ingestInvoiceEvent is the invoice ingest's part of handleInvoiceEvent.
+func (s *salesforceEventService) ingestInvoiceEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
 	if !s.invoices.enabled() {
 		slog.InfoContext(ctx, "salesforce: invoice ingest disabled, ignoring invoice event",
 			"eventType", req.EventType, "referenceId", req.ReferenceID)

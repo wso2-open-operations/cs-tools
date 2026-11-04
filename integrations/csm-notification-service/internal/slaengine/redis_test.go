@@ -284,10 +284,8 @@ func TestStore_AdvanceAlertedTier_SkipsUpdateWhenIncarnationMismatches(t *testin
 // it (see processDueMember). The script's own ZSCORE guard must prevent
 // that — this is exactly the kind of Lua-script-level behavior
 // fakeStore's plain Go simulation (engine_test.go) can't exercise. It also
-// pins that the new shifted-pause baseline lands in the SAME atomic
-// operation — the fix for a CodeRabbit-caught gap where a separate baseline
-// write left a window for a crash to leave the wake shift applied but the
-// baseline stale, causing a later resume to double-apply the same delta.
+// pins that the new shifted-pause baseline is recorded, and that a second
+// call with the same (now stale) old baseline shifts nothing.
 func TestStore_ShiftWake_MovesOnlyMembersStillInTheIndex(t *testing.T) {
 	store, closeStore := testStore(t)
 	defer closeStore()
@@ -305,7 +303,7 @@ func TestStore_ShiftWake_MovesOnlyMembersStillInTheIndex(t *testing.T) {
 	// member100 is deliberately never added -- standing in for a tier
 	// already alerted on and removed from the index.
 
-	if err := store.ShiftWake(ctx, caseID, ClockResponse, 1800, 5400); err != nil {
+	if err := store.ShiftWake(ctx, caseID, ClockResponse, 1800, 0, 5400); err != nil {
 		t.Fatalf("ShiftWake() error = %v", err)
 	}
 
@@ -330,7 +328,38 @@ func TestStore_ShiftWake_MovesOnlyMembersStillInTheIndex(t *testing.T) {
 		t.Fatal("GetClock() found = false, want true -- ShiftWake's HSET should have created the clock hash")
 	}
 	if meta.ShiftedPauseSeconds != 5400 {
-		t.Errorf("ShiftedPauseSeconds = %d, want 5400 -- the baseline must be written in the same atomic operation as the wake shift", meta.ShiftedPauseSeconds)
+		t.Errorf("ShiftedPauseSeconds = %d, want 5400", meta.ShiftedPauseSeconds)
+	}
+}
+
+// TestStore_ShiftWake_StaleBaselineShiftsNothing pins the compare-and-set: a
+// second resume diffing against the same old baseline (a redelivered event, or
+// a racing consumer) must not shift the entries again.
+func TestStore_ShiftWake_StaleBaselineShiftsNothing(t *testing.T) {
+	store, closeStore := testStore(t)
+	defer closeStore()
+	ctx := context.Background()
+	caseID := testCaseID(t)
+	member50 := wakeMember(caseID, ClockResponse, 50)
+	defer func() { _ = store.rdb.ZRem(ctx, wakeKey, member50) }()
+	defer func() { _ = store.rdb.Del(ctx, clockKey(caseID, ClockResponse)) }()
+
+	originalDue := time.Now().Add(time.Hour).Truncate(time.Second)
+	if err := store.AddWake(ctx, member50, originalDue); err != nil {
+		t.Fatalf("AddWake() error = %v", err)
+	}
+	if err := store.ShiftWake(ctx, caseID, ClockResponse, 1800, 0, 1800); err != nil {
+		t.Fatalf("first ShiftWake() error = %v", err)
+	}
+	if err := store.ShiftWake(ctx, caseID, ClockResponse, 1800, 0, 1800); err != nil {
+		t.Fatalf("second ShiftWake() error = %v", err)
+	}
+	score, err := store.rdb.ZScore(ctx, wakeKey, member50).Result()
+	if err != nil {
+		t.Fatalf("ZScore() error = %v", err)
+	}
+	if want := float64(originalDue.Add(30 * time.Minute).Unix()); score != want {
+		t.Errorf("score = %v, want %v (shifted exactly once)", score, want)
 	}
 }
 

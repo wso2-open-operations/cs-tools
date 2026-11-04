@@ -82,14 +82,30 @@ func DailyDate(now time.Time, loc *time.Location) time.Time {
 func SendDaily(reports ReportFetcher, email EmailSender, anchor func() time.Time,
 	to, cc []string, source worklogreport.Source, caseLinkBase string,
 	emailsEnabled bool) func(ctx context.Context) error {
-	return send(reports, email, worklogreport.CadenceDaily, anchor, to, cc, source, caseLinkBase, emailsEnabled)
+	return send(reports, email, worklogreport.CadenceDaily, anchor, to, cc, source, caseLinkBase, emailsEnabled, Override{})
+}
+
+// SendDailyWith is SendDaily for a manual run-now with an Override. The
+// override must have passed Override.Validate for the daily cadence.
+func SendDailyWith(reports ReportFetcher, email EmailSender, anchor func() time.Time,
+	to, cc []string, source worklogreport.Source, caseLinkBase string,
+	emailsEnabled bool, ov Override) func(ctx context.Context) error {
+	return send(reports, email, worklogreport.CadenceDaily, anchor, to, cc, source, caseLinkBase, emailsEnabled, ov)
 }
 
 // SendWeekly returns the weekly sub-cron handler.
 func SendWeekly(reports ReportFetcher, email EmailSender, anchor func() time.Time,
 	to, cc []string, source worklogreport.Source, caseLinkBase string,
 	emailsEnabled bool) func(ctx context.Context) error {
-	return send(reports, email, worklogreport.CadenceWeekly, anchor, to, cc, source, caseLinkBase, emailsEnabled)
+	return send(reports, email, worklogreport.CadenceWeekly, anchor, to, cc, source, caseLinkBase, emailsEnabled, Override{})
+}
+
+// SendWeeklyWith is SendWeekly for a manual run-now with an Override. The
+// override must have passed Override.Validate for the weekly cadence.
+func SendWeeklyWith(reports ReportFetcher, email EmailSender, anchor func() time.Time,
+	to, cc []string, source worklogreport.Source, caseLinkBase string,
+	emailsEnabled bool, ov Override) func(ctx context.Context) error {
+	return send(reports, email, worklogreport.CadenceWeekly, anchor, to, cc, source, caseLinkBase, emailsEnabled, ov)
 }
 
 // send fetches, renders and sends one report for the period its anchor
@@ -116,7 +132,7 @@ func SendWeekly(reports ReportFetcher, email EmailSender, anchor func() time.Tim
 // from a day where the job broke.
 func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadence,
 	anchor func() time.Time, to, cc []string, source worklogreport.Source,
-	caseLinkBase string, emailsEnabled bool) func(ctx context.Context) error {
+	caseLinkBase string, emailsEnabled bool, ov Override) func(ctx context.Context) error {
 
 	// Gate on the CLEANED list, not the raw one. {"to": [""]} has
 	// length one and is no audience at all; checking len(to) let it
@@ -127,9 +143,14 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 	// With the derived source the configured lists are irrelevant, so
 	// an empty one is not a reason to skip -- the audience is not known
 	// until the report comes back.
-	skipWithoutRecipients := source != worklogreport.SourceDerived
+	// A replaced audience is known up front, whatever the source.
+	skipWithoutRecipients := source != worklogreport.SourceDerived && !ov.HasRecipients()
 
 	return func(ctx context.Context) error {
+		if !emailsEnabled && ov.Active() {
+			slog.Warn("worklog report override run skipped: report emails are disabled (ALERTS_ENABLED=false)",
+				"cadence", cadence)
+		}
 		if !emailsEnabled || (skipWithoutRecipients && len(cleanTo) == 0) {
 			return nil
 		}
@@ -150,7 +171,10 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 		// for every attempt at the same period.
 		at := anchor()
 		var from, until time.Time
-		if cadence == worklogreport.CadenceWeekly {
+		if ov.HasWindow() {
+			// A manual run-now names its window; the anchor is not used.
+			from, until = ov.From, ov.To
+		} else if cadence == worklogreport.CadenceWeekly {
 			from, until = WeeklyRange(at, loc)
 		} else {
 			from = DailyDate(at, loc)
@@ -164,6 +188,14 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 
 		audience := worklogreport.Resolve(report.Recipients,
 			worklogreport.Audience{To: cleanTo, Cc: cleanCc}, source, nil)
+		if ov.HasRecipients() {
+			// REPLACES, never merges: neither the configured lists nor
+			// the registry-derived audience reach a test run. Counts
+			// only in the log, like the drift line below.
+			audience = worklogreport.Audience{To: ov.Recipients, Cc: ov.Cc}
+			slog.Warn("worklog report recipients overridden for this manual run",
+				"cadence", cadence, "to", len(audience.To), "cc", len(audience.Cc))
+		}
 
 		// Whichever source is in use, an empty audience is an error
 		// worth seeing: SendEmail treats no recipients as success, so
@@ -178,7 +210,7 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 		// maintained by hand on purpose -- but a lead who joins and
 		// never appears, or one who left and still receives it, shows
 		// up here instead of in somebody's inbox.
-		if missing, extra := worklogreport.Drift(report.Recipients, audience); len(missing) > 0 || len(extra) > 0 {
+		if missing, extra := worklogreport.Drift(report.Recipients, audience); !ov.HasRecipients() && (len(missing) > 0 || len(extra) > 0) {
 			// COUNTS, NEVER THE ADDRESSES. Application logs are far
 			// more widely readable than a report's audience, and this
 			// line was printing every derived address into them --
@@ -197,7 +229,7 @@ func send(reports ReportFetcher, email EmailSender, cadence worklogreport.Cadenc
 		}
 
 		return email.SendEmail(ctx, audience.To, audience.Cc,
-			notify.WorklogsReportSubject(report), notify.RenderWorklogsReport(report, caseLinkBase))
+			OverrideSubject(notify.WorklogsReportSubject(report), ov), notify.RenderWorklogsReport(report, caseLinkBase))
 	}
 }
 

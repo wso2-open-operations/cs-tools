@@ -123,7 +123,7 @@ func TestEmailNotifier_Send_CustomerGoesToToInternalGoesToCC(t *testing.T) {
 // (customer-lifecycle-notification@wso2.com, billing@wso2.com) sit on an
 // internal notice (and the no-business-contact nudge, which has the same
 // recipient shape): in "to", after the internal people, with no "cc" at
-// all — as the ServiceNow system sends it (confirmed by the user from real
+// all — as the legacy system sends it (confirmed by the user from real
 // legacy emails, 2026-09-29).
 func TestEmailNotifier_Send_StandingRecipientsGoToToOnInternalNotice(t *testing.T) {
 	sender := &mockEmailSender{}
@@ -153,7 +153,7 @@ func TestEmailNotifier_Send_StandingRecipientsGoToToOnInternalNotice(t *testing.
 }
 
 // TestEmailNotifier_Send_StandingRecipientsGoToToAndCCOnCustomerNotice: on
-// a customer-facing notice the ServiceNow system lists the two standing
+// a customer-facing notice the legacy system lists the two standing
 // lists in both "to" (after the customers) and "cc" (after the internal
 // people), confirmed by the user from real legacy emails.
 func TestEmailNotifier_Send_StandingRecipientsGoToToAndCCOnCustomerNotice(t *testing.T) {
@@ -242,7 +242,7 @@ func TestEmailNotifier_Send_OmitsEmptyEmails(t *testing.T) {
 }
 
 // TestEmailNotifier_Send_FiltersNonWSO2RecipientsByDefault is the core
-// staging safeguard: per explicit direction from Rashmika, no real email
+// staging safeguard: per explicit direction from the email service's owners, no real email
 // should reach a non-WSO2 address unless explicitly allowed. Default
 // (AllowNonWSO2Recipients: false) must drop the external address while
 // still sending to the internal wso2.com one — mixing both in "to" so the
@@ -343,7 +343,7 @@ func internalReminderBody() string {
 // internal-only notice (no Customer in Recipients) gets its own distinct
 // branded shell — not the customer-facing one, and not the old bare
 // plain-text fragment. Confirmed against a real received example ("Dear
-// Nisha Farook...", an internal day-0 notice): no logo, a light-bordered
+// Nora Example...", an internal day-0 notice): no logo, a light-bordered
 // card, and the project/account fields pulled into their own detail box.
 // An earlier version of this code either kept internal notices plain, or
 // wrongly gave them the customer-facing shell — both corrected here.

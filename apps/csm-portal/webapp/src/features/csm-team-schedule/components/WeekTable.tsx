@@ -35,6 +35,7 @@ import {
   isTierlessEscalation,
   shortDayName,
   standingWindowKey,
+  rotationHostOf,
   toIsoDate, rotaZoneName, zoneAbbreviation } from "../utils/rota";
 import {
   ENGAGEMENTS_FAILED_NOTE,
@@ -188,6 +189,7 @@ function TeamCell({ rows }: { rows: ScheduleAssignment[] }): JSX.Element {
  */
 function WeekEditCell({
   cell,
+  standing,
   turn,
   rotaDate,
   dayName,
@@ -198,6 +200,9 @@ function WeekEditCell({
   onRemove,
 }: {
   cell: ScheduleAssignment[];
+  /** People listed from a standing window on this row's hours: shown, but not
+   *  turns of this row, so not offered for removal. */
+  standing?: Set<string>;
   turn: WeekTurn;
   rotaDate: string;
   dayName: string;
@@ -219,15 +224,17 @@ function WeekEditCell({
           </span>
           <span className="who">{a.engineer.name}</span>
           {a.tier && !tiered ? <span className="tier-t">{a.tier}</span> : null}
-          <button
-            type="button"
-            className="rm"
-            aria-label={`Take ${a.engineer.name} off ${turn.label} on ${dayName}`}
-            disabled={busy}
-            onClick={() => onRemove(a)}
-          >
-            ×
-          </button>
+          {standing?.has(a.id) ? null : (
+            <button
+              type="button"
+              className="rm"
+              aria-label={`Take ${a.engineer.name} off ${turn.label} on ${dayName}`}
+              disabled={busy}
+              onClick={() => onRemove(a)}
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
       <select
@@ -339,6 +346,10 @@ export default function WeekTable({
       tiered?: boolean;
       /** An escalation turn stored with no tier: no turn to add anyone to. */
       untiered?: boolean;
+      /** People listed on a rotation's row from a standing window on its hours
+       *  (AEST on the Morning row), by assignment id: shown as the row's
+       *  members, but not turns, so not offered for removal. */
+      standing?: Set<string>;
     };
     const TIERS: ScheduleTier[] = ["L1", "L2", "L3"];
     const out: Row[] = [];
@@ -428,7 +439,20 @@ export default function WeekTable({
     // already lists regular hours by team, so the India region shift arrives
     // as one more team rather than as a row of its own saying the same
     // nine-to-five over again.
-    const byWindow = groupBy(rest, (a) => standingWindowKey(shifts.get(a.shiftCode), a.shiftCode));
+    // People on a standing window stored on a rotation's hours (AEST regular
+    // hours on the Morning rotation's 06:00-09:00) are listed on that
+    // rotation's row, untagged, as on the day view's card: the zone is the
+    // Roster's to show.
+    const standing = new Set<string>();
+    const placed = rest.map((a) => {
+      const own = shifts.get(a.shiftCode);
+      const dow = new Date(`${a.rotaDate}T00:00:00`).getDay();
+      const host = rotationHostOf(own, familyShifts, dow === 0 || dow === 6);
+      if (!host || !own) return a;
+      standing.add(a.id);
+      return { ...a, shiftCode: host.code };
+    });
+    const byWindow = groupBy(placed, (a) => standingWindowKey(shifts.get(a.shiftCode), a.shiftCode));
     for (const [, list] of byWindow.entries()) {
       // The window most of these people are on names the row, so it keeps the
       // label and colour a reader already knows it by.
@@ -446,6 +470,7 @@ export default function WeekTable({
         label: untiered ? `${shift.label} · tier not set` : undefined,
         sort: untiered ? 199 : (shift?.sortOrder ?? 999),
         untiered: Boolean(untiered),
+        ...(list.some((a) => standing.has(a.id)) ? { standing } : {}),
       });
     }
 
@@ -593,7 +618,7 @@ export default function WeekTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ code, shift, list, label, token: rowToken, tiered, untiered }) => {
+          {rows.map(({ code, shift, list, label, token: rowToken, tiered, untiered, standing }) => {
             const byDay = groupBy(list, (a) => a.rotaDate);
             const token = rowToken ?? shift?.colourToken ?? "";
             // A rotation or escalation turn can be edited here; regular hours
@@ -641,6 +666,7 @@ export default function WeekTable({
                       {edit && turn && editable ? (
                         <WeekEditCell
                           cell={cell}
+                          standing={standing}
                           turn={turn}
                           rotaDate={iso}
                           dayName={dayName}

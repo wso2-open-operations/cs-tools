@@ -99,8 +99,8 @@ type store interface {
 	SetClock(ctx context.Context, caseID, clockType string, meta ClockMeta) error
 	GetClock(ctx context.Context, caseID, clockType string) (ClockMeta, bool, error)
 	SetPaused(ctx context.Context, caseID, clockType string, paused bool) error
-	ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, newBaselineSeconds int64) error
-	SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error
+	ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, oldBaselineSeconds, newBaselineSeconds int64) error
+	SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, oldBaselineSeconds, newBaselineSeconds int64) error
 	SetShiftedPauseSeconds(ctx context.Context, caseID, clockType string, seconds int64) error
 	SetState(ctx context.Context, caseID, clockType, state string) error
 	AdvanceAlertedTier(ctx context.Context, caseID, clockType string, tier int, incarnation time.Time) (applied bool, err error)
@@ -689,10 +689,9 @@ func (e *Engine) resumeShift(ctx context.Context, caseID, clockType string) {
 	if delta <= 0 {
 		return
 	}
-	// One atomic call: shifting the wake entries and recording the new
-	// baseline must not be allowed to happen only one at a time — see
-	// Store.ShiftWake's own doc comment for the double-shift this prevents.
-	if err := e.store.ShiftWake(ctx, caseID, clockType, delta, state.PauseDurationSeconds); err != nil {
+	// The baseline is claimed before the entries move — see
+	// Store.ShiftWake's own doc comment for why that order.
+	if err := e.store.ShiftWake(ctx, caseID, clockType, delta, meta.ShiftedPauseSeconds, state.PauseDurationSeconds); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to shift wake entries after resume", "caseId", caseID, "clockType", clockType, "deltaSeconds", delta, "err", err)
 	}
 }
@@ -730,10 +729,8 @@ func (e *Engine) resumeShiftBusinessDays(ctx context.Context, caseID, clockType 
 	if len(wakes) == 0 {
 		return
 	}
-	// One atomic call, same reasoning as ShiftWake's own doc comment: the
-	// wake entries and the new baseline must not be allowed to land only
-	// one at a time.
-	if err := e.store.SetWakeAbsolute(ctx, caseID, clockType, wakes, state.BusinessPauseDurationSeconds); err != nil {
+	// Same baseline-first order as ShiftWake.
+	if err := e.store.SetWakeAbsolute(ctx, caseID, clockType, wakes, meta.ShiftedPauseSeconds, state.BusinessPauseDurationSeconds); err != nil {
 		slog.ErrorContext(ctx, "slaengine: failed to recompute business-day wake entries after resume", "caseId", caseID, "clockType", clockType, "err", err)
 	}
 }

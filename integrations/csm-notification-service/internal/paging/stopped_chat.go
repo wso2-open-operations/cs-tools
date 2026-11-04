@@ -136,6 +136,10 @@ func (e *Engine) stoppedWording(ctx context.Context, st LadderState, reason canc
 		how = "assigned"
 	case cancelAssigneeComment:
 		how = "a public comment by the assignee"
+	case cancelEngineerComment:
+		// The commenter may not be the assignee, so the assignee is not named.
+		return notifications.EscalationStopped{Outcome: "Acknowledged",
+			Detail: "Acknowledged (a public comment by an engineer after the severity change).", Answered: true}
 	case cancelCaseClosed:
 		return notifications.EscalationStopped{Outcome: "Case closed", Detail: "The case was closed."}
 	default:

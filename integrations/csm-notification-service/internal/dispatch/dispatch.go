@@ -137,6 +137,8 @@ type linkResolver interface {
 	CSMLink(caseID string) string
 	ChangeRequestLink(audience, changeRequestID, projectID string) string
 	OutageLink(outageID string) string
+	// ProjectLink is a project's page in the CSM portal.
+	ProjectLink(projectID string) string
 	ServiceRequestLink(caseID string) string
 	IncidentLink(incidentID string) string
 	// IsCustomer classifies a single email as external (customer) vs
@@ -236,6 +238,9 @@ type Dispatcher struct {
 	// pagingTests places paging-number test calls; set via
 	// WithPagingTestCalls, nil when not configured.
 	pagingTests pagingTestCaller
+	// mailPager starts the phone escalation for mail.alert.received; set via
+	// WithMailAlertPaging, nil when not configured.
+	mailPager mailAlertPager
 
 	// specialOps is the SME page for incident.special_ops_alert; see
 	// DeferSpecialOpsPage.
@@ -302,6 +307,23 @@ type Dispatcher struct {
 	// exactly how the CSM group is identified (caseLink == the csmLink
 	// argument each caller passes, from linkResolver.CSMLink).
 	defaultCSMEmailCC []string
+
+	// acpReactivationCC (ACP_REACTIVATION_CC) is CC'd on every "Back to Open
+	// state" email (project.reactivated); set via WithACPReactivation. Empty
+	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
+	acpReactivationCC []string
+	// acpInternalDomain is the only domain the "Back to Open state" email is
+	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
+	// is an internal notice. Empty means "@wso2.com".
+	acpInternalDomain string
+	// acpReactivationLedger, when set, records the "Back to Open state"
+	// emails already sent (Redis), so a redelivery never sends one twice.
+	acpReactivationLedger ReactivationLedger
+	// acpReactivationWaitFor and acpReactivationPoll bound how long, and how
+	// often, a delivery that finds the notice reserved waits for it to clear
+	// (see reserveReactivation). Set with the ledger; tests shorten them.
+	acpReactivationWaitFor time.Duration
+	acpReactivationPoll    time.Duration
 
 	// defaultOnCallNumber is handleIncidentCreated's fallback value for its
 	// payload's own CallTo when a publisher omits it — see that function's
@@ -417,6 +439,25 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 		records:              make(map[string]*recordState),
 		identityExisted:      make(map[string]bool),
 	}
+}
+
+// WithACPReactivation sets the CC list of the "Back to Open state" email
+// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
+// in production), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
+	d.acpReactivationCC = cc
+	d.acpInternalDomain = internalDomain
+	return d
+}
+
+// WithACPReactivationLedger sets the durable record of "Back to Open state"
+// emails already sent and returns d for chaining. Without one only the
+// in-process claim guards against a second send.
+func (d *Dispatcher) WithACPReactivationLedger(l ReactivationLedger) *Dispatcher {
+	d.acpReactivationLedger = l
+	d.acpReactivationWaitFor = reactivationSendingTTL + reactivationWaitInterval
+	d.acpReactivationPoll = reactivationWaitInterval
+	return d
 }
 
 // WithFrustrationDetection configures handleCommentAdded's
@@ -543,6 +584,32 @@ func (d *Dispatcher) handlePagingTestCall(ctx context.Context, raw json.RawMessa
 		return nil
 	}
 	return d.pagingTests.HandleTestCall(ctx, p)
+}
+
+// mailAlertPager starts the phone escalation for mail.alert.received;
+// internal/mailpaging's Engine implements it.
+type mailAlertPager interface {
+	HandleAlert(ctx context.Context, p events.MailAlertReceivedPayload) error
+}
+
+// WithMailAlertPaging routes mail.alert.received to p. Optional: a deployment
+// without it logs and acknowledges the event.
+func (d *Dispatcher) WithMailAlertPaging(p mailAlertPager) *Dispatcher {
+	d.mailPager = p
+	return d
+}
+
+// handleMailAlert hands a mail alert to the pager.
+func (d *Dispatcher) handleMailAlert(ctx context.Context, raw json.RawMessage) error {
+	var p events.MailAlertReceivedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode mail.alert.received payload: %w", err)
+	}
+	if d.mailPager == nil {
+		slog.InfoContext(ctx, "dispatch: mail alert paging is not configured here; ignoring the event", "rule", p.RuleName)
+		return nil
+	}
+	return d.mailPager.HandleAlert(ctx, p)
 }
 
 // specialOpsPager places the SME page for incident.special_ops_alert; the SRE
@@ -919,6 +986,92 @@ func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey stri
 // delay Handle's own return.
 const durableDedupReleaseTimeout = 5 * time.Second
 
+// recordRef is a best-effort set of identifying fields pulled from an
+// event's envelope and payload, for attribution on an error returned from
+// Handle only — never used for dispatch logic. A field is left empty when
+// the envelope couldn't be decoded far enough to have one (the raw bytes
+// aren't valid JSON) or the payload simply doesn't carry it. The payload
+// read is deliberately lenient (plain json.Unmarshal, not decodeStrict): a
+// payload events.Validate rejects for ONE missing required field has still
+// decoded every other field it did carry (decodeStrict's own unmarshal step
+// runs to completion before the required-field check does), so caseNumber/
+// wso2CaseId/commentId are there to read even on a validation failure.
+type recordRef struct {
+	entityID string
+	// isIncident is env.Type's own "incident."-prefix test -- incident.*
+	// payloads carry no caseId/caseNumber field of their own (see events.go's
+	// IncidentCreatedPayload/IncidentAssignedPayload), only a "number", and
+	// the envelope's own identity is an incident id, not a case id; both the
+	// field read below and the label String renders switch on this.
+	isIncident bool
+	commentID  string
+	caseNumber string
+	wso2CaseID string
+}
+
+func recordRefFor(env events.Envelope) recordRef {
+	ref := recordRef{entityID: env.EntityID, isIncident: strings.HasPrefix(string(env.Type), "incident.")}
+	var common struct {
+		CommentID  string `json:"commentId"`
+		CaseNumber string `json:"caseNumber"`
+		Number     string `json:"number"`
+		WSO2CaseID string `json:"wso2CaseId"`
+	}
+	_ = json.Unmarshal(env.Payload, &common)
+	ref.commentID = common.CommentID
+	if ref.isIncident {
+		ref.caseNumber = common.Number
+	} else {
+		ref.caseNumber = common.CaseNumber
+	}
+	ref.wso2CaseID = common.WSO2CaseID
+	return ref
+}
+
+// String renders this ref for appending to an error. wso2CaseId is
+// preferred over caseNumber/number when both are present — they identify the
+// same row, so reporting both is redundant; caseNumber/number only appears
+// when wso2CaseId is not available. The entity id and the number-ish field
+// are both labeled incidentId/number rather than caseId/caseNumber for an
+// incident.* event, matching what the envelope and payload actually are.
+func (r recordRef) String() string {
+	var parts []string
+	if r.entityID != "" {
+		if r.isIncident {
+			parts = append(parts, "incidentId="+r.entityID)
+		} else {
+			parts = append(parts, "caseId="+r.entityID)
+		}
+	}
+	if r.commentID != "" {
+		parts = append(parts, "commentId="+r.commentID)
+	}
+	if r.wso2CaseID != "" {
+		parts = append(parts, "wso2CaseId="+r.wso2CaseID)
+	} else if r.caseNumber != "" {
+		if r.isIncident {
+			parts = append(parts, "number="+r.caseNumber)
+		} else {
+			parts = append(parts, "caseNumber="+r.caseNumber)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// wrapWithRef appends ref's identifying fields to err, so the
+// "eventbus: handler failed" log line (which only ever logs err's own text —
+// see internal/eventbus's own package doc for why that package stays
+// payload-agnostic) carries enough to find the record without a DB query.
+func wrapWithRef(err error, ref recordRef) error {
+	if err == nil {
+		return nil
+	}
+	if s := ref.String(); s != "" {
+		return fmt.Errorf("%w [%s]", err, s)
+	}
+	return err
+}
+
 // Handle implements eventbus.Handle. A non-nil return causes the caller
 // (eventbus.Consumer) to retry — see its package doc for the retry policy.
 func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
@@ -926,15 +1079,18 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	if err := json.Unmarshal(record.Value, &env); err != nil {
 		return fmt.Errorf("dispatch: decode envelope: %w", err)
 	}
+	// Known even when env.Type turns out to be unrecognized or env.Payload
+	// fails events.Validate below — see recordRefFor's own doc comment.
+	ref := recordRefFor(env)
 	if !env.Type.IsKnown() {
-		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
+		return wrapWithRef(fmt.Errorf("dispatch: unknown event type %q", env.Type), ref)
 	}
 	// The only validation boundary left in this service: callers publish
 	// directly to the event bus now (see events.Validate's doc comment), so
 	// nothing has checked this record's required fields before it reaches
 	// here.
 	if err := events.Validate(env.EntityID, env.Type, env.Payload); err != nil {
-		return fmt.Errorf("dispatch: invalid payload: %w", err)
+		return wrapWithRef(fmt.Errorf("dispatch: invalid payload: %w", err), ref)
 	}
 
 	// Checked before dispatching to any handler, and independent of every
@@ -943,6 +1099,9 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	// restart/rebalance gap this closes. A record already in progress or
 	// already fully handled is skipped outright, never reaching a single
 	// handler.
+	if ownsItsDedup(env.Type) {
+		return wrapWithRef(d.dispatchByType(ctx, record, env), ref)
+	}
 	baseKey := recordBaseKey(record)
 	if !d.durablyClaimRecord(ctx, baseKey) {
 		slog.InfoContext(ctx, "dispatch: record already in progress or already processed, skipping", "type", string(env.Type))
@@ -962,7 +1121,24 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	} else {
 		d.markRecordDone(releaseCtx, baseKey)
 	}
-	return err
+	return wrapWithRef(err, ref)
+}
+
+// ownsItsDedup reports whether an event type's handler keeps its own durable
+// duplicate record, so Handle's record-level claim is not taken for it.
+//
+// project.reactivated (the "Back to Open state" email) does: its
+// ReactivationLedger reserves the notice before the send and marks it sent
+// after, and a delivery that finds a reservation held waits for it to be
+// released, marked sent or expired. The record-level claim treats "in
+// progress" like "done": after a crash between the claim and the send, the
+// redelivery seconds later would find the claim held, be skipped and
+// committed, and the email would never be sent. With the claim skipped, the
+// redelivery reaches the handler, waits out the crashed attempt's
+// reservation, and sends. The ledger also keys by project and reactivatedOn,
+// not by the record's bytes, and keeps a sent notice for 30 days, not 3.
+func ownsItsDedup(t events.Type) bool {
+	return t == events.TypeProjectReactivated
 }
 
 // dispatchByType is Handle's own event-type switch, split out so Handle
@@ -1009,6 +1185,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeProjectContactRegistered:
 		return d.handleProjectContactRegistered(ctx, record, env.Payload)
+	case events.TypeProjectReactivated:
+		return d.handleProjectReactivated(ctx, record, env.Payload)
 	case events.TypeSRCreated:
 		return d.handleSRCreated(ctx, record, env.Payload)
 	case events.TypeSRAcknowledged:
@@ -1017,6 +1195,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleSRCommentAdded(ctx, record, env.Payload)
 	case events.TypePagingTestCallRequested:
 		return d.handlePagingTestCall(ctx, env.Payload)
+	case events.TypeMailAlertReceived:
+		return d.handleMailAlert(ctx, env.Payload)
 	case events.TypeIncidentSpecialOpsAlert:
 		return d.handleSpecialOpsAlert(ctx, env.EntityID, env.Payload)
 	case events.TypeSLATierReached:

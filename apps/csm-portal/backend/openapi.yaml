@@ -14444,7 +14444,9 @@ paths:
         The Rota Reminders card on the Rota access tab. The entity service's payload, forwarded
         unchanged: weekdayEnabled, weekendEnabled, invitesEnabled, weekendRequired (people each
         weekend shift needs per day, by shift code), windows (a rotation's hours on its own clock,
-        by shift code), copyTo, updatedBy, updatedOn. 404 when nothing was saved: the reminders then
+        by shift code), inviteRotations (whether each rotation's reminders carry a calendar
+        invitation, by shift code), copyTo, weekendCopyTo (copied on the weekend summary only),
+        updatedBy, updatedOn. 404 when nothing was saved: the reminders then
         use their built-in settings, which the card shows.
       parameters:
         - name: family
@@ -14523,8 +14525,23 @@ paths:
                       start: { type: string, example: "08:00" }
                       end: { type: string, example: "18:00" }
                       timeZone: { type: string, example: America/Los_Angeles }
+                inviteRotations:
+                  type: object
+                  description: >-
+                    Whether each rotation's reminders carry a calendar invitation, by the shift code
+                    of its window. A rotation not named does. Optional: when absent the stored value
+                    is kept.
+                  additionalProperties: { type: boolean }
+                  example: { CRE_MORNING: true, CRE_WEEKEND_NIGHT: false }
                 copyTo:
                   type: array
+                  maxItems: 20
+                  items: { type: string, format: email }
+                weekendCopyTo:
+                  type: array
+                  description: >-
+                    Copied (Cc) on the weekend summary email only. Optional: when absent the stored
+                    value is kept.
                   maxItems: 20
                   items: { type: string, format: email }
       responses:
@@ -14623,7 +14640,7 @@ paths:
               type: object
               required: [kind]
               properties:
-                kind: { type: string, enum: [weekday, weekend] }
+                kind: { type: string, enum: [morning, evening, weekend, weekday] }
                 test:
                   type: boolean
                   description: Send it only to the person asking, as a test copy; their own queue, 2 minutes apart.
@@ -14654,7 +14671,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: "One of the same kind is already waiting to be sent."
+          description: "One that sends any of the same emails is already waiting to be sent."
           content:
             application/json:
               schema:
@@ -18603,8 +18620,9 @@ paths:
     get:
       summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
       description: >
-        A CSM admin. Same limit/offset query params as entity-service's own
-        GET /sla-status; responses are Cache-Control no-store. Typically polled right
+        A CSM admin. Same limit/offset/severity/caseType/search/elapsedBucket query
+        params as entity-service's own GET /sla-status (each forwarded verbatim,
+        blank omitted); responses are Cache-Control no-store. Typically polled right
         after POST /sla-engine/recalculate to show which clocks are currently running.
       operationId: searchActiveSLAStatusesManage
       parameters:
@@ -18616,6 +18634,29 @@ paths:
           in: query
           schema:
             type: integer
+        - name: severity
+          in: query
+          description: One of catastrophic, critical, high, medium, low.
+          schema:
+            type: string
+            enum: [catastrophic, critical, high, medium, low]
+        - name: caseType
+          in: query
+          description: One of case, engagement, service_request, security_report_analysis, announcement.
+          schema:
+            type: string
+            enum: [case, engagement, service_request, security_report_analysis, announcement]
+        - name: search
+          in: query
+          description: Matches only the case's own id (exact), number, or WSO2 case id (substring).
+          schema:
+            type: string
+        - name: elapsedBucket
+          in: query
+          description: One of under50, 50to75, 75to100, over100.
+          schema:
+            type: string
+            enum: [under50, 50to75, 75to100, over100]
       responses:
         "200":
           description: Every currently-active SLA clock, paginated.
