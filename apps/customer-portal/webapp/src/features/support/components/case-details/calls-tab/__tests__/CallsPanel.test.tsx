@@ -110,6 +110,7 @@ describe("CallsPanel", () => {
   beforeEach(() => {
     mockPatchMutate.mockClear();
     mockUseGetProjectFilters.mockClear();
+    vi.mocked(useGetCallRequests).mockClear();
     vi.mocked(useGetUserDetails).mockReturnValue({
       data: { timeZone: "America/New_York" },
       refetch: vi
