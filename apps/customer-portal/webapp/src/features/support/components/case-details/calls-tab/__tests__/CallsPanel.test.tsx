@@ -139,16 +139,10 @@ describe("CallsPanel", () => {
     expect(screen.getByTestId("calls-list-skeleton")).toBeInTheDocument();
   });
 
-  // CodeRabbit catch: callRequestStateKeys mapped callRequestStates' string
-  // enum ids to real numbers via CALL_REQUEST_STATE_KEY_BY_ID, but never
-  // filtered out the mapped Canceled key -- so once the separate NaN-mapping
-  // bug was fixed, "canceled" resolved to a real CALL_REQUEST_STATE_CANCELLED
-  // and stayed in the list, asking the search explicitly for Canceled call
-  // requests, the opposite of "all non-Canceled states" (this file's own
-  // comment). useGetProjectFilters' own upstream Canceled removal doesn't
-  // catch this either (it compares Number(s.id), which is NaN for the string
-  // id "canceled").
-  it("excludes Canceled from the call request search's state keys, even when the project filters include it", () => {
+  // The case's Calls count includes Canceled call requests, so the list must
+  // show them too: the search is sent without a state filter, which returns
+  // every state.
+  it("does not filter the call request search by state, so Canceled calls are listed", () => {
     mockUseGetProjectFilters.mockReturnValueOnce({
       data: {
         callRequestStates: [
@@ -178,7 +172,7 @@ describe("CallsPanel", () => {
       />);
 
     const [, , stateKeys] = vi.mocked(useGetCallRequests).mock.calls[0];
-    expect(stateKeys).not.toContain(CALL_REQUEST_STATE_CANCELLED);
+    expect(stateKeys).toBeUndefined();
   });
 
   it("should render error state", () => {
