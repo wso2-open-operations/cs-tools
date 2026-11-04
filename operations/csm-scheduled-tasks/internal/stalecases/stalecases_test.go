@@ -66,7 +66,7 @@ func TestSendReportSendsToConfiguredRecipients(t *testing.T) {
 	email := &fakeEmail{}
 	to, cc := []string{"team@example.com"}, []string{"lead@example.com"}
 
-	if err := stalecases.SendReport(reports, email, 30, to, cc, true)(context.Background()); err != nil {
+	if err := stalecases.SendReport(reports, email, 30, to, cc, "", true)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if reports.gotAge != 30 {
@@ -88,7 +88,7 @@ func TestSendReportOnlyOnboardingRowsStillSends(t *testing.T) {
 		OnboardingCases: []longopenreport.Row{{Number: "CS0000002"}}, OnboardingCasesTotal: 1,
 	}}
 	email := &fakeEmail{}
-	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, true)(context.Background()); err != nil {
+	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, "", true)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if email.calls != 1 {
@@ -99,7 +99,7 @@ func TestSendReportOnlyOnboardingRowsStillSends(t *testing.T) {
 func TestSendReportBothTablesEmptySendsNothing(t *testing.T) {
 	reports := &fakeReports{}
 	email := &fakeEmail{}
-	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, true)(context.Background()); err != nil {
+	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, "", true)(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
 	if reports.calls != 1 || email.calls != 0 {
@@ -110,7 +110,7 @@ func TestSendReportBothTablesEmptySendsNothing(t *testing.T) {
 func TestSendReportNoToSkipsFetch(t *testing.T) {
 	reports := &fakeReports{report: oneCase()}
 	email := &fakeEmail{}
-	if err := stalecases.SendReport(reports, email, 30, nil, []string{"lead@example.com"}, true)(context.Background()); err != nil {
+	if err := stalecases.SendReport(reports, email, 30, nil, []string{"lead@example.com"}, "", true)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if reports.calls != 0 || email.calls != 0 {
@@ -121,7 +121,7 @@ func TestSendReportNoToSkipsFetch(t *testing.T) {
 func TestSendReportAlertsDisabledSkipsFetch(t *testing.T) {
 	reports := &fakeReports{report: oneCase()}
 	email := &fakeEmail{}
-	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, false)(context.Background()); err != nil {
+	if err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, "", false)(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if reports.calls != 0 || email.calls != 0 {
@@ -133,7 +133,7 @@ func TestSendReportFetchErrorIsReturned(t *testing.T) {
 	boom := errors.New("boom")
 	reports := &fakeReports{err: boom}
 	email := &fakeEmail{}
-	err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, true)(context.Background())
+	err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, "", true)(context.Background())
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want it to wrap the fetch error", err)
 	}
@@ -146,7 +146,7 @@ func TestSendReportSendErrorIsReturned(t *testing.T) {
 	boom := errors.New("smtp down")
 	reports := &fakeReports{report: oneCase()}
 	email := &fakeEmail{err: boom}
-	err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, true)(context.Background())
+	err := stalecases.SendReport(reports, email, 30, []string{"team@example.com"}, nil, "", true)(context.Background())
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want it to wrap the send error", err)
 	}

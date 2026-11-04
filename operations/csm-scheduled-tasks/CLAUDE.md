@@ -130,7 +130,7 @@ and OAuth client credentials as the other entity-service clients, no extra env v
 `notify.RenderLongOpenCasesReport` renders the result as two tables, in this order: "Ongoing cases"
 (the report's `cases`, projects that are not being onboarded) and "Ongoing cases on onboarding
 projects" (`onboardingCases`). Columns: Case, WSO2 Case ID, Integration CS Team, Assignee, State,
-Priority, Last updated, Created. Which cases count as ongoing, the split between the tables, the
+Severity (S0-S4), Last updated, Created. Which cases count as ongoing, the split between the tables, the
 oldest-first order and the per-table row cap all live in entity-service; this task only fetches,
 renders and sends. The 30-day window is a fixed constant (`staleCaseOlderThanDays` in
 `cmd/server/main.go`), not an env var, and the subject is
@@ -141,7 +141,7 @@ entity-service without it the task fails (404) and the engine alerts.
 
 A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
 empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
-count-only line is logged, and the run succeeds. Case numbers are plain text, never links.
+count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<internal id>` (plain text when it is unset).
 
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
