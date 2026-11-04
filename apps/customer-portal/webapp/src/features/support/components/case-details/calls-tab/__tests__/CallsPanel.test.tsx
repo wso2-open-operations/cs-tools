@@ -271,6 +271,22 @@ describe("CallsPanel", () => {
     expect(screen.getByRole("combobox")).toBeInTheDocument();
   });
 
+  it("disables the dropdown until the first, unfiltered search finishes", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue({
+      ...listedCall,
+      isPending: true,
+      data: undefined,
+    } as unknown as ReturnType<typeof useGetCallRequests>);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    expect(screen.getByRole("combobox")).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("shows only the plain empty state, with no dropdown, when the case has no call requests", () => {
     vi.mocked(useGetCallRequests).mockReturnValue({
       ...listedCall,
