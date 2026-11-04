@@ -15,8 +15,8 @@
 -- under the License.
 
 -- A dashboard whose owner was deleted is kept while somebody can still see it
--- (migrations 0255 and 0270): a person or a team it is shared with. Its link
--- is off (0270 turns it off as the owner goes). With no owner, nobody can
+-- (migrations 0255 and 0276): a person or a team it is shared with. Its link
+-- is off (0276 turns it off as the owner goes). With no owner, nobody can
 -- unshare it through the API; its shares go when the person or the team is
 -- deleted (both cascade). Once the last of them goes, nobody can see it any
 -- more, so it is deleted here, as 0255 does for one shared with nobody when
@@ -26,7 +26,7 @@
 -- has no owner, its link is off and it has no person or team share left.
 -- It runs:
 --   * after a person share or a team share row is deleted;
---   * after a dashboard with no owner has its link turned off: 0270 does
+--   * after a dashboard with no owner has its link turned off: 0276 does
 --     that as the owner is deleted (no API can, turning a link off needs the
 --     owner).
 -- A dashboard that still has its owner is never touched.

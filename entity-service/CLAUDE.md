@@ -11334,10 +11334,10 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
 
 A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view
 only with people (`custom_dashboard_share`), with teams (`custom_dashboard_team_share`) and, since
-migration 0269, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
+migration 0275, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
 Saved dashboards are live in production, so a change here must leave the stored rows as they are.
 
-**The link** (migration 0269, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
+**The link** (migration 0275, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
 `custom_dashboard_link_handler.go`):
 
 - `custom_dashboard.link_enabled` is the owner's switch; `link_id` is the id in the link, a new random
@@ -11370,19 +11370,19 @@ stay with no owner while a person or a team they are shared with can still see t
 share, unshare, delete or turn the link of an ownerless dashboard on or off (every owner route matches no
 one). The rule is "kept while a person or a team share is left":
 
-- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0270) runs as the owner
+- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0276) runs as the owner
   goes. **It turns the dashboard's link off** (link id cleared, every `custom_dashboard_link_access` row
   deleted), so offboarding a user leaves no working link to their dashboards and the people who had one
   only through the link lose it; then it deletes the dashboard when no person share and no team share is
   left. People with a direct or team share keep it.
-- Migration 0271 deletes an ownerless dashboard later, once its last share goes and its link is off:
+- Migration 0277 deletes an ownerless dashboard later, once its last share goes and its link is off:
   `custom_dashboard_delete_if_orphaned(id)`, from AFTER DELETE triggers on both share tables (their rows go
   when the recipient user or the team is deleted, both cascade) and from an AFTER UPDATE OF `link_enabled`
-  trigger for an ownerless dashboard whose link goes off (0270's own update fires it as the owner goes; it
+  trigger for an ownerless dashboard whose link goes off (0276's own update fires it as the owner goes; it
   applies the same rule). A dashboard that has its owner is never touched by any of them.
 - The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
   (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
-  (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0271).
+  (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0277).
 
 ## Adding a new entity
 

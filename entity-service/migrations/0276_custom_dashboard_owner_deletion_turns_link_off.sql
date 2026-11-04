@@ -17,7 +17,7 @@
 -- When a user is deleted, migration 0255's trigger deletes their dashboards
 -- that are shared with nobody (no row in custom_dashboard_share or
 -- custom_dashboard_team_share) and keeps the rest, with no owner. A dashboard
--- whose link is on (migration 0269) has its link turned off first: with no
+-- whose link is on (migration 0275) has its link turned off first: with no
 -- owner nobody could turn it off, so offboarding a user must not leave a link
 -- to their dashboard working. The people who had it only through the link
 -- lose it (their custom_dashboard_link_access rows are deleted, as when the
@@ -25,7 +25,7 @@
 -- team keep it, as before. So a dashboard whose link was on is then kept or
 -- deleted by 0255's rule, exactly like one whose link was off.
 --
--- Turning the link off also fires migration 0271's trigger for an ownerless
+-- Turning the link off also fires migration 0277's trigger for an ownerless
 -- dashboard, which applies the same rule; the delete below finds nothing left
 -- to do in that case.
 --

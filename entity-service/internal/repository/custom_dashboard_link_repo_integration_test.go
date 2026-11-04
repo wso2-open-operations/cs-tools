@@ -512,7 +512,7 @@ const (
 	cdbDashboardSharedF  = "cdb00000-0000-4000-8000-0000000000f4"
 )
 
-// Deleting the owner turns every link of theirs off (migration 0270): the
+// Deleting the owner turns every link of theirs off (migration 0276): the
 // people who had a dashboard only through its link lose it and the link opens
 // nothing, so a dashboard shared with nobody else goes with the owner, opened
 // by somebody or not, like one whose link was already off (migration 0255).

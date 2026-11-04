@@ -46,7 +46,7 @@ type CustomDashboardShareRepository interface {
 	RemoveShare(ctx context.Context, ownerID, dashboardID, userID string) (bool, error)
 	// ListSharedWithUser is every dashboard shared with the user, directly,
 	// with a team the user is in now (migration 0253), or through a link they
-	// opened while it is on (migration 0269), without definitions, ordered by
+	// opened while it is on (migration 0275), without definitions, ordered by
 	// name. Team and link shares count only for internal staff, and nothing
 	// counts for the dashboard's owner.
 	ListSharedWithUser(ctx context.Context, userID string) ([]domain.SharedCustomDashboardSummary, error)
@@ -157,7 +157,7 @@ func (r *customDashboardShareRepo) RemoveShare(ctx context.Context, ownerID, das
 // is 0 direct, 1 team, 2 link). Team membership is read live from
 // team_member: whoever is in the team now sees the dashboard. A link share is
 // a row of custom_dashboard_link_access (the user opened the link, migration
-// 0269) and counts only while the link is on. Team and link shares count only
+// 0275) and counts only while the link is on. Team and link shares count only
 // when $1 is internal staff (person shares check that when they are added; a
 // team's members are not checked then), and no share counts for the
 // dashboard's owner. A dashboard whose owner was deleted (owner_user_id NULL,

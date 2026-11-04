@@ -18,9 +18,9 @@ package repository
 
 import "testing"
 
-// These check migration 0271: a dashboard whose owner was deleted goes once
+// These check migration 0277: a dashboard whose owner was deleted goes once
 // nobody can see it any more, i.e. when its last person or team share goes
-// (its link was turned off with the owner, migration 0270). They run on the team share fixture (teams Orion and
+// (its link was turned off with the owner, migration 0276). They run on the team share fixture (teams Orion and
 // Lyra) with an owner G and a recipient H of their own. Skipped unless
 // ENTITY_TEST_DATABASE_URL is set.
 
@@ -156,7 +156,7 @@ func TestCustomDashboardOrphanIntegration_GoesWithItsLastTeamShare(t *testing.T)
 }
 
 // A dashboard whose link was on has it turned off as its owner goes
-// (migration 0270), so it too goes with its last share.
+// (migration 0276), so it too goes with its last share.
 func TestCustomDashboardOrphanIntegration_ALinkThatWasOnDoesNotKeepIt(t *testing.T) {
 	f := newOrphanFixture(t)
 	saveCustomDashboard(t, f.dashboards, cdbOwnerG, cdbOrphanX, "Linked", `{"v":1}`)
@@ -209,7 +209,7 @@ func TestCustomDashboardOrphanIntegration_OwnerAndLastRecipientTogether(t *testi
 }
 
 // No API turns the link of an ownerless dashboard on or off (both need the
-// owner, and 0270 turns it off as the owner goes); when something does, as
+// owner, and 0276 turns it off as the owner goes); when something does, as
 // here in SQL, a dashboard nobody else has stays while its link is on and
 // goes once it is turned off, and one shared with somebody stays.
 func TestCustomDashboardOrphanIntegration_TurningAnOrphansLinkOff(t *testing.T) {

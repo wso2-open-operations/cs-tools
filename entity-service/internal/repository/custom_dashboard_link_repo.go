@@ -27,7 +27,7 @@ import (
 )
 
 // CustomDashboardLinkRepository reads and writes whether anyone with a saved
-// dashboard's link may view it (migration 0269). The owner side takes the
+// dashboard's link may view it (migration 0275). The owner side takes the
 // owner and only ever touches that owner's dashboards; OpenLink is the
 // recipient side. Once opened, the dashboard is read like any other shared
 // one (CustomDashboardShareRepository). ids must be UUIDs; the service checks

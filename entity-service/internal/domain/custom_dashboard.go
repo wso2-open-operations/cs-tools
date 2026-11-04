@@ -100,7 +100,7 @@ type CustomDashboardTeamShareList struct {
 }
 
 // CustomDashboardLink is whether anyone with a saved dashboard's link may view
-// it (migration 0269), as its owner sees it. LinkID is the id in the link, ""
+// it (migration 0275), as its owner sees it. LinkID is the id in the link, ""
 // while the option is off; a new one each time it is turned on. OpenedBy is
 // how many people have opened the link (and so see the dashboard as shared
 // with them) since it was turned on; who they are is never listed.
@@ -133,7 +133,7 @@ type OpenedCustomDashboardLink struct {
 // it was shared with, nil when it was shared with the caller directly (a
 // direct share wins when there are both; with several teams, the first by
 // name). SharedViaLink is true when the caller has it only because they
-// opened its link (migration 0269): a direct or team share wins over it.
+// opened its link (migration 0275): a direct or team share wins over it.
 // SharedOn is that share's date (for a link, when the caller opened it).
 type SharedCustomDashboardSummary struct {
 	ID            string                        `json:"id"`
