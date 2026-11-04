@@ -37,6 +37,7 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import CallsListSkeleton from "@case-details-calls/CallsListSkeleton";
 import CallRequestList from "@case-details-calls/CallRequestList";
 import CallsEmptyState from "@case-details-calls/CallsEmptyState";
+import CallsStatusFilter from "@case-details-calls/CallsStatusFilter";
 import CallsErrorState from "@case-details-calls/CallsErrorState";
 import RequestCallModal from "@case-details-calls/RequestCallModal";
 import DeleteCallRequestModal from "@case-details-calls/DeleteCallRequestModal";
@@ -49,6 +50,8 @@ import {
   CALL_REQUEST_LEAD_MINUTES_BY_PRIORITY_ID,
   CALL_REQUEST_STATE_CANCELLED,
   CALL_REQUEST_STATE_CUSTOMER_REJECTED,
+  CALL_REQUEST_STATE_KEYS_BY_STATUS_FILTER,
+  CALL_REQUEST_STATUS_FILTER_OPTIONS,
   CALL_REQUEST_STATE_PENDING_ON_WSO2,
   CALL_SCHEDULABLE_CASE_STATUSES,
   type CaseStatus,
@@ -89,8 +92,13 @@ export default function CallsPanel({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [callRequestsPage, setCallRequestsPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState("");
 
   const { data: projectFilters } = useGetProjectFilters(projectId);
+
+  const statusStateKeys = statusFilter
+    ? CALL_REQUEST_STATE_KEYS_BY_STATUS_FILTER[statusFilter]
+    : undefined;
   const {
     data: userDetails,
     refetch: refetchUserDetails,
@@ -202,7 +210,7 @@ export default function CallsPanel({
     hasNextPage,
     isFetchingNextPage,
     isFetchNextPageError,
-  } = useGetCallRequests(projectId, caseId);
+  } = useGetCallRequests(projectId, caseId, statusStateKeys);
   const patchCallRequest = usePatchCallRequest(projectId, caseId);
 
   const allCallRequests = useMemo(
@@ -251,6 +259,11 @@ export default function CallsPanel({
     isFetchingNextPage,
     isFetchNextPageError,
   ]);
+
+  const handleStatusFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setCallRequestsPage(1);
+  };
 
   const handleCallRequestPageChange = (
     _event: ChangeEvent<unknown>,
@@ -403,14 +416,41 @@ export default function CallsPanel({
 
   const mainCallsContent = (
     <>
-      {!(allCallRequests.length === 0 && !isPending && !isError) && (
-        <Box sx={{ alignSelf: "flex-start" }}>{requestCallButton}</Box>
+      {!(
+        allCallRequests.length === 0 &&
+        !isPending &&
+        !isError &&
+        !statusFilter
+      ) && (
+        <Stack
+          direction="row"
+          spacing={2}
+          alignItems="center"
+          justifyContent="space-between"
+          flexWrap="wrap"
+          useFlexGap
+        >
+          {requestCallButton}
+          <CallsStatusFilter
+            value={statusFilter}
+            options={CALL_REQUEST_STATUS_FILTER_OPTIONS}
+            onChange={handleStatusFilterChange}
+          />
+        </Stack>
       )}
 
       {isPending ? (
         <CallsListSkeleton />
       ) : isError ? (
         <CallsErrorState error={error} />
+      ) : allCallRequests.length === 0 && statusFilter ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ py: 4, textAlign: "center" }}
+        >
+          No call requests have this status.
+        </Typography>
       ) : allCallRequests.length === 0 ? (
         <CallsEmptyState action={requestCallButton} />
       ) : (
