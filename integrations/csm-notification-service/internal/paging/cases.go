@@ -121,7 +121,9 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 		// The live and dead-letter consumers can each hold a severity change
 		// for this case; the check, the new chain and the record below must
 		// not interleave, or an older change could replace a newer chain.
-		unlock, err := e.lockCaseSeverity(ctx, caseID)
+		// The rest runs under the lock's context: it is cancelled if the
+		// lock is lost, so nothing below writes after another handler took it.
+		ctx, unlock, err := e.lockCaseSeverity(ctx, caseID)
 		if err != nil {
 			return err
 		}
@@ -409,10 +411,14 @@ func (e *Engine) severityChangeHandled(ctx context.Context, caseID string, chang
 	return !last.IsZero() && !changedAt.After(last)
 }
 
-// severityLockTTL bounds one case's severity lock: far longer than the few
-// Redis writes the handling takes, short enough that a holder that died delays
-// the next change by at most this.
+// severityLockTTL bounds one case's severity lock between renewals: a holder
+// that died delays the next change by at most this.
 const severityLockTTL = 30 * time.Second
+
+// severityLockRenew is how often a holder extends its lock. Handling can
+// outlast the TTL -- building a plan makes sequential entity-service calls of
+// up to 25s each -- so the lock is a lease renewed while the work runs.
+var severityLockRenew = severityLockTTL / 3
 
 // severityLockPoll is how often a waiting severity change retries the lock.
 const severityLockPoll = 100 * time.Millisecond
@@ -422,9 +428,14 @@ const severityLockPoll = 100 * time.Millisecond
 var severityLockWait = 10 * time.Second
 
 // lockCaseSeverity takes the case's severity lock for this ladder, waiting up
-// to severityLockWait, and returns the function that releases it. A Redis
-// error leaves the change unlocked, logged, as it was handled before the lock.
-func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (func(), error) {
+// to severityLockWait, and returns the context to do the work under and the
+// function that releases the lock. The lock is renewed every
+// severityLockRenew while held; if a renewal finds it lost (or cannot reach
+// Redis), the returned context is cancelled, so the work's writes fail and
+// the consumer retries instead of overwriting the chain of whoever holds the
+// lock now. A Redis error taking the lock leaves the change unlocked, logged,
+// as it was handled before the lock.
+func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (context.Context, func(), error) {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	token := hex.EncodeToString(buf)
@@ -434,10 +445,20 @@ func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (func(), e
 		if err != nil {
 			slog.WarnContext(ctx, "escalation: could not take the case's severity lock; handling without it",
 				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
-			return func() {}, nil
+			return ctx, func() {}, nil
 		}
 		if ok {
-			return func() {
+			held, cancel := context.WithCancel(ctx)
+			stop := make(chan struct{})
+			renewed := make(chan struct{})
+			go func() {
+				defer close(renewed)
+				e.renewCaseSeverity(held, cancel, stop, caseID, token)
+			}()
+			return held, func() {
+				close(stop)
+				<-renewed
+				cancel()
 				if err := e.store.UnlockCaseSeverity(context.WithoutCancel(ctx), caseID, token); err != nil {
 					slog.WarnContext(ctx, "escalation: could not release the case's severity lock; it expires on its own",
 						"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
@@ -445,12 +466,36 @@ func (e *Engine) lockCaseSeverity(ctx context.Context, caseID string) (func(), e
 			}, nil
 		}
 		if !time.Now().Before(deadline) {
-			return nil, fmt.Errorf("escalation: another severity change for case %s is still being handled", caseID)
+			return nil, nil, fmt.Errorf("escalation: another severity change for case %s is still being handled", caseID)
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		case <-time.After(severityLockPoll):
+		}
+	}
+}
+
+// renewCaseSeverity extends the case's severity lock every severityLockRenew
+// until stop is closed, and cancels the holder's work once the lock is lost.
+func (e *Engine) renewCaseSeverity(held context.Context, cancel context.CancelFunc, stop <-chan struct{}, caseID, token string) {
+	tick := time.NewTicker(severityLockRenew)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-held.Done():
+			return
+		case <-tick.C:
+			ok, err := e.store.RenewCaseSeverity(held, caseID, token, severityLockTTL)
+			if err == nil && ok {
+				continue
+			}
+			slog.WarnContext(held, "escalation: lost the case's severity lock; abandoning this change so it is retried",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind), "err", err)
+			cancel()
+			return
 		}
 	}
 }

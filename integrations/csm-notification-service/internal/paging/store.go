@@ -325,6 +325,23 @@ func (s *Store) UnlockCaseSeverity(ctx context.Context, caseID, token string) er
 	return unlockScript.Run(ctx, s.rdb, []string{s.severityLockKey(caseID)}, token).Err()
 }
 
+// renewScript extends the lock only while it still holds this holder's
+// token, so a holder whose lock expired and was taken never extends the new
+// holder's.
+var renewScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+// RenewCaseSeverity extends the lock taken with token to ttl from now, and
+// reports whether this holder still had it.
+func (s *Store) RenewCaseSeverity(ctx context.Context, caseID, token string, ttl time.Duration) (bool, error) {
+	n, err := renewScript.Run(ctx, s.rdb, []string{s.severityLockKey(caseID)}, token, ttl.Milliseconds()).Int()
+	return n == 1, err
+}
+
 // Create stores a new ladder only if none is running for this incident, and
 // reports whether it actually created one.
 //

@@ -775,6 +775,12 @@ is keyed by the case id, and `Trigger.Record` is `case`.
     unlocked, an older change could pass the check and replace the newer
     chain. A change that finds it held waits up to `severityLockWait` (10s),
     then errors so the consumer retries; a Redis error proceeds unlocked.
+    The lock is a lease: building a plan makes sequential entity-service
+    calls (25s timeout each), so it can outlast 30s. The holder renews it
+    every `severityLockRenew` (10s, token-checked `RenewCaseSeverity`), and
+    the work runs under a context that is cancelled when a renewal finds the
+    lock lost or Redis unreachable -- its writes then fail and the change is
+    retried, rather than overwriting the chain of whoever holds it now.
   The new fields are decoded strictly: deploy this service before the
   entity-service that sends them.
 - **SRE team**: an S0 case's SRE ladder pages its account's SRE team

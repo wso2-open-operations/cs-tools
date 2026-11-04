@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,8 +57,10 @@ type memStore struct {
 	assignees map[string]string
 	// severityChanged is each case's latest handled severity change.
 	severityChanged map[string]time.Time
-	// severityLocks holds each locked case's lock token.
+	// severityLocks holds each locked case's lock token, under lockMu: the
+	// engine renews a held lock from its own goroutine.
 	severityLocks map[string]string
+	lockMu        sync.Mutex
 	// claims are due calls a replica has taken.
 	claims map[string]bool
 	// smePages are the open SME pages, keyed by smeKey, holding the press
@@ -95,6 +98,8 @@ func (m *memStore) SetCaseAssignee(_ context.Context, caseID, email string) erro
 }
 
 func (m *memStore) LockCaseSeverity(_ context.Context, caseID, token string, _ time.Duration) (bool, error) {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
 	if m.severityLocks == nil {
 		m.severityLocks = map[string]string{}
 	}
@@ -105,11 +110,38 @@ func (m *memStore) LockCaseSeverity(_ context.Context, caseID, token string, _ t
 	return true, nil
 }
 
+func (m *memStore) RenewCaseSeverity(_ context.Context, caseID, token string, _ time.Duration) (bool, error) {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
+	return m.severityLocks[caseID] == token, nil
+}
+
 func (m *memStore) UnlockCaseSeverity(_ context.Context, caseID, token string) error {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
 	if m.severityLocks[caseID] == token {
 		delete(m.severityLocks, caseID)
 	}
 	return nil
+}
+
+// severityLockHolder is the token holding the case's severity lock, if any.
+func (m *memStore) severityLockHolder(caseID string) (string, bool) {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
+	token, held := m.severityLocks[caseID]
+	return token, held
+}
+
+// stealSeverityLock hands the case's severity lock to another holder, as an
+// expired lock taken by another consumer would.
+func (m *memStore) stealSeverityLock(caseID string) {
+	m.lockMu.Lock()
+	defer m.lockMu.Unlock()
+	if m.severityLocks == nil {
+		m.severityLocks = map[string]string{}
+	}
+	m.severityLocks[caseID] = "someone-else"
 }
 
 func (m *memStore) SeverityChangedAt(_ context.Context, caseID string) (time.Time, error) {
