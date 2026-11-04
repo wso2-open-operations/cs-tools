@@ -34,6 +34,18 @@ type fakeIncidentAutocloseRepo struct {
 	listErr  error
 	gotDays  int
 	gotLimit int
+	// closedToday is what CountIncidentsClosedSince returns: every close today,
+	// manual ones included. countErr fails it; counts and gotSince record it.
+	closedToday int
+	countErr    error
+	counts      int
+	gotSince    time.Time
+}
+
+func (f *fakeIncidentAutocloseRepo) CountIncidentsClosedSince(_ context.Context, since time.Time) (int, error) {
+	f.counts++
+	f.gotSince = since
+	return f.closedToday, f.countErr
 }
 
 func (f *fakeIncidentAutocloseRepo) ListIncidentsDueForAutoclose(_ context.Context, days, limit int) ([]repository.IncidentAutocloseCandidate, error) {
@@ -50,6 +62,10 @@ type fakeIncidentCloser struct {
 	states   []domain.IncidentState
 	actor    string
 	days     int
+	// repo, when set, has its closedToday raised by each close, as the real
+	// count rises with the closed_on the close stamps. onClose runs after each.
+	repo    *fakeIncidentAutocloseRepo
+	onClose func(id string)
 }
 
 func (f *fakeIncidentCloser) UpdateIncident(ctx context.Context, req domain.UpdateIncidentRequest) (domain.UpdateIncidentResponse, error) {
@@ -68,6 +84,12 @@ func (f *fakeIncidentCloser) UpdateIncident(ctx context.Context, req domain.Upda
 		return domain.UpdateIncidentResponse{}, repository.ErrIncidentNotDueForAutoclose
 	}
 	f.closed = append(f.closed, req.ID)
+	if f.repo != nil {
+		f.repo.closedToday++
+	}
+	if f.onClose != nil {
+		f.onClose(req.ID)
+	}
 	return domain.UpdateIncidentResponse{}, nil
 }
 
@@ -219,5 +241,183 @@ func TestIncidentAutoclose_RefusesANonInternalCaller(t *testing.T) {
 	}
 	if repo.gotDays != 0 || len(closer.states) != 0 {
 		t.Fatalf("listed (days %d) or closed (%v) for a refused caller", repo.gotDays, closer.states)
+	}
+}
+
+// budgetService is the service under test with its clock fixed.
+func budgetService(repo *fakeIncidentAutocloseRepo, closer *fakeIncidentCloser, now time.Time) IncidentAutocloseService {
+	svc := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").(*incidentAutocloseService)
+	svc.now = func() time.Time { return now }
+	return svc
+}
+
+func dueIncidents(n int) []repository.IncidentAutocloseCandidate {
+	out := make([]repository.IncidentAutocloseCandidate, n)
+	for i := range out {
+		out[i] = repository.IncidentAutocloseCandidate{ID: string(rune('a' + i)), Number: "INC-" + strings.ToUpper(string(rune('a'+i)))}
+	}
+	return out
+}
+
+// TestIncidentAutoclose_DailyLimitValidation: dailyLimit is 0..100000.
+func TestIncidentAutoclose_DailyLimitValidation(t *testing.T) {
+	for name, tc := range map[string]struct {
+		daily int
+		ok    bool
+	}{"negative": {-1, false}, "too large": {100001, false}, "zero": {0, true}, "one": {1, true}, "max": {100000, true}} {
+		t.Run(name, func(t *testing.T) {
+			repo, closer := &fakeIncidentAutocloseRepo{}, &fakeIncidentCloser{}
+			_, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(),
+				domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: tc.daily})
+			var ve *apierror.ValidationError
+			if tc.ok && err != nil || !tc.ok && !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want ok = %v", err, tc.ok)
+			}
+		})
+	}
+}
+
+// TestIncidentAutoclose_NoDailyLimitReadsNoBudget: without a dailyLimit nothing
+// is counted and the flag stays false.
+func TestIncidentAutoclose_NoDailyLimitReadsNoBudget(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: dueIncidents(2), closedToday: 1000}
+	closer := &fakeIncidentCloser{}
+	resp, err := NewIncidentAutocloseService(repo, closer, internalAccess{}, "").Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14)})
+	if err != nil || repo.counts != 0 || resp.DailyLimitReached || len(resp.Closed) != 2 {
+		t.Fatalf("err = %v, counts = %d, resp = %+v", err, repo.counts, resp)
+	}
+}
+
+// TestIncidentAutoclose_BudgetExhaustedReturnsEmpty: nothing is listed or
+// closed, more is false (so the scheduler's paging loop ends) and the flag is set.
+func TestIncidentAutoclose_BudgetExhaustedReturnsEmpty(t *testing.T) {
+	for _, closedToday := range []int{5, 9} { // equal to, and over (manual closes), the limit
+		repo := &fakeIncidentAutocloseRepo{due: dueIncidents(3), closedToday: closedToday}
+		closer := &fakeIncidentCloser{}
+		resp, err := budgetService(repo, closer, time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)).Autoclose(context.Background(),
+			domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !resp.DailyLimitReached || resp.More || len(resp.Closed) != 0 || len(resp.Failed) != 0 || resp.Closed == nil || resp.Failed == nil {
+			t.Fatalf("closedToday %d: resp = %+v", closedToday, resp)
+		}
+		if repo.gotLimit != 0 || len(closer.closed) != 0 {
+			t.Fatalf("listed (limit %d) or closed %v with no budget", repo.gotLimit, closer.closed)
+		}
+	}
+}
+
+// TestIncidentAutoclose_DailyLimitClampsThePage: the page limit is clamped to
+// what is left of the budget, the run closes exactly that many, and, the budget
+// being used up, more is false.
+func TestIncidentAutoclose_DailyLimitClampsThePage(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: dueIncidents(2), closedToday: 3}
+	closer := &fakeIncidentCloser{repo: repo}
+	resp, err := budgetService(repo, closer, time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.gotLimit != 2 {
+		t.Errorf("listed with limit %d, want 2 (5 - 3 closed today)", repo.gotLimit)
+	}
+	if len(resp.Closed) != 2 || !resp.DailyLimitReached || resp.More {
+		t.Fatalf("resp = %+v", resp)
+	}
+	// The caller's own limit still wins when it is the smaller one, and a page
+	// that leaves budget behind keeps more.
+	repo = &fakeIncidentAutocloseRepo{due: dueIncidents(2), closedToday: 3}
+	closer = &fakeIncidentCloser{repo: repo}
+	resp, err = budgetService(repo, closer, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 100, Limit: 2})
+	if err != nil || repo.gotLimit != 2 || !resp.More || resp.DailyLimitReached || len(resp.Closed) != 2 {
+		t.Fatalf("err = %v, limit = %d, resp = %+v", err, repo.gotLimit, resp)
+	}
+}
+
+// TestIncidentAutoclose_DailyLimitCountsFromUTCMidnight: the closed count is
+// read from 00:00 UTC of the current UTC day, whatever the clock's zone.
+func TestIncidentAutoclose_DailyLimitCountsFromUTCMidnight(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{}
+	// 01:30 on 5 Nov in Colombo is 20:00 on 4 Nov UTC.
+	now := time.Date(2026, 11, 5, 1, 30, 0, 0, time.FixedZone("x", 19800))
+	if _, err := budgetService(repo, &fakeIncidentCloser{}, now).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC); !repo.gotSince.Equal(want) {
+		t.Fatalf("counted since %s, want %s", repo.gotSince, want)
+	}
+}
+
+// TestIncidentAutoclose_DryRunAppliesTheBudget: a dry run clamps the page to
+// the remaining budget and reports what a real run would close, changing nothing.
+func TestIncidentAutoclose_DryRunAppliesTheBudget(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: dueIncidents(4), closedToday: 2}
+	closer := &fakeIncidentCloser{repo: repo}
+	resp, err := budgetService(repo, closer, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.gotLimit != 3 {
+		t.Errorf("listed with limit %d, want 3", repo.gotLimit)
+	}
+	if !resp.DryRun || len(closer.closed) != 0 || len(closer.states) != 0 {
+		t.Fatalf("resp = %+v, updates = %v", resp, closer.states)
+	}
+	// The fake ignores the limit it is given, so the next cases feed it a page the clamp would produce.
+	repo = &fakeIncidentAutocloseRepo{due: dueIncidents(3), closedToday: 2}
+	resp, err = budgetService(repo, &fakeIncidentCloser{}, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5, DryRun: true})
+	if err != nil || len(resp.Closed) != 3 || !resp.DailyLimitReached || resp.More {
+		t.Fatalf("err = %v, resp = %+v", err, resp)
+	}
+	// Budget left over after the page: not reached, and more reflects a full page.
+	repo = &fakeIncidentAutocloseRepo{due: dueIncidents(2), closedToday: 0}
+	resp, err = budgetService(repo, &fakeIncidentCloser{}, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 50, Limit: 2, DryRun: true})
+	if err != nil || resp.DailyLimitReached || !resp.More || len(resp.Closed) != 2 {
+		t.Fatalf("err = %v, resp = %+v", err, resp)
+	}
+	// An exhausted budget in a dry run is the same empty answer as a real run.
+	repo = &fakeIncidentAutocloseRepo{due: dueIncidents(2), closedToday: 5}
+	resp, err = budgetService(repo, &fakeIncidentCloser{}, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5, DryRun: true})
+	if err != nil || !resp.DryRun || !resp.DailyLimitReached || len(resp.Closed) != 0 || resp.More {
+		t.Fatalf("err = %v, resp = %+v", err, resp)
+	}
+}
+
+// TestIncidentAutoclose_RecheckStopsWhenOthersUseTheBudget: the count is read
+// again before each close, so closes made meanwhile (a manual close, an
+// overlapping run) are seen and the run stops with the budget used up.
+func TestIncidentAutoclose_RecheckStopsWhenOthersUseTheBudget(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: dueIncidents(4), closedToday: 0}
+	closer := &fakeIncidentCloser{repo: repo}
+	// After the first close, three other closes land (a manual one among them).
+	closer.onClose = func(string) { repo.closedToday += 3 }
+	resp, err := budgetService(repo, closer, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 4, Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Closed) != 1 || len(closer.closed) != 1 || !resp.DailyLimitReached || resp.More {
+		t.Fatalf("closed %v, resp = %+v", closer.closed, resp)
+	}
+	if repo.counts != 3 { // the start, before the first close, before the second
+		t.Errorf("count read %d times, want 3", repo.counts)
+	}
+}
+
+// TestIncidentAutoclose_CountFailureIsAnError: no budget, no close.
+func TestIncidentAutoclose_CountFailureIsAnError(t *testing.T) {
+	repo := &fakeIncidentAutocloseRepo{due: dueIncidents(1), countErr: errors.New("boom")}
+	closer := &fakeIncidentCloser{}
+	if _, err := budgetService(repo, closer, time.Now()).Autoclose(context.Background(),
+		domain.IncidentAutocloseRequest{ResolvedForDays: autoclosePtr(14), DailyLimit: 5}); err == nil || len(closer.closed) != 0 {
+		t.Fatalf("err = %v, closed = %v", err, closer.closed)
 	}
 }

@@ -35,6 +35,9 @@ const (
 	// NOW() - make_interval(days => n) can compute: a few million days runs
 	// past timestamptz's range and Postgres would answer an opaque 500.
 	incidentAutocloseMaxDays = 3650
+	// Largest dailyLimit accepted; case auto-closure caps its own the same way
+	// (a multiple of its page size).
+	incidentAutocloseMaxDailyLimit = 100000
 )
 
 // incidentCloser is the part of IncidentService the auto-close uses to close an
@@ -49,6 +52,8 @@ type incidentAutocloseService struct {
 	incidents   incidentCloser
 	access      AccessService
 	systemEmail string
+	// now is the clock the daily budget's UTC midnight comes from; tests set it.
+	now func() time.Time
 }
 
 // NewIncidentAutocloseService constructs the Postgres-backed
@@ -64,7 +69,7 @@ func NewIncidentAutocloseService(repo repository.IncidentAutocloseRepository, in
 	if systemEmail == "" {
 		systemEmail = domain.AutoclosureDefaultActor
 	}
-	return &incidentAutocloseService{repo: repo, incidents: incidents, access: access, systemEmail: systemEmail}
+	return &incidentAutocloseService{repo: repo, incidents: incidents, access: access, systemEmail: systemEmail, now: time.Now}
 }
 
 // unavailableIncidentAutocloseService stands in where the feature cannot run
@@ -91,6 +96,9 @@ func validateIncidentAutocloseRequest(req domain.IncidentAutocloseRequest) (int,
 	if *req.ResolvedForDays < 1 || *req.ResolvedForDays > incidentAutocloseMaxDays {
 		return 0, &apierror.ValidationError{Msg: "resolvedForDays must be between 1 and 3650"}
 	}
+	if req.DailyLimit < 0 || req.DailyLimit > incidentAutocloseMaxDailyLimit {
+		return 0, &apierror.ValidationError{Msg: "dailyLimit must be between 0 and 100000"}
+	}
 	switch {
 	case req.Limit == 0:
 		return incidentAutocloseDefaultLimit, nil
@@ -107,6 +115,17 @@ func validateIncidentAutocloseRequest(req domain.IncidentAutocloseRequest) (int,
 // due, and skips one that is not. It adds no comment or work note; the update
 // writes the activity entry and, in dual-write, mirrors the close to the
 // backing data source like any other incident update.
+//
+// Daily budget. A positive DailyLimit caps how many incidents may enter
+// CLOSED per UTC day. The budget is the DailyLimit minus the incidents whose
+// closed_on is at or after 00:00 UTC today. That counts EVERY close today,
+// manual ones included, not only auto-closes: it is the conservative reading
+// of a ceiling, needs no extra column, and avoids closed_by_id, which is NULL
+// when the system user has no user row. The page limit is clamped to what is
+// left, and a real run re-reads the count before each close (as case
+// auto-closure re-checks before each act), so overlapping runs overshoot by at
+// most a few. A dry run writes nothing but applies the same budget, so its
+// count is what a real run would close.
 func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.IncidentAutocloseRequest) (domain.IncidentAutocloseResponse, error) {
 	// The route is internalOnly too; this is the second line case auto-closure
 	// also keeps (autoclosureService.requireInternal): the run closes incidents,
@@ -119,6 +138,26 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 		return domain.IncidentAutocloseResponse{}, err
 	}
 	days := *req.ResolvedForDays
+	budgeted := req.DailyLimit > 0
+	var dayStart time.Time
+	used := 0 // incidents closed since dayStart, as last read (plus this call's closes)
+	if budgeted {
+		now := s.now().UTC()
+		dayStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		if used, err = s.repo.CountIncidentsClosedSince(ctx, dayStart); err != nil {
+			return domain.IncidentAutocloseResponse{}, err
+		}
+		remaining := req.DailyLimit - used
+		if remaining <= 0 {
+			slog.InfoContext(ctx, "incident auto-close run: daily limit already reached", "dryRun", req.DryRun,
+				"dailyLimit", req.DailyLimit, "closedToday", used)
+			return domain.IncidentAutocloseResponse{
+				DryRun: req.DryRun, Closed: []domain.IncidentAutocloseClosed{}, Failed: []domain.IncidentAutocloseFailed{},
+				DailyLimitReached: true,
+			}, nil
+		}
+		limit = min(limit, remaining)
+	}
 	due, err := s.repo.ListIncidentsDueForAutoclose(ctx, days, limit)
 	if err != nil {
 		return domain.IncidentAutocloseResponse{}, err
@@ -129,11 +168,13 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 		Failed: []domain.IncidentAutocloseFailed{},
 		More:   len(due) == limit,
 	}
+	reached := false
 	closed := domain.IncidentStateClosed
 	closeCtx := withIncidentAutoclose(ctx, s.systemEmail, days)
 	for _, c := range due {
 		if req.DryRun {
 			resp.Closed = append(resp.Closed, autoclosedEntry(c))
+			used++
 			continue
 		}
 		// A request that ran out of time stops here; what closed stays closed
@@ -141,7 +182,15 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 		if err := ctx.Err(); err != nil {
 			return domain.IncidentAutocloseResponse{}, err
 		}
-		_, err := s.incidents.UpdateIncident(closeCtx, domain.UpdateIncidentRequest{ID: c.ID, State: &closed})
+		if budgeted {
+			if used, err = s.repo.CountIncidentsClosedSince(ctx, dayStart); err != nil {
+				return resp, err
+			}
+			if used >= req.DailyLimit {
+				break
+			}
+		}
+		_, err = s.incidents.UpdateIncident(closeCtx, domain.UpdateIncidentRequest{ID: c.ID, State: &closed})
 		if errors.Is(err, repository.ErrIncidentNotDueForAutoclose) {
 			// Re-opened, closed or touched since it was listed: no longer due.
 			continue
@@ -152,8 +201,17 @@ func (s *incidentAutocloseService) Autoclose(ctx context.Context, req domain.Inc
 			continue
 		}
 		resp.Closed = append(resp.Closed, autoclosedEntry(c))
+		used++
 	}
+	// The budget is used up: tell the caller, and stop it paging (more would
+	// only make it call again to be answered with an empty page).
+	if budgeted && used >= req.DailyLimit {
+		reached = true
+		resp.More = false
+	}
+	resp.DailyLimitReached = reached
 	slog.InfoContext(ctx, "incident auto-close run", "dryRun", req.DryRun, "resolvedForDays", days,
+		"dailyLimit", req.DailyLimit, "dailyLimitReached", reached,
 		"selected", len(due), "closed", len(resp.Closed), "failed", len(resp.Failed), "more", resp.More)
 	return resp, nil
 }

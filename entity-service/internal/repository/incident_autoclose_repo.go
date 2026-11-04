@@ -33,6 +33,9 @@ type IncidentAutocloseRepository interface {
 	// whose resolved_on (their last update when none is recorded) is at least
 	// resolvedForDays days ago, oldest first.
 	ListIncidentsDueForAutoclose(ctx context.Context, resolvedForDays, limit int) ([]IncidentAutocloseCandidate, error)
+	// CountIncidentsClosedSince returns how many incidents entered CLOSED at or
+	// after since (incident.closed_on), however they were closed.
+	CountIncidentsClosedSince(ctx context.Context, since time.Time) (int, error)
 }
 
 // ErrIncidentNotDueForAutoclose is what UpdateIncidentLifecycle returns, with
@@ -90,4 +93,17 @@ func (r *incidentAutocloseRepo) ListIncidentsDueForAutoclose(ctx context.Context
 		return nil, fmt.Errorf("list incidents due for auto-close: %w", err)
 	}
 	return out, nil
+}
+
+// CountIncidentsClosedSince implements IncidentAutocloseRepository. It counts
+// every close, manual ones included: closed_on is stamped on entering CLOSED
+// whoever closes, and closed_by_id is NULL for the system user without a user
+// row, so the auto-closes cannot be told apart reliably. Counting all of them
+// is the conservative reading of a daily ceiling.
+func (r *incidentAutocloseRepo) CountIncidentsClosedSince(ctx context.Context, since time.Time) (int, error) {
+	var n int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*)::int FROM incident WHERE closed_on >= $1`, since).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count incidents closed since %s: %w", since.UTC().Format(time.RFC3339), err)
+	}
+	return n, nil
 }

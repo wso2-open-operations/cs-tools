@@ -4868,9 +4868,26 @@ that component's CLAUDE.md).
   auto-closure's reference time falls back to it. Any later write to the work item pushes it back; review those in
   the first dry run.
 
-The route takes `{resolvedForDays (required, 1-3650), limit (0/absent = 200, max 1000), dryRun}` (unknown fields
-are a 400) and answers `{dryRun, closed: [{id, number, resolvedOn}], failed: [{id, number, error}], more}`. `more`
-is true when `limit` incidents were selected: the caller calls again. Under `DATA_SOURCE=servicenow` (or without a
+The route takes `{resolvedForDays (required, 1-3650), limit (0/absent = 200, max 1000), dailyLimit (0/absent = no
+cap, max 100000), dryRun}` (unknown fields are a 400) and answers `{dryRun, closed: [{id, number, resolvedOn}],
+failed: [{id, number, error}], more, dailyLimitReached}`. `more` is true when `limit` incidents were selected: the
+caller calls again, unless `dailyLimitReached` (below), when `more` is always false.
+
+**Daily limit.** The first real run would otherwise close every incident Resolved since cutover, so, as case
+auto-closure's `dailyLimit`, a positive `dailyLimit` caps how many incidents may enter CLOSED per UTC day. The
+budget is `dailyLimit` minus the incidents with `closed_on >= 00:00 UTC today` (`CountIncidentsClosedSince`), and it
+counts **every** close today, **manual ones included**, not only auto-closes. That is deliberate: it is the
+conservative reading of a ceiling, needs no schema change, and avoids `closed_by_id`, which is NULL when the system
+user has no `"user"` row, so auto-closes cannot be told apart reliably. A busy day of manual closes therefore
+shrinks the auto-close's allowance. At the start of a call, `remaining <= 0` returns an empty page with
+`dailyLimitReached: true` and nothing is listed; otherwise the page `limit` is clamped to `remaining`. A real run
+re-reads the count before each close (a read, as case auto-closure does), so overlapping runs overshoot by a few at
+most, and stops when it is used up. `dailyLimitReached` is true whenever the budget is used up (before the call, by
+the call, or, in a dry run, by what it would close), and then `more` is false so the scheduler's paging loop ends
+instead of running to its page cap; the scheduler logs it without alerting. A dry run applies the same budget and
+clamp, so its `closed` count is what a real run would close; it returns one page only. The count filters on
+`closed_on`, which has no index: it is one scan of `incident` per read, cheap at the table's current size, and a
+partial index on `closed_on` is the follow-up if the table grows. Under `DATA_SOURCE=servicenow` (or without a
 pool) it is a 503 (`NewUnavailableIncidentAutocloseService`; the reason is logged). A failure lands in `failed` (a
 database error's text is only logged) and does not stop the rest; the incident stays RESOLVED and is selected
 again. A dry run lists what is due as `closed` and changes nothing, so a repeated dry-run call returns the same
@@ -4889,7 +4906,7 @@ page.
   published (a manual close publishes none either).
 - Tests: `incident_autoclose_integration_test.go` (`INCIDENT_AUTOCLOSE_TEST_DSN`: due / not due / NULL
   `resolved_on` / no close notes / other states, the default system user and one with a row, the task cascade,
-  dry run, limit and `more`, the re-check under the lock, no comment rows, the manual close's stamps, and under
+  dry run, limit and `more`, the daily limit (manual closes counted, a second call closes none), the re-check under the lock, no comment rows, the manual close's stamps, and under
   dual-write, as case auto-closure's `TestAutoclosureIntegration_DualWrite*`: the close is mirrored as exactly
   `{state: closed}` with no user token, and a failing mirror neither fails the close nor repeats it),
   `incident_autoclose_service_test.go` (including the 403 for a caller that is not internal),

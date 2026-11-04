@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -32,6 +33,11 @@ import (
 // noAutocloseRepo fails the test if the service reaches the repository: every
 // request in these tests must be refused before that.
 type noAutocloseRepo struct{ t *testing.T }
+
+func (r noAutocloseRepo) CountIncidentsClosedSince(context.Context, time.Time) (int, error) {
+	r.t.Fatal("repository reached")
+	return 0, nil
+}
 
 func (r noAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, int) ([]repository.IncidentAutocloseCandidate, error) {
 	r.t.Fatal("repository reached")
@@ -52,6 +58,8 @@ func TestIncidentAutocloseHandler_RefusesBadBodies(t *testing.T) {
 		"days past int32":   `{"resolvedForDays":3000000000}`,
 		"limit over 1000":   `{"resolvedForDays":14,"limit":1001}`,
 		"negative limit":    `{"resolvedForDays":14,"limit":-5}`,
+		"negative daily":    `{"resolvedForDays":14,"dailyLimit":-1}`,
+		"daily over 100000": `{"resolvedForDays":14,"dailyLimit":100001}`,
 		"days not a number": `{"resolvedForDays":"14"}`,
 		"trailing data":     `{"resolvedForDays":14} {}`,
 	} {
@@ -78,6 +86,10 @@ func TestIncidentAutocloseHandler_Unavailable(t *testing.T) {
 
 type stubAutocloseRepo struct {
 	due []repository.IncidentAutocloseCandidate
+}
+
+func (r stubAutocloseRepo) CountIncidentsClosedSince(context.Context, time.Time) (int, error) {
+	return 0, nil
 }
 
 func (r stubAutocloseRepo) ListIncidentsDueForAutoclose(context.Context, int, int) ([]repository.IncidentAutocloseCandidate, error) {
@@ -113,13 +125,13 @@ func TestIncidentAutocloseHandler_ResponseShape(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"dryRun", "closed", "failed", "more"} {
+	for _, k := range []string{"dryRun", "closed", "failed", "more", "dailyLimitReached"} {
 		if _, ok := raw[k]; !ok {
 			t.Errorf("response has no %q: %s", k, w.Body.String())
 		}
 	}
-	if string(raw["failed"]) != "[]" || string(raw["more"]) != "true" {
-		t.Errorf("failed = %s, more = %s; want [] and true", raw["failed"], raw["more"])
+	if string(raw["failed"]) != "[]" || string(raw["more"]) != "true" || string(raw["dailyLimitReached"]) != "false" {
+		t.Errorf("failed = %s, more = %s, dailyLimitReached = %s; want [], true and false", raw["failed"], raw["more"], raw["dailyLimitReached"])
 	}
 	var resp domain.IncidentAutocloseResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)

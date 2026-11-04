@@ -15834,8 +15834,8 @@ paths:
         DATA_SOURCE=postgres-servicenow-dual-write the close is written back to
         the backing data source like any other incident update. An incident
         with no resolvedOn is measured from its last update. Internal callers
-        only. Postgres data sources only. Backs operations/csm-scheduled-tasks
-        (incident_autoclose).
+        only. Postgres data sources only. An optional dailyLimit caps the closes per
+        UTC day. Backs operations/csm-scheduled-tasks (incident_autoclose).
       operationId: autocloseIncidents
       requestBody:
         required: true
@@ -15854,8 +15854,8 @@ paths:
                 $ref: '#/components/schemas/IncidentAutocloseResponse'
         "400":
           description: >-
-            resolvedForDays missing or outside 1-3650, limit outside 0-1000, or an
-            unknown field.
+            resolvedForDays missing or outside 1-3650, limit outside 0-1000,
+            dailyLimit outside 0-100000, or an unknown field.
           content:
             application/json:
               schema:
@@ -40300,6 +40300,18 @@ components:
           maximum: 1000
           default: 200
           description: Most incidents one call selects, oldest first. 0 or absent means 200.
+        dailyLimit:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          default: 0
+          description: >-
+            Most incidents that may enter CLOSED per UTC day. 0 or absent means
+            no cap. The budget is dailyLimit minus the incidents closed since
+            00:00 UTC today, counting every close (manual ones included, not
+            only auto-closes), and the page is clamped to it. Once it is used
+            up the call returns an empty page with dailyLimitReached true. A
+            dry run applies the same budget.
         dryRun:
           type: boolean
           default: false
@@ -40334,7 +40346,7 @@ components:
           description: Why it was not closed. Database errors are only logged and reported generically.
     IncidentAutocloseResponse:
       type: object
-      required: [dryRun, closed, failed, more]
+      required: [dryRun, closed, failed, more, dailyLimitReached]
       properties:
         dryRun:
           type: boolean
@@ -40348,7 +40360,15 @@ components:
             $ref: '#/components/schemas/IncidentAutocloseFailed'
         more:
           type: boolean
-          description: True when the call selected limit incidents, so more may be due; call again.
+          description: >-
+            True when the call selected limit incidents, so more may be due;
+            call again. Always false when dailyLimitReached is true.
+        dailyLimitReached:
+          type: boolean
+          description: >-
+            True when the request's dailyLimit is used up: before the call, by
+            the call, or, in a dry run, by what the run would close. Never true
+            without a dailyLimit.
     ACPReopenCheckRequest:
       type: object
       additionalProperties: false

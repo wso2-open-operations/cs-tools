@@ -311,6 +311,85 @@ func TestIncidentAutoclose_LimitAndMore(t *testing.T) {
 	}
 }
 
+// acClosedToday is the budget's own count: incidents closed since 00:00 UTC
+// today, whoever closed them.
+func acClosedToday(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	now := time.Now().UTC()
+	n, err := repository.NewIncidentAutocloseRepository(repository.NewScoped(pool)).
+		CountIncidentsClosedSince(acCtx(), time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("CountIncidentsClosedSince: %v", err)
+	}
+	return n
+}
+
+// TestIncidentAutoclose_DailyLimit: with four due incidents and one closed by
+// hand today, a dailyLimit leaving room for two closes exactly two (oldest
+// first) and reports the limit reached with more false; a dry run applies the
+// same budget; a second call closes none. The manual close counts against the
+// budget. Counts are relative to what the database already closed today.
+func TestIncidentAutoclose_DailyLimit(t *testing.T) {
+	pool := incidentAutoclosePool(t)
+	before := acClosedToday(t, pool)
+
+	manual := acResolved(t, pool, 1, false)
+	repo := repository.NewIncidentRepository(repository.NewScoped(pool))
+	closedState, actor := "CLOSED", acActorID
+	if _, err := repo.UpdateIncidentLifecycle(acCtx(), manual, repository.IncidentLifecycleUpdate{State: &closedState, DefaultResolvedByID: &actor}, "ic-caller@test.local"); err != nil {
+		t.Fatalf("manual close: %v", err)
+	}
+	base := acClosedToday(t, pool)
+	if base != before+1 {
+		t.Fatalf("closed today = %d after a manual close, want %d: manual closes must count", base, before+1)
+	}
+
+	oldest := acResolved(t, pool, acDue+3, false)
+	second := acResolved(t, pool, acDue+2, false)
+	third := acResolved(t, pool, acDue+1, false)
+	newest := acResolved(t, pool, acDue, false)
+	req := domain.IncidentAutocloseRequest{ResolvedForDays: acDaysPtr(), DailyLimit: base + 2}
+
+	dry := req
+	dry.DryRun = true
+	d := acSweep(t, pool, dry)
+	if len(d.Closed) != 2 || d.Closed[0].ID != oldest || d.Closed[1].ID != second || !d.DailyLimitReached || d.More {
+		t.Fatalf("dry run = %+v reached=%v more=%v, want the two oldest, reached, no more", d.Closed, d.DailyLimitReached, d.More)
+	}
+	if acRead(t, pool, oldest).state != "RESOLVED" {
+		t.Fatal("the dry run closed an incident")
+	}
+
+	first := acSweep(t, pool, req)
+	if len(first.Closed) != 2 || first.Closed[0].ID != oldest || first.Closed[1].ID != second || !first.DailyLimitReached || first.More {
+		t.Fatalf("run = %+v reached=%v more=%v, want the two oldest, reached, no more", first.Closed, first.DailyLimitReached, first.More)
+	}
+	for _, id := range []string{third, newest} {
+		if acRead(t, pool, id).state != "RESOLVED" {
+			t.Fatalf("incident %s was closed beyond the daily limit", id)
+		}
+	}
+	if got := acClosedToday(t, pool); got != base+2 {
+		t.Fatalf("closed today = %d, want %d", got, base+2)
+	}
+
+	again := acSweep(t, pool, req)
+	if len(again.Closed) != 0 || len(again.Failed) != 0 || !again.DailyLimitReached || again.More {
+		t.Fatalf("second call = %+v, want an empty page with the limit reached", again)
+	}
+	if acRead(t, pool, third).state != "RESOLVED" || acRead(t, pool, newest).state != "RESOLVED" {
+		t.Fatal("the second call closed an incident past the limit")
+	}
+
+	// Raising the limit by one lets exactly one more through.
+	raised := req
+	raised.DailyLimit = base + 3
+	more := acSweep(t, pool, raised)
+	if len(more.Closed) != 1 || more.Closed[0].ID != third || !more.DailyLimitReached {
+		t.Fatalf("raised run = %+v reached=%v, want only the third", more.Closed, more.DailyLimitReached)
+	}
+}
+
 // TestIncidentAutoclose_SystemUserWithARow: with AUTOCLOSURE_SYSTEM_USER_EMAIL
 // naming a user that has a row, the close is attributed to that user:
 // closed_by_id is theirs and updated_by their email.
