@@ -161,7 +161,7 @@ func assignment(name, email, team, code, rotaDate, start, end string) teamschedu
 }
 
 var weekdayRotations = map[string]string{"CRE_MORNING": "Morning", "CRE_MORNING_OC": "On-call", "CRE_EVENING": "Evening"}
-var weekendRotations = map[string]string{"CRE_WEEKEND": "LK Weekend", "CRE_WEEKEND_NIGHT": "Americas Weekend", "CRE_WEEKEND_NIGHT_OC": "LK On-call"}
+var weekendRotations = map[string]string{"CRE_WEEKEND": "LK Weekend", "CRE_WEEKEND_NIGHT": "Americas Weekend", "CRE_WEEKEND_NIGHT_OC": "Americas On-call"}
 
 // config is a task's configuration as cmd/server/main.go builds it.
 func config(now string, rotations map[string]string) Config {

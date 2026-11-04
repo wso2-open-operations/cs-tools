@@ -129,7 +129,7 @@ describe("RotaReminderSettings", () => {
     const weekend = within(screen.getByRole("group", { name: "Weekend rota" }));
     expect(weekend.getByLabelText("People needed on LK Weekend each day")).toBeInTheDocument();
     expect(weekend.getByLabelText("People needed on Americas Weekend each day")).toBeInTheDocument();
-    const hours = within(weekend.getByRole("group", { name: "Americas Weekend and LK On-call hours" }));
+    const hours = within(weekend.getByRole("group", { name: "Americas Weekend and Americas On-call hours" }));
     expect(hours.getByLabelText("Start")).toBeInTheDocument();
     expect(hours.getByLabelText("End")).toBeInTheDocument();
     expect(hours.getByLabelText("Time zone")).toBeInTheDocument();
@@ -218,7 +218,7 @@ describe("RotaReminderSettings", () => {
 
   it("names the Americas Weekend switch and explains daylight saving by the zone its hours are kept on", () => {
     render(<RotaReminderSettings />);
-    const hours = () => screen.getByRole("group", { name: "Americas Weekend and LK On-call hours" });
+    const hours = () => screen.getByRole("group", { name: "Americas Weekend and Americas On-call hours" });
     expect(within(invitesFor()).getByRole("checkbox", { name: "Americas Weekend (PT)" })).toBeInTheDocument();
     expect(hours()).toHaveTextContent(/daylight saving/);
 

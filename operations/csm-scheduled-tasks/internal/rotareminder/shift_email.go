@@ -640,11 +640,14 @@ func dateOf(rotaDate string, zone *time.Location) time.Time {
 }
 
 // zoneName is the name people use for t's zone. Go's tz database names
-// Colombo's offset "+0530"; the office calls it IST.
+// Colombo's offset "+0530"; the office calls it IST. The Americas hours are
+// "PDT" all year, as the roster's chip is, also while Los Angeles is on PST.
 func zoneName(t time.Time) string {
 	switch t.Location().String() {
 	case "Asia/Colombo", "Asia/Kolkata":
 		return "IST"
+	case "America/Los_Angeles":
+		return "PDT"
 	}
 	return t.Format("MST")
 }
