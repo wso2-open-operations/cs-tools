@@ -261,6 +261,87 @@ func (s *Store) SetCaseAssignee(ctx context.Context, caseID, email string) error
 	return s.rdb.Set(ctx, caseAssigneePrefix+caseID, email, caseAssigneeTTL).Err()
 }
 
+// severityChangedKey is this ladder's record of a case's latest handled
+// severity change, beside its state keys (each ladder handles the event).
+func (s *Store) severityChangedKey(caseID string) string {
+	return strings.TrimSuffix(s.state, "state:") + "case:severity-changed:" + caseID
+}
+
+// SeverityChangedAt returns the latest severity change this ladder handled for
+// the case, or zero when none is recorded.
+func (s *Store) SeverityChangedAt(ctx context.Context, caseID string) (time.Time, error) {
+	v, err := s.rdb.Get(ctx, s.severityChangedKey(caseID)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, v).UTC(), nil
+}
+
+// setLaterScript writes ARGV[1] only when it is later than the stored value,
+// in one step: the live and dead-letter consumers can record changes for one
+// case at the same time, and a plain read-then-write could move it backwards.
+var setLaterScript = redis.NewScript(`
+local cur = redis.call('GET', KEYS[1])
+if cur and tonumber(cur) >= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+return 1
+`)
+
+// SetSeverityChangedAt records at as the latest handled severity change,
+// never moving the record backwards.
+func (s *Store) SetSeverityChangedAt(ctx context.Context, caseID string, at time.Time) error {
+	return setLaterScript.Run(ctx, s.rdb, []string{s.severityChangedKey(caseID)},
+		at.UnixNano(), stateTTL.Milliseconds()).Err()
+}
+
+// severityLockKey serialises this ladder's handling of one case's severity
+// changes across its live and dead-letter consumers.
+func (s *Store) severityLockKey(caseID string) string {
+	return strings.TrimSuffix(s.state, "state:") + "case:severity-lock:" + caseID
+}
+
+// LockCaseSeverity takes the case's severity lock for ttl under token, and
+// reports whether it got it.
+func (s *Store) LockCaseSeverity(ctx context.Context, caseID, token string, ttl time.Duration) (bool, error) {
+	return s.rdb.SetNX(ctx, s.severityLockKey(caseID), token, ttl).Result()
+}
+
+// unlockScript deletes the lock only while it still holds this holder's
+// token, so a holder whose lock expired never frees someone else's.
+var unlockScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
+
+// UnlockCaseSeverity releases the lock taken with token.
+func (s *Store) UnlockCaseSeverity(ctx context.Context, caseID, token string) error {
+	return unlockScript.Run(ctx, s.rdb, []string{s.severityLockKey(caseID)}, token).Err()
+}
+
+// renewScript extends the lock only while it still holds this holder's
+// token, so a holder whose lock expired and was taken never extends the new
+// holder's.
+var renewScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+// RenewCaseSeverity extends the lock taken with token to ttl from now, and
+// reports whether this holder still had it.
+func (s *Store) RenewCaseSeverity(ctx context.Context, caseID, token string, ttl time.Duration) (bool, error) {
+	n, err := renewScript.Run(ctx, s.rdb, []string{s.severityLockKey(caseID)}, token, ttl.Milliseconds()).Int()
+	return n == 1, err
+}
+
 // Create stores a new ladder only if none is running for this incident, and
 // reports whether it actually created one.
 //

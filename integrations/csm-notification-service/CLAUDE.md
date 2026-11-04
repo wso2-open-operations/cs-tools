@@ -756,7 +756,33 @@ is keyed by the case id, and `Trigger.Record` is `case`.
   new chain, on both ladders (`cancelEngineerComment`). The assignee is known
   only from a `case.assigned` this service saw, so on a case assigned before
   that the assignee's own comment went unmatched and the calls ran on (seen on
-  prod, 2026-11-03). New-case chains keep the rule above.
+  prod, 2026-11-03). New-case chains keep the rule above. Three guards, each
+  off when its field is absent (older publishers):
+  - a comment whose `createdOn` is more than `commentClockSkew` (1m) before the
+    chain's `Trigger.ChangedAt` (`changedAt` on `case.severity_changed`) is a
+    redelivered old comment and does not stop it;
+  - `supportEngineerUnknown` (entity-service could not check the role) with a
+    `@wso2.com` author counts as an engineer's comment;
+  - each ladder keeps the latest handled `changedAt` per case in Redis
+    (`…case:severity-changed:<caseId>`, 7 days, `SetSeverityChangedAt` never
+    moves it back, in one compare-and-set script), so a replayed or older
+    severity change is ignored even after its chain stopped and its state was
+    deleted. A failed read or write of that record is logged and handled as
+    before.
+  - the check, the new chain and the record run under a per-case lock for the
+    ladder (`…case:severity-lock:<caseId>`, 30s, released by token), because
+    the live and dead-letter consumers can each hold a change for one case:
+    unlocked, an older change could pass the check and replace the newer
+    chain. A change that finds it held waits up to `severityLockWait` (10s),
+    then errors so the consumer retries; a Redis error proceeds unlocked.
+    The lock is a lease: building a plan makes sequential entity-service
+    calls (25s timeout each), so it can outlast 30s. The holder renews it
+    every `severityLockRenew` (10s, token-checked `RenewCaseSeverity`), and
+    the work runs under a context that is cancelled when a renewal finds the
+    lock lost or Redis unreachable -- its writes then fail and the change is
+    retried, rather than overwriting the chain of whoever holds it now.
+  The new fields are decoded strictly: deploy this service before the
+  entity-service that sends them.
 - **SRE team**: an S0 case's SRE ladder pages its account's SRE team
   (`sreTeamName` on `case.created`/`case.severity_changed`, entity-service's
   `account.sre_team_id`), carried as `RoutingContext.SRETeam`; `Trigger.Team`
