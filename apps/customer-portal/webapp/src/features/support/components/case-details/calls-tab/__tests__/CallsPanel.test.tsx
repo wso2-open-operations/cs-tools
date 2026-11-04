@@ -287,6 +287,30 @@ describe("CallsPanel", () => {
     expect(screen.getByRole("combobox")).toHaveAttribute("aria-disabled", "true");
   });
 
+  it("keeps the dropdown enabled when a later search is pending after the first one finished", () => {
+    vi.mocked(useGetCallRequests).mockReturnValue(listedCall);
+
+    renderWithProviders(<CallsPanel
+        projectId={mockProjectId}
+        caseId={mockCaseId}
+        caseStatusLabel="Work In Progress"
+      />);
+
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Cancelled" }));
+
+    // Back to All statuses, whose cached search is gone: pending again.
+    vi.mocked(useGetCallRequests).mockReturnValue({
+      ...listedCall,
+      isPending: true,
+      data: undefined,
+    } as unknown as ReturnType<typeof useGetCallRequests>);
+    fireEvent.mouseDown(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "All statuses" }));
+
+    expect(screen.getByRole("combobox")).not.toHaveAttribute("aria-disabled", "true");
+  });
+
   it("shows only the plain empty state, with no dropdown, when the case has no call requests", () => {
     vi.mocked(useGetCallRequests).mockReturnValue({
       ...listedCall,
