@@ -229,4 +229,46 @@ describe("ProjectSwitcher", () => {
     expect(screen.getByText("Error: Projects")).toBeInTheDocument();
     expect(screen.queryByTestId("project-select")).not.toBeInTheDocument();
   });
+
+  describe("single-project user", () => {
+    beforeEach(() => {
+      vi.mocked(useGetProjectsModule.flattenProjectPages).mockReturnValue([
+        mockProjects[0],
+      ] as never);
+      vi.mocked(useGetProjectsModule.getTotalRecords).mockReturnValue(1);
+    });
+
+    it("shows the project name when the URL project is the user's project", () => {
+      render(<ProjectSwitcher projectId="1" onProjectChange={mockOnProjectChange} />);
+
+      expect(screen.getByText("Project A")).toBeInTheDocument();
+      expect(screen.queryByText("Select Project")).not.toBeInTheDocument();
+    });
+
+    it("does not show the user's own project name for a project id they cannot access", () => {
+      render(
+        <ProjectSwitcher projectId="not-mine" onProjectChange={mockOnProjectChange} />,
+      );
+
+      expect(screen.getByText("Select Project")).toBeInTheDocument();
+      expect(screen.queryByText("Project A")).not.toBeInTheDocument();
+    });
+
+    it("lets the chip navigate to the user's accessible project", () => {
+      render(
+        <ProjectSwitcher projectId="not-mine" onProjectChange={mockOnProjectChange} />,
+      );
+
+      fireEvent.click(screen.getByText("Select Project"));
+      expect(mockOnProjectChange).toHaveBeenCalledWith("1");
+    });
+
+    it("keeps the chip inert when the URL has no project id", () => {
+      render(<ProjectSwitcher onProjectChange={mockOnProjectChange} />);
+
+      expect(screen.getByText("Project A")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Project A"));
+      expect(mockOnProjectChange).not.toHaveBeenCalled();
+    });
+  });
 });
