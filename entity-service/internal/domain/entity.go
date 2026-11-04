@@ -5427,9 +5427,10 @@ const MaxTimeCardAggregateDays = 31
 // their logged minutes summed per value of GroupBy.
 //
 // GroupBy is one of the TimeCardGroupBy* values (required). "day" requires
-// both Filters.StartDate and Filters.EndDate, at most MaxTimeCardAggregateDays
-// apart, and returns one bucket per day of that window in date order,
-// including days with no cards; MaxGroups and Measure do not apply to it.
+// both Filters.StartDate and Filters.EndDate, a window of at most
+// MaxTimeCardAggregateDays (both inclusive), and returns one bucket per day of
+// that window in date order, including days with no cards; MaxGroups and
+// Measure do not apply to it.
 // Every other grouping returns the top MaxGroups buckets (default 10) ranked
 // by Measure ("count", the default, or "minutes"), the rest folded into
 // OthersCount / OthersMinutes.

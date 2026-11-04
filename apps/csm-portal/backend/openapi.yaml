@@ -8785,10 +8785,10 @@ paths:
         for dashboard charts (Postgres data sources only).
       description: >-
         Counts the cards POST /time-cards/search matches for the same filters.
-        "day" needs filters.startDate and filters.endDate, at most 31 days
-        apart, and returns every day of that window in date order. CS
-        engineers and admins only (narrower than the search, which time card
-        approvers can also use).
+        "day" needs filters.startDate and filters.endDate, a window of at most
+        31 days (both inclusive), and returns every day of that window in date
+        order. CS engineers and admins only (narrower than the search, which
+        time card approvers can also use).
       operationId: aggregateTimeCards
       security:
         - bearerAuth: []
