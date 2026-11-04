@@ -279,12 +279,15 @@ func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
 	if f.Search != "" {
 		// Case id: exact match (it's a UUID, not a prefix/substring the way
 		// number/WSO2 id are). Number/WSO2 id: case-insensitive substring,
-		// sharing one wildcarded arg between both ILIKEs.
+		// sharing one wildcarded arg between both ILIKEs. escapeLikeWildcards
+		// (plg_users_repo.go) makes a literal "%" or "_" in the search term
+		// match itself rather than acting as an ILIKE pattern -- same
+		// convention every other ILIKE search in this package follows.
 		*args = append(*args, f.Search)
 		exactIdx := len(*args)
-		*args = append(*args, "%"+f.Search+"%")
+		*args = append(*args, "%"+escapeLikeWildcards(f.Search)+"%")
 		likeIdx := len(*args)
-		fmt.Fprintf(&b, " AND (wi.id::TEXT = $%d OR wi.number ILIKE $%d OR wi.wso2_id ILIKE $%d)", exactIdx, likeIdx, likeIdx)
+		fmt.Fprintf(&b, " AND (wi.id::TEXT = $%d OR wi.number ILIKE $%d ESCAPE '\\' OR wi.wso2_id ILIKE $%d ESCAPE '\\')", exactIdx, likeIdx, likeIdx)
 	}
 	return b.String()
 }
@@ -293,7 +296,9 @@ func appendSLAStatusFilterSQL(f domain.SLAStatusFilters, args *[]any) string {
 // the four fixed ranges the CSM Portal's SLA Engine admin table filters by
 // (domain.SLAElapsedBucket* constants). "" (no bucket filter requested)
 // always matches, so a caller that never asks for one can share this
-// unconditionally.
+// unconditionally. 75to100 is inclusive of exactly 100% (its own label reads
+// "75% - 100%"); over100 is exclusive of it (its own label reads "Over
+// 100%") -- a clock at exactly 100% belongs in the former, not the latter.
 func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	switch bucket {
 	case domain.SLAElapsedBucketUnder50:
@@ -301,9 +306,9 @@ func slaElapsedBucketMatches(bucket string, pct float64) bool {
 	case domain.SLAElapsedBucket50To75:
 		return pct >= 50 && pct < 75
 	case domain.SLAElapsedBucket75To100:
-		return pct >= 75 && pct < 100
+		return pct >= 75 && pct <= 100
 	case domain.SLAElapsedBucketOver100:
-		return pct >= 100
+		return pct > 100
 	default:
 		return true
 	}
@@ -378,7 +383,10 @@ func (r *slaStatusRepo) SearchActiveSLAStatuses(ctx context.Context, pagination 
 			return nil, 0, fmt.Errorf("query active sla statuses: %w", err)
 		}
 		defer rows.Close()
-		var matched []domain.SLAStatus
+		// Non-nil even with zero rows: SearchSLAStatusResponse.Statuses has
+		// no omitempty, so a nil slice here would serialize as JSON null
+		// instead of [] -- the webapp reads statuses.length unconditionally.
+		matched := make([]domain.SLAStatus, 0)
 		for rows.Next() {
 			st, err := scanSLAStatus(rows)
 			if err != nil {

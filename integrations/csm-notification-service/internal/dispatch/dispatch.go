@@ -997,34 +997,51 @@ const durableDedupReleaseTimeout = 5 * time.Second
 // runs to completion before the required-field check does), so caseNumber/
 // wso2CaseId/commentId are there to read even on a validation failure.
 type recordRef struct {
-	entityID   string
+	entityID string
+	// isIncident is env.Type's own "incident."-prefix test -- incident.*
+	// payloads carry no caseId/caseNumber field of their own (see events.go's
+	// IncidentCreatedPayload/IncidentAssignedPayload), only a "number", and
+	// the envelope's own identity is an incident id, not a case id; both the
+	// field read below and the label String renders switch on this.
+	isIncident bool
 	commentID  string
 	caseNumber string
 	wso2CaseID string
 }
 
 func recordRefFor(env events.Envelope) recordRef {
-	ref := recordRef{entityID: env.EntityID}
+	ref := recordRef{entityID: env.EntityID, isIncident: strings.HasPrefix(string(env.Type), "incident.")}
 	var common struct {
 		CommentID  string `json:"commentId"`
 		CaseNumber string `json:"caseNumber"`
+		Number     string `json:"number"`
 		WSO2CaseID string `json:"wso2CaseId"`
 	}
 	_ = json.Unmarshal(env.Payload, &common)
 	ref.commentID = common.CommentID
-	ref.caseNumber = common.CaseNumber
+	if ref.isIncident {
+		ref.caseNumber = common.Number
+	} else {
+		ref.caseNumber = common.CaseNumber
+	}
 	ref.wso2CaseID = common.WSO2CaseID
 	return ref
 }
 
 // String renders this ref for appending to an error. wso2CaseId is
-// preferred over caseNumber when both are present — they identify the same
-// row, so reporting both is redundant; caseNumber only appears when
-// wso2CaseId is not available.
+// preferred over caseNumber/number when both are present — they identify the
+// same row, so reporting both is redundant; caseNumber/number only appears
+// when wso2CaseId is not available. The entity id and the number-ish field
+// are both labeled incidentId/number rather than caseId/caseNumber for an
+// incident.* event, matching what the envelope and payload actually are.
 func (r recordRef) String() string {
 	var parts []string
 	if r.entityID != "" {
-		parts = append(parts, "caseId="+r.entityID)
+		if r.isIncident {
+			parts = append(parts, "incidentId="+r.entityID)
+		} else {
+			parts = append(parts, "caseId="+r.entityID)
+		}
 	}
 	if r.commentID != "" {
 		parts = append(parts, "commentId="+r.commentID)
@@ -1032,7 +1049,11 @@ func (r recordRef) String() string {
 	if r.wso2CaseID != "" {
 		parts = append(parts, "wso2CaseId="+r.wso2CaseID)
 	} else if r.caseNumber != "" {
-		parts = append(parts, "caseNumber="+r.caseNumber)
+		if r.isIncident {
+			parts = append(parts, "number="+r.caseNumber)
+		} else {
+			parts = append(parts, "caseNumber="+r.caseNumber)
+		}
 	}
 	return strings.Join(parts, " ")
 }
