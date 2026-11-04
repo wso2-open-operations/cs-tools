@@ -36,10 +36,14 @@ import (
 //   - A case S0 pages CRE and SRE; S1-S4 page CRE only (which severities is
 //     cre.trigger.priorities -- S4 is off unless listed). Routing decides
 //     which ladders, as it does for incidents (DefaultRouting).
-//   - Any severity change stops the running chain and starts a new one for the
+//   - A severity change stops the running chain and starts a new one for the
 //     new severity, from the first tier, even on a case already acknowledged.
 //     A severity a ladder does not page (S4 when it is off; anything below S0
 //     for SRE) just stops that ladder's chain.
+//   - On the CRE ladder a LOWERED severity (S1 -> S3) starts no chain: a
+//     running one carries on until it is acknowledged, a stopped one stays
+//     stopped. A severity either side of which is unrecognised counts as
+//     raised, so a malformed event still pages.
 //   - CRE stops when an engineer is assigned AND that engineer posts a public
 //     comment. SRE on an S0 case stops when any engineer is assigned, or --
 //     on a case already assigned when it became S0 -- when the assignee posts
@@ -135,6 +139,13 @@ func (e *Engine) handleCase(ctx context.Context, env events.Envelope, record []b
 			return nil
 		}
 		switch {
+		case e.cfg.Kind == LadderCRE && severityLowered(p.OldSeverity, p.NewSeverity) && e.pagesSeverity(ctx, t):
+			// A lowered case is no more urgent than it was: nobody is
+			// paged again for it, and a chain still waiting for its
+			// acknowledgement carries on as it was.
+			slog.InfoContext(ctx, "escalation: severity lowered; no new chain, a running one carries on",
+				"incidentId", caseID, "ladder", ladderName(e.cfg.Kind),
+				"from", p.OldSeverity, "to", p.NewSeverity)
 		case e.admit(ctx, &t):
 			// A new chain for the new severity, replacing whatever runs.
 			err = e.schedule(ctx, t, true)
@@ -373,6 +384,25 @@ func triggerFromSeverityChanged(caseID string, p events.SeverityChangedPayload, 
 			At:              now,
 		},
 	}
+}
+
+// severityLowered reports whether a case's severity went down, S0 being the
+// highest. Either side unrecognised (or empty) is not a lowering, so the
+// change is handled as a raise and still pages.
+func severityLowered(from, to string) bool {
+	f, okFrom := severityRank(from)
+	t, okTo := severityRank(to)
+	return okFrom && okTo && t > f
+}
+
+// severityRank is a severity's place from S0/P0 (0) down to S4/P4 (4), in
+// any spelling NormalisePriority knows.
+func severityRank(severity string) (int, bool) {
+	p := NormalisePriority(severity)
+	if len(p) != 2 || p[0] != 'P' || p[1] < '0' || p[1] > '4' {
+		return 0, false
+	}
+	return int(p[1] - '0'), true
 }
 
 // isClosedCaseStatus reports whether a case.status_changed label means the

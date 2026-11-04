@@ -739,11 +739,18 @@ is keyed by the case id, and `Trigger.Record` is `case`.
   never paged). S0 pages CRE and SRE, S1-S4 CRE only; which severities CRE pages
   is `cre.trigger.priorities` (the local file leaves S4 out: paging S4 is
   optional).
-- **Severity change**: any change stops the running chain and starts a new one
+- **Severity change**: a change stops the running chain and starts a new one
   for the new severity, from the first tier, even after acknowledgement. A
   severity a ladder does not page stops its chain (SRE below S0; S4 while it is
   off). The event has no timestamp, so the chain runs from now, and a
   redelivery is recognised by the chain already running at that severity.
+- **A lowered severity starts no CRE chain** (`severityLowered`, S0 highest):
+  a running chain carries on unchanged until it is acknowledged, and a stopped
+  one stays stopped. Lowering into a severity CRE does not page (S4 while it is
+  off) still stops it, and SRE is unchanged (it pages only S0, so a lowering
+  always stops it). An old or new severity the code does not recognise counts
+  as a raise, so a malformed event still pages (an empty one never gets here:
+  the payload's validation refuses it).
 - **Stop**: CRE needs an engineer assigned AND that engineer's public comment
   (`acknowledgement.requireBoth`). SRE on an S0 case stops when any engineer is
   assigned, or -- on a case already assigned when it became S0 -- on the

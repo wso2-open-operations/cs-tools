@@ -159,7 +159,7 @@ func TestEngine_SeverityChangeWaitsForTheCaseLock(t *testing.T) {
 		t.Fatal("could not take the lock for the test")
 	}
 
-	err := cre.Handle(ctx, severityChangedAt(t, "HIGH", "MEDIUM", testClock.Add(time.Hour)))
+	err := cre.Handle(ctx, severityChangedAt(t, "HIGH", "CRITICAL", testClock.Add(time.Hour)))
 	if err == nil || !strings.Contains(err.Error(), "still being handled") {
 		t.Fatalf("err = %v; want a retryable error while the case is locked", err)
 	}
@@ -168,7 +168,7 @@ func TestEngine_SeverityChangeWaitsForTheCaseLock(t *testing.T) {
 	}
 
 	_ = store.UnlockCaseSeverity(ctx, testIncidentID, "other")
-	if err := cre.Handle(ctx, severityChangedAt(t, "HIGH", "MEDIUM", testClock.Add(time.Hour))); err != nil {
+	if err := cre.Handle(ctx, severityChangedAt(t, "HIGH", "CRITICAL", testClock.Add(time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 	if st, _, _ := store.Get(ctx, testIncidentID); st.Plan.Trigger.Kind != TriggerSeverityChanged {
