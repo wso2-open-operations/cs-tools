@@ -14,24 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-<<<<<<<< HEAD:apps/customer-portal/webapp/src/providers/IdleStateContext.ts
-import { createContext, useContext } from "react";
-
-/**
- * True while the session-warning prompt is showing (the user has been idle
- * long enough to be asked to confirm). Defaults to false so consumers work
- * without IdleTimeoutProvider (tests, other trees).
- */
-export const IdleStateContext = createContext<boolean>(false);
-
-/**
- * Whether the user is currently considered idle.
- *
- * @returns {boolean} True while the session warning is open.
- */
-export function useIsIdle(): boolean {
-  return useContext(IdleStateContext);
-========
 package main
 
 import (
@@ -50,5 +32,4 @@ func TestSplitComma(t *testing.T) {
 			t.Errorf("splitComma(%q) = %v, want %v", in, got, want)
 		}
 	}
->>>>>>>> origin/dev-app-csm-portal:integrations/legacy-product-api/cmd/server/main_test.go
 }
