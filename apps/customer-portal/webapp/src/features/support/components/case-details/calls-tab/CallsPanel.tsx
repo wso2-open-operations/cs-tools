@@ -93,6 +93,12 @@ export default function CallsPanel({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [callRequestsPage, setCallRequestsPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
+  // The case whose first, unfiltered search has finished; the dropdown stays
+  // usable after that, even while a later search (e.g. back to All statuses
+  // once the cached one was dropped) is pending.
+  const [firstSearchDoneFor, setFirstSearchDoneFor] = useState<string | null>(
+    null,
+  );
 
   const { data: projectFilters } = useGetProjectFilters(projectId);
 
@@ -212,6 +218,11 @@ export default function CallsPanel({
     isFetchNextPageError,
   } = useGetCallRequests(projectId, caseId, statusStateKeys);
   const patchCallRequest = usePatchCallRequest(projectId, caseId);
+
+  if (!isPending && !statusFilter && firstSearchDoneFor !== caseId) {
+    setFirstSearchDoneFor(caseId);
+  }
+  const isFirstSearchDone = firstSearchDoneFor === caseId;
 
   const allCallRequests = useMemo(
     () => data?.pages?.flatMap((p) => p.callRequests ?? []) ?? [],
@@ -435,7 +446,7 @@ export default function CallsPanel({
             value={statusFilter}
             options={CALL_REQUEST_STATUS_FILTER_OPTIONS}
             onChange={handleStatusFilterChange}
-            disabled={isPending && !statusFilter}
+            disabled={!isFirstSearchDone}
           />
         </Stack>
       )}
