@@ -36,6 +36,7 @@ import {
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
 import {
+  blobImageSources,
   hasBlobImageSource,
   rewriteBlobImageSources,
 } from "@features/support/utils/inlineCommentImages";
@@ -97,14 +98,16 @@ export default function ActivityCommentInput({
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
-  // Images pasted or inserted into the comment are uploaded as soon as they are
-  // added (when entity attachments are on) and shown from a local blob: URL. Each
-  // finished upload's id is kept against that URL; on send the URLs are replaced
-  // by `/<id>` references, so no image bytes travel with the comment.
+  // Images pasted or inserted into the comment are shown from a local blob: URL and
+  // kept here; nothing is uploaded until the comment is sent (when entity
+  // attachments are on), so an image that is removed or never posted leaves
+  // nothing on the server. Each finished upload's id is kept against that URL; the
+  // URLs are then replaced by `/<id>` references, so no image bytes travel with
+  // the comment.
   const authFetch = useAuthApiClient();
   const imageIdsRef = useRef<Map<string, string>>(new Map());
+  const queuedImagesRef = useRef<Map<string, File>>(new Map());
   const previewUrlsRef = useRef<Set<string>>(new Set());
-  const pendingImagesRef = useRef(0);
   const [pendingImages, setPendingImages] = useState(0);
   const uploadImagesInline = isEntityAttachmentsEnabled();
 
@@ -112,14 +115,17 @@ export default function ActivityCommentInput({
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     previewUrlsRef.current.clear();
     imageIdsRef.current.clear();
+    queuedImagesRef.current.clear();
   };
   useEffect(() => {
     const previewUrls = previewUrlsRef.current;
     const imageIds = imageIdsRef.current;
+    const queued = queuedImagesRef.current;
     return () => {
       previewUrls.forEach((url) => URL.revokeObjectURL(url));
       previewUrls.clear();
       imageIds.clear();
+      queued.clear();
     };
   }, []);
 
@@ -148,47 +154,64 @@ export default function ActivityCommentInput({
     !isSignedIn ||
     isAuthLoading ||
     postComment.isPending ||
-    isUploadingAttachments;
+    isUploadingAttachments ||
+    pendingImages > 0;
 
   const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
 
-  // Stores one image through entity-service's upload flow. Rejects after showing
-  // the error, so the editor takes the image out again.
+  // Keeps one image for the send. The editor shows it from its blob: URL; it is
+  // uploaded by uploadQueuedImages when the comment is sent.
   const uploadInlineImage = async (file: File, previewUrl: string) => {
     previewUrlsRef.current.add(previewUrl);
-    pendingImagesRef.current += 1;
-    setPendingImages((n) => n + 1);
+    queuedImagesRef.current.set(previewUrl, file);
+  };
+
+  // Stores the images the comment still shows, one after another, through
+  // entity-service's upload flow. Resolves false after showing the error of the
+  // first one that fails; the ones already stored are kept, so sending again
+  // uploads only the rest.
+  const uploadQueuedImages = async (html: string): Promise<boolean> => {
+    const toUpload = blobImageSources(html).filter(
+      (url) => !imageIdsRef.current.has(url) && queuedImagesRef.current.has(url),
+    );
+    if (toUpload.length === 0) return true;
+    setPendingImages(toUpload.length);
     try {
-      const input = {
-        type: "comment" as const,
-        parentId: caseId,
-        file,
-        name: file.name || "image",
-      };
-      let id: string;
-      try {
-        id = (await uploadStoredAttachment(authFetch, input)).id;
-      } catch (error) {
-        // The file is already in place: finish the upload instead of repeating it.
-        if (!(error instanceof UploadConfirmPendingError)) throw error;
-        id = (
-          await confirmStoredUpload(authFetch, {
-            type: "comment",
-            attachmentId: error.attachmentId,
-          })
-        ).id;
+      for (const previewUrl of toUpload) {
+        const file = queuedImagesRef.current.get(previewUrl) as File;
+        const input = {
+          type: "comment" as const,
+          parentId: caseId,
+          file,
+          name: file.name || "image",
+        };
+        let id: string;
+        try {
+          id = (await uploadStoredAttachment(authFetch, input)).id;
+        } catch (error) {
+          // The file is already in place: finish the upload instead of repeating it.
+          if (!(error instanceof UploadConfirmPendingError)) throw error;
+          id = (
+            await confirmStoredUpload(authFetch, {
+              type: "comment",
+              attachmentId: error.attachmentId,
+            })
+          ).id;
+        }
+        imageIdsRef.current.set(previewUrl, id);
+        queuedImagesRef.current.delete(previewUrl);
+        setPendingImages((n) => n - 1);
       }
-      imageIdsRef.current.set(previewUrl, id);
+      return true;
     } catch (error) {
       showError(
         error instanceof Error && error.message
-          ? error.message
-          : "Failed to upload the image. Please try again.",
+          ? `${error.message} The comment was not sent; try again.`
+          : "Failed to upload the image. The comment was not sent; try again.",
       );
-      throw error;
+      return false;
     } finally {
-      pendingImagesRef.current -= 1;
-      setPendingImages((n) => n - 1);
+      setPendingImages(0);
     }
   };
 
@@ -284,23 +307,6 @@ export default function ActivityCommentInput({
       return;
     }
 
-    if (pendingImagesRef.current > 0) {
-      showError("Please wait for the image upload to finish.");
-      return;
-    }
-    // Uploaded images are sent as `/<id>` references; a preview URL that is left
-    // is an image that never finished uploading and must not be sent.
-    const finalValue = rewriteBlobImageSources(
-      currentValue,
-      imageIdsRef.current,
-    );
-    if (hasBlobImageSource(finalValue)) {
-      showError(
-        "An image in the comment could not be uploaded. Remove it and try again.",
-      );
-      return;
-    }
-
     // Snapshot attachments before posting
     const attachmentsSnapshot = [...currentAttachments];
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
@@ -314,6 +320,24 @@ export default function ActivityCommentInput({
     };
 
     const performSend = async () => {
+      // The comment's images are uploaded now; their `/<id>` references replace
+      // the preview URLs, and one that is left is an image that never uploaded and
+      // must not be sent.
+      let finalValue = currentValue;
+      if (hasText) {
+        if (!(await uploadQueuedImages(currentValue))) return;
+        finalValue = rewriteBlobImageSources(
+          currentValue,
+          imageIdsRef.current,
+        );
+        if (hasBlobImageSource(finalValue)) {
+          showError(
+            "An image in the comment could not be uploaded. Remove it and try again.",
+          );
+          return;
+        }
+      }
+
       // Attachment-only: skip comment endpoint, upload directly
       if (!hasText && hasAttachments) {
         const ok = await uploadAttachmentsFromSnapshot(
@@ -360,7 +384,7 @@ export default function ActivityCommentInput({
     // Warn about PII in the comment text before posting. Attachment-only
     // sends have no text to scan, so they proceed directly.
     if (hasText) {
-      piiGuard.checkBeforeSubmit(finalValue, performSend);
+      piiGuard.checkBeforeSubmit(currentValue, performSend);
     } else {
       performSend();
     }
