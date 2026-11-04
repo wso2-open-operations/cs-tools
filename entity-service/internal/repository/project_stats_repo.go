@@ -195,6 +195,17 @@ func (r *projectStatsRepo) TimeCardReport(ctx context.Context, projectID, from, 
 			return err
 		}
 
+		// time_card is readable by any project member, so the work item it hangs
+		// off must pass the same visibility rules as every other read of that
+		// work item: a change request is listed only when the caller may see it,
+		// and an announcement whose row is invisible through RLS is left out
+		// rather than listed with a blank type. Both are no-ops for an internal
+		// caller, which is the scheduled report's.
+		args := []any{projectID, from, to}
+		crVis, args := r.vis.andClause(ctx, "wi", "cr", args)
+		if crVis != "" {
+			crVis = " AND (wi.type <> 'CHANGE_REQUEST' OR" + strings.TrimPrefix(crVis, " AND") + ")"
+		}
 		rows, err := tx.Query(ctx, `
 			SELECT wi.id::text, wi.number, wi.wso2_id, LOWER(wi.type::text),
 			       COALESCE(SUM(`+timeCardMinutesExpr+`), 0),
@@ -203,12 +214,15 @@ func (r *projectStatsRepo) TimeCardReport(ctx context.Context, projectID, from, 
 			       COALESCE(SUM(COALESCE(tc.patching_minutes, 0)), 0)
 			  FROM time_card tc
 			  JOIN work_item wi ON wi.id = tc.case_id
+			  LEFT JOIN change_request cr ON cr.id = wi.id
+			  LEFT JOIN announcement ann ON ann.id = wi.id
 			 WHERE wi.project_id = $1::uuid
 			   AND tc.state = 'APPROVED'
 			   AND tc.work_date >= $2::date
 			   AND tc.work_date <= $3::date
+			   AND (wi.type <> 'ANNOUNCEMENT' OR ann.id IS NOT NULL)`+crVis+`
 			 GROUP BY wi.id, wi.number, wi.wso2_id, wi.type
-			 ORDER BY wi.number ASC, wi.id ASC`, projectID, from, to)
+			 ORDER BY wi.number ASC, wi.id ASC`, args...)
 		if err != nil {
 			return err
 		}
