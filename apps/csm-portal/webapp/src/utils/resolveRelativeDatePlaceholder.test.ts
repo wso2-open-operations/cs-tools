@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { resolveRelativeDatePlaceholder } from "./resolveRelativeDatePlaceholder";
+import { describeRelativeDatePlaceholder, resolveRelativeDatePlaceholder } from "./resolveRelativeDatePlaceholder";
 
 // A fixed reference instant so every assertion is deterministic regardless of
 // the machine/timezone running the test — 2026-08-15 14:30 in whatever
@@ -119,5 +119,26 @@ describe("resolveRelativeDatePlaceholder", () => {
     expect(
       resolveRelativeDatePlaceholder("__endOfMonth:100000000__", "lte", NOW),
     ).toBeUndefined();
+  });
+});
+
+describe("describeRelativeDatePlaceholder", () => {
+  it("puts each placeholder in words, the same as the Cases list's presets", () => {
+    expect(describeRelativeDatePlaceholder("__today__")).toBe("Today");
+    expect(describeRelativeDatePlaceholder("__daysAgo:0__")).toBe("Today");
+    expect(describeRelativeDatePlaceholder("__daysAgo:1__")).toBe("1 day ago");
+    expect(describeRelativeDatePlaceholder("__daysAgo:30__")).toBe("30 days ago");
+    expect(describeRelativeDatePlaceholder("__startOfMonth:0__")).toBe("Start of this month");
+    expect(describeRelativeDatePlaceholder("__startOfMonth:-1__")).toBe("Start of last month");
+    expect(describeRelativeDatePlaceholder("__endOfMonth:1__")).toBe("End of next month");
+    expect(describeRelativeDatePlaceholder("__startOfMonth:-3__")).toBe("Start of the month 3 months ago");
+    expect(describeRelativeDatePlaceholder("__endOfQuarter:-1__")).toBe("End of last quarter");
+    expect(describeRelativeDatePlaceholder("__startOfQuarter:2__")).toBe("Start of the quarter 2 quarters ahead");
+  });
+
+  it("describes nothing the resolver would not resolve", () => {
+    for (const v of ["2026-10-04", "__today:5__", "__daysAgo:-1__", "__daysAgo__", "__weeksAgo:2__", "today"]) {
+      expect(describeRelativeDatePlaceholder(v)).toBeUndefined();
+    }
   });
 });

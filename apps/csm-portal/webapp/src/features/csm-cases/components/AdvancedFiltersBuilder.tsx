@@ -29,6 +29,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
+import { describeRelativeDatePlaceholder } from "@utils/resolveRelativeDatePlaceholder";
 import MultiSelectField from "@components/MultiSelectField";
 import AsyncCreatedByMultiSelect from "@features/csm-cases/components/AsyncCreatedByMultiSelect";
 import AsyncAssigneeMultiSelect from "@features/csm-cases/components/AsyncAssigneeMultiSelect";
@@ -104,11 +105,20 @@ function isRelativeDatePreset(value: string): boolean {
   return RELATIVE_DATE_PRESETS.some((p) => p.value === value);
 }
 
+/** The words for a relative date that is not one of the menu's presets but
+ * that the resolver accepts (a dashboard click-through's `__daysAgo:13__`,
+ * "13 days ago"), so the menu can show it as picked instead of an empty
+ * custom date. `undefined` for a preset, a literal date and anything else. */
+function otherRelativeDateLabel(value: string): string | undefined {
+  return value && !isRelativeDatePreset(value) ? describeRelativeDatePlaceholder(value) : undefined;
+}
+
 interface DateOrPresetValueInputProps {
   /** Unique per rendered row, so the label/`labelId` pair stays unambiguous
    * when several date rows are open at once. */
   labelId: string;
-  /** A relative-date placeholder (one of `RELATIVE_DATE_PRESETS`), a literal
+  /** A relative-date placeholder (one of `RELATIVE_DATE_PRESETS`, or another
+   * the resolver accepts, see {@link otherRelativeDateLabel}), a literal
    * `YYYY-MM-DD`, or `""` (nothing chosen yet). */
   value: string;
   onChange: (next: string) => void;
@@ -200,7 +210,9 @@ function DateOrPresetValueInput({
   onChange,
 }: DateOrPresetValueInputProps): JSX.Element {
   const [mode, setMode] = useState<"preset" | "custom">(
-    value && !isRelativeDatePreset(value) ? "custom" : "preset",
+    value && !isRelativeDatePreset(value) && otherRelativeDateLabel(value) === undefined
+      ? "custom"
+      : "preset",
   );
   const [localDate, setLocalDate] = useState<Date | null>(() => parseDateOnly(value));
   const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -299,6 +311,9 @@ function DateOrPresetValueInput({
               {p.label}
             </MenuItem>
           ))}
+          {otherRelativeDateLabel(value) !== undefined && (
+            <MenuItem value={value}>{otherRelativeDateLabel(value)}</MenuItem>
+          )}
           <MenuItem value={CUSTOM_DATE_SENTINEL}>Custom date…</MenuItem>
         </Select>
       </FormControl>

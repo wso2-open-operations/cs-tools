@@ -568,6 +568,21 @@ function widgetPreviewFallbackHref(
   });
 }
 
+/** The case-family resourceTypes: they search `/cases/search` and open the
+ * cases list (or its "View more" preview with the editable `CasesFilterBar`). */
+export const CASE_FAMILY_RESOURCE_TYPE_SET: ReadonlySet<BeWidgetResourceType> = new Set<BeWidgetResourceType>([
+  "case",
+  "service_request",
+  "security_report_analysis",
+  "announcement",
+  "engagement",
+]);
+
+/** Whether `resourceType` is one of the case-family resourceTypes. */
+export function isCaseFamilyResourceType(resourceType: BeWidgetResourceType): boolean {
+  return CASE_FAMILY_RESOURCE_TYPE_SET.has(resourceType);
+}
+
 /**
  * Shared `buildHref` wrapper for every case-family resourceType (`case`,
  * `service_request`, `security_report_analysis`, `engagement`, and

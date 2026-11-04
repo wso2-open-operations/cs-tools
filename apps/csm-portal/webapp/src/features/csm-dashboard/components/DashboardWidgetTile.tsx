@@ -37,7 +37,10 @@ import { useWidgetPieData, type PieSliceResult } from "@features/csm-dashboard/a
 import { useWidgetGroupByData } from "@features/csm-dashboard/api/useWidgetGroupByData";
 import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFeedbackTrendData";
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
-import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
+import {
+  isCaseFamilyResourceType,
+  WIDGET_RESOURCE_CONFIG,
+} from "@features/csm-dashboard/config/widgetResourceConfig";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import GenericColumnList from "@features/csm-dashboard/components/GenericColumnList";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
@@ -347,13 +350,22 @@ function DashboardWidgetTile({
   // encoding — carrying dashboard placeholder vocabulary into it would make
   // `__today__` a value users can type into, and hand-edit out of, a shared
   // list-page URL.
-  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> =>
-    resolveCurrentUserPlaceholder(
-      resolveRelativeDateFilters(
-        resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId),
-      ),
+  //
+  // Except for the case family: their destination (the cases list, or its
+  // "View more" preview with the editable `CasesFilterBar`) now resolves the
+  // same placeholders itself, browser-local, with the same resolver
+  // (`useGetCsmCases`, `resolveAdvancedFilterDateValues`), and its Advanced
+  // date rows can only show a relative placeholder or a plain date. A frozen
+  // instant (`2026-10-03T18:30:00.000Z`) showed there as an empty date box, so
+  // case-family links keep the widget's own `__daysAgo:30__` / `__today__`.
+  const keepsRelativeDates = isCaseFamilyResourceType(resourceType);
+  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> => {
+    const teamResolved = resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId);
+    return resolveCurrentUserPlaceholder(
+      keepsRelativeDates ? teamResolved : resolveRelativeDateFilters(teamResolved),
       currentUserId,
     );
+  };
   // Carried on every count/pie/bar click-through below so the resource's own
   // list page (which has no dashboard context of its own) can offer a Back
   // button straight to this exact dashboard — mirroring the list-shape
@@ -747,6 +759,8 @@ function DashboardWidgetTile({
                     resourceType,
                     currentUserId,
                   })}
+                  // The preview page's Back returns here.
+                  state={dashboardReturnState}
                   size="small"
                   variant="text"
                   endIcon={<ArrowRight size={14} />}
