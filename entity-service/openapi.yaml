@@ -5922,6 +5922,699 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /products:
+    post:
+      summary: Add a product.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createProduct
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWrite'
+      responses:
+        "201":
+          description: The new product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}:
+    get:
+      summary: One product with its catalogue fields.
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: getProduct
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Change a product.
+      description: >
+        Fields present in the body are set (null clears an optional one). A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateProduct
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWrite'
+      responses:
+        "200":
+          description: The product.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{id}/versions:
+    post:
+      summary: Add a version of a product.
+      description: >
+        Creates one row per deployment profile in profiles, all on one public listing (a new public id, or publicId to join a live listing of the same product and version). A profile the version already has is refused. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createProductVersions
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionCreate'
+      responses:
+        "201":
+          description: The new rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/search:
+    post:
+      summary: Search versions across products.
+      description: >
+        Ordered by product name, release date (newest first), version and profile. feed keeps the live rows with a public listing on that feed. Page size up to 1000. Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: searchAllProductVersions
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchAllProductVersionsRequest'
+      responses:
+        "200":
+          description: Matching versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchProductVersionsResponse'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/{id}:
+    get:
+      summary: One product version row.
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: getProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersion'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Change a product version.
+      description: >
+        Listing fields apply to every live row of the version (its public listing, or the unpublished rows of the same product and version); deploymentProfile and publicId to this row only. On a retired row the change applies to that row alone. Dates must keep release <= earliest possible EOL <= EOL and EOL announcement <= EOL, and a version on a public feed needs a public abbreviation or a product code; both are checked on the row as written (the body over the stored values). publicId may only name a live listing of the same product and version. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductVersionPatch'
+      responses:
+        "200":
+          description: The rows changed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /product-versions/{id}/retire:
+    post:
+      summary: Retire a product version.
+      description: >
+        Retires every live row of the version: its public listing, or, when the row has no public id, the unpublished rows of the same product and version. Retired rows leave the catalogue and both public feeds; the product version searches still return them unless excludeRetired is set. A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: retireProductVersion
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The rows retired.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductVersionList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines:
+    get:
+      summary: Release lines.
+      description: >
+        Ordered by name. Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listReleaseLines
+      tags: [Products]
+      parameters:
+        - name: includeRetired
+          in: query
+          required: false
+          description: Include retired release lines.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: The release lines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLineList'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Add a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: createReleaseLine
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseLineWrite'
+      responses:
+        "201":
+          description: The new release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not returned by this create (it references nothing that can be missing); listed because every write documents 404.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines/{id}:
+    patch:
+      summary: Change a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: updateReleaseLine
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReleaseLineWrite'
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /release-lines/{id}/retire:
+    post:
+      summary: Retire a release line.
+      description: >
+        A product catalogue manager (AUTH_PRODUCT_CATALOG_MANAGER_ROLES or AUTH_ADMIN_ROLES). Applied at once, in one transaction. Dates are YYYY-MM-DD. Postgres data source only.
+      operationId: retireReleaseLine
+      tags: [Products]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The release line.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLine'
+        "400":
+          description: Invalid parameter or body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /carbon-platform-history:
+    get:
+      summary: Carbon platform history (reference data).
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listCarbonPlatformHistory
+      tags: [Products]
+      responses:
+        "200":
+          description: Every row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonPlatformHistoryList'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /carbon-kernel-releases:
+    get:
+      summary: Carbon kernel releases (reference data).
+      description: >
+        Internal callers only (CSM staff tokens and allow-listed M2M clients such as legacy-product-api). Postgres data source only.
+      operationId: listCarbonKernelReleases
+      tags: [Products]
+      responses:
+        "200":
+          description: Every row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarbonKernelReleaseList'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller, or (writes) not a product catalogue manager.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /deployments:
     post:
       summary: Create a new deployment.
@@ -23087,6 +23780,10 @@ components:
 
     Product:
       type: object
+      description: >
+        A product. The catalogue fields (code to activeVersionCount) were
+        added with the product catalogue; unit, businessUnit and
+        manufacturer are lowercase enum values.
       properties:
         id:
           type: string
@@ -23101,7 +23798,29 @@ components:
         updatedOn:
           type: string
           format: date-time
-
+        code:
+          type: string
+          nullable: true
+        unit:
+          type: string
+          nullable: true
+        businessUnit:
+          type: string
+          nullable: true
+        manufacturer:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        versionCount:
+          type: integer
+          description: Live (not retired) version rows.
+        retiredVersionCount:
+          type: integer
+        activeVersionCount:
+          type: integer
+          description: Live version rows not discontinued.
     SearchProductsResponse:
       type: object
       properties:
@@ -23175,9 +23894,24 @@ components:
         deploymentProfile:
           type: string
           description: Only versions with this deployment profile (e.g. "All In One"), matched case-insensitively. Omit it, or send an empty string, to return every profile. Postgres data source only.
-
+        excludeRetired:
+          type: boolean
+          description: Leave out retired rows. Omitted or false returns every row, retired ones included. Postgres data source only.
+        feed:
+          type: string
+          enum: [support-matrix, release-matrix]
+          description: Only the live rows with a public listing on this feed. Postgres data source only.
+        publicId:
+          type: integer
+          format: int64
+          description: Only the rows of this public listing. Postgres data source only.
     ProductVersion:
       type: object
+      description: >
+        One product version row (one deployment profile). The live rows
+        sharing publicId are one public listing on the Support Matrix and
+        Release Matrix. The fields from productName on were added with the
+        product catalogue (Postgres data source only).
       properties:
         id:
           type: string
@@ -23187,7 +23921,8 @@ components:
           type: string
         currentSupportStatus:
           type: string
-          enum: [available, extended, deprecated, discontinued, null]
+          description: The stored enum value, uppercase.
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
           nullable: true
         releaseDate:
           type: string
@@ -23211,7 +23946,59 @@ components:
         updatedOn:
           type: string
           format: date-time
-
+        productName:
+          type: string
+        productCode:
+          type: string
+          nullable: true
+        serialNumber:
+          type: string
+          nullable: true
+        supportEolAnnouncementDate:
+          type: string
+          format: date-time
+          nullable: true
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+        publicName:
+          type: string
+          nullable: true
+        publicAbbreviation:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        isPublic:
+          type: boolean
+          description: Listed on the Release Matrix.
+        showInSupportMatrix:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        releaseLinks:
+          type: string
+          nullable: true
+        legacyStatus:
+          type: boolean
+          description: The legacy status bit; defaults to true.
+        releaseLineId:
+          type: string
+          format: uuid
+          nullable: true
+        releaseLineName:
+          type: string
+          nullable: true
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        retiredOn:
+          type: string
+          format: date-time
+          nullable: true
     SearchProductVersionsResponse:
       type: object
       properties:
@@ -31371,6 +32158,259 @@ components:
         sentOn:
           type: string
           format: date-time
+    CatalogCarbon:
+      type: object
+      nullable: true
+      properties:
+        platformRelease:
+            type: string
+            nullable: true
+        platformVersion:
+            type: string
+            nullable: true
+        carbonKernelVersion:
+            type: string
+            nullable: true
+        releaseChunk:
+            type: string
+            nullable: true
+        kernelPatchNo:
+            type: string
+            nullable: true
+    ProductVersionList:
+      type: object
+      properties:
+        productVersions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductVersion'
+    SearchAllProductVersionsRequest:
+      type: object
+      additionalProperties: false
+      description: The per-product version search's filters, plus productId, across products.
+      properties:
+        pagination:
+          type: object
+          additionalProperties: false
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              maximum: 1000
+              description: Rows per page. Defaults to 20, capped at 1000 (the whole catalogue fits in one page).
+            offset:
+              type: integer
+              minimum: 0
+              description: Zero-based offset into the result set.
+        productId:
+          type: string
+          format: uuid
+          description: Only this product.
+        searchQuery:
+          type: string
+          description: Case-insensitive match against the version string.
+        deploymentProfile:
+          type: string
+          description: Only rows with this deployment profile, matched case-insensitively.
+        excludeRetired:
+          type: boolean
+          description: Leave out retired rows.
+        feed:
+          type: string
+          enum: [support-matrix, release-matrix]
+          description: Only the live rows with a public listing on this feed.
+        publicId:
+          type: integer
+          format: int64
+          description: Only the rows of this public listing.
+    ProductWrite:
+      type: object
+      additionalProperties: false
+      description: name and class are required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        class: {type: string, enum: [software, service]}
+        code: {type: string, maxLength: 64, nullable: true}
+        unit: {type: string, enum: [integration, iot, iam, choreo, asgardeo, apim, analytics, devant, bijira, null], nullable: true}
+        businessUnit: {type: string, enum: [integration_software, integration_cloud, iam, corporate, null], nullable: true}
+        manufacturer: {type: string, enum: [wso2, wso2_cloud, null], nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+    ProductVersionPatch:
+      type: object
+      additionalProperties: false
+      description: Dates are YYYY-MM-DD. Listing fields apply to every live row of the version; deploymentProfile and publicId to this row only.
+      properties:
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, maxLength: 150, nullable: true}
+        publicAbbreviation: {type: string, maxLength: 64, nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+        releaseLinks: {type: string, maxLength: 255, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string, maxLength: 50}
+        legacyStatus: {type: boolean}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        deploymentProfile:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: This row only.
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: This row only; a live listing of the same product and version.
+    ProductVersionCreate:
+      type: object
+      additionalProperties: false
+      required: [version, profiles]
+      description: Dates are YYYY-MM-DD. One row per profile, all on one public listing.
+      properties:
+        version: {type: string, maxLength: 20}
+        profiles:
+          type: array
+          minItems: 1
+          description: One row per deployment profile; "" is a row with no profile.
+          items: {type: string, maxLength: 255}
+        currentSupportStatus:
+          type: string
+          nullable: true
+          description: Case-insensitive; reads return the uppercase form.
+          enum: [available, extended, deprecated, discontinued, AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        releaseDate: {type: string, format: date, nullable: true}
+        earliestPossibleSupportEolDate: {type: string, format: date, nullable: true}
+        supportEolDate: {type: string, format: date, nullable: true}
+        supportEolAnnouncementDate: {type: string, format: date, nullable: true}
+        publicName: {type: string, maxLength: 150, nullable: true}
+        publicAbbreviation: {type: string, maxLength: 64, nullable: true}
+        description: {type: string, maxLength: 2000, nullable: true}
+        releaseLinks: {type: string, maxLength: 255, nullable: true}
+        isPublic: {type: boolean}
+        showInSupportMatrix: {type: boolean}
+        tags:
+          type: array
+          nullable: true
+          items: {type: string, maxLength: 50}
+        legacyStatus: {type: boolean}
+        releaseLineId: {type: string, format: uuid, nullable: true}
+        carbon:
+          $ref: '#/components/schemas/CatalogCarbon'
+        publicId:
+          type: integer
+          format: int64
+          nullable: true
+          description: A live listing of the same product and version to join; omit it to start a new listing.
+    ReleaseLineWrite:
+      type: object
+      additionalProperties: false
+      description: name is required on create.
+      properties:
+        name: {type: string, maxLength: 100}
+        startDate: {type: string, format: date, nullable: true}
+        status: {type: string, maxLength: 50, nullable: true}
+    ReleaseLine:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        startDate:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        legacyId:
+          type: integer
+          format: int64
+          nullable: true
+        versionCount:
+          type: integer
+        retiredOn:
+          type: string
+          format: date-time
+          nullable: true
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+    ReleaseLineList:
+      type: object
+      properties:
+        releaseLines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReleaseLine'
+    CarbonPlatformHistory:
+      type: object
+      description: >
+        A Carbon platform release and the product versions built on it.
+        releaseDateText is the legacy M/d/yyyy text, kept for the legacy
+        feed's ordering. The remaining properties are one version string
+        per Carbon-era product (esbVersion, apiManagerVersion, ...).
+      properties:
+        id:
+          type: integer
+        carbonVersion:
+            type: string
+            nullable: true
+        releaseDate:
+            type: string
+            format: date
+            nullable: true
+        releaseDateText:
+            type: string
+            nullable: true
+      additionalProperties:
+        type: string
+        nullable: true
+    CarbonPlatformHistoryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarbonPlatformHistory'
+    CarbonKernelRelease:
+      type: object
+      properties:
+        id:
+          type: integer
+        kernelRelease:
+            type: string
+            nullable: true
+        releaseDate:
+            type: string
+            format: date
+            nullable: true
+        carbonPlatform:
+            type: string
+            nullable: true
+    CarbonKernelReleaseList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarbonKernelRelease'
     CustomDashboard:
       type: object
       required: [id, name, definition, createdOn, updatedOn]

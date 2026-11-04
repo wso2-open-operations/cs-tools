@@ -84,6 +84,7 @@ describe("top-level nav order", () => {
       "security-center",
       "customers",
       "kb-articles",
+      "products",
       "plg",
       "updates",
       "time-cards",
@@ -94,6 +95,31 @@ describe("top-level nav order", () => {
       "admin",
       "help",
     ]);
+  });
+});
+
+describe("products section", () => {
+  it("sits directly below Knowledge and is staff-only", () => {
+    const ids = CSM_NAV_ITEMS.map((section) => section.id);
+    expect(ids.indexOf("products")).toBe(ids.indexOf("kb-articles") + 1);
+    expect(navNodeById("products")?.requires).toBe("canViewStaffSections");
+  });
+
+  it("has the Catalogue and Release lines tabs, none narrower than the section", () => {
+    expect(navNodeById("products")?.children?.map((tab) => tab.id)).toEqual([
+      "products.catalogue",
+      "products.release-lines",
+    ]);
+    expect(navNodeById("products.catalogue")?.requires).toBeUndefined();
+  });
+
+  it("resolves each tab's route, and a section-level path to the section", () => {
+    expect(navNodeMatchForPath("/products/release-lines")).toMatchObject({
+      node: { id: "products.release-lines" },
+    });
+    expect(navNodeMatchForPath("/products")).toMatchObject({
+      node: { id: "products" },
+    });
   });
 });
 
