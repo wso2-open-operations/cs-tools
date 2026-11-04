@@ -447,7 +447,7 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     }
   });
 
-  it("holds the send button while an image uploads, then sends its id instead of the preview URL", async () => {
+  it("uploads a pasted image only when the comment is sent, then sends its id instead of the preview URL", async () => {
     let finish: (value: { id: string }) => void = () => {};
     upload.mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -456,22 +456,40 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
     fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
 
+    // Pasting sends nothing; the Send button stays available.
+    expect(upload).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
     expect(upload).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ type: "comment", parentId: CASE_ID, name: "shot.png" }),
     );
-    expect(screen.getByText("Uploading images…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeDisabled();
+    expect(await screen.findByText("Uploading images…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
 
     await act(async () => finish({ id: IMAGE_ID }));
-    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const [html] = onSubmit.mock.calls[0];
     expect(html).toBe(`see <img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
     expect(html).not.toContain("blob:");
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:https://csm.example.com/1");
+  });
+
+  it("uploads nothing for an image that was removed before Send", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "no image after all" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(upload).not.toHaveBeenCalled();
   });
 
   it("explains a failed image on the first Send and posts the comment without it on the second", async () => {
@@ -481,9 +499,6 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 
     fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
     fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
-    await screen.findByRole("button", { name: /Send to customer/ });
-    await waitFor(() => expect(screen.queryByText("Uploading images…")).not.toBeInTheDocument());
-
     fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
 
     expect(await screen.findByText(/Could not upload shot\.png.*Press Send again/)).toBeInTheDocument();
@@ -495,6 +510,7 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     const [html] = onSubmit.mock.calls[0];
     expect(html).toBe("see ");
     expect(html).not.toContain("blob:");
+    expect(upload).toHaveBeenCalledTimes(1); // the failed image is not tried again
   });
 
   it("asks again when the draft changes after the failed-image notice", async () => {
@@ -504,7 +520,6 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 
     fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
     fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
-    await waitFor(() => expect(screen.queryByText("Uploading images…")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
     await screen.findByText(/Press Send again/);
 
@@ -515,6 +530,37 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 
     expect(await screen.findByText(/Press Send again/)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("sends a comment that is only an image", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toBe(`<img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
+  });
+
+  it("sends the remaining image when the only other image failed and was dropped", async () => {
+    upload
+      .mockRejectedValueOnce(new Error("Could not upload shot.png (HTTP 500). Please try again."))
+      .mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await screen.findByText(/Press Send again/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toBe(`<img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
   });
 
   it("never sends a blob: image this page did not upload", async () => {

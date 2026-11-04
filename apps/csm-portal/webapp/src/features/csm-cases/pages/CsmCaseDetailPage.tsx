@@ -104,6 +104,7 @@ import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
 import {
+  hasCommentContent,
   hasPublicComment,
   isGithubRaisedCaseNumber,
 } from "@features/csm-cases/utils/commentContent";
@@ -2827,14 +2828,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  // Post the comment only when there's text; an attachment-only
+                  // Post the comment when it has text or an image; an attachment-only
                   // send skips the comment endpoint and just uploads the files.
-                  const hasText =
-                    bodyHtml
-                      .replace(/<[^>]*>/g, "")
-                      .replace(/&nbsp;/g, " ")
-                      .trim().length > 0;
-                  if (hasText) {
+                  if (hasCommentContent(bodyHtml)) {
                     await postComment.mutateAsync({
                       caseId,
                       bodyHtml,

@@ -18,6 +18,11 @@
 /** An `<img>` whose src is a blob: URL (a local preview), up to its closing quote. */
 const BLOB_IMG_SRC = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(blob:[^"']*)\2/gi;
 
+/** The preview URL of every blob: image in the HTML, in order. */
+export function blobImageSources(html: string): string[] {
+  return Array.from(html.matchAll(BLOB_IMG_SRC), (m) => m[3]);
+}
+
 /**
  * Replaces the local preview of each uploaded image with its reference,
  * `src="/<attachment id>"`, the shape the portal resolves through entity-service.

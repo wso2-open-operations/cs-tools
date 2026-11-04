@@ -213,15 +213,18 @@ describe("ActivityCommentInput", () => {
     }
     const sendButton = () => screen.getByRole("button", { name: /send comment/i });
 
-    it("uploads the image as a comment attachment of the case and sends only its /<id> reference", async () => {
+    it("uploads the image when the comment is sent, as a comment attachment of the case, and sends only its /<id> reference", async () => {
       mockUpload.mockResolvedValue({ id: ID.toUpperCase(), status: "COMPLETE" });
       renderInput("case-001");
 
       fireEvent.click(screen.getByRole("button", { name: "add image" }));
       typeComment(withImage);
+      // Adding the image sends nothing.
+      expect(mockUpload).not.toHaveBeenCalled();
       await waitFor(() => expect(sendButton()).not.toBeDisabled());
       fireEvent.click(sendButton());
 
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
       expect(mockUpload).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
@@ -230,26 +233,41 @@ describe("ActivityCommentInput", () => {
           name: "image.png",
         }),
       );
-      expect(mockMutate).toHaveBeenCalledTimes(1);
       const content = mockMutate.mock.calls[0][0].body.content as string;
       expect(content).toContain(`src="/${ID}"`);
       expect(content).not.toContain("blob:");
       expect(content).not.toContain("base64");
     });
 
-    it("keeps send disabled while the image is still uploading", async () => {
+    it("holds the comment back until the image has uploaded", async () => {
       let finish: (v: { id: string }) => void = () => {};
       mockUpload.mockReturnValue(new Promise((r) => (finish = r)));
       renderInput();
 
       fireEvent.click(screen.getByRole("button", { name: "add image" }));
       typeComment(withImage);
-      expect(sendButton()).toBeDisabled();
+      await waitFor(() => expect(sendButton()).not.toBeDisabled());
       fireEvent.click(sendButton());
+
+      await waitFor(() => expect(mockUpload).toHaveBeenCalledTimes(1));
+      expect(sendButton()).toBeDisabled();
       expect(mockMutate).not.toHaveBeenCalled();
 
       await act(async () => finish({ id: ID }));
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+    });
+
+    it("uploads nothing for an image that was removed before sending", async () => {
+      mockUpload.mockResolvedValue({ id: ID, status: "COMPLETE" });
+      renderInput();
+
+      fireEvent.click(screen.getByRole("button", { name: "add image" }));
+      typeComment("<p>no image after all</p>");
       await waitFor(() => expect(sendButton()).not.toBeDisabled());
+      fireEvent.click(sendButton());
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(mockUpload).not.toHaveBeenCalled();
     });
 
     it("finishes an upload whose confirm step failed instead of uploading again", async () => {
@@ -267,6 +285,7 @@ describe("ActivityCommentInput", () => {
       await waitFor(() => expect(sendButton()).not.toBeDisabled());
       fireEvent.click(sendButton());
 
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
       expect(mockConfirm).toHaveBeenCalledWith(expect.anything(), {
         type: "comment",
         attachmentId: "att-9",
@@ -275,8 +294,10 @@ describe("ActivityCommentInput", () => {
       expect(mockMutate.mock.calls[0][0].body.content).toContain(`src="/${ID}"`);
     });
 
-    it("does not send a comment whose image failed to upload", async () => {
-      mockUpload.mockRejectedValue(new Error("The file could not be uploaded."));
+    it("does not send a comment whose image failed to upload, and uploads it again on the next send", async () => {
+      mockUpload
+        .mockRejectedValueOnce(new Error("The file could not be uploaded."))
+        .mockResolvedValue({ id: ID, status: "COMPLETE" });
       renderInput();
 
       fireEvent.click(screen.getByRole("button", { name: "add image" }));
@@ -284,10 +305,33 @@ describe("ActivityCommentInput", () => {
       await waitFor(() => expect(sendButton()).not.toBeDisabled());
       fireEvent.click(sendButton());
 
-      expect(mockMutate).not.toHaveBeenCalled();
       expect(
-        await screen.findByText(/could not be uploaded/i),
+        await screen.findByText(/could not be uploaded.*not sent/i),
       ).toBeInTheDocument();
+      expect(mockMutate).not.toHaveBeenCalled();
+
+      await waitFor(() => expect(sendButton()).not.toBeDisabled());
+      fireEvent.click(sendButton());
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(mockUpload).toHaveBeenCalledTimes(2);
+      expect(mockMutate.mock.calls[0][0].body.content).toContain(`src="/${ID}"`);
+    });
+
+    it("uploads an image once when its preview appears twice in the comment", async () => {
+      mockUpload.mockResolvedValue({ id: ID, status: "COMPLETE" });
+      renderInput();
+
+      fireEvent.click(screen.getByRole("button", { name: "add image" }));
+      typeComment(`${withImage}<img src="${PREVIEW}" alt="copy">`);
+      await waitFor(() => expect(sendButton()).not.toBeDisabled());
+      fireEvent.click(sendButton());
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(mockUpload).toHaveBeenCalledTimes(1);
+      const content = mockMutate.mock.calls[0][0].body.content as string;
+      expect(content.match(new RegExp(`src="/${ID}"`, "g"))).toHaveLength(2);
+      expect(content).not.toContain("blob:");
     });
 
     it("tells the user a comment can have at most 5 images", async () => {
