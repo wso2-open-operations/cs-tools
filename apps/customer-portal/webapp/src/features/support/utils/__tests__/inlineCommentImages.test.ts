@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  blobImageSources,
   hasBlobImageSource,
   rewriteBlobImageSources,
 } from "@features/support/utils/inlineCommentImages";
@@ -49,6 +50,14 @@ describe("rewriteBlobImageSources", () => {
   it("leaves a preview with no uploaded id, and every other image, alone", () => {
     const html = `<img src="${URL_B}"><img src="https://example.com/a.png"><img src="/${ID.toLowerCase()}">`;
     expect(rewriteBlobImageSources(html, new Map([[URL_A, ID]]))).toBe(html);
+  });
+});
+
+describe("blobImageSources", () => {
+  it("lists the preview URL of every blob: image in order, and nothing else", () => {
+    const html = `<img src="${URL_B}"><img src="https://example.com/a.png"><img src='${URL_A}'><img src="/${ID.toLowerCase()}">`;
+    expect(blobImageSources(html)).toEqual([URL_B, URL_A]);
+    expect(blobImageSources("<p>no images</p>")).toEqual([]);
   });
 });
 
