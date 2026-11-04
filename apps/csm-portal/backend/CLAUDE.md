@@ -862,6 +862,16 @@ could not group before this, so no saved dashboard changes. The AI integration s
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
 there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
 
+**Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
+that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
+line"); without it both lines are drawn. `validateLineSeries` (`internal/dashboard/registry.go`) refuses an
+empty list (leave the field out for both), an unknown or repeated value, and `series` on any other shape.
+Every line widget saved or served before the field has none, so none of them changes. The view and the draft
+carry it (`widgetViews` / `widgetTemplates`), so a rename or an edit keeps it:
+`TestDraftToDefinition_KeepsLineSeries`, and the round trip fixture has a line widget with `series`. The
+catalogue (sections 4, 8 and 9) teaches the model when to set it. Deploy this backend before the catalogue
+mounts that teach it: an older backend refuses `series` as an unknown field, so those prompts would fail.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same
