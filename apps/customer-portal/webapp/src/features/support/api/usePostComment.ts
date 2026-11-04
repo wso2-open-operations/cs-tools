@@ -22,11 +22,12 @@ import {
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
-import { ApiQueryKeys, ApiMutationKeys } from "@constants/apiConstants";
+import { ApiMutationKeys } from "@constants/apiConstants";
 import type {
   PostCommentRequest,
   PostCommentVariables,
 } from "@features/support/types/supportApi";
+import { refreshCaseComments } from "@features/support/api/caseCommentsRefresh";
 import { parseApiResponseMessage } from "@utils/ApiError";
 import { MAX_COMMENT_BODY_BYTES } from "@features/support/constants/supportConstants";
 import {
@@ -38,7 +39,8 @@ export type { PostCommentRequest, PostCommentVariables };
 
 /**
  * Posts a comment to a case (POST /cases/:caseId/comments).
- * On success, invalidates case-comments queries so the list refetches.
+ * On success, fetches only the newest comments into the cached list instead of
+ * refetching every loaded page, and leaves case details alone.
  *
  * @returns {UseMutationResult<void, Error, PostCommentVariables>} Mutation result.
  */
@@ -103,8 +105,8 @@ export function usePostComment(): UseMutationResult<
         throw new Error(parseApiResponseMessage(text, response.status, response.statusText));
       }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CASE_COMMENTS] });
+    onSuccess: (_data, { caseId }) => {
+      void refreshCaseComments(queryClient, authFetch, caseId, logger);
     },
   });
 }

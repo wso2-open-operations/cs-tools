@@ -14,14 +14,24 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import IdleTimeoutProvider from "@providers/IdleTimeoutProvider";
+import { useIsIdle } from "@providers/IdleStateContext";
 
 const activateMock = vi.fn();
+let capturedOnPrompt: (() => void) | undefined;
+
+const authState = vi.hoisted(() => ({ isSignedIn: true, isLoading: false }));
+vi.mock("@asgardeo/react", () => ({
+  useAsgardeo: () => ({ signOut: vi.fn(), ...authState }),
+}));
 
 vi.mock("react-idle-timer", () => ({
-  useIdleTimer: () => ({ activate: activateMock }),
+  useIdleTimer: (opts: { onPrompt: () => void }) => {
+    capturedOnPrompt = opts.onPrompt;
+    return { activate: activateMock };
+  },
 }));
 
 vi.mock("@hooks/useLogger", () => ({
@@ -29,9 +39,17 @@ vi.mock("@hooks/useLogger", () => ({
 }));
 
 vi.mock("@components/SessionWarningDialog", () => ({
-  default: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="session-warning">warning</div> : null,
+  default: ({ open, onContinue }: { open: boolean; onContinue: () => void }) =>
+    open ? (
+      <div data-testid="session-warning">
+        <button onClick={onContinue}>continue</button>
+      </div>
+    ) : null,
 }));
+
+function IdleProbe() {
+  return <span data-testid="idle">{String(useIsIdle())}</span>;
+}
 
 describe("IdleTimeoutProvider", () => {
   it("renders children and wires idle timer", () => {
@@ -42,5 +60,49 @@ describe("IdleTimeoutProvider", () => {
     );
     expect(screen.getByText("App")).toBeInTheDocument();
     expect(activateMock).toBeDefined();
+  });
+
+  describe("idle state", () => {
+    beforeEach(() => {
+      authState.isSignedIn = true;
+      authState.isLoading = false;
+      activateMock.mockClear();
+    });
+
+    const renderProbe = () =>
+      render(
+        <IdleTimeoutProvider>
+          <IdleProbe />
+        </IdleTimeoutProvider>,
+      );
+
+    it("is not idle until the prompt opens", () => {
+      renderProbe();
+      expect(screen.getByTestId("idle")).toHaveTextContent("false");
+    });
+
+    it("becomes idle when the prompt opens and clears on Continue", () => {
+      renderProbe();
+      act(() => capturedOnPrompt?.());
+      expect(screen.getByTestId("idle")).toHaveTextContent("true");
+
+      act(() => screen.getByText("continue").click());
+      expect(screen.getByTestId("idle")).toHaveTextContent("false");
+      expect(activateMock).toHaveBeenCalled();
+    });
+
+    it("ignores the prompt when signed out or still loading", () => {
+      authState.isSignedIn = false;
+      const { unmount } = renderProbe();
+      act(() => capturedOnPrompt?.());
+      expect(screen.getByTestId("idle")).toHaveTextContent("false");
+      unmount();
+
+      authState.isSignedIn = true;
+      authState.isLoading = true;
+      renderProbe();
+      act(() => capturedOnPrompt?.());
+      expect(screen.getByTestId("idle")).toHaveTextContent("false");
+    });
   });
 });

@@ -22,6 +22,10 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { usePostAttachments } from "../usePostAttachments";
 
 const mockAuthFetch = vi.fn();
+const mockRefreshCaseComments = vi.hoisted(() => vi.fn());
+vi.mock("@features/support/api/caseCommentsRefresh", () => ({
+  refreshCaseComments: mockRefreshCaseComments,
+}));
 
 vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => mockAuthFetch,
@@ -46,7 +50,7 @@ describe("usePostAttachments", () => {
     expect(typeof usePostAttachments).toBe("function");
   });
 
-  it("invalidates attachments, comments and case details on success", async () => {
+  it("invalidates attachments and refreshes only the newest comments on success", async () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const wrapper = ({ children }: { children: ReactNode }) => (
@@ -59,11 +63,10 @@ describe("usePostAttachments", () => {
       body: { name: "a.txt", type: "text/plain", content: "abc" },
     });
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1));
+    expect(mockRefreshCaseComments.mock.calls[0][2]).toBe("case-1");
     const keys = invalidate.mock.calls.map((c) => c[0]?.queryKey);
-    expect(keys).toContainEqual([ApiQueryKeys.CASE_ATTACHMENTS, "case-1"]);
-    expect(keys).toContainEqual([ApiQueryKeys.CASE_COMMENTS]);
-    expect(keys).toContainEqual([ApiQueryKeys.CASE_DETAILS]);
+    expect(keys).toEqual([[ApiQueryKeys.CASE_ATTACHMENTS, "case-1"]]);
   });
 
   it("does not invalidate when the upload fails", async () => {
@@ -87,5 +90,6 @@ describe("usePostAttachments", () => {
       }),
     ).rejects.toThrow();
     expect(invalidate).not.toHaveBeenCalled();
+    expect(mockRefreshCaseComments).not.toHaveBeenCalled();
   });
 });

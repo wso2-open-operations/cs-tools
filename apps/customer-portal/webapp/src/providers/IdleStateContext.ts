@@ -14,11 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
-import { usePostComment } from "../usePostComment";
+import { createContext, useContext } from "react";
 
-describe("usePostComment", () => {
-  it("exports a hook function", () => {
-    expect(typeof usePostComment).toBe("function");
-  });
-});
+/**
+ * True while the session-warning prompt is showing (the user has been idle
+ * long enough to be asked to confirm). Defaults to false so consumers work
+ * without IdleTimeoutProvider (tests, other trees).
+ */
+export const IdleStateContext = createContext<boolean>(false);
+
+/**
+ * Whether the user is currently considered idle.
+ *
+ * @returns {boolean} True while the session warning is open.
+ */
+export function useIsIdle(): boolean {
+  return useContext(IdleStateContext);
+}
