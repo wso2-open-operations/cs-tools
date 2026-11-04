@@ -132,9 +132,10 @@ type TriggerKind string
 const (
 	TriggerNewIncident      TriggerKind = "New Case"
 	TriggerPriorityElevated TriggerKind = "Priority Elevation"
-	// TriggerSeverityChanged is a customer case's severity changing, up or
-	// down: the running chain stops and a new one starts for the new
-	// severity, from the first tier.
+	// TriggerSeverityChanged is a customer case's severity changing: the
+	// running chain stops and a new one starts for the new severity, from
+	// the first tier. On the CRE ladder only a raise does; a lowering starts
+	// nothing (see handleCase).
 	TriggerSeverityChanged TriggerKind = "Severity Change"
 	// TriggerSpecialOps is an incident escalated to a Special Ops
 	// team: the one-call SME page (sme.go).
