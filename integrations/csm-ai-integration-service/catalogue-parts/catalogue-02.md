@@ -169,7 +169,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 | `state` | `in` | `NEW`, `ASSESS`, `ROOT_CAUSE_ANALYSIS`, `FIX_IN_PROGRESS`, `RESOLVED`, `CLOSED` |
 | `assignedUserId` | `in` | `["__current_user__"]` only |
 
-**Shapes.** `count`; `list` with `listLimit` and `sortBy` — incident `createdOn`, `updatedOn` or
+**Shapes.** `count`; `list` with `listLimit` and `sortBy`: incident `createdOn`, `updatedOn` or
 `openedOn`; change request `createdOn` or `updatedOn`; **a problem list sets no `sortBy`**; `pie`/`bar`
 with `slices` (each slice's `query` in the same shape) or `"groupBy": {"field": "state", "maxGroups": 8}`.
 
@@ -208,7 +208,7 @@ values are case-sensitive exactly as written.
 { "resourceType": "account", "shape": "count", "query": { "abtTeam": "rigel", "healthStatus": "at_risk" } }
 ```
 
-**Shapes.** `count`; `list` with `listLimit` — **an account list sets no `sortBy`**, a project list may
+**Shapes.** `count`; `list` with `listLimit`: **an account list sets no `sortBy`**, a project list may
 sort only by `endDate` ("ending soonest" is `asc`); `pie`/`bar` with `slices` only (each slice's `query`
 flat too), e.g. one slice per risk or per onboarding status.
 
@@ -264,7 +264,7 @@ list has no `sortBy`.
 
 ## 7. Grouping (pie and bar)
 
-**Fixed slices** — use when the groups are a short known list (severity, state, issue type, work
+**Fixed slices**: use when the groups are a short known list (severity, state, issue type, work
 state, engagement type, ABT teams). One slice per value, in a sensible order:
 
 ```json
@@ -278,7 +278,7 @@ Each slice's `query.filters` is added to the widget's own `query.filters`. `colo
 of `primary`, `secondary`, `success`, `error`, `info`, `warning`; use `error` for the most severe
 or breached group, `warning` next, otherwise leave it out.
 
-**Server-side grouping** — use when the groups are open-ended:
+**Server-side grouping**: use when the groups are open-ended:
 
 ```json
 "groupBy": { "field": "account", "maxGroups": 10 }

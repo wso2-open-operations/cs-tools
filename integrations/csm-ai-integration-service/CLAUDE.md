@@ -101,6 +101,12 @@ files, and names starting with `.` (Kubernetes' `..data` entries beside mounted 
 Each part's trailing whitespace is trimmed, so the catalogue split at a blank line before a `## ` heading
 joins back into the same text (`TestTheBuiltInCatalogueSplitAtHeadingsJoinsBackUnchanged`).
 
+**`catalogue.md` is plain ASCII** (`TestTheCatalogueIsPlainASCII`): Choreo's file mount editor encodes a file with the
+browser's `btoa()`, which refuses any character outside Latin-1 ("The string to be encoded contains characters outside of
+the Latin1 range"), and would store a Latin-1 one such as "é" as a byte this service, reading UTF-8, does not read back.
+Write ":" or " - " for a dash, "..." for an ellipsis, straight quotes. The Teams section is written at run time, not
+mounted, so team names are not affected.
+
 **`catalogue-parts/` is generated: never edit it by hand.** `make catalogue-parts` (`cmd/splitcatalogue`)
 cuts the built-in `catalogue.md` with `catalogue.Split` into parts of at most `catalogue.MaxPartBytes`
 (19,000 bytes: a margin under 20 KB however it is counted, and shown as 19 KB, never 20 KB, by a

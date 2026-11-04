@@ -7,8 +7,8 @@
 | "raised by person@example.com", "created by <email>" | `createdBy in ["person@example.com"]` (several people: one `in` with all their emails) |
 | "raised by Alex" (a name, no email) | not expressible: reply with `{"error": ...}` asking for the email address |
 | no creator mentioned | no `createdBy` filter at all (records raised by anyone) |
-| "open", "new" (state) | `state in ["open"]` — the Open state only |
-| "active", "outstanding", "not closed", "ongoing", "unresolved" | `state notIn ["closed"]` — every state except Closed |
+| "open", "new" (state) | `state in ["open"]`: the Open state only |
+| "active", "outstanding", "not closed", "ongoing", "unresolved" | `state notIn ["closed"]`: every state except Closed |
 | "CSAT", "customer satisfaction", "feedback", "ratings", "survey responses" | `resourceType: "case_feedback"` (section 5d) |
 | "CSAT trend", "CSAT by month / by week", "average rating over time" | a `bar` with `"groupBy": {"bucket": "month"}` (or `week`) |
 | "feedback by rating", "rating distribution" | a `pie` with `"groupBy": {"bucket": "rating"}` |
@@ -46,7 +46,7 @@
 | "time cards", "time logs", "timesheets", "logged time" | `resourceType: "time_card"` (section 5a) |
 | "my time cards", "time I logged" | `time_card` with `userIds ["__current_user__"]` |
 | "waiting for approval", "awaiting approval", "to approve", "submitted" (time cards) | `states ["submitted"]` |
-| "pending" (time cards) | `states ["pending", "submitted"]` — not decided yet |
+| "pending" (time cards) | `states ["pending", "submitted"]`: not decided yet |
 | "approved" (time cards) | `states ["approved", "processed"]` |
 | "rejected" / "recalled" (time cards) | `states ["rejected"]` / `states ["recalled"]` |
 | "time cards by state / status" | a `pie` or `bar` with one slice per state: Pending (`pending`), Submitted, Approved (approved + processed), Rejected. Leave Pending out only if the request asks to; add Recalled only if asked |
@@ -57,7 +57,7 @@
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
 | time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible: `{"error": ...}` as in section 5a |
-| "my open", "open … assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]` — "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
+| "my open", "open ... assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]`: "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
@@ -83,7 +83,7 @@
 | "my ABT", "my ABT team" | same as "my team's" |
 | a named team with "ABT": "Rigel ABT", "the Sirius ABT" | same as the team by name |
 | "all ABTs", "every ABT" (no grouping) | one `creTeam in [...]` with the keys of **every** CRE ABT team |
-| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" — the only grouping | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section |
+| "by ABT", "per ABT", "for each ABT", "separated by ABT", "across ABTs" (the only grouping) | one `pie` or `bar` widget, on a `"cs"` dashboard, with **one slice per CRE ABT team** (label = team name, query `creTeam in ["<key>"]`), in the order of the Teams section |
 | "by ABT" **together with** another grouping, e.g. "by severity, separated by ABT" | **one widget per CRE ABT team**: each widget's `query.filters` carries `creTeam in ["<key>"]`, its `displayName` starts with the team name (e.g. "Rigel: SLA Breaches by Severity"), and its slices are the other grouping; `gridWidth` 4. Only the teams the request names, if it names some |
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
