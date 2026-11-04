@@ -42,7 +42,8 @@ const manualPerRun = 5
 // ManualReminder returns the handler of rota_manual_reminder: at every run it
 // claims the family's waiting "Send now" requests and sends each with the
 // automatic reminders' own code -- weekday is the next working day's windows,
-// weekend the coming weekend (this one, from a Saturday or a Sunday), sent
+// morning and evening one of them (the Morning with its on-call, or the
+// Evening), weekend the coming weekend (this one, from a Saturday or a Sunday), sent
 // even when not fully marked, as on Friday. Each request is reported SENT or
 // FAILED with a short result for the card. A request that cannot be sent is
 // reported, not retried: somebody pressed a button and should see why. Only a
@@ -95,10 +96,16 @@ func ManualReminder(rota RotaReader, store ReminderStore, queue RequestQueue, em
 func sendManual(ctx context.Context, rota RotaReader, store ReminderStore, email EmailSender, weekdayCfg, weekendCfg Config, kind string) (*Tally, error) {
 	tally := &Tally{}
 	switch kind {
-	case "weekday":
+	case "weekday", "morning", "evening":
 		cfg := weekdayCfg
 		if !cfg.EmailsEnabled {
 			return tally, errors.New("emails are turned off in this environment (ALERTS_ENABLED)")
+		}
+		if kind != "weekday" {
+			cfg.Rotations = windowRotations(cfg.Rotations, kind)
+			if len(cfg.Rotations) == 0 {
+				return tally, fmt.Errorf("no %s rotation is set up for the weekday reminders (ROTA_REMINDER_WEEKDAY_SHIFTS)", kind)
+			}
 		}
 		cfg.Manual, cfg.Anchor, cfg.Tally = true, cfg.Now, tally
 		return tally, WeekdayReminder(rota, email, cfg)(ctx)
@@ -113,6 +120,21 @@ func sendManual(ctx context.Context, rota RotaReader, store ReminderStore, email
 		return tally, weekend(ctx, rota, store, email, cfg, true)
 	}
 	return tally, fmt.Errorf("unknown reminder kind %q", kind)
+}
+
+// windowRotations keeps the weekday rotations of one window: "morning" is the
+// shift whose code ends in _MORNING with its on-call (<CODE>_OC), "evening" the
+// one ending in _EVENING with its on-call, so "Send now" can send one window's
+// reminder on its own. The names stay as configured.
+func windowRotations(rotations map[string]string, kind string) map[string]string {
+	suffix := "_" + strings.ToUpper(kind)
+	out := map[string]string{}
+	for code, name := range rotations {
+		if strings.HasSuffix(strings.TrimSuffix(code, "_OC"), suffix) {
+			out[code] = name
+		}
+	}
+	return out
 }
 
 // manualWeekendAnchor is the day a "Send now" weekend is counted from: today,
@@ -177,7 +199,7 @@ func longDay(d time.Time) string { return dayList([]time.Time{d}) }
 func asTest(cfg Config, to string) Config {
 	cfg.Test = true
 	cfg.RedirectTo = []string{to}
-	cfg.Copy = nil
+	cfg.Copy, cfg.WeekendCopy = nil, nil
 	cfg.AlertTo, cfg.AlertCc = []string{to}, nil
 	return cfg
 }

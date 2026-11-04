@@ -168,6 +168,9 @@ type Assignment struct {
 	EndsAt    time.Time `json:"endsAt"`
 	IsOnCall  bool      `json:"isOnCall"`
 	Note      string    `json:"note"`
+	// Tier is the escalation tier of a tiered rota's turn (SRE: L1, L2, L3);
+	// empty for an untiered one.
+	Tier string `json:"tier,omitempty"`
 }
 
 // Catalogue reads the shift windows and teams.

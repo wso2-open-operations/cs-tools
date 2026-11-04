@@ -127,6 +127,21 @@ func (s *rotaReminderSettingsService) Save(ctx context.Context, family string, r
 	if err != nil {
 		return domain.RotaReminderSettings{}, err
 	}
+	// A card from before the per-rotation switches and the weekend copies
+	// sends neither: keep what is stored rather than turning every rotation's
+	// invitations back on or dropping the weekend copies.
+	if req.InviteRotations == nil || req.WeekendCopyTo == nil {
+		stored, err := s.repo.Get(ctx, f)
+		if err != nil {
+			return domain.RotaReminderSettings{}, err
+		}
+		if stored != nil && req.InviteRotations == nil {
+			settings.InviteRotations = stored.InviteRotations
+		}
+		if stored != nil && req.WeekendCopyTo == nil {
+			settings.WeekendCopyTo = stored.WeekendCopyTo
+		}
+	}
 	return s.repo.Save(ctx, actor, settings)
 }
 
@@ -146,7 +161,9 @@ func validRotaReminderSettings(family string, req domain.SaveRotaReminderSetting
 		InvitesEnabled:  *req.InvitesEnabled,
 		WeekendRequired: map[string]int{},
 		Windows:         map[string]domain.ReminderWindow{},
+		InviteRotations: map[string]bool{},
 		CopyTo:          []string{},
+		WeekendCopyTo:   []string{},
 	}
 	if len(req.WeekendRequired) > maxReminderSettingEntries {
 		return bad("weekendRequired has more than %d shifts", maxReminderSettingEntries)
@@ -182,16 +199,39 @@ func validRotaReminderSettings(family string, req domain.SaveRotaReminderSetting
 		}
 		out.Windows[code] = domain.ReminderWindow{Start: w.Start, End: w.End, TimeZone: zone}
 	}
-	if len(req.CopyTo) > maxReminderCopyTo {
-		return bad("copyTo has more than %d addresses", maxReminderCopyTo)
+	if len(req.InviteRotations) > maxReminderSettingEntries {
+		return bad("inviteRotations has more than %d rotations", maxReminderSettingEntries)
 	}
-	for _, a := range req.CopyTo {
+	for code, on := range req.InviteRotations {
+		if !reminderShiftCodeRe.MatchString(code) {
+			return bad("inviteRotations: %q is not a shift code", code)
+		}
+		out.InviteRotations[code] = on
+	}
+	var err error
+	if out.CopyTo, err = reminderAddresses("copyTo", req.CopyTo); err != nil {
+		return domain.RotaReminderSettings{}, err
+	}
+	if out.WeekendCopyTo, err = reminderAddresses("weekendCopyTo", req.WeekendCopyTo); err != nil {
+		return domain.RotaReminderSettings{}, err
+	}
+	return out, nil
+}
+
+// reminderAddresses checks a list of copied addresses and returns them
+// trimmed, lower-cased and without repeats. field names the list in a refusal.
+func reminderAddresses(field string, in []string) ([]string, error) {
+	out := []string{}
+	if len(in) > maxReminderCopyTo {
+		return nil, &apierror.ValidationError{Msg: fmt.Sprintf("%s has more than %d addresses", field, maxReminderCopyTo)}
+	}
+	for _, a := range in {
 		a = strings.ToLower(strings.TrimSpace(a))
 		if !emailRE.MatchString(a) || len(a) > 254 {
-			return bad("copyTo: %q is not an email address", a)
+			return nil, &apierror.ValidationError{Msg: fmt.Sprintf("%s: %q is not an email address", field, a)}
 		}
-		if !slices.Contains(out.CopyTo, a) {
-			out.CopyTo = append(out.CopyTo, a)
+		if !slices.Contains(out, a) {
+			out = append(out, a)
 		}
 	}
 	return out, nil

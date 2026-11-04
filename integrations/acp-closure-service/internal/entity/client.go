@@ -16,7 +16,7 @@
 
 // Package entity is an HTTP client for csm-integration-service — the M2M
 // gateway this component calls instead of entity-service directly (per
-// Sajith's guidance and the "used by the Account Closure Process automation"
+// the API team's guidance and the "used by the Account Closure Process automation"
 // comment already present in csm-integration-service's own client). See
 // integrations/csm-integration-service/openapi.yaml for the API contract.
 package entity

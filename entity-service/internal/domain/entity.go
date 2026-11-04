@@ -3611,6 +3611,12 @@ type SearchCaseView struct {
 	// EscalationLevel is the case's current escalation level -- see
 	// CaseView.EscalationLevel's doc comment.
 	EscalationLevel *string `json:"escalationLevel"`
+	// ResolvedOn is the time the case moved to solution proposed, as a UTC
+	// RFC 3339 string. Null if it never did.
+	ResolvedOn *string `json:"resolvedOn"`
+	// ClosedOn is the time the case was closed, as a UTC RFC 3339 string.
+	// Null if it is not closed.
+	ClosedOn *string `json:"closedOn"`
 }
 
 // SearchCasesResponse is the paginated result of a case search. When the
@@ -9029,6 +9035,47 @@ type SearchSLAStatusResponse struct {
 	Offset   int         `json:"offset"`
 }
 
+// SLA elapsed-percentage bucket keys -- GET /sla-status's own elapsedBucket
+// query param, and SLAStatusFilters.ElapsedBucket's accepted values. Fixed,
+// named ranges rather than an open gte/lte pair (unlike the unrelated,
+// generic taskSLABusinessElapsedPercent case-search filter in
+// internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
+// offers exactly these four buckets, not an arbitrary range.
+const (
+	SLAElapsedBucketUnder50 = "under50"
+	SLAElapsedBucket50To75  = "50to75"
+	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
+// SLA Engine admin table. Every field's zero value ("") means "don't filter
+// on this" -- a caller passing none of them gets exactly
+// SearchActiveSLAStatuses' previous, unfiltered behavior, so this is purely
+// additive for every existing caller (csm-notification-service's own
+// startup reconciliation included).
+type SLAStatusFilters struct {
+	// Severity is one of CaseSeverity's own values (catastrophic/critical/
+	// high/medium/low) -- a case-like row whose type carries no severity at
+	// all (service_request/announcement) never matches a non-empty value.
+	Severity CaseSeverity
+	// CaseType is one of the five case-like work_item_type_enum labels,
+	// uppercase (CASE/ENGAGEMENT/SERVICE_REQUEST/SECURITY_REPORT_ANALYSIS/
+	// ANNOUNCEMENT).
+	CaseType string
+	// Search matches ONLY the case's own id (exact), number, or WSO2 case id
+	// (both substring, case-insensitive) -- deliberately never title,
+	// product, or any other field: this is a case-identity lookup, not a
+	// general-purpose search box.
+	Search string
+	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
+	// "" for no bucket filter. Applied AFTER the same business-day
+	// correction scanSLAStatus already applies to BusinessElapsedPercent --
+	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
+	// why this can't be a plain SQL WHERE/HAVING clause.
+	ElapsedBucket string
+}
+
 // SLAClockState is GET /sla-status/clock-state's response — the full,
 // current state of exactly one (work item, clock target) "sla" row,
 // regardless of whether it is currently "active" (unlike SLAStatus/
@@ -10407,4 +10454,68 @@ type GetRiskActionItemsResponse struct {
 // /action-items/{id}/comments.
 type GetActionItemCommentsResponse struct {
 	Comments []ActionItemComment `json:"comments"`
+}
+
+// ACPReopenActor is updated_by on a project the ACP reopen check sets back to
+// Open (internal/service/acp_reopen.go).
+const ACPReopenActor = "acp-reopen"
+
+// ACPReopenProject is what the ACP reopen check reads of a CSM project. The
+// three closure sub-states and ClosureState are the raw enum labels
+// ("CLOSED", "SUSPENDED", "OPEN"), nil when unset.
+type ACPReopenProject struct {
+	ID                              string
+	SfID                            string
+	Name                            string
+	Key                             string
+	EndDateClosureState             *string
+	InvoiceDueDateClosureState      *string
+	ComplianceViolationClosureState *string
+	ClosureState                    *string
+	SuspensionProcessState          json.RawMessage
+}
+
+// ACPReopenWrite is one reopen of an ACP-suspended project: which tracks go
+// back to OPEN and the suspensionProcessState to store with them.
+// SectionsOnly writes the suspensionProcessState with no track change: the
+// daily check finishing a project a person already set back to Open.
+type ACPReopenWrite struct {
+	ReopenEndDate          bool
+	ReopenInvoice          bool
+	SectionsOnly           bool
+	SuspensionProcessState json.RawMessage
+}
+
+// ACPReopenOutcome is the project after an ACPReopenWrite: Open reports that
+// the overall closure state (recomputed from the three sub-states) is OPEN.
+type ACPReopenOutcome struct {
+	ClosureState *string
+	Open         bool
+}
+
+// ACPReopenCheckRequest is the body of POST /acp/reopen-check, the daily
+// safety net over every project ACP suspended. Projects are taken in id
+// order after Cursor (empty: from the start), at most Limit of them (default
+// 10, at most 50); a call that runs short of time stops early.
+type ACPReopenCheckRequest struct {
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
+
+// ACPReopenCheckResponse reports one page of the daily check. Checked is
+// every project looked at; Reopened those with a track set back to Open;
+// Finished those a person had already set back to Open, now finished
+// (Salesforce Open; the email queued only for a suspension in the last 7
+// days); SkippedSetByHand those left alone as set by hand; FailedProjectIDs those whose check
+// failed (the error is logged). More is true while projects are left: call
+// again with NextCursor as the cursor. More false means every project is done.
+type ACPReopenCheckResponse struct {
+	Checked          int      `json:"checked"`
+	Reopened         int      `json:"reopened"`
+	Finished         int      `json:"finished"`
+	SkippedSetByHand int      `json:"skippedSetByHand"`
+	Failed           int      `json:"failed"`
+	FailedProjectIDs []string `json:"failedProjectIds"`
+	NextCursor       string   `json:"nextCursor"`
+	More             bool     `json:"more"`
 }

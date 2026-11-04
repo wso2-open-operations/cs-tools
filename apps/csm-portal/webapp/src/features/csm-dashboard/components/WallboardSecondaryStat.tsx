@@ -19,6 +19,7 @@ import type { JSX } from "react";
 import { Link as RouterLink } from "react-router";
 import type { BeDashboardDistinctByConfig, BeWidgetResourceType } from "@api/backend/types";
 import { useWallboardTileData } from "@features/csm-dashboard/api/useWallboardTileData";
+import { WALLBOARD_FONT_SIZE, wb } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardSecondaryStatProps {
   widgetId: string;
@@ -71,7 +72,7 @@ export default function WallboardSecondaryStat({
       sx={{
         flex: 1,
         borderRadius: "8px",
-        p: 0.75,
+        p: wb(6),
         height: "100%",
         display: "flex",
         flexDirection: "column",
@@ -83,23 +84,26 @@ export default function WallboardSecondaryStat({
       }}
     >
       {state === "loading" ? (
-        // 1.9rem * 16 — matches WallboardStatTile's own value-font-size-based
-        // skeleton height (its "primary" variant), now that this tier's
-        // value text is that same size.
-        <Skeleton variant="rounded" height={30.4} width="60%" sx={{ bgcolor: "rgba(255,255,255,0.08)" }} />
+        // Same height as the number it stands in for — the same value size
+        // and `lineHeight: 1.1` as WallboardStatTile's own skeleton.
+        <Skeleton
+          variant="rounded"
+          width="60%"
+          sx={{ bgcolor: "rgba(255,255,255,0.08)", height: `calc(${WALLBOARD_FONT_SIZE.value} * 1.1)` }}
+        />
       ) : state === "error" ? (
         <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.5)" }}>
           —
         </Typography>
       ) : (
-        <Typography sx={{ fontWeight: 700, fontSize: "1.9rem", lineHeight: 1.1, color: "#fff" }}>
+        <Typography sx={{ fontWeight: 700, fontSize: WALLBOARD_FONT_SIZE.value, lineHeight: 1.1, color: "#fff" }}>
           {total.toLocaleString()}
         </Typography>
       )}
       <Typography
         sx={{
-          mt: 0.4,
-          fontSize: "0.68rem",
+          mt: wb(3.2),
+          fontSize: WALLBOARD_FONT_SIZE.label,
           fontWeight: 700,
           letterSpacing: "0.04em",
           textTransform: "uppercase",

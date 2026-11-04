@@ -253,36 +253,13 @@ type searchCasesResponse struct {
 	Limit  int              `json:"limit"`
 }
 
-// SearchOpenCasesOlderThan returns every case whose state is not "closed"
-// and whose createdOn is at least olderThan in the past — the entity-service
-// query behind an "open too long" report. Sorted oldest-first (createdOn
-// ascending), so a caller building a report table can just take the
-// returned order as given.
-//
-// Unlike SearchCasesInStateCreatedBeforeYesterday, a result set larger than
-// the pagination cap is not an error: the backlog this query covers (every
-// non-closed case, including long-abandoned ones) can legitimately be far
-// larger than any email is useful at. It returns the oldest
-// maxSearchPages*searchPageSize cases plus total, the true match count, so
-// the caller can say "showing N of total" rather than fail every run.
-// total == len(cases) when nothing was cut off.
-func (c *Client) SearchOpenCasesOlderThan(ctx context.Context, olderThan time.Duration) (cases []Case, total int, err error) {
-	cutoff := time.Now().Add(-olderThan).UTC().Format(time.RFC3339)
-	return c.searchCases(ctx, []caseFieldFilter{
-		{Field: "state", Op: "notIn", Values: []string{"closed"}},
-		{Field: "createdOn", Op: "lte", Values: []string{cutoff}},
-	})
-}
-
 // SearchCasesInStateCreatedBeforeYesterday returns every case whose state is
 // exactly state (not "not closed" — an exact match, e.g. "open") and whose
-// createdOn falls before the start of yesterday. Unlike
-// SearchOpenCasesOlderThan's rolling-duration cutoff, this is a calendar-day
+// createdOn falls before the start of yesterday. This is a calendar-day
 // boundary computed in UTC: a case created at 23:59 yesterday is excluded, one
 // created at 00:01 the day before is included, regardless of what time of day
 // this method itself is called — "before yesterday" is a calendar concept,
-// not a fixed number of hours ago. Sorted oldest-first, same as
-// SearchOpenCasesOlderThan.
+// not a fixed number of hours ago. Sorted oldest-first.
 //
 // Errors, rather than returning a partial list, if the result set exceeds the
 // pagination cap — see searchCases.

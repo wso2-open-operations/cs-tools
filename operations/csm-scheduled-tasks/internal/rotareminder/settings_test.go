@@ -199,3 +199,25 @@ func TestSettings_OverrideCodeByCodeAndNeverTurnInvitesOn(t *testing.T) {
 		t.Error("the configured minimums were changed in place")
 	}
 }
+
+// A rotation switched off on the card loses its invitations; one switched on,
+// or not named, keeps them.
+func TestSettings_InviteRotations(t *testing.T) {
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites = true
+	saved := savedSettings()
+	saved.InviteRotations = map[string]bool{"CRE_MORNING": false, "CRE_EVENING": true}
+	saved.WeekendCopyTo = []string{"head@example.com"}
+	cfg.Settings = fakeSettings{s: saved}
+	got, on, err := withSettings(context.Background(), cfg, false)
+	if err != nil || !on {
+		t.Fatalf("on %v, err %v", on, err)
+	}
+	if strings.Join(got.WeekendCopy, ",") != "head@example.com" {
+		t.Errorf("weekend copy %v, want the saved one", got.WeekendCopy)
+	}
+	if got.invitesFor("CRE_MORNING") || !got.invitesFor("CRE_EVENING") || !got.invitesFor("CRE_WEEKEND") {
+		t.Errorf("invitations: Morning %v, Evening %v, LK Weekend %v; want off, on, on",
+			got.invitesFor("CRE_MORNING"), got.invitesFor("CRE_EVENING"), got.invitesFor("CRE_WEEKEND"))
+	}
+}

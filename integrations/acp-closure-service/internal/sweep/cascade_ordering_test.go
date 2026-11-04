@@ -203,13 +203,13 @@ func wroteField(calls []updateCall, field string) bool {
 }
 
 // TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOther
-// reproduces a real staging bug (project 81953721…, 2026-09-28). Each
+// reproduces a real staging bug (2026-09-28). Each
 // cascade saves suspensionProcessState by rewriting the whole object. Both
 // used to build that object from the snapshot fetched at the start of the
 // run, so the second cascade's save wrote back the first cascade's section
 // as it was before the run: the invoice cascade recorded "suspend", then the
 // subscription cascade's IGNORED record reset the invoice section to "open".
-// ServiceNow then reopened the project, and the next run suspended it and
+// The legacy system then reopened the project, and the next run suspended it and
 // emailed the customer again. The final saved history must carry both
 // cascades' updates, whichever order they ran in.
 func TestProcessProject_BothCascadesFireSameRun_HistoryWritesDoNotClobberEachOther(t *testing.T) {

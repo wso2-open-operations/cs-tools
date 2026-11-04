@@ -39,6 +39,9 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
+	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
@@ -48,6 +51,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -163,6 +167,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service migration-scan client", "err", err)
+		os.Exit(1)
+	}
+
+	// The stale cases report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service long-open-cases client", "err", err)
 		os.Exit(1)
 	}
 
@@ -462,11 +480,10 @@ func main() {
 	const staleCasesTaskName = "stale_cases_report"
 	staleCasesTo, staleCasesCc := recipientsFor(recipientOverrides, staleCasesTaskName)
 	staleCasesEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, staleCasesTaskName))
-	// Fixed, not env-configurable — unlike HOUSEKEEPING_RETENTION_DAYS, there's
-	// no operational reason to tune this per deployment today. Revisit as an
-	// env var (mirroring envDays("HOUSEKEEPING_RETENTION_DAYS", 30)'s shape)
-	// if that changes.
-	const staleCaseThreshold = 30 * 24 * time.Hour
+	// Fixed, not env-configurable: there's no operational reason to tune this
+	// per deployment today. It is the age window asked of entity-service's
+	// long-open cases report and named in the mail's subject.
+	const staleCaseOlderThanDays = 30
 
 	const openCasesTaskName = "open_cases_report"
 	// Where an issue key in a CS Worklogs mail points: the CSM portal,
@@ -604,12 +621,20 @@ func main() {
 		if len(to) > 0 {
 			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
 		}
+		v, to, cc := v, to, cc
 		regressionTasks = append(regressionTasks, registry.Task{
 			Name:     name,
 			Schedule: scheduleFor(scheduleOverrides, name, "30 3 1 * *"),
 			Handler: regressionscan.SendReport(regressionReportClient,
 				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
 				v, to, cc, regressionCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return regressionscan.SendReport(regressionReportClient, email,
+						v, orRecipients(to, rec), cc, regressionCaseLinkBase, alertsEnabled)
+				}),
 		})
 	}
 
@@ -648,19 +673,28 @@ func main() {
 			To:       housekeepingTo,
 			Cc:       housekeepingCc,
 		},
-		// Emails staleCasesTo/Cc a report of every case open more than
-		// staleCaseThreshold — see internal/stalecases's own doc comment.
-		// Sends nothing (but still succeeds) if staleCasesTo is empty, i.e.
-		// this task isn't mentioned in SUB_CRON_RECIPIENTS. Default schedule
-		// is daily at 07:00 (again, TZ=UTC-dependent — see above), ahead of
-		// most business hours; override via SUB_CRON_SCHEDULES if needed.
+		// Emails staleCasesTo/Cc the long-open cases report (cases open more
+		// than staleCaseOlderThanDays, in two tables) fetched from
+		// entity-service; see internal/stalecases's own doc comment. Sends
+		// nothing (but still succeeds) if staleCasesTo is empty, i.e. this task
+		// isn't mentioned in SUB_CRON_RECIPIENTS, or if both tables are empty.
+		// Default schedule is daily at 07:00 (again, TZ=UTC-dependent; see
+		// above), ahead of most business hours; override via
+		// SUB_CRON_SCHEDULES if needed.
 		{
 			Name:     staleCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, staleCasesTaskName, "0 7 * * *"),
-			Handler: stalecases.SendReport(entityCasesClient, staleCasesEmail,
-				staleCaseThreshold, staleCasesTo, staleCasesCc, alertsEnabled),
+			Handler: stalecases.SendReport(longOpenReportClient, staleCasesEmail,
+				staleCaseOlderThanDays, staleCasesTo, staleCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(staleCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return stalecases.SendReport(longOpenReportClient, email,
+						staleCaseOlderThanDays, orRecipients(staleCasesTo, rec), staleCasesCc, worklogCaseLinkBase, alertsEnabled)
+				}),
 		},
 		// Products that deployment nodes report but the product catalogue does not
 		// know -- ServiceNow emailed one fixed address on every such miss. Daily, to
@@ -674,6 +708,13 @@ func main() {
 				24*time.Hour, unresolvedProductsTo, unresolvedProductsCc, alertsEnabled, time.Now),
 			To: unresolvedProductsTo,
 			Cc: unresolvedProductsCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(unresolvedProductsEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return unresolvedproducts.SendDigest(unresolvedProductsClient, email,
+						24*time.Hour, orRecipients(unresolvedProductsTo, rec), unresolvedProductsCc, alertsEnabled, time.Now)
+				}),
 		},
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
@@ -687,6 +728,12 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
 		// own doc comment. The audience is the mail groups of the teams
@@ -706,6 +753,14 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, migrationCaseReportTaskName, "30 22 * * 0"),
 			Handler: migrationscan.SendReport(migrationReportClient, migrationCaseEmail,
 				migrationCaseOlderThanDays, migrationCaseTo, migrationCaseCc, migrationCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. The
+			// scheduled handler above is untouched.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(migrationCaseEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return migrationscan.SendReport(migrationReportClient, email,
+						migrationCaseOlderThanDays, orRecipients(migrationCaseTo, rec), migrationCaseCc, migrationCaseLinkBase, alertsEnabled)
+				}),
 		},
 		// The CS Worklogs reports. Both default schedules are the times
 		// ServiceNow actually sends at, expressed in UTC because these
@@ -739,6 +794,16 @@ func main() {
 				periodStart(worklogsDailySchedule),
 				worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceDaily, worklogsDailyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendDailyWith(worklogReportClient, email,
+						periodStart(worklogsDailySchedule),
+						orRecipients(worklogsDailyTo, rec), worklogsDailyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		{
 			Name:     worklogsWeeklyTaskName,
@@ -747,6 +812,16 @@ func main() {
 				periodStart(worklogsWeeklySchedule),
 				worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceWeekly, worklogsWeeklyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendWeeklyWith(worklogReportClient, email,
+						periodStart(worklogsWeeklySchedule),
+						orRecipients(worklogsWeeklyTo, rec), worklogsWeeklyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		// Query-hour utilisation, ported from ServiceNow's two flows.
 		//
@@ -764,12 +839,27 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, queryHoursNoticeTaskName, "15 * * * *"),
 			Handler: queryhoursreport.SendUsageNotifications(queryHourClient, queryHoursNoticeEmail,
 				queryHoursNoticeCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. A
+			// transition whose owners are unknown is still skipped.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: consumesCrossings(reportRunNow(queryHoursNoticeEmail, emailClient,
+				func(email notify.Sender, _ []string) func(ctx context.Context) error {
+					return queryhoursreport.SendUsageNotifications(queryHourClient, email,
+						queryHoursNoticeCc, queryHoursOverride, alertsEnabled)
+				})),
 		},
 		{
 			Name:     queryHoursWeeklyTaskName,
 			Schedule: scheduleFor(scheduleOverrides, queryHoursWeeklyTaskName, "0 4 * * 1"),
 			Handler: queryhoursreport.SendWeeklyReport(queryHourClient, queryHoursWeeklyEmail,
 				queryHoursWeeklyTo, queryHoursWeeklyCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(queryHoursWeeklyEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return queryhoursreport.SendWeeklyReport(queryHourClient, email,
+						orRecipients(queryHoursWeeklyTo, rec), queryHoursWeeklyCc, queryHoursOverride, alertsEnabled)
+				}),
 		},
 		// The first sub-cron here that does real, per-row, multi-step,
 		// partial-failure-tolerant work rather than a bulk delete or a
@@ -930,6 +1020,12 @@ func main() {
 			slog.Error("ROTA_REMINDER_WINDOWS is malformed; refusing to start", "err", err)
 			os.Exit(1)
 		}
+		// The CRE weekend summary also lists the SRE people on the weekend
+		// (SaaS weekend day and TZ3 night), for information.
+		var rotaSupport rotareminder.SupportRota
+		if strings.EqualFold(family, "CRE") {
+			rotaSupport = rotareminder.SREWeekendSupport()
+		}
 		rotaConfig := func(task, sched string, rotations map[string]string, to, cc []string) rotareminder.Config {
 			var copied []string
 			if copyTaskRecipients {
@@ -944,6 +1040,7 @@ func main() {
 				Invites:        invites,
 				OrganizerEmail: organizer,
 				Required:       weekendRequired,
+				Support:        rotaSupport,
 				Windows:        rotaWindows,
 				Settings:       teamScheduleClient,
 				EmailsEnabled:  alertsEnabled,
@@ -1071,9 +1168,34 @@ func main() {
 			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, autoclosureDefaultSchedule),
 			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
 			RunNowNarrow: runNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit", "--states"},
 			To:           autoclosureTo,
 			Cc:           autoclosureCc,
 		})
+	}
+
+	// entity-service's daily ACP reopen check -- see internal/acp's
+	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
+	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
+	// CSM_ACP_REOPEN_ENABLED=true (else POST /acp/reopen-check is a 404 and
+	// the run fails and alerts). Whether anything is written is
+	// entity-service's own dry run (CSM_ACP_REOPEN_DRY_RUN), not a setting here.
+	// Registered before acp_closure on purpose: the engine runs the tasks due
+	// in one tick in registration order, so when one tick covers both (the
+	// driver late, or a restart after 04:00 UTC) a project is reopened before
+	// acp_closure could send it a reminder.
+	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
+		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
+	// The Account Closure Process -- see internal/acp's package doc and this
+	// component's CLAUDE.md, "ACP closure". OFF unless ACP_ENABLED=true: it
+	// emails customers and suspends their projects in CSM and Salesforce, so
+	// it is never on by accident, and no ACP_* setting is read (or required)
+	// while it is off.
+	if envBool("ACP_ENABLED", false) {
+		tasks = append(tasks, acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, emailClient, emailBaseURL, alertsEnabled, scheduleOverrides, recipientOverrides))
 	}
 
 	var tasksWithRecipients []string
@@ -1101,6 +1223,14 @@ func main() {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
 			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+		os.Exit(1)
+	}
+
+	// Every report task takes --recipients/--cc on --run-now. A report task
+	// added to reportTaskNames without the hook is a code error: stop rather
+	// than leave it out quietly.
+	if missing := tasksMissingReportRunNow(tasks, reportTaskNames()); len(missing) > 0 {
+		slog.Error("report tasks without the run-now recipient override", "tasks", missing)
 		os.Exit(1)
 	}
 
@@ -1146,6 +1276,127 @@ func main() {
 	start := time.Now()
 	eng.Tick(ctx, start)
 	slog.Info("tick complete", "elapsed", time.Since(start).String())
+}
+
+// acpTaskName is the acp_closure sub-cron's ledger key.
+const acpTaskName = "acp_closure"
+
+// acpReopenCheckTaskName is the acp_reopen_check sub-cron's ledger key.
+const acpReopenCheckTaskName = "acp_reopen_check"
+
+// acpReopenCheckCallTimeout bounds one page of the reopen check: longer than
+// the client's usual 25 seconds, since entity-service checks several
+// projects (a few Salesforce calls each) per page.
+const acpReopenCheckCallTimeout = 2 * time.Minute
+
+// acpReopenCheckTask builds the acp_reopen_check task. Called only when
+// ACP_REOPEN_CHECK_ENABLED=true.
+func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	client, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+		Timeout:      acpReopenCheckCallTimeout,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for the ACP reopen check; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	to, cc := recipientsFor(recipientOverrides, acpReopenCheckTaskName)
+	return registry.Task{
+		// 03:30 UTC is 09:00 in Colombo, every day: half an hour before
+		// acp_closure, so a project reopened here is not sent a reminder.
+		Name:         acpReopenCheckTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpReopenCheckTaskName, "30 3 * * *"),
+		Handler:      acp.RunReopenCheck(client),
+		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
+		To:           to,
+		Cc:           cc,
+	}
+}
+
+// acpRetryBackoff is how long a failed ACP run waits before it is retried.
+// Longer than the driver's hour on purpose: a retry re-sends a notice whose
+// email went out but whose CSM record failed, so fewer retries mean fewer
+// such duplicates, and 4 hours still lands in the same working day.
+const acpRetryBackoff = 4 * time.Hour
+
+// acpMaxAttempts allows each ACP task one retry per day. For acp_closure a
+// retry can send a project's notice again (its email went out, its CSM record
+// failed), so the rest waits for the next weekday's run; the failure alert
+// says so. For acp_reopen_check a retry repeats nothing, but a failure that
+// lasts (entity-service's reopen not enabled yet, a 404 or 403, during the
+// rollout) would otherwise alert every 4 hours; tomorrow's run catches up.
+const acpMaxAttempts = 2
+
+// acpTask builds the acp_closure task from the ACP_* settings, stopping
+// startup on a missing or unsafe one: a task that fails every weekday is
+// worse than one that never starts. Called only when ACP_ENABLED=true.
+func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	emailClient notify.Sender, emailBaseURL string, alertsEnabled bool,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	// CSM: entity-service itself, with this component's shared credentials.
+	// Its client id must be in entity-service's M2M_CLIENT_IDS, or every
+	// notice and suspension write (PATCH /projects/{id}) is refused.
+	csmClient, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for ACP; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	// Salesforce: sales-entity-service, with its own client credentials.
+	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+	})
+	if err != nil {
+		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	// The unsafe combinations are refused here, not warned about: see
+	// acpConfig.
+	debug := debugFor(recipientOverrides, acpTaskName)
+	cfg, warnings, err := acpConfig(readACPSettings(alertsEnabled, emailBaseURL, debug))
+	for _, w := range warnings {
+		slog.Warn(w)
+	}
+	if err != nil {
+		slog.Error("unsafe ACP configuration; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	return registry.Task{
+		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
+		// skips a weekend in Colombo time, for a retry that lands on one.
+		Name:     acpTaskName,
+		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler: acp.Run(acp.Clients{
+			CSM:         csmClient,
+			SalesEntity: salesEntityClient,
+			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+			// instead, the same as a report task's debug mail mode.
+			Email: notify.ForReport(emailClient, debug),
+		}, cfg),
+		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
+		To:           to,
+		Cc:           cc,
+	}
 }
 
 // parseStringMap decodes a flat JSON object of string values, the same shape

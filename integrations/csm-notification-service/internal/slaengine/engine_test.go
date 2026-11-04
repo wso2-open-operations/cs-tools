@@ -131,12 +131,14 @@ func (s *fakeStore) SetPaused(_ context.Context, caseID, clockType string, pause
 	return nil
 }
 
-// ShiftWake mirrors the real Store's own shiftWakeScript: only a member
-// already present in wake is moved, same "never resurrect an
-// already-alerted tier" guard the real ZSCORE check gives, and the new
-// baseline is recorded in the same call — see Store.ShiftWake's own doc
-// comment for why these two writes must happen together.
-func (s *fakeStore) ShiftWake(_ context.Context, caseID, clockType string, deltaSeconds, newBaselineSeconds int64) error {
+// ShiftWake mirrors the real Store: the baseline is claimed against the
+// expected old value first (a stale caller shifts nothing), then only a
+// member already present in wake is moved, same "never resurrect an
+// already-alerted tier" guard the real ZSCORE check gives.
+func (s *fakeStore) ShiftWake(_ context.Context, caseID, clockType string, deltaSeconds, oldBaselineSeconds, newBaselineSeconds int64) error {
+	if s.clocks[caseID+"|"+clockType].ShiftedPauseSeconds != oldBaselineSeconds {
+		return nil
+	}
 	if deltaSeconds != 0 {
 		for _, tier := range tierSequence {
 			member := wakeMember(caseID, clockType, tier)
@@ -152,7 +154,10 @@ func (s *fakeStore) ShiftWake(_ context.Context, caseID, clockType string, delta
 	return nil
 }
 
-func (s *fakeStore) SetWakeAbsolute(_ context.Context, caseID, clockType string, wakes map[int]time.Time, newBaselineSeconds int64) error {
+func (s *fakeStore) SetWakeAbsolute(_ context.Context, caseID, clockType string, wakes map[int]time.Time, oldBaselineSeconds, newBaselineSeconds int64) error {
+	if s.clocks[caseID+"|"+clockType].ShiftedPauseSeconds != oldBaselineSeconds {
+		return nil
+	}
 	for tier, at := range wakes {
 		member := wakeMember(caseID, clockType, tier)
 		if _, ok := s.wake[member]; ok {

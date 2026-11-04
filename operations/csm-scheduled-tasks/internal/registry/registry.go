@@ -55,6 +55,12 @@ type Task struct {
 	// zero (see cmd/server/main.go) — there is no point backing off
 	// shorter than how often this process even runs.
 	RetryBackoff time.Duration
+	// MaxAttempts caps how many times one period is attempted, the first
+	// run included; 0 means no cap. Once a failed attempt reaches it, the
+	// engine schedules no further retry for that period (the next period
+	// supersedes it as usual). For a task whose retry repeats an outward
+	// effect, such as acp_closure re-sending a notice whose record failed.
+	MaxAttempts int
 	// To/Cc are additional recipients emailed when this specific task
 	// fails, on top of the standing ALERT_RECIPIENTS audience every task
 	// already alerts (see engine.Engine.AlertRecipients' own doc comment)
@@ -77,6 +83,11 @@ type Task struct {
 	// value it cannot honour. Nil means the task takes no narrowing flags and a
 	// run-now of it runs Handler as is.
 	RunNowNarrow func(o RunNowOptions) (handler func(ctx context.Context) error, settings []any, err error)
+	// RunNowFlags names the run-now flags RunNowNarrow honours ("--dry-run",
+	// "--limit", "--states", "--from-date", "--to-date", "--recipients",
+	// "--cc"). A flag on the command line that is not listed is refused for
+	// this task rather than ignored.
+	RunNowFlags []string
 }
 
 // RunNowOptions are the narrowing arguments of an on-demand run. A zero value
@@ -88,4 +99,11 @@ type RunNowOptions struct {
 	Limit int
 	// States is the subset of states to work; nil means not given.
 	States []string
+	// FromDate and ToDate are an explicit inclusive reporting window, plain
+	// calendar dates as UTC midnights; both zero means not given. Only report
+	// tasks that list them in RunNowFlags take them.
+	FromDate, ToDate time.Time
+	// Recipients and Cc replace the audience of one manual run; nil means not
+	// given. Only report tasks that list them in RunNowFlags take them.
+	Recipients, Cc []string
 }

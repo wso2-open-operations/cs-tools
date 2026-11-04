@@ -164,7 +164,7 @@ func TestWithState_NullBlobIsAFirstWrite(t *testing.T) {
 // based_on_compliance must survive untouched when only
 // based_on_subscription_end_date changes. Uses the real shape confirmed via
 // a live write against the dedicated test project
-// e3e87599-1bc7-6650-182c-0dc5604bcb68 — based_on_due_invoices with a real
+// 00000000-0000-4000-8000-000000000001 — based_on_due_invoices with a real
 // event_type and multiple already-populated action results, not a trivial
 // empty case.
 func TestWithSubscriptionEndDateState_PreservesOtherSectionsByteForByte(t *testing.T) {

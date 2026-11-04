@@ -331,3 +331,20 @@ func TestValidate_OutageStatusPageDue(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_MailAlertReceived(t *testing.T) {
+	ok := `{"ruleName":"sre","messageId":"m1","dedupeKey":"m1/sre","subject":"s","from":"a@example.com"}`
+	if err := Validate("m1", TypeMailAlertReceived, rawJSON(t, ok)); err != nil {
+		t.Errorf("valid payload: %v", err)
+	}
+	for name, c := range map[string]struct{ entityID, payload string }{
+		"no rule name":      {"m1", `{"messageId":"m1","dedupeKey":"m1/sre"}`},
+		"no dedupe key":     {"m1", `{"ruleName":"sre","messageId":"m1"}`},
+		"entity id differs": {"other", ok},
+		"unknown field":     {"m1", `{"ruleName":"sre","messageId":"m1","dedupeKey":"d","extra":1}`},
+	} {
+		if err := Validate(c.entityID, TypeMailAlertReceived, rawJSON(t, c.payload)); err == nil {
+			t.Errorf("%s: Validate() error = nil, want an error", name)
+		}
+	}
+}

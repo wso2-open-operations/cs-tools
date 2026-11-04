@@ -73,8 +73,10 @@ const (
 
 func validReminderRequestKind(kind string) (string, error) {
 	k := strings.ToLower(strings.TrimSpace(kind))
-	if k != "weekday" && k != "weekend" {
-		return "", &apierror.ValidationError{Msg: "kind must be weekday or weekend"}
+	switch k {
+	case "weekday", "morning", "evening", "weekend":
+	default:
+		return "", &apierror.ValidationError{Msg: "kind must be morning, evening, weekend or weekday"}
 	}
 	return k, nil
 }

@@ -57,8 +57,9 @@ type WorklogReport struct {
 	To      string               `json:"to"`
 	Totals  WorklogTotals        `json:"totals"`
 	// ByType is the work-item type breakdown: issue counts and hours for
-	// Query (= work_item type CASE), Incident, Service Request,
-	// Security Report Analysis and Engagement.
+	// Query (= a CASE of severity S4), Incident (= a CASE of severity
+	// S0-S3, or an incident work item), Service Request, Security Report
+	// Analysis and Engagement.
 	ByType []WorklogTypeBucket `json:"byType"`
 	Teams  []WorklogTeamReport `json:"teams"`
 	// Recipients is who the data says should receive this report. It is
@@ -135,22 +136,17 @@ type WorklogTeamReport struct {
 	ApprovedHours float64 `json:"approvedHours"`
 	PendingHours  float64 `json:"pendingHours"`
 	TotalHours    float64 `json:"totalHours"`
-	// MembersForAverage is the divisor the two averages below actually
-	// use, and it is NOT a count of non-lead members.
+	// MembersForAverage is the single divisor both averages below use.
 	//
-	// WEEKLY: a flat Members - 1, whatever the number of leads.
-	// ServiceNow hardcodes it -- `totMem_team_cal = team.nMembers - 1`
-	// with the comment "exclude the lead" -- while the numerator
-	// subtracts the hours of EVERY lead. The two therefore disagree
-	// whenever a team has other than exactly one: a team of ten with
-	// two leads divides eight people's hours by nine and understates,
-	// one with no lead on the roster divides everyone's by nine and
-	// overstates. That is a defect in the original, kept because exact
-	// parity with the delivered mail is the goal here -- it is what
-	// makes the single-member team divide by zero.
+	// WEEKLY: the team's rostered members. Leads are not on the roster, so
+	// nothing is subtracted. The previous system divides by members less
+	// one and prints 0.00 for average approved hours; both are defects and
+	// are intentionally not reproduced.
 	//
-	// DAILY: present members (1 each, 0.5 for a half day) less one per
-	// present lead, which is self-consistent.
+	// DAILY: present members (1 each, 0.5 for a half day, 0 for a full
+	// day), with the numerators taken over the same people.
+	//
+	// A team with no one counting yields 0, never NaN or Infinity.
 	MembersForAverage         float64            `json:"membersForAverage"`
 	AvgApprovedHoursPerPerson float64            `json:"avgApprovedHoursPerPerson"`
 	AvgTotalHoursPerPerson    float64            `json:"avgTotalHoursPerPerson"`
@@ -170,10 +166,11 @@ type WorklogDeveloper struct {
 	Email  string `json:"email"`
 	Name   string `json:"name"`
 	// WorkedDays is weekly-only, and is NOT derived from time cards: it is
-	// the weekdays in range minus this person's leave days, a half day
-	// counting 0.5. The mail proves the distinction -- vikt@ shows 5
-	// worked days against 0 issues and 0.00 hours, which no time-card-
-	// derived count could produce. Public holidays are not modelled
+	// the weekdays in range on which the person has a team, meaning not
+	// covered by leave (a half day removes the whole day), an exclusion or
+	// a confirmed allocation, each day counted once. The mail proves the
+	// distinction -- vikt@ shows 5 worked days against 0 issues and 0.00
+	// hours, which no time-card-derived count could produce. Public holidays are not modelled
 	// anywhere in the schema, so they are not deducted.
 	WorkedDays float64 `json:"workedDays"`
 	// Leave is daily-only: the absence kind's short code if the person is

@@ -60,8 +60,8 @@ function iso(ms: number): string {
 /**
  * The days a reminder is about, as YYYY-MM-DD, counted from today in Asia/Colombo.
  *
- * weekday: the next working day after today (Saturday and Sunday are skipped,
- * so Friday gives Monday).
+ * morning, evening and weekday: the next working day after today (Saturday and
+ * Sunday are skipped, so Friday gives Monday).
  * weekend: Monday to Friday give the coming Saturday and Sunday; Saturday
  * gives today and tomorrow; Sunday gives yesterday and today.
  */
@@ -69,7 +69,7 @@ export function reminderDays(kind: RotaReminderKind, now: Date): string[] {
   const today = colomboToday(now);
   const weekday = new Date(today).getUTCDay();
 
-  if (kind === "weekday") {
+  if (kind !== "weekend") {
     const ahead = weekday === 5 ? 3 : weekday === 6 ? 2 : 1;
     return [iso(today + ahead * DAY_MS)];
   }

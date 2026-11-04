@@ -37,6 +37,7 @@ import useGetProjectFilters from "@api/useGetProjectFilters";
 import CallsListSkeleton from "@case-details-calls/CallsListSkeleton";
 import CallRequestList from "@case-details-calls/CallRequestList";
 import CallsEmptyState from "@case-details-calls/CallsEmptyState";
+import CallsStatusFilter from "@case-details-calls/CallsStatusFilter";
 import CallsErrorState from "@case-details-calls/CallsErrorState";
 import RequestCallModal from "@case-details-calls/RequestCallModal";
 import DeleteCallRequestModal from "@case-details-calls/DeleteCallRequestModal";
@@ -49,7 +50,8 @@ import {
   CALL_REQUEST_LEAD_MINUTES_BY_PRIORITY_ID,
   CALL_REQUEST_STATE_CANCELLED,
   CALL_REQUEST_STATE_CUSTOMER_REJECTED,
-  CALL_REQUEST_STATE_KEY_BY_ID,
+  CALL_REQUEST_STATE_KEYS_BY_STATUS_FILTER,
+  CALL_REQUEST_STATUS_FILTER_OPTIONS,
   CALL_REQUEST_STATE_PENDING_ON_WSO2,
   CALL_SCHEDULABLE_CASE_STATUSES,
   type CaseStatus,
@@ -90,8 +92,19 @@ export default function CallsPanel({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [callRequestsPage, setCallRequestsPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState("");
+  // The case whose first, unfiltered search has finished; the dropdown stays
+  // usable after that, even while a later search (e.g. back to All statuses
+  // once the cached one was dropped) is pending.
+  const [firstSearchDoneFor, setFirstSearchDoneFor] = useState<string | null>(
+    null,
+  );
 
   const { data: projectFilters } = useGetProjectFilters(projectId);
+
+  const statusStateKeys = statusFilter
+    ? CALL_REQUEST_STATE_KEYS_BY_STATUS_FILTER[statusFilter]
+    : undefined;
   const {
     data: userDetails,
     refetch: refetchUserDetails,
@@ -115,34 +128,6 @@ export default function CallsPanel({
 
   const needsTimeZone =
     !isUserMeLoading && !!userDetails && !resolvedUserTimeZone;
-
-  // Derive filtered state keys from project filters (all non-Canceled states for search body).
-  // callRequestStates' own `id` is entity-service's string enum key
-  // ("pending_on_wso2", ...), not a number -- Number(s.id) is always NaN and
-  // gets filtered out, so this used to silently resolve to [], which
-  // useGetCallRequests treats as "no filter" (stateKeys.length > 0 gate):
-  // every state, Canceled included, despite this comment's own stated intent
-  // (a real, silently-degraded bug, not a crash). CALL_REQUEST_STATE_KEY_BY_ID
-  // mirrors backend-v2's own callRequestStateKeyToEnum (reversed) so this stays
-  // in the same fixed numeric scheme as approveStateKey/rejectStateKey above.
-  // The Canceled key itself is explicitly dropped after mapping -- a second,
-  // previously-masked bug: with the id->number mapping now working,
-  // CALL_REQUEST_STATE_KEY_BY_ID.canceled resolves to a real number
-  // (CALL_REQUEST_STATE_CANCELLED) just like every other state, so it would
-  // otherwise stay in the list and the search body would ask for Canceled
-  // call requests explicitly, the opposite of this comment's own stated
-  // intent. useGetProjectFilters' own upstream Canceled-removal doesn't catch
-  // this either -- it compares Number(s.id), which is NaN for the string id
-  // "canceled" and so never excludes it there -- so filtering it out here,
-  // after the mapping, is the fix, not a belt-and-suspenders duplicate.
-  const callRequestStateKeys = useMemo<number[] | undefined>(() => {
-    if (!projectFilters?.callRequestStates) return undefined;
-    return projectFilters.callRequestStates
-      .map((s) => CALL_REQUEST_STATE_KEY_BY_ID[s.id])
-      .filter(
-        (n): n is number => n !== undefined && n !== CALL_REQUEST_STATE_CANCELLED,
-      );
-  }, [projectFilters]);
 
   // The API's own severityBasedAllocationTime is checked first (in case it
   // is ever populated -- it is currently always an empty map, since no
@@ -231,8 +216,13 @@ export default function CallsPanel({
     hasNextPage,
     isFetchingNextPage,
     isFetchNextPageError,
-  } = useGetCallRequests(projectId, caseId, callRequestStateKeys);
+  } = useGetCallRequests(projectId, caseId, statusStateKeys);
   const patchCallRequest = usePatchCallRequest(projectId, caseId);
+
+  if (!isPending && !statusFilter && firstSearchDoneFor !== caseId) {
+    setFirstSearchDoneFor(caseId);
+  }
+  const isFirstSearchDone = firstSearchDoneFor === caseId;
 
   const allCallRequests = useMemo(
     () => data?.pages?.flatMap((p) => p.callRequests ?? []) ?? [],
@@ -280,6 +270,11 @@ export default function CallsPanel({
     isFetchingNextPage,
     isFetchNextPageError,
   ]);
+
+  const handleStatusFilterChange = (value: string) => {
+    setStatusFilter(value);
+    setCallRequestsPage(1);
+  };
 
   const handleCallRequestPageChange = (
     _event: ChangeEvent<unknown>,
@@ -432,14 +427,42 @@ export default function CallsPanel({
 
   const mainCallsContent = (
     <>
-      {!(allCallRequests.length === 0 && !isPending && !isError) && (
-        <Box sx={{ alignSelf: "flex-start" }}>{requestCallButton}</Box>
+      {!(
+        allCallRequests.length === 0 &&
+        !isPending &&
+        !isError &&
+        !statusFilter
+      ) && (
+        <Stack
+          direction="row"
+          spacing={2}
+          alignItems="center"
+          justifyContent="space-between"
+          flexWrap="wrap"
+          useFlexGap
+        >
+          {requestCallButton}
+          <CallsStatusFilter
+            value={statusFilter}
+            options={CALL_REQUEST_STATUS_FILTER_OPTIONS}
+            onChange={handleStatusFilterChange}
+            disabled={!isFirstSearchDone}
+          />
+        </Stack>
       )}
 
       {isPending ? (
         <CallsListSkeleton />
       ) : isError ? (
         <CallsErrorState error={error} />
+      ) : allCallRequests.length === 0 && statusFilter ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ py: 4, textAlign: "center" }}
+        >
+          No call requests have this status.
+        </Typography>
       ) : allCallRequests.length === 0 ? (
         <CallsEmptyState action={requestCallButton} />
       ) : (
