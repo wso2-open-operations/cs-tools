@@ -135,6 +135,19 @@ describe("OpenDashboardLinkPage", () => {
     expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
   });
 
+  it("keeps the next link's answer when the previous link's answer arrives after it", async () => {
+    let answerFirst: (v: unknown) => void = () => {};
+    postMock.mockReturnValueOnce(new Promise((resolve) => (answerFirst = resolve)));
+    postMock.mockRejectedValueOnce(new BackendApiError(404, "This link doesn't open a dashboard."));
+    renderAt(LINK_ID, { nextLinkId: OTHER_LINK_ID });
+    fireEvent.click(screen.getByRole("link", { name: "Next link" }));
+    expect(await screen.findByText("Couldn't open the link")).toBeInTheDocument();
+    await act(async () => answerFirst({ dashboardId: DASHBOARD, own: false }));
+    expect(screen.getByText("Couldn't open the link")).toBeInTheDocument();
+    expect(screen.queryByText("Opening the dashboard…")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("landed")).not.toBeInTheDocument();
+  });
+
   it("offers a way to the Shared Dashboards list", async () => {
     postMock.mockRejectedValue(new BackendApiError(400, "This isn't a valid dashboard link. Check that it was copied in full."));
     renderAt("not-a-link");

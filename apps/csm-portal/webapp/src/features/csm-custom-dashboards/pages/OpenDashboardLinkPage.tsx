@@ -54,15 +54,21 @@ export default function OpenDashboardLinkPage(): JSX.Element {
   useEffect(() => {
     if (requested.current === linkId) return;
     requested.current = linkId;
+    // An answer for a link the page has since moved on from is dropped, so a
+    // late one cannot replace the current link's answer.
     mutateAsync(linkId).then(
-      (opened) => setAnswer({ linkId, opened }),
-      (error: Error) => setAnswer({ linkId, error }),
+      (opened) => {
+        if (requested.current === linkId) setAnswer({ linkId, opened });
+      },
+      (error: Error) => {
+        if (requested.current === linkId) setAnswer({ linkId, error });
+      },
     );
   }, [linkId, mutateAsync]);
 
   // Only this link's answer counts: when the page moves on to another link,
-  // the previous one's error or dashboard (even one that arrives late) is not
-  // shown while the new link opens.
+  // the previous one's error or dashboard is not shown while the new link
+  // opens.
   const result = answer?.linkId === linkId ? answer : null;
 
   if (result && "opened" in result) {
