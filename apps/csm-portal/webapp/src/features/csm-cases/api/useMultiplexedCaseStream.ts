@@ -19,6 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiConfig } from "@config/apiConfig";
 import { useAuthTokens } from "@hooks/useAuthTokens";
 import { useLogger } from "@hooks/useLogger";
+import { useIsIdle } from "@providers/IdleStateContext";
 import {
   MAX_BACKOFF_ATTEMPTS,
   invalidateCaseById,
@@ -82,6 +83,10 @@ export function parseCaseUpdatedCaseId(data: unknown): string | undefined {
  * - The connection stays open while the browser page is hidden, so a background
  *   case tab is still flagged when the user is on another browser tab. It is
  *   still a single connection, so keeping it costs one slot, not one per tab.
+ * - While the session-warning dialog is showing (`useIsIdle`), no stream is
+ *   held: the open connection is closed and no reconnect is attempted, so an
+ *   abandoned tab does not keep a long-lived connection. Dismissing the dialog
+ *   reconnects through the normal path with the backoff reset.
  * - A 404/405 means the backend predates this endpoint. Retrying every few
  *   seconds would be pointless, so the hook drops straight to the slow idle
  *   retry (`RECONNECT_IDLE_DELAY_MS`), which still recovers after a deploy.
@@ -98,6 +103,7 @@ export function useMultiplexedCaseStream(
   const queryClient = useQueryClient();
   const getTokens = useAuthTokens();
   const logger = useLogger();
+  const isIdle = useIsIdle();
 
   // Order-insensitive, so reordering tabs never reconnects.
   const idsKey = [...new Set(caseIds)].sort().join(",");
@@ -132,6 +138,11 @@ export function useMultiplexedCaseStream(
 
   useEffect(() => {
     if (!apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    // While the session warning is showing the tab is idle: hold no stream.
+    // Returning here, with `isIdle` in the deps, means cleanup closes the open
+    // connection and clears any pending reconnect timer, and the re-run once
+    // the warning is dismissed connects fresh with the backoff reset.
+    if (isIdle) return;
 
     const ids = settledKey ? settledKey.split(",") : [];
 
@@ -249,5 +260,5 @@ export function useMultiplexedCaseStream(
       clearTimeout(reconnectTimer);
       source?.close();
     };
-  }, [settledKey, queryClient]);
+  }, [settledKey, queryClient, isIdle]);
 }
