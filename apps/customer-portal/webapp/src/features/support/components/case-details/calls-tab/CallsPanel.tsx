@@ -435,6 +435,7 @@ export default function CallsPanel({
             value={statusFilter}
             options={CALL_REQUEST_STATUS_FILTER_OPTIONS}
             onChange={handleStatusFilterChange}
+            disabled={isPending && !statusFilter}
           />
         </Stack>
       )}
