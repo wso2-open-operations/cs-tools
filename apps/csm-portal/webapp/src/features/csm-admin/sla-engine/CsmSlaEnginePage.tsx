@@ -25,8 +25,11 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  FormControl,
+  InputLabel,
   MenuItem,
   Paper,
+  Select,
   Skeleton,
   Table,
   TableBody,
@@ -89,6 +92,60 @@ function caseDetailPath(caseId: string, caseType: string | undefined): string {
 }
 
 /**
+ * Single-select filter dropdown matching MultiSelectField's own label
+ * behavior (see that component's doc comment): the label sits centered like
+ * a placeholder when nothing is selected and shrinks into the outline notch
+ * once a value is chosen. The `top: "0px !important"` override is required,
+ * not cosmetic -- oxygen-ui's own theme (MuiInputLabel styleOverrides)
+ * targets `.MuiFormControl-root:has(.MuiSelect-select) &:not(.MuiInputLabel-shrink)`
+ * and shifts an unshrunk label up by `top: -7px`, a compound selector whose
+ * specificity beats a plain sx-emitted class -- without `!important` here,
+ * every option in this filter bar's Severity/Type/Elapsed dropdowns renders
+ * with its label sitting visibly above center instead of vertically centered
+ * (reported live, this filter bar's "All" state looked different from every
+ * other filter dropdown in the portal).
+ */
+function SlaFilterSelect<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+  minWidth,
+}: {
+  id: string;
+  label: string;
+  value: T | "";
+  options: { value: T; label: string }[];
+  onChange: (value: T | "") => void;
+  minWidth: number;
+}): JSX.Element {
+  const hasValue = value !== "";
+  return (
+    <FormControl size="small" sx={{ minWidth }}>
+      <InputLabel id={`${id}-label`} shrink={hasValue} sx={{ top: "0px !important" }}>
+        {label}
+      </InputLabel>
+      <Select
+        labelId={`${id}-label`}
+        id={id}
+        notched={hasValue}
+        label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value as T | "")}
+      >
+        <MenuItem value="">All</MenuItem>
+        {options.map((option) => (
+          <MenuItem key={option.value} value={option.value}>
+            {option.label}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+}
+
+/**
  * SLA Engine admin page: "Recalculate SLA" wipes and rebuilds
  * csm-notification-service's own Redis-held SLA tracking from this
  * backend's durable record (POST /sla-engine/recalculate) -- for recovering
@@ -116,16 +173,16 @@ export default function CsmSlaEnginePage(): JSX.Element {
     setSearchInput("");
     setPage(0);
   };
-  const handleSeverityChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setSeverityFilter(e.target.value as Severity | "");
+  const handleSeverityChange = (value: Severity | ""): void => {
+    setSeverityFilter(value);
     setPage(0);
   };
-  const handleCaseTypeChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setCaseTypeFilter(e.target.value as BeCaseType | "");
+  const handleCaseTypeChange = (value: BeCaseType | ""): void => {
+    setCaseTypeFilter(value);
     setPage(0);
   };
-  const handleElapsedBucketChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    setElapsedBucketFilter(e.target.value as SlaElapsedBucket | "");
+  const handleElapsedBucketChange = (value: SlaElapsedBucket | ""): void => {
+    setElapsedBucketFilter(value);
     setPage(0);
   };
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>): void => {
@@ -246,37 +303,30 @@ export default function CsmSlaEnginePage(): JSX.Element {
             size="small"
             sx={{ minWidth: 260 }}
           />
-          <TextField select label="Severity" value={severityFilter} onChange={handleSeverityChange} size="small" sx={{ minWidth: 160 }}>
-            <MenuItem value="">All</MenuItem>
-            {SEVERITY_FILTER_OPTIONS.map((sev) => (
-              <MenuItem key={sev} value={sev}>
-                {SEVERITY_LABEL[sev]}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="Type" value={caseTypeFilter} onChange={handleCaseTypeChange} size="small" sx={{ minWidth: 180 }}>
-            <MenuItem value="">All</MenuItem>
-            {ALL_CASE_TYPES.map((type) => (
-              <MenuItem key={type} value={type}>
-                {CASE_TYPE_LABEL[type]}
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
+          <SlaFilterSelect
+            id="sla-engine-filter-severity"
+            label="Severity"
+            value={severityFilter}
+            onChange={handleSeverityChange}
+            minWidth={160}
+            options={SEVERITY_FILTER_OPTIONS.map((sev) => ({ value: sev, label: SEVERITY_LABEL[sev] }))}
+          />
+          <SlaFilterSelect
+            id="sla-engine-filter-case-type"
+            label="Type"
+            value={caseTypeFilter}
+            onChange={handleCaseTypeChange}
+            minWidth={180}
+            options={ALL_CASE_TYPES.map((type) => ({ value: type, label: CASE_TYPE_LABEL[type] }))}
+          />
+          <SlaFilterSelect
+            id="sla-engine-filter-elapsed-bucket"
             label="Elapsed"
             value={elapsedBucketFilter}
             onChange={handleElapsedBucketChange}
-            size="small"
-            sx={{ minWidth: 150 }}
-          >
-            <MenuItem value="">All</MenuItem>
-            {ELAPSED_BUCKET_FILTER_OPTIONS.map((bucket) => (
-              <MenuItem key={bucket} value={bucket}>
-                {SLA_ELAPSED_BUCKET_LABEL[bucket]}
-              </MenuItem>
-            ))}
-          </TextField>
+            minWidth={150}
+            options={ELAPSED_BUCKET_FILTER_OPTIONS.map((bucket) => ({ value: bucket, label: SLA_ELAPSED_BUCKET_LABEL[bucket] }))}
+          />
           {hasActiveFilters && (
             <Button size="small" onClick={handleClearFilters} sx={{ alignSelf: "center" }}>
               Clear filters
