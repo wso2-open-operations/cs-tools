@@ -208,6 +208,43 @@ type githubSyncService struct {
 	// portal-created one does (github_sn_case.go). Nil writes Postgres only
 	// and numbers the record SR-GH-<n>. Set with WithServiceNowGithubCases.
 	snCases snGithubCaseAPI
+	// slaEngine registers the CSM SLA clocks for a service request created
+	// from an issue, as caseService.CreateCase does for one created in the
+	// portal. Nil (CSM_SLA_ENGINE_ENABLED off, or no database) registers
+	// none. Set with WithGithubSLAEngine.
+	slaEngine SLAEngineService
+}
+
+// WithGithubSLAEngine gives the sync the SLA clock engine, so a service
+// request created from a GitHub issue gets the same clocks one created in the
+// portal does. A no-op if svc is not a *githubSyncService; a nil engine (the
+// engine is disabled) leaves the sync registering no clocks.
+func WithGithubSLAEngine(svc GithubSyncService, e SLAEngineService) GithubSyncService {
+	if s, ok := svc.(*githubSyncService); ok && e != nil {
+		s.slaEngine = e
+	}
+	return svc
+}
+
+// registerServiceRequestClocks registers the SLA clocks for a service request
+// the sync just inserted, or found already inserted by an earlier or
+// concurrent delivery. Best-effort, as on every other creation path: the
+// record exists, so a failure is logged by the engine and never fails the
+// delivery. Idempotent: the engine registers a clock only when no active
+// (or already-completed) one exists for that record and policy, so running it
+// again on a redelivery adds nothing and repairs a registration that failed
+// the first time. It runs before the SR automation so a consumer reacting to
+// the sr.created event finds the clocks already there, the order the portal's
+// create path keeps for cases.
+func (s *githubSyncService) registerServiceRequestClocks(ctx context.Context, id string) {
+	if s.slaEngine == nil || id == "" {
+		return
+	}
+	// The engine writes the sla table as the system: a webhook delivery
+	// carries no user identity of its own.
+	ctx, cancel := context.WithTimeout(repository.WithSystemIdentity(ctx), applyCaseStateSLATimeout)
+	defer cancel()
+	s.slaEngine.RegisterCaseClocks(ctx, id, nil, "")
 }
 
 // WithServiceNowGithubCases makes the sync create each new service request in
@@ -502,12 +539,15 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		if errors.Is(err, repository.ErrAlreadyExists()) {
 			slog.InfoContext(ctx, "github: issue already had a service request",
 				"serviceRequestId", id, "issue", p.Issue.Number)
+			// Idempotent: repairs a registration an earlier delivery missed.
+			s.registerServiceRequestClocks(ctx, id)
 			return Outcome{Action: "exists", ChangeRequestID: id}, nil
 		}
 		return Outcome{}, err
 	}
 	slog.InfoContext(ctx, "github: service request created from issue",
 		"serviceRequestId", id, "number", number, "issue", p.Issue.Number, "catalog", catalog)
+	s.registerServiceRequestClocks(ctx, id)
 	// Only for a new record: an issue that already had one ("exists" above)
 	// was announced when that record was created.
 	//

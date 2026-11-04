@@ -1285,6 +1285,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slog.Info("service request events enabled", "topic", cfg.SREEventHubTopic, "automatedTeams", len(cfg.SRAlertSRETeamIDs))
 	}
 	if githubSync != nil {
+		// slaEngineSvc is nil when CSM_SLA_ENGINE_ENABLED=false or no database
+		// is configured; WithGithubSLAEngine then leaves the sync without one.
+		service.WithGithubSLAEngine(githubSync, slaEngineSvc)
 		service.WithGithubCaseStates(githubSync, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
