@@ -209,8 +209,9 @@ func newStreamMux(stream http.HandlerFunc) *http.ServeMux {
 	return mux
 }
 
-// defaultStreamMaxLifetime is the default STREAM_MAX_LIFETIME. It must stay
-// below the gateway endpoint timeout in front of this service.
+// defaultStreamMaxLifetime is the default STREAM_MAX_LIFETIME. The value plus
+// its maximum +10% jitter must stay below the gateway endpoint timeout in front
+// of this service, with operational margin.
 const defaultStreamMaxLifetime = "4m"
 
 // parseDuration parses a Go duration string ("4m", "50s"); "0" disables.
