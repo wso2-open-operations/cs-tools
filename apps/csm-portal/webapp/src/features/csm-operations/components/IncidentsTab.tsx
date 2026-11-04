@@ -123,6 +123,7 @@ function formatDate(value?: string | null): string {
   );
 }
 
+/** The cell of one optional column (see `INCIDENT_OPTIONAL_COLUMNS`) for an incident row; "—" when the value is missing. */
 function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident): JSX.Element {
   switch (id) {
     case "category":
@@ -142,16 +143,18 @@ function renderOptionalCell(id: IncidentOptionalColumnId, incident: BeIncident):
   }
 }
 
+type IncidentSortField = "createdOn" | "updatedOn" | "openedOn";
+
 /**
  * Incidents listing for the Operations → Incidents tab. Searches
  * `POST /incidents/search` with server-side pagination, free-text search,
  * and priority / SLA-violated / created-date-range / product filters (see
  * `IncidentsFilterBar`). Filter state lives in the URL (tab-prefixed `inc...`
  * params) rather than local state, so a plain tab switch doesn't reset it and
- * a filtered list can be bookmarked or shared.
+ * a filtered list can be bookmarked or shared. A row opens its incident with
+ * `{ from, parentState }`, so the incident's Back returns here with this
+ * page's own Back intact.
  */
-type IncidentSortField = "createdOn" | "updatedOn" | "openedOn";
-
 export default function IncidentsTab(): JSX.Element {
   const navigate = useNavTransition();
   const api = useBackendApi();
@@ -513,7 +516,12 @@ export default function IncidentsTab(): JSX.Element {
                     onClick={() =>
                       incident.id &&
                       navigate(`/operations/incidents/${incident.id}`, {
-                        state: { from: `${location.pathname}${location.search}` },
+                        // `parentState` keeps this tab's own state (e.g.
+                        // `{ from: <dashboard> }`) for the detail page's Back.
+                        state: {
+                          from: `${location.pathname}${location.search}`,
+                          parentState: location.state ?? null,
+                        },
                       })
                     }
                     selected={selection.isSelected(incident)}

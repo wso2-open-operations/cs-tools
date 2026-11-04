@@ -27,9 +27,10 @@ import (
 // MaxPartBytes is the largest catalogue part Split writes, in bytes. Choreo
 // limits the size of a mounted file: about 20 KB, the limit the backend's
 // DASHBOARDS_DIR part files are cut to (apps/csm-portal/backend
-// internal/dashboard, loadDir). 20,000 is under 20 KB whether that means
-// 20,000 or 20,480 bytes.
-const MaxPartBytes = 20000
+// internal/dashboard, loadDir). 19,000 keeps a margin under it, and a file
+// manager that rounds sizes to the nearest KB shows a part as at most
+// "19 KB", never as "20 KB", the limit itself.
+const MaxPartBytes = 19000
 
 // partSeparators are where Split may cut, in the order it tries them: before
 // a "## " section, before a "### " subsection, then at any blank line. Each

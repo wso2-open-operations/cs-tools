@@ -18,7 +18,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import type { JSX } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { BeIncidentDetail } from "@api/backend/types";
@@ -219,7 +219,7 @@ function LocationSearchProbe(): JSX.Element {
  * `useSearchParams` to actually read/write the URL, which a mocked
  * `react-router` module can't provide.
  */
-function renderPage(initialEntry = "/operations/incidents/inc-1"): ReturnType<typeof render> {
+function renderPage(initialEntry: InitialEntry = "/operations/incidents/inc-1"): ReturnType<typeof render> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -909,5 +909,20 @@ describe("CsmIncidentDetailPage — Channel through the incident lifecycle", () 
       expect(patch).not.toHaveProperty("contactType");
       expect(patch).not.toHaveProperty("subcategory");
     }
+  });
+});
+
+describe("CsmIncidentDetailPage — Back restores the list's own way back", () => {
+  // Operations reached from a dashboard is `{ from: <dashboard> }`; its row
+  // nests that as `parentState`, and Back must hand it back, or Operations
+  // loses its own Back button.
+  it("goes back to the list with the list's own state", () => {
+    navigateMock.mockClear();
+    renderPage({
+      pathname: "/operations/incidents/inc-1",
+      state: { from: "/operations?tab=x", parentState: { from: "/dashboard/my/d-1" } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(navigateMock).toHaveBeenLastCalledWith("/operations?tab=x", { state: { from: "/dashboard/my/d-1" } });
   });
 });

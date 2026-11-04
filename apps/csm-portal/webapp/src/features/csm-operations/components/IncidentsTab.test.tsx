@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ReactElement } from "react";
+import type { JSX, ReactElement } from "react";
 import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import "@testing-library/jest-dom/vitest";
 import IncidentsTab from "@features/csm-operations/components/IncidentsTab";
 import { useSearchIncidents } from "@features/csm-operations/api/useSearchIncidents";
@@ -502,5 +502,36 @@ describe("IncidentsTab — bulk watch list", { timeout: 20_000 }, () => {
 
     await waitFor(() => expect(screen.getByText("Updated 1 of 1 incidents.")).toBeInTheDocument());
     expect(apiMock.patch).toHaveBeenCalledWith("/incidents/inc-1", { watchList: ["user-9", "user-7"] });
+  });
+});
+
+describe("IncidentsTab — rows keep the page's own way back", () => {
+  // Operations reached from a dashboard is `{ from: <dashboard> }`; a row
+  // nests that as `parentState`, so the record's Back can hand it back and
+  // the Operations page keeps its own Back button.
+  function StateProbe(): JSX.Element {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  it("passes the page's own state as parentState", async () => {
+    showRows([INCIDENT]);
+    rtlRender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={[{ pathname: "/operations", search: "?tab=incidents", state: { from: "/dashboard/my/d-1" } }]}>
+          <Routes>
+            <Route path="/operations" element={<IncidentsTab />} />
+            <Route path="/operations/incidents/:id" element={<StateProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("INC0000001"));
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+        from: "/operations?tab=incidents",
+        parentState: { from: "/dashboard/my/d-1" },
+      }),
+    );
   });
 });

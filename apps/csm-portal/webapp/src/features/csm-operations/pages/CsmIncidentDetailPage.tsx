@@ -258,6 +258,12 @@ const INCIDENT_TAB_IDS: readonly IncidentTabId[] = TAB_DEFS.map((t) => t.id);
 export const HANDOFF_NEEDS_ASSIGNEE_REASON =
   "Assign the incident to an engineer first: the assignee is responsible for the page to the SME on duty.";
 
+/**
+ * The incident detail page, mounted on its own route or in an open case tab.
+ * Back goes to `state.from` with `state.parentState` (the list the incident
+ * was opened from, with that list's own state), else to the Operations
+ * Incidents tab.
+ */
 export default function CsmIncidentDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
@@ -276,8 +282,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // Prefer the list URL the row link captured (if any) so "back" returns to
   // the exact view the engineer came from, falling back to the bare tab path
   // for a bookmarked or directly-linked incident.
+  // `parentState` is the state that list was itself carrying (e.g.
+  // `{ from: <dashboard> }`), handed back on Back so it keeps its own Back.
   const backState = (routeOverride ? routeOverride.state : routedLocationState) as
-    | { from?: string }
+    | { from?: string; parentState?: unknown }
     | undefined;
   const backTarget = backState?.from ?? OPERATIONS_INCIDENTS_PATH;
   const { data, isLoading, isError } = useGetIncident(id);
@@ -542,7 +550,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   );
 
   const back = (): void => {
-    navigate(backTarget);
+    navigate(backTarget, { state: backState?.parentState ?? undefined });
   };
 
   const BackButton = (
