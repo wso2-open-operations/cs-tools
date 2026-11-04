@@ -599,14 +599,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // connection of its own.
   // Case Feedback (CSAT survey) submissions for this case, if any — the
   // survey only exists once a case is closed, so the query itself is
-  // disabled until then rather than firing early for an open case.
+  // disabled until then (and while the case is still loading) rather than
+  // firing early for an open case.
+  const isFeedbackEligible = data?.state === "closed";
   const {
     data: caseFeedback,
     isLoading: isFeedbackLoading,
     isError: isFeedbackError,
     refetch: refetchFeedback,
     isFetching: isFetchingFeedback,
-  } = useGetCsmCaseFeedback(caseId, data?.state === "closed");
+  } = useGetCsmCaseFeedback(caseId, isFeedbackEligible);
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
@@ -1048,7 +1050,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
     void refetchChat();
     void refetchAttachments();
     void refetchCallRequests();
-    void refetchFeedback();
+    // `refetch()` ignores `enabled`, so guard it: a manual refresh must not
+    // issue the feedback request for a case that isn't closed.
+    if (isFeedbackEligible) void refetchFeedback();
   };
 
   // Re-runs every source the Details tab renders: the case itself plus the

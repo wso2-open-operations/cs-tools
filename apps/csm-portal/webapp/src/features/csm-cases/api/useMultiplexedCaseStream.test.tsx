@@ -106,6 +106,14 @@ function emitError(source: InstanceType<typeof MockEventSource>, status?: number
 const invalidatedKeys = () =>
   invalidateQueriesMock.mock.calls.map(([arg]) => (arg as { queryKey: unknown[] }).queryKey);
 
+const OLD_MS = 60_000;
+/** Seeds comments + activities for a case as last fetched `ageMs` ago. */
+function seedThread(id: string, ageMs: number) {
+  for (const key of ["csm-case-comments", "csm-case-activities"]) {
+    queryClient.setQueryData([key, id], [], { updatedAt: Date.now() - ageMs });
+  }
+}
+
 const expectedInvalidationsFor = (id: string) => [
   ["csm-case-comments", id],
   ["csm-case-activities", id],
@@ -138,6 +146,7 @@ describe("useMultiplexedCaseStream", () => {
   beforeEach(() => {
     mockInstances.length = 0;
     invalidateQueriesMock.mockReset().mockImplementation(() => Promise.resolve());
+    queryClient.clear();
     debugMock.mockReset();
     getTokensMock.mockReset().mockResolvedValue({ token: "access-token", idToken: "id-token" });
     apiConfigMock.streamUrl = "https://stream.example.test";
@@ -520,7 +529,8 @@ describe("useMultiplexedCaseStream", () => {
     });
     expect(invalidateQueriesMock).not.toHaveBeenCalled();
 
-    // ID_B stays, ID_C is new.
+    // ID_B stays, ID_C is new and has old cached data from an earlier tab.
+    seedThread(ID_C, OLD_MS);
     rerender({ ids: [ID_B, ID_C] });
     await waitFor(() => expect(mockInstances).toHaveLength(2), {
       timeout: ID_SET_DEBOUNCE_MS * 10,
@@ -531,6 +541,9 @@ describe("useMultiplexedCaseStream", () => {
     });
 
     expect(invalidatedKeys()).toEqual([
+      // Newly added ID_C: thread revalidated at settle time (before the open).
+      ["csm-case-comments", ID_C],
+      ["csm-case-activities", ID_C],
       ["csm-case-comments", ID_B],
       ["csm-case-activities", ID_B],
       ["csm-case-detail", ID_B],
@@ -547,6 +560,7 @@ describe("useMultiplexedCaseStream", () => {
       mockInstances[0].dispatchEvent(new Event("open"));
     });
 
+    seedThread(ID_B, OLD_MS);
     rerender({ ids: [ID_B] });
     await waitFor(() => expect(mockInstances).toHaveLength(2), {
       timeout: ID_SET_DEBOUNCE_MS * 10,
@@ -555,7 +569,104 @@ describe("useMultiplexedCaseStream", () => {
       mockInstances[1].dispatchEvent(new Event("open"));
     });
 
-    expect(invalidatedKeys()).toEqual([["csm-cases"], ["csm-case-children"]]);
+    expect(invalidatedKeys()).toEqual([
+      ["csm-case-comments", ID_B],
+      ["csm-case-activities", ID_B],
+      ["csm-cases"],
+      ["csm-case-children"],
+    ]);
+  });
+
+  describe("ids newly added to the subscribed set", () => {
+    const threadKeys = (id: string) => [
+      ["csm-case-comments", id],
+      ["csm-case-activities", id],
+    ];
+
+    it("revalidates only comments and activities of an id that re-enters the set with old cached data", async () => {
+      const { rerender } = renderStream([ID_A, ID_B]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+      // First settle: nothing to revalidate.
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+
+      rerender({ ids: [ID_B] });
+      await waitFor(() => expect(mockInstances).toHaveLength(2), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      // Removing an id revalidates nothing.
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+
+      seedThread(ID_A, OLD_MS);
+      rerender({ ids: [ID_B, ID_A] });
+      await waitFor(() => expect(mockInstances).toHaveLength(3), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidatedKeys()).toEqual(threadKeys(ID_A));
+    });
+
+    it("skips a newly added id with no cached data (first-time open)", async () => {
+      const { rerender } = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      rerender({ ids: [ID_A, ID_B] });
+      await waitFor(() => expect(mockInstances).toHaveLength(2), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+    });
+
+    it("skips a newly added id whose data was fetched moments ago", async () => {
+      const { rerender } = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      seedThread(ID_B, 500);
+      rerender({ ids: [ID_A, ID_B] });
+      await waitFor(() => expect(mockInstances).toHaveLength(2), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+    });
+
+    it("does not revalidate an id that stays subscribed", async () => {
+      const { rerender } = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      seedThread(ID_B, OLD_MS);
+      rerender({ ids: [ID_A, ID_B] });
+      await waitFor(() => expect(mockInstances).toHaveLength(2), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidatedKeys()).toEqual(threadKeys(ID_B));
+    });
+
+    it("counts an id as re-entering after every tab was closed", async () => {
+      const { rerender } = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      rerender({ ids: [] });
+      await waitFor(() => expect(mockInstances[0].closed).toBe(true), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+
+      seedThread(ID_A, OLD_MS);
+      rerender({ ids: [ID_A] });
+      await waitFor(() => expect(mockInstances).toHaveLength(2), {
+        timeout: ID_SET_DEBOUNCE_MS * 10,
+      });
+      expect(invalidatedKeys()).toEqual(threadKeys(ID_A));
+    });
+
+    it("does nothing while the stream is gated off", async () => {
+      apiConfigMock.streamEnabled = false;
+      const { rerender } = renderStream([ID_A]);
+      rerender({ ids: [ID_B] });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, ID_SET_DEBOUNCE_MS + 100));
+      });
+      expect(mockInstances).toHaveLength(0);
+      expect(invalidateQueriesMock).not.toHaveBeenCalled();
+    });
   });
 
   describe("page visibility", () => {
