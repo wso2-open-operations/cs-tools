@@ -304,6 +304,7 @@ export default function DashboardWidgetGrid({
           columns={widget.columns}
           sortBy={widget.sortBy}
           days={widget.days}
+          series={widget.series}
           inlineDrilldown={widget.inlineDrilldown}
           inlineLabels={widget.inlineLabels}
           selectedTeamCreGroupId={selectedTeamCreGroupId}

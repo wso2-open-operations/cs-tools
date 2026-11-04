@@ -90,5 +90,41 @@ describe("DashboardLineChart", () => {
     expect(screen.getByTestId("line-closed")).toHaveTextContent(
       "Closed: Sep 1=1, Sep 2=4",
     );
+    expect(screen.getAllByText(/^(Opened|Closed)$/)).toHaveLength(2);
+  });
+
+  it.each([
+    ["opened", "Opened", "closed", "Closed"],
+    ["closed", "Closed", "opened", "Opened"],
+  ] as const)("draws only the %s line, and only its legend entry, when series names it", (key, label, otherKey, otherLabel) => {
+    render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} series={[key]} />);
+
+    expect(screen.getByTestId(`line-${key}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`line-${otherKey}`)).not.toBeInTheDocument();
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(otherLabel)).not.toBeInTheDocument();
+  });
+
+  it("draws both lines, Opened first, when series names both in any order", () => {
+    render(
+      <DashboardLineChart points={POINTS} isLoading={false} isError={false} series={["closed", "opened"]} />,
+    );
+    const lines = screen.getAllByTestId(/^line-/).map((el) => el.getAttribute("data-testid"));
+    expect(lines).toEqual(["line-opened", "line-closed"]);
+  });
+
+  it("counts only the drawn line for the empty state", () => {
+    const onlyClosed = [
+      { date: "2026-09-01", opened: 0, closed: 2 },
+      { date: "2026-09-02", opened: 0, closed: 1 },
+    ];
+    const { unmount } = render(
+      <DashboardLineChart points={onlyClosed} isLoading={false} isError={false} series={["opened"]} />,
+    );
+    expect(screen.getByText("Nothing to show here right now")).toBeInTheDocument();
+    unmount();
+
+    render(<DashboardLineChart points={onlyClosed} isLoading={false} isError={false} series={["closed"]} />);
+    expect(screen.getByTestId("line-closed")).toBeInTheDocument();
   });
 });

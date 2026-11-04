@@ -19,6 +19,7 @@ import { Inbox } from "@wso2/oxygen-ui-icons-react";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 import type { CaseVolumeTrendChartPoint } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
+import type { BeLineSeries } from "@api/backend/types";
 import { useDarkMode } from "@utils/useDarkMode";
 
 const CHART_HEIGHT_PX = 220;
@@ -27,7 +28,13 @@ interface DashboardLineChartProps {
   points: CaseVolumeTrendChartPoint[];
   isLoading: boolean;
   isError: boolean;
+  /** The lines to draw (`BeDashboardWidget.series`); `undefined` or empty
+   * draws both. Drawn in the fixed order Opened, Closed whatever the order
+   * given. */
+  series?: BeLineSeries[];
 }
+
+const ALL_SERIES: readonly BeLineSeries[] = ["opened", "closed"];
 
 /** Formats a `YYYY-MM-DD` point date for the x-axis — "Sep 1" (no year: this
  * chart's own window is capped at 90 days, see `maxWidgetLineDays` on the
@@ -54,15 +61,23 @@ function formatDateLabel(date: string): string {
  * `query` is. Colors are this app's own semantic palette (`info` for Opened,
  * `success` for Closed) rather than an arbitrary chart-library rotation —
  * matching how severity/status colors are already assigned by meaning
- * elsewhere in this app, not by picking hues.
+ * elsewhere in this app, not by picking hues. `series` leaves one of the two
+ * lines out (its legend entry too); the empty state then counts only the
+ * lines drawn.
  */
 export default function DashboardLineChart({
   points,
   isLoading,
   isError,
+  series,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
+  const shown = ALL_SERIES.filter((s) => !series?.length || series.includes(s));
+  const lineStyles = {
+    opened: { label: "Opened", color: theme.palette.info.main },
+    closed: { label: "Closed", color: theme.palette.success.main },
+  } as const;
 
   if (isLoading) {
     return <Skeleton variant="rounded" height={CHART_HEIGHT_PX} />;
@@ -76,7 +91,7 @@ export default function DashboardLineChart({
     );
   }
 
-  const total = points.reduce((sum, p) => sum + p.opened + p.closed, 0);
+  const total = points.reduce((sum, p) => sum + shown.reduce((s, key) => s + p[key], 0), 0);
 
   if (points.length === 0 || total === 0) {
     return (
@@ -134,24 +149,19 @@ export default function DashboardLineChart({
           already follows in this codebase — this gives this chart tight,
           predictable spacing instead. */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
-        {(
-          [
-            { key: "opened", label: "Opened", color: theme.palette.info.main },
-            { key: "closed", label: "Closed", color: theme.palette.success.main },
-          ] as const
-        ).map((series) => (
-          <Box key={series.key} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+        {shown.map((key) => (
+          <Box key={key} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
             <Box
               sx={{
                 width: 10,
                 height: 10,
                 borderRadius: "50%",
-                bgcolor: series.color,
+                bgcolor: lineStyles[key].color,
                 flexShrink: 0,
               }}
             />
             <Typography variant="caption" color="text.secondary">
-              {series.label}
+              {lineStyles[key].label}
             </Typography>
           </Box>
         ))}
@@ -174,24 +184,14 @@ export default function DashboardLineChart({
           // widget instead of spanning the full 12-column width.
           xAxis={{ show: true, interval: "preserveStartEnd" }}
           yAxis={{ show: true }}
-          lines={[
-            {
-              dataKey: "opened",
-              name: "Opened",
-              stroke: theme.palette.info.main,
-              strokeWidth: 2,
-              dot: false,
-              isAnimationActive: false,
-            },
-            {
-              dataKey: "closed",
-              name: "Closed",
-              stroke: theme.palette.success.main,
-              strokeWidth: 2,
-              dot: false,
-              isAnimationActive: false,
-            },
-          ]}
+          lines={shown.map((key) => ({
+            dataKey: key,
+            name: lineStyles[key].label,
+            stroke: lineStyles[key].color,
+            strokeWidth: 2,
+            dot: false,
+            isAnimationActive: false,
+          }))}
         />
       </Box>
     </Box>

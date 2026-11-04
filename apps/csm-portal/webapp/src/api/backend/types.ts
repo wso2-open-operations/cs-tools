@@ -4943,7 +4943,14 @@ export interface BeDashboardWidget {
    * endpoint caps this at 90 — a widget configured above that cap fails
    * dashboard-config validation at load time, not at render time. */
   days?: number;
+  /** Only meaningful for shape "line": which of the two lines to draw.
+   * Absent draws both, as every line widget did before this field. The
+   * backend refuses an empty list and an unknown or repeated value. */
+  series?: BeLineSeries[];
 }
+
+/** One of a `shape: "line"` widget's two lines (`BeDashboardWidget.series`). */
+export type BeLineSeries = "opened" | "closed";
 
 /** One day's point in a `shape: "line"` widget's resolved trend — see
  * {@link BeCaseVolumeTrendResponse}. */

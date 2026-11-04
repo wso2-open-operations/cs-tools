@@ -28,6 +28,7 @@ import type {
   BeDashboardGroupByConfig,
   BeDashboardPieSlice,
   BeDashboardWidgetColumn,
+  BeLineSeries,
   BeWidgetResourceType,
   BeWidgetShape,
 } from "@api/backend/types";
@@ -127,6 +128,9 @@ interface DashboardWidgetTileProps {
    * many trailing days the Opened/Closed trend covers. `undefined` lets
    * `useCaseVolumeTrendData` apply the backend's own default. */
   days?: number;
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.series`):
+   * the lines to draw; `undefined` draws both. */
+  series?: BeLineSeries[];
   /** The currently selected team's own `creGroupId` (see
    * `BeTeam.creGroupId`), or an array of every team's `creGroupId` in the
    * current dashboard's family when the "All ABTs" option is selected (see
@@ -263,6 +267,7 @@ function DashboardWidgetTile({
   columns,
   sortBy,
   days,
+  series,
   selectedTeamCreGroupId,
   selectedTeamSreGroupId,
   selectedTeamLabel,
@@ -962,6 +967,7 @@ function DashboardWidgetTile({
           points={volumeTrendData.points}
           isLoading={volumeTrendData.isLoading}
           isError={volumeTrendData.isError}
+          series={series}
         />
       </Card>
     );
