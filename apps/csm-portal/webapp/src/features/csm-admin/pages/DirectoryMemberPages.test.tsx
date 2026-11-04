@@ -44,6 +44,10 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: backendPostMock }),
 }));
 
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: { id: "user-1", email: "jane.doe@example.com" }, isLoading: false, isError: false }),
+}));
+
 import RoleMembersPage from "@features/csm-admin/pages/RoleMembersPage";
 import GroupMembersPage from "@features/csm-admin/pages/GroupMembersPage";
 import TeamMembersPage from "@features/csm-admin/pages/TeamMembersPage";

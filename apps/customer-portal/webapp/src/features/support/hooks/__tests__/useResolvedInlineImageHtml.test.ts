@@ -45,7 +45,9 @@ describe("useResolvedInlineImageHtml", () => {
     expect(useAttachmentPreviews).toHaveBeenCalledWith([
       "abc123abc123abc123abc123abc123ab",
       "xyzxyzxyzxyzxyzxyzxyzxyzxyzxyzxy",
-    ]);
+    ],
+      undefined,
+    );
     expect(result.current.resolvedHtml).toContain("data:image/png;base64,AAA");
     expect(result.current.resolvedHtml).toContain("data-unresolved=\"true\"");
     expect(result.current.isLoading).toBe(false);
@@ -71,6 +73,25 @@ describe("useResolvedInlineImageHtml", () => {
     );
   });
 
+  it("forwards the caseId to the attachment preview fetch as an authorization hint", () => {
+    vi.mocked(useAttachmentPreviews).mockReturnValue({
+      dataUrls: new Map(),
+      isLoading: false,
+    });
+
+    renderHook(() =>
+      useResolvedInlineImageHtml(
+        '<img src="/abc123abc123abc123abc123abc123ab.iix">',
+        "case-1",
+      ),
+    );
+
+    expect(useAttachmentPreviews).toHaveBeenCalledWith(
+      ["abc123abc123abc123abc123abc123ab"],
+      "case-1",
+    );
+  });
+
   it("keeps loading false when html has no inline images", () => {
     vi.mocked(useAttachmentPreviews).mockReturnValue({
       dataUrls: new Map(),
@@ -81,7 +102,7 @@ describe("useResolvedInlineImageHtml", () => {
       useResolvedInlineImageHtml("<p>No images here</p>"),
     );
 
-    expect(useAttachmentPreviews).toHaveBeenCalledWith([]);
+    expect(useAttachmentPreviews).toHaveBeenCalledWith([], undefined);
     expect(result.current.resolvedHtml).toBe("<p>No images here</p>");
     expect(result.current.isLoading).toBe(false);
   });
@@ -99,7 +120,7 @@ describe("useResolvedInlineImageHtml", () => {
       const { result } = renderHook(() =>
         useResolvedInlineImageHtml(`<p><img src="/${UUID}"><br></p>`),
       );
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], undefined);
       expect(result.current.resolvedHtml).toContain(`src="${DATA}"`);
     });
 
@@ -116,7 +137,7 @@ describe("useResolvedInlineImageHtml", () => {
       const { result } = renderHook(() =>
         useResolvedInlineImageHtml(`<img src="${src}">`),
       );
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], undefined);
       expect(result.current.resolvedHtml).toContain(`src="${DATA}"`);
     });
 
@@ -127,7 +148,7 @@ describe("useResolvedInlineImageHtml", () => {
       });
       const html = `<img src="/${UUID}"><img src="/${HEX}.iix"><img src="/${HEX}">`;
       const { result } = renderHook(() => useResolvedInlineImageHtml(html));
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX]);
+      expect(useAttachmentPreviews).toHaveBeenCalledWith([HEX], undefined);
       expect(result.current.resolvedHtml.match(/data:image\/png/g)).toHaveLength(3);
     });
 
@@ -159,7 +180,7 @@ describe("useResolvedInlineImageHtml", () => {
       });
       const html = `<img src="${src}">`;
       const { result } = renderHook(() => useResolvedInlineImageHtml(html));
-      expect(useAttachmentPreviews).toHaveBeenCalledWith([]);
+      expect(useAttachmentPreviews).toHaveBeenCalledWith([], undefined);
       expect(result.current.resolvedHtml).toBe(html);
     });
   });

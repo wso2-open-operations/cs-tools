@@ -180,9 +180,6 @@ func (s *caseAttachmentDualWriteService) CreateCaseAttachment(ctx context.Contex
 	}
 
 	snResp, err := s.snMirror.CreateBareCaseAttachment(ctx, req)
-	if err == nil && req.ReferenceType == domain.ReferenceTypeChangeRequest {
-		return s.recordChangeRequestAttachment(ctx, req, snResp, user)
-	}
 	if err != nil {
 		// ServiceNow never accepted the attachment -- nothing is written to
 		// Postgres at all, by construction (s.repo.CreateCaseAttachmentFromServiceNow
@@ -324,24 +321,5 @@ func (s *caseAttachmentDualWriteService) UpdateAttachment(ctx context.Context, r
 		)
 	}
 
-	return resp, nil
-}
-
-// recordChangeRequestAttachment is CreateCaseAttachment's tail for a change
-// request. ServiceNow has accepted the file; its metadata goes to
-// work_item_attachment (the table a change request's attachment list reads),
-// not case_attachment, whose writes are limited to case-like work items -- the
-// insert there matched no row and the upload came back as a 400 although
-// ServiceNow had stored the file.
-func (s *caseAttachmentDualWriteService) recordChangeRequestAttachment(ctx context.Context, req domain.CreateAttachmentRequest, snResp domain.CreateAttachmentResponse, user domain.User) (domain.CreateAttachmentResponse, error) {
-	createdOn, err := s.repo.RecordChangeRequestAttachmentFromServiceNow(ctx, req, snResp.Attachment.ID, snResp.Attachment.SizeBytes, user.Email)
-	if err != nil {
-		slog.ErrorContext(ctx, "sn create change request attachment: ServiceNow attachment created but the Postgres metadata insert failed",
-			"attachmentId", snResp.Attachment.ID, "changeRequestId", req.ReferenceID, "error", err)
-		return domain.CreateAttachmentResponse{}, err
-	}
-	resp := snResp
-	resp.Attachment.CreatedOn = createdOn
-	resp.Attachment.CreatedBy = user.Email
 	return resp, nil
 }

@@ -16,6 +16,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import Actions from "@components/header/Actions";
 
 // Mock @wso2/oxygen-ui
@@ -45,9 +46,12 @@ vi.mock("@wso2/oxygen-ui", () => ({
 }));
 
 // Mock icons
-vi.mock("@wso2/oxygen-ui-icons-react", () => {
+vi.mock("@wso2/oxygen-ui-icons-react", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@wso2/oxygen-ui-icons-react")>();
   const mockIcon = (name: string) => () => <svg data-testid={`icon-${name}`} />;
   return {
+    ...actual,
     Briefcase: mockIcon("Briefcase"),
     FileText: mockIcon("FileText"),
     FolderOpen: mockIcon("FolderOpen"),
@@ -61,6 +65,16 @@ vi.mock("@wso2/oxygen-ui-icons-react", () => {
   };
 });
 
+// Actions reads the error page state; the provider is only mounted at the app root.
+vi.mock("@context/error-page/ErrorPageContext", () => ({
+  useErrorPageContext: () => ({ isProjectSuspended: false }),
+}));
+
+// GetHelpDropdown has its own tests (needs logger/query providers).
+vi.mock("@components/header/GetHelpDropdown", () => ({
+  default: () => <div data-testid="get-help" />,
+}));
+
 // Mock UserProfile
 vi.mock("../UserProfile", () => ({
   default: () => <div data-testid="user-profile" />,
@@ -68,9 +82,25 @@ vi.mock("../UserProfile", () => ({
 
 describe("Actions", () => {
   it("should render theme toggle and user profile", () => {
-    render(<Actions />);
+    render(
+      <MemoryRouter initialEntries={["/project-1/dashboard"]}>
+        <Actions />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByTestId("theme-toggle")).toBeInTheDocument();
     expect(screen.getByTestId("user-profile")).toBeInTheDocument();
+    expect(screen.getByTestId("get-help")).toBeInTheDocument();
+  });
+
+  it("should hide Get Help on the project hub", () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Actions />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByTestId("get-help")).not.toBeInTheDocument();
+    expect(screen.getByTestId("theme-toggle")).toBeInTheDocument();
   });
 });

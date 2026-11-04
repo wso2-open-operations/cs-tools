@@ -33,6 +33,19 @@ const mockUseGetProjectFilters = vi.fn();
 const mockUseGetProjectCases = vi.fn();
 const mockUsePostProjectDeploymentsSearchInfinite = vi.fn();
 
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [], isLoading: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("react-router", async (importOriginal) => {
   const actual = (await importOriginal()) as object;
   return {

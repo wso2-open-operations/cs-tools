@@ -71,6 +71,7 @@ func seedBillableCase(t *testing.T, pool *pgxpool.Pool, suffix, caseID string) {
 		_, _ = scoped.Exec(ctx, `DELETE FROM time_card WHERE created_by = $1`, actor)
 		_, _ = scoped.Exec(ctx, `DELETE FROM work_item_tag WHERE created_by = $1`, actor)
 		_, _ = scoped.Exec(ctx, `DELETE FROM work_item WHERE created_by = $1`, actor)
+		_, _ = scoped.Exec(ctx, `DELETE FROM project WHERE created_by = $1`, actor)
 		_, _ = pool.Exec(ctx, `DELETE FROM tag WHERE created_by = $1`, actor)
 		_, _ = pool.Exec(ctx, `DELETE FROM "user" WHERE user_name = $1`, actor+"@example.com")
 	}
@@ -88,6 +89,10 @@ func seedBillableCase(t *testing.T, pool *pgxpool.Pool, suffix, caseID string) {
 	          VALUES ($1, now(), now(), $2, $2, true)`,
 		billableTestUserID, actor+"@example.com")
 
+	mustExec(`INSERT INTO project (id, created_on, updated_on, created_by, updated_by, key, name, sf_id)
+	          VALUES ($1, now(), now(), $2, $2, $3::text, $3::text, 'sf-'||$3::text)`,
+		billableTestProjectID, actor, "BILL-"+suffix)
+
 	mustExec(`INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
 	          VALUES ($1, now(), now(), $2, $2, $3, $3, 'a case', 'CASE', $4)`,
 		caseID, actor, "BILL-"+suffix, billableTestProjectID)
@@ -102,7 +107,9 @@ func caseIsBillable(t *testing.T, pool *pgxpool.Pool, caseID string) bool {
 	t.Helper()
 	ctx := repository.WithSystemIdentity(context.Background())
 	var isBillable bool
-	if err := pool.QueryRow(ctx, `SELECT bool_and(is_billable) FROM time_card WHERE case_id = $1`, caseID).Scan(&isBillable); err != nil {
+	// scoped, not the raw pool: time_card is RLS-protected, so only a query
+	// carrying the identity above sees its rows under a non-bypass role.
+	if err := repository.NewScoped(pool).QueryRow(ctx, `SELECT bool_and(is_billable) FROM time_card WHERE case_id = $1`, caseID).Scan(&isBillable); err != nil {
 		t.Fatalf("read back is_billable: %v", err)
 	}
 	return isBillable

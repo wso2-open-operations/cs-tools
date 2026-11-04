@@ -445,13 +445,16 @@ export default function CsmIssuesView({
   // The URL write happens in an effect so it is not a navigate during
   // render, and only for this clamp — a general pagination effect races
   // filter updates that also call `setSearchParams`.
-  const clampedPageRef = useRef<number | null>(null);
+  // The clamp is recorded in state (a fresh object per clamp, set during
+  // render); the ref remembers which clamp the effect has already written so
+  // later effect re-runs do not replay it.
+  const [clampedPage, setClampedPage] = useState<{ page: number } | null>(null);
+  const writtenClampRef = useRef<{ page: number } | null>(null);
   useEffect(() => {
-    const clamped = clampedPageRef.current;
-    if (clamped == null) return;
-    clampedPageRef.current = null;
-    writePaginationToUrl(clamped, rowsPerPage);
-  }, [page, rowsPerPage, writePaginationToUrl]);
+    if (clampedPage == null || writtenClampRef.current === clampedPage) return;
+    writtenClampRef.current = clampedPage;
+    writePaginationToUrl(clampedPage.page, rowsPerPage);
+  }, [clampedPage, rowsPerPage, writePaginationToUrl]);
 
   const { canWrite, canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
   // See visibleCaseTypes's own doc comment: must mirror PermViewSecurityCenter
@@ -727,7 +730,7 @@ export default function CsmIssuesView({
   // setState in effects); React re-renders before committing, so it's not a
   // user-visible extra paint.
   if (data !== undefined && !data.hasMore && page > lastPage) {
-    clampedPageRef.current = lastPage;
+    setClampedPage({ page: lastPage });
     setPage(lastPage);
   }
   const paginationCount = data === undefined || data.hasMore ? -1 : total;

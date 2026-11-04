@@ -31,6 +31,10 @@ const mockAuthFetch = vi.fn().mockResolvedValue({
   json: () => Promise.resolve(mockFiltersResponse),
 });
 
+vi.mock("@/hooks/useAuthApiClient", () => ({
+  useAuthApiClient: () => mockAuthFetch,
+}));
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({
     getIdToken: vi.fn().mockResolvedValue("mock-token"),

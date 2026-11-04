@@ -386,8 +386,7 @@ export default function CsmKBArticleEditorPage(): JSX.Element {
               },
               "& pre": { p: 2, overflowX: "auto" },
             }}
-            // eslint-disable-next-line react/no-danger -- article.body is
-            // author-authored rich text HTML from our own Lexical editor,
+            // article.body is author-authored rich text HTML from our own Lexical editor,
             // not third-party/user-submitted-elsewhere content.
             dangerouslySetInnerHTML={{ __html: article?.body ?? "" }}
           />

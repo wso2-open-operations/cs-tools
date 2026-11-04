@@ -19,6 +19,19 @@ import { describe, expect, it, vi } from "vitest";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 
+vi.mock("@features/project-details/api/usePostDeploymentAttachment", () => ({
+  usePostDeploymentAttachment: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@features/support/api/usePostAttachments", () => ({
   usePostAttachments: () => ({
     mutate: vi.fn(),

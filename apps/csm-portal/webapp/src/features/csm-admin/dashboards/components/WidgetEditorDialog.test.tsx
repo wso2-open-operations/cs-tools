@@ -105,6 +105,7 @@ describe("WidgetEditorDialog", () => {
       {
         filters: { filters: [{ field: "type", op: "in", values: ["case"] }] },
         pagination: { offset: 0, limit: 1 },
+        countOnly: true,
       },
       { signal: expect.any(AbortSignal) },
     );
@@ -149,6 +150,7 @@ describe("WidgetEditorDialog", () => {
             ],
           },
           pagination: { offset: 0, limit: 1 },
+          countOnly: true,
         },
         { signal: expect.any(AbortSignal) },
       ),
@@ -232,6 +234,7 @@ describe("WidgetEditorDialog", () => {
             filters: [{ field: "creTeam", op: "in", values: ["team-group-1"] }, { field: "type", op: "in", values: ["case"] }],
           },
           pagination: { offset: 0, limit: 1 },
+          countOnly: true,
         },
         { signal: expect.any(AbortSignal) },
       ),
@@ -266,6 +269,7 @@ describe("WidgetEditorDialog", () => {
             filters: [{ field: "sreTeam", op: "in", values: ["sre-team-group-1"] }, { field: "type", op: "in", values: ["case"] }],
           },
           pagination: { offset: 0, limit: 1 },
+          countOnly: true,
         },
         { signal: expect.any(AbortSignal) },
       ),

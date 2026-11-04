@@ -22,6 +22,9 @@ import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
 
 const mockAuthFetch = vi.fn();
 
+// This suite exercises the real hook; undo the global mock from vitest.setup.ts.
+vi.unmock("@api/useGetAttachmentContent");
+
 vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => mockAuthFetch,
 }));

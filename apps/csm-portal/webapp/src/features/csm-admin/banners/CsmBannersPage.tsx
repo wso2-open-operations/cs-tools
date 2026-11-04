@@ -41,7 +41,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { ChevronDown, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import { darken, lighten, useTheme, type Theme } from "@mui/material/styles";
-import { useEffect, useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
+import { useMemo, useState, type ChangeEvent, type JSX, type KeyboardEvent } from "react";
 import {
   BANNER_TYPE_LABEL,
   EMPTY_BANNER_CONTENT,
@@ -164,7 +164,13 @@ function ColorField({
   const hex = cssColorToHex(value, "#000000");
   const channels = hexChannels(hex);
   const [hexText, setHexText] = useState(hex);
-  useEffect(() => setHexText(hex), [hex]);
+  // Re-sync the text box when the committed colour changes from outside.
+  // Adjusting state during render (not in an effect) avoids a cascading render.
+  const [syncedHex, setSyncedHex] = useState(hex);
+  if (syncedHex !== hex) {
+    setSyncedHex(hex);
+    setHexText(hex);
+  }
 
   const commitHex = (next: string): void => {
     setHexText(next);
@@ -475,11 +481,11 @@ export default function CsmBannersPage(): JSX.Element {
     () => sorted.filter((banner) => banner.status === statusTab),
     [sorted, statusTab],
   );
+  // Clamp the page during render (a deleted/filtered-out last row can leave it
+  // past the end); React re-renders immediately with the corrected state.
+  const lastPage = Math.max(0, Math.ceil(visible.length / rowsPerPage) - 1);
+  if (page > lastPage) setPage(lastPage);
   const pageBanners = visible.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
-  useEffect(() => {
-    const lastPage = Math.max(0, Math.ceil(visible.length / rowsPerPage) - 1);
-    if (page > lastPage) setPage(lastPage);
-  }, [page, rowsPerPage, visible.length]);
   const previewHtml = buildBannerHtml(contentOf(draft), editingId ?? "");
   const orderLocked = draft.status === "unpublished";
   const lockedStatus = scheduleLocksStatus(draft.startsOn, draft.expiresOn, now);

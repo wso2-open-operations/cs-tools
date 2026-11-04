@@ -520,15 +520,6 @@ type CaseRepository interface {
 	// CreateCaseAttachment path uses, and sits within the create call's latency
 	// of the moment ServiceNow accepted the file.
 	CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
-	// RecordChangeRequestAttachmentFromServiceNow records the metadata of an
-	// attachment ServiceNow has just accepted for a change request, in
-	// work_item_attachment -- the table SearchWorkItemAttachments lists a change
-	// request's attachments from, which the sync otherwise fills from ServiceNow
-	// later. id is ServiceNow's own sys_id as a UUID, the id the sync writes the
-	// same row under, so ON CONFLICT DO NOTHING makes that later copy (or a
-	// retry) a no-op. case_attachment cannot hold it: its writes are limited to
-	// case-like work items. Returns the stored row's created_on.
-	RecordChangeRequestAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, createdByEmail string) (time.Time, error)
 	// SearchCaseAttachments returns a paginated slice of attachments for the given
 	// case, most recently created first, together with the total matching count.
 	SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
@@ -2974,36 +2965,6 @@ func (r *caseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAt
 	// CreateCaseComment above.
 	a.CreatedBy = domain.NewUserReference(uploadedByID, "", "")
 	return a, nil
-}
-
-// RecordChangeRequestAttachmentFromServiceNow implements CaseRepository.
-//
-// crvis: guarded by r.vis.requireVisibleChangeRequest below
-func (r *caseRepo) RecordChangeRequestAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, createdByEmail string) (time.Time, error) {
-	if err := r.vis.requireVisibleChangeRequest(ctx, r.db, req.ReferenceID); err != nil {
-		return time.Time{}, err
-	}
-	const insert = `
-		INSERT INTO work_item_attachment (id, created_on, updated_on, created_by, updated_by, name, content_type, work_item_id, size_bytes, state)
-		SELECT $1::uuid, NOW(), NOW(), $2::text, $2::text, $3::text, $4::text, $5::uuid, $6::bigint, 'AVAILABLE'
-		WHERE EXISTS (SELECT 1 FROM work_item w WHERE w.id = $5::uuid AND w.type = 'CHANGE_REQUEST'::work_item_type_enum)
-		ON CONFLICT (id) DO NOTHING
-		RETURNING created_on`
-	var createdOn time.Time
-	err := r.db.QueryRow(ctx, insert, id, createdByEmail, req.Name, req.Type, req.ReferenceID, sizeBytes).Scan(&createdOn)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Either the id is already recorded (the sync, or a retry, got there
-		// first) or the work item is not a change request.
-		const existing = `SELECT created_on FROM work_item_attachment WHERE id = $1::uuid AND work_item_id = $2::uuid`
-		err = r.db.QueryRow(ctx, existing, id, req.ReferenceID).Scan(&createdOn)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return time.Time{}, &apierror.ValidationError{Msg: "one or more referenced IDs do not exist"}
-		}
-	}
-	if err != nil {
-		return time.Time{}, fmt.Errorf("record change request attachment from servicenow: %w", err)
-	}
-	return createdOn.UTC(), nil
 }
 
 // CreateCaseAttachmentFromServiceNow implements CaseRepository. See the
