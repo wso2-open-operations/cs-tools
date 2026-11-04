@@ -474,7 +474,7 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:https://csm.example.com/1");
   });
 
-  it("does not send a comment whose image failed to upload, and says why", async () => {
+  it("explains a failed image on the first Send and posts the comment without it on the second", async () => {
     upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
     const onSubmit = vi.fn();
     render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
@@ -486,7 +486,34 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
 
-    expect(await screen.findByText(/Could not upload shot\.png.*Remove that image/)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not upload shot\.png.*Press Send again/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [html] = onSubmit.mock.calls[0];
+    expect(html).toBe("see ");
+    expect(html).not.toContain("blob:");
+  });
+
+  it("asks again when the draft changes after the failed-image notice", async () => {
+    upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    await waitFor(() => expect(screen.queryByText("Uploading images…")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await screen.findByText(/Press Send again/);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: 'see this <img src="blob:https://csm.example.com/1" alt="x">' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/Press Send again/)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
