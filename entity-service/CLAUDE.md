@@ -4833,6 +4833,85 @@ audit count; `CASE_STATS_TEST_DSN`), `autoclosure_integration_test.go` (service 
 service, lifecycle through to the closed row; `ENTITY_TEST_DATABASE_URL`; run as `csm_app` so row-level
 security is in force), `autoclosure_service_test.go` / `autoclosure_close_test.go` (units).
 
+## Incident auto-close (`POST /incidents/autoclose`)
+
+Closes incidents left RESOLVED for 14 days. Postgres had no such job, so every resolved incident stayed RESOLVED
+for ever. The rule was measured on the previous system's data (400 recently auto-closed incidents): 399 closed
+336.1-336.8 h after they were resolved, hourly, with **no comment and no work note**. It is driven by
+`operations/csm-scheduled-tasks`'s `incident_autoclose` task (off until `INCIDENT_AUTOCLOSE_ENABLED=true`; see
+that component's CLAUDE.md).
+
+**It follows the decisions made for "Case auto-closure"** (above) rather than new ones:
+
+- **The close goes through the incident service**, as case auto-closure closes through the case service:
+  `incidentAutocloseService` calls the deployment's `IncidentService.UpdateIncident` with `{state: closed}` for each
+  due incident. So the close, its activity entry, its task cascade and, under
+  `DATA_SOURCE=postgres-servicenow-dual-write`, the write-back to the backing data source (a failure lands in
+  `sn_writeback_failures` and never undoes the close) are exactly those of any incident update. The previous
+  system's own auto-close job still closes its copy until it is retired; whether to switch it off before
+  enabling this under dual-write is the same team decision case auto-closure records. Once it is retired, this is
+  what closes both copies.
+- **The system user is case auto-closure's**: `AUTOCLOSURE_SYSTEM_USER_EMAIL` (optional; empty acts as
+  `domain.AutoclosureDefaultActor`, "System user"). `updated_by`, the activity entry and the task cascade's notes
+  are written as that user, and `closed_by_id` is its user id when it has a `"user"` row, else NULL, as case
+  auto-closure leaves `closed_by_user_id`. `closed_on` is the time of the close (`NOW()`), as for a case.
+- **The exemptions ride an unexported context marker** (`withIncidentAutoclose`, `incident_autoclose_context.go`,
+  the counterpart of `withAutoclosureActor`), so no HTTP request can ask for them. `UpdateIncident` reads it to
+  resolve the actor and to set `IncidentLifecycleUpdate.AutocloseDueDays`, which makes `updateIncidentLifecycleTx`
+  (1) re-check under the row lock that the incident is still due (`incidentAutocloseDue`), returning
+  `repository.ErrIncidentNotDueForAutoclose` and writing nothing when it was re-opened, closed or touched since it
+  was listed, and (2) close without the resolution code and notes a manual close needs.
+- **Internal callers only**, checked twice as case auto-closure does: `internalOnly` on the route, and
+  `RequireInternalCaller` in the service (403) before anything is listed. The scheduler's client id must be in
+  `M2M_CLIENT_IDS`.
+- **An incident with no `resolved_on`** (synced rows can lack it) is measured from `work_item.updated_on`, as case
+  auto-closure's reference time falls back to it. Any later write to the work item pushes it back; review those in
+  the first dry run.
+
+The route takes `{resolvedForDays (required, 1-3650), limit (0/absent = 200, max 1000), dailyLimit (0/absent = no
+cap, max 100000), dryRun}` (unknown fields are a 400) and answers `{dryRun, closed: [{id, number, resolvedOn}],
+failed: [{id, number, error}], more, dailyLimitReached}`. `more` is true when `limit` incidents were selected: the
+caller calls again, unless `dailyLimitReached` (below), when `more` is always false.
+
+**Daily limit.** The first real run would otherwise close every incident Resolved since cutover, so, as case
+auto-closure's `dailyLimit`, a positive `dailyLimit` caps how many incidents may enter CLOSED per UTC day. The
+budget is `dailyLimit` minus the incidents with `closed_on >= 00:00 UTC today` (`CountIncidentsClosedSince`), and it
+counts **every** close today, **manual ones included**, not only auto-closes. That is deliberate: it is the
+conservative reading of a ceiling, needs no schema change, and avoids `closed_by_id`, which is NULL when the system
+user has no `"user"` row, so auto-closes cannot be told apart reliably. A busy day of manual closes therefore
+shrinks the auto-close's allowance. At the start of a call, `remaining <= 0` returns an empty page with
+`dailyLimitReached: true` and nothing is listed; otherwise the page `limit` is clamped to `remaining`. A real run
+re-reads the count before each close (a read, as case auto-closure does), so overlapping runs overshoot by a few at
+most, and stops when it is used up. `dailyLimitReached` is true whenever the budget is used up (before the call, by
+the call, or, in a dry run, by what it would close), and then `more` is false so the scheduler's paging loop ends
+instead of running to its page cap; the scheduler logs it without alerting. A dry run applies the same budget and
+clamp, so its `closed` count is what a real run would close; it returns one page only. The count filters on
+`closed_on`, which has no index: it is one scan of `incident` per read, cheap at the table's current size, and a
+partial index on `closed_on` is the follow-up if the table grows. Under `DATA_SOURCE=servicenow` (or without a
+pool) it is a 503 (`NewUnavailableIncidentAutocloseService`; the reason is logged). A failure lands in `failed` (a
+database error's text is only logged) and does not stop the rest; the incident stays RESOLVED and is selected
+again. A dry run lists what is due as `closed` and changes nothing, so a repeated dry-run call returns the same
+page.
+
+- **Migrations.** 0273 adds `incident.closed_on` and `incident.closed_by_id` (`REFERENCES "user"(id) ON DELETE SET
+  NULL`, as `resolved_by_id` in 0058) under a 5 s `lock_timeout`, as 0249 does; nothing is backfilled.
+  0274 (`closed_by_id`) and 0275 (the partial `ON incident (resolved_on) WHERE state = 'RESOLVED'` the listing
+  reads) build the indexes `CONCURRENTLY`, one per file, as 0263 does. `GetIncidentByID` selects the two columns,
+  so **apply 0273 before deploying this build**.
+- **A manual close records them too** (`updateIncidentLifecycleTx`): entering CLOSED from another state stamps
+  `closed_on = NOW()` and `closed_by_id` = the acting user (NULL for a caller with no user row). Re-sending CLOSED,
+  or re-opening, leaves both as they were. Read back as `closedOn` / `closedBy` on `IncidentView`.
+- **Side effects checked**: `incident_outbox` (0181) records the change; `IncidentReportDrainer` acts only on a
+  move to IN_PROGRESS or RESOLVED or a group change, so it acknowledges this as a no-op. No `incident.*` event is
+  published (a manual close publishes none either).
+- Tests: `incident_autoclose_integration_test.go` (`INCIDENT_AUTOCLOSE_TEST_DSN`: due / not due / NULL
+  `resolved_on` / no close notes / other states, the default system user and one with a row, the task cascade,
+  dry run, limit and `more`, the daily limit (manual closes counted, a second call closes none), the re-check under the lock, no comment rows, the manual close's stamps, and under
+  dual-write, as case auto-closure's `TestAutoclosureIntegration_DualWrite*`: the close is mirrored as exactly
+  `{state: closed}` with no user token, and a failing mirror neither fails the close nor repeats it),
+  `incident_autoclose_service_test.go` (including the 403 for a caller that is not internal),
+  `incident_autoclose_handler_test.go`.
+
 ## Change requests
 
 Tests: `entity-service/docs/change-request-tests.md` maps change request scenarios to Go and Playwright tests, lists Vitest coverage, and says how to list and run them.

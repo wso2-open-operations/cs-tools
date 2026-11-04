@@ -1862,6 +1862,23 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	problemHandler := handler.NewProblemHandler(activeProblemSvc)
 
+	// Incident auto-close: closes incidents left RESOLVED for 14 days
+	// (POST /incidents/autoclose, driven by operations/csm-scheduled-tasks'
+	// incident_autoclose task). Like case auto-closure above, it closes through
+	// the deployment's incident service, as the same system user
+	// (AUTOCLOSURE_SYSTEM_USER_EMAIL), so in dual-write the close is mirrored
+	// to the backing data source like any other incident update. Always
+	// registered; without the Postgres incident tables it answers 503 (the
+	// reason is logged), like the case auto-closure routes.
+	var incidentAutocloseSvc service.IncidentAutocloseService
+	if db == nil || cfg.DataSource == config.DataSourceServiceNow {
+		incidentAutocloseSvc = service.NewUnavailableIncidentAutocloseService("incident auto-close needs the Postgres incident tables: DATA_SOURCE must be postgres or postgres-servicenow-dual-write")
+	} else {
+		incidentAutocloseSvc = service.NewIncidentAutocloseService(repository.NewIncidentAutocloseRepository(repository.NewScoped(db)),
+			activeIncidentSvc, accessSvc, cfg.AutoclosureSystemUserEmail)
+	}
+	incidentAutocloseHandler := handler.NewIncidentAutocloseHandler(incidentAutocloseSvc)
+
 	var alertHandler *handler.AlertHandler
 	if cfg.DataSource == config.DataSourceServiceNow {
 		alertHandler = handler.NewAlertHandler(service.NewServiceNowAlertService(serviceNowIntegrationServiceClient))
@@ -2788,6 +2805,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	mux.HandleFunc("POST /incidents/aggregate", internalOnly(accessSvc, incidentHandler.AggregateIncidents))
 	mux.HandleFunc("POST /incidents/{id}/activities/search", internalOnly(accessSvc, incidentHandler.SearchIncidentActivities))
 	mux.HandleFunc("POST /incidents/{id}/specialist-handoffs", internalOnly(accessSvc, incidentHandler.HandOffIncidentToSpecialist))
+	mux.HandleFunc("POST /incidents/autoclose", internalOnly(accessSvc, incidentAutocloseHandler.Autoclose))
 	mux.HandleFunc("GET /specialist-handoff-teams", internalOnly(accessSvc, incidentHandler.ListSpecialistHandoffTeams))
 
 	// Postgres-backed, and deliberately separate from outageHandler above:

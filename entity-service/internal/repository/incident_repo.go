@@ -298,6 +298,8 @@ type SpecialistHandoffWritten struct {
 // Closed need a resolution code and resolution notes, taken from the request
 // or already on the record. Entering Resolved stamps resolved_on, and
 // resolved_by_id from ResolvedByID, falling back to DefaultResolvedByID.
+// Entering Closed stamps closed_on and closed_by_id (DefaultResolvedByID, NULL
+// when there is none).
 // Entering Closed or Canceled also closes the incident's open incident tasks,
 // as ServiceNow's "Cascade closure of Incident Tasks" does (see
 // cascadeIncidentTaskClosure). Entering Resolved also resolves the open child
@@ -309,7 +311,13 @@ type IncidentLifecycleUpdate struct {
 	ResolutionCode      *string // incident_resolution_code_enum label
 	ResolutionNotes     *string // incident.close_notes
 	ResolvedByID        *string
-	DefaultResolvedByID *string // the acting user, used only when entering Resolved without ResolvedByID
+	DefaultResolvedByID *string // the acting user: resolved_by_id when entering Resolved without ResolvedByID, and closed_by_id when entering Closed
+	// AutocloseDueDays makes this update the incident auto-close: it is applied
+	// only while the incident is still due (incidentAutocloseDue, checked under
+	// the row lock; ErrIncidentNotDueForAutoclose otherwise), and the close
+	// needs no resolution code or notes. Set only by the incident service, for
+	// the auto-close workflow; never from a request.
+	AutocloseDueDays *int
 
 	// WorkNotes and AdditionalComments are written as comment rows in the same transaction as the
 	// state change, so a failed note leaves the state change unsaved too. Nil or blank writes nothing.
@@ -774,9 +782,11 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		       rb.id, COALESCE(rb.name, NULLIF(TRIM(CONCAT_WS(' ', rb.first_name, rb.last_name)), '')),
 		       inc.resolved_on, inc.resolved_with_parent, inc.incident_report, wi.description,
 		       wi.created_on, wi.created_by, wi.updated_on, wi.updated_by,
-		       ag.id, ag.name
+		       ag.id, ag.name,
+		       inc.closed_on, cb.id, COALESCE(cb.name, NULLIF(TRIM(CONCAT_WS(' ', cb.first_name, cb.last_name)), ''))
 		` + incidentFromJoins + `
 		LEFT JOIN "group" ag ON ag.id = wi.assignment_group_id
+		LEFT JOIN "user" cb ON cb.id = inc.closed_by_id
 		WHERE wi.id = $1 AND wi.type = 'INCIDENT'`
 
 	var (
@@ -801,6 +811,8 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		createdOn, updatedOn               time.Time
 		createdBy, updatedBy               string
 		agID, agName                       *string
+		closedOn                           *time.Time
+		cbID, cbName                       *string
 	)
 	err := r.db.QueryRow(ctx, query, id).Scan(
 		&id2, &number, &subject, &openedOn,
@@ -819,6 +831,7 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 		&resolvedOn, &resolvedWithParent, &incidentReport, &description,
 		&createdOn, &createdBy, &updatedOn, &updatedBy,
 		&agID, &agName,
+		&closedOn, &cbID, &cbName,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.IncidentView{}, &apierror.NotFoundError{Msg: "incident not found"}
@@ -880,6 +893,14 @@ func (r *incidentRepo) GetIncidentByID(ctx context.Context, id string) (domain.I
 	if rbID != nil {
 		name := stringOrEmpty(rbName)
 		v.ResolvedBy = &name
+	}
+	if closedOn != nil {
+		s := closedOn.UTC().Format(time.RFC3339)
+		v.ClosedOn = &s
+	}
+	if cbID != nil {
+		name := stringOrEmpty(cbName)
+		v.ClosedBy = &name
 	}
 	// Derived at read time from the handoff's work notes and runbook task,
 	// as ServiceNow's getHandoffSummary does; nothing is stored for it.
@@ -1460,6 +1481,7 @@ func insertIncidentNotesTx(ctx context.Context, tx pgx.Tx, incidentID string, wo
 var incidentLifecycleFKField = map[string][2]string{
 	"work_item_assigned_to_id_fkey":      {"assignedEngineerId", "user"},
 	"incident_resolved_by_id_fkey":       {"resolvedById", "user"},
+	"incident_closed_by_id_fkey":         {"closedBy", "user"},
 	"work_item_assignment_group_id_fkey": {"assignmentGroupId", "group"},
 	"work_item_parent_id_fkey":           {"parentId", "record"},
 	"incident_service_id_fkey":           {"serviceId", "service"},
@@ -1487,7 +1509,7 @@ func (r *incidentRepo) UpdateIncidentLifecycle(ctx context.Context, id string, u
 	}
 	var ve *apierror.ValidationError
 	var nfe *apierror.NotFoundError
-	if errors.As(err, &ve) || errors.As(err, &nfe) {
+	if errors.As(err, &ve) || errors.As(err, &nfe) || errors.Is(err, ErrIncidentNotDueForAutoclose) {
 		return nil, err
 	}
 	if IsRLSPolicyViolation(err) {
@@ -1750,7 +1772,21 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 		return nil, fmt.Errorf("update incident: read current state: %w", err)
 	}
 
-	if u.State != nil && (*u.State == "RESOLVED" || *u.State == "CLOSED") {
+	if u.AutocloseDueDays != nil {
+		// The row is locked: an incident re-opened, closed or touched since it
+		// was listed is no longer due, and is left alone.
+		var due bool
+		if err := tx.QueryRow(ctx, `
+			SELECT `+incidentAutocloseDue+`
+			FROM incident inc
+			JOIN work_item wi ON wi.id = inc.id
+			WHERE inc.id = $2`, *u.AutocloseDueDays, id).Scan(&due); err != nil {
+			return nil, fmt.Errorf("update incident: check auto-close is due: %w", err)
+		}
+		if !due {
+			return nil, ErrIncidentNotDueForAutoclose
+		}
+	} else if u.State != nil && (*u.State == "RESOLVED" || *u.State == "CLOSED") {
 		code, notes := currentCode, currentNotes
 		if u.ResolutionCode != nil {
 			code = u.ResolutionCode
@@ -1814,6 +1850,16 @@ func (r *incidentRepo) updateIncidentLifecycleTx(ctx context.Context, tx pgx.Tx,
 	if enteringResolved {
 		// Resolved by this update itself, not by its parent's cascade.
 		incSets = append(incSets, "resolved_on = NOW()", "resolved_with_parent = FALSE")
+	}
+	// Entering Closed records when and by whom (migration 0273). A re-open
+	// leaves both as they were.
+	if u.State != nil && *u.State == "CLOSED" && currentState != "CLOSED" {
+		incSets = append(incSets, "closed_on = NOW()")
+		if u.DefaultResolvedByID != nil {
+			addInc("closed_by_id = $%d::uuid", *u.DefaultResolvedByID)
+		} else {
+			incSets = append(incSets, "closed_by_id = NULL")
+		}
 	}
 	if err := r.addIncidentRecordFields(ctx, tx, u, addInc, &incSets,
 		currentCategory, currentImpact, currentUrgency, currentSubcategoryID); err != nil {

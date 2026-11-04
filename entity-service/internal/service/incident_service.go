@@ -697,6 +697,17 @@ const incidentSystemActorEmail = "system-m2m@wso2.com"
 func (s *incidentService) resolveActor(ctx context.Context) (domain.User, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
+		if systemEmail, _, ok := incidentAutocloseFromContext(ctx); ok {
+			// The incident auto-close acts as the system user, as case
+			// auto-closure does: its user row when there is one.
+			actor := domain.User{Email: systemEmail}
+			if s.userRepo != nil {
+				if u, err := s.userRepo.GetUserByEmail(ctx, systemEmail); err == nil && u.ID != "" {
+					actor = u
+				}
+			}
+			return actor, nil
+		}
 		return domain.User{Email: incidentSystemActorEmail}, nil
 	}
 	email, err := emailFromJWT(token)
@@ -1185,6 +1196,9 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 	if hasLifecycle || hasRecord {
 		if actor.ID != "" {
 			lifecycle.DefaultResolvedByID = &actor.ID
+		}
+		if _, days, ok := incidentAutocloseFromContext(ctx); ok {
+			lifecycle.AutocloseDueDays = &days
 		}
 		// The notes ride in the same transaction: a failed note leaves nothing saved.
 		lifecycle.WorkNotes, lifecycle.AdditionalComments = req.WorkNotes, req.AdditionalComments

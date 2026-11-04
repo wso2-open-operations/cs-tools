@@ -15819,6 +15819,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /incidents/autoclose:
+    post:
+      summary: >-
+        Close the incidents that have been RESOLVED for at least resolvedForDays
+        days (the platform's rule is 14 days after resolution). Each due
+        incident, oldest first, up to limit, is closed by the ordinary incident
+        update in its own transaction, after it is re-checked as still due under
+        its row lock: state CLOSED, closedOn now, closedBy the system user
+        (AUTOCLOSURE_SYSTEM_USER_EMAIL, the user case auto-closure closes as;
+        null when that user has no user record), its open incident tasks closed
+        as on a manual close. No comment or work note is added, and the
+        resolution code and notes are not required. With
+        DATA_SOURCE=postgres-servicenow-dual-write the close is written back to
+        the backing data source like any other incident update. An incident
+        with no resolvedOn is measured from its last update. Internal callers
+        only. Postgres data sources only. An optional dailyLimit caps the closes per
+        UTC day. Backs operations/csm-scheduled-tasks (incident_autoclose).
+      operationId: autocloseIncidents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentAutocloseRequest'
+      responses:
+        "200":
+          description: >-
+            What was closed (or, in a dry run, would be) and what failed. A failed
+            incident stays RESOLVED and is selected again by the next call.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentAutocloseResponse'
+        "400":
+          description: >-
+            resolvedForDays missing or outside 1-3650, limit outside 0-1000,
+            dailyLimit outside 0-100000, or an unknown field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid caller credential (the route is internal-only).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Caller is not internal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not used; declared for consistency with every writable endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: >-
+            Incident auto-close is not available on this entity-service
+            (DATA_SOURCE=servicenow or no database); the reason is logged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /incidents:
     post:
       summary: Create a new incident.
@@ -35043,6 +35117,21 @@ components:
           type: string
           nullable: true
           description: Timestamp when the incident was resolved. Populated for resolved/closed ServiceNow incidents; null otherwise.
+        closedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            When the incident entered Closed (Postgres data sources, migration
+            0255). Null for an incident closed before that migration, and when
+            incidents are not read from Postgres (DATA_SOURCE=servicenow).
+        closedBy:
+          type: string
+          nullable: true
+          description: >-
+            Name of the user the close is attributed to: the closer on a manual
+            close, the auto-close's system user on an auto-close. Null when
+            unknown, and on an auto-close whose system user has no user record.
         resolvedWithParent:
           type: boolean
           readOnly: true
@@ -40195,6 +40284,91 @@ components:
     AutoclosureStage:
       type: string
       enum: [release_hold, first_reminder, second_reminder, close]
+    IncidentAutocloseRequest:
+      type: object
+      additionalProperties: false
+      required: [resolvedForDays]
+      properties:
+        resolvedForDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: How many days an incident must have been RESOLVED (the platform uses 14).
+        limit:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          default: 200
+          description: Most incidents one call selects, oldest first. 0 or absent means 200.
+        dailyLimit:
+          type: integer
+          minimum: 0
+          maximum: 100000
+          default: 0
+          description: >-
+            Most incidents that may enter CLOSED per UTC day. 0 or absent means
+            no cap. The budget is dailyLimit minus the incidents closed since
+            00:00 UTC today, counting every close (manual ones included, not
+            only auto-closes), and the page is clamped to it. Once it is used
+            up the call returns an empty page with dailyLimitReached true. A
+            dry run applies the same budget.
+        dryRun:
+          type: boolean
+          default: false
+          description: >-
+            Select and return what is due as "closed" without changing anything.
+            Calling again returns the same page.
+    IncidentAutocloseClosed:
+      type: object
+      required: [id, number, resolvedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        resolvedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: The stored resolvedOn; null when the incident had none and was due by its last update.
+    IncidentAutocloseFailed:
+      type: object
+      required: [id, number, error]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        error:
+          type: string
+          description: Why it was not closed. Database errors are only logged and reported generically.
+    IncidentAutocloseResponse:
+      type: object
+      required: [dryRun, closed, failed, more, dailyLimitReached]
+      properties:
+        dryRun:
+          type: boolean
+        closed:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentAutocloseClosed'
+        failed:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentAutocloseFailed'
+        more:
+          type: boolean
+          description: >-
+            True when the call selected limit incidents, so more may be due;
+            call again. Always false when dailyLimitReached is true.
+        dailyLimitReached:
+          type: boolean
+          description: >-
+            True when the request's dailyLimit is used up: before the call, by
+            the call, or, in a dry run, by what the run would close. Never true
+            without a dailyLimit.
     ACPReopenCheckRequest:
       type: object
       additionalProperties: false
