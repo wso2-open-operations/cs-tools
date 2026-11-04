@@ -49,7 +49,6 @@ import {
   CALL_REQUEST_LEAD_MINUTES_BY_PRIORITY_ID,
   CALL_REQUEST_STATE_CANCELLED,
   CALL_REQUEST_STATE_CUSTOMER_REJECTED,
-  CALL_REQUEST_STATE_KEY_BY_ID,
   CALL_REQUEST_STATE_PENDING_ON_WSO2,
   CALL_SCHEDULABLE_CASE_STATUSES,
   type CaseStatus,
@@ -115,34 +114,6 @@ export default function CallsPanel({
 
   const needsTimeZone =
     !isUserMeLoading && !!userDetails && !resolvedUserTimeZone;
-
-  // Derive filtered state keys from project filters (all non-Canceled states for search body).
-  // callRequestStates' own `id` is entity-service's string enum key
-  // ("pending_on_wso2", ...), not a number -- Number(s.id) is always NaN and
-  // gets filtered out, so this used to silently resolve to [], which
-  // useGetCallRequests treats as "no filter" (stateKeys.length > 0 gate):
-  // every state, Canceled included, despite this comment's own stated intent
-  // (a real, silently-degraded bug, not a crash). CALL_REQUEST_STATE_KEY_BY_ID
-  // mirrors backend-v2's own callRequestStateKeyToEnum (reversed) so this stays
-  // in the same fixed numeric scheme as approveStateKey/rejectStateKey above.
-  // The Canceled key itself is explicitly dropped after mapping -- a second,
-  // previously-masked bug: with the id->number mapping now working,
-  // CALL_REQUEST_STATE_KEY_BY_ID.canceled resolves to a real number
-  // (CALL_REQUEST_STATE_CANCELLED) just like every other state, so it would
-  // otherwise stay in the list and the search body would ask for Canceled
-  // call requests explicitly, the opposite of this comment's own stated
-  // intent. useGetProjectFilters' own upstream Canceled-removal doesn't catch
-  // this either -- it compares Number(s.id), which is NaN for the string id
-  // "canceled" and so never excludes it there -- so filtering it out here,
-  // after the mapping, is the fix, not a belt-and-suspenders duplicate.
-  const callRequestStateKeys = useMemo<number[] | undefined>(() => {
-    if (!projectFilters?.callRequestStates) return undefined;
-    return projectFilters.callRequestStates
-      .map((s) => CALL_REQUEST_STATE_KEY_BY_ID[s.id])
-      .filter(
-        (n): n is number => n !== undefined && n !== CALL_REQUEST_STATE_CANCELLED,
-      );
-  }, [projectFilters]);
 
   // The API's own severityBasedAllocationTime is checked first (in case it
   // is ever populated -- it is currently always an empty map, since no
@@ -231,7 +202,7 @@ export default function CallsPanel({
     hasNextPage,
     isFetchingNextPage,
     isFetchNextPageError,
-  } = useGetCallRequests(projectId, caseId, callRequestStateKeys);
+  } = useGetCallRequests(projectId, caseId);
   const patchCallRequest = usePatchCallRequest(projectId, caseId);
 
   const allCallRequests = useMemo(
