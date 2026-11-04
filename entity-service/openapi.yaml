@@ -3456,6 +3456,127 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /users/me/dashboards/{id}/link:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get whether anyone with the link may view one of the caller's saved dashboards.
+      description: >
+        Postgres-only. Owner only: a dashboard that is not the caller's
+        (missing, or another user's) is not found. Off for every dashboard
+        until its owner turns it on.
+      operationId: getCustomDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Turn on the link to one of the caller's saved dashboards.
+      description: >
+        Postgres-only. No request body. Owner only. Any internal staff member
+        who opens the link (POST /users/me/shared-dashboards/link) can then
+        view the dashboard, view only, while the link stays on. Turning on a
+        link that is already on keeps the same link (200).
+      operationId: enableCustomDashboardLink
+      responses:
+        "200":
+          description: The dashboard's link, on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomDashboardLink'
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Turn off the link to one of the caller's saved dashboards.
+      description: >
+        Postgres-only. Owner only. Everyone who had the dashboard only
+        through the link loses it, and the old link stops working; turning
+        it on again makes a new link. Turning off a link that is off is not
+        an error (204).
+      operationId: disableCustomDashboardLink
+      responses:
+        "204":
+          description: The link is off.
+        "400":
+          description: Bad request — the id is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the caller has no dashboard with that id, or no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /users/me/shared-dashboards:
     get:
       summary: List the dashboards other users shared with the caller.
@@ -3484,6 +3605,57 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Not found — no platform user matches the token email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /users/me/shared-dashboards/link:
+    post:
+      summary: Open a saved dashboard's link.
+      description: >
+        Postgres-only, internal staff only. The link id is in the body, not
+        the path, so it stays out of access logs. From then on the dashboard
+        is listed under GET /users/me/shared-dashboards while the link stays
+        on, unless the caller owns it: through the link (sharedViaLink true),
+        or through a person or team share while the caller has one, and
+        through the link again if that share goes. Opening it again changes
+        nothing. A link that is unknown or off, and a caller who is not
+        internal staff, are not found.
+      operationId: openCustomDashboardLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenCustomDashboardLinkRequest'
+      responses:
+        "200":
+          description: The dashboard the link opened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OpenedCustomDashboardLink'
+        "400":
+          description: Bad request — the body is not valid, linkId is not a UUID, or the token carries no email.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — x-user-id-token header is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found — the link does not open a dashboard (unknown, or turned off), the caller is not internal staff, or no platform user matches the token email.
           content:
             application/json:
               schema:
@@ -16708,6 +16880,54 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /time-cards/aggregate:
+    post:
+      summary: >-
+        Count time cards and sum their logged minutes per state, user,
+        project or day (Postgres data sources only).
+      description: >-
+        Matches exactly the time cards POST /time-cards/search matches for the
+        same filters. A "day" grouping requires filters.startDate and
+        filters.endDate, a window of at most 31 days (both inclusive), and
+        returns one bucket per day of that window in date order, days without
+        cards included at zero;
+        maxGroups and measure do not apply to it. Refused with 400 when the
+        configured data source has no time card aggregate.
+      operationId: aggregateTimeCards
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AggregateTimeCardsRequest'
+      responses:
+        "200":
+          description: >-
+            Time card counts and summed minutes per value of groupBy
+            (groups[].totalMinutes, othersMinutes and totalMinutes are set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateResponse'
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /cases/time-cards/search:
     post:
       summary: Search time cards rolled up by case (ServiceNow data source only).
@@ -24745,6 +24965,11 @@ components:
         count:
           type: integer
           description: Number of matching records in this bucket.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on this bucket's time cards, in minutes. Set only by
+            POST /time-cards/aggregate.
 
     AggregateResponse:
       type: object
@@ -24768,6 +24993,17 @@ components:
           description: >-
             Total number of records matching the request's filters; always
             equals the sum of groups' counts plus othersCount.
+        othersMinutes:
+          type: integer
+          description: >-
+            The minutes counterpart of othersCount. Set only by
+            POST /time-cards/aggregate.
+        totalMinutes:
+          type: integer
+          description: >-
+            Time logged on every matching time card, in minutes; equals the
+            sum of groups' totalMinutes plus othersMinutes. Set only by
+            POST /time-cards/aggregate.
 
     AddCaseTagRequest:
       type: object
@@ -27053,6 +27289,35 @@ components:
           type: string
           enum: [asc, desc]
           description: Sort direction. Defaults to desc when omitted.
+
+    AggregateTimeCardsRequest:
+      type: object
+      required: [groupBy]
+      properties:
+        filters:
+          $ref: '#/components/schemas/SearchTimeCardsFilters'
+        groupBy:
+          type: string
+          enum: [state, user, project, day]
+          description: >-
+            What to group by. "day" groups by work date and requires
+            filters.startDate and filters.endDate (at most 31 days, both
+            inclusive). A card with no project has no "project" bucket;
+            it is counted in othersCount and othersMinutes.
+        measure:
+          type: string
+          enum: [count, minutes]
+          default: count
+          description: >-
+            What the buckets are ranked by, and so which survive maxGroups.
+            Ignored for "day".
+        maxGroups:
+          type: integer
+          minimum: 0
+          default: 10
+          description: >-
+            How many buckets to return; the rest are folded into othersCount
+            and othersMinutes. Ignored for "day".
 
     SearchTimeCardsRequest:
       type: object
@@ -30271,9 +30536,41 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomDashboardTeamShare'
+    CustomDashboardLink:
+      type: object
+      required: [enabled, openedBy]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether anyone internal with the link may view the dashboard.
+        linkId:
+          type: string
+          format: uuid
+          description: The id in the link; absent while the link is off. A new one each time the link is turned on.
+        openedBy:
+          type: integer
+          description: How many people have opened the link since it was turned on (and so see the dashboard as shared with them). Who they are is not listed.
+    OpenCustomDashboardLinkRequest:
+      type: object
+      required: [linkId]
+      additionalProperties: false
+      properties:
+        linkId:
+          type: string
+          format: uuid
+    OpenedCustomDashboardLink:
+      type: object
+      required: [dashboardId, own]
+      properties:
+        dashboardId:
+          type: string
+          format: uuid
+        own:
+          type: boolean
+          description: True when the caller owns the dashboard (read it as one of their own); otherwise read it with GET /users/me/shared-dashboards/{id}.
     SharedCustomDashboardSummary:
       type: object
-      required: [id, name, owner, sharedViaTeam, sharedOn, updatedOn]
+      required: [id, name, owner, sharedViaTeam, sharedViaLink, sharedOn, updatedOn]
       properties:
         id:
           type: string
@@ -30289,7 +30586,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
           nullable: true
-          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name). sharedOn is that share's date.
+          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name). sharedOn is that share's date.
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-dashboards/link); false for a person or team share.
         sharedOn:
           type: string
           format: date-time
@@ -30307,7 +30607,7 @@ components:
             $ref: '#/components/schemas/SharedCustomDashboardSummary'
     SharedCustomDashboard:
       type: object
-      required: [id, name, definition, owner, sharedViaTeam, sharedOn, updatedOn]
+      required: [id, name, definition, owner, sharedViaTeam, sharedViaLink, sharedOn, updatedOn]
       properties:
         id:
           type: string
@@ -30326,7 +30626,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/CustomDashboardTeamShareTeam'
           nullable: true
-          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly (a direct share wins; with several teams, the first by name). sharedOn is that share's date.
+          description: The caller's team the dashboard was shared with; null when it was shared with the caller directly or only by link (a direct share wins, then a team share, then the link; with several teams, the first by name). sharedOn is that share's date.
+        sharedViaLink:
+          type: boolean
+          description: True when the caller has the dashboard only because they opened its link (POST /users/me/shared-dashboards/link); false for a person or team share.
         sharedOn:
           type: string
           format: date-time

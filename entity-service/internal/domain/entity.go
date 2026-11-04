@@ -3422,10 +3422,15 @@ type CaseGroup struct {
 // display form (identical to Key when the grouped field has no separate
 // label, e.g. an already-friendly account name). Count is the number of
 // matching records whose value of the grouped field falls in this bucket.
+//
+// TotalMinutes is set only by POST /time-cards/aggregate (the summed time
+// logged on the bucket's cards); every other aggregate leaves it nil, so
+// their responses carry no such field.
 type AggregateBucket struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Count int    `json:"count"`
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Count        int    `json:"count"`
+	TotalMinutes *int   `json:"totalMinutes,omitempty"`
 }
 
 // AggregateResponse is the shared result shape for every resource's dedicated
@@ -3435,10 +3440,16 @@ type AggregateBucket struct {
 // cap into a single count. TotalRecords is the total number of records
 // matching the request's filters, and always equals the sum of Groups'
 // counts plus OthersCount.
+//
+// OthersMinutes and TotalMinutes are the minute counterparts of OthersCount
+// and TotalRecords, set (like AggregateBucket.TotalMinutes) only by
+// POST /time-cards/aggregate.
 type AggregateResponse struct {
-	Groups       []AggregateBucket `json:"groups"`
-	OthersCount  int               `json:"othersCount"`
-	TotalRecords int               `json:"totalRecords"`
+	Groups        []AggregateBucket `json:"groups"`
+	OthersCount   int               `json:"othersCount"`
+	TotalRecords  int               `json:"totalRecords"`
+	OthersMinutes *int              `json:"othersMinutes,omitempty"`
+	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
 // CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
@@ -5389,6 +5400,45 @@ type SearchTimeCardsRequest struct {
 	Filters    *SearchTimeCardsFilters `json:"filters,omitempty"`
 	SortBy     TimeCardSort            `json:"sortBy"`
 	Pagination Pagination              `json:"pagination"`
+}
+
+// Time card aggregate groupings (AggregateTimeCardsRequest.GroupBy).
+const (
+	TimeCardGroupByState   = "state"
+	TimeCardGroupByUser    = "user"
+	TimeCardGroupByProject = "project"
+	TimeCardGroupByDay     = "day"
+)
+
+// Time card aggregate measures (AggregateTimeCardsRequest.Measure): what the
+// buckets are ranked by, and so which ones survive the MaxGroups cap.
+const (
+	TimeCardMeasureCount   = "count"
+	TimeCardMeasureMinutes = "minutes"
+)
+
+// MaxTimeCardAggregateDays caps a "day" grouping's window (startDate to
+// endDate, both inclusive): one bucket per day, so the window is the
+// response size.
+const MaxTimeCardAggregateDays = 31
+
+// AggregateTimeCardsRequest is the request body for POST /time-cards/aggregate:
+// the time cards POST /time-cards/search would match for Filters, counted and
+// their logged minutes summed per value of GroupBy.
+//
+// GroupBy is one of the TimeCardGroupBy* values (required). "day" requires
+// both Filters.StartDate and Filters.EndDate, a window of at most
+// MaxTimeCardAggregateDays (both inclusive), and returns one bucket per day of
+// that window in date order, including days with no cards; MaxGroups and
+// Measure do not apply to it.
+// Every other grouping returns the top MaxGroups buckets (default 10) ranked
+// by Measure ("count", the default, or "minutes"), the rest folded into
+// OthersCount / OthersMinutes.
+type AggregateTimeCardsRequest struct {
+	Filters   *SearchTimeCardsFilters `json:"filters,omitempty"`
+	GroupBy   string                  `json:"groupBy"`
+	Measure   string                  `json:"measure,omitempty"`
+	MaxGroups int                     `json:"maxGroups,omitempty"`
 }
 
 // TimeCardRef is a lightweight reference used for user, approvedBy, and project fields.

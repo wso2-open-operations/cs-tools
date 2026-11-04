@@ -4720,13 +4720,25 @@ export interface BeDashboardGroupByConfig {
    * existing widget config is unaffected. Meaningless when `bucket` is set,
    * same as `maxGroups`/`othersLabel`. */
   hideOthers?: boolean;
+  /** What a `time_card` widget's slices show: `"count"` (the default, the
+   * number of cards) or `"hours"` (the time logged on them). Sent to
+   * `POST /time-cards/aggregate` as `"count"` / `"minutes"`, which also
+   * decides which buckets survive `maxGroups`. Backend-enforced to appear
+   * only on a field-grouped `time_card` widget; absent everywhere else. */
+  measure?: BeTimeCardMeasure;
 }
+
+/** `BeDashboardGroupByConfig.measure`'s values. */
+export type BeTimeCardMeasure = "count" | "hours";
 
 /** One bucket of a `POST /{resourceType}/aggregate` response. */
 export interface BeGroupByBucket {
   key: string;
   label: string;
   count: number;
+  /** Time logged on this bucket's cards, in minutes. Only
+   * `POST /time-cards/aggregate` sets it. */
+  totalMinutes?: number;
 }
 
 /** Response shape of `POST /{resourceType}/aggregate`. `othersCount` covers
@@ -4736,6 +4748,10 @@ export interface BeGroupByResponse {
   groups: BeGroupByBucket[];
   othersCount: number;
   totalRecords: number;
+  /** The minutes counterparts of `othersCount` / `totalRecords`. Only
+   * `POST /time-cards/aggregate` sets them. */
+  othersMinutes?: number;
+  totalMinutes?: number;
 }
 
 /**

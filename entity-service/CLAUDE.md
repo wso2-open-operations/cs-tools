@@ -3968,6 +3968,44 @@ already use — no route path, request, or response shape changed.
   filtering, the same deliberate posture as `AccountContactRepository`/
   `ProjectContactRepository`'s own `callerEmail` parameter below.
 
+## POST /time-cards/aggregate: time card counts and summed minutes for dashboard charts
+
+Counts the time cards `POST /time-cards/search` matches for the same `filters`, and sums
+the minutes logged on them, per `groupBy`: `state`, `user`, `project` or `day`. It reuses
+`timeCardWhereClause` and `timeCardFromJoins`, and sums `timeCardMinutesExpr` (shared with
+`project_stats_repo.go`), so the aggregate can never count a different set of cards from
+the search, or a different total from the search's `totalTime`; keep it that way.
+
+- **Response:** the shared `AggregateResponse`, plus `groups[].totalMinutes`,
+  `othersMinutes` and `totalMinutes`. Those three are pointers with `omitempty`, set only
+  here: every other aggregate leaves them nil and its JSON is unchanged
+  (`aggregate_response_json_test.go` pins both shapes). A zero is sent as `0`, not dropped.
+- **Ranking:** `measure` (`count`, the default, or `minutes`) decides which buckets survive
+  `maxGroups` (default 10); the rest fold into `othersCount` / `othersMinutes`. The top 10
+  users by cards and by hours are different people, so a widget showing hours must send
+  `minutes`.
+- **Keys and labels:** a `state` key is lower-cased (what the `states` filter accepts).
+  `user` and `project` keys are ids. Their labels never come back empty or NULL: a user with
+  no name falls back to their email, then their user name; a project with no name falls back
+  to its key. A NULL `p.name` used to fail the scan. A card with no project has no
+  `project` bucket: it is counted in `othersCount` / `othersMinutes`, so every grouping's
+  totals match the search's.
+- **`day`:** groups by `work_date` and needs both `startDate` and `endDate`, at most
+  `MaxTimeCardAggregateDays` (31) days inclusive, checked in `validateTimeCardAggregate`.
+  The query runs `generate_series` over the window, so every day comes back in date order,
+  days without cards at 0. `maxGroups` and `measure` do not apply.
+- **`DATA_SOURCE=servicenow`:** refused with 400, because the ServiceNow integration has no
+  time card aggregate.
+- **Access:** the route is not `internalOnly`, the same as the search. `time_card` RLS
+  (migration 0144) scopes both. The CSM backend decides who may call it (see the backend's
+  `CLAUDE.md`).
+
+Tests: `time_card_aggregate_service_test.go` (validation, the default cap, the caller
+check, the ServiceNow refusal) and `time_card_aggregate_integration_test.go`
+(`CASE_STATS_TEST_DSN`). The integration fixture is built so that ranking by count and
+ranking by minutes disagree, it has a card with all five minute columns NULL, and the
+search-parity test compares both counts and minutes with `SearchTimeCards`.
+
 ## Linking a case to its originating conversation, and the activity feed's work-note count
 
 Reported live: a case created from a Novera chat ("create case" from an
@@ -11291,6 +11329,60 @@ migration 0079 (`skill*`, `user_skill`, `user_skill_history`). Registered only w
   changed (409). A skill's scale cannot change while any `user_skill` holds a level of it (409).
 - **Manager search** lists active internal people and active skills only, one row per person-skill, every filter
   (skill, level, minimum level value, team key, name or email, user ids) applied in SQL.
+
+## Saved custom dashboards: sharing by link, and dashboards whose owner is deleted
+
+A user's saved dashboard (`custom_dashboard`, migration 0251; `/users/me/dashboards*`) can be shared view
+only with people (`custom_dashboard_share`), with teams (`custom_dashboard_team_share`) and, since
+migration 0275, with anyone internal who has its link. Postgres-only: no other data source holds any of it.
+Saved dashboards are live in production, so a change here must leave the stored rows as they are.
+
+**The link** (migration 0275, `custom_dashboard_link_repo.go`, `custom_dashboard_link_service.go`,
+`custom_dashboard_link_handler.go`):
+
+- `custom_dashboard.link_enabled` is the owner's switch; `link_id` is the id in the link, a new random
+  UUID each time the switch is turned on (never derived from the dashboard's id), so turning it off and on
+  again makes every earlier copy stop working. A CHECK keeps them in step (an id exactly when on); a partial
+  unique index serves the lookup by link id.
+- `GET /users/me/dashboards/{id}/link` answers `{enabled, linkId?, openedBy}`; `PUT` turns it on (no body;
+  on again keeps the same id) and `DELETE` turns it off (204), which in the same transaction deletes the
+  dashboard's `custom_dashboard_link_access` rows, so everyone who had it only through the link loses it.
+  All three touch only the caller's own row: another user's dashboard is the same 404 as a missing one.
+- `POST /users/me/shared-dashboards/link` with `{linkId}` opens a link and answers `{dashboardId, own}`.
+  **The link id is a bearer secret**: it travels in the body (never the path, so it is not in access
+  logs), and no error or log line quotes it (`linkId is not a UUID`, never the value; `writeServiceError`
+  logs validation errors). An unknown link, a link that is off and a caller who is not internal staff all
+  get the same 404, so the answer tells nobody whether a link id ever existed. The owner opening their own
+  link gets `own: true` and no row.
+- **Who counts as having opened it.** `custom_dashboard_link_access` holds one row per (dashboard, user)
+  for every internal user but the owner who opened the link, also one it is already shared with directly
+  or through one of their teams (the Shared list still shows that share, see below), and opening it again
+  adds nothing. So whether the user opened the link before or after being shared the dashboard, it stays
+  in their list through the link when that share goes. `openedBy` counts these rows only, never who; rows
+  go with the dashboard and with the user.
+- **The Shared list** (`ListSharedWithUser` / `GetSharedWithUser`) shows each dashboard once: a direct
+  share wins, then a team share (`sharedViaTeam`), then the link (`sharedViaLink: true`). A link row is
+  kept when a direct or team share is added later, so the dashboard comes back through the link when that
+  share goes.
+
+**Deleting the owner.** `owner_user_id` is ON DELETE SET NULL (migration 0255): a deleted user's dashboards
+stay with no owner while a person or a team they are shared with can still see them, and nobody can edit,
+share, unshare, delete or turn the link of an ownerless dashboard on or off (every owner route matches no
+one). The rule is "kept while a person or a team share is left":
+
+- `trg_custom_dashboard_delete_unshared_orphan` (0255, its function replaced by 0276) runs as the owner
+  goes. **It turns the dashboard's link off** (link id cleared, every `custom_dashboard_link_access` row
+  deleted), so offboarding a user leaves no working link to their dashboards and the people who had one
+  only through the link lose it; then it deletes the dashboard when no person share and no team share is
+  left. People with a direct or team share keep it.
+- Migration 0277 deletes an ownerless dashboard later, once its last share goes and its link is off:
+  `custom_dashboard_delete_if_orphaned(id)`, from AFTER DELETE triggers on both share tables (their rows go
+  when the recipient user or the team is deleted, both cascade) and from an AFTER UPDATE OF `link_enabled`
+  trigger for an ownerless dashboard whose link goes off (0276's own update fires it as the owner goes; it
+  applies the same rule). A dashboard that has its owner is never touched by any of them.
+- The integration tests pin each case: `custom_dashboard_team_share_repo_integration_test.go`
+  (`DeletingTheOwnerKeepsOnlySharedDashboards`), `custom_dashboard_link_repo_integration_test.go`
+  (`DeletingTheOwnerTurnsTheLinkOff`) and `custom_dashboard_orphan_integration_test.go` (0277).
 
 ## Adding a new entity
 

@@ -37,10 +37,20 @@ type stubTimeCardRepo struct {
 	deleteTimeCard          func(ctx context.Context, id, submitterID string) error
 	setTimeCardSNSysID      func(ctx context.Context, id, snSysID string) error
 	getTimeCardSNSysID      func(ctx context.Context, id string) (*string, error)
+	aggregateTimeCards      func(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error)
 }
 
 func (s *stubTimeCardRepo) SearchTimeCards(context.Context, domain.SearchTimeCardsRequest, string) ([]domain.TimeCardView, int, error) {
 	panic("not implemented")
+}
+
+// AggregateTimeCards calls aggregateTimeCards; a test that reaches it
+// without setting it panics, as the stub's other methods do.
+func (s *stubTimeCardRepo) AggregateTimeCards(ctx context.Context, req domain.AggregateTimeCardsRequest, maxGroups int) (domain.AggregateResponse, error) {
+	if s.aggregateTimeCards == nil {
+		panic("not implemented")
+	}
+	return s.aggregateTimeCards(ctx, req, maxGroups)
 }
 func (s *stubTimeCardRepo) SearchCaseTimeCards(context.Context, domain.SearchTimeCardsRequest, string) ([]domain.CaseTimeCardSummary, int, error) {
 	panic("not implemented")

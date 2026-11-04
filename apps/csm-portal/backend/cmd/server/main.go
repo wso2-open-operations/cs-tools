@@ -531,6 +531,11 @@ func main() {
 	route("GET /dashboards/custom/{id}/team-shares", handler.PermWrite, customDashboardHandler.ListCustomDashboardTeamShares)
 	route("PUT /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.AddCustomDashboardTeamShare)
 	route("DELETE /dashboards/custom/{id}/team-shares/{teamKey}", handler.PermWrite, customDashboardHandler.RemoveCustomDashboardTeamShare)
+	// Sharing a saved dashboard by link (owner only): anyone internal who
+	// opens the link sees it under Shared Dashboards while it stays on.
+	route("GET /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.GetCustomDashboardLink)
+	route("PUT /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.EnableCustomDashboardLink)
+	route("DELETE /dashboards/custom/{id}/link", handler.PermWrite, customDashboardHandler.DisableCustomDashboardLink)
 	// Dashboards other users shared with the caller, view only. "shared" is a
 	// literal segment, like "custom", so it never collides with {dashboardId}.
 	// PermView, like the system dashboards: anyone a dashboard can be shared
@@ -538,6 +543,9 @@ func main() {
 	// widgets query with the viewer's own permissions.
 	route("GET /dashboards/shared", handler.PermView, customDashboardHandler.ListSharedDashboards)
 	route("GET /dashboards/shared/{id}", handler.PermView, customDashboardHandler.GetSharedDashboard)
+	// Opening a link is PermView like reading a share: anyone a link can
+	// reach (any internal user) can open it. The link id is in the body.
+	route("POST /dashboards/shared/link", handler.PermView, customDashboardHandler.OpenDashboardLink)
 	route("GET /updates/product-update-levels", handler.PermViewUpdates, updatesHandler.GetProductUpdateLevels)
 	route("POST /updates/levels/search", handler.PermViewUpdates, updatesHandler.SearchUpdatesBetweenUpdateLevels)
 	route("GET /users/me", handler.PermAuthenticated, usersHandler.GetMe)
@@ -825,6 +833,7 @@ func main() {
 	route("POST /sla-engine/recalculate", handler.PermAdmin, slaEngineHandler.RequestRecalculation)
 	route("POST /configuration-items/search", handler.PermView, configurationItemHandler.SearchConfigurationItems)
 	route("POST /time-cards/search", handler.PermTimeCardsAndUpdates, timeCardHandler.SearchTimeCards)
+	route("POST /time-cards/aggregate", handler.PermViewTimeCardTotals, timeCardHandler.AggregateTimeCards)
 	route("POST /time-cards", handler.PermTimeCardsAndUpdates, timeCardHandler.CreateTimeCard)
 	route("PATCH /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.UpdateTimeCard)
 	route("DELETE /time-cards/{id}", handler.PermTimeCardsAndUpdates, timeCardHandler.DeleteTimeCard)

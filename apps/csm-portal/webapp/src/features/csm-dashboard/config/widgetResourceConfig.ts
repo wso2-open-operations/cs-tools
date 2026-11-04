@@ -1126,6 +1126,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   time_card: {
     searchEndpoint: "/time-cards/search",
+    // Counts and summed minutes per state / user / project / day; a widget's
+    // `groupBy.measure` picks which one its slices show (see
+    // useWidgetGroupByData). CS engineers and admins only.
+    groupByEndpoint: "/time-cards/aggregate",
     // The preview page's URL round-trip decodes every filter value as a
     // comma-split array; the search's `startDate`/`endDate` are single
     // dates, so unwrap them back (a no-op for a tile's own fetch, whose

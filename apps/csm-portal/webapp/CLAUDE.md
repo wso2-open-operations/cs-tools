@@ -618,6 +618,63 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## My Dashboards: the name on Save, and Rename
+
+A saved dashboard's name is its definition's `displayName` (entity-service keeps it as the row's `name`:
+unique per owner ignoring case, at most 255 characters). The user sets it in one dialog,
+`DashboardNameDialog` (`features/csm-custom-dashboards/components`), used in three places:
+
+- **Save on the generate page**, for a new dashboard and for "Edit with AI" alike
+  (`GenerateDashboardPage.tsx`): the dialog opens with the draft's name (the one the model gave it, or
+  the edited dashboard's own), so keeping it is one click, and the draft is PUT under the name
+  confirmed. An edit is still saved in place, under the same id.
+- **Rename in My Dashboards** (`MyDashboardsPage.tsx`, the pencil icon beside each switcher entry's
+  delete icon): `useRenameCustomDashboard` reads the dashboard (`GET /dashboards/custom/{id}`), sets
+  only `displayName` and PUTs it back under the same id. The row is updated in place, so its widgets,
+  shares (people and teams) and creation time stay. Rename stays off until the name actually changes.
+- A refusal shows **in the dialog, under the field**, never in a banner, and the dialog stays open:
+  a name the user already has (409, `saveErrorMessage` / `renameErrorMessage`, one wording), another
+  4xx in the backend's words (the 50-dashboard limit, a dashboard that is gone, one saved under rules
+  that have since changed: its read is a 422 and it is never saved again). The name is trimmed;
+  empty and over-length names never reach the backend.
+
+Phase 1 of this feature is in production, so a change here must leave users' saved dashboards as they
+are. Rename and an edit's Save send the served form back, and only the backend's round trip
+(`draftToDefinition`, see `apps/csm-portal/backend`'s own `CLAUDE.md`, "Custom dashboards") turns it
+into the stored definition unchanged: do not build a saved dashboard's PUT from anything other than
+what `GET /dashboards/custom/{id}` returned.
+
+## Sharing a dashboard by link (the Share dialog's Anyone tab, and the link page)
+
+The owner shares a saved dashboard with people, teams or anyone internal who has its link, from
+`ShareCustomDashboardDialog` (`features/csm-custom-dashboards/components`), whose toggle reads
+**People / Teams / Anyone**. The rules are entity-service's (its `CLAUDE.md`, "Saved custom dashboards:
+sharing by link"); the webapp only shows them.
+
+- **Anyone tab**: `DashboardLinkSection` in place of the search. The switch "Anyone with CSM Portal Viewer
+  access and the link can view" turns the link on (`usePutCustomDashboardLink`) or off
+  (`useDeleteCustomDashboardLink`), both answering into the cached link (`useGetCustomDashboardLink`,
+  key `CSM_CUSTOM_DASHBOARD_LINK`). While it is on: the link (`dashboardLinkUrl`,
+  `utils/dashboardLinkUrl.ts`, `/dashboard/shared/link/<linkId>` on this origin) with a Copy button, and
+  "Opened by N people" (never who). Turning it off takes the dashboard from everyone who had it only
+  through the link; turning it on again makes a new link.
+- **"Shared with"**, under every tab, starts with an "Anyone with CSM Portal Viewer access" row while the
+  link is on. The dialog reads the same link query, so the switch changes the row at once. "Not shared
+  with anyone yet." shows only when no person, no team and the link is known to be off: a link still
+  loading waits, and one that could not be read says so instead.
+- **The link page** (`pages/OpenDashboardLinkPage.tsx`, route `dashboard/shared/link/:linkId` in
+  `App.tsx`, under the Dashboards tab strip): opens the link once (`useOpenDashboardLink`, the id in the
+  POST body, never a URL the backend logs) and replaces itself with `/dashboard/my/<id>` when the caller
+  owns it, else `/dashboard/shared/<id>`. A 4xx shows the backend's words ("Couldn't open the link", with
+  a way to Shared Dashboards); anything else is generic; the link id is never shown. **The answer is kept
+  in the page's own state from `mutateAsync`, not read from the mutation**: `main.tsx` renders under
+  `StrictMode`, whose remount detaches `useMutation`'s observer, so `isSuccess` never arrived and the page
+  hung on "Opening the dashboard…" (a test runs it under `StrictMode`). A ref keeps the call to one per
+  link id.
+- **Shared Dashboards** names one the user has only through its link "Opened from a link shared by
+  <owner>" (`sharedViaLink`); a team share's wording wins when both are set. A dashboard whose owner was
+  deleted names them "a former user"; it stays while somebody can still see it, its link included.
+
 ## Testing
 
 - Runner: Vitest (`jsdom` environment), configured inline in `vite.config.ts` — no separate `vitest.config.ts`.
@@ -755,6 +812,26 @@ everything past the cap rolls into a response `othersCount`).
   where an "Others" wedge is a legitimate completeness signal — so this is a deliberate, bar-specific
   override, not something a widget's config can opt back into. `shape: "pie"` is unaffected and still
   honors `groupBy.hideOthers` as configured.
+- **Time card totals (`groupBy.measure`, `time_card` only).** A `time_card` widget groups through
+  `POST /time-cards/aggregate` (its `groupByEndpoint`) by `state`, `user`, `project` or `day`. With
+  `groupBy.measure: "hours"`, `useWidgetGroupByData` sends `measure: "minutes"` and each slice's
+  `value` is the bucket's `totalMinutes / 60`, with Others from `othersMinutes`. With `"count"` it sends
+  `measure: "count"`, and with no measure it sends none; both show card counts. Every other widget's
+  request carries no `measure` key at all (the backend refuses one anywhere else), so their requests
+  are unchanged. A `day` grouping comes back as one bucket per day in date order, empty days at 0,
+  and the slices keep that order, labelled as short local dates ("Oct 30", `formatDayLabel` in
+  `utils/timeCardTotals.ts`; never `new Date("YYYY-MM-DD")`, which is UTC midnight and shows the previous
+  day west of UTC). With hours, `DashboardWidgetTile` passes `formatHours` ("12.5 h", one decimal) as
+  `formatValue` to `DashboardBarChart` (bar labels and tooltip) and `DashboardPieChart` (outer labels,
+  legend, centre total, and the legend's accessible name in place of "N cases"), and uses it for the
+  title's total badge. Without a `formatValue` both charts render exactly as before. A bucket's
+  click-through (`bucketQuery`) opens the time card preview list filtered the way the time card search
+  takes it: `states`, `userIds` or `projectIds` as one-item lists, and a day as `startDate` = `endDate` =
+  that day (it wins over the widget's own window when merged). The route is CS engineer and admin
+  only (`PermViewTimeCardTotals`), so for any other role (time card approver and viewer included) the
+  backend answers 403, `useWidgetGroupByData` reports it as `isForbidden`, and the tile says "You don't
+  have access to time card totals." in place of the chart, not the error. Any other failure is still
+  the normal error.
 - **`DashboardBarChart`'s x-axis category labels (account/bucket names) always render horizontally,
   word-wrapped onto up to two lines — never rotated.** Found live: recharts' own default `<XAxis>`
   tick silently drops a label it decides doesn't fit at the tile's rendered width — with several real,
