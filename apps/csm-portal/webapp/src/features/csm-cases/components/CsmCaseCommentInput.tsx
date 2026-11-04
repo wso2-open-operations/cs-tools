@@ -61,6 +61,7 @@ import {
   uploadQueuedImages,
   useInlineImageStatus,
 } from "@features/csm-cases/api/inlineImageUploads";
+import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
 /** A file staged for upload, with the display name chosen in the modal. */
@@ -161,12 +162,12 @@ function isEmpty(html: string): boolean {
 }
 
 /**
- * Whether there is nothing to send: no text and no image. An inline image counts
- * as content even though it has no text; `isEmpty` stays text-only, for the
- * checks that are about what the reply says.
+ * Whether there is nothing to send: no text and no image (see
+ * {@link hasCommentContent}). `isEmpty` stays text-only, for the checks that are
+ * about what the reply says.
  */
 function isBlank(html: string): boolean {
-  return isEmpty(html) && !/<img\b/i.test(html);
+  return !hasCommentContent(html);
 }
 
 /**

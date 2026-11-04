@@ -100,6 +100,7 @@ import {
   pendingCustomerProposal,
 } from "@features/csm-operations/utils/changeRequests";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import { AttachmentsWidget, TagsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
@@ -1334,9 +1335,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
+                  if (hasCommentContent(bodyHtml)) {
                     await postComment.mutateAsync({
                       changeRequestId: id,
                       bodyHtml,
