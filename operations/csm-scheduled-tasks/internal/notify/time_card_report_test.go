@@ -103,6 +103,28 @@ func TestRenderTimeCardReportEmpty(t *testing.T) {
 	}
 }
 
+// The report goes to external contacts, so it must carry no link at all, in
+// particular none into the internal portal. The only URLs allowed are the
+// two XML namespace identifiers every XHTML mail declares.
+func TestTimeCardReportHasNoLinks(t *testing.T) {
+	empty := sampleTimeCardReport()
+	empty.Cases, empty.Totals = nil, timecards.Totals{}
+	for name, html := range map[string]string{
+		"with cases": notify.RenderTimeCardReport(sampleTimeCardReport()),
+		"no data":    notify.RenderTimeCardReport(empty),
+	} {
+		html = strings.NewReplacer(
+			"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd", "",
+			"http://www.w3.org/1999/xhtml", "",
+		).Replace(html)
+		for _, banned := range []string{"href", "<a ", "<img", "src=", "http://", "https://", "mailto:"} {
+			if strings.Contains(strings.ToLower(html), banned) {
+				t.Errorf("%s: the external report contains %q", name, banned)
+			}
+		}
+	}
+}
+
 func TestTimeCardReportSubject(t *testing.T) {
 	r := sampleTimeCardReport()
 	if got, want := notify.TimeCardReportSubject(r), "Time Card Report - Acme Corp - April 2030"; got != want {
