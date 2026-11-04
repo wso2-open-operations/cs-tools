@@ -17,6 +17,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import { IdleStateContext } from "@providers/IdleStateContext";
 
 const { MockEventSource, mockInstances } = vi.hoisted(() => {
   const mockInstances: InstanceType<typeof MockEventSource>[] = [];
@@ -78,8 +79,14 @@ const invalidateQueriesMock = vi.fn();
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 queryClient.invalidateQueries = invalidateQueriesMock;
 
+let idleValue = false;
+
 function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <IdleStateContext.Provider value={idleValue}>{children}</IdleStateContext.Provider>
+    </QueryClientProvider>
+  );
 }
 
 function renderStream(initialIds: string[], onCaseUpdated?: (caseId: string) => void) {
@@ -151,6 +158,7 @@ describe("useMultiplexedCaseStream", () => {
     getTokensMock.mockReset().mockResolvedValue({ token: "access-token", idToken: "id-token" });
     apiConfigMock.streamUrl = "https://stream.example.test";
     apiConfigMock.streamEnabled = true;
+    idleValue = false;
   });
 
   afterEach(() => {
@@ -702,6 +710,66 @@ describe("useMultiplexedCaseStream", () => {
 
       act(() => setDocumentVisibility("visible"));
       expect(mockInstances).toHaveLength(1);
+    });
+  });
+
+  describe("idle (session warning showing)", () => {
+    it("does not connect while idle", async () => {
+      idleValue = true;
+      renderStream([ID_A]);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockInstances).toHaveLength(0);
+      expect(getTokensMock).not.toHaveBeenCalled();
+    });
+
+    it("closes the open stream when idle starts", async () => {
+      const view = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      idleValue = true;
+      view.rerender({ ids: [ID_A] });
+      expect(mockInstances[0].closed).toBe(true);
+      expect(mockInstances).toHaveLength(1);
+    });
+
+    it("cancels a pending reconnect timer when idle starts", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const view = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      emitError(mockInstances[0], 500);
+      idleValue = true;
+      view.rerender({ ids: [ID_A] });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+      });
+      expect(mockInstances).toHaveLength(1);
+    });
+
+    it("reconnects when idle clears, without waiting out a backoff delay", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const view = renderStream([ID_A]);
+      await waitFor(() => expect(mockInstances).toHaveLength(1));
+
+      // Two consecutive errors push the backoff attempt up.
+      emitError(mockInstances[0], 500);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      await waitFor(() => expect(mockInstances).toHaveLength(2));
+      emitError(mockInstances[1], 500);
+
+      idleValue = true;
+      view.rerender({ ids: [ID_A] });
+      expect(mockInstances).toHaveLength(2);
+
+      idleValue = false;
+      view.rerender({ ids: [ID_A] });
+      await waitFor(() => expect(mockInstances).toHaveLength(3));
+      expect(mockInstances[2].closed).toBe(false);
     });
   });
 });
