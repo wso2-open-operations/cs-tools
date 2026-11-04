@@ -16,6 +16,15 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 
+/**
+ * staleTime for the per-case comment and activity queries. Both are refreshed
+ * by the `case_updated` stream (see invalidateCaseById) and by their own
+ * mutations, so a longer window only suppresses redundant refetches when
+ * remounting a case view. Not for queries the stream does not cover. Matches
+ * the case detail query.
+ */
+export const CASE_QUERY_STALE_TIME_MS = 30_000;
+
 /** Base delay before the first reconnect attempt after the stream errors out or drops. */
 const RECONNECT_BASE_DELAY_MS = 3_000;
 /** Reconnect delay never grows past this while still within MAX_BACKOFF_ATTEMPTS. */
