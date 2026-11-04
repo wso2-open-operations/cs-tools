@@ -41,8 +41,9 @@
 -- grant, or a turn on T that a lead placed by hand and that is not over yet:
 -- from today on, or started earlier and still running (an overnight turn). A
 -- MOVE turn is the span's own and goes with it. They are then on both teams,
--- which a rota admin can finish from Rota Access. Someone with two rows on T
--- gets one row on H, as a sub_lead if either row was one.
+-- which a rota admin can finish from Rota Access. A person's rows on T are
+-- judged together: someone with two rows there gets one row on H, a sub_lead
+-- if either was one, and the evidence counts from the earlier of the two.
 --
 -- Data only: no table, column, type or constraint changes. Names nobody.
 -- Re-runnable: a second run finds them on their own team and changes nothing.
@@ -66,48 +67,57 @@ span AS (
      WHERE lower(k.moves_to_team_key) = lower(ab.team_key)
        AND ab.home_team_key IS NOT NULL
        AND lower(ab.home_team_key) <> lower(ab.team_key)
+),
+-- A person's rows on one team, taken together: a duplicate row must not be
+-- judged apart from the other (one engineer row, one sub_lead row).
+tm AS (
+    SELECT m.user_id, m.team_id,
+           bool_and(m.role IN ('engineer', 'sub_lead')) AS plain,
+           bool_or(m.role = 'sub_lead') AS sub_lead,
+           bool_or(m.alert_tier IS NOT NULL) AS tiered,
+           MIN(m.created_on) AS joined
+      FROM team_member m
+     GROUP BY m.user_id, m.team_id
 )
-SELECT m.id AS member_id, m.user_id, m.role, m.alert_tier,
+SELECT tm.user_id, CASE WHEN tm.sub_lead THEN 'sub_lead' ELSE 'engineer' END AS role, tm.tiered,
        tt.id AS target_id, tt.key AS target_key, ht.id AS home_id, ht.key AS home_key
-  FROM team_member m
-  JOIN team tt ON tt.id = m.team_id
+  FROM tm
+  JOIN team tt ON tt.id = tm.team_id
   JOIN target ON target.key = lower(tt.key)
-  JOIN span s ON s.user_id = m.user_id AND s.target_key = lower(tt.key) AND s.latest = 1
+  JOIN span s ON s.user_id = tm.user_id AND s.target_key = lower(tt.key) AND s.latest = 1
   JOIN team ht ON lower(ht.key) = s.home_key
- WHERE m.role IN ('engineer', 'sub_lead')
+ WHERE tm.plain
    AND lower(COALESCE(tt.type, '')) NOT LIKE 'sre%' AND lower(COALESCE(tt.type, '')) NOT LIKE 'sme%'
    AND lower(COALESCE(ht.type, '')) NOT LIKE 'sre%' AND lower(COALESCE(ht.type, '')) NOT LIKE 'sme%'
-   AND NOT EXISTS (SELECT 1 FROM team_member h WHERE h.team_id = ht.id AND h.user_id = m.user_id)
+   AND NOT EXISTS (SELECT 1 FROM team_member h WHERE h.team_id = ht.id AND h.user_id = tm.user_id)
    AND (
         EXISTS (SELECT 1 FROM span a
-                 WHERE a.user_id = m.user_id AND a.target_key = lower(tt.key) AND a.home_key = s.home_key
+                 WHERE a.user_id = tm.user_id AND a.target_key = lower(tt.key) AND a.home_key = s.home_key
                    AND (a.ends_on IS NULL OR a.ends_on >= CURRENT_DATE))
      OR EXISTS (SELECT 1 FROM team_schedule_absence o
-                 WHERE o.user_id = m.user_id AND lower(o.team_key) = s.home_key
-                   AND o.starts_on >= m.created_on::date
+                 WHERE o.user_id = tm.user_id AND lower(o.team_key) = s.home_key
+                   AND o.starts_on >= tm.joined::date
                    AND o.starts_on > (SELECT MAX(a.ends_on) FROM span a
-                                       WHERE a.user_id = m.user_id AND a.target_key = lower(tt.key)))
+                                       WHERE a.user_id = tm.user_id AND a.target_key = lower(tt.key)))
      OR EXISTS (SELECT 1 FROM team_schedule_assignment o
-                 WHERE o.user_id = m.user_id AND lower(o.team_key) = s.home_key
-                   AND o.rota_date >= m.created_on::date
+                 WHERE o.user_id = tm.user_id AND lower(o.team_key) = s.home_key
+                   AND o.rota_date >= tm.joined::date
                    AND o.rota_date > (SELECT MAX(a.ends_on) FROM span a
-                                       WHERE a.user_id = m.user_id AND a.target_key = lower(tt.key)))
+                                       WHERE a.user_id = tm.user_id AND a.target_key = lower(tt.key)))
    );
 
--- Back on their own team, as the same engineer or sub_lead: one row per
--- person and team, a sub_lead when either of two rows on T was one.
+-- Back on their own team: one row, a sub_lead when any of their rows on T was one.
 INSERT INTO team_member (id, created_on, updated_on, created_by, updated_by, team_id, user_id, role, group_id)
-SELECT gen_random_uuid(), now(), now(), 'migration:0274', 'migration:0274', one.home_id, one.user_id, one.role,
-       (SELECT g.id FROM "group" g WHERE g.id = one.home_id)
-  FROM (SELECT DISTINCT ON (mm.user_id, mm.home_id) mm.user_id, mm.home_id, mm.role
-          FROM _moved_member mm
-         ORDER BY mm.user_id, mm.home_id, (mm.role = 'sub_lead') DESC) one;
+SELECT gen_random_uuid(), now(), now(), 'migration:0274', 'migration:0274', mm.home_id, mm.user_id, mm.role,
+       (SELECT g.id FROM "group" g WHERE g.id = mm.home_id)
+  FROM _moved_member mm;
 
--- Off the move's team, unless something there still needs the membership.
+-- Off the move's team, every row of theirs there, unless something there
+-- still needs the membership.
 DELETE FROM team_member m
  USING _moved_member mm
- WHERE m.id = mm.member_id
-   AND mm.alert_tier IS NULL
+ WHERE m.user_id = mm.user_id AND m.team_id = mm.target_id
+   AND NOT mm.tiered
    AND NOT EXISTS (SELECT 1 FROM team_schedule_rota_marker r
                     WHERE r.user_id = mm.user_id AND lower(r.team_key) = lower(mm.target_key))
    AND NOT EXISTS (SELECT 1 FROM team_schedule_assignment a

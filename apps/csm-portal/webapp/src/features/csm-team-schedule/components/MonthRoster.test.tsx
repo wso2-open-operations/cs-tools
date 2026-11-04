@@ -1527,3 +1527,22 @@ describe("MonthRoster: the chips before 1 Nov 2026", () => {
     expect(legend).toContain("IST");
   });
 });
+
+describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", () => {
+  it("lists LK and IST for a member with nothing stored, as their blank weekdays read both", () => {
+    const { container } = renderRoster({
+      month: new Date(2026, 9, 1),
+      monthCount: 2,
+      zoneChipsFrom: "2026-11-01",
+      selectedIso: "2026-10-30",
+      assignments: [],
+      teamMembers: { alpha: [{ userId: "u-Dee", name: "Dee", email: "dee@example.com", isLead: false, role: "engineer" }] },
+    });
+    const drawn = [...container.querySelectorAll("tbody tr td .chip.dflt")].map((c) => c.textContent);
+    expect(drawn).toContain("LK");
+    expect(drawn).toContain("IST");
+    const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
+    expect(legend).toContain("LK");
+    expect(legend).toContain("IST");
+  });
+});
