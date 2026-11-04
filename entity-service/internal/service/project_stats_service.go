@@ -376,6 +376,52 @@ func (s *projectStatsService) GetProjectTimeCardStats(ctx context.Context, proje
 	}, nil
 }
 
+// GetProjectTimeCardReport implements ProjectStatsService. from and to are
+// both required, inclusive bounds on the time card's work date.
+func (s *projectStatsService) GetProjectTimeCardReport(ctx context.Context, projectID, from, to string) (domain.ProjectTimeCardReportResponse, error) {
+	fromDate, toDate, err := parseTimeCardReportRange(from, to)
+	if err != nil {
+		return domain.ProjectTimeCardReportResponse{}, err
+	}
+	if _, err := s.requireProject(ctx, projectID); err != nil {
+		return domain.ProjectTimeCardReportResponse{}, err
+	}
+	// Echo the bounds in canonical form.
+	resp, err := s.repo.TimeCardReport(ctx, projectID, fromDate.Format(statsDateLayout), toDate.Format(statsDateLayout))
+	if err != nil {
+		return domain.ProjectTimeCardReportResponse{}, err
+	}
+	if resp == nil {
+		return domain.ProjectTimeCardReportResponse{}, &apierror.NotFoundError{Msg: "project not found"}
+	}
+	return *resp, nil
+}
+
+const statsDateLayout = "2006-01-02"
+
+// parseTimeCardReportRange requires both bounds to be yyyy-MM-dd dates with
+// from on or before to.
+func parseTimeCardReportRange(from, to string) (time.Time, time.Time, error) {
+	if from == "" {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "from is required and must be a date in YYYY-MM-DD format"}
+	}
+	if to == "" {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "to is required and must be a date in YYYY-MM-DD format"}
+	}
+	f, err := time.Parse(statsDateLayout, from)
+	if err != nil {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "from must be a date in YYYY-MM-DD format"}
+	}
+	t, err := time.Parse(statsDateLayout, to)
+	if err != nil {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "to must be a date in YYYY-MM-DD format"}
+	}
+	if f.After(t) {
+		return time.Time{}, time.Time{}, &apierror.ValidationError{Msg: "from must be on or before to"}
+	}
+	return f, t, nil
+}
+
 // validateStatsDate rejects a malformed date before it reaches the
 // repository's ::date cast, which would otherwise surface as an opaque 500
 // rather than telling the caller which parameter was wrong. An empty value

@@ -30,6 +30,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/timecardreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/worklogsreport"
 )
@@ -50,7 +51,7 @@ type runNowArgs struct {
 	Options registry.RunNowOptions
 	// Given names the narrowing flags that were on the command line, in the
 	// order they are reported ("--dry-run", "--limit", "--states", "--from-date",
-	// "--to-date", "--recipients", "--cc").
+	// "--to-date", "--recipients", "--cc", "--to", "--project-key").
 	Given []string
 }
 
@@ -71,7 +72,9 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	fromDate := fs.String("from-date", "", "first day of the reporting window, YYYY-MM-DD (only with --run-now, only the CS Worklogs reports)")
 	toDate := fs.String("to-date", "", "last day of the reporting window, YYYY-MM-DD, inclusive (with --from-date)")
 	recipients := fs.String("recipients", "", "comma list of addresses that REPLACE the report's whole audience for this run (only with --run-now, only report tasks)")
-	cc := fs.String("cc", "", "comma list of Cc addresses, the only Cc of this run (needs --recipients)")
+	cc := fs.String("cc", "", "comma list of Cc addresses, the only Cc of this run (needs --recipients; for time_card_report it is added to the derived or explicit audience)")
+	to := fs.String("to", "", "comma list of addresses that REPLACE the project contacts for this run (only with --run-now=time_card_report)")
+	projectKey := fs.String("project-key", "", "run for this one project key, configured or not (only with --run-now=time_card_report)")
 	if err := fs.Parse(args); err != nil {
 		return nil, fmt.Errorf("bad arguments: %w", err)
 	}
@@ -82,7 +85,7 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
 	if !seen["run-now"] {
-		return nil, errors.New("--dry-run, --limit, --states, --from-date, --to-date, --recipients and --cc are only valid together with --run-now")
+		return nil, errors.New("--dry-run, --limit, --states, --from-date, --to-date, --recipients, --to, --cc and --project-key are only valid together with --run-now")
 	}
 	name := strings.TrimSpace(*task)
 	if name == "" {
@@ -125,8 +128,32 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 		out.Options.FromDate, out.Options.ToDate = from, to
 		out.Given = append(out.Given, "--from-date", "--to-date")
 	}
-	if seen["cc"] && !seen["recipients"] {
+	// time_card_report is the one task whose --cc stands alone: it adds to the
+	// project contacts as well as to an explicit --to list.
+	if seen["cc"] && !seen["recipients"] && !seen["to"] && name != timecardreport.TaskName {
 		return nil, errors.New("--cc needs --recipients: it only adds copies to a replaced audience")
+	}
+	if seen["to"] && seen["recipients"] {
+		return nil, errors.New("--to and --recipients cannot be combined; --to is for time_card_report, --recipients for the other reports")
+	}
+	if seen["project-key"] {
+		key := strings.TrimSpace(*projectKey)
+		if key == "" || len(key) > 64 || strings.ContainsAny(key, ", \t\r\n") {
+			return nil, fmt.Errorf("--project-key=%q must be one project key, such as PRJ-1", *projectKey)
+		}
+		out.Options.ProjectKey = key
+		out.Given = append(out.Given, "--project-key")
+	}
+	if seen["to"] {
+		list, err := worklogsreport.ParseAddressList("--to", *to)
+		if err != nil {
+			return nil, err
+		}
+		if len(list) > timecardreport.MaxRecipients {
+			return nil, fmt.Errorf("--to has %d addresses; at most %d are accepted", len(list), timecardreport.MaxRecipients)
+		}
+		out.Options.Recipients = list
+		out.Given = append(out.Given, "--to")
 	}
 	if seen["recipients"] {
 		list, err := worklogsreport.ParseAddressList("--recipients", *recipients)
@@ -140,6 +167,9 @@ func parseRunNowArgs(args []string) (*runNowArgs, error) {
 		list, err := worklogsreport.ParseAddressList("--cc", *cc)
 		if err != nil {
 			return nil, err
+		}
+		if name == timecardreport.TaskName && len(list) > timecardreport.MaxRecipients {
+			return nil, fmt.Errorf("--cc has %d addresses; at most %d are accepted", len(list), timecardreport.MaxRecipients)
 		}
 		out.Options.Cc = list
 		out.Given = append(out.Given, "--cc")
@@ -320,6 +350,40 @@ func worklogsRunNow(cadence worklogreport.Cadence, normal, raw notify.Sender,
 			settings = append(settings, recipientSettings(o)...)
 		}
 		return build(email, win, o.Recipients), settings, nil
+	}
+}
+
+// timeCardRunNowFlags are the run-now flags time_card_report takes. It is the
+// one task whose flags can widen a run (see registry.Task.RunNowNarrow): --to
+// replaces the project contacts, --project-key names a project that need not be
+// configured, --cc adds copies.
+var timeCardRunNowFlags = []string{"--project-key", "--to", "--cc"}
+
+// timeCardRunNow is the RunNowNarrow hook of time_card_report. configured are
+// TIME_CARD_REPORT_PROJECT_KEYS; build makes the handler for a sender and a
+// run's settings. Nothing given runs the schedule's own settings. --project-key
+// replaces the configured projects with that one. --to is the operator's
+// chosen audience: it replaces the derived contacts, goes out as one mail with
+// no test-copy rewrite, and wins over the task's debug list, so the sender is
+// the raw one; without it the task's normal sender (debug mode included) is
+// used. The WARN it returns says the run writes no ledger row, so it can send
+// a period again.
+func timeCardRunNow(normal, raw notify.Sender, configured []string,
+	build func(email notify.Sender, cfg timecardreport.Config) func(ctx context.Context) error,
+) func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+	return func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+		cfg := timecardreport.Config{ProjectKeys: configured, To: o.Recipients, Cc: o.Cc}
+		if o.ProjectKey != "" {
+			cfg.ProjectKeys = []string{o.ProjectKey}
+		}
+		email := normal
+		if len(o.Recipients) > 0 {
+			email = raw
+		}
+		settings := []any{"projectKeys", cfg.ProjectKeys, "projectOverride", o.ProjectKey != "",
+			"toCount", len(o.Recipients), "ccCount", len(o.Cc),
+			"warning", "no ledger row is written, so this run can mail a period that was already sent"}
+		return build(email, cfg), settings, nil
 	}
 }
 

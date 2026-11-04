@@ -5571,6 +5571,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /projects/{id}/time-cards/report:
+    get:
+      summary: Get a project's approved time cards aggregated per case for a date range.
+      description: >-
+        Postgres data source only; the other data source returns 400. Counts
+        only APPROVED time cards of the project's cases whose work date falls
+        within from..to, inclusive on both ends. Every figure, billable,
+        non-billable and patching included, is scoped to the project. All
+        durations are MINUTES, unrounded; the caller formats them. Per case,
+        totalMinutes is the sum of the five per-activity minute columns,
+        billableMinutes covers cards flagged billable, nonBillableMinutes covers
+        the rest (so billable + non-billable = total), and patchingMinutes is the
+        patching share, which is already included in the total. Cases are
+        ordered by case number ascending. Contact details are never returned. A
+        range with no approved cards returns 200 with an empty cases array and
+        zero totals.
+
+
+        To identify the project by its key rather than its id, resolve the id
+        first with POST /projects/search (searchQuery set to the key; take the
+        result whose key matches exactly), then call this endpoint with that id.
+      operationId: getProjectTimeCardReport
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: First work date to include (yyyy-MM-dd).
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Last work date to include (yyyy-MM-dd). Must not be before from.
+      responses:
+        "200":
+          description: The project's per-case time-card report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectTimeCardReportResponse'
+        "400":
+          description: >-
+            Bad request: from or to is missing or not a yyyy-MM-dd date, from is
+            after to, or the data source does not support the report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Project not found, or not visible to the caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /projects/{id}/change-requests/stats:
     get:
       summary: Get a project's change-request statistics.
@@ -33933,6 +34004,85 @@ components:
         nonBillableHours:
           type: number
           format: double
+
+    ProjectTimeCardReportResponse:
+      type: object
+      description: The response for GET /projects/{id}/time-cards/report. All durations are minutes.
+      required: [project, from, to, totals, cases]
+      properties:
+        project:
+          type: object
+          required: [id, key, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            key:
+              type: string
+              description: The project's key.
+            name:
+              type: string
+              nullable: true
+        from:
+          type: string
+          format: date
+          description: The first work date included (yyyy-MM-dd), as requested.
+        to:
+          type: string
+          format: date
+          description: The last work date included (yyyy-MM-dd), as requested.
+        totals:
+          $ref: '#/components/schemas/ProjectTimeCardReportTotals'
+        cases:
+          type: array
+          description: One row per case with approved time in the range, ordered by case number ascending.
+          items:
+            $ref: '#/components/schemas/ProjectTimeCardReportCase'
+
+    ProjectTimeCardReportTotals:
+      type: object
+      description: Project-wide sums of the case rows, in minutes.
+      required: [totalMinutes, billableMinutes, nonBillableMinutes, patchingMinutes]
+      properties:
+        totalMinutes:
+          type: integer
+        billableMinutes:
+          type: integer
+        nonBillableMinutes:
+          type: integer
+        patchingMinutes:
+          type: integer
+          description: Patching share of totalMinutes.
+
+    ProjectTimeCardReportCase:
+      type: object
+      description: One case's approved time in the range, in minutes.
+      required: [caseId, caseNumber, externalCaseId, caseType, totalMinutes, billableMinutes, nonBillableMinutes, patchingMinutes]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        caseNumber:
+          type: string
+        externalCaseId:
+          type: string
+          nullable: true
+          description: The case's external (WSO2) case id.
+        caseType:
+          type: string
+          nullable: true
+          description: The case's type, lowercase (for example case, service_request, engagement).
+        totalMinutes:
+          type: integer
+        billableMinutes:
+          type: integer
+          description: Minutes on cards flagged billable.
+        nonBillableMinutes:
+          type: integer
+          description: Minutes on cards not flagged billable.
+        patchingMinutes:
+          type: integer
+          description: Patching share of totalMinutes.
 
     ProjectChangeRequestStatsResponse:
       type: object

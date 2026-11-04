@@ -540,6 +540,12 @@ func (s *snProjectStatsService) GetProjectTimeCardStats(ctx context.Context, pro
 	}, nil
 }
 
+// GetProjectTimeCardReport implements ProjectStatsService. The backing data
+// source exposes no per-case time-card report to proxy, so this is a 400.
+func (s *snProjectStatsService) GetProjectTimeCardReport(_ context.Context, _, _, _ string) (domain.ProjectTimeCardReportResponse, error) {
+	return domain.ProjectTimeCardReportResponse{}, &apierror.ValidationError{Msg: "the project time-card report is not supported when DATA_SOURCE=servicenow"}
+}
+
 // GetProjectChangeRequestStats implements ProjectStatsService.
 func (s *snProjectStatsService) GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error) {
 	if err := validateUUIDs("id", []string{projectID}); err != nil {

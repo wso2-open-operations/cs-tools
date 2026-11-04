@@ -656,6 +656,10 @@ type ProjectStatsService interface {
 	// GetProjectTimeCardStats returns the project's time-card statistics,
 	// optionally filtered by a startDate/endDate range (each yyyy-MM-dd).
 	GetProjectTimeCardStats(ctx context.Context, projectID, startDate, endDate string) (domain.ProjectTimeCardStatsResponse, error)
+	// GetProjectTimeCardReport returns the project's APPROVED time cards
+	// aggregated per case for a required from/to work-date range (each
+	// yyyy-MM-dd, inclusive). Postgres only.
+	GetProjectTimeCardReport(ctx context.Context, projectID, from, to string) (domain.ProjectTimeCardReportResponse, error)
 	// GetProjectChangeRequestStats returns the project's change-request statistics.
 	GetProjectChangeRequestStats(ctx context.Context, projectID string) (domain.ProjectChangeRequestStatsResponse, error)
 }
