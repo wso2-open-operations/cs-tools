@@ -55,6 +55,9 @@ function renderRoster(over: Partial<React.ComponentProps<typeof MonthRoster>> = 
     shifts: SHIFTS,
     absenceKinds: [ANNUAL_LEAVE],
     selectedIso: "2026-09-21",
+    // These tests read today's chips on September days; the chips a day before
+    // 1 Nov 2026 keeps have their own test.
+    zoneChipsFrom: "2000-01-01",
     ...scopeControls(),
     ...over,
   } as React.ComponentProps<typeof MonthRoster>;
@@ -1484,5 +1487,62 @@ describe("MonthRoster: customer engagement markers", () => {
       expect(marks(rowOf(container, "Jane Doe"))).toHaveLength(1);
       expect(rowOf(container, "Jane Doe").querySelector("td.zwhole .engmk")).not.toBeNull();
     });
+  });
+});
+
+describe("MonthRoster: the chips before 1 Nov 2026", () => {
+  it("keeps LK, IND and NLK on days before 1 Nov 2026 and reads IST and PDT from then on", () => {
+    const IND = { ...REGULAR, code: "CRE_REGULAR_IND", label: "India region shift", colourToken: "IND" };
+    const NLK = { ...REGULAR, code: "CRE_AMERICAS", shortCode: "PDT", label: "Americas cover", colourToken: "NLK" };
+    const { container } = renderRoster({
+      month: new Date(2026, 9, 1),
+      monthCount: 2,
+      zoneChipsFrom: "2026-11-01",
+      shifts: new Map([...SHIFTS, [IND.code, IND], [NLK.code, NLK]]),
+      selectedIso: "2026-10-30",
+      assignments: [
+        assignment({ name: "Asela", rotaDate: "2026-10-30", shiftCode: REGULAR.code }),
+        assignment({ name: "Asela", rotaDate: "2026-11-02", shiftCode: REGULAR.code }),
+        assignment({ name: "Bimal", rotaDate: "2026-10-30", shiftCode: IND.code }),
+        assignment({ name: "Bimal", rotaDate: "2026-11-02", shiftCode: IND.code }),
+        assignment({ name: "Chen", rotaDate: "2026-10-30", shiftCode: NLK.code }),
+        assignment({ name: "Chen", rotaDate: "2026-11-02", shiftCode: NLK.code }),
+      ],
+    });
+    const chipsOf = (name: string) => {
+      const row = [...container.querySelectorAll("tbody tr")].find((tr) => tr.querySelector(".who")?.textContent === name)!;
+      // The stored turns, 30 Oct then 2 Nov (a drawn blank weekday is .dflt).
+      return [...row.querySelectorAll("td .chip:not(.dflt)")].map((c) => c.textContent);
+    };
+    expect(chipsOf("Asela")).toEqual(["LK", "IST"]);
+    expect(chipsOf("Bimal")).toEqual(["IND", "IST"]);
+    expect(chipsOf("Chen")).toEqual(["NLK", "PDT"]);
+    // A blank weekday follows the same date: LK in October, IST in November.
+    const drawn = [...container.querySelectorAll("tbody tr")[0].querySelectorAll("td .chip.dflt")].map((c) => c.textContent);
+    expect(drawn[0]).toBe("LK");
+    expect(drawn[drawn.length - 1]).toBe("IST");
+    // The legend explains both, as the grid draws both.
+    const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
+    expect(legend).toContain("LK");
+    expect(legend).toContain("IST");
+  });
+});
+
+describe("MonthRoster: the legend across 1 Nov 2026 from blank weekdays alone", () => {
+  it("lists LK and IST for a member with nothing stored, as their blank weekdays read both", () => {
+    const { container } = renderRoster({
+      month: new Date(2026, 9, 1),
+      monthCount: 2,
+      zoneChipsFrom: "2026-11-01",
+      selectedIso: "2026-10-30",
+      assignments: [],
+      teamMembers: { alpha: [{ userId: "u-Dee", name: "Dee", email: "dee@example.com", isLead: false, role: "engineer" }] },
+    });
+    const drawn = [...container.querySelectorAll("tbody tr td .chip.dflt")].map((c) => c.textContent);
+    expect(drawn).toContain("LK");
+    expect(drawn).toContain("IST");
+    const legend = [...container.querySelectorAll(".rlegend .chip")].map((c) => c.textContent);
+    expect(legend).toContain("LK");
+    expect(legend).toContain("IST");
   });
 });

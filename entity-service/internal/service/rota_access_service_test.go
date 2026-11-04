@@ -118,7 +118,7 @@ func (f *fakeRotaAccessRepo) UpdateTeamMember(_ context.Context, _, team, actor 
 
 func (f *fakeRotaAccessRepo) MoveTeamMember(_ context.Context, _, from, to, actor string) (domain.TeamMemberMove, error) {
 	res := f.move
-	if res.OnSource && !res.OnTarget && !res.Lead && res.AlertTier == "" && res.UpcomingTurns == 0 {
+	if res.OnSource && !res.OnTarget && !res.Lead && res.AlertTier == "" && res.UpcomingTurns == 0 && res.SpanUntil == "" {
 		res.Moved = true
 		f.wrote, f.actor = "move-member:"+from+">"+to, actor
 	}
@@ -618,5 +618,22 @@ func TestMoveTeamMemberRefusals(t *testing.T) {
 				t.Fatalf("%s: a refused move was written: %q", name, tc.repo.wrote)
 			}
 		})
+	}
+}
+
+// Someone a move tag already puts on the target team (a Brazil rotation onto
+// Americas) stays a member of their own team: moving the membership as well
+// left their own team's rows with nobody to change them.
+func TestMoveTeamMemberRefusesSomeoneAMoveSpanAlreadyPutsThere(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	for until, want := range map[string]string{"2026-12-31": "until 2026-12-31", "open": "with no end date"} {
+		repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"atlas": "CRE", "americas": "CRE"},
+			move: domain.TeamMemberMove{OnSource: true, Role: "engineer", SpanUntil: until}}
+		svc, _ := newRotaAccess(repo)
+		_, err := svc.MoveTeamMember(admin, "atlas", someoneID, "americas")
+		wantConflict(t, err, "a move span onto the target, "+until, want)
+		if repo.wrote != "" {
+			t.Fatalf("%s: the membership was moved: %q", until, repo.wrote)
+		}
 	}
 }

@@ -67,6 +67,9 @@ interface MonthRosterProps {
   /** The allocations could not be read: the roster is drawn without them,
    *  with a quiet note saying so. */
   engagementsFailed?: boolean;
+  /** The first day drawn with the time-zone chips (ZONE_CHIPS_FROM unless
+   *  given); a day before it keeps LK, IND or NLK. */
+  zoneChipsFrom?: string;
   assignments: ScheduleAssignment[];
   absences: ScheduleAbsence[];
   shifts: Map<string, ScheduleShift>;
@@ -217,11 +220,34 @@ const ZONE_HOURS_LABEL: Readonly<Record<string, string>> = {
   AEST: "Australia cover",
 };
 
+/** The first day the CRE chips name the time zone (IST, PDT). Before it the
+ *  roster keeps the chips those days were rostered under, LK, IND and NLK, so
+ *  October still reads as the sheet it was planned on. Display only: the
+ *  catalogue holds the new codes, and only the month roster reads the date. */
+const ZONE_CHIPS_FROM = "2026-11-01";
+
+/** The chip a day before ZONE_CHIPS_FROM keeps, by today's chip and colour:
+ *  Regular hours and the India region shift both read IST, and their colour
+ *  tells them apart. */
+const CHIP_BEFORE_ZONES: Readonly<Record<string, string>> = {
+  "IST|LK": "LK",
+  "IST|IND": "IND",
+  "PDT|NLK": "NLK",
+  "PDT-WE|NLKWE": "NLK-WE",
+  "PDT-WE-OC|OC": "NLK-WE-OC",
+};
+
+/** A cell's chip on a given day (see ZONE_CHIPS_FROM). */
+function chipCodeOn(c: Cell, iso: string, from: string): string {
+  if (c.tier || iso >= from) return c.code;
+  return CHIP_BEFORE_ZONES[`${c.code}|${c.token}`] ?? c.code;
+}
+
 /** What a weekday nobody has marked is: an ordinary working day.
  *
  *  Drawn, never stored. The rota sheet this replaces wrote LK into every
- *  such cell by hand (the chip now reads IST); here it is simply what an empty weekday means, so it
- *  gives way the moment leave, an allocation or a turn is marked, and there
+ *  such cell by hand (the chip reads IST from ZONE_CHIPS_FROM on); here it
+ *  is simply what an empty weekday means, so it gives way the moment leave, an allocation or a turn is marked, and there
  *  is nothing to clean up when one is. Not a turn, so "Rotations only" fades
  *  it like the rest of the standing hours. */
 const WORKING_DAY: Cell = {
@@ -249,6 +275,7 @@ export default function MonthRoster({
   onSpanChange,
   engagementAllocations,
   engagementsFailed = false,
+  zoneChipsFrom = ZONE_CHIPS_FROM,
   assignments,
   absences,
   shifts,
@@ -867,7 +894,7 @@ export default function MonthRoster({
     const put = (it: LegendItem): void => {
       if (!out.has(it.key)) out.set(it.key, it);
     };
-    const fromCell = (c: Cell): void => {
+    const fromCell = (c: Cell, iso: string): void => {
       if (c.quiet) return;
       const kind = c.absenceKindCode ? kindByCode.get(c.absenceKindCode) : undefined;
       // A move drawn as the other team's hours reads as those hours.
@@ -889,29 +916,36 @@ export default function MonthRoster({
         put({ key: `t|${c.tier}`, group: "Rota", code: c.tier, token: c.token, label: `${c.tier} escalation tier` });
         return;
       }
+      const code = chipCodeOn(c, iso, zoneChipsFrom);
       put({
-        key: `s|${c.code}|${c.token}|${c.onCall ? "oc" : ""}`,
+        key: `s|${code}|${c.token}|${c.onCall ? "oc" : ""}`,
         group: c.isRotation ? "Rota" : "Hours",
-        code: c.code,
+        code,
         token: c.token,
         label: c.isDefault ? `${c.title.replace(/^Working day.*/, "Working day")} (nothing else marked)` : c.title,
         onCall: c.onCall,
       });
     };
     for (const row of rows) {
-      for (const m of [row.days, row.zoned, row.allocs, row.zonedBase]) for (const c of m.values()) fromCell(c);
+      // Every key starts with the day (ISO), a zone column's too.
+      for (const m of [row.days, row.zoned, row.allocs, row.zonedBase]) for (const [k, c] of m) fromCell(c, k.slice(0, 10));
     }
-    // What an unmarked weekday reads as on each team in view (LK, or NLK on
-    // the Americas team), so the most common chip on the grid is explained.
+    // What an unmarked weekday reads as on each team in view (IST, or PDT on
+    // the Americas team), so the most common chip on the grid is explained:
+    // once on each side of zoneChipsFrom, as a grid that spans it draws both
+    // (LK in October, IST from November).
     for (const row of rows) {
+      const sides = new Set<boolean>();
       for (const d of days) {
         if (d.getDay() === 0 || d.getDay() === 6) continue;
         const iso = toIsoDate(d);
-        if (row.days.has(iso)) continue;
+        const after = iso >= zoneChipsFrom;
+        if (sides.has(after) || row.days.has(iso)) continue;
         const dflt = defaultFor(row, iso);
         if (dflt) {
-          fromCell(dflt);
-          break;
+          fromCell(dflt, iso);
+          sides.add(after);
+          if (sides.size === 2) break;
         }
       }
     }
@@ -944,8 +978,16 @@ export default function MonthRoster({
       if (!kind.movesToTeamKey || !kind.worksRotaThere || !kind.showsAsShiftCode || kind.retired) continue;
       if (kind.family && kind.family !== family) continue;
       // Only this rota's windows: the picker offers no other family's hours.
+      // Named as it reads on the last day in view (see zoneChipsFrom).
       const sh = shifts.get(kind.showsAsShiftCode);
-      if (sh && sh.family === family) put({ key: `s|${sh.shortCode}|${sh.colourToken}|`, group: "Hours", code: sh.shortCode, token: sh.colourToken, label: sh.label });
+      if (sh && sh.family === family && days.length > 0) {
+        const code = chipCodeOn(
+          { code: sh.shortCode, token: sh.colourToken, title: sh.label, isRotation: false },
+          toIsoDate(days[days.length - 1]),
+          zoneChipsFrom,
+        );
+        put({ key: `s|${code}|${sh.colourToken}|`, group: "Hours", code, token: sh.colourToken, label: sh.label });
+      }
     }
     // Only when a marker is on a row in view: the legend explains what is
     // drawn, and the marker is not a code a lead can mark.
@@ -961,7 +1003,7 @@ export default function MonthRoster({
       const label = ZONE_HOURS_LABEL[it.code];
       return [label ? { ...it, label } : it];
     });
-  }, [rows, days, kindByCode, defaultFor, absenceKinds, family, shifts, engByPerson]);
+  }, [rows, days, kindByCode, defaultFor, absenceKinds, family, shifts, engByPerson, zoneChipsFrom]);
 
   /** Turn a click on any roster cell into the slot the page should open the
    *  picker on. Shared by the plain grid and by SRE's zone-split one, which
@@ -1010,11 +1052,13 @@ export default function MonthRoster({
 
   /** A chip as the grid draws it: dashed when the window is on-call, and
    *  marked when it is only what an unmarked weekday means. */
-  const chipOf = (c: Cell, extra = ""): JSX.Element =>
+  const chipOf = (c: Cell, iso: string, extra = ""): JSX.Element =>
     c.quiet ? (
       <span className="none">·</span>
     ) : (
-      <span className={`chip sm ${c.token}${c.isDefault ? " dflt" : ""}${c.onCall ? " oc" : ""}${extra}`}>{c.code}</span>
+      <span className={`chip sm ${c.token}${c.isDefault ? " dflt" : ""}${c.onCall ? " oc" : ""}${extra}`}>
+        {chipCodeOn(c, iso, zoneChipsFrom)}
+      </span>
     );
   /** The strip under a day on which the engineer is on a customer
    *  engagement, or nothing. Absolutely placed in the cell (see the css), so
@@ -1038,10 +1082,10 @@ export default function MonthRoster({
       ? ` — still rostered for ${turns.map((t) => (t.tier ? `${t.tier} · ${t.title}` : t.title)).join(" and ")}: needs cover`
       : "";
   /** Leave, and the turn it leaves uncovered struck through under it. */
-  const clashPair = (leave: Cell, turns: Cell[]): JSX.Element => (
+  const clashPair = (leave: Cell, turns: Cell[], iso: string): JSX.Element => (
     <span className="duo clash">
-      {chipOf(leave)}
-      {chipOf(turns[0], " gone")}
+      {chipOf(leave, iso)}
+      {chipOf(turns[0], iso, " gone")}
     </span>
   );
   /** Why a row cannot be changed, for a lead in edit mode: the row is there
@@ -1259,14 +1303,14 @@ export default function MonthRoster({
                 {...(editable ? keyable(key, firstStop()) : {})}
               >
                 {clash && cell ? (
-                  clashPair(cell, clash)
+                  clashPair(cell, clash, iso)
                 ) : cell && alloc ? (
                   <span className="duo">
-                    {chipOf(cell)}
-                    {chipOf(alloc)}
+                    {chipOf(cell, iso)}
+                    {chipOf(alloc, iso)}
                   </span>
                 ) : shown ? (
-                  chipOf(shown)
+                  chipOf(shown, iso)
                 ) : (
                   <span className="none">·</span>
                 )}
@@ -1302,7 +1346,7 @@ export default function MonthRoster({
                 onClick={editable ? (e) => openCell(e, row, iso, cell) : undefined}
                 {...(editable ? keyable(`${row.userId}|${row.teamKey}|${iso}`, firstStop()) : {})}
               >
-                {clash ? clashPair(whole, clash) : chipOf(whole)}
+                {clash ? clashPair(whole, clash, iso) : chipOf(whole, iso)}
                 {engMark(row.userId, iso)}
               </td>
             );
@@ -1349,11 +1393,11 @@ export default function MonthRoster({
                   // in TZ1 on an RnD day, or on TZ1's regular hours --
                   // the cell says both.
                   <span className="duo">
-                    {chipOf(turn)}
-                    {chipOf(under)}
+                    {chipOf(turn, iso)}
+                    {chipOf(under, iso)}
                   </span>
                 ) : zc ? (
-                  chipOf(zc)
+                  chipOf(zc, iso)
                 ) : (
                   <span className="zempty" />
                 )}

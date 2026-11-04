@@ -115,6 +115,10 @@ type TeamMemberMove struct {
 	UpcomingTurns int
 	// Lead is true when the source role is lead-type.
 	Lead bool
+	// SpanUntil is set when a move span (Brazil rotation, Migration) already
+	// puts them on the target team today or later: the last day of the latest
+	// such span, or "open" for one with no end. Such a person is not moved.
+	SpanUntil string
 	// Membership is the membership on the target after the call, when the
 	// person is on it.
 	Membership TeamMembership
