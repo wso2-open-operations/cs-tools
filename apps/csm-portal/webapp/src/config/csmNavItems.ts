@@ -38,6 +38,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   Megaphone,
+  SlidersHorizontal,
   RefreshCw,
   ScrollText,
   Settings,
@@ -92,10 +93,10 @@ export interface CsmNavNode {
   /**
    * True when this page already renders its own, more specific unavailable
    * message — one that names what it is blocked on, say. The route guard then
-   * lets a `wip` page render that instead of replacing it with the generic
+   * lets a `preview` page render that instead of replacing it with the generic
    * "coming soon" fallback, which would be a downgrade.
    */
-  rendersOwnWipPage?: boolean;
+  rendersOwnPreviewPage?: boolean;
   /**
    * Marks this node as a second sidebar entry for a page another node owns:
    * the id of that owning node. A shortcut owns no routes (the route guard,
@@ -514,12 +515,12 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
             icon: Building2,
           },
           // Routes to a placeholder that already names its backend blocker, so
-          // it renders itself rather than the generic WIP page.
+          // it renders itself rather than the generic preview page.
           {
             id: "admin.user-management.permissions",
             label: "Permissions",
             href: "/admin/user-management/permissions",
-            rendersOwnWipPage: true,
+            rendersOwnPreviewPage: true,
             icon: KeyRound,
           },
         ],
@@ -546,6 +547,16 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Banners",
         href: "/admin/banners",
         icon: Megaphone,
+        requires: "isAdmin",
+      },
+      // Admin only, like Banners: it changes what every staff member's menu
+      // shows, so the sidebar and Quick-nav hide it from anyone else, and the
+      // backend refuses the write from a non-admin.
+      {
+        id: "admin.feature-visibility",
+        label: "Feature Visibility",
+        href: "/admin/feature-visibility",
+        icon: SlidersHorizontal,
         requires: "isAdmin",
       },
       // Admin only, same reasoning as Banners above: recalculating SLA

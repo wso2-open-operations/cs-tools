@@ -33,14 +33,16 @@ import {
   visibleShortcutTo,
 } from "@config/featureFlags";
 import { useFeaturePreviewOverrides } from "@config/featurePreview";
+import { useFeatureOverridesVersion } from "@config/featureOverridesStore";
 import type { PortalAccess } from "@context/current-user/portalAccess";
 import { usePortalAccess, useSafeCurrentUserId } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 
-/** Tooltip for a disabled WIP item. Includes the label so the collapsed rail
- *  (which hides the label) still says which feature it is. */
-const wipTooltip = (label: string): string =>
-  `${label} — this section is still under construction`;
+/** Tooltip for a section that is in preview and so disabled for this user.
+ *  Includes the label so the collapsed rail (which hides the label) still says
+ *  which feature it is. */
+const previewTooltip = (label: string): string =>
+  `${label} — this section is in preview and isn't open to everyone yet`;
 
 const COMPANY_NAME = "WSO2 LLC";
 const TERMS_OF_SERVICE_URL = "https://wso2.com/terms-of-use/";
@@ -162,6 +164,8 @@ export default function CsmSideBar({
   // for them alone -- never for any other caller, and never touching the
   // deployment-wide config itself.
   const { overrides: previewOverrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
+  // Repaints when the shared per-page state loads or an admin saves a change.
+  useFeatureOverridesVersion();
   const location = useLocation();
   const navigate = useNavTransition();
   const activeItem = pickActiveId(location.pathname, access, previewOverrides);
@@ -182,15 +186,16 @@ export default function CsmSideBar({
   // navigating `Link` — see below) reaches here through Oxygen's own
   // `onSelect`, dotted ids are how it's told apart from a flat top-level
   // item's id (never dotted) whose Link already handled the navigation
-  // itself. A WIP child stays visible (so a deployment's config change is
-  // still legible in the rail) but inert, same intent as a WIP top-level
-  // section, just enforced here instead of structurally — Oxygen's own
-  // collapsed-rail popover reads a nested item's id/icon/label straight off
-  // its props, so it has to stay a plain `Sidebar.Item` rather than being
-  // wrapped in a disabling `Box`/`Tooltip` the way a top-level WIP section is.
+  // itself. A preview child stays visible (so a change in Settings is still
+  // legible in the rail) but inert for anyone who cannot open it, same intent as
+  // a preview top-level section, just enforced here instead of structurally —
+  // Oxygen's own collapsed-rail popover reads a nested item's id/icon/label
+  // straight off its props, so it has to stay a plain `Sidebar.Item` rather
+  // than being wrapped in a disabling `Box`/`Tooltip` the way a top-level
+  // preview section is.
   const handleSelect = useCallback(
     (id: string): void => {
-      if (id.includes(".") && featureState(id, access, previewOverrides) !== "wip") {
+      if (id.includes(".") && featureState(id, access, previewOverrides) !== "preview") {
         const node = navNodeById(id);
         if (node) navigate(navNodeHref(node));
       }
@@ -253,14 +258,15 @@ export default function CsmSideBar({
       <Sidebar.Nav>
         <Sidebar.Category>
           {
-            /* `hidden` sections are filtered out entirely; `wip` ones stay
-               rendered but disabled below. */
+            /* `hidden` sections are filtered out entirely; `preview` ones stay
+               rendered but disabled below (an admin can open them, see
+               `featureState`). */
             visibleNavSections(access, previewOverrides)
               .map((item) => {
                 // Only reachable once `item` has already resolved to
-                // "enabled" (a `wip` item takes the branch below and returns
-                // early), so this can never also be true for a WIP item --
-                // no badge conflict to resolve.
+                // "enabled" (a `preview` item that this user cannot open takes
+                // the branch below and returns early), so this can never also
+                // be true for a disabled item -- no badge conflict to resolve.
                 const itemPreviewedOnly = isPreviewedOnly(item.id, access, previewOverrides);
                 const itemContent = (
                   <Sidebar.Item id={item.id}>
@@ -277,18 +283,19 @@ export default function CsmSideBar({
                   </Sidebar.Item>
                 );
 
-                // WIP sections stay visible but disabled: no navigating Link, dimmed
+                // Preview sections stay visible but disabled for anyone who cannot
+                // open them: no navigating Link, dimmed
                 // and non-clickable (pointer events blocked on the inner box so no
                 // click reaches Oxygen's select handler). The outer element is a
                 // focusable div (tabIndex 0, aria-disabled) so keyboard users can
-                // reach it and reveal the "work in progress" tooltip, which fires on
+                // reach it and reveal the "in preview" tooltip, which fires on
                 // both hover and focus. Their routes render the coming-soon page
                 // (see App.tsx's WipRouteGuard).
-                if (featureState(item.id, access, previewOverrides) === "wip") {
+                if (featureState(item.id, access, previewOverrides) === "preview") {
                   return (
                     <Tooltip
                       key={item.id}
-                      title={wipTooltip(item.label)}
+                      title={previewTooltip(item.label)}
                       placement="right"
                     >
                       <Box
@@ -326,8 +333,8 @@ export default function CsmSideBar({
                         <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>
                       )}
                       {children.map((child) => {
-                        const childWip =
-                          featureState(child.id, access, previewOverrides) === "wip";
+                        const childPreview =
+                          featureState(child.id, access, previewOverrides) === "preview";
                         const childPreviewedOnly = isPreviewedOnly(
                           child.id,
                           access,
@@ -341,8 +348,8 @@ export default function CsmSideBar({
                               </Sidebar.ItemIcon>
                             )}
                             <Sidebar.ItemLabel>{child.label}</Sidebar.ItemLabel>
-                            {childWip && (
-                              <Sidebar.ItemBadge color="warning">WIP</Sidebar.ItemBadge>
+                            {childPreview && (
+                              <Sidebar.ItemBadge color="warning">Preview</Sidebar.ItemBadge>
                             )}
                             {childPreviewedOnly && (
                               <Sidebar.ItemBadge color="primary">Preview</Sidebar.ItemBadge>

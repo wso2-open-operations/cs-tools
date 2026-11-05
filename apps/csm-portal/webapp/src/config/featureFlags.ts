@@ -17,23 +17,27 @@
 /**
  * Per-page feature flags, resolved against the navigation tree.
  *
- * A deployment lists nav-node ids it wants to restrict in the runtime
- * `CSM_PORTAL_FEATURE_OVERRIDES` map (`public/config.js`):
+ * An admin sets each page to `enabled` (Available) or `preview` in Settings >
+ * Feature visibility. The saved map lives in the database and reaches this file
+ * through `featureOverridesStore.ts`. Until an admin has saved once, the
+ * runtime `CSM_PORTAL_FEATURE_OVERRIDES` map (`public/config.js`) is read
+ * instead, and still is if the shared map cannot be loaded:
  *
  * ```js
  * CSM_PORTAL_FEATURE_OVERRIDES: {
- *   "operations": "wip",
+ *   "operations": "preview",
  *   "operations.incidents": "enabled",
- *   "admin.roles": "hidden",
  * }
  * ```
  *
- * Anything absent from that map is a normally working feature — no entry means
- * enabled, so a page only ever needs configuring when it should be restricted.
+ * An older config may also say `wip` (read as `preview`) or `hidden` (still
+ * honoured, config only, until the first save writes it as `preview`).
+ *
+ * Anything absent from the map is a normally working feature — no entry means
+ * enabled, so a page only ever needs an entry when it should be restricted.
  * Ids are the dotted `CsmNavNode.id` values in `csmNavItems.ts`; the map is
  * deliberately flat (one level, dotted keys) so there is no deep-merge
- * behaviour to reason about and a config diff between environments stays
- * readable.
+ * behaviour to reason about.
  */
 
 import {
@@ -46,30 +50,80 @@ import {
 } from "@config/csmNavItems";
 import type { ComponentType } from "react";
 import type { PortalAccess } from "@context/current-user/portalAccess";
+import {
+  getSharedFeatureOverrides,
+  getSharedFeatureOverridesVersion,
+} from "@config/featureOverridesStore";
 
 /**
- * How a page behaves in this deployment.
+ * The two states an admin can save for a page.
  *
- * - `enabled` — normal. The default for anything not listed in the overrides.
- * - `wip` — advertised but not usable: shown in the sidebar/tab strip greyed
- *   out with a "work in progress" tooltip, dropped from Quick-nav, and its
+ * - `enabled` — Available. The default for anything without an entry.
+ * - `preview` — in preview: an admin can open it, with a Preview tag; everyone
+ *   else sees it greyed out with the same tag, dropped from Quick-nav, and its
  *   routes render the shared "coming soon" page.
- * - `hidden` — absent: no nav entry anywhere, and its routes redirect away.
  */
-export type FeatureState = "enabled" | "wip" | "hidden";
+export type StoredFeatureState = "enabled" | "preview";
 
-const FEATURE_STATES: readonly string[] = ["enabled", "wip", "hidden"];
+/**
+ * How a page resolves for one caller.
+ *
+ * The two stored states, plus `hidden`: absent — no nav entry anywhere, and its
+ * routes redirect away. `hidden` is never saved from Settings. It comes from a
+ * role capability the user lacks (`requires`) or from a legacy `hidden` line in
+ * `config.js` that nobody has saved over yet.
+ */
+export type FeatureState = StoredFeatureState | "hidden";
 
-function isFeatureState(value: unknown): value is FeatureState {
-  return typeof value === "string" && FEATURE_STATES.includes(value);
+/**
+ * Reads one source of overrides and keeps the entries that name a known page
+ * and a state it understands. `legacy` also accepts what an older
+ * `config.js` may say: `wip` (read as `preview`) and `hidden`. The saved map
+ * never carries either, so it is read with `legacy` off.
+ *
+ * An unknown page or state is almost always a typo, and a silently ignored typo
+ * in a flag that is meant to restrict something is the failure mode worth
+ * shouting about, so each one is warned about.
+ */
+function parseOverrideMap(
+  raw: unknown,
+  source: string,
+  legacy: boolean,
+): Record<string, FeatureState> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+
+  const knownIds = new Set(flattenNavNodes().map((node) => node.id));
+  const parsed: Record<string, FeatureState> = {};
+
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!knownIds.has(id)) {
+      console.warn(`[featureFlags] ${source} names an unknown page "${id}"; ignoring it.`);
+      continue;
+    }
+    if (value === "enabled" || value === "preview") {
+      parsed[id] = value;
+    } else if (legacy && value === "wip") {
+      parsed[id] = "preview";
+    } else if (legacy && value === "hidden") {
+      parsed[id] = "hidden";
+    } else {
+      console.warn(
+        `[featureFlags] ${source}["${id}"] must be one of enabled, preview${
+          legacy ? " (or the older wip, hidden)" : ""
+        }; ignoring it.`,
+      );
+    }
+  }
+
+  return parsed;
 }
 
 /**
- * Reads the raw override map. Accepts either an object literal (how
+ * Reads the config file's override map. Accepts either an object literal (how
  * `public/config.js` writes it) or a JSON string, because platform config
  * injection often only carries string values.
  */
-function readRawOverrides(): unknown {
+function readConfigOverrides(): unknown {
   const raw = window.config?.CSM_PORTAL_FEATURE_OVERRIDES;
   if (typeof raw !== "string") return raw;
   try {
@@ -83,68 +137,81 @@ function readRawOverrides(): unknown {
 }
 
 /**
- * Validates the raw map, dropping entries that name an unknown page or an
- * unknown state. Both are almost always typos, and a silently ignored typo in a
- * flag that is meant to hide something is the failure mode worth shouting
- * about, so each one is warned about at startup.
+ * The map the rules resolve against. Once an admin has saved, only the saved
+ * rows count and `config.js` is not read. Before that, the config is the base
+ * and any rows that exist (a first save that stopped part-way) sit on top of
+ * it. With no shared map at all — still loading, or it failed — it is the
+ * config alone, exactly as before this setting existed.
  */
-function parseOverrides(): Record<string, FeatureState> {
-  const raw = readRawOverrides();
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+function resolveOverrides(): Record<string, FeatureState> {
+  const sharedMap = getSharedFeatureOverrides();
+  const rows = sharedMap
+    ? parseOverrideMap(sharedMap.rows, "Feature visibility settings", false)
+    : {};
+  if (sharedMap?.savedOnce) return rows;
+  return {
+    ...parseOverrideMap(readConfigOverrides(), "CSM_PORTAL_FEATURE_OVERRIDES", true),
+    ...rows,
+  };
+}
 
-  const knownIds = new Set(flattenNavNodes().map((node) => node.id));
-  const parsed: Record<string, FeatureState> = {};
-
-  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!knownIds.has(id)) {
-      console.warn(
-        `[featureFlags] CSM_PORTAL_FEATURE_OVERRIDES names an unknown page "${id}"; ignoring it.`,
-      );
-      continue;
-    }
-    if (!isFeatureState(value)) {
-      console.warn(
-        `[featureFlags] CSM_PORTAL_FEATURE_OVERRIDES["${id}"] must be one of ${FEATURE_STATES.join(
-          ", ",
-        )}; ignoring it.`,
-      );
-      continue;
-    }
-    parsed[id] = value;
+/**
+ * What `config.js` holds, as it would be saved: only known pages, with `wip`
+ * and `hidden` both written as `preview`. The Settings page uses it as the
+ * starting point before the first save.
+ */
+export function configOverridesAsStored(): Record<string, StoredFeatureState> {
+  const out: Record<string, StoredFeatureState> = {};
+  const parsed = parseOverrideMap(readConfigOverrides(), "CSM_PORTAL_FEATURE_OVERRIDES", true);
+  for (const [id, value] of Object.entries(parsed)) {
+    out[id] = value === "enabled" ? "enabled" : "preview";
   }
+  return out;
+}
 
-  return parsed;
+interface ResolvedStates {
+  /** Each node's state after the menu rules, before any per-user lift. */
+  effective: Map<string, FeatureState>;
+  /** Nodes that resolve to `preview` before rule 5 promotes their section. */
+  preview: Set<string>;
 }
 
 /**
  * Resolves every node in the tree to its effective state.
  *
  * Rules, in order:
- * 1. A `hidden` ancestor hides its whole subtree. A child override cannot
- *    resurrect a page whose section does not exist.
+ * 1. A `hidden` ancestor hides its whole subtree (a legacy config line). A
+ *    child override cannot resurrect a page whose section does not exist.
  * 2. Otherwise a node's own override wins.
- * 3. Otherwise it inherits its parent's state, so marking a section `wip`
- *    marks its tabs `wip` without listing each one. A shortcut (see
+ * 3. Otherwise it inherits its parent's state, so marking a section `preview`
+ *    marks its tabs `preview` without listing each one. A shortcut (see
  *    `CsmNavNode.shortcutTo`) is the exception: it is not one of its section's
- *    tabs, so it does not inherit a `wip` section's state (a `hidden` section
- *    still hides it, rule 1). Whether a WIP section offers its shortcut at all
- *    is decided per user, see `isShortcutOffered`.
+ *    tabs, so it does not inherit a `preview` section's state (a `hidden`
+ *    section still hides it, rule 1). Whether a preview section offers its
+ *    shortcut at all is decided per user, see `isShortcutOffered`.
  * 4. Otherwise it is `enabled`.
- * 5. Finally, a `wip` section with at least one `enabled` tab is promoted to
- *    `enabled` — the section has something usable in it, so it must stay
+ * 5. Finally, a `preview` section with at least one `enabled` tab is promoted
+ *    to `enabled` — the section has something usable in it, so it must stay
  *    clickable or that tab would be reachable only by deep link. A shortcut
- *    does not count as a tab here either.
+ *    does not count as a tab here either. The stored value stays `preview`;
+ *    `preview` in the result remembers which nodes were `preview` before this
+ *    step, so an admin still sees the tag on such a section.
+ *
+ * The admin lift (an admin can open a `preview` page) is per user and applied
+ * in {@link featureState}, not here.
  */
-function computeStates(): Map<string, FeatureState> {
-  const overrides = parseOverrides();
-  const states = new Map<string, FeatureState>();
+function computeStates(): ResolvedStates {
+  const overrides = resolveOverrides();
+  const effective = new Map<string, FeatureState>();
+  const preview = new Set<string>();
 
   const inherit = (nodes: readonly CsmNavNode[], parent: FeatureState): void => {
     for (const node of nodes) {
       const inherited: FeatureState = isNavShortcut(node) ? "enabled" : parent;
       const state: FeatureState =
         parent === "hidden" ? "hidden" : (overrides[node.id] ?? inherited);
-      states.set(node.id, state);
+      effective.set(node.id, state);
+      if (state === "preview") preview.add(node.id);
       if (node.children?.length) inherit(node.children, state);
     }
   };
@@ -155,31 +222,39 @@ function computeStates(): Map<string, FeatureState> {
       if (!node.children?.length) continue;
       promote(node.children);
       const hasUsableChild = node.children.some(
-        (child) => !isNavShortcut(child) && states.get(child.id) === "enabled",
+        (child) => !isNavShortcut(child) && effective.get(child.id) === "enabled",
       );
-      if (states.get(node.id) === "wip" && hasUsableChild) {
-        states.set(node.id, "enabled");
+      if (effective.get(node.id) === "preview" && hasUsableChild) {
+        effective.set(node.id, "enabled");
       }
     }
   };
   promote(CSM_NAV_ITEMS);
 
-  return states;
+  return { effective, preview };
 }
 
-let cachedStates: Map<string, FeatureState> | undefined;
+let cachedResolved: { version: number; value: ResolvedStates } | undefined;
+
+function resolved(): ResolvedStates {
+  const version = getSharedFeatureOverridesVersion();
+  if (!cachedResolved || cachedResolved.version !== version) {
+    cachedResolved = { version, value: computeStates() };
+  }
+  return cachedResolved.value;
+}
 
 function states(): Map<string, FeatureState> {
-  cachedStates ??= computeStates();
-  return cachedStates;
+  return resolved().effective;
 }
 
 /**
  * Clears the memoised resolution so a test can swap `window.config` between
- * cases. Not for application code — the config is fixed for a page load.
+ * cases. Not for application code — the shared map's own changes already
+ * invalidate it.
  */
 export function resetFeatureStatesForTests(): void {
-  cachedStates = undefined;
+  cachedResolved = undefined;
 }
 
 let cachedRequirements: Map<string, keyof PortalAccess> | undefined;
@@ -206,7 +281,7 @@ function requirements(): Map<string, keyof PortalAccess> {
 
 /**
  * True when some node under (but not including) `node` has an active preview
- * override. Lets a `hidden`/`wip` ancestor get promoted too when the admin
+ * override. Lets a `hidden`/`preview` ancestor get promoted too when the admin
  * has only switched on preview for one of its descendants: `listPreviewableFeatures`
  * offers every restricted node individually, tabs included, so an admin can
  * (and reasonably would) preview just `"operations.incidents"` without also
@@ -245,7 +320,7 @@ function hasPreviewedDescendant(
  * deployment-wide state.
  *
  * `previewOverrides` (the Feature Preview dialog's per-admin, browser-local
- * toggles — see `featurePreview.ts`) can PROMOTE a `hidden`/`wip` node to
+ * toggles — see `featurePreview.ts`) can PROMOTE a `hidden`/`preview` node to
  * `enabled` for that one admin, but can never demote anything and can never
  * bypass a genuine capability failure: a node whose `requires` capability the
  * caller lacks resolves to `hidden` regardless of any override. Promotion
@@ -285,16 +360,18 @@ function ownFeatureState(
   const need = requirements().get(id);
   const capabilityOk = !access || !need || access[need];
   if (!capabilityOk) return "hidden";
-  if (state !== "hidden" && state !== "wip") return state;
+  // An admin can open a Preview page. Everyone else keeps it greyed out.
+  if (state === "preview" && access?.isAdmin) return "enabled";
+  if (state !== "hidden" && state !== "preview") return state;
   if (!access?.isAdmin) return state;
   if (previewOverrides?.[id] === true) return "enabled";
   if (hasPreviewedDescendant(navNodeById(id), previewOverrides)) return "enabled";
   return state;
 }
 
-const STATE_RANK: Record<FeatureState, number> = { enabled: 0, wip: 1, hidden: 2 };
+const STATE_RANK: Record<FeatureState, number> = { enabled: 0, preview: 1, hidden: 2 };
 
-/** The more restrictive of two states: hidden over wip over enabled. */
+/** The more restrictive of two states: hidden over preview over enabled. */
 function narrower(a: FeatureState, b: FeatureState): FeatureState {
   return STATE_RANK[a] >= STATE_RANK[b] ? a : b;
 }
@@ -541,10 +618,10 @@ export function firstEnabledDestination(
 /**
  * Every nav node this deployment's own `CSM_PORTAL_FEATURE_OVERRIDES` map
  * EXPLICITLY names, and whose resolved state (without any preview override
- * applied) is still `hidden`/`wip` — the candidate list the Feature Preview
+ * applied) is still `hidden`/`preview` — the candidate list the Feature Preview
  * dialog renders as toggle rows.
  *
- * Deliberately NOT every node whose state merely ends up `hidden`/`wip`
+ * Deliberately NOT every node whose state merely ends up `hidden`/`preview`
  * through inheritance — a `hidden` section forces every one of its tabs
  * hidden too (rule 1 in `computeStates`' own doc comment), so without this
  * restriction a deployment that hides a handful of sections would offer a
@@ -566,18 +643,18 @@ export function firstEnabledDestination(
  * shortcut's own preview value).
  */
 export function listPreviewableFeatures(access?: PortalAccess): CsmNavNode[] {
-  const overrides = parseOverrides();
+  const overrides = resolveOverrides();
   return flattenNavNodes(CSM_NAV_ITEMS).filter((node) => {
     if (isNavShortcut(node) || !(node.id in overrides)) return false;
     const state = featureState(node.id, access);
-    return state === "hidden" || state === "wip";
+    return state === "hidden" || state === "preview";
   });
 }
 
 /**
  * True when `id` is visible to the signed-in admin right now ONLY because of
  * an active Feature Preview override — this deployment's own
- * `CSM_PORTAL_FEATURE_OVERRIDES` still restricts it (`hidden`/`wip`) for
+ * `CSM_PORTAL_FEATURE_OVERRIDES` still restricts it (`hidden`/`preview`) for
  * everyone else. Lets a previewed nav element be marked as such wherever it
  * renders, so "I can see this" is never mistaken for "this is live".
  *
@@ -597,7 +674,59 @@ export function isPreviewedOnly(
   previewOverrides?: Record<string, boolean>,
 ): boolean {
   if (!access?.isAdmin) return false;
+  // A node an admin team set to Preview for everyone: the admin opens it, and
+  // it carries the tag so it is never mistaken for a live page.
+  if (resolved().preview.has(id) && featureState(id, access, previewOverrides) === "enabled") {
+    return true;
+  }
   const withoutPreview = featureState(id, access);
   if (withoutPreview === "enabled") return false;
   return featureState(id, access, previewOverrides) === "enabled";
+}
+
+/** One page in the navigation tree, as the Feature visibility page lists it. */
+export interface FeatureNodeInfo {
+  id: string;
+  label: string;
+  /** 0 for a top-level section, 1 for one of its pages, and so on. */
+  depth: number;
+  parentId?: string;
+  /** Ids of the pages directly under it. Shortcuts are left out. */
+  childIds: string[];
+  /** The role capability the page needs, or an ancestor's. */
+  requires?: keyof PortalAccess;
+}
+
+/**
+ * Every page an admin can set from Settings, in nav order: the whole tree
+ * except shortcuts (a shortcut is a second menu entry for a page elsewhere and
+ * has no state of its own — it follows that page). A page added to
+ * `csmNavItems.ts` shows up here with no database row and starts as
+ * Available.
+ */
+export function listFeatureNodes(): FeatureNodeInfo[] {
+  const out: FeatureNodeInfo[] = [];
+  const walk = (
+    nodes: readonly CsmNavNode[],
+    depth: number,
+    parentId: string | undefined,
+    inherited: keyof PortalAccess | undefined,
+  ): void => {
+    for (const node of nodes) {
+      if (isNavShortcut(node)) continue;
+      const need = node.requires ?? inherited;
+      const children = (node.children ?? []).filter((child) => !isNavShortcut(child));
+      out.push({
+        id: node.id,
+        label: node.label,
+        depth,
+        parentId,
+        childIds: children.map((child) => child.id),
+        requires: need,
+      });
+      walk(children, depth + 1, node.id, need);
+    }
+  };
+  walk(CSM_NAV_ITEMS, 0, undefined, undefined);
+  return out;
 }

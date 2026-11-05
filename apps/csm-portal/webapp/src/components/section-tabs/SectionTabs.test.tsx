@@ -33,8 +33,21 @@ vi.mock("@api/backend/client", () => ({
 vi.mock("@config/apiConfig", () => ({
   apiConfig: { backendUrl: "https://example.test" },
 }));
+// The redirect reads the signed-in user's access (an admin opens a Preview
+// tab), and Operations needs a role that can use it.
+const currentRoles = vi.hoisted(() => ({ value: ["cs_engineer"] as string[] }));
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: { id: "user-1", roles: currentRoles.value },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
 
-import { LegacyQueryTabRedirect } from "@components/section-tabs/SectionTabs";
+import SectionTabs, { LegacyQueryTabRedirect } from "@components/section-tabs/SectionTabs";
+import { navNodeById } from "@config/csmNavItems";
+import type { SectionTab } from "@hooks/useSectionTabs";
 
 function setOverrides(value: unknown): void {
   window.config = {
@@ -44,7 +57,10 @@ function setOverrides(value: unknown): void {
   resetFeatureStatesForTests();
 }
 
-beforeEach(() => setOverrides(undefined));
+beforeEach(() => {
+  currentRoles.value = ["cs_engineer"];
+  setOverrides(undefined);
+});
 afterEach(() => setOverrides(undefined));
 
 function LocationProbe(): JSX.Element {
@@ -122,5 +138,58 @@ describe("LegacyQueryTabRedirect", () => {
     expect(probe).toContain("severity=s1");
     expect(probe).not.toContain("tab=incidents");
     expect(probe).toContain("#top");
+  });
+});
+
+describe("LegacyQueryTabRedirect for a Preview section", () => {
+  beforeEach(() => setOverrides({ operations: "preview" }));
+
+  it("sends an admin to the first tab, which is in Preview", () => {
+    currentRoles.value = ["admin"];
+    renderAt("/operations");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/operations/service-requests");
+  });
+
+  it("sends everyone else to the dashboard, since no tab is open to them", () => {
+    currentRoles.value = ["cs_engineer"];
+    renderAt("/operations");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/dashboard");
+  });
+});
+
+describe("SectionTabs chips", () => {
+  function tab(id: string, state: SectionTab["state"], previewedOnly: boolean): SectionTab {
+    const node = navNodeById(id)!;
+    return { key: id, label: node.label, state, node, previewedOnly };
+  }
+
+  function renderTabs(tabs: SectionTab[]) {
+    return render(
+      <MemoryRouter>
+        <SectionTabs tabs={tabs} activeKey={tabs[0]!.key} select={vi.fn()} ariaLabel="Test tabs" />
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows a disabled Preview chip for a tab the user cannot open", () => {
+    renderTabs([
+      tab("operations.incidents", "enabled", false),
+      tab("operations.problems", "preview", false),
+    ]);
+    const problems = screen.getByRole("tab", { name: /Problem management/ });
+    expect(problems).toBeDisabled();
+    expect(problems).toHaveTextContent("Preview");
+    expect(screen.queryByText("WIP")).not.toBeInTheDocument();
+  });
+
+  it("shows a Preview chip on a tab an admin can open, and leaves it clickable", () => {
+    renderTabs([
+      tab("operations.incidents", "enabled", false),
+      tab("operations.problems", "enabled", true),
+    ]);
+    const problems = screen.getByRole("tab", { name: /Problem management/ });
+    expect(problems).not.toBeDisabled();
+    expect(problems).toHaveTextContent("Preview");
+    expect(screen.getByRole("tab", { name: "Incidents" })).not.toHaveTextContent("Preview");
   });
 });

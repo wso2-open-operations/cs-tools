@@ -53,20 +53,26 @@ window.config = {
   // gitignored config.js.
   // CSM_PORTAL_DEV_BYPASS_ACCESS_CHECK: true,
 
-  // Per-page visibility. Keys are nav-node ids from src/config/csmNavItems.ts:
-  // a section id ("operations") or one of its tabs ("operations.incidents").
-  // Values:
-  //   "enabled" - normal. Also what any page NOT listed here gets, so only
+  // Per-page visibility. This is now set by an admin in Settings > Feature
+  // visibility and stored in the database. This map is only the FALLBACK: it is
+  // read until an admin has saved there once (the first save keeps these lines
+  // as saved rows), and again if the saved settings cannot be loaded.
+  // Keys are nav-node ids from src/config/csmNavItems.ts: a section id
+  // ("operations") or one of its tabs ("operations.incidents"). Values:
+  //   "enabled" - Available. Also what any page NOT listed here gets, so only
   //               list a page when you want to restrict it.
-  //   "wip"     - visible but greyed out with a "work in progress" tooltip,
-  //               dropped from the quick-nav palette, routes render the shared
-  //               "coming soon" page.
-  //   "hidden"  - no nav entry at all, routes redirect to the dashboard.
+  //   "preview" - an admin can open it, with a Preview tag. Everyone else sees
+  //               it greyed out with the same tag, dropped from the quick-nav
+  //               palette, and its routes render the shared "coming soon" page.
+  //   "wip"     - the older name for "preview", still read as "preview".
+  //   "hidden"  - the older "no nav entry at all" state, still honoured here
+  //               until the first save in Settings (which saves it as
+  //               "preview"). Settings no longer offers it.
   //
   // A section's setting cascades to its tabs, and a tab can override it: the
-  // block below marks Operations as WIP while keeping the finished Incidents
-  // tab usable (which also keeps Operations itself clickable). A "hidden"
-  // section hides its tabs unconditionally.
+  // block below puts Operations in preview while keeping the finished
+  // Incidents tab usable (which also keeps Operations itself clickable for
+  // everyone). A "hidden" section hides its tabs unconditionally.
   //
   // Available ids: dashboard, support, operations{.service-requests,
   // .change-requests, .incidents, .problems}, engagements, security-center
@@ -80,15 +86,15 @@ window.config = {
   // "customers.customer-health" is not a Customers tab but a second sidebar
   // entry for the Customer Health page (shown to viewers who are not CS
   // engineers/admins, inside the Customers dropdown). It follows
-  // "customer-health": hiding or WIP-ing that hides or WIPs both entries.
-  // A WIP or hidden Customers section does not hide Customer Health: those
+  // "customer-health": hiding it or putting it in preview does both entries.
+  // A preview or hidden Customers section does not hide Customer Health: those
   // viewers then get the separate Customer Health entry instead. It is never
   // offered in the Feature Preview dialog; preview "customer-health" instead.
   CSM_PORTAL_FEATURE_OVERRIDES: {
-    "operations": "wip",
+    "operations": "preview",
     "operations.incidents": "enabled",
-    "customers": "wip",
-    "admin": "wip",
+    "customers": "preview",
+    "admin": "preview",
     "admin.user-management.users": "enabled",
   },
 

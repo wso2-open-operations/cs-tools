@@ -566,3 +566,63 @@ describe("CsmSideBar — Feature Preview and the Customers shortcut", () => {
     expect(container.querySelector('[data-item-id="customer-health"]')).toBeNull();
   });
 });
+
+// A page or section the admins put in Preview (Settings > Feature visibility)
+// opens for an admin with a Preview badge, and stays greyed out and inert for
+// everyone else, with the same word on it.
+describe("CsmSideBar — a section in Preview", () => {
+  function setOverrides(value: unknown): void {
+    window.config = {
+      ...window.config,
+      CSM_PORTAL_FEATURE_OVERRIDES: value,
+    } as Window["config"];
+    resetFeatureStatesForTests();
+  }
+
+  beforeEach(() => {
+    sidebarPropsSpy.mockClear();
+    localStorage.clear();
+    setOverrides(undefined);
+  });
+
+  afterEach(() => {
+    currentRoles.value = ["cs_engineer"];
+    setOverrides(undefined);
+  });
+
+  it("tags a Preview page for an admin and leaves an Available page alone", () => {
+    currentRoles.value = ["admin"];
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
+    const { container } = renderAt("/dashboard");
+
+    expect(container.querySelector('[data-item-id="operations.problems"]')).toHaveTextContent("Preview");
+    expect(container.querySelector('[data-item-id="operations.incidents"]')).not.toHaveTextContent("Preview");
+    // The section itself is Preview as saved, even though Incidents keeps it open.
+    expect(container.querySelector('[data-item-id="operations"]')).toHaveTextContent("Operations");
+    expect(container.querySelector("[aria-disabled]")).toBeNull();
+  });
+
+  it("tags the same Preview page for someone who cannot open it, and never says WIP", () => {
+    currentRoles.value = ["cs_engineer"];
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
+    const { container } = renderAt("/dashboard");
+
+    expect(container.querySelector('[data-item-id="operations.problems"]')).toHaveTextContent("Preview");
+    expect(container.querySelector('[data-item-id="operations.incidents"]')).not.toHaveTextContent("Preview");
+    expect(container).not.toHaveTextContent("WIP");
+  });
+
+  it("greys out a Preview section with no open page for everyone but an admin", () => {
+    currentRoles.value = ["cs_engineer"];
+    setOverrides({ customers: "preview" });
+    const { container } = renderAt("/dashboard");
+    const greyed = container.querySelector("[aria-disabled]");
+    expect(greyed).not.toBeNull();
+    expect(greyed).toHaveTextContent("Customers");
+
+    currentRoles.value = ["admin"];
+    const adminView = renderAt("/dashboard");
+    expect(adminView.container.querySelector("[aria-disabled]")).toBeNull();
+    expect(adminView.container.querySelector('[data-item-id="customers"]')).toHaveTextContent("Preview");
+  });
+});

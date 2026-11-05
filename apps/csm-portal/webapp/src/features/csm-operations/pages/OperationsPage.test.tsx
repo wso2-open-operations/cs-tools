@@ -30,6 +30,23 @@ import "@testing-library/jest-dom/vitest";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
 import { currentPageEntry } from "@features/csm-recent/currentPageEntry";
 
+// The tab strip and the index redirects read the signed-in user's access (an
+// admin opens a Preview tab), and Operations needs a role that can use it.
+vi.mock("@api/backend/client", () => ({
+  useBackendApi: () => ({ get: vi.fn(), post: vi.fn() }),
+}));
+vi.mock("@config/apiConfig", () => ({
+  apiConfig: { backendUrl: "https://example.test" },
+}));
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: { id: "user-1", roles: ["cs_engineer"] },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 vi.mock("@features/csm-cases/components/CsmIssuesView", () => ({
   default: () => <div data-testid="tab-content">service requests</div>,
 }));

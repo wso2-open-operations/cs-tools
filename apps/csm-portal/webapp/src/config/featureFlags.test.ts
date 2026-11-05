@@ -61,32 +61,32 @@ describe("featureState", () => {
   });
 
   it("applies an explicit override", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+    setOverrides({ updates: "hidden", engagements: "preview" });
     expect(featureState("updates")).toBe("hidden");
-    expect(featureState("engagements")).toBe("wip");
+    expect(featureState("engagements")).toBe("preview");
     expect(featureState("dashboard")).toBe("enabled");
   });
 
-  it("cascades a WIP section onto its tabs", () => {
-    setOverrides({ "security-center": "wip" });
-    expect(featureState("security-center.reports")).toBe("wip");
-    expect(featureState("security-center.vulnerabilities")).toBe("wip");
+  it("cascades a preview section onto its tabs", () => {
+    setOverrides({ "security-center": "preview" });
+    expect(featureState("security-center.reports")).toBe("preview");
+    expect(featureState("security-center.vulnerabilities")).toBe("preview");
   });
 
-  it("lets a tab opt out of its section's WIP state", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "enabled" });
+  it("lets a tab opt out of its section's preview state", () => {
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     expect(featureState("operations.incidents")).toBe("enabled");
-    expect(featureState("operations.problems")).toBe("wip");
+    expect(featureState("operations.problems")).toBe("preview");
   });
 
-  it("promotes a WIP section that has a usable tab, so the tab is reachable", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "enabled" });
+  it("promotes a preview section that has a usable tab, so the tab is reachable", () => {
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     expect(featureState("operations")).toBe("enabled");
   });
 
-  it("leaves a WIP section disabled when every tab is restricted", () => {
-    setOverrides({ operations: "wip" });
-    expect(featureState("operations")).toBe("wip");
+  it("leaves a preview section disabled when every tab is restricted", () => {
+    setOverrides({ operations: "preview" });
+    expect(featureState("operations")).toBe("preview");
   });
 
   it("hides a section's whole subtree, overriding any tab that opts out", () => {
@@ -130,15 +130,15 @@ describe("override parsing", () => {
 
 describe("featureStateForPath", () => {
   it("resolves a tab's deep link to the tab, not to its section", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "enabled" });
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     expect(featureStateForPath("/operations/incidents")).toBe("enabled");
     expect(featureStateForPath("/operations/incidents/INC0001")).toBe("enabled");
-    expect(featureStateForPath("/operations/problems/PRB0001")).toBe("wip");
+    expect(featureStateForPath("/operations/problems/PRB0001")).toBe("preview");
   });
 
   it("resolves a section's own landing route to the section", () => {
-    setOverrides({ operations: "wip" });
-    expect(featureStateForPath("/operations")).toBe("wip");
+    setOverrides({ operations: "preview" });
+    expect(featureStateForPath("/operations")).toBe("preview");
   });
 
   it("resolves a route-backed tab and its detail pages", () => {
@@ -154,8 +154,8 @@ describe("featureStateForPath", () => {
 });
 
 describe("navigation helpers", () => {
-  it("keeps WIP sections in the sidebar but drops hidden ones", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+  it("keeps preview sections in the sidebar but drops hidden ones", () => {
+    setOverrides({ updates: "hidden", engagements: "preview" });
     const ids = visibleNavSections().map((section) => section.id);
     expect(ids).not.toContain("updates");
     expect(ids).toContain("engagements");
@@ -163,7 +163,7 @@ describe("navigation helpers", () => {
 
   it("separates visible tabs from usable ones", () => {
     setOverrides({
-      "admin.user-management.roles": "wip",
+      "admin.user-management.roles": "preview",
       "admin.user-management.groups": "hidden",
     });
     const userManagement = navNodeById("admin.user-management");
@@ -177,7 +177,7 @@ describe("navigation helpers", () => {
   });
 
   it("offers only usable destinations to the quick-nav palette", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "enabled" });
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     const ids = navigableNavNodes().map((node) => node.id);
     expect(ids).toContain("operations");
     expect(ids).toContain("operations.incidents");
@@ -214,7 +214,7 @@ describe("firstEnabledDestination", () => {
   });
 
   it("skips restricted sections so a hidden page never redirects into one", () => {
-    setOverrides({ dashboard: "hidden", support: "wip" });
+    setOverrides({ dashboard: "hidden", support: "preview" });
     expect(firstEnabledDestination()).toBe("/operations");
   });
 
@@ -228,8 +228,8 @@ describe("firstEnabledDestination", () => {
 });
 
 describe("isFeatureVisible / isFeatureEnabled", () => {
-  it("distinguishes hidden, WIP and enabled", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+  it("distinguishes hidden, preview and enabled", () => {
+    setOverrides({ updates: "hidden", engagements: "preview" });
     expect(isFeatureVisible("updates")).toBe(false);
     expect(isFeatureVisible("engagements")).toBe(true);
     expect(isFeatureEnabled("engagements")).toBe(false);
@@ -247,10 +247,10 @@ describe("featureState preview overrides", () => {
     expect(featureState("updates", admin, { updates: true })).toBe("enabled");
   });
 
-  it("promotes a deployment-wip node to enabled for an admin with the override on", () => {
-    setOverrides({ engagements: "wip" });
-    expect(featureState("engagements", admin)).toBe("wip");
-    expect(featureState("engagements", admin, { engagements: true })).toBe("enabled");
+  it("opens a preview node for an admin with no browser override at all", () => {
+    setOverrides({ engagements: "preview" });
+    expect(featureState("engagements", admin)).toBe("enabled");
+    expect(featureState("engagements", admin, { engagements: false })).toBe("enabled");
   });
 
   it("does not promote for a non-admin, even with the override on", () => {
@@ -307,16 +307,19 @@ describe("featureState preview overrides", () => {
   });
 
   it("leaves every other caller (no third argument) completely unaffected", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+    setOverrides({ updates: "hidden", engagements: "preview" });
+    // A hidden node stays hidden for an admin without the browser override. A
+    // preview node is the admin's to open, but nobody else's.
     expect(featureState("updates", admin)).toBe("hidden");
-    expect(featureState("engagements", admin)).toBe("wip");
+    expect(featureState("engagements", csEngineer)).toBe("preview");
+    expect(featureState("engagements")).toBe("preview");
     expect(featureState("dashboard")).toBe("enabled");
   });
 });
 
 describe("listPreviewableFeatures", () => {
-  it("returns only nodes that are hidden or WIP for this deployment, without applying any override", () => {
-    setOverrides({ updates: "hidden", engagements: "wip" });
+  it("returns only nodes that are hidden or preview for this deployment, without applying any override", () => {
+    setOverrides({ updates: "hidden", engagements: "preview" });
     const ids = listPreviewableFeatures().map((n) => n.id);
     expect(ids).toContain("updates");
     expect(ids).toContain("engagements");
@@ -331,11 +334,11 @@ describe("listPreviewableFeatures", () => {
     expect(csEngineerIds).toContain("operations.incidents");
   });
 
-  it("returns an empty array when nothing is hidden or WIP", () => {
+  it("returns an empty array when nothing is hidden or preview", () => {
     expect(listPreviewableFeatures()).toEqual([]);
   });
 
-  it("excludes a tab that is only hidden/WIP because its section is — never named in the config itself", () => {
+  it("excludes a tab that is only hidden/preview because its section is — never named in the config itself", () => {
     setOverrides({ operations: "hidden" });
     const ids = listPreviewableFeatures().map((n) => n.id);
     expect(ids).toContain("operations");
@@ -347,10 +350,10 @@ describe("listPreviewableFeatures", () => {
     expect(ids).not.toContain("operations.problems");
   });
 
-  it("excludes a config entry whose resolved state is already enabled (e.g. a WIP section promoted by a usable tab)", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "enabled" });
+  it("excludes a config entry whose resolved state is already enabled (e.g. a preview section promoted by a usable tab)", () => {
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     const ids = listPreviewableFeatures().map((n) => n.id);
-    // The section is explicitly named, but it resolves to "enabled" (a WIP
+    // The section is explicitly named, but it resolves to "enabled" (a preview
     // section promoted by its own enabled tab) — nothing to preview there.
     // operations.incidents is also explicitly named, but its own resolved
     // state is "enabled" too, so it's excluded the same way.
@@ -359,7 +362,7 @@ describe("listPreviewableFeatures", () => {
   });
 
   it("includes a tab the config names directly, even while its section is also restricted", () => {
-    setOverrides({ operations: "wip", "operations.incidents": "hidden" });
+    setOverrides({ operations: "preview", "operations.incidents": "hidden" });
     const ids = listPreviewableFeatures().map((n) => n.id);
     expect(ids).toContain("operations");
     expect(ids).toContain("operations.incidents");

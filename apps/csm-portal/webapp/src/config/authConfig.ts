@@ -61,13 +61,14 @@ declare global {
       CSM_PORTAL_THEME: string;
       CSM_PORTAL_LOG_LEVEL: string;
       /**
-       * Per-page visibility overrides keyed by nav-node id (see
-       * `csmNavItems.ts`). Object literal, or the same object as a JSON string
-       * for platforms that inject config as strings. Pages left out are
-       * enabled. See `featureFlags.ts`.
+       * Fallback per-page visibility, keyed by nav-node id (see
+       * `csmNavItems.ts`), read until an admin saves in Settings > Feature
+       * visibility. Object literal, or the same object as a JSON string for
+       * platforms that inject config as strings. Pages left out are enabled.
+       * `wip` is read as `preview`. See `featureFlags.ts`.
        */
       CSM_PORTAL_FEATURE_OVERRIDES?:
-        | Record<string, "enabled" | "wip" | "hidden">
+        | Record<string, "enabled" | "preview" | "wip" | "hidden">
         | string;
       CSM_PORTAL_MAINTENANCE_BANNER_VISIBLE: boolean;
       CSM_PORTAL_MAINTENANCE_BANNER_SEVERITY?: string;

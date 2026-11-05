@@ -29,6 +29,7 @@ import {
   useRouteTabs,
 } from "@hooks/useSectionTabs";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
+import { getPortalAccess } from "@context/current-user/portalAccess";
 import {
   CaseRouteOverrideProvider,
   type CaseRouteOverrideValue,
@@ -46,6 +47,17 @@ vi.mock("@api/backend/client", () => ({
 vi.mock("@config/apiConfig", () => ({
   apiConfig: { backendUrl: "https://example.test" },
 }));
+// Every tab hook reads the signed-in user's access (an admin opens a Preview
+// tab), and Operations needs a role that can use it.
+const currentRoles = vi.hoisted(() => ({ value: ["cs_engineer"] as string[] }));
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({
+    user: { id: "user-1", roles: currentRoles.value },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
 
 function setOverrides(value: unknown): void {
   window.config = {
@@ -56,6 +68,7 @@ function setOverrides(value: unknown): void {
 }
 
 beforeEach(() => {
+  currentRoles.value = ["cs_engineer"];
   setOverrides(undefined);
 });
 
@@ -162,6 +175,50 @@ function renderRouteTabsAt(initialEntry: string) {
     </MemoryRouter>,
   );
 }
+
+// A section in Preview opens for an admin and stays inert for everyone else.
+// Operations is the case that matters: its tab strip is a path segment, which
+// used to ignore who was asking.
+describe("a Preview section's tabs, by who is asking", () => {
+  beforeEach(() => {
+    setOverrides({ operations: "preview", "operations.incidents": "enabled" });
+  });
+
+  it("opens every Preview tab for an admin, tagged as previewed only", () => {
+    currentRoles.value = ["admin"];
+    function Probe(): JSX.Element {
+      const { tabs } = usePathSectionTabs("operations", "/operations");
+      return (
+        <div data-testid="tabs">
+          {tabs.map((tab) => `${tab.key}:${tab.state}:${tab.previewedOnly}`).join(",")}
+        </div>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={["/operations/incidents"]}>
+        <Routes>
+          <Route path="/operations/:tab" element={<Probe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const text = screen.getByTestId("tabs").textContent ?? "";
+    expect(text).toContain("problems:enabled:true");
+    expect(text).toContain("incidents:enabled:false");
+  });
+
+  it("keeps a Preview tab inert for someone else, and lands them on the open one", () => {
+    currentRoles.value = ["cs_engineer"];
+    renderPathTabsAt("/operations/problems");
+    expect(screen.getByTestId("active-key")).toHaveTextContent("incidents");
+  });
+
+  it("starts an admin on the first tab even when it is in Preview", () => {
+    expect(firstEnabledPathTab("operations", getPortalAccess(["admin"]))).toBe("service-requests");
+    expect(firstEnabledPathTab("operations", getPortalAccess(["cs_engineer"]))).toBe("incidents");
+    expect(enabledPathTabKeys("operations", getPortalAccess(["admin"]))).toContain("problems");
+    expect(enabledPathTabKeys("operations", getPortalAccess(["cs_engineer"]))).not.toContain("problems");
+  });
+});
 
 describe("useRouteTabs", () => {
   it("selects the tab whose path the page is on", () => {
