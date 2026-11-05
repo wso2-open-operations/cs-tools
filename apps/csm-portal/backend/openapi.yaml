@@ -14183,7 +14183,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: The person has upcoming turns on the team or holds its Case Alerts tier (the entity service's reason is kept).
+          description: The person holds the team's Case Alerts tier (the entity service's reason is kept). Their upcoming turns on the team are removed with the membership.
           content:
             application/json:
               schema:
@@ -14282,9 +14282,9 @@ paths:
       description: >
         CSM admin only; the entity service decides and its reason is kept on every refusal. `teamKey`
         is the team the person leaves and `toTeamKey` the team they join. Their role is kept and their
-        alert tier is empty on the new team. Refused with nothing written (409) while they have
-        upcoming turns or an alert tier on the source team, hold a lead-type role, or are on both
-        teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
+        alert tier is empty on the new team, and their upcoming turns on the source team are removed
+        with the move. Refused with nothing written (409) while they hold an alert tier on the source
+        team, hold a lead-type role, or are on both teams. Idempotent when they are already on the target and not on the source. PostgreSQL data
         source only.
       parameters:
         - name: teamKey
@@ -14342,7 +14342,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
-          description: Refused with nothing written (upcoming turns or an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
+          description: Refused with nothing written (an alert tier on the source team, a lead-type role, or on both teams; the entity service reason is kept).
           content:
             application/json:
               schema:

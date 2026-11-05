@@ -2642,6 +2642,8 @@
 .csm-ts .ra-mem-grid .cp-x:disabled { opacity: 0.4; cursor: default; }
 .csm-ts .ra-mem-q { flex: 1 1 100%; font-size: 12.5px; color: var(--ink); }
 .csm-ts .ra-mem-acts { display: flex; gap: 6px; }
+.csm-ts .ra-mem-turns { flex: 1 1 100%; font-size: 11.5px; color: var(--muted); }
+.csm-ts .ra-mem-turns-warn { color: var(--crit); font-weight: 600; }
 .csm-ts .ra-mem-yes { color: var(--crit); border-color: color-mix(in srgb, var(--crit) 45%, var(--line-2)); }
 .csm-ts .ra-mem-empty { font-size: 12.5px; color: var(--muted); padding: 14px 0; }
 @media (max-width: 760px) {
