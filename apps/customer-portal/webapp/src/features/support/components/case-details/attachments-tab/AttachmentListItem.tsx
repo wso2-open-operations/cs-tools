@@ -15,9 +15,9 @@
 // under the License.
 
 import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import {
   Box,
-  CircularProgress,
   IconButton,
   Paper,
   Skeleton,
@@ -79,6 +79,7 @@ export default function AttachmentListItem({
   deleteTooltip,
   hideDescription = false,
   isDownloadLoading = false,
+  downloadProgress = null,
 }: AttachmentListItemProps): JSX.Element {
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
@@ -215,7 +216,7 @@ export default function AttachmentListItem({
               onClick={() => onDownload(attachment)}
             >
               {isDownloadLoading ? (
-                <CircularProgress color="inherit" size={16} aria-hidden />
+                <DownloadProgressIndicator progress={downloadProgress} />
               ) : (
                 <Download size={16} aria-hidden />
               )}

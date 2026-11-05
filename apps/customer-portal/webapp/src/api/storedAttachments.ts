@@ -30,6 +30,9 @@ import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
  */
 export type DownloadSaveOutcome = "saved" | "started";
 
+/** Called as a download arrives: bytes received so far and the file's total size, once the first range is back. */
+export type DownloadProgress = (received: number, total: number) => void;
+
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
@@ -232,7 +235,7 @@ async function readRange(
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
 ): Promise<void> {
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
@@ -248,7 +251,7 @@ async function downloadFromBackend(
 
 async function readAndStore(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string },
+  input: { type: StoredAttachmentType; id: string; name?: string; onProgress?: DownloadProgress },
   sink: DiskSink | undefined,
 ): Promise<void> {
   const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
@@ -271,6 +274,8 @@ async function readAndStore(
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
 
+  let received = partsLength(first.parts);
+  if (total !== undefined) input.onProgress?.(received, total);
   if (total !== undefined && partsLength(first.parts) < total) {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
     let next = 1;
@@ -300,6 +305,8 @@ async function readAndStore(
           );
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
+          received += end - start + 1;
+          input.onProgress?.(received, total);
         } catch (error) {
           failure ??= { error };
         }
@@ -335,7 +342,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
 ): Promise<void> {
   if (isBackendAttachmentStorage()) {
     await downloadFromBackend(authFetch, input);
