@@ -23,12 +23,6 @@ import { UploadConfirmPendingError } from "@api/storedAttachments";
 const uploadMutate = vi.fn();
 const confirmMutate = vi.fn();
 
-vi.mock("@features/support/api/usePostAttachments", () => ({
-  usePostAttachments: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-vi.mock("@features/project-details/api/usePostDeploymentAttachment", () => ({
-  usePostDeploymentAttachment: () => ({ mutate: vi.fn(), isPending: false }),
-}));
 vi.mock("@api/useStoredAttachments", () => ({
   useStoredAttachmentUpload: () => ({
     upload: { mutate: uploadMutate, isPending: false },
@@ -50,12 +44,11 @@ function renderModal(props: { caseId?: string; deploymentId?: string } = {}) {
   return { onClose, pick };
 }
 
-describe("UploadAttachmentModal with entity-service attachments on", () => {
+describe("UploadAttachmentModal (chunked upload to Azure Blob through the backend)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (window as unknown as { config: unknown }).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test",
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
     };
   });
 
@@ -84,6 +77,13 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
       parentId: "dep-1",
       deploymentId: "dep-1",
     });
+  });
+
+  it("offers no description field for a deployment document: a stored upload has none", () => {
+    const { pick } = renderModal({ deploymentId: "dep-1" });
+    pick(new File(["x"], "guide.pdf", { type: "application/pdf" }));
+    expect(screen.getByLabelText(/document name/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/description/i)).not.toBeInTheDocument();
   });
 
   it("allows a file up to the 100 MB default and refuses one over it", () => {
@@ -125,6 +125,7 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
         "work_item",
         "att-9",
         "The service is temporarily unavailable.",
+        2,
       ),
     );
     expect(
@@ -135,6 +136,7 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
     expect(confirmMutate.mock.calls[0][0]).toMatchObject({
       type: "work_item",
       attachmentId: "att-9",
+      chunks: 2,
       caseId: "case-1",
     });
     expect(uploadMutate).toHaveBeenCalledTimes(1);
@@ -142,7 +144,6 @@ describe("UploadAttachmentModal with entity-service attachments on", () => {
 
   it("passes an abort signal and a progress callback, and shows the GB limit", () => {
     (window as unknown as { config?: unknown }).config = {
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
       CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240,
     };
     const { pick } = renderModal({ caseId: "case-1" });

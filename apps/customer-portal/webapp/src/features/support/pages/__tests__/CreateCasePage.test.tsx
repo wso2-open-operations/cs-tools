@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CreateCasePage from "@features/support/pages/CreateCasePage";
 
 const mockNavigate = vi.fn();
+const mockStoredUpload = vi.fn();
 const mockShowLoader = vi.fn();
 const mockHideLoader = vi.fn();
 
@@ -102,8 +103,11 @@ vi.mock("@features/settings/api/useGetUserDetails", () => ({
   default: () => ({ data: MOCK_USER_DETAILS }),
 }));
 
-vi.mock("@features/support/api/usePostAttachments", () => ({
-  usePostAttachments: () => ({ mutateAsync: vi.fn(), mutate: vi.fn() }),
+vi.mock("@api/useStoredAttachments", () => ({
+  useStoredAttachmentUpload: () => ({
+    upload: { mutateAsync: mockStoredUpload, mutate: vi.fn() },
+    confirm: { mutateAsync: vi.fn(), mutate: vi.fn() },
+  }),
 }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {

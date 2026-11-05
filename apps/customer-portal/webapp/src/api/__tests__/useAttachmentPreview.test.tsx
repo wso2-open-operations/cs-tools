@@ -108,12 +108,11 @@ describe("useAttachmentPreview", () => {
   });
 });
 
-describe("useAttachmentPreview with entity-service attachments on", () => {
+describe("useAttachmentPreview through the inline image route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (window as unknown as { config?: Record<string, unknown> }).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: "https://api.test/",
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
     };
     vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (
       this: FileReader,
@@ -133,7 +132,7 @@ describe("useAttachmentPreview with entity-service attachments on", () => {
         headers: { "Content-Type": "image/png" },
       }),
     );
-    const { result } = renderHook(() => useAttachmentPreview("att-1", "case-1"), {
+    const { result } = renderHook(() => useAttachmentPreview("att-1"), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -144,25 +143,17 @@ describe("useAttachmentPreview with entity-service attachments on", () => {
     expect(authFetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to the existing content route on a 404", async () => {
-    authFetchMock
-      .mockResolvedValueOnce(new Response("", { status: 404 }))
-      .mockResolvedValueOnce({
-        ok: true,
-        blob: async () => new Blob(["img"], { type: "image/png" }),
-        headers: { get: () => "image/png" },
-      });
-    const { result } = renderHook(() => useAttachmentPreview("att-2", "case-1"), {
+  it("shows no image when the inline route does not know the id (404)", async () => {
+    authFetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
+    const { result } = renderHook(() => useAttachmentPreview("att-2"), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBe("data:image/png;base64,inline");
-    expect(String(authFetchMock.mock.calls[1][0])).toContain(
-      "/attachments/att-2/content",
-    );
+    expect(result.current.data).toBeNull();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fall back when the inline route fails for another reason", async () => {
+  it("shows no image when the inline route fails for another reason", async () => {
     authFetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     const { result } = renderHook(() => useAttachmentPreview("att-3"), {
       wrapper: createWrapper(),
@@ -172,10 +163,10 @@ describe("useAttachmentPreview with entity-service attachments on", () => {
     expect(authFetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("reports a removed image (410) without falling back or retrying", async () => {
+  it("reports a removed image (410) without retrying", async () => {
     authFetchMock.mockResolvedValue(new Response("", { status: 410 }));
     const { result } = renderHook(
-      () => useAttachmentPreviews(["att-4"], "case-1"),
+      () => useAttachmentPreviews(["att-4"]),
       { wrapper: createWrapper() },
     );
     await waitFor(() => expect(result.current.removedIds.has("att-4")).toBe(true));
