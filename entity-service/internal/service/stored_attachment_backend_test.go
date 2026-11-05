@@ -106,6 +106,29 @@ func TestBackend_InitiateUploadKeepsItsChecks(t *testing.T) {
 	}
 }
 
+// A file of exactly the limit is accepted, at the upload and at the confirm;
+// only a byte more is refused.
+func TestBackend_AFileOfExactlyTheLimitIsAccepted(t *testing.T) {
+	req := initReq()
+	req.SizeBytes = 1000
+	if _, err := newBackendSvc(newFakeStoredRepo()).InitiateUpload(saCtx(t, saEmail), req); err != nil {
+		t.Errorf("an attachment of exactly the limit: %v", err)
+	}
+	req = initReq()
+	req.Kind, req.ContentType, req.SizeBytes = domain.StoredAttachmentComment, "image/png", 100
+	if _, err := newBackendSvc(newFakeStoredRepo()).InitiateUpload(saCtx(t, saEmail), req); err != nil {
+		t.Errorf("a comment image of exactly the limit: %v", err)
+	}
+	req.SizeBytes = 101
+	wantErr[*apierror.ValidationError](t, errOf(newBackendSvc(newFakeStoredRepo()).InitiateUpload(saCtx(t, saEmail), req)), "a byte over the image limit")
+
+	repo := newFakeStoredRepo()
+	pendingUpload(repo, 1000)
+	if _, err := newBackendSvc(repo).ConfirmUpload(saCtx(t, saEmail), confirmReq(domain.StoredAttachmentWorkItem, 1000, "")); err != nil {
+		t.Errorf("confirming an attachment of exactly the limit: %v", err)
+	}
+}
+
 func errOf[T any](_ T, err error) error { return err }
 
 func TestBackend_SFTPGoOnlyCallsAreNotAvailable(t *testing.T) {
