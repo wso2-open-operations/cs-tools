@@ -18,7 +18,6 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import Footer from "@components/footer/Footer";
 import {
-  COMPANY_NAME,
   PRIVACY_POLICY_URL,
   TERMS_OF_SERVICE_URL,
 } from "@features/project-hub/constants/appLayoutConstants";
@@ -45,7 +44,7 @@ vi.mock("@wso2/oxygen-ui", () => ({
 describe("Footer", () => {
   it("should render the company name", () => {
     render(<Footer />);
-    expect(screen.getByText(new RegExp(COMPANY_NAME, "i"))).toBeDefined();
+    expect(screen.getByText(/WSO2 LLC/i)).toBeDefined();
   });
 
   it("should render the terms of service link with correct URL", () => {

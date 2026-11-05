@@ -183,6 +183,10 @@ These must be set in `public/config.js` or the app throws at startup:
 | `CUSTOMER_PORTAL_AUTH_SIGN_IN_REDIRECT_URL` | page origin | Post-login redirect URL. Unset uses the page's own origin (`window.location.origin`); that origin must be a registered callback URL. Set only to override |
 | `CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL` | page origin | Post-logout redirect URL. Same default and override rules; must be a registered logout URL |
 | `CUSTOMER_PORTAL_THEME` | `acrylicOrange` | Oxygen UI theme: `acrylicOrange`, `acrylicPurple`, `highContrast`, `classic` |
+| `CUSTOMER_PORTAL_APP_NAME` | `Customer Portal` | Product name beside the header logo and in the browser tab |
+| `CUSTOMER_PORTAL_COMPANY_NAME` | `WSO2 LLC` | Company name in the footer copyright line |
+| `CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL` | `/logo-dark.svg` | Header and tab-icon logo for the light colour scheme (a path or `https` URL); also used for dark mode when no dark-mode logo is set. To use your own file without editing config, mount it over `public/logo-dark.svg` |
+| `CUSTOMER_PORTAL_LOGO_DARK_MODE_URL` | `/logo-white.svg` | Header and tab-icon logo for the dark colour scheme. Mount your SVG over `public/logo-white.svg` to replace the default |
 | `CUSTOMER_PORTAL_LOG_LEVEL` | `ERROR` | Console log level: `ERROR`, `WARN`, `INFO`, `DEBUG` |
 | `CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL` | — | WebSocket URL for the AI chatbot; omit to disable |
 | `CUSTOMER_PORTAL_FLOATING_NOVERA_ENABLED` | `false` | Show floating Novera assistant button on all pages |

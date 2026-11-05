@@ -22,7 +22,7 @@ import {
   SERVICENOW_REDIRECT_NO_CASE_ID,
 } from "@features/project-hub/constants/projectHubConstants";
 import { ROUTE_PREVIOUS_PAGE } from "@features/project-hub/constants/navigationConstants";
-import { APP_SHELL_NAV_ITEMS, COMPANY_NAME } from "@features/project-hub/constants/appLayoutConstants";
+import { APP_SHELL_NAV_ITEMS } from "@features/project-hub/constants/appLayoutConstants";
 
 describe("projectHubConstants", () => {
   it("exports hub search and pagination values", () => {
@@ -45,6 +45,5 @@ describe("navigationConstants", () => {
 describe("appLayoutConstants", () => {
   it("exports app shell navigation items", () => {
     expect(APP_SHELL_NAV_ITEMS.length).toBeGreaterThan(0);
-    expect(COMPANY_NAME).toBe("WSO2 LLC");
   });
 });

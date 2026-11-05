@@ -32,6 +32,12 @@ export interface CustomerPortalWindowConfig {
   CUSTOMER_PORTAL_AUTH_SIGN_OUT_REDIRECT_URL?: string;
   CUSTOMER_PORTAL_BACKEND_BASE_URL: string;
   CUSTOMER_PORTAL_THEME: string;
+  /** Optional name and logo settings. Each falls back to the stock WSO2 value when unset. */
+  CUSTOMER_PORTAL_APP_NAME?: string;
+  CUSTOMER_PORTAL_COMPANY_NAME?: string;
+  /** Logo for the light colour scheme; also used for dark when no dark-mode logo is set. */
+  CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL?: string;
+  CUSTOMER_PORTAL_LOGO_DARK_MODE_URL?: string;
   CUSTOMER_PORTAL_LOG_LEVEL: string;
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_VISIBLE: boolean;
   CUSTOMER_PORTAL_MAINTENANCE_BANNER_SEVERITY?: string;

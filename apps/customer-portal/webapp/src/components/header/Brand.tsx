@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { appearanceConfig } from "@config/appearanceConfig";
 import { Box, Header as HeaderUI, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
@@ -67,7 +68,9 @@ export default function Brand({
     return () => observer.disconnect();
   }, []);
 
-  const logoSrc = isDarkMode ? "/logo-white.svg" : "/logo-dark.svg";
+  const logoSrc = isDarkMode
+    ? appearanceConfig.logoDarkModeUrl
+    : appearanceConfig.logoLightModeUrl;
 
   return (
     <HeaderUI.Brand
@@ -112,12 +115,23 @@ export default function Brand({
             lg: "0.875rem",
             xl: "1rem",
           },
+          // A long configured name truncates instead of pushing the header
+          // controls out of view; the stock title fits well within the caps.
+          maxWidth: {
+            xs: "9rem",
+            sm: "12rem",
+            md: "16rem",
+            lg: "14rem",
+            xl: "18rem",
+          },
+          overflow: "hidden",
+          textOverflow: "ellipsis",
           [theme.breakpoints.down("xl")]: {
             display: "inline-block",
           },
         }}
       >
-        Customer Portal
+        <span title={appearanceConfig.name}>{appearanceConfig.name}</span>
       </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );
