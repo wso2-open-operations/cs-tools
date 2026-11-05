@@ -115,12 +115,23 @@ export default function Brand({
             lg: "0.875rem",
             xl: "1rem",
           },
+          // A long configured name truncates instead of pushing the header
+          // controls out of view; the stock title fits well within the caps.
+          maxWidth: {
+            xs: "9rem",
+            sm: "12rem",
+            md: "16rem",
+            lg: "14rem",
+            xl: "18rem",
+          },
+          overflow: "hidden",
+          textOverflow: "ellipsis",
           [theme.breakpoints.down("xl")]: {
             display: "inline-block",
           },
         }}
       >
-        {appearanceConfig.name}
+        <span title={appearanceConfig.name}>{appearanceConfig.name}</span>
       </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );

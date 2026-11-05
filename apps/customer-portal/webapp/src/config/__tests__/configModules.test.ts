@@ -104,4 +104,14 @@ describe("config modules", () => {
     expect(appearanceConfig.logoLightModeUrl).toBe("https://cdn.test/logo.svg");
     expect(appearanceConfig.logoDarkModeUrl).toBe("https://cdn.test/logo.svg");
   });
+
+  it("appearanceConfig anchors bare logo paths to the site root and leaves URLs alone", async () => {
+    const config = (window as unknown as { config: Record<string, string> })
+      .config;
+    config.CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL = "./logos/light.svg";
+    config.CUSTOMER_PORTAL_LOGO_DARK_MODE_URL = "https://cdn.test/dark.svg";
+    const { appearanceConfig } = await import("@config/appearanceConfig");
+    expect(appearanceConfig.logoLightModeUrl).toBe("/logos/light.svg");
+    expect(appearanceConfig.logoDarkModeUrl).toBe("https://cdn.test/dark.svg");
+  });
 });

@@ -27,8 +27,17 @@
         if (v("CUSTOMER_PORTAL_APP_NAME")) {
           document.title = v("CUSTOMER_PORTAL_APP_NAME");
         }
-        var light = v("CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL");
-        var dark = v("CUSTOMER_PORTAL_LOGO_DARK_MODE_URL") || light;
+        // Anchor bare paths ("logos/a.svg") to the site root so they do not
+        // resolve against the current page on deep links.
+        var logo = function (k) {
+          var u = v(k);
+          if (!u || u.charAt(0) === "/" || /^[a-z][a-z0-9+.-]*:/i.test(u)) {
+            return u;
+          }
+          return "/" + u.replace(/^\.\//, "");
+        };
+        var light = logo("CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL");
+        var dark = logo("CUSTOMER_PORTAL_LOGO_DARK_MODE_URL") || light;
         var icons = document.querySelectorAll('link[rel="icon"]');
         if (light && icons[0]) icons[0].setAttribute("href", light);
         if (dark && icons[1]) icons[1].setAttribute("href", dark);
