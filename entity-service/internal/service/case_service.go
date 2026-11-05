@@ -1974,9 +1974,16 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	}
 	// A service request's severity is internal and has its own, narrower path
 	// (no SLA revision, no notification, no mirror write). The record's type is
-	// read first; a read that fails falls through so the usual path reports it.
+	// read first and a failed read fails the request (404, 5xx): the general
+	// path below must never run for a record whose type could not be
+	// established. The repository refuses a service request's severity write
+	// that did not come through updateServiceRequestSeverity as well.
 	if req.Severity != nil {
-		if cv, err := s.GetCaseByID(ctx, req.ID); err == nil && cv.Type != nil && *cv.Type == "service_request" {
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
 			return s.updateServiceRequestSeverity(ctx, req)
 		}
 	}

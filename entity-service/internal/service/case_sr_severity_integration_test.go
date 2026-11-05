@@ -312,7 +312,7 @@ func TestSRSeverityIntegration_Update(t *testing.T) {
 	})
 	t.Run("the repository reports the previous severity", func(t *testing.T) {
 		low := domain.CaseSeverityLow
-		_, prev, _, err := repo.UpdateCase(srsInternalCtx(t), domain.UpdateCaseRequest{ID: srsSRHigh, Severity: &low}, nil)
+		_, prev, _, err := repo.UpdateCase(srsInternalCtx(t), domain.UpdateCaseRequest{ID: srsSRHigh, Severity: &low, InternalSeverityWrite: true}, nil)
 		if err != nil {
 			t.Fatalf("UpdateCase: %v", err)
 		}
@@ -365,9 +365,56 @@ func TestSRSeverityIntegration_Update(t *testing.T) {
 		if got := srsStoredSeverity(t, pool, srsSRHigh); got != "S3" {
 			t.Errorf("stored severity = %s, want S3", got)
 		}
+		// Staff acting through the customer portal are refused by the database too:
+		// app.is_internal stays true for them, app.is_internal_staff does not.
+		if _, err := scoped.Exec(srsStaffViaPortalCtx(t), `UPDATE service_request SET severity = 'S1' WHERE id = $1`, srsSRHigh); err == nil {
+			t.Fatal("a portal-routed staff UPDATE of severity succeeded")
+		}
+		if got := srsStoredSeverity(t, pool, srsSRHigh); got != "S3" {
+			t.Errorf("stored severity = %s after the refused updates, want S3", got)
+		}
+		// An internal caller's is accepted (and is put back for the steps below).
+		if _, err := scoped.Exec(srsInternalCtx(t), `UPDATE service_request SET severity = 'S2' WHERE id = $1`, srsSRHigh); err != nil {
+			t.Fatalf("an internal UPDATE of severity failed: %v", err)
+		}
+		if _, err := scoped.Exec(srsInternalCtx(t), `UPDATE service_request SET severity = 'S3' WHERE id = $1`, srsSRHigh); err != nil {
+			t.Fatalf("an internal UPDATE of severity failed: %v", err)
+		}
 		// Another column of the same row is still theirs to change.
 		if _, err := scoped.Exec(srsCustomerCtx(t), `UPDATE service_request SET close_notes = 'thanks' WHERE id = $1`, srsSRHigh); err != nil {
 			t.Errorf("a customer-identity UPDATE of another column failed: %v", err)
+		}
+	})
+	t.Run("the repository refuses a service request severity write that skipped the service", func(t *testing.T) {
+		crit := domain.CaseSeverityCritical
+		_, _, _, err := repo.UpdateCase(srsInternalCtx(t), domain.UpdateCaseRequest{ID: srsSRHigh, Severity: &crit}, nil)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("UpdateCase without the internal flag = %v, want a ValidationError", err)
+		}
+		if got := srsStoredSeverity(t, pool, srsSRHigh); got != "S3" {
+			t.Errorf("stored severity = %s, want it to stay S3", got)
+		}
+	})
+	t.Run("a record typed as a case whose only row is a service request's cannot be used to get around it", func(t *testing.T) {
+		sys := repository.WithSystemIdentity(context.Background())
+		scoped := repository.NewScoped(pool)
+		const id = "5e5e5e00-0000-4000-8000-0000000000f2"
+		if _, err := scoped.Exec(sys, `INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
+			VALUES ($1, now(), now(), 't', 't', 'SRS-MISMATCH', 'WSO2-SRS-MISMATCH', 'mismatch', 'CASE', $2)`, id, srsProjectID); err != nil {
+			t.Fatalf("seed work item: %v", err)
+		}
+		if _, err := scoped.Exec(sys, `INSERT INTO service_request (id, state, severity) VALUES ($1, 'OPEN', 'S2')`, id); err != nil {
+			t.Fatalf("seed service request: %v", err)
+		}
+		crit := domain.CaseSeverityCritical
+		for name, ctx := range map[string]context.Context{"external": srsCustomerCtx(t), "portal staff": srsStaffViaPortalCtx(t), "internal": srsInternalCtx(t)} {
+			if _, err := svc.UpdateCase(ctx, domain.UpdateCaseRequest{ID: id, Severity: &crit}); err == nil {
+				t.Errorf("%s: a severity change on a mismatched service request row succeeded", name)
+			}
+			if got := srsStoredSeverity(t, pool, id); got != "S2" {
+				t.Errorf("%s: stored severity = %s, want S2", name, got)
+			}
 		}
 	})
 	t.Run("a case's severity update is untouched", func(t *testing.T) {
@@ -575,4 +622,73 @@ func TestSRSeverityIntegration_TypeTransfer(t *testing.T) {
 			t.Errorf("case severity = %s, want S4", got)
 		}
 	})
+}
+
+// The activity feed (opt-in field changes) shows a service request's severity
+// changes to internal callers only.
+func TestSRSeverityIntegration_ActivityFeed(t *testing.T) {
+	pool := newCustomerReplyIntegrationPool(t)
+	seedSRSeverityFixture(t, pool)
+	svc := srsNewService(pool, "")
+	repo := repository.NewCaseRepository(repository.NewScoped(pool))
+
+	// An SR severity change and a case severity change, both recorded.
+	crit, low := domain.CaseSeverityCritical, domain.CaseSeverityLow
+	if _, err := svc.UpdateCase(srsInternalCtx(t), domain.UpdateCaseRequest{ID: srsSRHigh, Severity: &crit}); err != nil {
+		t.Fatalf("update SR severity: %v", err)
+	}
+	if _, err := svc.UpdateCase(srsInternalCtx(t), domain.UpdateCaseRequest{ID: srsCaseMed, Severity: &low}); err != nil {
+		t.Fatalf("update case severity: %v", err)
+	}
+	// A non-severity field change on the SR, which every reader may see.
+	if err := repo.RecordCaseFieldChangeActivity(repository.WithSystemIdentity(context.Background()), srsSRHigh, "state", "Open", "Work In Progress", srsStaff); err != nil {
+		t.Fatalf("record state change: %v", err)
+	}
+
+	feed := func(t *testing.T, ctx context.Context, id string) (fields []string, total int) {
+		t.Helper()
+		yes := true
+		acts, total, err := repo.SearchCaseActivities(ctx, domain.SearchCaseActivitiesRequest{CaseID: id, IncludeFieldChanges: &yes, Pagination: domain.Pagination{Limit: 50}})
+		if err != nil {
+			t.Fatalf("SearchCaseActivities: %v", err)
+		}
+		for _, a := range acts {
+			for _, c := range a.Changes {
+				fields = append(fields, c.Field)
+			}
+		}
+		return fields, total
+	}
+	has := func(fields []string, f string) bool {
+		for _, x := range fields {
+			if x == f {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("an internal caller sees the service request's severity change", func(t *testing.T) {
+		fields, total := feed(t, srsInternalCtx(t), srsSRHigh)
+		if !has(fields, "severity") || !has(fields, "state") || total != 2 {
+			t.Errorf("fields = %v, total = %d, want severity and state, 2", fields, total)
+		}
+	})
+	for name, ctx := range map[string]func(*testing.T) context.Context{"a customer": srsCustomerCtx, "staff through the customer portal": srsStaffViaPortalCtx} {
+		t.Run(name+" does not, in the feed or in the total", func(t *testing.T) {
+			fields, total := feed(t, ctx(t), srsSRHigh)
+			if has(fields, "severity") {
+				t.Errorf("fields = %v: the service request's severity change is visible", fields)
+			}
+			if !has(fields, "state") || total != 1 {
+				t.Errorf("fields = %v, total = %d, want only the state change, 1", fields, total)
+			}
+		})
+		t.Run(name+" still sees a case's severity change", func(t *testing.T) {
+			fields, total := feed(t, ctx(t), srsCaseMed)
+			if !has(fields, "severity") || total != 1 {
+				t.Errorf("fields = %v, total = %d, want the case's severity change, 1", fields, total)
+			}
+		})
+	}
 }

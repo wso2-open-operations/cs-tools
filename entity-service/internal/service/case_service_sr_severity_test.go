@@ -217,3 +217,55 @@ func TestSNCaseService_CreateCase_ServiceRequestPayloadCarriesNoSeverity(t *test
 		t.Errorf("payload %v does not look like a create payload", gotBody)
 	}
 }
+
+// A failed read of the record's type fails the severity update: the general
+// path must never run for a record whose type could not be established.
+func TestCaseService_UpdateSeverity_FailsClosedWhenTheTypeReadFails(t *testing.T) {
+	readErr := errors.New("connection reset")
+	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, readErr
+		},
+		updateCasePrev: func(context.Context, domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, *domain.CaseState, error) {
+			t.Error("the repository was asked to write after the type read failed")
+			return domain.Case{}, nil, nil, nil
+		},
+	}
+	low := domain.CaseSeverityLow
+	for name, scope := range map[string]AccessScope{"internal": srsInternalScope, "external": srsExternalScope, "portal staff": srsPortalScope} {
+		svc := NewCaseService(repo, stubUserRepo{}, nil, stubAccessServiceWithScope{scope}, nil)
+		_, err := svc.UpdateCase(context.Background(), domain.UpdateCaseRequest{ID: testDeploymentUUID, Severity: &low})
+		if !errors.Is(err, readErr) {
+			t.Errorf("%s: err = %v, want the type read error returned", name, err)
+		}
+	}
+}
+
+func TestSNCaseService_UpdateCase_ServiceRequestSeverityIsRefused(t *testing.T) {
+	var patched bool
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			patched = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id": "` + testWLCaseSysid + `", "internalId": "WSO2-001", "number": "SR0001001",
+			"title": "t", "description": "d", "createdOn": "2026-01-01 10:00:00", "updatedOn": "2026-01-02 10:00:00",
+			"createdBy": "reporter@example.com",
+			"project": {"id": "` + testProjectSysid + `", "name": "Project A"},
+			"deployment": {"id": "", "name": ""}, "deployedProduct": {"id": "", "name": "", "version": ""},
+			"state": {"id": 1, "label": "Open"},
+			"caseType": {"id": "5aeff1201b74c210264c997a234bcb54", "name": "Service Request"}
+		}`))
+	})
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
+	sev := domain.CaseSeverityHigh
+	_, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: sysidToUUID(testWLCaseSysid), Severity: &sev})
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, want a ValidationError (400)", err)
+	}
+	if patched {
+		t.Error("a write was sent to the backing data source")
+	}
+}

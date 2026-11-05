@@ -22,15 +22,21 @@
 -- cannot be narrowed to "every column but severity". The application refuses
 -- an external caller's severity change first (caseService.UpdateCase); this
 -- trigger is the database-level backstop for any writer that skips that check.
--- It reads app.is_internal, set per transaction from the caller's resolved
--- scope (see rls.go), the same signal every policy in this series uses.
+-- It reads app.is_internal_staff, set per transaction from the caller's
+-- resolved scope (see rls.go, scoped.go): true only for an internal caller that
+-- did not arrive through the customer portal's backend. app.is_internal is not
+-- used because it stays true for staff acting through that portal, whom the
+-- service treats as customers for this field.
 --
 -- UPDATE only. A customer's own create goes through insertAsCheckedProjectMember,
 -- which marks the insert transaction internal (so the extension policy can see
 -- the new work item); the create path therefore ignores an external caller's
 -- severity in Go and lets the column default apply. A writer with no
--- app.is_internal setting at all (csm-sync-service) never changes severity, so
--- it is unaffected: the check fires only when the value actually changes.
+-- app.is_internal_staff setting at all (csm-sync-service) never changes
+-- severity, so it is unaffected: the check fires only when the value actually
+-- changes. Deploy order: the application must be running the build that sets
+-- app.is_internal_staff before this migration is applied, or an internal
+-- severity change is refused until it is.
 --
 -- CREATE OR REPLACE and DROP TRIGGER IF EXISTS make this safe to re-run.
 BEGIN;
@@ -39,7 +45,7 @@ CREATE OR REPLACE FUNCTION service_request_severity_internal_only() RETURNS trig
 LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.severity IS DISTINCT FROM OLD.severity
-       AND COALESCE(current_setting('app.is_internal', true), '') <> 'true' THEN
+       AND COALESCE(current_setting('app.is_internal_staff', true), '') <> 'true' THEN
         RAISE EXCEPTION 'service request severity can only be changed by internal users'
             USING ERRCODE = '42501';
     END IF;

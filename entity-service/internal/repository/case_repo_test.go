@@ -350,14 +350,20 @@ func TestValidateUpdateCaseFieldsForType(t *testing.T) {
 			state: "CLOSED",
 		},
 		{
-			name:         "SERVICE_REQUEST allows an S1-S4 severity",
+			name:         "SERVICE_REQUEST allows an S1-S4 severity through the internal path",
 			workItemType: "SERVICE_REQUEST",
-			req:          domain.UpdateCaseRequest{Severity: &sev},
+			req:          domain.UpdateCaseRequest{Severity: &sev, InternalSeverityWrite: true},
+		},
+		{
+			name:          "SERVICE_REQUEST refuses a severity write that did not come through the internal path",
+			workItemType:  "SERVICE_REQUEST",
+			req:           domain.UpdateCaseRequest{Severity: &sev},
+			wantErrSubstr: "can only be changed by an internal user",
 		},
 		{
 			name:          "SERVICE_REQUEST rejects catastrophic severity",
 			workItemType:  "SERVICE_REQUEST",
-			req:           domain.UpdateCaseRequest{Severity: func() *domain.CaseSeverity { s := domain.CaseSeverityCatastrophic; return &s }()},
+			req:           domain.UpdateCaseRequest{InternalSeverityWrite: true, Severity: func() *domain.CaseSeverity { s := domain.CaseSeverityCatastrophic; return &s }()},
 			wantErrSubstr: "catastrophic is not allowed for a service request",
 		},
 		{

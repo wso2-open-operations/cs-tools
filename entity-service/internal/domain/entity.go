@@ -3790,6 +3790,11 @@ type UpdateCaseRequest struct {
 	// to be a real email address; a configured display label (e.g. a team or
 	// system name) is an intended use, not a misuse.
 	ActorEmail *string `json:"actorEmail,omitempty"`
+	// InternalSeverityWrite is set only by caseService.updateServiceRequestSeverity,
+	// after it has checked the caller may set a service request's severity. The
+	// repository refuses a severity write on a service request without it, so no
+	// other path can reach that write. Never read from the request body.
+	InternalSeverityWrite bool `json:"-"`
 }
 
 // UpdateCaseResponse is the response for PATCH /cases/{id}.

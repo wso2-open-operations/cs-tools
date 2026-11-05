@@ -2661,6 +2661,13 @@ const updateAnnouncementQuery = `
 // where u_work_state and resolution_code live on the one case table that
 // holds all of these types.
 func validateUpdateCaseFieldsForType(workItemType string, req domain.UpdateCaseRequest, state string) error {
+	// A service request's severity is internal: only caseService's own
+	// service-request path (which checks the caller) sets this flag. Any other
+	// route here -- including a record whose work_item.type disagrees with its
+	// extension row, so the service took it for a case -- is refused.
+	if workItemType == "SERVICE_REQUEST" && req.Severity != nil && !req.InternalSeverityWrite {
+		return &apierror.ValidationError{Msg: "a service request's severity can only be changed by an internal user"}
+	}
 	if workItemType != "CASE" && workItemType != "SERVICE_REQUEST" && req.Severity != nil {
 		return &apierror.ValidationError{Msg: "severity is only supported for cases and service requests"}
 	}
@@ -5201,6 +5208,20 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	includeFieldChanges := req.IncludeFieldChanges != nil && *req.IncludeFieldChanges
 	excludeWorkNotes := req.ExcludeWorkNotes != nil && *req.ExcludeWorkNotes
 
+	// A service request's severity changes are internal: its field-change rows
+	// are left out of the feed (and of the total) for a caller that may not see
+	// that severity -- the same rule as severityColumnFor. An identity that
+	// cannot be read from ctx is treated as one that may not. Case severity rows
+	// are unaffected: the filter only matches a work item that has a
+	// service_request row.
+	scope, _ := CallerIdentityFromContext(ctx)
+	fieldChangeFilter, fieldChangeDataFilter := "", ""
+	if !scope.canSeeServiceRequestSeverity() {
+		const clause = ` AND NOT (%[1]s.field_name = 'severity' AND EXISTS (SELECT 1 FROM service_request sr_sev WHERE sr_sev.id = %[1]s.work_item_id))`
+		fieldChangeFilter = fmt.Sprintf(clause, "wa")
+		fieldChangeDataFilter = fieldChangeFilter
+	}
+
 	// IS DISTINCT FROM, not <>: a comment with no type at all (NULL) must
 	// still count/show -- a plain <> comparison against NULL evaluates to
 	// NULL (neither true nor false in a WHERE clause), which would silently
@@ -5234,7 +5255,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 			(SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id
 			 WHERE wa.work_item_id = $1` + syncedAttachmentFilter + `)`
 	if includeFieldChanges {
-		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
+		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity wa WHERE wa.work_item_id = $1` + fieldChangeFilter + `)`
 	}
 
 	// An attachment entry's content is never empty: a client that hides
@@ -5324,7 +5345,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 					wa.field_name, wa.old_value, wa.new_value
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
-				WHERE wa.work_item_id = $1
+				WHERE wa.work_item_id = $1` + fieldChangeDataFilter + `
 			) fc`
 	}
 	dataQuery += `

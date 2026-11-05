@@ -143,6 +143,7 @@ func (s *caseService) updateServiceRequestSeverity(ctx context.Context, req doma
 			actorID = &actor.ID
 		}
 	}
+	req.InternalSeverityWrite = true
 	c, previous, _, err := s.repo.UpdateCase(ctx, req, actorID)
 	if err != nil {
 		return domain.UpdateCaseResponse{}, err
