@@ -37,7 +37,7 @@ import {
 } from "@wso2/oxygen-ui";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
-import { ArrowLeft, Library, Link2 } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Building2, Library, Link2 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
@@ -438,7 +438,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
   }
   // Under the template picker: why it is disabled, or whose templates it lists.
   const templatePickerHint = !scope.projectId
-    ? `Select the Customer Project first. ${STANDARD_CHANGE_ONE_CUSTOMER_RULE}`
+    ? "Choose the Customer Project above to see its customer's templates."
     : projectCustomerQuery.isError
       ? "Couldn't look up the project's customer."
       : !projectCustomerKnown
@@ -452,7 +452,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     ? undefined
     : projectAccountId && templateCustomer
       ? `Projects of ${templateCustomer.name}, the customer of ${template!.number}: a template is used only for its own customer's projects.`
-      : "Required for a standard change: a project of the template's customer.";
+      : "Required for a standard change.";
 
   // The legacy ServiceNow form pre-selects "Other".
   const initialCategory = draft?.category ?? cloneState?.category ?? DEFAULT_CHANGE_REQUEST_CATEGORY;
@@ -651,6 +651,17 @@ export default function CreateChangeRequestPage(): JSX.Element {
       : subject.trim().length > 0) &&
     !isSubmitting &&
     !isIncidentParentSelected;
+  // What Create is still waiting for, said beside the button (its other blockers
+  // -- a template that can't be used, an incident as the originating record --
+  // are explained where they are).
+  const stillNeeded: string[] = [];
+  if (!isCreatableChangeRequestType(type)) stillNeeded.push("the change type");
+  else if (isStandard) {
+    if (!scope.projectId) stillNeeded.push("a Customer Project");
+    if (!templateId) stillNeeded.push("a standard change template");
+  } else if (!subject.trim()) stillNeeded.push("a subject");
+  const stillNeededText =
+    !isSubmitting && stillNeeded.length ? `Before it can be created it still needs ${stillNeeded.join(" and ")}.` : "";
   // Non-blocking: a past planned start/end is unusual but not forbidden
   // (e.g. logging a change that already happened), so this only warns.
   const plannedStartIsPast = isPastZonedInput(plannedStartDate);
@@ -876,6 +887,23 @@ export default function CreateChangeRequestPage(): JSX.Element {
     />
   );
 
+  // Customer Project -> Deployments -> Deployment products, below Priority and
+  // Impact. A standard change draws the Customer Project alone at the top (it
+  // decides which templates can be used) and the deployments here.
+  const renderScopeFields = (parts: "all" | "project" | "deployments"): JSX.Element => (
+    <ChangeRequestScopeFields
+      scope={scope}
+      disabled={isSubmitting}
+      idPrefix="cr"
+      parts={parts}
+      projectRequired={isStandard || projectNeededForApproval}
+      projectAccountId={projectAccountId}
+      projectHelperText={
+        projectHelperText ?? (projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined)
+      }
+    />
+  );
+
   return (
     <Box sx={{ width: "100%", px: 3, py: 3 }}>
       <Button
@@ -985,6 +1013,43 @@ export default function CreateChangeRequestPage(): JSX.Element {
 
           {isStandard ? (
             <>
+              {/* A standard change is one customer's: the Customer Project (and so the
+                  customer) comes first, and decides which templates can be picked below. */}
+              <Box
+                role="group"
+                aria-labelledby="cr-standard-project-heading"
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                  p: 2,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: "primary.main",
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, 0.06),
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Box sx={{ display: "flex", color: "primary.main" }}>
+                    <Building2 size={16} aria-hidden />
+                  </Box>
+                  <Typography id="cr-standard-project-heading" variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    Customer project
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  {STANDARD_CHANGE_ONE_CUSTOMER_RULE}
+                </Typography>
+                {renderScopeFields("project")}
+                {/* What to do next, where it is done: the project (the template picker waits for it). */}
+                {!scope.projectId && (
+                  <Typography variant="caption" color="error" role="status">
+                    {templateUsable
+                      ? `Select a Customer Project of ${templateCustomer!.name} to continue.`
+                      : "Select a Customer Project to continue."}
+                  </Typography>
+                )}
+              </Box>
               <Box
                 role="group"
                 aria-labelledby="cr-standard-template-heading"
@@ -1048,7 +1113,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
                     template&apos;s customer; nothing was created.
                   </Alert>
                 )}
-                {!templateId && (
+                {!templateId && !!scope.projectId && (
                   <Typography variant="caption" color="error" role="status">
                     Select a standard change template to continue.
                   </Typography>
@@ -1100,11 +1165,6 @@ export default function CreateChangeRequestPage(): JSX.Element {
                     This template has no customer recorded, so a change request cannot be raised from it until its
                     customer is set. Pick another template.
                   </Alert>
-                )}
-                {templateUsable && !scope.projectId && (
-                  <Typography variant="caption" color="error" role="status">
-                    {`Select a Customer Project of ${templateCustomer!.name} to continue.`}
-                  </Typography>
                 )}
               </Box>
               {templateUsable && (
@@ -1220,20 +1280,13 @@ export default function CreateChangeRequestPage(): JSX.Element {
             )}
           </Box>
 
+          {/* The usual place of the project block. A standard change has its project at the
+              top, so only its deployments are drawn here. */}
           <Box role="group" aria-labelledby="cr-scope-heading">
             <Typography id="cr-scope-heading" variant="subtitle2" sx={{ mb: 1 }}>
-              Customer project and deployments
+              {isStandard ? "Deployments" : "Customer project and deployments"}
             </Typography>
-            <ChangeRequestScopeFields
-              scope={scope}
-              disabled={isSubmitting}
-              idPrefix="cr"
-              projectRequired={isStandard || projectNeededForApproval}
-              projectAccountId={projectAccountId}
-              projectHelperText={
-                projectHelperText ?? (projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined)
-              }
-            />
+            {renderScopeFields(isStandard ? "deployments" : "all")}
           </Box>
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
@@ -1551,7 +1604,19 @@ export default function CreateChangeRequestPage(): JSX.Element {
           </Box>
         </Box>
 
-        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}>
+        <Box
+          sx={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 1.5, mt: 2.5 }}
+        >
+          {stillNeededText && (
+            <Typography
+              id="cr-create-still-needed"
+              variant="body2"
+              color="text.secondary"
+              sx={{ flex: "1 1 260px", textAlign: "right" }}
+            >
+              {stillNeededText}
+            </Typography>
+          )}
           <Button variant="outlined" onClick={handleCancel}>
             Cancel
           </Button>
@@ -1560,6 +1625,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
             onClick={handleSubmit}
             disabled={!canSubmit}
             loading={isSubmitting}
+            aria-describedby={stillNeededText ? "cr-create-still-needed" : undefined}
           >
             Create change request
           </Button>

@@ -400,6 +400,12 @@ The change request create page and edit dialog share `useChangeRequestScope` (`f
 
 - Changing or clearing the project clears the deployments below it and re-derives the Customer Group. Deployment products are never picked — they are derived (`productsReady` is false while the lookup for the current selection is in flight, and the products are then not sent).
 - **Customer Group is read-only and derived.** It is the chosen project's registered contacts (the people asked at the customer gates, who answer in the customer portal), shown as name chips with a lock icon, helper "Derived from the customer project's registered contacts" ("Select a Customer Project first." / "—" until a project is chosen, "No registered contacts on this project…" when empty). It is not form state, not in drafts or clones, and **never sent**: the backend refuses `customerGroupId` (and `environmentIds`) with a 400. The detail page shows the same list from `customerContacts`; at a customer gate with an empty list the Approval tab explains that no customer approvers were assigned (`noCustomerContactsHelper`).
+- **What Create is still waiting for is said beside it** (every type): "Before it can be created it still needs the
+  change type / a subject / a Customer Project and a standard change template." (`stillNeeded`, the button's
+  `aria-describedby`), so nobody has to search the form for the missing field. Only what keeps Create disabled is
+  listed; a template that can't be used or an incident as the originating record is explained where it is, and the
+  change specifics are checked on Create. Every field Create needs carries the required asterisk (see "Required
+  fields").
 - **Refusals of the create are worded by the entity service and shown as written.** A person with no ServiceNow account (a user created in this database, which nothing in the web can tell apart in the picker) or an assignment group ServiceNow does not have is refused by the create itself with a 400 that says who or what cannot be used, why, and which field to change. The create form shows every 4xx message of the entity service as written in its error banner (`CreateChangeRequestPage` `onError`), so keep that wording on the entity-service side and do not replace it with a generic message here.
 - Sent only when non-empty. The create page sends `projectId`, `deploymentIds`, `deploymentProductIds` (plus `category`, `comment`, `workNote`); the edit dialog sends the three scope fields **together** when any of them changed (the backend validates them as a unit), and not at all once the CR has been approved -- from Customer Approval / Scheduled on, i.e. editable only in New, Assess and Authorize (the dialog locks the deployments with the reason; the backend refuses from there on). The **Customer Project itself is editable only in New** (see the next section): after New the dialog shows it read-only and, when only the deployments changed, sends the stored project beside them, which the backend accepts as a no-op. A saved project can be swapped (in New) but not cleared (the patch cannot express "no project").
 - Clone carries the project and category, but deliberately **not** deployments / products: they name the deployment the change targets, and a clone exists to promote the change to another one. A draft or clone from before this change may still hold `customerGroupId` / `environmentIds`; they are ignored (not read, not re-saved).
@@ -776,8 +782,15 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     `{accountId}`, and searches with `projectIds`; no projects = no evidence, nothing searched). Submit is held back
     with "still needs ... a customer" (`standardChangeProposalGaps`, in the backend's order: after name and rationale).
   - **Create form, Standard**: the customer is the Customer Project's account (`useProjectCustomer`, `GET
-    /projects/{id}`). The template picker is disabled with the reason until a project with a customer is chosen, and
-    then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
+    /projects/{id}`), so a Standard change asks for the **Customer Project first, alone**, in a highlighted
+    "Customer project" section right under the change type and above the template (`ChangeRequestScopeFields
+    parts="project"`); its Deployments, Deployment products and Customer Group stay in the usual place below Priority
+    (`parts="deployments"`, under a "Deployments" heading), since they have no bearing on the template. Normal and
+    Emergency keep the one block (`parts="all"`) in its usual place, unchanged. The template picker is disabled with
+    the reason ("Choose the Customer Project above to see its customer's templates.") until a project with a
+    customer is chosen; until then the prompt to continue ("Select a Customer Project to continue.") is on the project
+    section, and the template's own prompt appears once its picker can be used. The one-customer rule is said once, in
+    the project section. It then lists only that customer's ACTIVE templates (`useSearchActiveStandardChangeTemplatesForSelect(query, enabled,
     accountId)`, `searchExtra`; it searches nothing without a customer). The Customer Project is required for
     Standard. A template chosen before any project (`?standardChangeTemplateId=`, a clone, a draft) narrows the
     project picker to its customer (`AsyncProjectSelect accountId`, a server-side `accountId` on `/projects/search`,

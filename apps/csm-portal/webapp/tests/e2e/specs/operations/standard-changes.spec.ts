@@ -71,7 +71,8 @@
 //      version with its placeholders highlighted and its customer (Example
 //      Corp), and it is in the catalogue as active version 1 of Example Corp;
 //      alice raises a change request from it on the create form (type
-//      Standard: the template picker waits for a Customer Project; with Other
+//      Standard: the Customer Project is asked for first, alone, above the
+//      template, and the template picker waits for it; with Other
 //      Corp's project it offers Other Corp's templates and none of Example
 //      Corp's -- not this one --, switching the project to Example Corp's
 //      clears the Other Corp template picked, and then the template, the
@@ -349,7 +350,8 @@ async function pick(page: Page, combobox: Locator, option: string): Promise<void
 
 /** The sidebar (not the breadcrumb trail, which is a navigation too). */
 function sidebar(page: Page): Locator {
-  return page.locator("nav").filter({ has: page.getByRole("button", { name: "Dashboard", exact: true }) });
+  // The sidebar is the nav holding the Operations entry (the first entry has been renamed before: Dashboard, Dashboards).
+  return page.locator("nav").filter({ has: page.getByRole("button", { name: "Operations", exact: true }) });
 }
 
 /** The sidebar's highlighted entry is "Change requests", and it is the only one. */
@@ -1253,7 +1255,15 @@ test.describe("standard changes (real stack)", () => {
       const projectPicker = alice.getByRole("combobox", { name: /^Customer Project/ });
       const options = alice.getByRole("listbox").getByRole("option");
       await expect(templatePicker).toBeDisabled();
-      await expect(alice.getByText(/^Select the Customer Project first\./)).toBeVisible();
+      await expect(alice.getByText("Choose the Customer Project above to see its customer's templates.", { exact: true })).toBeVisible();
+      await expect(alice.getByText("Select a Customer Project to continue.", { exact: true })).toBeVisible();
+      // A standard change asks for its Customer Project first, alone, above the template.
+      const projectSection = alice.getByRole("group", { name: "Customer project", exact: true });
+      await expect(projectSection.getByRole("combobox", { name: /^Customer Project/ })).toBeVisible();
+      await expect(projectSection.getByRole("combobox", { name: /^Deployments/ })).toHaveCount(0);
+      await expect(alice.getByRole("button", { name: "Create change request" })).toHaveAccessibleDescription(
+        "Before it can be created it still needs a Customer Project and a standard change template.",
+      );
       const chooseProject = async (name: string): Promise<void> => {
         await projectPicker.click();
         await projectPicker.fill(name);

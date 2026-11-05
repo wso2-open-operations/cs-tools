@@ -49,6 +49,13 @@ interface ChangeRequestScopeFieldsProps {
   projectRequired?: boolean;
   /** Text under the Customer Project picker (e.g. why it is required or narrowed). */
   projectHelperText?: ReactNode;
+  /**
+   * Which fields to draw: all of them (the default), the Customer Project alone,
+   * or Deployments and Deployment products alone. A standard change shows the
+   * project first (it decides the templates) and the deployments in their usual
+   * place, so the create page draws the two parts in two places.
+   */
+  parts?: "all" | "project" | "deployments";
 }
 
 function selectedOptions(
@@ -74,27 +81,29 @@ export default function ChangeRequestScopeFields({
   projectAccountId,
   projectRequired = false,
   projectHelperText,
+  parts = "all",
 }: ChangeRequestScopeFieldsProps): JSX.Element {
   const hasProject = !!scope.projectId;
 
   const deploymentValue = selectedOptions(scope.deploymentIds, scope.deploymentLabels);
   const productValue = selectedOptions(scope.deploymentProductIds, scope.deploymentProductLabels);
 
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <AsyncProjectSelect
-        id={`${idPrefix}-project`}
-        label="Customer Project"
-        value={scope.projectId}
-        knownLabel={scope.projectLabel || undefined}
-        onChange={scope.setProject}
-        disabled={disabled || projectDisabled}
-        disableClearable={!projectClearable}
-        accountId={projectAccountId}
-        required={projectRequired}
-        helperText={projectHelperText}
-      />
-
+  const projectField = (
+    <AsyncProjectSelect
+      id={`${idPrefix}-project`}
+      label="Customer Project"
+      value={scope.projectId}
+      knownLabel={scope.projectLabel || undefined}
+      onChange={scope.setProject}
+      disabled={disabled || projectDisabled}
+      disableClearable={!projectClearable}
+      accountId={projectAccountId}
+      required={projectRequired}
+      helperText={projectHelperText}
+    />
+  );
+  const deploymentFields = (
+    <>
       <Autocomplete<ScopeOption, true>
         multiple
         fullWidth
@@ -161,6 +170,13 @@ export default function ChangeRequestScopeFields({
           htmlInput: { "aria-readonly": true },
         }}
       />
+    </>
+  );
+
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {parts !== "deployments" && projectField}
+      {parts !== "project" && deploymentFields}
     </Box>
   );
 }
