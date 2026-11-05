@@ -276,9 +276,9 @@ export default function CaseDetailsAttachmentsPanel({
                     deleteTooltip={deleteTooltip}
                     hideDescription
                     isDownloadLoading={
-                      storedDownload.isDownloading &&
-                      storedDownload.downloadingId === att.id
+                      storedDownload.isDownloadingId(att.id)
                     }
+                    downloadProgress={storedDownload.downloadProgressOf(att.id)}
                   />
                 );
               })

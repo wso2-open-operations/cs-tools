@@ -36,6 +36,12 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
+import {
+  DOWNLOAD_STARTED,
+  downloadPercent,
+  isAttachmentDownloading,
+  setAttachmentDownloadProgress,
+} from "@features/csm-cases/api/attachmentDownloadProgress";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
   deleteEntityAttachment,
@@ -230,7 +236,7 @@ export function useDownloadCsmCaseAttachment(): (
     [showSuccess],
   );
 
-  return useCallback(
+  const download = useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
       await downloadEntityAttachment(api, {
         type: WORK_ITEM_ATTACHMENT_TYPE,
@@ -238,9 +244,25 @@ export function useDownloadCsmCaseAttachment(): (
         name: attachment.filename,
         size: attachment.size,
         onSaved: (outcome) => notify(attachment.filename, outcome),
+        onProgress: (received, total) =>
+          setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
       });
     },
     [api, notify],
+  );
+
+  // One download of an attachment at a time; its row shows how far it has got.
+  return useCallback(
+    async (attachment: CaseAttachment): Promise<void> => {
+      if (isAttachmentDownloading(attachment.id)) return;
+      setAttachmentDownloadProgress(attachment.id, DOWNLOAD_STARTED);
+      try {
+        await download(attachment);
+      } finally {
+        setAttachmentDownloadProgress(attachment.id, undefined);
+      }
+    },
+    [download],
   );
 }
 

@@ -96,7 +96,7 @@ export default function CommentBubble({
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadStoredAttachment, isDownloading, downloadingId } =
+  const { downloadStoredAttachment, isDownloadingId } =
     useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
@@ -327,9 +327,9 @@ export default function CommentBubble({
                     onClick={() => {
                       void handleAttachmentDownload();
                     }}
-                    disabled={isDownloading && downloadingId === comment.id}
+                    disabled={isDownloadingId(comment.id)}
                   >
-                    {isDownloading && downloadingId === comment.id ? (
+                    {isDownloadingId(comment.id) ? (
                       <CircularProgress size={16} />
                     ) : (
                       <Download size={16} />
