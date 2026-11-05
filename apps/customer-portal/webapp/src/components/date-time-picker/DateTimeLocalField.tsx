@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 
 import { AdapterDateFns, DatePickers } from "@wso2/oxygen-ui";
-import type { JSX, ReactNode, Ref } from "react";
+import { useImperativeHandle, useRef, type JSX, type ReactNode, type Ref } from "react";
 import { usePickerFieldValue } from "@hooks/usePickerFieldValue";
 import { formatDateTimeLocal, parseDateTimeLocal } from "@utils/dateTimeLocal";
 
@@ -37,8 +37,11 @@ export type DateTimeLocalFieldProps = {
   readOnly?: boolean;
   error?: boolean;
   helperText?: ReactNode;
-  inputRef?: Ref<HTMLInputElement>;
+  /** Receives a handle whose `focus()` moves focus to the field's first section. */
+  focusRef?: Ref<DateTimeLocalFieldHandle>;
 };
+
+export type DateTimeLocalFieldHandle = { focus: () => void };
 
 /**
  * Date-time field built on the Oxygen UI date-time picker that keeps the value
@@ -61,7 +64,7 @@ export default function DateTimeLocalField({
   readOnly,
   error,
   helperText,
-  inputRef,
+  focusRef,
 }: DateTimeLocalFieldProps): JSX.Element {
   const { draft, handleChange, handleBlur } = usePickerFieldValue({
     value,
@@ -70,9 +73,21 @@ export default function DateTimeLocalField({
     format: formatDateTimeLocal,
   });
 
+  // The picker's own focus handle differs between MUI X versions, and Oxygen UI
+  // bundles its own, so focus the first editable section of the field directly.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(
+    focusRef,
+    () => ({
+      focus: () => rootRef.current?.querySelector<HTMLElement>('[role="spinbutton"]')?.focus(),
+    }),
+    [],
+  );
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <DateTimePicker
+        ref={rootRef}
         label={label}
         value={draft}
         onChange={handleChange}
@@ -88,7 +103,6 @@ export default function DateTimeLocalField({
             required,
             error,
             helperText,
-            inputRef,
             onBlur: handleBlur,
           },
         }}
