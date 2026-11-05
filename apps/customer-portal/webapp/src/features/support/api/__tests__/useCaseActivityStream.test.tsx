@@ -309,6 +309,139 @@ describe("useCaseActivityStream", () => {
     });
   });
 
+  describe("swapping the connection before the gateway cap", () => {
+    const MAX_AGE = 4 * 60_000;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    const openFirst = async () => {
+      const hook = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+      mockRefreshCaseComments.mockClear();
+      return hook;
+    };
+
+    it("opens a new connection before the cap and keeps the old one until it is open", async () => {
+      await openFirst();
+
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      expect(MockEventSource.instances).toHaveLength(2);
+      expect(MockEventSource.instances[0].close).not.toHaveBeenCalled();
+
+      MockEventSource.instances[1].emit("open");
+      expect(MockEventSource.instances[0].close).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances[1].close).not.toHaveBeenCalled();
+    });
+
+    it("asks for a fresh token for the new connection", async () => {
+      await openFirst();
+      mockGetIdToken.mockClear();
+      mockGetIdToken.mockResolvedValue("refreshed-token");
+
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+
+      expect(mockGetIdToken).toHaveBeenCalledTimes(1);
+      expect(MockEventSource.instances[1].init.headers.Authorization).toBe("Bearer refreshed-token");
+    });
+
+    it("needs no catch-up after a swap", async () => {
+      const { spy } = await openFirst();
+
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("keeps swapping every MAX_AGE", async () => {
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      MockEventSource.instances[1].emit("open");
+
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      expect(MockEventSource.instances).toHaveLength(3);
+      MockEventSource.instances[2].emit("open");
+      expect(MockEventSource.instances[1].close).toHaveBeenCalledTimes(1);
+    });
+
+    it("still handles updates from the new connection", async () => {
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      MockEventSource.instances[1].emit("open");
+
+      MockEventSource.instances[1].emit("case_updated", caseEvent("case.comment_added"));
+
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the old connection when the replacement fails, and retries", async () => {
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      MockEventSource.instances[1].emit("error");
+
+      expect(MockEventSource.instances[0].close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
+
+    it("stops retrying a replacement that keeps failing", async () => {
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      for (let i = 1; i <= 4; i += 1) {
+        MockEventSource.instances[i].emit("error");
+        await vi.advanceTimersByTimeAsync(15_000);
+      }
+
+      // The first replacement plus three retries; the old connection is untouched.
+      expect(MockEventSource.instances).toHaveLength(5);
+      expect(MockEventSource.instances[0].close).not.toHaveBeenCalled();
+    });
+
+    it("falls back to a normal reconnect when the old connection is cut mid-swap", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+
+      MockEventSource.instances[0].emit("error");
+      expect(MockEventSource.instances[1].close).toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
+
+    it("ignores an error from a connection that has already been swapped out", async () => {
+      await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+      MockEventSource.instances[1].emit("open");
+
+      MockEventSource.instances[0].emit("error");
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(MockEventSource.instances).toHaveLength(2);
+    });
+
+    it("closes both connections on unmount mid-swap", async () => {
+      const { unmount } = await openFirst();
+      await vi.advanceTimersByTimeAsync(MAX_AGE);
+
+      unmount();
+
+      expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+      expect(MockEventSource.instances[1].close).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+    });
+  });
+
   it("does not connect when streaming is disabled or the URL is unset", async () => {
     mockApiConfig.streamEnabled = false;
     setup("case-1");
