@@ -19,7 +19,7 @@ info:
     | `create_work_note` | `POST /cases/{id}/comments` with `type=work_note` (internal note) — and nothing else | worknote-creator, cs-engineer, admin |
     | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates; any other field in that body still needs `write` | onboarding-lead, admin |
     | `write` | every other `POST`/`PATCH`/`DELETE`, including incident and change-request comments and case comments of any type other than `work_note` | cs-engineer, admin |
-    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
+    | `admin` | `POST /users`, `GET /portal-banners/manage`, `POST /portal-banners`, `PUT /portal-banners/{id}`, `PUT /feature-overrides`, `GET /sla-status/manage`, `POST /sla-engine/recalculate` | admin only |
     | `security_center` | `POST /products/vulnerabilities/search`, `GET /products/vulnerabilities/{id}`, `GET /products/vulnerabilities/meta`, and a `POST /cases/search`/`GET /cases/{id}` naming case type security_report_analysis | cs-engineer, admin |
 security:
   - bearerAuth: []
@@ -19407,6 +19407,115 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /feature-overrides:
+    get:
+      summary: The shared per-page feature state.
+      description: >
+        Every saved row, enabled ones included, and whether an admin has saved once.
+        Until then the shell reads its config file instead. Any signed-in caller with
+        view permission, because every staff member's menu depends on it. A page with
+        no row was never saved. Responses are Cache-Control no-store.
+      operationId: listFeatureOverrides
+      responses:
+        "200":
+          description: The saved rows and the saved-once mark.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureOverrideList'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+    put:
+      summary: Save one page's feature state.
+      description: >
+        A CSM admin. state is enabled or preview. A row is never deleted: setting a
+        page back to available writes enabled. markSaved is sent on the last write of
+        a first save. Responses are Cache-Control no-store.
+      operationId: putFeatureOverride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveFeatureOverrideRequest'
+      responses:
+        "200":
+          description: The stored row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeatureOverride'
+        "400":
+          description: Invalid page id or state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can change feature visibility.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "413":
+          description: The request body is too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: The upstream service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /sla-status/manage:
     get:
       summary: Every currently-active SLA clock, for the Recalculate SLA admin page.
@@ -32276,6 +32385,48 @@ components:
           format: date-time
         updatedBy:
           type: string
+    FeatureOverride:
+      type: object
+      required: [navNodeId, state, updatedOn, updatedBy]
+      properties:
+        navNodeId:
+          type: string
+          description: The portal nav-node id, such as operations or operations.incidents.
+        state:
+          type: string
+          enum: [enabled, preview]
+        updatedOn:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          description: The admin who saved it.
+    FeatureOverrideList:
+      type: object
+      required: [overrides, savedOnce]
+      properties:
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeatureOverride'
+        savedOnce:
+          type: boolean
+          description: True once an admin has finished a first save. Until then the shell reads its config file.
+    SaveFeatureOverrideRequest:
+      type: object
+      required: [navNodeId, state]
+      additionalProperties: false
+      properties:
+        navNodeId:
+          type: string
+          maxLength: 200
+          pattern: '^[a-z0-9][a-z0-9._-]*$'
+        state:
+          type: string
+          enum: [enabled, preview]
+        markSaved:
+          type: boolean
+          description: Set on the last write of a first save.
     PortalBannerList:
       type: object
       required: [banners]
