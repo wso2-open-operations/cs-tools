@@ -218,8 +218,14 @@ describe("storedAttachments", () => {
     });
   });
 
-  describe("chunked upload and streamed download", () => {
-    const CHUNK = 16 * 1024 * 1024;
+  describe("with the files held by the portal backend", () => {
+    const CHUNK = 8 * 1024 * 1024;
+    const withMode = () => {
+      (window as unknown as { config: unknown }).config = {
+        CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
+        CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
+      };
+    };
     const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
     const bigFile = (size: number) =>
       ({
@@ -229,7 +235,8 @@ describe("storedAttachments", () => {
         slice: (from: number, to: number) => new Blob([new Uint8Array(to - from)]),
       }) as unknown as File;
 
-    it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+    it("sends the file in 8 MiB chunks, then confirms with the chunk count", async () => {
+      withMode();
       authFetch.mockImplementation(async (url: string) => {
         if (url.endsWith("/attachments/upload")) return json(started, 201);
         if (url.includes("/chunks/")) return new Response(null, { status: 204 });

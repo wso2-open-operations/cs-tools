@@ -224,7 +224,10 @@ describe("chunked upload and streamed download", () => {
     window.config = {} as typeof window.config;
   });
 
-  it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+  const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
+    ({ post, putBinary, getResponse }) as unknown as BackendApi;
+
+  it("sends the file in 8 MiB chunks, then confirms with the chunk count", async () => {
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
     const putBinary = vi.fn().mockResolvedValue(undefined);
     const progress: number[] = [];

@@ -35,8 +35,8 @@ import (
 )
 
 // ChunkBytes is the size of every upload chunk but the last. The browser sends
-// 16 MiB at a time, which stays well under the gateway's 50 MB request limit.
-const ChunkBytes = 16 << 20
+// 8 MiB at a time, which stays well under the gateway's 50 MB request limit.
+const ChunkBytes = 8 << 20
 
 // attachmentStreamWriteDeadline is how long a file download may take to write,
 // beyond the server's global WriteTimeout: 100 MiB over a slow link.
@@ -46,7 +46,7 @@ const attachmentStreamWriteDeadline = 30 * time.Minute
 const maxChunkBodyBytes = ChunkBytes
 
 // attachmentChunkDeadline is how long one chunk may take to arrive and be stored,
-// beyond the server's global read and write timeouts: 16 MiB over a slow link.
+// beyond the server's global read and write timeouts: 8 MiB over a slow link.
 const attachmentChunkDeadline = 10 * time.Minute
 
 // attachmentBlobStore is the part of azblobstore.Store the attachment routes use.

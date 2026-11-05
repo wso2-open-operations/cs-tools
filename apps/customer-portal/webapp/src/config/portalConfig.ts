@@ -102,7 +102,7 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
   /**
-   * How many 16 MiB ranges of one attachment download are fetched at the same
+   * How many 8 MiB ranges of one attachment download are fetched at the same
    * time (a number or numeric string). Defaults to 4, kept between 1 and 8;
    * 1 fetches one range at a time.
    */
