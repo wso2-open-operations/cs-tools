@@ -1208,6 +1208,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// below), not for DataSourceServiceNow: that mode's CreateCase never
 		// reaches this service's Postgres data at all.
 		activeCaseSvc = service.WithProductCategoryEnforcement(activeCaseSvc, referenceDataRepo, deployedProductRepo)
+		// The severity a new service request gets when none is sent.
+		activeCaseSvc = service.WithServiceRequestDefaultSeverity(activeCaseSvc, cfg.ServiceRequestDefaultSeverity)
 		// POST /cases/volume-trend's per-day cache -- Redis-backed or
 		// in-memory, see volumeTrendCache's own construction above.
 		activeCaseSvc = service.WithCaseVolumeTrendCache(activeCaseSvc, volumeTrendCache)
@@ -1254,6 +1256,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// See the matching comment in the DataSourcePostgresServiceNowDualWrite
 		// case above.
 		activeCaseSvc = service.WithProductCategoryEnforcement(activeCaseSvc, referenceDataRepo, deployedProductRepo)
+		activeCaseSvc = service.WithServiceRequestDefaultSeverity(activeCaseSvc, cfg.ServiceRequestDefaultSeverity)
 		activeCaseSvc = service.WithCaseVolumeTrendCache(activeCaseSvc, volumeTrendCache)
 		if snSLASearchDelegate != nil {
 			activeCaseSvc = service.WithSLASearchDelegate(activeCaseSvc, snSLASearchDelegate)
