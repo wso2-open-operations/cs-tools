@@ -895,9 +895,29 @@ func (e *Engine) processDueMember(ctx context.Context, member string) error {
 	// "tier reached" log line, on top of no Chat/email send. See
 	// verifyTierStillDue's own doc comment for exactly what it checks and
 	// why every inconclusive outcome still proceeds (fails open).
-	proceed, state := e.verifyTierStillDue(ctx, caseID, clockType, tier, meta)
-	if !proceed {
+	verdict, state := e.verifyTierStillDue(ctx, caseID, clockType, tier, meta)
+	switch verdict {
+	case tierResolved:
+		// The clock is genuinely, terminally done -- mark this tier done the
+		// same as a real alert would, so a later tier for the same clock is
+		// never re-checked and re-suppressed from scratch.
 		return e.finishTier(ctx, caseID, clockType, tier, meta, member, false)
+	case tierNotYetDue:
+		// This tier has NOT actually happened yet (paused, or the real
+		// duration/pause math puts its due instant still in the future) --
+		// release the claim and leave the wake entry pending (and, for the
+		// duration/pause case, already rescheduled to its real due instant by
+		// verifyTierStillDue) so it is alerted on for real once it genuinely
+		// comes due, instead of being wrongly finalized now. A CodeRabbit
+		// review on the first version of this check caught that treating
+		// "not yet due" the same as "resolved" permanently lost the alert:
+		// finishTier would have advanced AlertedTier past this tier and
+		// removed its wake entry, so the clock's own real crossing later
+		// would never be re-examined at all.
+		if err := e.store.ReleaseTier(ctx, caseID, clockType, tier, meta.StartedAt); err != nil {
+			slog.ErrorContext(ctx, "slaengine: failed to release tier claim for a not-yet-due tier, it will stay claimed until the claim expires", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
+		}
+		return nil
 	}
 
 	if err := e.alertTier(ctx, meta, caseID, clockType, tier, state); err != nil {
@@ -953,6 +973,31 @@ func (e *Engine) finishTier(ctx context.Context, caseID, clockType string, tier 
 	return nil
 }
 
+// tierVerdict is verifyTierStillDue's three-way answer to "should this due
+// wake member be alerted on": tierDue covers both a genuine crossing and
+// every inconclusive outcome (fails open, see that function's own doc
+// comment); the other two both suppress the alert but are NOT
+// interchangeable, since only one of them means the tier is actually
+// finished.
+type tierVerdict int
+
+const (
+	// tierDue: alert normally, exactly as if this check didn't exist.
+	tierDue tierVerdict = iota
+	// tierResolved: the clock is genuinely, terminally done (ACHIEVED/
+	// CANCELLED/COMPLETED) with no breach ever recorded — this tier was
+	// never really reached and never will be. Safe to finishTier(reached:
+	// false): advance the cursor and drop the wake entry for good.
+	tierResolved
+	// tierNotYetDue: the tier has NOT happened yet — the clock is currently
+	// paused, or entity-service's own duration/pause math puts this tier's
+	// real due instant still in the future. Must NOT be finished: the tier
+	// claim is released and the wake entry stays pending (rescheduled to
+	// its real due instant where that's known), so the genuine crossing is
+	// still alerted on later instead of being silently lost.
+	tierNotYetDue
+)
+
 // verifyTierStillDue asks entity-service whether this tier crossing is
 // still genuinely valid — before any Kafka publish, Chat send, or "sla tier
 // reached" log happens, not just before the Chat send the way an earlier
@@ -960,9 +1005,9 @@ func (e *Engine) finishTier(ctx context.Context, caseID, clockType string, tier 
 // incident showed this engine's own Redis copy of a clock can silently go
 // stale (paused, cancelled, or completed in entity-service with no event
 // ever reaching this engine), leaving a wake entry that fires here long
-// after the clock had, in truth, already moved on. proceed=false — nothing
-// published, nothing logged as reached, no Chat/email send — only when ALL
-// of the following hold:
+// after the clock had, in truth, already moved on. A non-tierDue verdict —
+// nothing published, nothing logged as reached, no Chat/email send — is
+// returned only when ALL of the following hold:
 //   - the lookup itself succeeded (a network error/timeout is unconfirmed,
 //     not evidence of anything — see the fail-open reasoning below);
 //   - entity-service actually has a row for this clock at all (Found) —
@@ -976,9 +1021,9 @@ func (e *Engine) finishTier(ctx context.Context, caseID, clockType string, tier 
 //     (case, clockType) pair, and a stale wake entry for the OLD
 //     incarnation must not be waved through just because entity-service now
 //     has an unrelated, currently-active NEW one;
-//   - and then one of three ways the live record disagrees with this wake:
+//   - and then one of two ways the live record disagrees with this wake:
 //   - isTerminalSLAStage(state.Stage) && !state.HasBreached — resolved
-//     cleanly, no breach ever recorded;
+//     cleanly, no breach ever recorded. Verdict: tierResolved.
 //   - state.IsPaused && !state.HasBreached — currently paused, no breach
 //     ever recorded. PAUSED isn't terminal (pausing is routine, not a
 //     resolution), so the check above alone never catches it — but a
@@ -991,54 +1036,100 @@ func (e *Engine) finishTier(ctx context.Context, caseID, clockType string, tier 
 //     setPaused(true) is called right here so the Redis copy agrees with
 //     entity-service immediately, instead of waiting for another
 //     case.status_changed delivery that may never come for a case that
-//     doesn't change state again;
-//   - state.BusinessElapsedPercent < float64(tier) && !state.HasBreached —
-//     entity-service's own LIVE elapsed percentage, not just its stage,
+//     doesn't change state again. Verdict: tierNotYetDue — the clock will
+//     resume and genuinely reach this tier later; resumeShift (triggered
+//     separately, by the eventual resume event) is what recomputes its
+//     real due instant, not this check.
+//   - !state.HasBreached && tierDueAt(state, tier) is still in the future
+//     — entity-service's own duration/pause math, not just its stage,
 //     disagrees with the tier this wake claims was reached. This is the
 //     generic backstop for every "entity-service changed the clock and
-//     this engine was never told" gap, known and yet-to-be-found alike — it
-//     only needs the live number to disagree, not a specific event type to
-//     react to.
+//     this engine was never told" gap, known and yet-to-be-found alike —
+//     it only needs the real due instant to disagree, not a specific event
+//     type to react to. Deliberately computed from StartedOn/
+//     DurationSeconds/Schedule/pause totals rather than compared against
+//     entity-service's own live elapsed-percentage figure: a percentage of
+//     exactly 0 is genuinely ambiguous (a live, true 0% clock looks
+//     identical to a missing/unpopulated field), which a CodeRabbit review
+//     flagged as a real risk of suppressing a tier that should have fired
+//     because the percentage silently defaulted to 0 — the direct time
+//     math has no such ambiguity: tierDueAt simply fails (ok=false,
+//     inconclusive, fails open) when StartedOn/DurationSeconds aren't
+//     usable. Verdict: tierNotYetDue — its wake entry is rescheduled to the
+//     real due instant via AddWake, so the next tick doesn't re-examine it
+//     pointlessly until it's actually due.
 //
 // Every inconclusive outcome — a lookup error, no row found, a mismatched
-// incarnation — fails open (proceed=true, logged): silently losing a
-// genuine breach alert over an inconclusive double-check is worse than the
-// occasional false positive this whole feature exists to reduce. e.entity
-// is nil for every caller that hasn't wired one up (every existing test),
-// which also fails open the same way, preserving this function's exact
-// prior behavior for them. The returned clockState is the zero value
-// whenever no live lookup happened or none was conclusive against this
-// exact field — callers (sendBreachEmails, via sendBreachAlert) already
-// treat an empty AssigneeEmail/TeamEmail as "not resolvable, skip", the
-// same posture they have for a genuinely unassigned case or team.
-func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType string, tier int, meta ClockMeta) (bool, clockState) {
+// incarnation, an unusable duration/schedule — fails open (tierDue,
+// logged): silently losing a genuine breach alert over an inconclusive
+// double-check is worse than the occasional false positive this whole
+// feature exists to reduce. e.entity is nil for every caller that hasn't
+// wired one up (every existing test), which also fails open the same way,
+// preserving this function's exact prior behavior for them. The returned
+// clockState is the zero value whenever no live lookup happened or none was
+// conclusive against this exact field — callers (sendBreachEmails, via
+// sendBreachAlert) already treat an empty AssigneeEmail/TeamEmail as "not
+// resolvable, skip", the same posture they have for a genuinely unassigned
+// case or team.
+func (e *Engine) verifyTierStillDue(ctx context.Context, caseID, clockType string, tier int, meta ClockMeta) (tierVerdict, clockState) {
 	if e.entity == nil {
-		return true, clockState{}
+		return tierDue, clockState{}
 	}
 	state, err := e.entity.GetClockState(ctx, caseID, clockType)
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "slaengine: failed to verify clock state before treating this tier as reached, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
-		return true, state
+		return tierDue, state
 	case !state.Found:
 		slog.WarnContext(ctx, "slaengine: entity-service has no record of this clock, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
-		return true, state
+		return tierDue, state
 	case !isSameClockIncarnation(state.StartedOn, meta.StartedAt):
 		slog.WarnContext(ctx, "slaengine: entity-service is tracking a different clock incarnation than this wake entry, proceeding anyway", "caseId", caseID, "clockType", clockType, "tier", tier)
-		return true, state
+		return tierDue, state
 	case isTerminalSLAStage(state.Stage) && !state.HasBreached:
 		slog.InfoContext(ctx, "slaengine: clock already resolved in entity-service's own record with no breach, this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "stage", state.Stage)
-		return false, state
+		return tierResolved, state
 	case state.IsPaused && !state.HasBreached:
 		slog.WarnContext(ctx, "slaengine: entity-service shows this clock currently paused but this engine's own redis copy did not know, correcting it — this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier)
 		e.setPaused(ctx, caseID, clockType, true)
-		return false, state
-	case state.BusinessElapsedPercent < float64(tier) && !state.HasBreached:
-		slog.WarnContext(ctx, "slaengine: entity-service's own live elapsed percentage is below this tier, this engine's own wake schedule is stale — this tier was not genuinely reached", "caseId", caseID, "clockType", clockType, "tier", tier, "liveElapsedPercent", state.BusinessElapsedPercent)
-		return false, state
-	default:
-		return true, state
+		return tierNotYetDue, state
+	case state.HasBreached:
+		return tierDue, state
 	}
+	dueAt, ok := tierDueAt(state, tier)
+	if !ok || !e.clock().Before(dueAt) {
+		return tierDue, state
+	}
+	slog.WarnContext(ctx, "slaengine: entity-service's own clock duration/pause timing puts this tier's real due instant still in the future, this engine's own wake schedule was stale — this tier was not genuinely reached, rescheduling", "caseId", caseID, "clockType", clockType, "tier", tier, "dueAt", dueAt)
+	if err := e.store.AddWake(ctx, wakeMember(caseID, clockType, tier), dueAt); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to reschedule a not-yet-due tier's wake entry to its real due instant", "caseId", caseID, "clockType", clockType, "tier", tier, "err", err)
+	}
+	return tierNotYetDue, state
+}
+
+// tierDueAt computes the real instant entity-service's own clock state says
+// this tier is due — StartedOn plus tier's own fraction of the real policy
+// duration, plus the clock's completed pause total, using the same
+// business-day-aware math (dueInstant/tierFraction) RegisterClocks/
+// resumeShiftBusinessDays already use to schedule and reschedule wake
+// entries. ok is false (inconclusive) when StartedOn or DurationSeconds
+// aren't usable — verifyTierStillDue's caller treats that as fail-open, same
+// as a lookup error. By the time this runs, state.IsPaused is already known
+// false (verifyTierStillDue's own ordering returns tierNotYetDue on that
+// branch first), so only the clock's own completed pause segments
+// (PauseDurationSeconds/BusinessPauseDurationSeconds) ever apply here — no
+// open pause segment to fold in.
+func tierDueAt(state clockState, tier int) (time.Time, bool) {
+	if state.StartedOn == nil || state.DurationSeconds <= 0 {
+		return time.Time{}, false
+	}
+	duration := time.Duration(state.DurationSeconds) * time.Second
+	if state.Schedule == slaScheduleWSO2BusinessDays {
+		pause := time.Duration(state.BusinessPauseDurationSeconds) * time.Second
+		return businessdays.AddBusinessDuration(*state.StartedOn, tierFraction(duration, tier)+pause), true
+	}
+	pause := time.Duration(state.PauseDurationSeconds) * time.Second
+	return state.StartedOn.Add(tierFraction(duration, tier) + pause), true
 }
 
 // processDueMemberFallback handles one due wake-index member when this

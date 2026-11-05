@@ -1215,6 +1215,113 @@ func TestTick_EntityServiceReportsClockAlreadyResolved_SuppressesTheAlert(t *tes
 	}
 }
 
+// TestTick_EntityServicePausedButRedisDidNotKnow_DefersRatherThanFinishing is
+// the regression guard for a CodeRabbit-caught bug: an earlier version of
+// this check finished (AdvanceAlertedTier + RemoveWake) a tier suppressed for
+// ANY reason, including a clock entity-service reports as currently paused —
+// permanently losing that tier's alert, since the clock will genuinely reach
+// it later once resumed. The fix: a paused clock's tier claim is released and
+// its wake entry left exactly where it is, so the real crossing is still
+// caught once resumeShift (triggered separately, by the eventual resume
+// event) recomputes its due instant.
+func TestTick_EntityServicePausedButRedisDidNotKnow_DefersRatherThanFinishing(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {Found: true, IsPaused: true, HasBreached: false, StartedOn: &past},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: past}
+	wakeAt := time.Now().Add(-time.Minute)
+	st.wake[wakeMember("case-1", "response", 50)] = wakeAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %+v, want none -- the clock is currently paused", chat.calls)
+	}
+	if pub.calls != 0 {
+		t.Errorf("publish calls = %d, want 0", pub.calls)
+	}
+	gotWakeAt, stillPresent := st.wake[wakeMember("case-1", "response", 50)]
+	if !stillPresent {
+		t.Fatal("wake entry was removed, want it left pending for the real crossing once the clock resumes")
+	}
+	if !gotWakeAt.Equal(wakeAt) {
+		t.Errorf("wake entry due time = %v, want unchanged %v -- a paused clock's wake entry is only ever moved by resumeShift", gotWakeAt, wakeAt)
+	}
+	meta, _, _ := st.GetClock(context.Background(), "case-1", "response")
+	if meta.AlertedTier != 0 {
+		t.Errorf("AlertedTier = %d, want 0 -- this tier was never actually reached, it must not be finalized", meta.AlertedTier)
+	}
+	if !meta.Paused {
+		t.Error("meta.Paused = false, want true -- the self-heal must still correct this engine's own redis copy")
+	}
+	if st.claims[tierClaimKey("case-1", "response", 50, past)] {
+		t.Error("tier claim still held, want it released so a future tick (once resumed) can claim it for real")
+	}
+}
+
+// TestTick_EntityServiceDurationMathShowsTierNotYetDue_DefersAndReschedules
+// is the regression guard for the second CodeRabbit finding on the same
+// check: comparing against entity-service's own live elapsed PERCENTAGE
+// could not distinguish a genuinely-0% fresh clock from a percentage that
+// just wasn't populated, risking a suppressed genuine alert. The fix checks
+// real time math instead -- StartedOn plus this tier's own fraction of the
+// real policy duration plus the clock's completed pause total -- and, when
+// that puts the real due instant still in the future, reschedules the wake
+// entry there rather than just leaving a stale, premature one in place.
+func TestTick_EntityServiceDurationMathShowsTierNotYetDue_DefersAndReschedules(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	e := newTestEngine(st, chat, pub)
+	startedOn := time.Now().Add(-10 * time.Minute)
+	duration := 4 * time.Hour
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", HasBreached: false,
+			StartedOn: &startedOn, DurationSeconds: int64(duration.Seconds()),
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: startedOn}
+	staleWakeAt := time.Now().Add(-time.Minute)
+	st.wake[wakeMember("case-1", "response", 50)] = staleWakeAt
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %+v, want none -- the real due instant for tier 50 is still in the future", chat.calls)
+	}
+	if pub.calls != 0 {
+		t.Errorf("publish calls = %d, want 0", pub.calls)
+	}
+	wantDueAt := startedOn.Add(duration / 2)
+	gotDueAt, stillPresent := st.wake[wakeMember("case-1", "response", 50)]
+	if !stillPresent {
+		t.Fatal("wake entry was removed, want it rescheduled to its real due instant")
+	}
+	if diff := gotDueAt.Sub(wantDueAt); diff < -time.Second || diff > time.Second {
+		t.Errorf("rescheduled wake due time = %v, want %v (startedOn + tier's fraction of the real duration)", gotDueAt, wantDueAt)
+	}
+	if !gotDueAt.After(staleWakeAt) {
+		t.Errorf("rescheduled wake due time = %v, want later than the stale original %v", gotDueAt, staleWakeAt)
+	}
+	meta, _, _ := st.GetClock(context.Background(), "case-1", "response")
+	if meta.AlertedTier != 0 {
+		t.Errorf("AlertedTier = %d, want 0 -- this tier was never actually reached, it must not be finalized", meta.AlertedTier)
+	}
+	if st.claims[tierClaimKey("case-1", "response", 50, startedOn)] {
+		t.Error("tier claim still held, want it released so the rescheduled wake can be claimed for real once it comes due")
+	}
+}
+
 // TestTick_EntityServiceConfirmsClockStillActive_StillSendsTheAlert proves
 // the new check is not a blanket suppression -- a clock entity-service
 // still considers live (the overwhelmingly common case: a real, ongoing
