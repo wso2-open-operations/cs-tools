@@ -27,7 +27,6 @@ cs-tools/
 │   ├── csm-portal-activity-stream-service/      # Go SSE push service for the CSM portal
 │   ├── customer-portal-activity-stream-service/ # Go SSE push service for the customer portal
 │   ├── customer-service/                        # Customer operations related integration Ballerina service
-│   ├── sftpgo-authentication-service/           # Go auth/provisioning hooks for SFTPGo, backed by Asgardeo
 │   ├── sre-alert-core-service/                  # Go: dedups alerts into incidents, forwards to CSM/Chat
 │   └── sre-alert-ingestion-service/             # Go: normalizes monitoring webhooks into alert rows
 ├── operations/
@@ -185,17 +184,6 @@ The Customer Portal's counterpart to the CSM Portal Activity Stream Service abov
 | Upstream | Azure Event Hub |
 
 See the [Customer Portal Activity Stream Service README](./integrations/customer-portal-activity-stream-service/README.md) for full setup and usage documentation.
-
-### SFTPGo Authentication Service (`integrations/sftpgo-authentication-service/`)
-
-A secure, individual-account-based authentication and provisioning service for [SFTPGo](https://github.com/drakkan/sftpgo), integrated with Asgardeo. Authenticates users against corporate credentials, enforces MFA, and dynamically provisions virtual folders based on subscriptions or roles via SFTPGo's pre-login hook.
-
-| Layer | Technology |
-|-------|------------|
-| Language | Go |
-| Upstream | SFTPGo Admin API, Asgardeo |
-
-See the [SFTPGo Authentication Service README](./integrations/sftpgo-authentication-service/README.md) for full setup and usage documentation.
 
 ### Alert Core Service (`integrations/sre-alert-core-service/`)
 
