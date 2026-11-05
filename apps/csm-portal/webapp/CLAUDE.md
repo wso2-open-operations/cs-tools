@@ -58,7 +58,7 @@ failure also hides the tab). And the All Skills tab's create/edit/(de)activate a
 `usePortalAccess().isAdmin`. The sidebar entry itself uses `canWrite`. Filtering and paging for the catalogue and the
 manager table are always sent to the backend, never done in the browser.
 
-**Products** (`features/csm-products`, `/products`) is another deliberate exception, on top of a real backend
+**Product catalogue** (`features/csm-products`, Settings ▸ Product catalogue at `/admin/product-catalog`, tabs Products and Release lines; the old top-level `/products` links redirect there; the tab, its pages (`ProductCatalogRouteGuard`) and its help topic are shown only to `canManageProductCatalog`) is another deliberate exception, on top of a real backend
 gate: every edit control (Add product, Add product version and each product's Add version action, the Edit pencil,
 New release line, and the Retire action inside each edit dialog) renders only for `usePortalAccess().canManageProductCatalog` (`product_catalog_manager` or `admin`). The
 backend's `PermManageProductCatalog` refuses the catalogue write routes of the products API (`POST /products`,
@@ -67,14 +67,13 @@ reader each control would only ever 403. A save applies at once (there is no dra
 changed keys (`utils/catalogChange.ts`), and the backend applies a version's listing-wide fields to every live
 deployment-profile row of the version (the rows sharing its `publicId`, or for an unpublished version the live rows
 with the same product and version), in one transaction, which the edit dialog spells out before saving. The edit
-dialog sends one PATCH with only the support fields it shows (`buildVersionSupportPayload`), and one retire call
+dialog sends one PATCH with only the fields it changed (`buildVersionEditPayload`: support status and EOL dates up front, release date and publishing settings under a collapsed "Advanced"), and one retire call
 for the whole version; Add version creates every profile in one call. The API sends dates as RFC 3339 timestamps
 and the support status upper case; `utils/catalogWire.ts` turns them into the `YYYY-MM-DD` / lower-case shapes
 the feature works with, in the read hooks only. The Catalogue never lists cloud (SaaS)
 products or end-of-life products (every version retired or discontinued), nor retired or discontinued versions or
 retired release lines, so there is no Restore (`isListedProduct`, `listedVersions`, `utils/catalogProducts.ts`). Adding a version pre-fills
-its publishing settings from the product's latest live version (`listingFormFrom`), shown in a collapsed "Advanced
-configuration" section (on a release-date tie the "All In One" row, then the lowest `publicId`, so a profile that
+its publishing settings from the product's latest live version (`listingFormFrom`), shown openly under "Publishing" (on a release-date tie the "All In One" row, then the lowest `publicId`, so a profile that
 is its own listing is not copied), and creates one row per deployment profile in a single
 `POST /products/{id}/versions` (`useAddCatalogVersion`); if the product's versions fail to load, the dialog warns
 instead of prefilling. A refusal's message is shown inside the

@@ -22,6 +22,7 @@ import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallb
 import SectionTabs from "@components/section-tabs/SectionTabs";
 import { useRouteTabs } from "@hooks/useSectionTabs";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { hasDashboardBuilderAccess } from "@features/csm-admin/dashboards/utils/dashboardBuilderAccess";
 
 /** The tile-grid landing route — the default Back target for a directory
@@ -31,7 +32,10 @@ const USER_MANAGEMENT_INDEX_PATH = "/admin/user-management";
 
 /**
  * Settings shell. A single top-level tab strip, driven by the navigation
- * tree, for [User management, Dashboards]. User management no longer has its
+ * tree, for [User management, Dashboards, Banners, SLA Engine, Product
+ * catalogue]. Product catalogue renders its own second-level strip
+ * (`ProductsLayout`: Products, Release lines) and is shown only to catalogue
+ * managers (`canManageProductCatalog`). User management no longer has its
  * own nested tab strip underneath it — its Users/Roles/Groups/Teams/
  * Permissions directories are chosen from a tile grid instead
  * (`CsmUserManagementLandingPage`, rendered at the `user-management` index
@@ -66,12 +70,14 @@ export default function CsmAdminLayout(): JSX.Element {
   const hasDashboardsTabAccess = hasDashboardBuilderAccess(user?.roles);
   const hasBannersTabAccess = (user?.roles ?? []).some((role) => role.toLowerCase() === "admin");
   const hasSlaEngineTabAccess = hasBannersTabAccess;
+  const hasProductCatalogTabAccess = usePortalAccess().canManageProductCatalog;
   const allTabs = useRouteTabs("admin");
   const tabs = useMemo(() => {
     const visible = allTabs.tabs.filter((tab) => {
       if (tab.node.id === "admin.dashboards") return hasDashboardsTabAccess;
       if (tab.node.id === "admin.banners") return hasBannersTabAccess;
       if (tab.node.id === "admin.sla-engine") return hasSlaEngineTabAccess;
+      if (tab.node.id === "admin.product-catalog") return hasProductCatalogTabAccess;
       return true;
     });
     // `allTabs.activeKey` was resolved against the UNFILTERED list — if
@@ -83,7 +89,7 @@ export default function CsmAdminLayout(): JSX.Element {
       ? allTabs.activeKey
       : (visible[0]?.key ?? "");
     return { ...allTabs, tabs: visible, activeKey };
-  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess, hasSlaEngineTabAccess]);
+  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess, hasSlaEngineTabAccess, hasProductCatalogTabAccess]);
 
   const location = useLocation();
   const { pathname } = location;

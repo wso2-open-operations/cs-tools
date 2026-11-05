@@ -16,9 +16,6 @@
 
 
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -28,17 +25,15 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
   MenuItem,
-  Switch,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useAddCatalogVersion } from "@features/csm-products/api/useAddCatalogVersion";
 import { useGetCatalogVersions } from "@features/csm-products/api/useGetCatalogVersions";
 import { useGetReleaseLines } from "@features/csm-products/api/useGetReleaseLines";
+import VersionListingFields from "@features/csm-products/components/VersionListingFields";
 import VersionSupportFields from "@features/csm-products/components/VersionSupportFields";
 import type { CatalogProduct } from "@features/csm-products/types/productCatalog";
 import {
@@ -48,14 +43,12 @@ import {
   validateVersionForm,
   type VersionFormValues,
 } from "@features/csm-products/utils/catalogChange";
-import { CARBON_FIELD_LABEL } from "@features/csm-products/utils/catalogFormat";
 import {
   DEFAULT_PROFILE,
   latestLiveVersion,
   listingFormFrom,
   normalizeProfiles,
   productDisplayCode,
-  summarizeListing,
   type ListingFormValues,
 } from "@features/csm-products/utils/catalogProducts";
 
@@ -69,13 +62,18 @@ interface AddVersionDialogProps {
   onSaved: (message: string) => void;
 }
 
+/** The note under Publishing: where the settings came from. */
+function sourceSummary(source: { version: string } | null, edited: boolean): string {
+  if (edited) return "Edited for this version.";
+  return source ? `Copied from ${source.version}; change anything that differs.` : "No earlier version to copy from.";
+}
+
 /**
  * Add a version of a product: one row per deployment profile, sharing one
  * public listing. The dialog asks for the product, version, profiles and the
- * support fields; the publishing settings sit in a collapsed "Advanced
- * configuration" section, pre-filled from the product's most recent live
- * version so the new version publishes like its siblings, and summarised in
- * that section's header. Until the user edits them they follow the selected
+ * support fields, and shows the publishing settings below them, pre-filled
+ * from the product's most recent live version so the new version publishes
+ * like its siblings. Until the user edits them they follow the selected
  * product; once edited, the user's values are kept.
  */
 export default function AddVersionDialog({ products, initialProductId, onClose, onSaved }: AddVersionDialogProps): JSX.Element {
@@ -84,7 +82,7 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
   const [profiles, setProfiles] = useState<string[]>([DEFAULT_PROFILE]);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Null while the advanced fields follow the selected product's latest version.
+  // Null while the publishing fields follow the selected product's latest version.
   const [advancedEdits, setAdvancedEdits] = useState<ListingFormValues | null>(null);
   const versions = useGetCatalogVersions(productId);
   const releaseLines = useGetReleaseLines();
@@ -100,21 +98,8 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
   );
   const prefilled = useMemo(() => listingFormFrom(latest), [latest]);
   const advanced = advancedEdits ?? prefilled;
-  const releaseLineNames = useMemo(
-    () => new Map((releaseLines.data ?? []).map((line) => [line.id, line.name])),
-    [releaseLines.data],
-  );
   const showCarbon = Boolean(latest?.carbon) || CARBON_KEYS.some((key) => advanced.carbon[key].trim() !== "");
   const editAdvanced = (patch: Partial<ListingFormValues>): void => setAdvancedEdits({ ...advanced, ...patch });
-  const advancedText = (key: "publicName" | "publicAbbreviation" | "description" | "tags" | "releaseLinks", label: string) => ({
-    label,
-    value: advanced[key],
-    onChange: (event: { target: { value: string } }) => editAdvanced({ [key]: event.target.value }),
-    error: submitted && Boolean(errors[key]),
-    helperText: submitted ? errors[key] : undefined,
-    size: "small" as const,
-    fullWidth: true,
-  });
   const profileOptions = useMemo(
     () =>
       normalizeProfiles([
@@ -209,73 +194,27 @@ export default function AddVersionDialog({ products, initialProductId, onClose, 
           />
           {sourceFailed && (
             <Alert severity="warning">
-              Could not load this product&apos;s versions to copy settings from; check the advanced settings.
+              Could not load this product&apos;s versions to copy settings from; check the publishing settings.
             </Alert>
           )}
-          <Accordion disableGutters variant="outlined" sx={{ "&::before": { display: "none" } }}>
-            <AccordionSummary expandIcon={<ChevronDown size={16} />}>
-              <Typography variant="body2">
-                <strong>Advanced configuration</strong>
-                {" — "}
-                {!productId && advancedEdits === null
-                  ? "pick a product to copy its latest version's settings"
-                  : loadingSource
-                    ? "checking how this product publishes…"
-                    : summarizeListing(advanced, latest, advancedEdits !== null, releaseLineNames)}
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={advanced.showInSupportMatrix}
-                      onChange={(event) => editAdvanced({ showInSupportMatrix: event.target.checked })}
-                    />
-                  }
-                  label="On Support Matrix"
-                />
-                <FormControlLabel
-                  control={<Switch checked={advanced.isPublic} onChange={(event) => editAdvanced({ isPublic: event.target.checked })} />}
-                  label="On Release Matrix"
-                />
-                <TextField {...advancedText("publicName", "Public name")} />
-                <TextField {...advancedText("publicAbbreviation", "Public abbreviation")} />
-                <TextField
-                  select
-                  size="small"
-                  fullWidth
-                  label="Release line"
-                  value={advanced.releaseLineId}
-                  onChange={(event) => editAdvanced({ releaseLineId: event.target.value })}
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {(releaseLines.data ?? []).map((line) => (
-                    <MenuItem key={line.id} value={line.id}>
-                      {line.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField {...advancedText("tags", "Tags")} helperText="Comma separated, e.g. OB" />
-                <TextField {...advancedText("releaseLinks", "Release links")} sx={{ gridColumn: { sm: "1 / -1" } }} />
-                <TextField {...advancedText("description", "Description")} multiline minRows={2} sx={{ gridColumn: { sm: "1 / -1" } }} />
-                {showCarbon &&
-                  CARBON_KEYS.map((key) => (
-                    <TextField
-                      key={key}
-                      label={`Carbon ${CARBON_FIELD_LABEL[key].toLowerCase()}`}
-                      size="small"
-                      fullWidth
-                      value={advanced.carbon[key]}
-                      onChange={(event) => editAdvanced({ carbon: { ...advanced.carbon, [key]: event.target.value } })}
-                    />
-                  ))}
-              </Box>
-            </AccordionDetails>
-          </Accordion>
-          {submitted && ["publicName", "publicAbbreviation", "releaseLinks"].some((key) => errors[key]) && (
-            <Alert severity="error">Check the fields under Advanced configuration.</Alert>
-          )}
+          <Box>
+            <Typography variant="subtitle2">Publishing</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {!productId && advancedEdits === null
+                ? "Pick a product to copy its latest version's settings."
+                : loadingSource
+                  ? "Checking how this product publishes…"
+                  : sourceSummary(latest, advancedEdits !== null)}
+            </Typography>
+          </Box>
+          <VersionListingFields
+            values={advanced}
+            onChange={editAdvanced}
+            releaseLines={releaseLines.data ?? []}
+            errors={errors}
+            showErrors={submitted}
+            showCarbon={showCarbon}
+          />
           {error && <Alert severity="error">{error}</Alert>}
         </Box>
       </DialogContent>

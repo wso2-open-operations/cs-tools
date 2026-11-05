@@ -62,12 +62,28 @@ export const VERSION_UPDATE_KEYS = [
 
 export type VersionUpdateKey = (typeof VERSION_UPDATE_KEYS)[number];
 
-/** The support fields the Edit version dialog offers, in form order (not the release date). */
-export const VERSION_SUPPORT_KEYS = [
+/**
+ * The fields the Edit version dialog offers, in form order: the support
+ * status and EOL dates up front, then the release date and the publishing
+ * settings under Advanced. All are listing fields, which entity-service
+ * applies to every live row of the version; the row-specific ones
+ * (deployment profile, public id) and the legacy status are not edited here.
+ */
+export const VERSION_EDIT_KEYS = [
   "currentSupportStatus",
   "earliestPossibleSupportEolDate",
   "supportEolAnnouncementDate",
   "supportEolDate",
+  "releaseDate",
+  "publicName",
+  "publicAbbreviation",
+  "description",
+  "showInSupportMatrix",
+  "isPublic",
+  "releaseLineId",
+  "tags",
+  "releaseLinks",
+  "carbon",
 ] as const satisfies readonly VersionUpdateKey[];
 
 /** The edit dialog's state: text inputs hold strings, "" meaning empty. */
@@ -229,21 +245,21 @@ export function sameWireValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** An UPDATE payload holding only the keys whose value differs from the live row. */
 /**
- * The Edit dialog's PATCH body: only the support fields it shows
- * (VERSION_SUPPORT_KEYS) that differ from the live row. entity-service applies
- * them to every live row of the version, so nothing row-specific is sent.
+ * The Edit dialog's PATCH body: only the fields it shows (VERSION_EDIT_KEYS)
+ * that differ from the live row. entity-service applies them to every live
+ * row of the version, so nothing row-specific is sent.
  */
-export function buildVersionSupportPayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
+export function buildVersionEditPayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
   const payload: CatalogChangePayload = {};
-  for (const key of VERSION_SUPPORT_KEYS) {
+  for (const key of VERSION_EDIT_KEYS) {
     const next = formWireValue(form, key);
     if (!sameWireValue(next, liveWireValue(live, key))) payload[key] = next;
   }
   return payload;
 }
 
+/** An UPDATE payload holding only the keys whose value differs from the live row. */
 export function buildVersionUpdatePayload(live: CatalogVersion, form: VersionFormValues): CatalogChangePayload {
   const payload: CatalogChangePayload = {};
   for (const key of VERSION_UPDATE_KEYS) {
