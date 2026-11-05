@@ -342,14 +342,9 @@ export default function CaseDetailsAttachmentsPanel({
                     hideDescription
                     isDownloadLoading={
                       (isDownloading && downloadingId === att.id) ||
-                      (storedDownload.isDownloading &&
-                        storedDownload.downloadingId === att.id)
+                      storedDownload.isDownloadingId(att.id)
                     }
-                    downloadProgress={
-                      storedDownload.downloadingId === att.id
-                        ? storedDownload.downloadProgress
-                        : null
-                    }
+                    downloadProgress={storedDownload.downloadProgressOf(att.id)}
                   />
                 );
               })

@@ -16,6 +16,7 @@
 
 import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import {
   Box,
   IconButton,
@@ -219,6 +220,11 @@ export default function AttachmentListItem({
               </IconButton>
             )}
             {deleteButton}
+            <DownloadProgressStatus
+              name={attachment.name}
+              downloading={isDownloadLoading}
+              progress={downloadProgress}
+            />
             <IconButton
               size="small"
               aria-label={`Download ${attachment.name}`}

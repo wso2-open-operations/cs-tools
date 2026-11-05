@@ -40,6 +40,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
@@ -315,7 +316,7 @@ function DocumentRow({
 
   const isDownloadLoading =
     (isDownloading && downloadingId === doc.id) ||
-    (storedDownload.isDownloading && storedDownload.downloadingId === doc.id);
+    storedDownload.isDownloadingId(doc.id);
 
   const handleDownloadClick = async () => {
     if (!doc.id) return;
@@ -546,6 +547,11 @@ function DocumentRow({
               <Trash2 size={16} aria-hidden />
             </IconButton>
           )}
+          <DownloadProgressStatus
+            name={name}
+            downloading={isDownloadLoading}
+            progress={storedDownload.downloadProgressOf(doc.id)}
+          />
           <IconButton
             size="small"
             aria-label={`Download ${name}`}
@@ -556,11 +562,7 @@ function DocumentRow({
           >
             {isDownloadLoading ? (
               <DownloadProgressIndicator
-                progress={
-                  storedDownload.downloadingId === doc.id
-                    ? storedDownload.downloadProgress
-                    : null
-                }
+                progress={storedDownload.downloadProgressOf(doc.id)}
               />
             ) : (
               <Download size={16} aria-hidden />
