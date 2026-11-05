@@ -92,7 +92,9 @@ func completeProposal() domain.StandardChangeProposal {
 		Customer:  &domain.EntityRef{ID: "00000000-0000-0000-0000-000000000301", Name: "Example Corp"},
 		Rationale: stdp("<p>Done 12 times without incident.</p>"),
 		StandardChangeContent: domain.StandardChangeContent{
+			Summary:            stdp("Updates the tags of one AKS cluster. Not for node pools."),
 			Subject:            stdp("Update tags on {{cluster}}"),
+			Description:        stdp("<p>Update the tags of {{cluster}}</p>"),
 			ImplementationPlan: stdp("<p>az aks update -n {{cluster}} --tags {{tags}}</p>"),
 			BackoutPlan:        stdp("<p>Re-apply the previous tags of {{cluster}}.</p>"),
 			TestPlan:           stdp("<p>az aks show -n {{ cluster }}</p>"),
@@ -114,6 +116,17 @@ func TestCheckStandardChangeProposalComplete(t *testing.T) {
 	p := completeProposal()
 	p.Rationale, p.TestPlan, p.Risk, p.Subject = stdp("<p><br></p>"), stdp("<p>&nbsp;</p>"), nil, stdp("  ")
 	wantStdValidation(t, checkStandardChangeProposalComplete(p), "still needs: rationale, subject, testPlan, risk")
+
+	// What the template is for, and the description its change requests carry.
+	p = completeProposal()
+	p.Summary, p.Description = stdp(" "), stdp("<p><br></p>")
+	wantStdValidation(t, checkStandardChangeProposalComplete(p), "still needs: summary, description")
+	p = completeProposal()
+	p.Summary = stdp("For {{cluster}}")
+	wantStdValidation(t, checkStandardChangeProposalComplete(p), "cannot use {{placeholders}}")
+	p = completeProposal()
+	p.Summary = stdp(strings.Repeat("x", 2001))
+	wantStdValidation(t, checkStandardChangeProposalComplete(p), "summary must be at most 2000")
 
 	// A new template belongs to one customer: a new proposal that names none is
 	// not complete (a modification or retirement has its template's).
@@ -274,4 +287,16 @@ func TestNormalizeSuspendReason(t *testing.T) {
 	}
 	_, err = normalizeSuspendReason(atLimit + "x")
 	wantStdValidation(t, err, "reason must be at most 1000 characters")
+}
+
+func TestNormalizeStandardChangeDeploymentTypes(t *testing.T) {
+	got, err := normalizeStandardChangeDeploymentTypes([]string{" PRIMARY_PRODUCTION", "staging", "primary_production"})
+	if err != nil || strings.Join(got, ",") != "primary_production,staging" {
+		t.Fatalf("normalised = %v, %v", got, err)
+	}
+	if got, err := normalizeStandardChangeDeploymentTypes(nil); err != nil || len(got) != 0 {
+		t.Fatalf("none = %v, %v", got, err)
+	}
+	_, err = normalizeStandardChangeDeploymentTypes([]string{"production"})
+	wantStdValidation(t, err, `"production" is not a deployment type`)
 }

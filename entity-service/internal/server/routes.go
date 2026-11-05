@@ -2341,6 +2341,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /standard-change-proposals/{id}/submit", internalOnly(accessSvc, standardChangeHandler.SubmitProposal))
 		mux.HandleFunc("POST /standard-change-proposals/{id}/withdraw", internalOnly(accessSvc, standardChangeHandler.WithdrawProposal))
 		mux.HandleFunc("POST /standard-change-proposals/{id}/decision", internalOnly(accessSvc, standardChangeHandler.DecideProposal))
+		mux.HandleFunc("POST /standard-change-proposals/{id}/cancel", internalOnly(accessSvc, standardChangeHandler.CancelProposal))
+		mux.HandleFunc("DELETE /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.DeleteProposal))
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that

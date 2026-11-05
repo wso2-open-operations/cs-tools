@@ -59,8 +59,8 @@ func wantCode(t *testing.T, err error, code, what string) {
 	}
 }
 
-// stdApprovedTemplate takes a proposal from a closed change request through CAB
-// approval and returns the template.
+// stdApprovedTemplate takes a proposal from a closed change request through the
+// CAB and the authority and returns the template.
 func stdApprovedTemplate(t *testing.T, env *stdEnv, name string) domain.StandardChangeTemplate {
 	t.Helper()
 	p, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
@@ -72,10 +72,7 @@ func stdApprovedTemplate(t *testing.T, env *stdEnv, name string) domain.Standard
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), p.ID); err != nil {
 		t.Fatal(err)
 	}
-	p, err = env.svc.DecideProposal(stdCtx(stdCAB1), p.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	p = cabThenAuthority(t, env, p.ID)
 	tpl, err := env.svc.GetTemplate(stdCtx(stdCAB1), p.Template.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +94,7 @@ func TestChangeRequestStandardChangeIntegration(t *testing.T) {
 			crs := WithStandardChangeTemplates(NewChangeRequestService(crRepo, repository.NewUserRepository(pool)), stdRepo)
 			stdChangeRequestFlow(t, env, crs)
 			t.Run("raised only for the template's customer", func(t *testing.T) { stdChangeRequestCustomer(t, env, crs, crRepo, stdRepo) })
+			t.Run("the template's priority and deployment types", func(t *testing.T) { stdChangeRequestScope(t, env, crs) })
 		})
 	}
 }
@@ -208,7 +206,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	wantCode(t, err, apierror.CodeStandardChangeTemplateUnavailable, "raise from a suspended template")
 	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{State: &assess})
 	wantCode(t, err, apierror.CodeStandardChangeTemplateUnavailable, "request approval on a suspended template")
-	if _, err := env.svc.ResumeTemplate(stdCtx(stdCAB1), tpl.ID); err != nil {
+	if _, err := env.svc.ResumeTemplate(stdCtx(stdCAB1), tpl.ID, domain.StandardChangeTemplateNoteRequest{Note: "ok"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{State: &assess}); err != nil {
@@ -242,8 +240,8 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if got.State != domain.StandardChangeTemplateStateActive {
 		t.Fatalf("a flag does not suspend the template: %s", got.State)
 	}
-	if _, err := env.svc.ClearTemplateReview(stdCtx(stdProposer), tpl.ID); err != nil {
-		t.Fatalf("the owner clears the flag: %v", err)
+	if _, err := env.svc.ClearTemplateReview(stdCtx(stdAuth1), tpl.ID, domain.StandardChangeTemplateNoteRequest{Note: "Understood"}); err != nil {
+		t.Fatalf("the authority clears the flag: %v", err)
 	}
 
 	implement := domain.ChangeRequestStateImplement
@@ -260,7 +258,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	}
 	// Cleared, the flag stays cleared when the deviated change moves on: only the
 	// write that rolls a change back or records the deviation raises it.
-	if _, err := env.svc.ClearTemplateReview(stdCtx(stdCAB1), tpl.ID); err != nil {
+	if _, err := env.svc.ClearTemplateReview(stdCtx(stdCAB1), tpl.ID, domain.StandardChangeTemplateNoteRequest{Note: "Understood"}); err != nil {
 		t.Fatal(err)
 	}
 	review := domain.ChangeRequestStateReview
@@ -287,9 +285,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), m.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.svc.DecideProposal(stdCtx(stdCAB1), m.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
-		t.Fatal(err)
-	}
+	cabThenAuthority(t, env, m.ID)
 	_, err = crs.PatchChangeRequest(ctx, third.ChangeRequest.ID, domain.PatchChangeRequestRequest{State: &assess})
 	wantCode(t, err, apierror.CodeStandardChangeTemplateUnavailable, "request approval after the template was revised")
 	if c, _ := crs.GetChangeRequest(ctx, third.ChangeRequest.ID); c.StandardChange == nil || c.StandardChange.Version != 1 {
@@ -424,5 +420,112 @@ func stdChangeRequestCustomer(t *testing.T, env *stdEnv, crs ChangeRequestServic
 	}
 	if _, err := crs.PatchChangeRequest(ctx, fid, domain.PatchChangeRequestRequest{State: &assess}); err != nil {
 		t.Fatalf("request approval once the project is customer A's again: %v", err)
+	}
+}
+
+// stdChangeRequestScope: what a template fixes (a priority, the deployment types)
+// is used and kept; what it leaves open the change request chooses.
+func stdChangeRequestScope(t *testing.T, env *stdEnv, crs ChangeRequestService) {
+	ctx := crCtx(t, stdCAB2)
+	sys := repository.WithSystemIdentity(context.Background())
+	deployments := map[string]string{}
+	for label, typ := range map[string]string{"prod1": "PRIMARY_PRODUCTION", "prod2": "PRIMARY_PRODUCTION", "staging": "STAGING", "untyped": ""} {
+		var id string
+		if err := env.scoped.QueryRow(sys, `INSERT INTO deployment (id, created_on, updated_on, created_by, updated_by, number, name, type, is_active, project_id, air_gapped)
+			VALUES (gen_random_uuid(), NOW(), NOW(), 't', 't', 'ZZSTDTEST-' || $1, $2, NULLIF($3, '')::deployment_type_enum, true, $4::uuid, false) RETURNING id::text`,
+			label, stdTag+" "+label, typ, env.projects["A"]).Scan(&id); err != nil {
+			t.Fatalf("seed deployment %s: %v", label, err)
+		}
+		deployments[label] = id
+	}
+	t.Cleanup(func() {
+		for _, id := range deployments {
+			_, _ = env.scoped.Exec(sys, `DELETE FROM change_request_deployment WHERE deployment_id = $1::uuid`, id)
+			_, _ = env.scoped.Exec(sys, `DELETE FROM deployment WHERE id = $1::uuid`, id)
+		}
+	})
+
+	// The proposal fixes them; both are shown and approved with the rest.
+	p := readyDraft(t, env, stdTag+" Production restart")
+	high := domain.ChangeRequestPriorityHigh
+	_, err := env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{DeploymentTypes: &[]string{"production"}})
+	expectErr[*apierror.ValidationError](t, err, "an unknown deployment type")
+	bad := domain.ChangeRequestPriority("planning")
+	_, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{Priority: &bad})
+	expectErr[*apierror.ValidationError](t, err, "a priority this API does not set")
+	if p, err = env.svc.UpdateProposal(stdCtx(stdProposer), p.ID, domain.UpdateStandardChangeProposalRequest{
+		Priority: &high, DeploymentTypes: &[]string{" PRIMARY_PRODUCTION ", "primary_production"}}); err != nil ||
+		p.Priority == nil || *p.Priority != high || len(p.DeploymentTypes) != 1 || p.DeploymentTypes[0] != "primary_production" {
+		t.Fatalf("fix priority and deployment types: %v %v, %v", p.Priority, p.DeploymentTypes, err)
+	}
+	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	p = cabThenAuthority(t, env, p.ID)
+	tpl, err := env.svc.GetTemplate(ctx, p.Template.ID)
+	if err != nil || tpl.CurrentVersion.Priority == nil || *tpl.CurrentVersion.Priority != high || len(tpl.CurrentVersion.DeploymentTypes) != 1 ||
+		tpl.CurrentVersion.Summary == nil {
+		t.Fatalf("the version = %+v, %v", tpl.CurrentVersion, err)
+	}
+
+	standard := domain.ChangeRequestTypeStandard
+	group := cabGroupID
+	projectA := env.projects["A"]
+	raise := func(extra func(*domain.CreateChangeRequestRequest)) (domain.CreateChangeRequestResponse, error) {
+		req := domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, ProjectID: &projectA, StandardChangeTemplateID: &tpl.ID,
+			StandardChangeParameters: map[string]string{"cluster": "aks-1", "env": "prod"}}
+		if extra != nil {
+			extra(&req)
+		}
+		return crs.CreateChangeRequest(ctx, req)
+	}
+	_, err = raise(nil)
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "no deployment")
+	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.DeploymentIDs = []string{deployments["staging"]} })
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "a staging deployment")
+	_, err = raise(func(r *domain.CreateChangeRequestRequest) {
+		r.DeploymentIDs = []string{deployments["prod1"], deployments["untyped"]}
+	})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "an untyped deployment")
+	low := domain.ChangeRequestPriorityLow
+	_, err = raise(func(r *domain.CreateChangeRequestRequest) {
+		r.DeploymentIDs = []string{deployments["prod1"]}
+		r.Priority = &low
+	})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "another priority")
+	created, err := raise(func(r *domain.CreateChangeRequestRequest) { r.DeploymentIDs = []string{deployments["prod1"]} })
+	if err != nil {
+		t.Fatalf("raise for a production deployment: %v", err)
+	}
+	id := created.ChangeRequest.ID
+	if cr, _ := crs.GetChangeRequest(ctx, id); cr.Priority == nil || *cr.Priority != "high" || len(cr.Deployments) != 1 {
+		t.Fatalf("raised = priority %v deployments %+v", cr.Priority, cr.Deployments)
+	}
+
+	// PATCH keeps them: the priority is frozen, the deployments stay of that type.
+	lowPtr := &low
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{Priority: &lowPtr})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "PATCH the fixed priority")
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{DeploymentIDs: &[]string{}})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "PATCH away every deployment")
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{DeploymentIDs: &[]string{deployments["staging"]}})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "PATCH to a staging deployment")
+	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{DeploymentIDs: &[]string{deployments["prod1"], deployments["prod2"]}}); err != nil {
+		t.Fatalf("PATCH to two production deployments: %v", err)
+	}
+
+	// A template that fixes neither leaves both open.
+	free := stdApprovedTemplate(t, env, stdTag+" Open scope")
+	if free.CurrentVersion.Priority != nil || free.CurrentVersion.DeploymentTypes != nil {
+		t.Fatalf("a template that fixes nothing: %v %v", free.CurrentVersion.Priority, free.CurrentVersion.DeploymentTypes)
+	}
+	open, err := crs.CreateChangeRequest(ctx, domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, ProjectID: &projectA,
+		StandardChangeTemplateID: &free.ID, StandardChangeParameters: map[string]string{"cluster": "aks-1", "env": "dev"}, Priority: &low,
+		DeploymentIDs: []string{deployments["staging"]}})
+	if err != nil {
+		t.Fatalf("raise with a chosen priority and a staging deployment: %v", err)
+	}
+	if _, err := crs.PatchChangeRequest(ctx, open.ChangeRequest.ID, domain.PatchChangeRequestRequest{Priority: &lowPtr, DeploymentIDs: &[]string{}}); err != nil {
+		t.Fatalf("PATCH an open priority and clear the deployments: %v", err)
 	}
 }

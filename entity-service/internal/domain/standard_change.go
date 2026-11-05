@@ -25,6 +25,12 @@ import "time"
 // the risk, the customer gates -- is frozen on every change request raised from it;
 // only the declared parameters, the schedule and the scope vary per use.
 
+// A proposal is approved in two stages: the CAB, then the Standard Change
+// Authority (StandardChangeAuthorityGroupName), of whom
+// StandardChangeAuthorityApprovals different people must approve. Nobody approves
+// at both stages, and the proposer at neither.
+const StandardChangeAuthorityApprovals = 2
+
 // StandardChangeTemplateState is a template's lifecycle state.
 type StandardChangeTemplateState string
 
@@ -48,18 +54,29 @@ const (
 	StandardChangeProposalKindRetire StandardChangeProposalKind = "retire"
 )
 
-// StandardChangeProposalState is a proposal's lifecycle state. Approved, rejected
-// and withdrawn are final; a proposal is never deleted, so a rejected one stays as
-// the record of what was proposed and why it was refused.
+// StandardChangeProposalState is a proposal's lifecycle state. Approved,
+// rejected, withdrawn and cancelled are final. A draft that was never submitted
+// may be deleted by its proposer; once submitted a proposal is never deleted, so
+// a rejected one stays as the record of what was proposed and why it was refused.
 type StandardChangeProposalState string
 
 const (
 	StandardChangeProposalStateDraft     StandardChangeProposalState = "draft"
 	StandardChangeProposalStateCABReview StandardChangeProposalState = "cab_review"
-	StandardChangeProposalStateApproved  StandardChangeProposalState = "approved"
-	StandardChangeProposalStateRejected  StandardChangeProposalState = "rejected"
-	StandardChangeProposalStateWithdrawn StandardChangeProposalState = "withdrawn"
+	// AuthorityReview: the CAB approved; the Standard Change Authority has not yet.
+	StandardChangeProposalStateAuthorityReview StandardChangeProposalState = "authority_review"
+	StandardChangeProposalStateApproved        StandardChangeProposalState = "approved"
+	StandardChangeProposalStateRejected        StandardChangeProposalState = "rejected"
+	StandardChangeProposalStateWithdrawn       StandardChangeProposalState = "withdrawn"
+	// Cancelled: a Standard Change Authority member ended an open proposal (its
+	// proposer left or abandoned it), with a reason.
+	StandardChangeProposalStateCancelled StandardChangeProposalState = "cancelled"
 )
+
+// IsOpen reports whether a proposal in this state can still be approved.
+func (s StandardChangeProposalState) IsOpen() bool {
+	return s == StandardChangeProposalStateDraft || s == StandardChangeProposalStateCABReview || s == StandardChangeProposalStateAuthorityReview
+}
 
 // StandardChangeParameterType is the input a parameter takes.
 type StandardChangeParameterType string
@@ -95,6 +112,12 @@ type StandardChangeParameter struct {
 // from it. On a proposal (a draft) any part may still be missing; on a version
 // the required parts are always set.
 type StandardChangeContent struct {
+	// Summary says what the template is for, when to use it and what it does
+	// not cover (plain text, no placeholders). It is the template's own
+	// description, shown in the catalogue and the template picker; never copied
+	// onto a change request. Required to submit a new template or a revision;
+	// null on versions approved before it existed.
+	Summary *string `json:"summary"`
 	// Subject becomes the change request's title (plain text).
 	Subject *string `json:"subject"`
 	// The rich-text fields (HTML), as on a change request.
@@ -109,6 +132,14 @@ type StandardChangeContent struct {
 	Impact               *ChangeRequestImpact   `json:"impact"`
 	Risk                 *ChangeRequestRisk     `json:"risk"`
 	RollbackDurationText *string                `json:"rollbackDurationText"`
+	// Priority, when set, is the priority of every change request raised from
+	// the template; null leaves it to whoever raises the change.
+	Priority *ChangeRequestPriority `json:"priority"`
+	// DeploymentTypes, when set, are the deployment types (deployment.type, in
+	// lower case: primary_production, staging, ...) a change request raised from
+	// the template is for: it needs at least one deployment and every one of its
+	// deployments must be of these types. Null: any deployments, or none.
+	DeploymentTypes []string `json:"deploymentTypes"`
 
 	IsPlanningVisibleToCustomers bool `json:"isPlanningVisibleToCustomers"`
 	CustomerApprovalRequired     bool `json:"customerApprovalRequired"`
@@ -172,6 +203,17 @@ type StandardChangeTemplate struct {
 	ReviewRequiredReason        *string    `json:"reviewRequiredReason"`
 	ReviewRequiredOn            *time.Time `json:"reviewRequiredOn"`
 	ReviewRequiredChangeRequest *EntityRef `json:"reviewRequiredChangeRequest"`
+	// History is what happened to the template outside its proposals (suspended,
+	// resumed, flagged for review, review cleared), newest first. Filled on GET
+	// /standard-change-templates/{id} only.
+	History []StandardChangeTemplateEvent `json:"history,omitempty"`
+	// What the caller may do now (advisory; every action re-checks). Suspending
+	// is open to the owner, the CAB and the Standard Change Authority; resuming
+	// and clearing the review flag, which put the template back in use without a
+	// review, to the Standard Change Authority only.
+	CanSuspend     bool `json:"canSuspend"`
+	CanResume      bool `json:"canResume"`
+	CanClearReview bool `json:"canClearReview"`
 	// SuspendedReason, SuspendedOn and SuspendedBy (an email) record the suspension;
 	// all null unless the template is suspended. The reason is optional, so it may
 	// be null on a suspended template.
@@ -188,6 +230,37 @@ type StandardChangeTemplate struct {
 	UpdatedBy    string                      `json:"updatedBy"`
 	// Versions is filled on GET /standard-change-templates/{id} only, newest first.
 	Versions []StandardChangeTemplateVersionSummary `json:"versions,omitempty"`
+}
+
+// StandardChangeTemplateEventAction is what a template history entry records.
+type StandardChangeTemplateEventAction string
+
+const (
+	StandardChangeTemplateEventSuspended     StandardChangeTemplateEventAction = "suspended"
+	StandardChangeTemplateEventResumed       StandardChangeTemplateEventAction = "resumed"
+	StandardChangeTemplateEventReviewFlagged StandardChangeTemplateEventAction = "review_flagged"
+	StandardChangeTemplateEventReviewCleared StandardChangeTemplateEventAction = "review_cleared"
+)
+
+// StandardChangeTemplateEvent is one entry of a template's history.
+type StandardChangeTemplateEvent struct {
+	Action StandardChangeTemplateEventAction `json:"action"`
+	// Note is the suspension reason, the resume or clear note, or why the
+	// template was flagged.
+	Note *string `json:"note"`
+	// ChangeRequest is the change request that flagged the template for review.
+	ChangeRequest *EntityRef `json:"changeRequest"`
+	// Actor is who did it (an email, or a service's name).
+	Actor     string    `json:"actor"`
+	CreatedOn time.Time `json:"createdOn"`
+}
+
+// StandardChangeTemplateNoteRequest is the body of POST
+// /standard-change-templates/{id}/resume and .../clear-review.
+type StandardChangeTemplateNoteRequest struct {
+	// Note says why the template may be used again: required, at most 1000
+	// characters.
+	Note string `json:"note"`
 }
 
 // SearchStandardChangeTemplatesRequest is the body of POST /standard-change-templates/search.
@@ -229,17 +302,33 @@ type StandardChangeEvidence struct {
 	Customer *EntityRef `json:"customer"`
 }
 
-// StandardChangeProposalApprover is one CAB member asked to decide a proposal.
+// StandardChangeProposalStage is one approval stage of a proposal: the CAB, then
+// the Standard Change Authority.
+type StandardChangeProposalStage struct {
+	ID string `json:"id"`
+	// Label is the stage's name ("CAB Approval", "Standard Change Authority").
+	Label string `json:"label"`
+	// RequiredApprovals is how many different approvers must approve it;
+	// Approvals is how many have.
+	RequiredApprovals int `json:"requiredApprovals"`
+	Approvals         int `json:"approvals"`
+	// Decision is APPROVED or REJECTED once the stage is settled, else null.
+	Decision *string `json:"decision"`
+}
+
+// StandardChangeProposalApprover is one person asked to decide a proposal.
 type StandardChangeProposalApprover struct {
-	ID       string         `json:"id"`
+	ID string `json:"id"`
+	// StageID is the stage (Stages) the row belongs to.
+	StageID  string         `json:"stageId"`
 	Approver *UserReference `json:"approver"`
 	// State is the approver row's state, UPPER_SNAKE (REQUESTED, APPROVED,
 	// REJECTED, CANCELLED), as on a change request's approvals.
 	State     string    `json:"state"`
 	Comments  *string   `json:"comments"`
 	UpdatedOn time.Time `json:"updatedOn"`
-	// CanDecide is true on the caller's own REQUESTED row while the proposal is
-	// in CAB review.
+	// CanDecide is true on the caller's own REQUESTED row of the stage the
+	// proposal is waiting on.
 	CanDecide bool `json:"canDecide"`
 }
 
@@ -271,7 +360,10 @@ type StandardChangeProposal struct {
 	// copy) may change its customer.
 	CopiedFrom *EntityRef `json:"copiedFrom"`
 	StandardChangeContent
-	Evidence     []StandardChangeEvidence         `json:"evidence"`
+	Evidence []StandardChangeEvidence `json:"evidence"`
+	// Stages are the approval stages, oldest first; Approvers their rows, newest
+	// stage first.
+	Stages       []StandardChangeProposalStage    `json:"stages"`
 	Approvers    []StandardChangeProposalApprover `json:"approvers"`
 	ProposedBy   *UserReference                   `json:"proposedBy"`
 	CreatedOn    time.Time                        `json:"createdOn"`
@@ -286,6 +378,11 @@ type StandardChangeProposal struct {
 	CanEdit     bool `json:"canEdit"`
 	CanSubmit   bool `json:"canSubmit"`
 	CanWithdraw bool `json:"canWithdraw"`
+	// CanDelete: the proposer, on a draft (never submitted).
+	CanDelete bool `json:"canDelete"`
+	// CanCancel: a Standard Change Authority member, on someone else's open
+	// proposal.
+	CanCancel bool `json:"canCancel"`
 }
 
 // CreateStandardChangeProposalRequest is the body of POST /standard-change-proposals.
@@ -313,24 +410,29 @@ type CreateStandardChangeProposalRequest struct {
 // they are; Parameters and EvidenceChangeRequestIDs replace the whole list. An
 // empty Category, Impact or Risk clears it.
 type UpdateStandardChangeProposalRequest struct {
-	Name *string `json:"name,omitempty"`
+	Name    *string `json:"name,omitempty"`
+	Summary *string `json:"summary,omitempty"`
 	// AccountID sets the customer of a NEW draft that did not start from a change
 	// request; the evidence it cites must then be that customer's. A draft that
 	// started from a change request, and a modification or retirement, keep the
 	// customer they have (resending it is accepted, another is a 400).
-	AccountID                    *string                    `json:"accountId,omitempty"`
-	Rationale                    *string                    `json:"rationale,omitempty"`
-	Subject                      *string                    `json:"subject,omitempty"`
-	Description                  *string                    `json:"description,omitempty"`
-	Justification                *string                    `json:"justification,omitempty"`
-	ImplementationPlan           *string                    `json:"implementationPlan,omitempty"`
-	RiskImpactAnalysis           *string                    `json:"riskImpactAnalysis,omitempty"`
-	BackoutPlan                  *string                    `json:"backoutPlan,omitempty"`
-	TestPlan                     *string                    `json:"testPlan,omitempty"`
-	Category                     *ChangeRequestCategory     `json:"category,omitempty"`
-	Impact                       *ChangeRequestImpact       `json:"impact,omitempty"`
-	Risk                         *ChangeRequestRisk         `json:"risk,omitempty"`
-	RollbackDurationText         *string                    `json:"rollbackDurationText,omitempty"`
+	AccountID            *string                `json:"accountId,omitempty"`
+	Rationale            *string                `json:"rationale,omitempty"`
+	Subject              *string                `json:"subject,omitempty"`
+	Description          *string                `json:"description,omitempty"`
+	Justification        *string                `json:"justification,omitempty"`
+	ImplementationPlan   *string                `json:"implementationPlan,omitempty"`
+	RiskImpactAnalysis   *string                `json:"riskImpactAnalysis,omitempty"`
+	BackoutPlan          *string                `json:"backoutPlan,omitempty"`
+	TestPlan             *string                `json:"testPlan,omitempty"`
+	Category             *ChangeRequestCategory `json:"category,omitempty"`
+	Impact               *ChangeRequestImpact   `json:"impact,omitempty"`
+	Risk                 *ChangeRequestRisk     `json:"risk,omitempty"`
+	RollbackDurationText *string                `json:"rollbackDurationText,omitempty"`
+	// Priority: an empty value clears it (chosen per change).
+	Priority *ChangeRequestPriority `json:"priority,omitempty"`
+	// DeploymentTypes replaces the list; an empty list clears it (any deployment).
+	DeploymentTypes              *[]string                  `json:"deploymentTypes,omitempty"`
 	IsPlanningVisibleToCustomers *bool                      `json:"isPlanningVisibleToCustomers,omitempty"`
 	CustomerApprovalRequired     *bool                      `json:"customerApprovalRequired,omitempty"`
 	CustomerReviewRequired       *bool                      `json:"customerReviewRequired,omitempty"`
@@ -346,6 +448,13 @@ type DecideStandardChangeProposalRequest struct {
 	Comment *string `json:"comment,omitempty"`
 }
 
+// CancelStandardChangeProposalRequest is the body of POST
+// /standard-change-proposals/{id}/cancel.
+type CancelStandardChangeProposalRequest struct {
+	// Reason is required, at most 4000 characters.
+	Reason string `json:"reason"`
+}
+
 // SearchStandardChangeProposalsRequest is the body of POST /standard-change-proposals/search.
 type SearchStandardChangeProposalsRequest struct {
 	States     []StandardChangeProposalState `json:"states,omitempty"`
@@ -355,8 +464,8 @@ type SearchStandardChangeProposalsRequest struct {
 	AccountID *string `json:"accountId,omitempty"`
 	// ProposedByMe narrows to the caller's own proposals.
 	ProposedByMe bool `json:"proposedByMe,omitempty"`
-	// AwaitingMyDecision narrows to proposals in CAB review on which the caller
-	// holds a pending approval.
+	// AwaitingMyDecision narrows to proposals waiting on a stage (CAB or
+	// authority) on which the caller holds a pending approval.
 	AwaitingMyDecision bool       `json:"awaitingMyDecision,omitempty"`
 	Query              *string    `json:"query,omitempty"`
 	Pagination         Pagination `json:"pagination"`

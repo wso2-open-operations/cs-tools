@@ -74,14 +74,16 @@ func (h *StandardChangeHandler) SuspendTemplate(w http.ResponseWriter, r *http.R
 	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/suspend", "Failed to suspend the template.")
 }
 
-// ResumeTemplate handles POST /standard-change-templates/{id}/resume.
+// ResumeTemplate handles POST /standard-change-templates/{id}/resume. The body
+// {note} is forwarded; entity-service requires it.
 func (h *StandardChangeHandler) ResumeTemplate(w http.ResponseWriter, r *http.Request) {
-	h.noBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/resume", "Failed to resume the template.")
+	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/resume", "Failed to resume the template.")
 }
 
 // ClearTemplateReview handles POST /standard-change-templates/{id}/clear-review.
+// The body {note} is forwarded; entity-service requires it.
 func (h *StandardChangeHandler) ClearTemplateReview(w http.ResponseWriter, r *http.Request) {
-	h.noBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/clear-review", "Failed to clear the review flag.")
+	h.optionalBody(w, r, http.MethodPost, "/standard-change-templates/{id}", "/clear-review", "Failed to clear the review flag.")
 }
 
 // CreateProposal handles POST /standard-change-proposals.
@@ -129,6 +131,21 @@ func (h *StandardChangeHandler) DecideProposal(w http.ResponseWriter, r *http.Re
 	h.withBody(w, r, http.MethodPost, "/standard-change-proposals/"+id+"/decision", http.StatusOK, "Failed to record the decision.")
 }
 
+// CancelProposal handles POST /standard-change-proposals/{id}/cancel.
+func (h *StandardChangeHandler) CancelProposal(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !uuidRe.MatchString(id) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+	h.withBody(w, r, http.MethodPost, "/standard-change-proposals/"+id+"/cancel", http.StatusOK, "Failed to cancel the proposal.")
+}
+
+// DeleteProposal handles DELETE /standard-change-proposals/{id}: 204.
+func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Request) {
+	h.noBody(w, r, http.MethodDelete, "/standard-change-proposals/{id}", "", "Failed to delete the draft.")
+}
+
 // noBody forwards a call that carries no body. base holds "{id}", replaced by the
 // validated path id; suffix is appended.
 func (h *StandardChangeHandler) noBody(w http.ResponseWriter, r *http.Request, method, base, suffix, fallback string) {
@@ -143,7 +160,11 @@ func (h *StandardChangeHandler) noBody(w http.ResponseWriter, r *http.Request, m
 		return
 	}
 	path := strings.Replace(base, "{id}", id, 1) + suffix
-	h.forward(w, r, user.UserID, method, path, nil, http.StatusOK, fallback)
+	ok := http.StatusOK
+	if method == http.MethodDelete {
+		ok = http.StatusNoContent
+	}
+	h.forward(w, r, user.UserID, method, path, nil, ok, fallback)
 }
 
 // optionalBody is noBody for a call whose JSON body may be left out: an empty
@@ -209,6 +230,10 @@ func (h *StandardChangeHandler) forward(w http.ResponseWriter, r *http.Request, 
 			}
 		}
 		mapUpstreamError(w, err, fallback)
+		return
+	}
+	if okStatus == http.StatusNoContent {
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	writeJSON(w, okStatus, result)

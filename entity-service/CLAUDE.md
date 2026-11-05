@@ -8322,28 +8322,34 @@ so that function, and the internal caller's right to stamp the flags, are gone:
   code's own `ForbiddenError` instead of `work_item`'s RLS `NotFoundError`; the tests' doc comments
   say so, and the suite is also run as `csm_app` (RLS enforced).
 
-## Standard changes: templates, proposals and the CAB
+## Standard changes: templates, proposals, the CAB and the Standard Change Authority
 
 A **standard change** is pre-authorised at the level of its *template* (ITIL 4 change enablement):
-the CAB approves a template once, and every change request raised from it follows it without a CAB
-stage of its own. Before this, choosing Standard opened the ordinary create form with every field
+the CAB and then the Standard Change Authority approve a template once, and every change request
+raised from it follows it without a CAB stage of its own. Before this, choosing Standard opened the ordinary create form with every field
 free. Code: `standard_change_repo.go`, `change_request_standard_change.go` (repository and
 service), `standard_change_service.go`, `standard_change_template.go`, `standard_change_handler.go`;
 migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, number series
 `STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by), `0254`
-(the customer: `account_id` on template and proposal) and `100026` (row-level security). PostgreSQL data
-sources only; every route is `internalOnly`.
+(the customer: `account_id` on template and proposal), `0277` (the authority, the second stage,
+summary / priority / deployment types, the template history) and `100026` / `100028` (row-level
+security). PostgreSQL data sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
 live templates OF THAT CUSTOMER ignoring case and surrounding spaces, state `ACTIVE` / `SUSPENDED` / `RETIRED`, owner, `current_version_id`, the review flag),
 `standard_change_template_version` (immutable: the content a change request takes, its `parameters`
 JSON array, who approved it and from which proposal), `standard_change_proposal` (a work item, so it
 reuses `approval_stage` / `approval_stage_approver` for its CAB stage; kind `NEW` / `MODIFY` /
-`RETIRE`, state `DRAFT` / `CAB_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN`, the same content
+`RETIRE`, state `DRAFT` / `CAB_REVIEW` / `AUTHORITY_REVIEW` / `APPROVED` / `REJECTED` / `WITHDRAWN` /
+`CANCELLED`, the same content
 columns as a version) and `standard_change_proposal_evidence` (closed change requests the proposer
 cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
-`standard_change_parameter_values` (JSONB object) record what a change request was raised from. All
-four tables are internal-only under row-level security (`100026`).
+`standard_change_parameter_values` (JSONB object) record what a change request was raised from.
+`standard_change_template_event` (0277) is the template's append-only history outside its proposals
+(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, a note, the flagging change request,
+the actor), read newest first as `history` on `GET /standard-change-templates/{id}`; the template row
+itself keeps only the current values. All five tables are internal-only under row-level security
+(`100026`, `100028`).
 
 **A template is one customer's** (migration 0254; the user's rule: "one standard change of a customer
 cannot be added against another customer"). A customer is an `account`; a change request's customer
@@ -8399,11 +8405,12 @@ is its project's account.
   change request a proposal starts from must be a change request of the proposal's customer that was
   completed (closed): CHG.. (another customer: X)"), checked at create (from a change request, and for a
   copy, which carries the copied proposal's source change request over) and again at Submit.
-- **The CAB's approval re-checks both** (`checkProposalCustomerAtDecision`, in `applyApprovedProposal`,
-  NEW and MODIFY): a source change request or a piece of evidence that is no longer a closed change
-  request of the proposal's customer (its project moved after Submit) makes the approval a **409** ("the
-  CAB cannot approve this proposal now: ... reject it, or ask the proposer to withdraw it and propose
-  again"), written nothing (the decision's transaction rolls back, the CAB rows stay REQUESTED). A
+- **Approval re-checks both** (`checkProposalCustomerAtDecision`, NEW and MODIFY), at the CAB's
+  approval and again at the authority's final one (in `applyApprovedProposal`): a source change request
+  or a piece of evidence that is no longer a closed change request of the proposal's customer (its
+  project moved after Submit) makes the approval a **409** ("this proposal cannot be approved now: ...
+  reject it, or ask the proposer to withdraw it and propose again"), written nothing (the decision's
+  transaction rolls back, the rows stay REQUESTED). A
   rejection is still accepted. Each evidence item reads its current `customer` {id, name}, so the CAB
   sees which one moved.
 - **Projects move.** A change request's customer is its project's account, and the Salesforce project
@@ -8441,15 +8448,56 @@ mark the varying bits as `{{key}}` placeholders, each declared as a parameter (t
 number, date, select; up to 30). A new proposal can start from a closed change request (its content
 is copied and it becomes the first evidence) or copy an earlier proposal (a rejected one, say).
 Evidence is any number of closed change requests: the CAB judges it. Submit checks completeness
-(name, rationale, subject, the three plans, impact, a risk that is not high, every placeholder
-declared) and opens one "CAB Approval" stage on the CAB group (`domain.CABApprovalGroupName`), its
-active internal members, the proposer listed cancelled. A CAB member decides on their own row; the
-first decision settles it and cancels the others. **Approved**: `NEW` writes the template and version
-1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and clears the review flag, `RETIRE`
-retires it. **Rejected** needs a comment; the catalogue is untouched and the proposal stays as the
-record. A modification or retirement starts from the current version and is refused (409) when the
-template moved on since; at most one is open per template (unique partial index). The approval stage
-writes `approval_stage.raw_status` in the enum's own spelling (`APPROVED` / `REJECTED`).
+(name, rationale, **summary** (what the template is for, when to use it, what it does not cover; plain
+text, no placeholders, at most 2000 characters), subject, **description**, the three plans, impact, a
+risk that is not high, every placeholder declared) and opens the "CAB Approval" stage on the CAB group
+(`domain.CABApprovalGroupName`), its active internal members, the proposer listed cancelled.
+
+**Two stages** (0277). Making something a standard change takes it past the CAB on every use, so the
+template itself is gated twice:
+1. **CAB.** A CAB member decides on their own row; the first decision settles the stage and cancels
+   the others. Approval moves the proposal to `AUTHORITY_REVIEW` and provisions the second stage in the
+   same transaction (after re-checking that the template has not moved on and the customer rule,
+   below); nothing is applied yet.
+2. **Standard Change Authority** (`domain.StandardChangeAuthorityGroupName`, a named `"group"` created
+   empty by 0277 with id `…05ca`, resolved by name like the CAB; its members are the heads of SaaS
+   SRE, of each SaaS ABT and of SRE, added as `team_member.group_id` / `group_member` rows by an
+   operator: there is no admin API). The proposer and the CAB member who approved are listed
+   cancelled. `approval_stage.required_approvals` (0277, default 1, so every change request stage is
+   unchanged) is `domain.StandardChangeAuthorityApprovals` = 2: the stage stays open until two
+   different members approve, each once; the second approval applies the proposal. Any rejection (at
+   either stage) ends it and needs a comment.
+
+`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). Submit refuses (400)
+when the authority group has fewer than two eligible members besides the proposer
+(`resolveAuthorityPool`), so a proposal never waits on a group that could not authorise it; the CAB's
+approval refuses (409, nothing written) when its own approver leaves too few. **Approved**: `NEW`
+writes the template and version 1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and
+clears the review flag, `RETIRE` retires it; `decided_by_user_id` and the version's `approved_by` are
+the final authority approver, every decision is in the approver rows. **Rejected**: the catalogue is
+untouched and the proposal stays as the record. A modification or retirement starts from the current
+version and is refused (409) when the template moved on since; at most one is open (`DRAFT`,
+`CAB_REVIEW`, `AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0277). The
+approval stages write `approval_stage.raw_status` in the enum's own spelling (`APPROVED` /
+`REJECTED`). The proposal reads `stages` (label, required and received approvals, decision) and each
+approver row's `stageId`; `awaitingMyDecision` covers both stages.
+
+**Drafts, withdrawal, cancellation.** A draft that was never submitted is deleted by its proposer
+(`DELETE /standard-change-proposals/{id}`, 204; the work item's delete cascades to the proposal and
+its evidence): it has never been before anyone. Once submitted a proposal is never deleted: the
+proposer withdraws it (any open state; `decided_by_user_id` records who), and a Standard Change
+Authority member can **cancel** someone else's open proposal with a reason (`POST .../cancel`,
+state `CANCELLED`, the reason in `decision_comment`): the way out for a proposal whose proposer left,
+and for an abandoned revision that otherwise holds its template's one-open slot. `canDelete` /
+`canCancel` on the proposal say which applies to the caller.
+
+**One change, one template** (`changeRequestsFromOtherTemplate`). A change request raised from a
+template belongs to that template: it cannot start a NEW proposal or be its evidence, nor be evidence
+of a revision of another template (400 naming the template and pointing to "propose a revision of
+STD…"); it is evidence for a revision of its own template. Checked at create, on every evidence set
+and at Submit. Submit also refuses (409) a name another open proposal of the same customer is already
+waiting for approval under, and the placeholder name "Untitled standard change" (400). Not built yet:
+a similarity search of existing templates (proposed separately).
 
 **Raising a change request** (`changeRequestService.prepareStandardChange`, wired by
 `WithStandardChangeTemplates` in `routes.go`): `POST /change-requests` with
@@ -8459,7 +8507,12 @@ standard (or none). The template must be `ACTIVE`; its current version is render
 (rich-text fields HTML-escape them, a textarea's lines become `<br>`, the subject stays plain text and
 is held to 512 characters) and overwrites subject, description, justification, the plans,
 risk/impact analysis, category, impact, risk, rollback duration, planning visibility and the two
-customer boxes. Sending any of those (or `implementationDeviation`) is a 400. The repository records
+customer boxes. Sending any of those (or `implementationDeviation`) is a 400. What the template
+leaves open the caller chooses: when the version sets `priority` it is the change request's (another
+`priority` sent is a 400 `change_request_standard_template_field`), else the caller's; when it sets
+`deploymentTypes` the change request needs at least one deployment (400 in `prepareStandardChange`)
+and every deployment of those types (`checkStandardChangeDeployments`, in the create transaction once
+the deployments are written: 400 naming the others, an untyped deployment included). The repository records
 the version and values in the create transaction under `FOR SHARE` on the template, refusing (409)
 a template suspended, retired or revised in between. On dual-write the previous system gets the
 rendered content and none of the template fields (`DATA_SOURCE=servicenow` refuses them: 400).
@@ -8467,7 +8520,10 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 **On the change request afterwards.**
 - **Frozen**: a PATCH that changes a template-specified field is a 400 in every state
   (`checkStandardChangeTemplateFields`, before the approved-content lock); resending the stored value
-  is accepted. The parameters cannot be edited either (decision: a typo in New is a cancel and
+  is accepted. `priority` is frozen only when the version fixes one. A PATCH that writes the
+  deployments of a change whose version names deployment types is checked again
+  (`checkStandardChangeDeployments`, after the link rows are written): at least one, all of those
+  types. The parameters cannot be edited either (decision: a typo in New is a cancel and
   re-raise; editing them would need a re-render the dual-write mirror does not have).
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
@@ -8478,28 +8534,36 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 - **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
   implementation plan sets `review_required` on the template with the change request and a reason
   (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
-  identity). It does not suspend the template; the owner or a CAB member clears it, or approving a
-  modification does.
+  identity) and is recorded in the template's history. It does not suspend the template; a Standard
+  Change Authority member clears it (with a note), or approving a modification does.
 - **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`, version,
   parameters with values), staff only, best-effort like the tags.
 
 **Error codes**: `change_request_standard_template_field` (400),
 `standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).
 
-**Who may**: suspend / resume / clear the flag: the template's owner or a CAB member. Edit, submit,
-withdraw a proposal: its proposer. Decide: a CAB member other than the proposer.
+**Who may**: suspend (a brake, so open): the template's owner, a CAB member or a Standard Change
+Authority member. Resume and clear the review flag (both put the template back in use with no review):
+a Standard Change Authority member only, with a required note (`{note}`, at most 1000 characters);
+clearing is refused (409) on a retired template or one not flagged. `canSuspend` / `canResume` /
+`canClearReview` on the template say what the caller may do. Edit, submit, withdraw, delete a draft:
+its proposer. Cancel: a Standard Change Authority member, not on their own. Decide: a CAB member,
+then two authority members; never the proposer, and not the CAB approver at the second stage.
 
 **Suspension.** `POST .../suspend` takes an optional body `{reason}` (`decodeOptionalRequest`: an
 empty body is `{}`; trimmed, blank is none, at most 1000 characters or 400). `SetTemplateState`
 writes `suspended_reason` / `suspended_on` / `suspended_by` (the actor's email) on the move to
 `SUSPENDED` and clears all three on any other move; a retirement clears them too. The template reads
 them as `suspendedReason` / `suspendedOn` / `suspendedBy`, null unless the template is suspended.
+Every suspension and resumption (with its reason or note) also goes into the template's history.
 
 **Not done**: no import of the previous system's standard change templates (decision: they are
-re-proposed through this flow); no notices (mail / chat) on submit or decision.
+re-proposed through this flow); no notices (mail / chat) on submit or decision, so the Standard
+Change Authority learns of pending work only from the "awaiting my decision" view; no API to manage
+the authority group's members.
 
-Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, placeholders,
-rendering, the suspension reason), `change_request_standard_change_customer_test.go` (the customer
+Tests: `standard_change_template_test.go` (parameters, completeness incl. the customer, the summary and
+the description, placeholders, rendering, the suspension reason, deployment types), `change_request_standard_change_customer_test.go` (the customer
 check before the previous system is called), `handler/standard_change_handler_test.go` (the optional
 suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`

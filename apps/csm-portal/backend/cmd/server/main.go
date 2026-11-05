@@ -846,6 +846,8 @@ func main() {
 	route("POST /standard-change-proposals/{id}/submit", handler.PermWrite, standardChangeHandler.SubmitProposal)
 	route("POST /standard-change-proposals/{id}/withdraw", handler.PermWrite, standardChangeHandler.WithdrawProposal)
 	route("POST /standard-change-proposals/{id}/decision", handler.PermWrite, standardChangeHandler.DecideProposal)
+	route("POST /standard-change-proposals/{id}/cancel", handler.PermWrite, standardChangeHandler.CancelProposal)
+	route("DELETE /standard-change-proposals/{id}", handler.PermWrite, standardChangeHandler.DeleteProposal)
 
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)

@@ -13179,9 +13179,18 @@ paths:
     post:
       summary: Resume a suspended standard change template.
       operationId: resumeStandardChangeTemplate
-      description: The template's owner or a member of the CAB Approval group. 409 when it is not suspended.
+      description: >-
+        A member of the Standard Change Authority group only (resuming puts the template back in
+        use with no review), with a note saying why; recorded in the template's history. 409 when
+        it is not suspended.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandardChangeTemplateNoteRequest'
       responses:
         "200":
           description: The template.
@@ -13231,10 +13240,18 @@ paths:
       operationId: clearStandardChangeTemplateReview
       description: >-
         A change raised from the template was rolled back or deviated from its plan,
-        and the owner or the CAB has looked at it and decided the template stands.
-        (Approving a modification clears the flag too.) The owner or a CAB member.
+        and the Standard Change Authority has looked at it and decided the template stands.
+        (Approving a modification clears the flag too.) A member of the Standard Change
+        Authority group only, with a note; recorded in the template's history. 409 when the
+        template is retired or not flagged.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StandardChangeTemplateNoteRequest'
       responses:
         "200":
           description: The template.
@@ -13262,6 +13279,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template is retired, or not flagged for review.
           content:
             application/json:
               schema:
@@ -13480,6 +13503,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a draft standard change proposal.
+      operationId: deleteStandardChangeProposal
+      description: >-
+        The proposer only, on a draft that was never submitted: it is deleted with its
+        evidence. A submitted proposal is the record of what was asked and is withdrawn
+        instead (409).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Deleted.
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/submit:
     post:
       summary: Send a standard change proposal to the CAB.
@@ -13540,7 +13611,7 @@ paths:
     post:
       summary: Withdraw a standard change proposal.
       operationId: withdrawStandardChangeProposal
-      description: The proposer only, while it is a draft or in CAB review. Pending approvers are cancelled; the proposal is kept.
+      description: The proposer only, while it is open (draft, CAB review or authority review). Pending approvers are cancelled; the proposal is kept.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -13588,17 +13659,22 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/decision:
     post:
-      summary: Approve or reject a standard change proposal (CAB).
+      summary: Approve or reject a standard change proposal (CAB, then the Standard Change Authority).
       operationId: decideStandardChangeProposal
       description: >-
-        A CAB member on their own pending approver row; the proposer never decides
-        (403). The first decision settles the proposal and cancels the other
-        approvers. Approved: a new template (version 1), a new version of the template,
-        or the template retired. Rejected: needs a comment; nothing in the catalogue
-        changes and the proposal is kept as the record. 409 when it is not in CAB
-        review, or the approval would clash (a live template of the same name for the
-        customer, the template moved on, or the source change request or a piece of
-        evidence is no longer a closed change request of the proposal's customer).
+        A decision on the caller's own pending approver row of the stage the proposal
+        waits on; the proposer never decides (403). Two stages: the CAB (the first
+        decision settles it; its approval moves the proposal to authority_review and asks
+        the Standard Change Authority group, without the proposer or the CAB member who
+        approved), then the authority, which needs two different members' approvals (the
+        second one applies the proposal: a new template (version 1), a new version of the
+        template, or the template retired). Any rejection ends the proposal; it needs a
+        comment, nothing in the catalogue changes and the proposal is kept as the record.
+        409 when it is not waiting for a decision, when the authority group would have too
+        few members to authorise it, or the approval would clash (a live template of the
+        same name for the customer, the template moved on, or the source change request or
+        a piece of evidence is no longer a closed change request of the proposal's
+        customer).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -13610,6 +13686,67 @@ paths:
       responses:
         "200":
           description: The proposal, approved or rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeProposal'
+        "400":
+          description: "Bad request: a malformed id or body, or a value that is refused (the message says which)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller, or may not do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such template, version or proposal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The template or proposal is not in a state that allows this (the message says why).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-proposals/{id}/cancel:
+    post:
+      summary: Cancel someone else's open standard change proposal (Standard Change Authority).
+      operationId: cancelStandardChangeProposal
+      description: >-
+        A member of the Standard Change Authority group ends an open proposal (draft, CAB
+        review or authority review) its proposer abandoned, with a reason: pending approvers
+        are cancelled, the proposal is kept (state cancelled), and a modification or
+        retirement no longer holds its template. The proposer withdraws or deletes their own
+        (409).
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelStandardChangeProposalRequest'
+      responses:
+        "200":
+          description: The proposal, cancelled.
           content:
             application/json:
               schema:
@@ -33615,6 +33752,27 @@ components:
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
         customerReviewRequired: {type: boolean}
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            What the template is for, when to use it and what it does not cover (plain text, no
+            placeholders, at most 2000 characters). The template's own description: never copied
+            onto a change request. Required to submit a new template or a revision; null on
+            versions approved before it existed.
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low]
+          description: When set, the priority of every change request raised from the template (sending another is a 400, and a PATCH cannot change it); null leaves it to whoever raises the change.
+        deploymentTypes:
+          type: array
+          nullable: true
+          items: {type: string, enum: [primary_production, staging, qa, stress, uat, development]}
+          description: >-
+            When set, a change request raised from the template needs at least one deployment, and
+            every one of its deployments must be of these types (create and PATCH refuse others, an
+            untyped deployment included). Null: any deployments, or none.
         parameters:
           type: array
           items: {$ref: '#/components/schemas/StandardChangeParameter'}
@@ -33708,6 +33866,47 @@ components:
           type: array
           items: {$ref: '#/components/schemas/StandardChangeTemplateVersionSummary'}
           description: On GET /standard-change-templates/{id} only, newest first.
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeTemplateEvent'}
+          description: On GET /standard-change-templates/{id} only, newest first. What happened to the template outside its proposals.
+        canSuspend: {type: boolean, description: 'The caller may suspend it: its owner, a CAB member or a Standard Change Authority member, while it is active.'}
+        canResume: {type: boolean, description: 'The caller may resume it: a Standard Change Authority member, while it is suspended.'}
+        canClearReview: {type: boolean, description: 'The caller may clear its review flag: a Standard Change Authority member, while it is flagged.'}
+    StandardChangeTemplateEvent:
+      type: object
+      properties:
+        action: {type: string, enum: [suspended, resumed, review_flagged, review_cleared]}
+        note: {type: string, nullable: true, description: 'The suspension reason, the resume or clear note, or why the template was flagged.'}
+        changeRequest:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The change request that flagged the template for review.
+        actor: {type: string, description: 'Who did it: an email, or a service name.'}
+        createdOn: {type: string, format: date-time}
+    StandardChangeTemplateNoteRequest:
+      type: object
+      required: [note]
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 1000
+          description: Why the template may be used again. Required (blank is a 400), at most 1000 characters.
+    CancelStandardChangeProposalRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: {type: string, maxLength: 4000, description: 'Why the proposal is cancelled. Required.'}
+    StandardChangeProposalStage:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string, description: '"CAB Approval" or "Standard Change Authority".'}
+        requiredApprovals: {type: integer, description: 'How many different approvers must approve the stage (1 for the CAB, 2 for the authority).'}
+        approvals: {type: integer}
+        decision: {type: string, nullable: true, enum: [APPROVED, REJECTED], description: 'Null while the stage is open.'}
     SuspendStandardChangeTemplateRequest:
       type: object
       additionalProperties: false
@@ -33750,6 +33949,7 @@ components:
     StandardChangeProposalApprover:
       type: object
       properties:
+        stageId: {type: string, format: uuid, description: 'The stage (stages) the row belongs to.'}
         approver:
           allOf: [{$ref: '#/components/schemas/UserReference'}]
           nullable: true
@@ -33766,7 +33966,7 @@ components:
             id: {type: string, format: uuid}
             number: {type: string, description: 'SCP number.'}
             kind: {type: string, enum: [new, modify, retire]}
-            state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+            state: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
             name: {type: string}
             customer:
               allOf: [{$ref: '#/components/schemas/EntityRef'}]
@@ -33798,6 +33998,10 @@ components:
             evidence:
               type: array
               items: {$ref: '#/components/schemas/StandardChangeEvidence'}
+            stages:
+              type: array
+              items: {$ref: '#/components/schemas/StandardChangeProposalStage'}
+              description: The approval stages, oldest first.
             approvers:
               type: array
               items: {$ref: '#/components/schemas/StandardChangeProposalApprover'}
@@ -33816,6 +34020,8 @@ components:
             canEdit: {type: boolean}
             canSubmit: {type: boolean}
             canWithdraw: {type: boolean}
+            canDelete: {type: boolean, description: 'The proposer, on a draft never submitted.'}
+            canCancel: {type: boolean, description: "A Standard Change Authority member, on someone else's open proposal."}
     CreateStandardChangeProposalRequest:
       type: object
       required: [kind]
@@ -33839,8 +34045,10 @@ components:
     UpdateStandardChangeProposalRequest:
       type: object
       description: >
-        Omitted fields are left as they are; an empty category, impact or risk clears it; parameters
-        and evidenceChangeRequestIds replace the whole list. Evidence must be closed change requests of
+        Omitted fields are left as they are; an empty category, impact, risk or priority clears it;
+        parameters, deploymentTypes (empty: any deployment) and evidenceChangeRequestIds replace the
+        whole list. Evidence and the source change request may not be change requests raised from
+        another standard change template (a 400 points to a revision of that template). Evidence must be closed change requests of
         the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
       properties:
         name: {type: string}
@@ -33864,6 +34072,11 @@ components:
         impact: {type: string, enum: ['', high, medium, low]}
         risk: {type: string, enum: ['', high, moderate, low], description: 'high is accepted on a draft and refused on submit.'}
         rollbackDurationText: {type: string}
+        summary: {type: string, maxLength: 2000}
+        priority: {type: string, enum: ['', critical, high, moderate, low]}
+        deploymentTypes:
+          type: array
+          items: {type: string, enum: [primary_production, staging, qa, stress, uat, development]}
         isPlanningVisibleToCustomers: {type: boolean}
         customerApprovalRequired: {type: boolean}
         customerReviewRequired: {type: boolean}
@@ -33884,7 +34097,7 @@ components:
       properties:
         states:
           type: array
-          items: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+          items: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
         kinds:
           type: array
           items: {type: string, enum: [new, modify, retire]}
@@ -33900,7 +34113,7 @@ components:
         id: {type: string, format: uuid}
         number: {type: string}
         kind: {type: string, enum: [new, modify, retire]}
-        state: {type: string, enum: [draft, cab_review, approved, rejected, withdrawn]}
+        state: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
         name: {type: string}
         customer:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]

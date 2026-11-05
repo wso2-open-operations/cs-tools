@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -52,11 +53,13 @@ var standardChangeTemplateStates = map[domain.StandardChangeTemplateState]string
 }
 
 var standardChangeProposalStates = map[domain.StandardChangeProposalState]string{
-	domain.StandardChangeProposalStateDraft:     "DRAFT",
-	domain.StandardChangeProposalStateCABReview: "CAB_REVIEW",
-	domain.StandardChangeProposalStateApproved:  "APPROVED",
-	domain.StandardChangeProposalStateRejected:  "REJECTED",
-	domain.StandardChangeProposalStateWithdrawn: "WITHDRAWN",
+	domain.StandardChangeProposalStateDraft:           "DRAFT",
+	domain.StandardChangeProposalStateCABReview:       "CAB_REVIEW",
+	domain.StandardChangeProposalStateAuthorityReview: "AUTHORITY_REVIEW",
+	domain.StandardChangeProposalStateApproved:        "APPROVED",
+	domain.StandardChangeProposalStateRejected:        "REJECTED",
+	domain.StandardChangeProposalStateWithdrawn:       "WITHDRAWN",
+	domain.StandardChangeProposalStateCancelled:       "CANCELLED",
 }
 
 var standardChangeProposalKinds = map[domain.StandardChangeProposalKind]string{
@@ -123,9 +126,45 @@ func (s *standardChangeService) SearchTemplates(ctx context.Context, req domain.
 }
 
 func (s *standardChangeService) GetTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	if _, err := s.internal(ctx); err != nil {
+	viewer, err := s.internal(ctx)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
+	t, err := s.readTemplate(ctx, id)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	if viewer == "" {
+		return t, nil
+	}
+	roles, err := s.rolesOf(ctx, viewer, t)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	t.CanSuspend = t.State == domain.StandardChangeTemplateStateActive && (roles.owner || roles.cab || roles.authority)
+	t.CanResume = t.State == domain.StandardChangeTemplateStateSuspended && roles.authority
+	t.CanClearReview = t.ReviewRequired && t.State != domain.StandardChangeTemplateStateRetired && roles.authority
+	return t, nil
+}
+
+// templateRoles is who the caller is to a template.
+type templateRoles struct{ owner, cab, authority bool }
+
+func (s *standardChangeService) rolesOf(ctx context.Context, actor string, t domain.StandardChangeTemplate) (templateRoles, error) {
+	var r templateRoles
+	var err error
+	r.owner = t.Owner != nil && strings.EqualFold(t.Owner.Email, actor)
+	if r.cab, err = s.repo.IsGroupMember(ctx, actor, domain.CABApprovalGroupName); err != nil {
+		return r, err
+	}
+	if r.authority, err = s.repo.IsGroupMember(ctx, actor, domain.StandardChangeAuthorityGroupName); err != nil {
+		return r, err
+	}
+	return r, nil
+}
+
+// readTemplate is GetTemplate's read, without the caller's permissions.
+func (s *standardChangeService) readTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
 	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
@@ -156,67 +195,92 @@ func (s *standardChangeService) GetTemplateVersion(ctx context.Context, template
 	return *v, nil
 }
 
-// mayManageTemplate: the template's owner or a CAB member.
-func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string) error {
-	t, err := s.GetTemplate(ctx, id)
+// mayManageTemplate checks the caller may act on the template: suspending (a
+// brake) is open to its owner, the CAB and the Standard Change Authority;
+// releasing it (resume, clear the review flag), which puts it back in use with
+// no review, to the Standard Change Authority only.
+func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string, release bool) error {
+	t, err := s.readTemplate(ctx, id)
 	if err != nil {
 		return err
 	}
-	if t.Owner != nil && strings.EqualFold(t.Owner.Email, actor) {
+	roles, err := s.rolesOf(ctx, actor, t)
+	if err != nil {
+		return err
+	}
+	if release {
+		if !roles.authority {
+			return &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can put a template back in use (resume it, or clear its review flag)"}
+		}
 		return nil
 	}
-	cab, err := s.repo.IsCABMember(ctx, actor)
-	if err != nil {
-		return err
-	}
-	if !cab {
-		return &apierror.ForbiddenError{Msg: "only the template's owner or a member of the CAB can do this"}
+	if !roles.owner && !roles.cab && !roles.authority {
+		return &apierror.ForbiddenError{Msg: "only the template's owner, a member of the CAB or a member of the Standard Change Authority can suspend it"}
 	}
 	return nil
 }
 
 func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"ACTIVE"}, "SUSPENDED", req.Reason)
-}
-
-func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
-	return s.moveTemplate(ctx, id, []string{"SUSPENDED"}, "ACTIVE", "")
-}
-
-// moveTemplate moves the template's state; reason (blank for none) is recorded
-// only on a move to SUSPENDED (the repository clears it on any other move).
-func (s *standardChangeService) moveTemplate(ctx context.Context, id string, from []string, to, reason string) (domain.StandardChangeTemplate, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if err := s.mayManageTemplate(ctx, actor, id); err != nil {
-		return domain.StandardChangeTemplate{}, err
-	}
-	r, err := normalizeSuspendReason(reason)
+	r, err := normalizeSuspendReason(req.Reason)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	t, err := s.repo.SetTemplateState(ctx, id, actor, from, to, r)
-	if err != nil {
+	if err := s.mayManageTemplate(ctx, actor, id, false); err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	return *t, nil
+	if _, err := s.repo.SetTemplateState(ctx, id, actor, []string{"ACTIVE"}, "SUSPENDED", r); err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return s.GetTemplate(ctx, id)
 }
 
-func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error) {
+func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
+	actor, note, err := s.releaseNote(ctx, id, req)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	if _, err := s.repo.SetTemplateState(ctx, id, actor, []string{"SUSPENDED"}, "ACTIVE", &note); err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return s.GetTemplate(ctx, id)
+}
+
+func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
+	actor, note, err := s.releaseNote(ctx, id, req)
+	if err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	if _, err := s.repo.ClearReviewRequired(ctx, id, actor, note); err != nil {
+		return domain.StandardChangeTemplate{}, err
+	}
+	return s.GetTemplate(ctx, id)
+}
+
+// releaseNote checks a resume or clear-review: a Standard Change Authority
+// member, with a note saying why the template may be used again.
+func (s *standardChangeService) releaseNote(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (string, string, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
-		return domain.StandardChangeTemplate{}, err
+		return "", "", err
 	}
-	if err := s.mayManageTemplate(ctx, actor, id); err != nil {
-		return domain.StandardChangeTemplate{}, err
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return "", "", err
 	}
-	t, err := s.repo.ClearReviewRequired(ctx, id, actor)
+	note, err := normalizeSuspendReason(req.Note)
 	if err != nil {
-		return domain.StandardChangeTemplate{}, err
+		return "", "", &apierror.ValidationError{Msg: fmt.Sprintf("note must be at most %d characters", maxStandardChangeSuspendReason)}
 	}
-	return *t, nil
+	if note == nil {
+		return "", "", &apierror.ValidationError{Msg: "note is required: say why the template may be used again"}
+	}
+	if err := s.mayManageTemplate(ctx, actor, id, true); err != nil {
+		return "", "", err
+	}
+	return actor, *note, nil
 }
 
 func (s *standardChangeService) CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
@@ -297,10 +361,20 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 	mine := viewer != "" && p.ProposedBy != nil && strings.EqualFold(p.ProposedBy.Email, viewer)
 	p.CanEdit = mine && p.State == domain.StandardChangeProposalStateDraft
 	p.CanSubmit = p.CanEdit
-	p.CanWithdraw = mine && (p.State == domain.StandardChangeProposalStateDraft || p.State == domain.StandardChangeProposalStateCABReview)
+	p.CanWithdraw = mine && p.State.IsOpen()
+	p.CanDelete = p.CanEdit && p.SubmittedOn == nil && len(p.Stages) == 0
+	if !mine && viewer != "" && p.State.IsOpen() {
+		authority, err := s.repo.IsGroupMember(ctx, viewer, domain.StandardChangeAuthorityGroupName)
+		if err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		p.CanCancel = authority
+	}
+	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
+	waiting := p.State == domain.StandardChangeProposalStateCABReview || p.State == domain.StandardChangeProposalStateAuthorityReview
 	for i := range p.Approvers {
 		a := &p.Approvers[i]
-		a.CanDecide = !mine && viewer != "" && p.State == domain.StandardChangeProposalStateCABReview &&
+		a.CanDecide = !mine && viewer != "" && waiting &&
 			a.State == "REQUESTED" && a.Approver != nil && strings.EqualFold(a.Approver.Email, viewer)
 	}
 	return *p, nil
@@ -329,7 +403,7 @@ func (s *standardChangeService) SearchProposals(ctx context.Context, req domain.
 	for _, st := range req.States {
 		v, ok := standardChangeProposalStates[st]
 		if !ok {
-			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, cab_review, approved, rejected or withdrawn"}
+			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, cab_review, authority_review, approved, rejected, withdrawn or cancelled"}
 		}
 		f.States = append(f.States, v)
 	}
@@ -420,6 +494,23 @@ func (s *standardChangeService) UpdateProposal(ctx context.Context, id string, r
 	if req.Risk != nil && *req.Risk != "" && !validChangeRequestRisk[*req.Risk] {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "risk must be one of high, moderate or low"}
 	}
+	if req.Priority != nil && *req.Priority != "" && !validChangeRequestPriority[*req.Priority] {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "priority must be one of critical, high, moderate or low (or empty: chosen per change)"}
+	}
+	if req.Summary != nil {
+		n := strings.TrimSpace(*req.Summary)
+		if err := checkStandardChangeSummary(&n); err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		req.Summary = &n
+	}
+	if req.DeploymentTypes != nil {
+		types, err := normalizeStandardChangeDeploymentTypes(*req.DeploymentTypes)
+		if err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+		req.DeploymentTypes = &types
+	}
 	if req.Parameters != nil {
 		params, err := normalizeStandardChangeParameters(*req.Parameters)
 		if err != nil {
@@ -470,6 +561,45 @@ func (s *standardChangeService) WithdrawProposal(ctx context.Context, id string)
 		return domain.StandardChangeProposal{}, err
 	}
 	return s.proposalFor(ctx, actor, id)
+}
+
+func (s *standardChangeService) CancelProposal(ctx context.Context, id string, req domain.CancelStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "reason is required: say why the proposal is cancelled, for its record and its proposer"}
+	}
+	if utf8.RuneCountInString(reason) > 4000 {
+		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "reason must be at most 4000 characters"}
+	}
+	authority, err := s.repo.IsGroupMember(ctx, actor, domain.StandardChangeAuthorityGroupName)
+	if err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	if !authority {
+		return domain.StandardChangeProposal{}, &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can cancel someone else's proposal"}
+	}
+	if err := s.repo.CancelProposal(ctx, id, actor, reason); err != nil {
+		return domain.StandardChangeProposal{}, err
+	}
+	return s.proposalFor(ctx, actor, id)
+}
+
+func (s *standardChangeService) DeleteProposal(ctx context.Context, id string) error {
+	actor, err := s.actor(ctx)
+	if err != nil {
+		return err
+	}
+	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
+		return err
+	}
+	return s.repo.DeleteProposal(ctx, id, actor)
 }
 
 func (s *standardChangeService) DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {

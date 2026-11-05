@@ -4621,9 +4621,13 @@ func IsCreatableChangeRequestType(t ChangeRequestType) bool {
 // CAB Approval is created by migration 0188_change_request_approval_groups.sql when
 // absent (that migration also created an "ECAB Approval" group, which nothing
 // resolves any more and which is left in place).
+//   - StandardChangeAuthorityGroupName: the heads (of SaaS SRE, of each SaaS ABT,
+//     of SRE) who authorise a standard change template after the CAB, created
+//     by migration 0277 (domain.StandardChangeAuthorityApprovals of them).
 const (
-	CABApprovalGroupName          = "CAB Approval"
-	PeerApprovalFallbackGroupName = "Devops Approval"
+	CABApprovalGroupName             = "CAB Approval"
+	PeerApprovalFallbackGroupName    = "Devops Approval"
+	StandardChangeAuthorityGroupName = "Standard Change Authority"
 )
 
 // ChangeRequestState represents the current workflow state of a change request.

@@ -81,15 +81,25 @@ func (h *StandardChangeHandler) SuspendTemplate(w http.ResponseWriter, r *http.R
 	h.answer(w, r, http.StatusOK, t, err)
 }
 
-// ResumeTemplate handles POST /standard-change-templates/{id}/resume.
+// ResumeTemplate handles POST /standard-change-templates/{id}/resume. The body
+// {note} is required.
 func (h *StandardChangeHandler) ResumeTemplate(w http.ResponseWriter, r *http.Request) {
-	t, err := h.svc.ResumeTemplate(r.Context(), r.PathValue("id"))
+	var req domain.StandardChangeTemplateNoteRequest
+	if !decodeOptionalRequest(w, r, &req) {
+		return
+	}
+	t, err := h.svc.ResumeTemplate(r.Context(), r.PathValue("id"), req)
 	h.answer(w, r, http.StatusOK, t, err)
 }
 
 // ClearTemplateReview handles POST /standard-change-templates/{id}/clear-review.
+// The body {note} is required.
 func (h *StandardChangeHandler) ClearTemplateReview(w http.ResponseWriter, r *http.Request) {
-	t, err := h.svc.ClearTemplateReview(r.Context(), r.PathValue("id"))
+	var req domain.StandardChangeTemplateNoteRequest
+	if !decodeOptionalRequest(w, r, &req) {
+		return
+	}
+	t, err := h.svc.ClearTemplateReview(r.Context(), r.PathValue("id"), req)
 	h.answer(w, r, http.StatusOK, t, err)
 }
 
@@ -139,6 +149,25 @@ func (h *StandardChangeHandler) SubmitProposal(w http.ResponseWriter, r *http.Re
 func (h *StandardChangeHandler) WithdrawProposal(w http.ResponseWriter, r *http.Request) {
 	p, err := h.svc.WithdrawProposal(r.Context(), r.PathValue("id"))
 	h.answer(w, r, http.StatusOK, p, err)
+}
+
+// CancelProposal handles POST /standard-change-proposals/{id}/cancel.
+func (h *StandardChangeHandler) CancelProposal(w http.ResponseWriter, r *http.Request) {
+	var req domain.CancelStandardChangeProposalRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	p, err := h.svc.CancelProposal(r.Context(), r.PathValue("id"), req)
+	h.answer(w, r, http.StatusOK, p, err)
+}
+
+// DeleteProposal handles DELETE /standard-change-proposals/{id}: 204.
+func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteProposal(r.Context(), r.PathValue("id")); err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // DecideProposal handles POST /standard-change-proposals/{id}/decision.

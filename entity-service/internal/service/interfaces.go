@@ -218,14 +218,21 @@ type StandardChangeService interface {
 	GetTemplateVersion(ctx context.Context, templateID, versionID string) (domain.StandardChangeTemplateVersion, error)
 	// SuspendTemplate suspends an active template, recording the optional reason.
 	SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error)
-	ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
-	ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	// ResumeTemplate and ClearTemplateReview put a template back in use: a
+	// Standard Change Authority member only, with a note.
+	ResumeTemplate(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error)
+	ClearTemplateReview(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error)
 	CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 	GetProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
 	SearchProposals(ctx context.Context, req domain.SearchStandardChangeProposalsRequest) (domain.SearchStandardChangeProposalsResponse, error)
 	UpdateProposal(ctx context.Context, id string, req domain.UpdateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 	SubmitProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
 	WithdrawProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	// CancelProposal: a Standard Change Authority member ends someone else's
+	// open proposal, with a reason.
+	CancelProposal(ctx context.Context, id string, req domain.CancelStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	// DeleteProposal: the proposer deletes their draft that was never submitted.
+	DeleteProposal(ctx context.Context, id string) error
 	DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 }
 

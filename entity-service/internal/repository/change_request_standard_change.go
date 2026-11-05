@@ -81,9 +81,16 @@ func checkStandardChangeTemplateFields(ctx context.Context, tx pgx.Tx, id string
 	if snap.templateVersionID == nil {
 		return nil
 	}
+	// The priority is the template's only when its version fixes one.
+	fixesPriority := false
+	if req.Priority != nil {
+		if err := tx.QueryRow(ctx, `SELECT priority IS NOT NULL FROM standard_change_template_version WHERE id = $1::uuid`, *snap.templateVersionID).Scan(&fixesPriority); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("patch change request: read template priority: %w", err)
+		}
+	}
 	var fields []approvedLockField
 	for _, f := range approvedLockFields(req, true) {
-		if standardTemplateFields[f.name] {
+		if standardTemplateFields[f.name] || (f.name == "priority" && fixesPriority) {
 			fields = append(fields, f)
 		}
 	}
@@ -103,6 +110,57 @@ func checkStandardChangeTemplateFields(ctx context.Context, tx pgx.Tx, id string
 		return nil
 	}
 	return &apierror.ValidationError{Msg: standardTemplateFieldsMsg(changed), Code: apierror.CodeChangeRequestStandardTemplateField}
+}
+
+// DeploymentTypesText names a template's deployment types for a message
+// ("primary_production or staging").
+func DeploymentTypesText(types []string) string {
+	if len(types) <= 1 {
+		return strings.Join(types, "")
+	}
+	return strings.Join(types[:len(types)-1], ", ") + " or " + types[len(types)-1]
+}
+
+// checkStandardChangeDeployments refuses (400, CodeChangeRequestStandardTemplateField)
+// a templated change request whose template version names deployment types
+// (migration 0277) when it has no deployment, or a deployment of another type
+// (an untyped one included). Run in the writing transaction, after its
+// deployments are written, by create and by any PATCH that writes them.
+//
+// crvis: reads one change request's own deployments by id inside a transaction that has just written them
+func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeRequestID string) error {
+	var types []string
+	var name string
+	err := tx.QueryRow(ctx, `
+		SELECT v.deployment_types, t.name
+		  FROM change_request cr
+		  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
+		  JOIN standard_change_template t ON t.id = v.template_id
+		 WHERE cr.id = $1::uuid AND cardinality(v.deployment_types) > 0`, changeRequestID).Scan(&types, &name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	var total int
+	var other []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*), COALESCE(array_agg(d.name || ' (' || COALESCE(LOWER(d.type::text), 'no type') || ')' ORDER BY d.name)
+		                     FILTER (WHERE d.type IS NULL OR NOT (LOWER(d.type::text) = ANY($2::text[]))), '{}')
+		  FROM change_request_deployment l JOIN deployment d ON d.id = l.deployment_id
+		 WHERE l.change_request_id = $1::uuid`, changeRequestID, types).Scan(&total, &other); err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	switch {
+	case total == 0:
+		return &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
+			Msg: fmt.Sprintf("the standard change template %q is for %s deployments: choose at least one of the project's deployments of that type", name, DeploymentTypesText(types))}
+	case len(other) > 0:
+		return &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
+			Msg: fmt.Sprintf("the standard change template %q is for %s deployments only: %s cannot be chosen", name, DeploymentTypesText(types), strings.Join(other, ", "))}
+	}
+	return nil
 }
 
 // checkStandardChangeTypeEdit keeps a templated change request standard.

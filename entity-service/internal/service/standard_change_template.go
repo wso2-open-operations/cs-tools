@@ -49,6 +49,7 @@ const (
 	maxStandardChangeRenderedSubject = 512 // work_item.subject
 	maxStandardChangeRollbackText    = 255 // change_request.rollback_duration
 	maxStandardChangeSuspendReason   = 1000
+	maxStandardChangeSummary         = 2000
 )
 
 var (
@@ -193,8 +194,16 @@ func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error 
 	}
 	if p.Kind != domain.StandardChangeProposalKindRetire {
 		c := p.StandardChangeContent
+		// What the template is for, and the description every change request
+		// raised from it carries.
+		if blankText(c.Summary) {
+			missing = append(missing, "summary")
+		}
 		if blankText(c.Subject) {
 			missing = append(missing, "subject")
+		}
+		if blankRich(c.Description) {
+			missing = append(missing, "description")
 		}
 		if blankRich(c.ImplementationPlan) {
 			missing = append(missing, "implementationPlan")
@@ -228,6 +237,9 @@ func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error 
 	if c.RollbackDurationText != nil && utf8.RuneCountInString(*c.RollbackDurationText) > maxStandardChangeRollbackText {
 		return &apierror.ValidationError{Msg: fmt.Sprintf("rollbackDurationText must be at most %d characters", maxStandardChangeRollbackText)}
 	}
+	if err := checkStandardChangeSummary(c.Summary); err != nil {
+		return err
+	}
 	params, err := normalizeStandardChangeParameters(c.Parameters)
 	if err != nil {
 		return err
@@ -246,6 +258,41 @@ func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error 
 		return &apierror.ValidationError{Msg: "the template refers to parameters it does not declare: " + strings.Join(unknown, ", ")}
 	}
 	return nil
+}
+
+// checkStandardChangeSummary refuses a summary longer than
+// maxStandardChangeSummary characters, or one with a placeholder: the summary
+// describes the template, it is never rendered into a change request.
+func checkStandardChangeSummary(summary *string) error {
+	if summary == nil {
+		return nil
+	}
+	if utf8.RuneCountInString(*summary) > maxStandardChangeSummary {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("summary must be at most %d characters", maxStandardChangeSummary)}
+	}
+	if standardChangePlaceholder.MatchString(*summary) {
+		return &apierror.ValidationError{Msg: "summary describes the template and is never filled in, so it cannot use {{placeholders}}"}
+	}
+	return nil
+}
+
+// normalizeStandardChangeDeploymentTypes checks a template's deployment types
+// (lower case, as deployment.type reads) and returns them de-duplicated, in the
+// order given.
+func normalizeStandardChangeDeploymentTypes(in []string) ([]string, error) {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, t := range in {
+		v := strings.ToLower(strings.TrimSpace(t))
+		if _, ok := validDeploymentTypes[domain.DeploymentType(v)]; !ok {
+			return nil, &apierror.ValidationError{Msg: fmt.Sprintf("deploymentTypes: %q is not a deployment type (primary_production, staging, qa, stress, uat, development)", t)}
+		}
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out, nil
 }
 
 // normalizeStandardChangeValue checks one value against its declaration and

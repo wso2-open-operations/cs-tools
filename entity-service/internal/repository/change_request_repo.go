@@ -2058,6 +2058,13 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	if err := applyChangeRequestLinkPlan(ctx, tx, id, linkPlan); err != nil {
 		return "", fmt.Errorf("patch change request: %w", err)
 	}
+	// A change raised from a standard change template that names deployment
+	// types keeps at least one deployment, all of those types.
+	if linkPlan != nil && linkPlan.writeDeployments {
+		if err := checkStandardChangeDeployments(ctx, tx, id); err != nil {
+			return "", err
+		}
+	}
 	if req.Comment != nil {
 		if err := insertChangeRequestJournalEntry(ctx, tx, id, "COMMENT", actorEmail, *req.Comment); err != nil {
 			return "", fmt.Errorf("patch change request: %w", err)
@@ -2552,6 +2559,9 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 		// when the template stopped being usable since (change_request_standard_change.go).
 		if req.StandardChangeTemplateVersionID != nil {
 			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, projectID, req.StandardChangeParameters); err != nil {
+				return createdChangeRequestRow{}, err
+			}
+			if err := checkStandardChangeDeployments(ctx, tx, row.id); err != nil {
 				return createdChangeRequestRow{}, err
 			}
 		}
