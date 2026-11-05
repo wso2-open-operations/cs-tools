@@ -21,18 +21,7 @@ import (
 	"testing"
 )
 
-func TestParseAttachmentStorageMode(t *testing.T) {
-	for in, want := range map[string]string{"": "sftpgo", " Backend ": "backend", "SFTPGO": "sftpgo"} {
-		if got, err := parseAttachmentStorageMode(in); err != nil || got != want {
-			t.Errorf("%q = %q, %v", in, got, err)
-		}
-	}
-	if _, err := parseAttachmentStorageMode("s3"); err == nil {
-		t.Error("an unknown mode must be refused")
-	}
-}
-
-// TestBlobAttachmentRoutesDoNotConflict registers the backend-mode patterns next
+// TestBlobAttachmentRoutesDoNotConflict registers the stored-attachment patterns next
 // to the case-attachment ones: net/http.ServeMux panics at registration on an
 // ambiguous pair, which would otherwise only show when the server starts.
 func TestBlobAttachmentRoutesDoNotConflict(t *testing.T) {
@@ -52,7 +41,6 @@ func TestBlobAttachmentRoutesDoNotConflict(t *testing.T) {
 		"DELETE /attachments/{id}",
 		"POST /attachments/search",
 		"POST /attachments",
-		"POST /attachments/{id}/share",
 	} {
 		mux.HandleFunc(p, h)
 	}

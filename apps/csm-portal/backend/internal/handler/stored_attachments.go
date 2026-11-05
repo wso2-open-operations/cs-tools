@@ -22,11 +22,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 )
 
@@ -34,17 +32,12 @@ import (
 // attachment routes need. The entity service owns every access decision (the
 // caller's own row-level security), so this handler adds no case lookups.
 type storedAttachmentEntityClient interface {
-	StoredAttachmentLinks(ctx context.Context, body []byte) ([]byte, error)
 	InitiateStoredAttachmentUpload(ctx context.Context, body []byte) ([]byte, error)
-	ConfirmStoredAttachmentUpload(ctx context.Context, id string, body []byte) ([]byte, error)
-	DeleteStoredAttachment(ctx context.Context, body []byte) error
-	OpenInlineImage(ctx context.Context, id string) (*entity.InlineImageStream, error)
 }
 
-// StoredAttachmentHandler forwards the entity service's stored-attachment routes
-// (files held in SFTPGo). Uploads and downloads hand the browser a short-lived
-// link; a comment's inline image is streamed through this backend instead, so
-// the browser never talks to SFTPGo for a preview.
+// StoredAttachmentHandler forwards the start of an upload to the entity service,
+// which records the attachment and decides who may add it. The bytes themselves
+// move through BlobAttachmentHandler, into Azure Blob Storage.
 type StoredAttachmentHandler struct {
 	entity storedAttachmentEntityClient
 }
@@ -121,22 +114,6 @@ func readStoredAttachmentBody(w http.ResponseWriter, r *http.Request) (*middlewa
 	return user, body, true
 }
 
-// ResolveLinks handles POST /attachments/download.
-func (h *StoredAttachmentHandler) ResolveLinks(w http.ResponseWriter, r *http.Request) {
-	user, body, ok := readStoredAttachmentBody(w, r)
-	if !ok {
-		return
-	}
-	out, err := h.entity.StoredAttachmentLinks(r.Context(), body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity StoredAttachmentLinks failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to get attachment links.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, out)
-}
-
 // InitiateUpload handles POST /attachments/upload.
 func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.Request) {
 	user, body, ok := readStoredAttachmentBody(w, r)
@@ -151,85 +128,4 @@ func (h *StoredAttachmentHandler) InitiateUpload(w http.ResponseWriter, r *http.
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, out)
-}
-
-// ConfirmUpload handles POST /attachments/upload/{id}/confirm.
-func (h *StoredAttachmentHandler) ConfirmUpload(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
-		if middleware.UserInfoFromContext(r.Context()) == nil {
-			writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-			return
-		}
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-	user, body, ok := readStoredAttachmentBody(w, r)
-	if !ok {
-		return
-	}
-	out, err := h.entity.ConfirmStoredAttachmentUpload(r.Context(), id, body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ConfirmStoredAttachmentUpload failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to confirm the attachment upload.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, out)
-}
-
-// DeleteAttachment handles POST /attachments/delete.
-func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
-	user, body, ok := readStoredAttachmentBody(w, r)
-	if !ok {
-		return
-	}
-	if err := h.entity.DeleteStoredAttachment(r.Context(), body); err != nil {
-		slog.ErrorContext(r.Context(), "entity DeleteStoredAttachment failed", "userID", user.UserID, "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to delete the attachment.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// InlineImageContent handles GET /attachments/inline/{id}/content: it streams a
-// comment's inline image from the entity service, which has already checked that
-// the caller may see it. Nothing is buffered, and no link that could be shared
-// with someone without access ever exists.
-func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-	img, err := h.entity.OpenInlineImage(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity OpenInlineImage failed", "userID", user.UserID, "attachmentID", id, "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to retrieve the image.")
-		return
-	}
-	defer img.Body.Close()
-
-	// Strip parameters (e.g. charset) before the allowlist check.
-	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(img.ContentType, ";", 2)[0]))
-	if !storedInlineImageTypes[ct] {
-		ct = "application/octet-stream"
-	}
-	hd := w.Header()
-	hd.Set("Content-Type", ct)
-	if img.Length >= 0 {
-		hd.Set("Content-Length", strconv.FormatInt(img.Length, 10))
-	}
-	hd.Set("X-Content-Type-Options", "nosniff")
-	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	hd.Set("Content-Disposition", "inline")
-	hd.Set("Cache-Control", "private, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, img.Body) // #nosec G705 -- type is allowlisted above; nosniff and a sandboxing CSP are set
 }

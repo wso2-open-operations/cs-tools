@@ -452,44 +452,9 @@ caller holding `PermWrite` (the onboarding fields, including the four dates, are
 `PermManageOnboarding`). A nil `access` (no guard wired) fails closed, same as every other
 in-handler permission check in this codebase.
 
-## Stored attachments in SFTPGo (`internal/handler/stored_attachments.go`)
+## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
 
-Five routes forward to entity-service's stored-attachment API (files held in SFTPGo; the request field is
-`type`: `work_item`, `comment` or `deployment`). They are **additive**: the older flows above
-(`/attachments/search`, `GET /attachments/{id}/content`, `internal/sftpgo`, the `.iix` inline-image
-processor) are untouched. Entity-service owns every access decision (its own row-level security, REGISTERED
-membership, closed work items, only-the-uploader-may-delete), so this handler adds no case lookups.
-
-| Route | Permission | Behaviour |
-|---|---|---|
-| `POST /attachments/download` | `PermDownloadAttachment` | JSON pass-through: metadata plus a short-lived SFTPGo link (one request, two for `purpose: "preview"`, about a minute). Never cacheable |
-| `POST /attachments/upload` | `PermWrite` | 201 pass-through: a one-use upload link the browser POSTs the file to (multipart field `filenames`) |
-| `POST /attachments/upload/{id}/confirm` | `PermWrite` | pass-through; `{id}` must be a UUID |
-| `POST /attachments/delete` | `PermWrite` | 204; entity-service lets only the uploader delete |
-| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | **streams** a comment's inline image (`io.Copy`, nothing buffered) |
-
-**Permission choice.** A link or an inline image is the attachment's bytes, so both are
-`PermDownloadAttachment`, like `GET /attachments/{id}/content` and `POST /attachments/{id}/share`; `PermView`
-alone is what let a `viewer` read a pasted screenshot (see "Redacting raw base64 inline images"). Upload,
-confirm and delete change state, so `PermWrite`.
-
-**The inline image is never sent as anything but an image.** The response `Content-Type` is the upstream value
-only when it is `image/png`, `image/jpeg`, `image/gif` or `image/webp` (parameters stripped), else
-`application/octet-stream`; `Content-Length` only when entity-service sent one; always
-`X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
-`Content-Disposition: inline` and `Cache-Control: private, max-age=300`. The webapp uses the route as an
-`<img src>`, so the session authenticates it and no forwardable link exists.
-
-**Errors.** `mapStoredAttachmentError` (not the generic mapper): 400, 403, 409 and 429 carry entity-service's
-own message because it is written for the person ("This case is closed...", "Only the person who uploaded an
-attachment can delete it", "too many attachment links requested"), read only from its JSON envelope (never a raw
-body); 404, 401 as usual; 502/503/504 -> 503; anything else a fixed fallback. Tests:
-`stored_attachments_test.go` (handler), `stored_attachments_test.go` (entity client).
-
-## Stored attachments in Azure Blob Storage (`ATTACHMENT_STORAGE_MODE=backend`)
-
-Must match entity-service's setting of the same name; the default `sftpgo` keeps the section above. In `backend`
-mode this service holds the Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`,
+Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no attachments (the portal uploads a security report's files after the case exists). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
 `libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
 size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
 (`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is for
@@ -506,29 +471,25 @@ this process only: it is never put in a response, a header or a log.** The modul
 | `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline |
 | `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
 
-`POST /attachments/download` (links) is not registered in this mode. Config: `AZURE_STORAGE_ACCOUNT` and
+Startup fails unless the container is reachable. Entity-service answers refusals in words written for the person ("This case is closed...", "Only the person who uploaded an attachment can delete it"); `mapStoredAttachmentError` passes the 400, 403, 409 and 429 messages on (read only from its JSON envelope, never a raw body), maps 404, 401 as usual, 502/503/504 to 503 and anything else to a fixed fallback. Config: `AZURE_STORAGE_ACCOUNT` and
 `AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**, `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
 `AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the container only; or `AZURE_STORAGE_KEY` (the
 account's shared key, full control of the account); or `AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional
 `AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in the secret store, never in the repo or a log. With a
 container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development). `libs/azblobstore` is a
-separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build with an uncommitted `go.work` listing this module
-and the library, and add the `require` line once the tag exists (with it present a workspace build fails while the
-tag is missing). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
+separate Go module required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
 `.../acknowledge`).
 
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
-A pasted screenshot in a comment or case/incident/change-request description is normally extracted
-into a real, `PermDownloadAttachment`-gated attachment on the way in (see
-`internal/handler/inline_images.go`'s `InlineImageProcessor`, `SFTPGO_ATTACHMENT_STORAGE_ENABLED`
-only) and rewritten to a `.iix` reference. Content authored before that flag was on — or with it off
-— never goes through that extraction: the image stays as a raw `data:image/...;base64,...` `<img>`
+A pasted screenshot in a comment or case/incident/change-request description is stored as a real,
+`PermDownloadAttachment`-gated attachment and referenced by id. Content authored before that
+— never went through that extraction: the image stays as a raw `data:image/...;base64,...` `<img>`
 src embedded directly in the comment/description HTML itself, which every read response already
 returns to *any* caller holding `PermView` — there is no separate attachment resource for
 `PermDownloadAttachment` to gate. Found live: a `viewer`/`escalator` role, neither of which holds
-`canDownloadAttachment`, could see a pasted screenshot in a case comment despite the `.iix` mechanism
-being correctly gated.
+`canDownloadAttachment`, could see a pasted screenshot in a case comment although referenced attachments
+were correctly gated.
 
 `redactRawBase64Images` strips the base64 payload out of raw response bytes (a compiled regex over
 `data:image/...;base64,<payload>`, replaced with a short inert placeholder that still starts with
@@ -802,7 +763,7 @@ New upstream services get their own package under `internal/` following the same
 
 **Shared OAuth2 credentials**: `CustomerEntityClient` and `EngineeringEntityClient` (both in `entity`), `updates`, `scim`, and PLG's `internal/plg/entityclient` all authenticate as the same OAuth2 client-credentials app — `cmd/server/main.go` reads `OAUTH2_CLIENT_ID`/`OAUTH2_CLIENT_SECRET`/`OAUTH2_TOKEN_URL` once and passes them into every service's `Config`; only `<SERVICE>_BASE_URL`/`<SERVICE>_SCOPES` are per-service. `EngineeringEntityConfig` still has its own `ClientID`/`ClientSecret`/`TokenURL` fields (matching every other service's `Config` shape), but when it's wired into `main.go` those should be filled with the same shared `oauth2ClientID`/`oauth2ClientSecret`/`oauth2TokenURL` values, not new `ENGINEERING_ENTITY_*` env vars. Follow this pattern for any new upstream service client unless it genuinely uses a different OAuth2 app. PLG is the one client that **inherits** rather than being passed a `Config` per field: `main.go` hands `plg.Mount` a `plgconfig.EntityDefaults` carrying `CUSTOMER_ENTITY_BASE_URL` and the three shared `OAUTH2_*` values, because PLG reaches the same entity-service as `CustomerEntityClient` and a second copy of those settings is one that goes stale on the next secret rotation. `PLG_ENTITY_BASE_URL`/`PLG_ENTITY_OAUTH_*` exist as overrides and are normally unset.
 
-**Request timeouts**: `REST_READ_TIMEOUT` / `REST_WRITE_TIMEOUT` (default 60s) and `ENTITY_SERVICE_TIMEOUT` (default 60s, applied to `CustomerEntityClient` only) are parsed by the pure `loadTimeouts` in `cmd/server/timeouts.go`; all must be > 0, else startup fails; no ordering between them is enforced (client timeout < write timeout is advisable, not required). Defaults were raised from 30s/25s for large inline-attachment uploads. Other upstream clients (engineering, updates, SCIM, notifications, SFTPGo) keep their own fixed timeouts.
+**Request timeouts**: `REST_READ_TIMEOUT` / `REST_WRITE_TIMEOUT` (default 60s) and `ENTITY_SERVICE_TIMEOUT` (default 60s, applied to `CustomerEntityClient` only) are parsed by the pure `loadTimeouts` in `cmd/server/timeouts.go`; all must be > 0, else startup fails; no ordering between them is enforced (client timeout < write timeout is advisable, not required). Defaults were raised from 30s/25s so slow upstream calls are not cut off; an attachment chunk or download extends its own deadline. Other upstream clients (engineering, updates, SCIM, notifications) keep their own fixed timeouts.
 
 ## Customer-health risk tracking (`internal/risk`) is entity-service-backed, not MySQL
 
@@ -963,7 +924,7 @@ The server auto-loads `.env` from the working directory at startup (silently ign
 
 ## Feature flags: `CSM_MIGRATION_*`
 
-Flags named `CSM_MIGRATION_<FEATURE>_ENABLED` gate customer-onboarding cutover features. Each is **off unless its value is exactly `true`** (whitespace-trimmed — `1`, `TRUE`, `yes` are all off), deliberately stricter than the `strconv.ParseBool` leniency `SFTPGO_ATTACHMENT_STORAGE_ENABLED` has: these are cutover switches that must never flip on by accident. Off means **no behaviour change at all**: the handler is not constructed and the route is not registered in `cmd/server/main.go`, so the path 404s like any unknown one. Resolve a flag with a `load<Feature>Enabled()` in `main.go` backed by a pure `<feature>Enabled(raw string) bool` that `main_test.go` table-tests.
+Flags named `CSM_MIGRATION_<FEATURE>_ENABLED` gate customer-onboarding cutover features. Each is **off unless its value is exactly `true`** (whitespace-trimmed — `1`, `TRUE`, `yes` are all off), deliberately stricter than `strconv.ParseBool` leniency: these are cutover switches that must never flip on by accident. Off means **no behaviour change at all**: the handler is not constructed and the route is not registered in `cmd/server/main.go`, so the path 404s like any unknown one. Resolve a flag with a `load<Feature>Enabled()` in `main.go` backed by a pure `<feature>Enabled(raw string) bool` that `main_test.go` table-tests.
 
 - `CSM_MIGRATION_ONBOARDING_STATUS_ENABLED` → `GET /projects/{id}/onboarding-steps` (`OnboardingStepHandler`, `internal/handler/onboarding_steps.go`, `PermView`). It pages through the entity service's onboarding ledger (`CustomerEntityClient.SearchOnboardingSteps`, `internal/entity/onboarding.go` — a **typed** method, unlike the raw-passthrough rest of `customer.go`, because the handler regroups rows) with `filters.projectId`, at the upstream cap of 50 rows a page and at most `maxOnboardingStepPages` (40) pages, then regroups the flat newest-first rows into one entry per membership (invited email) with steps in flow order IDENTITY → DATABASE → EMAIL → REGISTRATION. It reports only what the ledger row holds (`step`, `status`, `attemptCount`, `lastError`, `eventType`, `eventModifiedOn`, `updatedOn`) — nothing derived or enriched; `lastError` is upstream error text and is passed through untouched for the webapp to render as plain text. Hitting the page cap sets `truncated: true` and logs a warning rather than failing. The webapp matches memberships to the project's contact rows by lower-cased email because `ProjectContact` carries no membership or `project_contact` id.
 
