@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
@@ -41,8 +42,20 @@ func NewFeatureOverrideRepository(db *pgxpool.Pool) FeatureOverrideRepository {
 	return &featureOverrideRepo{db: db}
 }
 
+// List returns every row and whether the first save has finished. A first save
+// writes its last row and the mark in one transaction, so both reads must see
+// the same moment: a read-committed pair of queries could return the old rows
+// next to a mark that has just been written, and the portal would stop using
+// its config fallback while missing the newly saved rows. A read-only
+// repeatable-read transaction fixes the snapshot at the first query.
 func (r *featureOverrideRepo) List(ctx context.Context) (domain.FeatureOverrideList, error) {
-	rows, err := r.db.Query(ctx, `SELECT nav_node_id, state, updated_on, updated_by
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `SELECT nav_node_id, state, updated_on, updated_by
 		FROM feature_override ORDER BY nav_node_id`)
 	if err != nil {
 		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: %w", err)
@@ -59,8 +72,9 @@ func (r *featureOverrideRepo) List(ctx context.Context) (domain.FeatureOverrideL
 	if err := rows.Err(); err != nil {
 		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: %w", err)
 	}
+	rows.Close()
 	var savedOnce bool
-	if err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_override_mark)`).Scan(&savedOnce); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_override_mark)`).Scan(&savedOnce); err != nil {
 		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: mark: %w", err)
 	}
 	return domain.FeatureOverrideList{Overrides: out, SavedOnce: savedOnce}, nil
