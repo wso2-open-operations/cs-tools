@@ -14,9 +14,9 @@
 // specific language governing permissions and limitations
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { useState } from "react";
+import { createRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
+import DateTimeLocalField, { type DateTimeLocalFieldHandle } from "@components/date-time-picker/DateTimeLocalField";
 
 const input = (): HTMLInputElement =>
   screen.getAllByLabelText(/Start/).find((el) => el.tagName === "INPUT") as HTMLInputElement;
@@ -102,6 +102,15 @@ describe("DateTimeLocalField", () => {
     );
     expect(screen.getByText("Start is required.")).toBeInTheDocument();
     expect(screen.getByRole("group")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("moves focus to the first section through the focus handle", () => {
+    const focusRef = createRef<DateTimeLocalFieldHandle>();
+    render(<DateTimeLocalField label="Start" value="2026-06-10T04:30" onChange={vi.fn()} focusRef={focusRef} />);
+
+    focusRef.current?.focus();
+
+    expect(sections()[0]).toHaveFocus();
   });
 
   it("is not editable when disabled", () => {
