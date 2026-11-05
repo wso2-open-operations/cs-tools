@@ -911,23 +911,10 @@ type CaseService interface {
 	// Transitioning State to closed is rejected with a ValidationError if the case has any
 	// open task that is visible to the customer (the authoritative case-close gate).
 	UpdateCase(ctx context.Context, req domain.UpdateCaseRequest) (domain.UpdateCaseResponse, error)
-	// CreateCaseAttachment uploads a new attachment for the case identified by req.CaseID.
-	// A ValidationError is returned for invalid input. For the CSM-native (Postgres) data
-	// source, req.Status controls the initial lifecycle state (see domain.AttachmentStatus):
-	// empty/omitted and "complete" behave exactly as before this field existed; "pending"
-	// registers the row before the caller has uploaded the file to SFTPGo, to be finished off
-	// later via ConfirmCaseAttachment. ServiceNow ignores this field.
-	CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error)
-	// ConfirmCaseAttachment transitions the CSM-native (Postgres) data source attachment
-	// identified by id from status "pending" to "complete", once its file has finished
-	// uploading to SFTPGo. A NotFoundError is returned if it does not exist; a
-	// ForbiddenError if the caller did not create it; a ConflictError if it is not
-	// currently "pending" (including if it was already confirmed). Supported by the
-	// CSM-native (Postgres) data source only -- ServiceNow attachments have no such
-	// lifecycle, since SN's /attachments API only ever returns fully-uploaded files.
-	ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error)
-	// SearchCaseAttachments returns a paginated list of attachments for the case identified
-	// by req.CaseID. A ValidationError is returned for invalid input.
+	// SearchCaseAttachments returns a paginated list of attachments for the work item,
+	// case or deployment identified by req.ReferenceID, from PostgreSQL only: the file
+	// bytes are in Azure Blob Storage and are read through the portal backends.
+	// A ValidationError is returned for invalid input.
 	SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error)
 	// SearchCaseActivities returns a paginated activity feed (comments, attachments, and
 	// optionally field changes) for the case identified by req.CaseID. Field-change entries
@@ -936,18 +923,6 @@ type CaseService interface {
 	// attachments only -- there is no field-change audit table in this schema, so
 	// req.IncludeFieldChanges has no effect there.
 	SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) (domain.SearchCaseActivitiesResponse, error)
-	// GetCaseAttachmentContent returns the raw binary content and its Content-Type
-	// for the attachment identified by attachmentID.
-	// A NotFoundError is returned if absent.
-	GetCaseAttachmentContent(ctx context.Context, attachmentID string) (content []byte, contentType string, err error)
-	// DeleteCaseAttachment removes the attachment identified by req.AttachmentID from the case.
-	// A NotFoundError is returned if the attachment does not exist.
-	DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error)
-	// UpdateAttachment updates the name and/or description of the attachment identified by
-	// req.AttachmentID, regardless of which reference type it is linked to. At least one of
-	// Name or Description must be provided. A NotFoundError is returned if the attachment
-	// does not exist.
-	UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error)
 	// AddCaseTag attaches a free-text label to the case identified by caseID.
 	// A ValidationError is returned for invalid input (e.g. malformed UUID, empty label).
 	AddCaseTag(ctx context.Context, caseID, label string) (domain.Tag, error)
@@ -972,11 +947,6 @@ type CaseService interface {
 	// SubmitCaseFeedback records feedback for the case identified by id. A ValidationError
 	// is returned for invalid input. Supported by the ServiceNow data source only.
 	SubmitCaseFeedback(ctx context.Context, id string, req domain.SubmitCaseFeedbackRequest) (domain.SubmitCaseFeedbackResponse, error)
-	// GetAttachmentByID returns the metadata and base64-encoded content of the attachment
-	// identified by id. A NotFoundError is returned if it does not exist. For the CSM-native
-	// (Postgres) data source, Content is always "" and StorageKey is populated instead: that
-	// data source holds no bytes, only a reference into external (SFTPGo) storage.
-	GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error)
 }
 
 // CaseGithubIssueService defines the operation for filing a GitHub issue from a case.
