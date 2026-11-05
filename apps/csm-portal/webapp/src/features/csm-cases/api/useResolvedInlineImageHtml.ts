@@ -17,29 +17,14 @@
 import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { BackendApiError, useBackendApi } from "@api/backend/client";
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import { fetchEntityInlineImage } from "@features/csm-cases/api/entityAttachments";
 import { ApiQueryKeys } from "@constants/apiConstants";
-import type { BeAttachmentShareResponse } from "@api/backend/types";
-import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   extractIixAttachmentIds,
   replaceInlineImageSrcs,
   sysidToUuid,
 } from "@features/csm-cases/utils/inlineImages";
-
-/**
- * How long a resolved share URL is treated as fresh before React Query would
- * refetch it. SFTPGo shares expire 5 minutes after creation (see the
- * backend's `shareTTL`); this is kept comfortably under that so a stale
- * cached URL is never handed to an `<img>` past its expiry, while still
- * avoiding a share-creation call on every re-render/remount within the
- * window. A fixed shorter `staleTime` is a deliberate, simple first pass —
- * not a full "detect the 403 and mint a fresh share" retry loop, which is
- * unnecessary complexity for an inline preview image.
- */
-const INLINE_IMAGE_SHARE_STALE_TIME_MS = 3 * 60_000;
 
 /**
  * What an image's query resolves to when entity-service answers 410 (the image
@@ -74,24 +59,19 @@ function blobToDataUrl(blob: Blob): Promise<string | null> {
  * Resolves inline-image attachments referenced within comment/description
  * HTML so `<img>` tags can render them.
  *
- * Two mutually exclusive paths, gated on the signed-in user's
- * `sftpgoAttachmentStorageEnabled` flag (`GET /users/me`):
- *  - Off (default, unchanged): fetches each attachment via the authenticated
- *    `GET /attachments/{id}/content` endpoint and resolves it into a `data:`
- *    URL, so the browser never makes an unauthenticated request. Mirrors the
- *    customer portal's `useResolvedInlineImageHtml`.
- *  - On: creates a short-lived public share (`POST /attachments/{id}/share`)
- *    for each referenced attachment and uses its `shareUrl` directly as the
- *    `<img>` src.
+ * Each referenced attachment is fetched through the authenticated backend's
+ * streamed comment-image route and resolved into a `data:` URL, so the browser
+ * never makes an unauthenticated request. An image the backend does not know
+ * (404/400) is left unresolved. Mirrors the customer portal's
+ * `useResolvedInlineImageHtml`.
  *
  * A caller without the `attachment_downloader`/`cs_engineer`/`admin` role
- * (see `usePortalAccess`'s `canDownloadAttachment`) never issues either
- * request — the backend would 403 both anyway — and every referenced image is
- * replaced with a "no permission" placeholder instead of a blank `<img>`.
+ * (see `usePortalAccess`'s `canDownloadAttachment`) never issues a request —
+ * the backend would 403 it anyway — and every referenced image is replaced
+ * with a "no permission" placeholder instead of a blank `<img>`.
  *
- * A third case: content authored before/without `sftpgoAttachmentStorageEnabled`
- * never gets extracted into a `.iix`-referenced attachment at all — the image
- * stays embedded as a raw base64 `data:` URI directly in the HTML, which
+ * Content authored before images were stored as attachments has the image
+ * embedded as a raw base64 `data:` URI directly in the HTML, which
  * `GET .../comments/search` already sends to anyone holding `PermView` alone
  * (there's no separate attachment resource for `PermDownloadAttachment` to
  * gate). `replaceInlineImageSrcs`'s `denyRawBase64` parameter hides these the
@@ -110,11 +90,8 @@ export function useResolvedInlineImageHtml(html: string): {
   isLoading: boolean;
 } {
   const api = useBackendApi();
-  const { user } = useCurrentUser();
   const { canDownloadAttachment } = usePortalAccess();
-  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const attachmentIds = useMemo(() => extractIixAttachmentIds(html), [html]);
-  const entityEnabled = isEntityAttachmentsEnabled();
 
   const queries = useQueries({
     queries: attachmentIds.map((id) => ({
@@ -122,60 +99,31 @@ export function useResolvedInlineImageHtml(html: string): {
         ApiQueryKeys.CSM_CASE_ATTACHMENTS,
         "inline-preview",
         id,
-        sftpgoEnabled,
-        entityEnabled,
       ],
       queryFn: async (): Promise<string | null> => {
         // The extracted id is a bare 32-char sysid; the endpoint requires the
         // canonical UUID shape (hyphens re-inserted), same as every other
         // attachment id sent to this backend.
-        const attachmentId = encodeURIComponent(sysidToUuid(id));
-
-        // Entity-service comment image (flag off = never runs): streamed by the
-        // backend after its own access check, so no share link is involved. An
-        // id it does not hold (an older image) is a 404 and falls through to
-        // the paths below.
-        if (entityEnabled) {
-          try {
-            const entityBlob = await fetchEntityInlineImage(api, sysidToUuid(id));
-            if (toSafeMimeType(entityBlob.type)) return blobToDataUrl(entityBlob);
-          } catch (err) {
-            // 410: removed on purpose; nothing else holds it, so stop here.
-            if (err instanceof BackendApiError && err.status === 410) {
-              return INLINE_IMAGE_REMOVED;
-            }
-            if (!(err instanceof BackendApiError && (err.status === 404 || err.status === 400))) {
-              throw err;
-            }
+        try {
+          const blob = await fetchEntityInlineImage(api, sysidToUuid(id));
+          return toSafeMimeType(blob.type) ? blobToDataUrl(blob) : null;
+        } catch (err) {
+          // 410: removed on purpose.
+          if (err instanceof BackendApiError && err.status === 410) {
+            return INLINE_IMAGE_REMOVED;
           }
+          // Not an image the backend holds: nothing to show.
+          if (err instanceof BackendApiError && (err.status === 404 || err.status === 400)) {
+            return null;
+          }
+          throw err;
         }
-
-        if (sftpgoEnabled) {
-          // A share is a real SFTPGo object with its own lifecycle — only
-          // create one when this specific inline image is actually being
-          // resolved for render, never eagerly for a whole comment thread.
-          const { shareUrl } = await api.post<
-            Record<string, never>,
-            BeAttachmentShareResponse
-          >(`/attachments/${attachmentId}/share`, {});
-          // The share URL is a public, unauthenticated download link, so it
-          // can be set directly as the <img> src rather than fetched and
-          // re-encoded as a data URL.
-          return shareUrl;
-        }
-
-        const blob = await api.getBlob(`/attachments/${attachmentId}/content`);
-        const mimeType = toSafeMimeType(blob.type);
-        if (!mimeType) return null;
-        return blobToDataUrl(blob);
       },
       // Skipping the request entirely (rather than letting it 403) avoids a
       // wasted round trip and an error the caller has no way to act on.
       enabled: !!id && canDownloadAttachment,
-      // The default (non-SFTPGo) path resolves immutable attachment content,
-      // so it's cached indefinitely. The SFTPGo share path resolves to a
-      // URL that itself expires — see INLINE_IMAGE_SHARE_STALE_TIME_MS.
-      staleTime: sftpgoEnabled ? INLINE_IMAGE_SHARE_STALE_TIME_MS : Infinity,
+      // Attachment content is immutable, so it's cached indefinitely.
+      staleTime: Infinity,
       retry: 1,
     })),
   });

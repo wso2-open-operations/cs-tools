@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import {
   Alert,
   Box,
@@ -1333,22 +1334,21 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!id) return;
-                  if (hasCommentContent(bodyHtml)) {
-                    await postComment.mutateAsync({
-                      changeRequestId: id,
-                      bodyHtml,
-                      internal,
-                    });
-                  }
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId: id,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                      referenceType: "change_request",
-                    });
-                  }
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ changeRequestId: id, bodyHtml, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({
+                        caseId: id,
+                        file,
+                        name,
+                        uploadedBy: engineerName,
+                        referenceType: "change_request",
+                      }),
+                  });
                   setComposerOpen(false);
                 }}
               />

@@ -84,19 +84,6 @@ export interface CustomerPortalWindowConfig {
    */
   CUSTOMER_PORTAL_STREAM_ENABLED?: boolean;
   /**
-   * Uses entity-service's stored-attachment routes (files in SFTPGo) for
-   * downloading, uploading and deleting case and deployment attachments, and for
-   * showing comment images. Defaults to false, so a config predating this key
-   * keeps the existing flow.
-   */
-  CUSTOMER_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean;
-  /**
-   * Where attachment files live: "sftpgo" (default) or "backend", where the
-   * portal backend stores them in Azure Blob Storage (chunked uploads, streamed
-   * downloads). Must match the backend's `ATTACHMENT_STORAGE_MODE`.
-   */
-  CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE?: string;
-  /**
    * Largest work item or deployment file offered for upload, in MB (a number or
    * numeric string). Defaults to 100, entity-service's own default; set it to
    * match the service's `ATTACHMENT_MAX_BYTES`. The service stays authoritative.

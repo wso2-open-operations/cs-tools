@@ -15,12 +15,7 @@
 // under the License.
 
 
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
-
 const BYTES_PER_MB = 1024 * 1024;
-
-/** Largest file of the older (ServiceNow) attachment flow, which the backend caps at 10 MB. */
-export const LEGACY_ATTACHMENT_MAX_BYTES = 10 * BYTES_PER_MB;
 
 /** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 100 MiB). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
@@ -36,8 +31,7 @@ function megabytes(raw: unknown, fallback: number): number {
 }
 
 /**
- * Largest file, in bytes, the portal offers to upload as a work item attachment
- * through entity-service's stored-attachment flow.
+ * Largest file, in bytes, the portal offers to upload as an attachment.
  *
  * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB`
  * key (a number of megabytes, or a numeric string). A missing, unparseable, zero
@@ -52,15 +46,6 @@ export function entityAttachmentMaxBytes(): number {
     megabytes(window.config?.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB, DEFAULT_ENTITY_ATTACHMENT_MAX_MB) *
     BYTES_PER_MB
   );
-}
-
-/**
- * The size limit a case attachment is checked against before it is uploaded:
- * {@link entityAttachmentMaxBytes} through entity-service's stored flow, the
- * older {@link LEGACY_ATTACHMENT_MAX_BYTES} when that flow is off.
- */
-export function getMaxAttachmentSizeBytes(): number {
-  return isEntityAttachmentsEnabled() ? entityAttachmentMaxBytes() : LEGACY_ATTACHMENT_MAX_BYTES;
 }
 
 /**

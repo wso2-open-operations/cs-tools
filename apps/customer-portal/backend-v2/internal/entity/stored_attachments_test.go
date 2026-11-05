@@ -52,7 +52,6 @@ func TestStoredAttachments_BodiesAreRelayedVerbatimWithTheCallersHeaders(t *test
 		_, _ = w.Write([]byte(`{"relayed":true}`))
 	}
 	c := storedTestClient(t, map[string]http.HandlerFunc{
-		"POST /attachments/download":            record,
 		"POST /attachments/upload":              record,
 		"POST /attachments/upload/{id}/confirm": record,
 		"POST /attachments/delete":              func(w http.ResponseWriter, r *http.Request) { record(w, r); w.WriteHeader(http.StatusNoContent) },
@@ -60,12 +59,9 @@ func TestStoredAttachments_BodiesAreRelayedVerbatimWithTheCallersHeaders(t *test
 	ctx := WithCorrelationID(WithUserIDToken(context.Background(), "tok"), "corr-1")
 	body := []byte(`{"type":"work_item","ids":["a"]}`)
 
-	out, err := c.ResolveStoredAttachmentLinks(ctx, body)
+	out, err := c.InitiateStoredAttachmentUpload(ctx, body)
 	if err != nil || string(out) != `{"relayed":true}` || gotBody != string(body) || gotUser != "tok" || gotCorr != "corr-1" || !strings.HasPrefix(gotAuth, "Bearer ") {
-		t.Errorf("download: err=%v out=%s body=%q user=%q corr=%q auth=%q", err, out, gotBody, gotUser, gotCorr, gotAuth)
-	}
-	if _, err := c.InitiateStoredAttachmentUpload(ctx, body); err != nil {
-		t.Errorf("upload: %v", err)
+		t.Errorf("upload: err=%v out=%s body=%q user=%q corr=%q auth=%q", err, out, gotBody, gotUser, gotCorr, gotAuth)
 	}
 	if _, err := c.ConfirmStoredAttachmentUpload(ctx, "abc", body); err != nil {
 		t.Errorf("confirm: %v", err)
@@ -77,63 +73,13 @@ func TestStoredAttachments_BodiesAreRelayedVerbatimWithTheCallersHeaders(t *test
 
 func TestStoredAttachments_UpstreamStatusIsKept(t *testing.T) {
 	c := storedTestClient(t, map[string]http.HandlerFunc{
-		"POST /attachments/download": func(w http.ResponseWriter, _ *http.Request) {
+		"POST /attachments/upload": func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, `{"code":429,"message":"too many"}`, http.StatusTooManyRequests)
 		},
 	})
-	_, err := c.ResolveStoredAttachmentLinks(context.Background(), []byte(`{}`))
+	_, err := c.InitiateStoredAttachmentUpload(context.Background(), []byte(`{}`))
 	var apiErr *apierror.Error
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("err = %v, want an upstream 429", err)
-	}
-}
-
-// TestStreamInlineImage_IsNotBuffered proves the body is handed over unread: the
-// server writes one chunk, then waits for the client to confirm it already has
-// that chunk before sending more. A client that buffered the whole response
-// (as doBinary does) would deadlock here and fail on the timeout.
-func TestStreamInlineImage_IsNotBuffered(t *testing.T) {
-	got := make(chan struct{})
-	c := storedTestClient(t, map[string]http.HandlerFunc{
-		"GET /attachments/inline/{id}/content": func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("x-user-id-token") != "tok" {
-				t.Errorf("x-user-id-token not forwarded")
-			}
-			w.Header().Set("Content-Type", "image/png")
-			_, _ = w.Write([]byte("first"))
-			w.(http.Flusher).Flush()
-			<-got
-			_, _ = w.Write([]byte("second"))
-		},
-	})
-	body, ct, size, err := c.StreamInlineImage(WithUserIDToken(context.Background(), "tok"), "img-1")
-	if err != nil {
-		t.Fatalf("StreamInlineImage: %v", err)
-	}
-	defer body.Close()
-	if ct != "image/png" || size != -1 {
-		t.Errorf("content type %q size %d, want image/png and -1 (chunked)", ct, size)
-	}
-	buf := make([]byte, 5)
-	if _, err := io.ReadFull(body, buf); err != nil || string(buf) != "first" {
-		t.Fatalf("first chunk = %q, %v", buf, err)
-	}
-	close(got)
-	rest, _ := io.ReadAll(body)
-	if string(rest) != "second" {
-		t.Errorf("rest = %q", rest)
-	}
-}
-
-func TestStreamInlineImage_MapsAnErrorStatus(t *testing.T) {
-	c := storedTestClient(t, map[string]http.HandlerFunc{
-		"GET /attachments/inline/{id}/content": func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, `{"code":404,"message":"attachment not found"}`, http.StatusNotFound)
-		},
-	})
-	_, _, _, err := c.StreamInlineImage(context.Background(), "img-1")
-	var apiErr *apierror.Error
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
-		t.Errorf("err = %v, want an upstream 404", err)
 	}
 }

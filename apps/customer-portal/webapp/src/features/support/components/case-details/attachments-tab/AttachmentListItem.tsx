@@ -34,7 +34,6 @@ import {
   FileArchive,
   FileText,
   Image,
-  PencilLine,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
@@ -77,7 +76,6 @@ export default function AttachmentListItem({
   attachment,
   onDownload,
   onDelete,
-  onEdit,
   deleteDisabled = false,
   deleteTooltip,
   hideDescription = false,
@@ -207,16 +205,6 @@ export default function AttachmentListItem({
                 ) : (
                   <ChevronDown size={16} aria-hidden />
                 )}
-              </IconButton>
-            )}
-            {onEdit && (
-              <IconButton
-                size="small"
-                aria-label={`Edit ${attachment.name}`}
-                sx={{ color: "text.secondary" }}
-                onClick={() => onEdit(attachment)}
-              >
-                <PencilLine size={16} aria-hidden />
               </IconButton>
             )}
             {deleteButton}

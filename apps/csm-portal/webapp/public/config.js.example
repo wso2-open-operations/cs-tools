@@ -211,16 +211,8 @@ window.config = {
   // reads "Unavailable". Off means no column and no request.
   CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: true,
 
-  // Attachments through entity-service's stored-attachment flow: uploads and
-  // downloads use short-lived SFTPGo share links (the browser talks to SFTPGo
-  // directly, so its public proxy must allow CORS from this origin), and a
-  // comment's images are streamed through the backend. On by default; only
-  // `false` turns it off, and the entity-service must have SFTPGO_URL,
-  // SFTPGO_USER and SFTPGO_PASSWORD set. Off means every attachment action
-  // uses the older ServiceNow flow.
-  CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: true,
-
-  // Early size checks for entity-service attachments, in megabytes. Optional:
+  // Early size checks for attachments (stored in Azure Blob Storage by the
+  // portal backend), in megabytes. Optional:
   // leave unset for the defaults below, which match the entity-service's own
   // defaults. Set them to the same values as the entity-service's
   // ATTACHMENT_MAX_BYTES and INLINE_IMAGE_MAX_BYTES; the server stays the
@@ -228,13 +220,6 @@ window.config = {
   // The inline image limit also applies to images embedded in other editors.
   // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
   // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 10,
-
-  // Where attachment files live. "sftpgo" (default): the browser sends and
-  // fetches files with SFTPGo share links. "backend": the portal backend holds the
-  // files in Azure Blob Storage, so uploads go to it in 8 MiB chunks and
-  // downloads stream from it, with no storage address exposed. Must match the
-  // backend's ATTACHMENT_STORAGE_MODE.
-  // CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
 
   // How many 8 MiB ranges of one attachment download are fetched at the same
   // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a

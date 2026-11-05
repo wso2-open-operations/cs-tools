@@ -18,55 +18,30 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"path"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
 
 const (
-	// maxDownloadLinkIDs is how many attachments one POST /attachments/download
-	// call may ask for: one file per request. The ids array is kept so the
-	// request shape does not change if the limit is ever raised.
-	maxDownloadLinkIDs = 1
 	// maxAttachmentLinkIDs bounds how many inline images of one comment are
 	// linked to it.
 	maxAttachmentLinkIDs = 20
-	// maxNewInlineImages bounds how many images pasted into one comment are
-	// stored. Comments migrated earlier may reference more; those are still linked.
-	maxNewInlineImages = 5
-	// attachmentLinkConcurrency bounds how many shares one call creates at once.
-	attachmentLinkConcurrency = 8
-	// maxSharesPerCallerPerMinute is how many shares (download or upload links)
-	// one caller may have created per minute; beyond it the call is a 429.
+	// maxSharesPerCallerPerMinute is how many uploads and locates one caller may
+	// start per minute; beyond it the call is a 429.
 	maxSharesPerCallerPerMinute = 60
 	// maxAttachmentNameLen is the width of the name column (VARCHAR(255)).
 	maxAttachmentNameLen = 255
-	// downloadLinkMaxUses and previewLinkMaxUses are how many requests a link
-	// serves before SFTPGo refuses it. A link is a bearer credential, so it is
-	// spent on the first open: a download is one request; a preview gets one
-	// spare for a browser that fetches an image twice. The webapp asks again if
-	// a link has gone.
-	downloadLinkMaxUses = 1
-	previewLinkMaxUses  = 2
-	// sniffBytes is how much of an upload is read to check its real type.
-	sniffBytes = 512
 )
 
 // inlineImageTypes are the only types a comment image may have. SVG is left
@@ -78,20 +53,13 @@ var inlineImageTypes = map[string]bool{
 	"image/webp": true,
 }
 
-// fileStore is the part of the SFTPGo client this service uses, so tests can
-// stand in for it.
-type fileStore interface {
-	CreateShare(ctx context.Context, spec filestore.ShareSpec) (string, error)
-	MkdirAll(ctx context.Context, dir string) error
-	PutFile(ctx context.Context, dir, name string, data []byte) error
-	ListDir(ctx context.Context, dir string) ([]filestore.Entry, error)
-	Rename(ctx context.Context, from, to string) error
-	RemoveFile(ctx context.Context, path string) error
-	RemoveDir(ctx context.Context, dir string) error
-	ReadHead(ctx context.Context, path string, n int) ([]byte, error)
-	Open(ctx context.Context, path string) (io.ReadCloser, int64, error)
-	DownloadURL(shareID string) string
-	UploadURL(shareID string) string
+// newInlineImageTypes are the only types an image added to a comment may have.
+// SVG is left out on purpose (it can carry script), and so is GIF. Images already
+// stored with another type are still shown (inlineImageTypes).
+var newInlineImageTypes = map[string]string{
+	"image/png":  "png",
+	"image/jpeg": "jpg",
+	"image/webp": "webp",
 }
 
 // StoredAttachmentLimits are the settings the service runs under.
@@ -99,22 +67,16 @@ type StoredAttachmentLimits struct {
 	// MaxBytes caps one file; InlineMaxBytes caps one comment image.
 	MaxBytes       int64
 	InlineMaxBytes int64
-	// ReadLinkTTL and UploadLinkTTL are how long a download and an upload link
-	// stay valid.
-	ReadLinkTTL   time.Duration
-	UploadLinkTTL time.Duration
 }
 
+// storedAttachmentService never touches a file: the portal backends hold the
+// files in Azure Blob Storage. It checks access, records the attachment rows and
+// hands each backend the storage key to use.
 type storedAttachmentService struct {
 	repo   repository.StoredAttachmentRepository
-	store  fileStore
 	limits StoredAttachmentLimits
 	now    func() time.Time
 	shares *shareLimiter
-	// backend is true with ATTACHMENT_STORAGE_MODE=backend: the portal backends
-	// hold the files, store is nil, and nothing here may touch a file. See
-	// NewBackendStoredAttachmentService.
-	backend bool
 }
 
 // NewStoredAttachmentService constructs a StoredAttachmentService.
@@ -124,8 +86,8 @@ type storedAttachmentService struct {
 // 100026) plus the parent lookup, both run as the caller: an external caller
 // needs to be a REGISTERED member of the parent's project, an internal one is
 // unrestricted, and a parent with no project is internal-only.
-func NewStoredAttachmentService(repo repository.StoredAttachmentRepository, store fileStore, limits StoredAttachmentLimits) StoredAttachmentService {
-	return &storedAttachmentService{repo: repo, store: store, limits: limits, now: time.Now, shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute)}
+func NewStoredAttachmentService(repo repository.StoredAttachmentRepository, limits StoredAttachmentLimits) StoredAttachmentService {
+	return &storedAttachmentService{repo: repo, limits: limits, now: time.Now, shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute)}
 }
 
 // resolveActorEmail resolves the caller's email from x-user-id-token. It is
@@ -178,13 +140,6 @@ func validateStoredAttachmentKind(kind domain.StoredAttachmentKind) error {
 	return &apierror.ValidationError{Msg: "kind must be one of work_item, comment, deployment"}
 }
 
-// storageUnavailable is what the caller sees when SFTPGo cannot be reached.
-// The cause is logged, never returned: it can name internal hosts.
-func storageUnavailable(ctx context.Context, what string, err error) error {
-	slog.ErrorContext(ctx, "attachment storage call failed", "operation", what, "error", err)
-	return &apierror.ServiceUnavailableError{Msg: "file storage is unavailable, please try again"}
-}
-
 // auditCaller identifies the caller on an audit line the way the access log does
 // (middleware.Logger): the user's UUID (the userid claim), else the client id of a
 // machine caller, else "-". It is not the email, which is personal data and is
@@ -198,142 +153,6 @@ func auditCaller(ctx context.Context) string {
 		return id.ClientID
 	}
 	return "-"
-}
-
-// auditLink records who was given a link to which attachment. SFTPGo only sees
-// the one service user for every transfer, so this line is how a download or an
-// upload is tied to a person: SFTPGo's transfer log carries the file path (for an
-// upload, the staging folder named after the attachment id), which this line
-// carries too, so the two match on path and time. The person is the callerId the
-// access log shows for the same request (see auditCaller), and correlationId
-// finds that request's other lines; neither is personal data.
-//
-// The share id is NOT logged in full. It is the link's secret (the link is
-// .../api/v2/shares/<id>), so anyone who could read it from a log could use the
-// link until it expires. Only a short prefix is kept, enough to recognise one in
-// a proxy log without being able to use it.
-func auditLink(ctx context.Context, action string, kind domain.StoredAttachmentKind, attachmentID, path, shareID string, expires time.Time) {
-	slog.InfoContext(ctx, "attachment link created",
-		"audit", true, "action", action, "callerId", auditCaller(ctx),
-		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(kind),
-		"attachmentId", attachmentID, "path", path, "shareRef", shareRef(shareID),
-		"expiresAt", expires)
-}
-
-// shareRef is the first few characters of a share id, never the whole of it.
-func shareRef(id string) string {
-	n := len(id) / 4
-	if n > 6 {
-		n = 6
-	}
-	return id[:n] + "..."
-}
-
-// ResolveLinks implements StoredAttachmentService.
-func (s *storedAttachmentService) ResolveLinks(ctx context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error) {
-	if s.backend {
-		// No share links exist in this mode; LocateAttachment is the way to a file.
-		return domain.AttachmentLinksResponse{}, &apierror.NotFoundError{Msg: "download links are not issued; locate the attachment instead"}
-	}
-	if err := validateStoredAttachmentKind(req.Kind); err != nil {
-		return domain.AttachmentLinksResponse{}, err
-	}
-	if len(req.IDs) == 0 {
-		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: "ids is required"}
-	}
-	if len(req.IDs) > maxDownloadLinkIDs {
-		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("ids cannot exceed %d entry: request one file at a time", maxDownloadLinkIDs)}
-	}
-	if err := validateUUIDs("ids", req.IDs); err != nil {
-		return domain.AttachmentLinksResponse{}, err
-	}
-	uses := downloadLinkMaxUses
-	switch req.Purpose {
-	case "", domain.AttachmentPurposeDownload:
-	case domain.AttachmentPurposePreview:
-		uses = previewLinkMaxUses
-	default:
-		return domain.AttachmentLinksResponse{}, &apierror.ValidationError{Msg: "purpose must be download or preview"}
-	}
-
-	// Only rows the caller may see come back; the rest are treated as absent.
-	rows, err := s.repo.GetByIDs(ctx, req.Kind, req.IDs)
-	if err != nil {
-		return domain.AttachmentLinksResponse{}, err
-	}
-	byID := make(map[string]domain.StoredAttachmentRow, len(rows))
-	for _, row := range rows {
-		byID[strings.ToLower(row.ID)] = row
-	}
-
-	if err := s.reserveShares(ctx, len(rows)); err != nil {
-		return domain.AttachmentLinksResponse{}, err
-	}
-	links := make(map[string]domain.AttachmentLink, len(rows))
-	var g errgroup.Group
-	g.SetLimit(attachmentLinkConcurrency)
-	results := make(chan domain.AttachmentLink, len(rows))
-	for _, row := range rows {
-		g.Go(func() error {
-			results <- s.linkFor(ctx, req.Kind, row, uses)
-			return nil
-		})
-	}
-	_ = g.Wait()
-	close(results)
-	for l := range results {
-		links[strings.ToLower(l.ID)] = l
-	}
-
-	// Answer in the order asked, once per id.
-	out := make([]domain.AttachmentLink, 0, len(links))
-	seen := make(map[string]bool, len(req.IDs))
-	for _, id := range req.IDs {
-		key := strings.ToLower(id)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		if l, ok := links[key]; ok {
-			out = append(out, l)
-		}
-	}
-	return domain.AttachmentLinksResponse{Links: out}, nil
-}
-
-// linkFor builds one attachment's entry, creating its download share when the
-// file is stored. A storage failure makes only that entry unavailable.
-func (s *storedAttachmentService) linkFor(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, uses int) domain.AttachmentLink {
-	l := domain.AttachmentLink{
-		ID: row.ID, Number: row.Number, Name: row.Name,
-		ContentType: row.ContentType, SizeBytes: row.SizeBytes,
-	}
-	switch {
-	case row.Status == "DELETED":
-		l.Reason = domain.AttachmentUnavailableDeleted
-		return l
-	case row.Status == "FAILED":
-		l.Reason = domain.AttachmentUnavailableFailed
-		return l
-	case row.Status != "COMPLETE" || row.StorageKey == nil || *row.StorageKey == "":
-		l.Reason = domain.AttachmentUnavailableNotStored
-		return l
-	}
-	expires := s.now().Add(s.limits.ReadLinkTTL)
-	shareID, err := s.store.CreateShare(ctx, filestore.ShareSpec{
-		Name: "dl", Scope: filestore.ShareRead, Path: *row.StorageKey,
-		MaxUses: uses, ExpiresAt: expires,
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "attachment storage call failed", "operation", "create read share", "attachmentId", row.ID, "error", err)
-		l.Reason = domain.AttachmentUnavailableStorage
-		return l
-	}
-	auditLink(ctx, "download", kind, row.ID, *row.StorageKey, shareID, expires)
-	l.Available = true
-	l.URL = s.store.DownloadURL(shareID)
-	l.ExpiresAt = &expires
-	return l
 }
 
 // InitiateUpload implements StoredAttachmentService.
@@ -395,49 +214,18 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
 
-	if s.backend {
-		// The portal backend holds the file: nothing to open here. It asks to
-		// authorize each chunk, so the row is all that is recorded.
-		slog.InfoContext(ctx, "attachment upload started",
-			"audit", true, "action", "upload", "callerId", auditCaller(ctx),
-			"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
-			"attachmentId", row.ID)
-		return domain.InitiateAttachmentUploadResponse{
-			AttachmentID: row.ID,
-			Number:       row.Number,
-			ExpiresAt:    s.now().Add(abandonedUploadAge),
-			MaxBytes:     limit,
-		}, nil
-	}
-
-	// One folder per upload, and a share on just that folder that accepts one
-	// request: the browser can put one file there and reach nothing else.
-	staging := filestore.StagingDir(row.ID)
-	expires := s.now().Add(s.limits.UploadLinkTTL)
-	shareID, err := s.openUploadShare(ctx, staging, expires)
-	if err != nil {
-		// The row would sit PENDING forever; record that it never got a link.
-		s.failQuietly(ctx, req.Kind, row.ID, "upload link could not be created")
-		return domain.InitiateAttachmentUploadResponse{}, storageUnavailable(ctx, "open upload share", err)
-	}
-	auditLink(ctx, "upload", req.Kind, row.ID, staging, shareID, expires)
+	// The portal backend holds the file: nothing to open here. It asks to
+	// authorize each chunk, so the row is all that is recorded.
+	slog.InfoContext(ctx, "attachment upload started",
+		"audit", true, "action", "upload", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
+		"attachmentId", row.ID)
 	return domain.InitiateAttachmentUploadResponse{
 		AttachmentID: row.ID,
 		Number:       row.Number,
-		UploadURL:    s.store.UploadURL(shareID),
-		FieldName:    "filenames",
-		ExpiresAt:    expires,
+		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
 	}, nil
-}
-
-func (s *storedAttachmentService) openUploadShare(ctx context.Context, staging string, expires time.Time) (string, error) {
-	if err := s.store.MkdirAll(ctx, staging); err != nil {
-		return "", err
-	}
-	return s.store.CreateShare(ctx, filestore.ShareSpec{
-		Name: "up", Scope: filestore.ShareWrite, Path: staging, MaxUses: 1, ExpiresAt: expires,
-	})
 }
 
 // ConfirmUpload implements StoredAttachmentService.
@@ -471,90 +259,7 @@ func (s *storedAttachmentService) ConfirmUpload(ctx context.Context, req domain.
 	default:
 		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "this upload was rejected; start a new upload"}
 	}
-	if s.backend {
-		return s.confirmFromBackend(ctx, req, row)
-	}
-
-	staging := filestore.StagingDir(row.ID)
-
-	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
-	if err != nil {
-		return domain.ConfirmAttachmentUploadResponse{}, err
-	}
-	// The item may have been closed since the upload began.
-	if parent.Closed {
-		return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, closedParentMessage, &apierror.ConflictError{Msg: closedParentMessage})
-	}
-
-	key := filestore.Key(filestore.KeyParts{
-		ProjectNumber:    parent.ProjectNumber,
-		WorkItemNumber:   workItemNumberFor(req.Kind, parent),
-		DeploymentNumber: deploymentNumberFor(req.Kind, parent),
-		Inline:           req.Kind == domain.StoredAttachmentComment,
-		AttachmentNumber: row.Number,
-		Name:             row.Name,
-	})
-
-	file, err := s.receivedFile(ctx, staging)
-	if err != nil {
-		var verr *apierror.ValidationError
-		if errors.As(err, &verr) {
-			// A confirm that moved the file but failed to mark the row leaves staging
-			// empty and the file at its final key: finish that job instead of
-			// rejecting an upload that did arrive.
-			if resp, done, ferr := s.completeMoved(ctx, req.Kind, row, key, staging); done {
-				return resp, ferr
-			}
-			return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, verr.Msg, verr)
-		}
-		return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "list upload folder", err)
-	}
-
-	limit := s.limitFor(req.Kind)
-	if file.Size > limit {
-		msg := "the file is larger than the " + formatByteLimit(limit) + " limit"
-		return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, msg, &apierror.ValidationError{Msg: msg})
-	}
-	if row.SizeBytes != nil && file.Size != *row.SizeBytes {
-		msg := "the uploaded file's size does not match the size declared"
-		return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, msg, &apierror.ValidationError{Msg: msg})
-	}
-
-	stagedPath := path.Join(staging, file.Name)
-	if req.Kind == domain.StoredAttachmentComment {
-		// The type the browser declared is only a claim; look at the bytes.
-		head, err := s.store.ReadHead(ctx, stagedPath, sniffBytes)
-		if err != nil {
-			return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "read upload", err)
-		}
-		if _, ok := newInlineImageTypes[strings.ToLower(strings.SplitN(http.DetectContentType(head), ";", 2)[0])]; !ok {
-			msg := "the file is not a PNG, JPEG or WebP image"
-			return domain.ConfirmAttachmentUploadResponse{}, s.reject(ctx, req.Kind, row.ID, staging, msg, &apierror.ValidationError{Msg: msg})
-		}
-	}
-
-	// The folder must exist before the file can be moved into it. A failure from
-	// here on leaves the row PENDING and the file staged, so confirm can be retried.
-	if err := s.store.MkdirAll(ctx, path.Dir(key)); err != nil {
-		return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "create final folder", err)
-	}
-	if err := s.store.Rename(ctx, stagedPath, key); err != nil {
-		return domain.ConfirmAttachmentUploadResponse{}, storageUnavailable(ctx, "move upload into place", err)
-	}
-
-	// UPDATE on these tables is internal-only, so the write runs as the system
-	// after the checks above (the caller owns this row, in a parent they can see).
-	ok, err := s.repo.MarkComplete(repository.WithSystemIdentity(ctx), req.Kind, row.ID, key, file.Size)
-	if err != nil {
-		return domain.ConfirmAttachmentUploadResponse{}, err
-	}
-	if !ok {
-		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "this upload was already confirmed"}
-	}
-	s.removeStaging(ctx, staging)
-
-	row.Status = "COMPLETE"
-	return confirmResponse(row, file.Size), nil
+	return s.confirmFromBackend(ctx, req, row)
 }
 
 // inlineImage is the stored row an inline image id names, with the type it is
@@ -616,37 +321,6 @@ func (s *storedAttachmentService) findInlineImage(ctx context.Context, id string
 	return inlineImage{kind: kind, row: row, mediaType: mediaType, isImage: imageType}, nil
 }
 
-// OpenInlineImage implements StoredAttachmentService. It is how a comment's
-// image is shown: entity-service reads it from SFTPGo and streams it, so access is
-// checked on every request and no link that could be forwarded ever exists.
-func (s *storedAttachmentService) OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error) {
-	if s.backend {
-		// The portal backend streams the image itself; LocateInlineImage is the way here.
-		return domain.StoredAttachmentContent{}, &apierror.NotFoundError{Msg: "attachment not found"}
-	}
-	img, err := s.findInlineImage(ctx, id)
-	if err != nil {
-		return domain.StoredAttachmentContent{}, err
-	}
-	row := img.row
-	body, size, err := s.store.Open(ctx, *row.StorageKey)
-	if err != nil {
-		if errors.Is(err, filestore.ErrNotFound) {
-			return domain.StoredAttachmentContent{}, &apierror.NotFoundError{Msg: "attachment not found"}
-		}
-		return domain.StoredAttachmentContent{}, storageUnavailable(ctx, "open inline image", err)
-	}
-	slog.InfoContext(ctx, "attachment content served",
-		"audit", true, "action", "view", "callerId", auditCaller(ctx),
-		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(img.kind),
-		"attachmentId", row.ID, "path", *row.StorageKey)
-	contentType := "application/octet-stream"
-	if img.isImage {
-		contentType = img.mediaType
-	}
-	return domain.StoredAttachmentContent{Body: body, ContentType: contentType, Size: size}, nil
-}
-
 // inlineImageRef finds the comment images a comment's HTML shows: its <img src>
 // ends in .../attachments/inline/<attachment id>/content, or is the bare
 // reference src="/<attachment id>" that ExtractInlineImages writes (and that
@@ -703,9 +377,8 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 // Who may delete is decided here, not by row-level security: UPDATE on these
 // tables is internal-only, so the soft delete runs as the system after the checks
 // below. For now only the person who uploaded an attachment may delete it, and
-// never once the work item is closed. The file is removed from SFTPGo first and
-// the row marked afterwards, so a failure in between leaves a COMPLETE row whose
-// file is gone, and repeating the call finishes the job.
+// never once the work item is closed. Only the row is marked here; the portal
+// backend removes the file afterwards.
 func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return err
@@ -751,13 +424,8 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return &apierror.ConflictError{Msg: closedParentDeleteMessage}
 	}
 
-	// With backend storage the file is not here to remove: the portal backend
-	// removes it from storage after this succeeds.
-	if !s.backend && row.StorageKey != nil && *row.StorageKey != "" {
-		if err := s.store.RemoveFile(ctx, strings.TrimLeft(*row.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-			return storageUnavailable(ctx, "delete attachment file", err)
-		}
-	}
+	// The file is not here to remove: the portal backend removes it from storage
+	// after this succeeds.
 	ok, err := s.repo.MarkDeleted(repository.WithSystemIdentity(ctx), req.Kind, row.ID, email)
 	if err != nil {
 		return err
@@ -799,86 +467,11 @@ func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int
 	return s.limits.MaxBytes
 }
 
-// receivedFile finds the one file the browser uploaded into a staging folder.
-// A *apierror.ValidationError means the folder holds no file, or more than one.
-func (s *storedAttachmentService) receivedFile(ctx context.Context, staging string) (filestore.Entry, error) {
-	entries, err := s.store.ListDir(ctx, staging)
-	if err != nil {
-		if errors.Is(err, filestore.ErrNotFound) {
-			return filestore.Entry{}, &apierror.ValidationError{Msg: "no file was uploaded"}
-		}
-		return filestore.Entry{}, err
-	}
-	var files []filestore.Entry
-	for _, e := range entries {
-		// A dot-file is not the browser's: nothing it can upload keeps its name.
-		if e.IsDir() || strings.HasPrefix(e.Name, ".") {
-			continue
-		}
-		files = append(files, e)
-	}
-	switch len(files) {
-	case 0:
-		return filestore.Entry{}, &apierror.ValidationError{Msg: "no file was uploaded"}
-	case 1:
-		return files[0], nil
-	}
-	return filestore.Entry{}, &apierror.ValidationError{Msg: "more than one file was uploaded"}
-}
-
-// completeMoved finishes a confirm whose file was already moved to its final key
-// (the earlier attempt failed between the move and marking the row). done is
-// false when no file is there, so the caller rejects as before.
-func (s *storedAttachmentService) completeMoved(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, key, staging string) (domain.ConfirmAttachmentUploadResponse, bool, error) {
-	entries, err := s.store.ListDir(ctx, path.Dir(key))
-	if err != nil {
-		if errors.Is(err, filestore.ErrNotFound) {
-			return domain.ConfirmAttachmentUploadResponse{}, false, nil
-		}
-		// Not knowing is not the same as absent: a transient failure must not
-		// reject an upload that may have arrived. The row stays PENDING for a retry.
-		return domain.ConfirmAttachmentUploadResponse{}, true, storageUnavailable(ctx, "list final folder", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || e.Name != path.Base(key) {
-			continue
-		}
-		ok, err := s.repo.MarkComplete(repository.WithSystemIdentity(ctx), kind, row.ID, key, e.Size)
-		if err != nil {
-			return domain.ConfirmAttachmentUploadResponse{}, true, err
-		}
-		if !ok {
-			return domain.ConfirmAttachmentUploadResponse{}, true, &apierror.ConflictError{Msg: "this upload was already confirmed"}
-		}
-		s.removeStaging(ctx, staging)
-		row.Status = "COMPLETE"
-		return confirmResponse(row, e.Size), true, nil
-	}
-	return domain.ConfirmAttachmentUploadResponse{}, false, nil
-}
-
-// reject throws an upload away: the staged file is removed and the row is
-// recorded as failed, so it cannot be confirmed later. It returns cause for the
-// caller to hand back.
-func (s *storedAttachmentService) reject(ctx context.Context, kind domain.StoredAttachmentKind, id, staging, reason string, cause error) error {
-	s.removeStaging(ctx, staging)
-	s.failQuietly(ctx, kind, id, reason)
-	return cause
-}
-
 // failQuietly marks a row FAILED as the system. A failure to do so is logged
 // only: the caller is already being given a more useful error.
 func (s *storedAttachmentService) failQuietly(ctx context.Context, kind domain.StoredAttachmentKind, id, reason string) {
 	if err := s.repo.MarkFailed(repository.WithSystemIdentity(ctx), kind, id, reason); err != nil {
 		slog.ErrorContext(ctx, "could not mark attachment failed", "attachmentId", id, "error", err)
-	}
-}
-
-// removeStaging deletes an upload folder, best effort: the file is either
-// already moved or being thrown away, and a leftover folder is harmless.
-func (s *storedAttachmentService) removeStaging(ctx context.Context, staging string) {
-	if err := s.store.RemoveDir(ctx, staging); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-		slog.WarnContext(ctx, "could not remove upload folder", "folder", staging, "error", err)
 	}
 }
 

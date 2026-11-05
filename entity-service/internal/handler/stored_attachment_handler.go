@@ -18,31 +18,22 @@ package handler
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// StoredAttachmentHandler handles HTTP requests for the links a browser uses to
-// download and upload attachment files held in SFTPGo.
+// StoredAttachmentHandler handles HTTP requests that record and authorize the
+// attachment files the portal backends hold in Azure Blob Storage.
 type StoredAttachmentHandler struct {
 	svc     service.StoredAttachmentService
-	cleanup service.AttachmentShareCleanupService
 	uploads service.AttachmentUploadCleanupService
 }
 
 // NewStoredAttachmentHandler constructs a StoredAttachmentHandler.
 func NewStoredAttachmentHandler(svc service.StoredAttachmentService) *StoredAttachmentHandler {
 	return &StoredAttachmentHandler{svc: svc}
-}
-
-// WithShareCleanup attaches the share cleanup, which backs POST /attachments/shares/cleanup.
-func (h *StoredAttachmentHandler) WithShareCleanup(c service.AttachmentShareCleanupService) *StoredAttachmentHandler {
-	h.cleanup = c
-	return h
 }
 
 // WithUploadCleanup attaches the abandoned-upload cleanup, which backs POST /attachments/uploads/cleanup.
@@ -65,8 +56,7 @@ func (h *StoredAttachmentHandler) CleanupUploads(w http.ResponseWriter, r *http.
 	writeStoredAttachmentJSON(w, http.StatusOK, res)
 }
 
-// AcknowledgeOrphans handles POST /attachments/uploads/cleanup/acknowledge. It
-// exists only with ATTACHMENT_STORAGE_MODE=backend.
+// AcknowledgeOrphans handles POST /attachments/uploads/cleanup/acknowledge.
 func (h *StoredAttachmentHandler) AcknowledgeOrphans(w http.ResponseWriter, r *http.Request) {
 	if h.uploads == nil {
 		http.NotFound(w, r)
@@ -82,34 +72,6 @@ func (h *StoredAttachmentHandler) AcknowledgeOrphans(w http.ResponseWriter, r *h
 		return
 	}
 	writeStoredAttachmentJSON(w, http.StatusOK, res)
-}
-
-// CleanupShares handles POST /attachments/shares/cleanup.
-func (h *StoredAttachmentHandler) CleanupShares(w http.ResponseWriter, r *http.Request) {
-	if h.cleanup == nil {
-		http.NotFound(w, r)
-		return
-	}
-	res, err := h.cleanup.CleanupShares(r.Context())
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeStoredAttachmentJSON(w, http.StatusOK, res)
-}
-
-// ResolveLinks handles POST /attachments/download.
-func (h *StoredAttachmentHandler) ResolveLinks(w http.ResponseWriter, r *http.Request) {
-	var req domain.AttachmentLinksRequest
-	if !decodeRequest(w, r, &req) {
-		return
-	}
-	resp, err := h.svc.ResolveLinks(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
 // InitiateUpload handles POST /attachments/upload.
@@ -155,35 +117,8 @@ func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// InlineImageContent handles GET /attachments/inline/{id}/content: it streams a
-// comment's inline image after the service has checked the caller may see it.
-func (h *StoredAttachmentHandler) InlineImageContent(w http.ResponseWriter, r *http.Request) {
-	c, err := h.svc.OpenInlineImage(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	defer c.Body.Close()
-	hd := w.Header()
-	hd.Set("Content-Type", c.ContentType)
-	if c.Size >= 0 {
-		hd.Set("Content-Length", strconv.FormatInt(c.Size, 10))
-	}
-	// Shown in the page, never run: the type is one of the four image types, and
-	// nosniff plus a sandboxing policy stop anything else being treated as a page.
-	hd.Set("X-Content-Type-Options", "nosniff")
-	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	hd.Set("Content-Disposition", "inline")
-	// The image is private to this caller; a short browser cache keeps an activity
-	// feed from fetching it again on every render.
-	hd.Set("Cache-Control", "private, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, c.Body)
-}
-
-// AuthorizeUpload handles POST /attachments/upload/{id}/authorize. It exists
-// only with ATTACHMENT_STORAGE_MODE=backend; the response carries an internal
-// storage key for the calling portal backend.
+// AuthorizeUpload handles POST /attachments/upload/{id}/authorize. The response
+// carries an internal storage key for the calling portal backend.
 func (h *StoredAttachmentHandler) AuthorizeUpload(w http.ResponseWriter, r *http.Request) {
 	var req domain.AuthorizeAttachmentUploadRequest
 	if !decodeRequest(w, r, &req) {
@@ -198,9 +133,8 @@ func (h *StoredAttachmentHandler) AuthorizeUpload(w http.ResponseWriter, r *http
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
-// LocateAttachment handles POST /attachments/locate. It exists only with
-// ATTACHMENT_STORAGE_MODE=backend; the response carries an internal storage key
-// for the calling portal backend.
+// LocateAttachment handles POST /attachments/locate. The response carries an
+// internal storage key for the calling portal backend.
 func (h *StoredAttachmentHandler) LocateAttachment(w http.ResponseWriter, r *http.Request) {
 	var req domain.LocateAttachmentRequest
 	if !decodeRequest(w, r, &req) {
@@ -216,7 +150,7 @@ func (h *StoredAttachmentHandler) LocateAttachment(w http.ResponseWriter, r *htt
 
 // InlineImageLocation handles GET /attachments/inline/{id}/location: where a
 // comment's inline image is stored, after the service has checked the caller may
-// see it. It exists only with ATTACHMENT_STORAGE_MODE=backend.
+// see it.
 func (h *StoredAttachmentHandler) InlineImageLocation(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.LocateInlineImage(r.Context(), r.PathValue("id"))
 	if err != nil {
@@ -226,8 +160,8 @@ func (h *StoredAttachmentHandler) InlineImageLocation(w http.ResponseWriter, r *
 	writeStoredAttachmentJSON(w, http.StatusOK, resp)
 }
 
-// writeStoredAttachmentJSON writes a response that carries short-lived links, so
-// it must never be cached by a browser or an intermediary.
+// writeStoredAttachmentJSON writes a response that can carry an internal storage
+// key, so it must never be cached by a browser or an intermediary.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

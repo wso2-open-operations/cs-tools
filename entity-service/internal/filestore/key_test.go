@@ -70,14 +70,3 @@ func TestKey_HostileNamesStayInsideTheAttachmentFolder(t *testing.T) {
 		t.Errorf("Key escaped its folder: %q", k)
 	}
 }
-
-func TestStagingDir_IsOneFolderPerAttachment(t *testing.T) {
-	a := StagingDir("0190ab12-0000-7000-8000-000000000001")
-	b := StagingDir("0190ab12-0000-7000-8000-000000000002")
-	if a == b {
-		t.Fatal("two attachments share a staging folder")
-	}
-	if !strings.HasPrefix(a, "csm/staging/") || strings.Contains(a, "..") {
-		t.Errorf("StagingDir = %q", a)
-	}
-}

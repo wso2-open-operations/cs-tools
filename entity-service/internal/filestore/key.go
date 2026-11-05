@@ -24,13 +24,11 @@ import (
 )
 
 const (
-	// rootDir is the top folder in the SFTPGo user's home directory.
+	// rootDir is the top folder of every key.
 	rootDir = "csm"
 	// projectDir holds files of known projects; defaultDir holds the rest.
 	projectDir = "projects"
 	defaultDir = "default"
-	// stagingDir holds uploads that are not confirmed yet, one folder each.
-	stagingDir = "staging"
 	// maxNameBytes caps the filename part of a key.
 	maxNameBytes = 150
 )
@@ -59,7 +57,7 @@ type KeyParts struct {
 	Name             string
 }
 
-// Key builds the SFTPGo path of a stored file, without a leading slash. It is
+// Key builds the storage key of a stored file, without a leading slash. It is
 // the layout csm-sync-service's attachment migrator used, so files uploaded now
 // sit beside the migrated ones. Folder names are lowercase snake_case:
 //
@@ -87,13 +85,6 @@ func Key(p KeyParts) string {
 		kind = inlineDir
 	}
 	return path.Join(base, workItemDir, folderName(p.WorkItemNumber), kind, file)
-}
-
-// StagingDir is the folder one upload is received into, before confirm moves
-// the file to its final key. One folder per attachment, so a share on it
-// reaches nothing else.
-func StagingDir(attachmentID string) string {
-	return path.Join(rootDir, stagingDir, folderName(attachmentID))
 }
 
 // folderName turns a project or record number into one lowercase snake_case

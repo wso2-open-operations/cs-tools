@@ -79,10 +79,10 @@ export function sysidToUuid(id: string): string {
 /**
  * Whether `src` is a raw base64-embedded image (`data:image/...;base64,...`)
  * rather than a real, separately-stored attachment. Content authored before
- * `SFTPGO_ATTACHMENT_STORAGE_ENABLED` was on (or created while it's off) never
- * gets extracted into a `.iix`-referenced attachment at all — the pixels stay
- * embedded directly in the comment/description HTML the backend already sends
- * to anyone holding `PermView`. The backend now redacts the real bytes out of
+ * images were stored as attachments never got extracted into an
+ * attachment-referenced image at all — the pixels stay embedded directly in
+ * the comment/description HTML the backend already sends to anyone holding
+ * `PermView`. The backend now redacts the real bytes out of
  * this before it ever reaches here (`apps/csm-portal/backend`'s own
  * `redactRawBase64Images` — see that repo's `CLAUDE.md`); this check just
  * decides whether the (now-inert, possibly-already-redacted) src still needs

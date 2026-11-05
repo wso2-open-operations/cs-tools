@@ -42,7 +42,8 @@ vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   usePostCsmCaseAttachment: () => ({ mutateAsync: vi.fn() }),
 }));
 vi.mock("@features/csm-cases/api/uploadAttachmentsToCase", () => ({
-  uploadAttachmentsToCase: () => Promise.resolve(0),
+  uploadAttachmentsToCase: () => Promise.resolve([]),
+  failedUploadsMessage: () => "upload failed",
 }));
 vi.mock("@features/csm-projects/api/useGetProject", () => ({
   useGetProject: () => ({ data: { subscriptionType: "subscription" }, isFetching: false }),

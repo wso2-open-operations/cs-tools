@@ -15,7 +15,7 @@
 // under the License.
 
 import type { ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DeploymentDocumentList from "@features/project-details/components/deployments/DeploymentDocumentList";
@@ -124,6 +124,21 @@ vi.mock("@features/settings/api/useGetUserDetails", () => ({
   }),
 }));
 
+const mockStoredDownload = vi.fn();
+const mockStoredDelete = vi.fn();
+
+vi.mock("@api/useStoredAttachments", () => ({
+  useStoredAttachmentDownload: () => ({
+    downloadStoredAttachment: mockStoredDownload,
+    isDownloading: false,
+    downloadingId: null,
+  }),
+  useStoredAttachmentDelete: () => ({
+    mutate: mockStoredDelete,
+    isPending: false,
+  }),
+}));
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
 });
@@ -178,6 +193,41 @@ describe("DeploymentDocumentList", () => {
 
     const iconButtons = container.querySelectorAll("button");
     expect(iconButtons.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("downloads a document through the stored attachment route as a deployment attachment", async () => {
+    mockStoredDownload.mockReset();
+    mockStoredDownload.mockResolvedValue(undefined);
+    renderWithProviders(<DeploymentDocumentList deploymentId="single-id" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Architecture.pdf" }));
+
+    await waitFor(() =>
+      expect(mockStoredDownload).toHaveBeenCalledWith({
+        type: "deployment",
+        id: "doc-1",
+        name: "Architecture.pdf",
+      }),
+    );
+  });
+
+  it("deletes the uploader's document through the stored attachment route after confirming", () => {
+    mockStoredDelete.mockReset();
+    renderWithProviders(<DeploymentDocumentList deploymentId="single-id" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Architecture.pdf" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(mockStoredDelete).toHaveBeenCalledWith(
+      { type: "deployment", attachmentId: "doc-1", deploymentId: "single-id" },
+      expect.any(Object),
+    );
+  });
+
+  it("offers no edit action: a stored document cannot be renamed", () => {
+    renderWithProviders(<DeploymentDocumentList deploymentId="dep-1" />);
+
+    expect(screen.queryByRole("button", { name: /^Edit / })).not.toBeInTheDocument();
   });
 
   it("should properly format file sizes", () => {

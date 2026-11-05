@@ -14,11 +14,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
-import { usePatchCaseAttachment } from "../usePatchCaseAttachment";
 
-describe("usePatchCaseAttachment", () => {
-  it("exports a hook function", () => {
-    expect(typeof usePatchCaseAttachment).toBe("function");
-  });
-});
+/**
+ * A file picked in a create form, held until the record it belongs to exists:
+ * attachments are uploaded to Azure Blob Storage through the portal backend
+ * after the create request succeeds, so only the `File` and its display
+ * metadata are kept here (nothing is read into memory or encoded).
+ */
+export interface PendingAttachment {
+  name: string;
+  /** Size in bytes, for display. */
+  size: number;
+  /** The original File, uploaded after the record is created. */
+  raw: File;
+}

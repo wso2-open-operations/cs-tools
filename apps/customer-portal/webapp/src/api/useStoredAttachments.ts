@@ -96,14 +96,14 @@ export interface StoredUploadVariables {
   caseId?: string;
   deploymentId?: string;
   onStep?: (step: StoredUploadStep) => void;
-  /** Cancels a large (TUS) upload. */
+  /** Cancels the upload. */
   signal?: AbortSignal;
-  /** Bytes sent so far, for a large (TUS) upload. */
+  /** Bytes sent so far. */
   onProgress?: (bytesSent: number, bytesTotal: number) => void;
 }
 
 /**
- * Uploads a file in three steps (start, send to SFTPGo, confirm). Shares the
+ * Uploads a file in three steps (start, send in chunks, confirm). Shares the
  * `postCaseAttachment` mutation key with the older upload so the case's pending
  * placeholder shows either way. A confirm that failed after the file arrived
  * throws UploadConfirmPendingError: use `confirm` to retry without re-uploading.
@@ -146,10 +146,17 @@ export function useStoredAttachmentUpload() {
   const confirm = useMutation<
     StoredAttachmentConfirmed,
     Error,
-    { type: StoredAttachmentType; attachmentId: string; caseId?: string; deploymentId?: string }
+    {
+      type: StoredAttachmentType;
+      attachmentId: string;
+      /** The chunk count the failed upload stored (`UploadConfirmPendingError.chunks`). */
+      chunks: number;
+      caseId?: string;
+      deploymentId?: string;
+    }
   >({
-    mutationFn: ({ type, attachmentId }) =>
-      confirmStoredUpload(authFetch, { type, attachmentId }),
+    mutationFn: ({ type, attachmentId, chunks }) =>
+      confirmStoredUpload(authFetch, { type, attachmentId, chunks }),
     onSuccess: (_data, vars) => invalidate(vars),
   });
 

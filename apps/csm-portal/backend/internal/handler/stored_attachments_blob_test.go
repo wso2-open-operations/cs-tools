@@ -133,6 +133,22 @@ func serveBlob(e *fakeBlobEntity, s *fakeBlobStore, method, target string, body 
 	return rec
 }
 
+// Every kind entity-service stores works the same way here: the type is only
+// relayed to entity-service, which decides who may add what to which parent.
+func TestBlobPutChunk_AcceptsEveryStoredAttachmentType(t *testing.T) {
+	for _, kind := range []string{"work_item", "comment", "deployment"} {
+		e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}
+		rec := serveBlob(e, s, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type="+kind, strings.NewReader("hello"), nil, true)
+		if rec.Code != http.StatusNoContent || !strings.Contains(e.authBody, `"`+kind+`"`) {
+			t.Errorf("%s: status %d, authorize body %s", kind, rec.Code, e.authBody)
+		}
+	}
+	rec := serveBlob(&fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type=case", strings.NewReader("x"), nil, true)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown type gave %d, want 400", rec.Code)
+	}
+}
+
 func TestBlobPutChunk_StoresUnderTheKeyEntityGave(t *testing.T) {
 	e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}
 	rec := serveBlob(e, s, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/1?type=work_item", strings.NewReader("hello"), nil, true)

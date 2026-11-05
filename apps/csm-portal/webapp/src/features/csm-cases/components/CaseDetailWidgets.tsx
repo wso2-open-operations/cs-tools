@@ -1109,9 +1109,9 @@ export function AttachmentsWidget({
   /** An upload is in flight. */
   uploading?: boolean;
   /**
-   * 0-100 while a direct-to-SFTPGo upload is in flight (see
+   * 0-100 while a chunked upload is in flight (see
    * `usePostCsmCaseAttachment`'s `uploadProgress`), `null`/omitted otherwise
-   * — including for the default upload path, which has no granular
+   * — including for the older base64 upload path, which has no granular
    * progress and falls back to an indeterminate bar.
    */
   uploadProgress?: number | null;

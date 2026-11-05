@@ -116,50 +116,6 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
-// AttachmentStorageMode says who stores work item, comment-image and deployment
-// attachment files (see Config.AttachmentStorageMode).
-type AttachmentStorageMode string
-
-const (
-	// AttachmentStorageModeSFTPGo: this service reaches SFTPGo and gives the
-	// browser short-lived share links. The default.
-	AttachmentStorageModeSFTPGo AttachmentStorageMode = "sftpgo"
-	// AttachmentStorageModeBackend: the portal backends store and serve the files
-	// themselves. This service keeps the access checks and the rows, authorizes each
-	// upload and read, and returns the storage key; it never touches a file.
-	AttachmentStorageModeBackend AttachmentStorageMode = "backend"
-)
-
-// AttachmentDataSource identifies which backend three case attachment reads
-// (GET /attachments/{id}, POST /attachments/search, GET
-// /attachments/{id}/content) and the case activity feed (POST
-// /cases/{id}/activities/search) use. GetAttachmentByID (GET
-// /attachments/{id}) is included even though it is metadata, not content:
-// backend-v2's content-download route resolves an attachment's owning case
-// through it first, purely for its own authorization check, before ever
-// calling the content route -- leaving it on DataSource would silently
-// reintroduce a 404 in front of the content route this flag exists to fix.
-// It does NOT affect PATCH/DELETE /attachments/{id}, POST /attachments, or
-// POST /attachments/{id}/confirm -- those always follow DataSource, because
-// the ServiceNow-backed implementation this switches to is read-only and
-// cannot serve those writes. Independent of DataSource and SLADataSource,
-// same reasoning as SLADataSource: a deployment can run DataSource=postgres
-// for every other entity while pointing these three attachment reads and the
-// activity feed specifically at ServiceNow. This is a stopgap for while
-// Postgres-synced attachment content and activity history aren't reliable
-// yet, meant to go away once that migration lands -- see routes.go for the
-// wiring.
-type AttachmentDataSource string
-
-const (
-	// AttachmentDataSourcePostgres reads case attachments and the activity
-	// feed from this service's own Postgres tables. The default.
-	AttachmentDataSourcePostgres AttachmentDataSource = "postgres"
-	// AttachmentDataSourceServiceNow reads case attachments and the activity
-	// feed live from the ServiceNow integration service instead.
-	AttachmentDataSourceServiceNow AttachmentDataSource = "servicenow"
-)
-
 // Config holds all environment-driven settings for the service.
 type Config struct {
 	DBHost string
@@ -240,11 +196,6 @@ type Config struct {
 	// usage/metrics reads under DATA_SOURCE=postgres-servicenow-dual-write.
 	// Defaults to "postgres" -- see UsageReadMode's own doc comment.
 	UsageReadMode UsageReadMode
-	// AttachmentDataSource controls which backend two case attachment reads
-	// and the activity feed use, independent of DataSource and
-	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
-	// own doc comment.
-	AttachmentDataSource AttachmentDataSource
 	// ServiceNowIntegrationServiceBaseURL is the base URL for the ServiceNow integration service API.
 	// Required when DataSource is "servicenow" (or SLADataSource is "servicenow" -- see Validate).
 	ServiceNowIntegrationServiceBaseURL string
@@ -740,25 +691,6 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// SFTPGo* is the file store behind work item, comment and deployment
-	// attachments. entity-service holds the only credential: it logs in as the
-	// service user (SFTPGO_USER/SFTPGO_PASSWORD, at SFTPGO_URL), and what a
-	// browser receives is a short-lived SFTPGo *share* for exactly one file or
-	// one upload folder, never a token (see StoredAttachmentService). All three
-	// must be set together; with none set the attachment link and upload
-	// routes are not registered.
-	//
-	// SFTPGoPublicURL is the address the BROWSER uses to reach SFTPGo
-	// (SFTPGO_PUBLIC_URL). It differs from SFTPGoURL once SFTPGo sits behind a
-	// public reverse proxy; unset, it falls back to SFTPGoURL.
-	SFTPGoURL       string
-	SFTPGoPublicURL string
-	SFTPGoUser      string
-	SFTPGoPassword  string
-	// SFTPGoAllowInsecureHTTP (SFTPGO_ALLOW_INSECURE_HTTP=true) permits http URLs
-	// for SFTPGo. Local development only: the service password and token travel
-	// in clear text over http, and an http public URL puts share ids on the wire.
-	SFTPGoAllowInsecureHTTP bool
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
 	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
 	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
@@ -766,18 +698,6 @@ type Config struct {
 	// defaults, to be set from the real size distribution.
 	AttachmentMaxBytes  int64
 	InlineImageMaxBytes int64
-	// AttachmentReadLinkTTL and AttachmentUploadLinkTTL are how long a download
-	// link (ATTACHMENT_READ_LINK_TTL, default 1m) and an upload link
-	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
-	AttachmentReadLinkTTL   time.Duration
-	AttachmentUploadLinkTTL time.Duration
-	// AttachmentStorageMode (ATTACHMENT_STORAGE_MODE) says who holds the files.
-	// "sftpgo" (the default) keeps today's behaviour: this service reaches SFTPGo
-	// and hands the browser a share link. "backend" means the portal backends hold
-	// the files themselves (in Azure Blob Storage): this service then only decides
-	// who may upload or read what and which storage key each file has, and needs no
-	// SFTPGo settings at all. See AttachmentStorageModeBackend.
-	AttachmentStorageMode AttachmentStorageMode
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
@@ -902,7 +822,6 @@ func Load() *Config {
 		SLADataSource:                                 SLADataSource(getEnvOrDefault("SLA_DATA_SOURCE", string(SLADataSourcePostgres))),
 		UsageRollupEnabled:                            os.Getenv("USAGE_ROLLUP_ENABLED") == "true",
 		UsageReadMode:                                 UsageReadMode(getEnvOrDefault("PRODUCT_CONSUMPTION_DATA_READ_MODE", string(UsageReadModePostgres))),
-		AttachmentDataSource:                          AttachmentDataSource(getEnvOrDefault("ATTACHMENT_DATA_SOURCE", string(AttachmentDataSourcePostgres))),
 		ServiceNowIntegrationServiceBaseURL:           os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
 		ServiceNowIntegrationServiceClientID:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID"),
@@ -1012,34 +931,10 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.SFTPGoURL = strings.TrimRight(strings.TrimSpace(os.Getenv("SFTPGO_URL")), "/")
-	cfg.SFTPGoPublicURL = strings.TrimRight(strings.TrimSpace(os.Getenv("SFTPGO_PUBLIC_URL")), "/")
-	if cfg.SFTPGoPublicURL == "" {
-		cfg.SFTPGoPublicURL = cfg.SFTPGoURL
-	}
-	cfg.SFTPGoUser = strings.TrimSpace(os.Getenv("SFTPGO_USER"))
-	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
-	cfg.SFTPGoAllowInsecureHTTP = os.Getenv("SFTPGO_ALLOW_INSECURE_HTTP") == "true"
 	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
-	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
-	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
-	cfg.AttachmentStorageMode = AttachmentStorageMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("ATTACHMENT_STORAGE_MODE", string(AttachmentStorageModeSFTPGo)))))
 	cfg.applySREEventHubTopic()
 	return cfg
-}
-
-// HasSFTPGo reports whether the SFTPGo file store is configured, which turns on
-// the attachment link and upload routes.
-func (c *Config) HasSFTPGo() bool {
-	return c.SFTPGoURL != "" && c.SFTPGoUser != "" && c.SFTPGoPassword != ""
-}
-
-// HasBackendAttachmentStorage reports whether the portal backends hold the
-// attachment files (ATTACHMENT_STORAGE_MODE=backend). It turns on the attachment
-// routes without SFTPGo and turns the SFTPGo link routes off.
-func (c *Config) HasBackendAttachmentStorage() bool {
-	return c.AttachmentStorageMode == AttachmentStorageModeBackend
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1258,12 +1153,6 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid PRODUCT_CONSUMPTION_DATA_READ_MODE %q: must be %q or %q", c.UsageReadMode, UsageReadModePostgres, UsageReadModeLegacy)
 	}
-	switch c.AttachmentDataSource {
-	case AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow:
-		// valid
-	default:
-		return fmt.Errorf("invalid ATTACHMENT_DATA_SOURCE %q: must be %q or %q", c.AttachmentDataSource, AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow)
-	}
 	// Postgres credentials are required for DATA_SOURCE=postgres and
 	// DATA_SOURCE=postgres-servicenow-dual-write — both serve every entity read
 	// and write from the pool (the fallback mode's ServiceNow leg is a
@@ -1305,24 +1194,22 @@ func (c *Config) Validate() error {
 	// DATA_SOURCE=servicenow (reads go there), for
 	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
 	// goes there, via the same client — see SNWritebackDispatcher), for
-	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead), and for
-	// ATTACHMENT_DATA_SOURCE=servicenow (attachment/activity-feed reads go
-	// there instead) -- all independent of DATA_SOURCE: a plain
-	// DATA_SOURCE=postgres deployment that points SLA or attachment reads at
+	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead) -- independent of
+	// DATA_SOURCE: a plain DATA_SOURCE=postgres deployment that points SLA reads at
 	// ServiceNow still needs real credentials for that client.
-	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow || c.AttachmentDataSource == AttachmentDataSourceServiceNow
+	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow
 	if snRequired {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceTokenURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientID == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientSecret == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 	}
 	// EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/EVENT_HUB_TOPIC are
@@ -1351,35 +1238,6 @@ func (c *Config) Validate() error {
 	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
-	}
-	switch c.AttachmentStorageMode {
-	case "", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend:
-	default:
-		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
-	}
-	// With ATTACHMENT_STORAGE_MODE=backend the SFTPGO_* settings are ignored, so a
-	// partial or insecure leftover from before the cutover must not stop the
-	// service starting. They are checked in every other mode.
-	if !c.HasBackendAttachmentStorage() {
-		// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
-		sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
-		if sftpgoSet && !c.HasSFTPGo() {
-			return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
-		}
-		if c.HasSFTPGo() {
-			for _, u := range []struct{ name, val string }{
-				{"SFTPGO_URL", c.SFTPGoURL},
-				{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
-			} {
-				parsed, err := url.Parse(u.val)
-				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-					return fmt.Errorf("%s must be an https URL", u.name)
-				}
-				if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
-					return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
-				}
-			}
-		}
 	}
 	scimSet := c.SCIMBaseURL != "" || c.SCIMTokenURL != "" || c.SCIMClientID != "" || c.SCIMClientSecret != "" || c.SCIMScopes != ""
 	if scimSet && !c.SCIMConfigured() {

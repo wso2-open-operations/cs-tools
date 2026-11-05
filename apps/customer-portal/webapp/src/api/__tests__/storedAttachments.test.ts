@@ -21,13 +21,10 @@ import {
   DOWNLOAD_RANGE_BYTES,
   downloadStoredAttachment,
   fetchInlineImageBlob,
-  requestAttachmentLink,
-  sendFileToUploadLink,
   toHyphenatedUuid,
   uploadStoredAttachment,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
-import { ApiError } from "@utils/ApiError";
 import {
   entityAttachmentMaxBytes,
   inlineImageMaxBytes,
@@ -59,158 +56,22 @@ describe("storedAttachments", () => {
     vi.restoreAllMocks();
   });
 
-  it("requests one link with the type, the id and the purpose", async () => {
-    authFetch.mockResolvedValueOnce(
-      json({ links: [{ id: "A-1", available: true, url: "https://f/x" }] }),
-    );
-    const link = await requestAttachmentLink(authFetch, {
-      type: "work_item",
-      id: "a-1",
-      purpose: "preview",
-    });
-    expect(link?.url).toBe("https://f/x");
-    const [url, init] = authFetch.mock.calls[0];
-    expect(url).toBe(`${BASE}/attachments/download`);
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({
-      type: "work_item",
-      ids: ["a-1"],
-      purpose: "preview",
-    });
-  });
-
-  describe("downloadStoredAttachment", () => {
-    let saved: { name: string; blob: Blob } | null;
-    beforeEach(() => {
-      saved = null;
-      URL.createObjectURL = vi.fn(() => "blob:test");
-      URL.revokeObjectURL = vi.fn();
-      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
-        function (this: HTMLAnchorElement) {
-          saved = { name: this.download, blob: new Blob() };
-        },
-      );
-    });
-
-    it("fetches the link without credentials and saves it under the attachment's own name", async () => {
-      authFetch.mockResolvedValueOnce(
-        json({
-          links: [
-            {
-              id: "a-1",
-              name: "report.pdf",
-              available: true,
-              url: "https://files.test/api/v2/shares/s1?compress=false",
-            },
-          ],
-        }),
-      );
-      rawFetch.mockResolvedValueOnce(new Response("pdf-bytes", { status: 200 }));
-
-      await downloadStoredAttachment(authFetch, {
-        type: "work_item",
-        id: "a-1",
-        name: "fallback.pdf",
-      });
-
-      expect(rawFetch).toHaveBeenCalledTimes(1);
-      const [url, init] = rawFetch.mock.calls[0];
-      expect(url).toBe("https://files.test/api/v2/shares/s1?compress=false");
-      expect(init).toEqual({ credentials: "omit" });
-      expect(saved?.name).toBe("report.pdf");
-      expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-    });
-
-    it("asks for one fresh link and retries once when the link fetch fails", async () => {
-      const link = (u: string) =>
-        json({ links: [{ id: "a-1", name: "r.pdf", available: true, url: u }] });
-      authFetch
-        .mockResolvedValueOnce(link("https://f/one"))
-        .mockResolvedValueOnce(link("https://f/two"));
-      rawFetch
-        .mockResolvedValueOnce(new Response("gone", { status: 404 }))
-        .mockResolvedValueOnce(new Response("ok", { status: 200 }));
-
-      await downloadStoredAttachment(authFetch, { type: "work_item", id: "a-1" });
-
-      expect(authFetch).toHaveBeenCalledTimes(2);
-      expect(rawFetch.mock.calls.map((c) => c[0])).toEqual([
-        "https://f/one",
-        "https://f/two",
-      ]);
-      expect(saved?.name).toBe("r.pdf");
-    });
-
-    it("does not retry a second time", async () => {
-      const link = (u: string) =>
-        json({ links: [{ id: "a-1", available: true, url: u }] });
-      authFetch
-        .mockResolvedValueOnce(link("https://f/one"))
-        .mockResolvedValueOnce(link("https://f/two"));
-      rawFetch.mockResolvedValue(new Response("no", { status: 500 }));
-
-      await expect(
-        downloadStoredAttachment(authFetch, { type: "work_item", id: "a-1" }),
-      ).rejects.toBeInstanceOf(ApiError);
-      expect(authFetch).toHaveBeenCalledTimes(2);
-      expect(rawFetch).toHaveBeenCalledTimes(2);
-    });
-
-    it("reports 404 when entity-service does not hold the attachment", async () => {
-      authFetch.mockResolvedValueOnce(json({ links: [] }));
-      await expect(
-        downloadStoredAttachment(authFetch, { type: "work_item", id: "a-1" }),
-      ).rejects.toMatchObject({ status: 404 });
-      expect(rawFetch).not.toHaveBeenCalled();
-    });
-
-    it("explains a link that is not available", async () => {
-      authFetch.mockResolvedValueOnce(
-        json({ links: [{ id: "a-1", available: false, reason: "DELETED" }] }),
-      );
-      await expect(
-        downloadStoredAttachment(authFetch, { type: "work_item", id: "a-1" }),
-      ).rejects.toThrow("This attachment has been deleted.");
-    });
-  });
-
-  it("sends the file as multipart form data in `filenames`, with no credentials or headers", async () => {
-    rawFetch.mockResolvedValueOnce(new Response("{}", { status: 201 }));
-    const file = new File(["hello"], "a.txt", { type: "text/plain" });
-
-    await sendFileToUploadLink(
-      { uploadUrl: "https://files.test/api/v2/shares/up1", fieldName: "filenames" },
-      file,
-    );
-
-    const [url, init] = rawFetch.mock.calls[0];
-    expect(url).toBe("https://files.test/api/v2/shares/up1");
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("omit");
-    expect(init.headers).toBeUndefined();
-    expect(init.body).toBeInstanceOf(FormData);
-    const entries = [...(init.body as FormData).entries()];
-    expect(entries).toHaveLength(1);
-    expect(entries[0][0]).toBe("filenames");
-    expect((entries[0][1] as File).name).toBe("a.txt");
-  });
-
   describe("uploadStoredAttachment", () => {
     const file = new File(["hello"], "a.txt", { type: "text/plain" });
     const started = {
       attachmentId: "att-1",
-      uploadUrl: "https://files.test/api/v2/shares/up1",
-      fieldName: "filenames",
       maxBytes: entityAttachmentMaxBytes(),
     };
+    const confirmed = { id: "att-1", name: "a.txt", sizeBytes: 5, status: "COMPLETE" };
+    const chunkCalls = () =>
+      authFetch.mock.calls.filter(([u]) => String(u).includes("/chunks/"));
 
     it("runs start, send and confirm in order and reports the steps", async () => {
-      authFetch
-        .mockResolvedValueOnce(json(started, 201))
-        .mockResolvedValueOnce(
-          json({ id: "att-1", name: "a.txt", sizeBytes: 5, status: "COMPLETE" }),
-        );
-      rawFetch.mockResolvedValueOnce(new Response("{}", { status: 201 }));
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started, 201);
+        if (url.includes("/chunks/")) return new Response(null, { status: 204 });
+        return json(confirmed);
+      });
       const steps: string[] = [];
 
       const done = await uploadStoredAttachment(authFetch, {
@@ -231,16 +92,20 @@ describe("storedAttachments", () => {
         contentType: "text/plain",
         sizeBytes: 5,
       });
-      expect(authFetch.mock.calls[1][0]).toBe(
-        `${BASE}/attachments/upload/att-1/confirm`,
-      );
+      expect(chunkCalls()).toHaveLength(1);
+      const confirm = authFetch.mock.calls.find(([u]) => String(u).endsWith("/confirm"))!;
+      expect(confirm[0]).toBe(`${BASE}/attachments/upload/att-1/confirm`);
+      expect(JSON.parse(confirm[1].body)).toEqual({ type: "work_item", chunks: 1 });
     });
 
     it("keeps the attachment id when only the confirm step fails, so confirm can be retried", async () => {
-      authFetch
-        .mockResolvedValueOnce(json(started, 201))
-        .mockResolvedValueOnce(json({ message: "storage unavailable" }, 503));
-      rawFetch.mockResolvedValueOnce(new Response("{}", { status: 201 }));
+      let confirms = 0;
+      authFetch.mockImplementation(async (url: string) => {
+        if (url.endsWith("/attachments/upload")) return json(started, 201);
+        if (url.includes("/chunks/")) return new Response(null, { status: 204 });
+        confirms++;
+        return confirms === 1 ? json({ message: "storage unavailable" }, 503) : json(confirmed);
+      });
 
       const error = await uploadStoredAttachment(authFetch, {
         type: "work_item",
@@ -251,17 +116,15 @@ describe("storedAttachments", () => {
 
       expect(error).toBeInstanceOf(UploadConfirmPendingError);
       expect((error as UploadConfirmPendingError).attachmentId).toBe("att-1");
-      expect(rawFetch).toHaveBeenCalledTimes(1);
+      expect(chunkCalls()).toHaveLength(1);
 
-      authFetch.mockResolvedValueOnce(
-        json({ id: "att-1", name: "a.txt", sizeBytes: 5, status: "COMPLETE" }),
-      );
       const retried = await confirmStoredUpload(authFetch, {
         type: "work_item",
         attachmentId: "att-1",
+        chunks: 1,
       });
       expect(retried.status).toBe("COMPLETE");
-      expect(rawFetch).toHaveBeenCalledTimes(1);
+      expect(chunkCalls()).toHaveLength(1);
     });
 
     it("refuses a file over the limit before anything is sent", async () => {
@@ -334,7 +197,7 @@ describe("storedAttachments", () => {
           name: "a.txt",
         }),
       ).rejects.toThrow(/exceeds/);
-      expect(rawFetch).not.toHaveBeenCalled();
+      expect(authFetch).toHaveBeenCalledTimes(1);
     });
 
     it("surfaces the closed-case message from the server", async () => {
@@ -355,12 +218,11 @@ describe("storedAttachments", () => {
     });
   });
 
-  describe("with the files held by the portal backend", () => {
+  describe("chunked upload and streamed download", () => {
     const CHUNK = 8 * 1024 * 1024;
     const withMode = () => {
       (window as unknown as { config: unknown }).config = {
         CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-        CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
       };
     };
     const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
@@ -599,7 +461,6 @@ describe("storedAttachments", () => {
       ] as const) {
         (window as unknown as { config: unknown }).config = {
           CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-          CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
           CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: configured,
         };
         const server = rangeServer(size, () => 5);
@@ -866,7 +727,6 @@ describe("storedAttachments", () => {
       it("skips the dialog when CUSTOMER_PORTAL_DOWNLOAD_TO_DISK is false", async () => {
         (window as unknown as { config: unknown }).config = {
           CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-          CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
           CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: false,
         };
         const disk = fakeDisk();
@@ -904,7 +764,7 @@ describe("storedAttachments", () => {
   it("tells the user to wait a minute on a 429", async () => {
     authFetch.mockResolvedValueOnce(json({ message: "slow down" }, 429));
     await expect(
-      requestAttachmentLink(authFetch, { type: "work_item", id: "a-1" }),
+      deleteStoredAttachment(authFetch, { type: "work_item", id: "a-1" }),
     ).rejects.toThrow(/wait a minute/);
   });
 

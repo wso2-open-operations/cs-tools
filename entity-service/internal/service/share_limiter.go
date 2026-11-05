@@ -21,10 +21,9 @@ import (
 	"time"
 )
 
-// shareLimiter caps how many SFTPGo shares one caller may have created in a
-// window. Each share is a stored record in SFTPGo, so this is what stops a
-// caller looping on the link endpoints. It is per pod and in memory: the limit is
-// a guard against abuse, not an exact quota.
+// shareLimiter caps how many uploads and locates one caller may start in a
+// window, which is what stops a caller looping on those endpoints. It is per pod
+// and in memory: the limit is a guard against abuse, not an exact quota.
 type shareLimiter struct {
 	mu      sync.Mutex
 	max     int
@@ -42,7 +41,7 @@ func newShareLimiter(max int, window time.Duration) *shareLimiter {
 	return &shareLimiter{max: max, window: window, buckets: map[string]shareBucket{}, now: time.Now}
 }
 
-// allow reserves n shares for caller and reports whether they fit in the
+// allow reserves n requests for caller and reports whether they fit in the
 // current window; when they do not, nothing is reserved.
 func (l *shareLimiter) allow(caller string, n int) bool {
 	l.mu.Lock()

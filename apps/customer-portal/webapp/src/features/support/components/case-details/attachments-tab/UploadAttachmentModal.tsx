@@ -31,10 +31,6 @@ import {
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
-import { usePostDeploymentAttachment } from "@features/project-details/api/usePostDeploymentAttachment";
-import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
-import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   entityAttachmentMaxBytes,
   formatLimit,
@@ -47,8 +43,6 @@ import {
 } from "@api/storedAttachments";
 import UploadAttachmentDropZone from "@case-details-attachments/UploadAttachmentDropZone";
 import SelectedFileDisplay from "@case-details-attachments/SelectedFileDisplay";
-
-export { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
 
 function getFileExtension(fileName: string): string {
   const dotIndex = fileName.lastIndexOf(".");
@@ -76,7 +70,9 @@ function ensureExtension(fileName: string, extension: string): string {
 
 /**
  * Modal for uploading a case attachment or deployment document: drag-and-drop or file picker.
- * Supports caseId (case attachments) or deploymentId (deployment documents). Max file size 10 MB.
+ * Supports caseId (case attachments) or deploymentId (deployment documents). The file is sent to
+ * the portal backend in chunks (start, chunks, confirm); the size limit is the configured
+ * attachment limit (100 MB by default).
  *
  * @param {UploadAttachmentModalProps} props - open, caseId/deploymentId, onClose, optional onSuccess.
  * @returns {JSX.Element} The upload attachment modal.
@@ -89,42 +85,28 @@ export default function UploadAttachmentModal({
   onSuccess,
   onSelect,
 }: UploadAttachmentModalProps): JSX.Element {
-  const postAttachments = usePostAttachments();
-  const postDeploymentAttachment = usePostDeploymentAttachment();
   const { upload: storedUpload, confirm: storedConfirm } =
     useStoredAttachmentUpload();
-  // With entity-service attachments on, the file goes straight to SFTPGo in three
-  // steps; off, it is sent as base64 through the portal backend as before.
-  const useStored = isEntityAttachmentsEnabled();
   const [uploadStep, setUploadStep] = useState<StoredUploadStep | null>(null);
-  // Bytes sent so far; set only while a large (TUS) upload runs.
+  // Bytes sent so far, while the chunks upload.
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const [storedError, setStoredError] = useState<string | null>(null);
-  // Set when the file arrived but the final confirm failed: retry only that step.
-  const [pendingConfirm, setPendingConfirm] = useState<string | null>(null);
+  // Set when the chunks arrived but the final confirm failed: retry only that step.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    attachmentId: string;
+    chunks: number;
+  } | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
-  // The stored (entity-service) upload has no description to send, so the field is
-  // not offered there.
-  const showDescription = isDeploymentMode && !useStored;
-  const maxBytes = useStored
-    ? entityAttachmentMaxBytes()
-    : MAX_ATTACHMENT_SIZE_BYTES;
+  const maxBytes = entityAttachmentMaxBytes();
   const maxLabel = formatLimit(maxBytes);
-  const isPending =
-    storedUpload.isPending ||
-    storedConfirm.isPending ||
-    (isDeploymentMode
-      ? postDeploymentAttachment.isPending
-      : postAttachments.isPending);
+  const isPending = storedUpload.isPending || storedConfirm.isPending;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [fileSizeErrorVisible, setFileSizeErrorVisible] = useState(false);
-  const [readErrorVisible, setReadErrorVisible] = useState(false);
 
   const fileTooLarge = file ? file.size > maxBytes : false;
   const displayName = name.trim() || (file ? getBaseFileName(file.name) : "");
@@ -137,9 +119,7 @@ export default function UploadAttachmentModal({
   const reset = useCallback(() => {
     setFile(null);
     setName("");
-    setDescription("");
     setFileSizeErrorVisible(false);
-    setReadErrorVisible(false);
     setUploadStep(null);
     setProgress(null);
     setStoredError(null);
@@ -147,8 +127,8 @@ export default function UploadAttachmentModal({
   }, []);
 
   const handleClose = useCallback(() => {
-    // Cancels a large upload still running; the pending row is left to the
-    // server's cleanup. No effect on a finished or multipart upload.
+    // Cancels an upload still running; the pending row is left to the
+    // server's cleanup. No effect on a finished upload.
     abortRef.current?.abort();
     abortRef.current = null;
     reset();
@@ -219,105 +199,63 @@ export default function UploadAttachmentModal({
 
     if (!caseId && !deploymentId) return;
 
-    if (useStored) {
-      setStoredError(null);
-      setProgress(null);
-      const controller = new AbortController();
-      abortRef.current = controller;
-      storedUpload.mutate(
-        {
-          type: isDeploymentMode ? "deployment" : "work_item",
-          parentId: (isDeploymentMode ? deploymentId : caseId)!,
-          file,
-          body: { name: attachmentName },
-          ...(isDeploymentMode ? { deploymentId } : { caseId }),
-          onStep: setUploadStep,
-          signal: controller.signal,
-          onProgress: (sent, total) => setProgress({ sent, total }),
+    setStoredError(null);
+    setProgress(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    storedUpload.mutate(
+      {
+        type: isDeploymentMode ? "deployment" : "work_item",
+        parentId: (isDeploymentMode ? deploymentId : caseId)!,
+        file,
+        body: { name: attachmentName },
+        ...(isDeploymentMode ? { deploymentId } : { caseId }),
+        onStep: setUploadStep,
+        signal: controller.signal,
+        onProgress: (sent, total) => setProgress({ sent, total }),
+      },
+      {
+        onSuccess: () => {
+          handleClose();
+          onSuccess?.();
         },
-        {
-          onSuccess: () => {
-            handleClose();
-            onSuccess?.();
-          },
-          onError: (error) => {
-            if (controller.signal.aborted || isAbortError(error)) return;
-            abortRef.current = null;
-            setUploadStep(null);
-            setProgress(null);
-            if (error instanceof UploadConfirmPendingError) {
-              setPendingConfirm(error.attachmentId);
-            }
-            setStoredError(error.message);
-          },
+        onError: (error) => {
+          if (controller.signal.aborted || isAbortError(error)) return;
+          abortRef.current = null;
+          setUploadStep(null);
+          setProgress(null);
+          if (error instanceof UploadConfirmPendingError) {
+            setPendingConfirm({
+              attachmentId: error.attachmentId,
+              chunks: error.chunks,
+            });
+          }
+          setStoredError(error.message);
         },
-      );
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = typeof reader.result === "string" ? reader.result : "";
-      const commaIndex = base64.indexOf(",");
-      const content = commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
-      const body = {
-        name: attachmentName,
-        type: file.type || "application/octet-stream",
-        content,
-        ...(description.trim() && { description: description.trim() }),
-      };
-
-      if (isDeploymentMode) {
-        postDeploymentAttachment.mutate(
-          { deploymentId: deploymentId!, body },
-          {
-            onSuccess: () => {
-              handleClose();
-              onSuccess?.();
-            },
-          },
-        );
-      } else if (caseId) {
-        postAttachments.mutate(
-          { caseId, body },
-          {
-            onSuccess: () => {
-              handleClose();
-              onSuccess?.();
-            },
-          },
-        );
-      }
-    };
-    reader.onerror = () => {
-      setReadErrorVisible(true);
-    };
-    reader.readAsDataURL(file);
+      },
+    );
   }, [
     caseId,
     deploymentId,
     file,
     name,
-    description,
     fileTooLarge,
     isDeploymentMode,
-    postAttachments,
-    postDeploymentAttachment,
     storedUpload,
-    useStored,
     handleClose,
     onSuccess,
     onSelect,
   ]);
 
-  // Retries only the final step; the file is already in place.
+  // Retries only the final step; the chunks are already stored.
   const handleRetryConfirm = useCallback(() => {
     if (!pendingConfirm) return;
     setStoredError(null);
     storedConfirm.mutate(
       {
         type: isDeploymentMode ? "deployment" : "work_item",
-        attachmentId: pendingConfirm,
+        attachmentId: pendingConfirm.attachmentId,
+        chunks: pendingConfirm.chunks,
         ...(isDeploymentMode ? { deploymentId } : { caseId }),
       },
       {
@@ -379,15 +317,6 @@ export default function UploadAttachmentModal({
             {storedError}
           </Alert>
         )}
-        {readErrorVisible && (
-          <Alert
-            severity="error"
-            onClose={() => setReadErrorVisible(false)}
-            sx={{ mb: 2 }}
-          >
-            Failed to read file. Please try again.
-          </Alert>
-        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -437,19 +366,6 @@ export default function UploadAttachmentModal({
           disabled={!file}
           sx={{ mt: 2 }}
         />
-        {showDescription && (
-          <TextField
-            fullWidth
-            label="Description (optional)"
-            placeholder="Add a short description for this file"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={!file}
-            multiline
-            minRows={2}
-            sx={{ mt: 2 }}
-          />
-        )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2, pt: 1 }}>
         <Button

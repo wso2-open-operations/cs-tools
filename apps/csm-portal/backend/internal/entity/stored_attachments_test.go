@@ -18,13 +18,10 @@ package entity
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
 
 func newStoredTestClient(t *testing.T, h http.HandlerFunc) *CustomerEntityClient {
@@ -50,9 +47,6 @@ func TestStoredAttachmentCallsSendTheDocumentedRequests(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	})
 	ctx := context.Background()
-	if _, err := c.StoredAttachmentLinks(ctx, []byte(`{"a":1}`)); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := c.InitiateStoredAttachmentUpload(ctx, []byte(`{"b":2}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +57,7 @@ func TestStoredAttachmentCallsSendTheDocumentedRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		`POST /attachments/download {"a":1}`, `POST /attachments/upload {"b":2}`,
+		`POST /attachments/upload {"b":2}`,
 		`POST /attachments/upload/id-1/confirm {"c":3}`, `POST /attachments/delete {"d":4}`,
 	}
 	if len(got) != len(want) {
@@ -73,40 +67,5 @@ func TestStoredAttachmentCallsSendTheDocumentedRequests(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
 		}
-	}
-}
-
-func TestOpenInlineImageStreamsTheBodyAndForwardsIdentity(t *testing.T) {
-	t.Parallel()
-	var gotToken, gotCorrelation, gotPath string
-	c := newStoredTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		gotToken, gotCorrelation, gotPath = r.Header.Get("x-user-id-token"), r.Header.Get("X-CSM-Correlation-ID"), r.URL.Path
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write([]byte("PNGDATA"))
-	})
-	ctx := WithCorrelationID(WithUserIDToken(context.Background(), "tok"), "corr-1")
-	img, err := c.OpenInlineImage(ctx, "abc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer img.Body.Close()
-	b, _ := io.ReadAll(img.Body)
-	if string(b) != "PNGDATA" || img.ContentType != "image/png" || img.Length != 7 {
-		t.Errorf("got %q type=%q len=%d", b, img.ContentType, img.Length)
-	}
-	if gotToken != "tok" || gotCorrelation != "corr-1" || gotPath != "/attachments/inline/abc/content" {
-		t.Errorf("token=%q correlation=%q path=%q", gotToken, gotCorrelation, gotPath)
-	}
-}
-
-func TestOpenInlineImageReturnsTheUpstreamStatusAsAnError(t *testing.T) {
-	t.Parallel()
-	c := newStoredTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, `{"message":"attachment not found"}`, http.StatusNotFound)
-	})
-	_, err := c.OpenInlineImage(context.Background(), "abc")
-	var apiErr *apierror.Error
-	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
-		t.Errorf("err = %v, want an *apierror.Error with status 404", err)
 	}
 }

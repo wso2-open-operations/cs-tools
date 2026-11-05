@@ -24,14 +24,10 @@ import LoggerProvider from "@context/logger/LoggerProvider";
 const mockMutate = vi.fn();
 const mockUpload = vi.fn();
 const mockConfirm = vi.fn();
-const entityAttachmentsEnabled = vi.fn(() => true);
+const mockAttachmentUpload = vi.fn();
 
 vi.mock("@/hooks/useAuthApiClient", () => ({
   useAuthApiClient: () => vi.fn(),
-}));
-
-vi.mock("@/config/entityAttachmentsConfig", () => ({
-  isEntityAttachmentsEnabled: () => entityAttachmentsEnabled(),
 }));
 
 vi.mock("@api/storedAttachments", async () => {
@@ -53,15 +49,34 @@ vi.mock("@features/support/api/usePostComment", () => ({
   })),
 }));
 
-vi.mock("@features/support/api/usePostAttachments", () => ({
-  usePostAttachments: vi.fn(() => ({
-    mutate: vi.fn(),
-    isPending: false,
+vi.mock("@api/useStoredAttachments", () => ({
+  useStoredAttachmentUpload: vi.fn(() => ({
+    upload: {
+      mutateAsync: (...args: unknown[]) => mockAttachmentUpload(...args),
+      isPending: false,
+    },
+    confirm: { mutateAsync: vi.fn(), isPending: false },
   })),
 }));
 
 vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
-  default: () => null,
+  default: ({
+    open,
+    onSelect,
+  }: {
+    open: boolean;
+    onSelect?: (file: File, name?: string) => void;
+  }) =>
+    open ? (
+      <button
+        type="button"
+        onClick={() =>
+          onSelect?.(new File(["notes"], "notes.txt", { type: "text/plain" }), "notes.txt")
+        }
+      >
+        pick file
+      </button>
+    ) : null,
 }));
 
 vi.mock("@asgardeo/react", () => ({
@@ -89,7 +104,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     overlayElement,
     onImageUpload,
     onPasteError,
+    onAttachmentClick,
   }: {
+    onAttachmentClick?: () => void;
     onPasteError?: (reason: "size" | "type" | "count") => void;
     onChange?: (html: string) => void;
     overlayElement?: React.ReactNode;
@@ -114,6 +131,9 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
           add image
         </button>
       )}
+      <button type="button" onClick={() => onAttachmentClick?.()}>
+        open attachment dialog
+      </button>
       <button type="button" onClick={() => onPasteError?.("count")}>
         report too many images
       </button>
@@ -139,8 +159,7 @@ describe("ActivityCommentInput", () => {
     mockMutate.mockReset();
     mockUpload.mockReset();
     mockConfirm.mockReset();
-    entityAttachmentsEnabled.mockReset();
-    entityAttachmentsEnabled.mockReturnValue(true);
+    mockAttachmentUpload.mockReset();
     Object.assign(URL, { revokeObjectURL: vi.fn() });
     useCustomerPermissionsMock.mockReset();
     useCustomerPermissionsMock.mockReturnValue({
@@ -199,6 +218,86 @@ describe("ActivityCommentInput", () => {
     });
     const { container } = renderInput();
     expect(container).toBeEmptyDOMElement();
+  });
+
+  describe("files attached to the comment", () => {
+    it("uploads an attached file through the stored upload, as an attachment of the case, alongside the comment", async () => {
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
+      );
+      renderInput("case-001");
+
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      fireEvent.click(screen.getByRole("button", { name: "pick file" }));
+      fireEvent.change(screen.getByTestId("case-description-editor"), {
+        target: { value: "<p>see the file</p>" },
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /send comment/i })).not.toBeDisabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /send comment/i }));
+
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(1));
+      expect(mockAttachmentUpload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "work_item",
+          parentId: "case-001",
+          caseId: "case-001",
+          body: { name: "notes.txt" },
+          file: expect.any(File),
+        }),
+      );
+    });
+  });
+
+  describe("the comment and the attached files are sent separately", () => {
+    const attachAndType = (html: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      fireEvent.click(screen.getByRole("button", { name: "pick file" }));
+      fireEvent.change(screen.getByTestId("case-description-editor"), { target: { value: html } });
+    };
+    const send = async () => {
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /send comment/i })).not.toBeDisabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /send comment/i }));
+    };
+
+    it("uploads the file even when the comment cannot be posted, and keeps the comment", async () => {
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onError?: (e: unknown) => void }) =>
+          options?.onError?.(new Error("Comments are closed.")),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/The comment was not posted \(Comments are closed\.\)/)).toBeTruthy();
+      // The file went through, so it is no longer queued.
+      expect(screen.queryByRole("button", { name: /send comment/i })).not.toBeDisabled();
+    });
+
+    it("posts the comment even when the file cannot be uploaded, and keeps the file attached", async () => {
+      mockAttachmentUpload.mockRejectedValue(new Error("The upload was interrupted."));
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/"notes\.txt": The upload was interrupted\./)).toBeTruthy();
+
+      // Sending again uploads only the file; there is no comment left to post.
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      await send();
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(2));
+      expect(mockMutate).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("images added to the comment", () => {
@@ -275,7 +374,7 @@ describe("ActivityCommentInput", () => {
         typeof import("@api/storedAttachments")
       >("@api/storedAttachments");
       mockUpload.mockRejectedValue(
-        new UploadConfirmPendingError("comment", "att-9", "confirm failed"),
+        new UploadConfirmPendingError("comment", "att-9", "confirm failed", 2),
       );
       mockConfirm.mockResolvedValue({ id: ID, status: "COMPLETE" });
       renderInput();
@@ -289,6 +388,7 @@ describe("ActivityCommentInput", () => {
       expect(mockConfirm).toHaveBeenCalledWith(expect.anything(), {
         type: "comment",
         attachmentId: "att-9",
+        chunks: 2,
       });
       expect(mockUpload).toHaveBeenCalledTimes(1);
       expect(mockMutate.mock.calls[0][0].body.content).toContain(`src="/${ID}"`);
@@ -342,14 +442,6 @@ describe("ActivityCommentInput", () => {
       expect(
         await screen.findByText("A comment can have at most 5 images."),
       ).toBeInTheDocument();
-    });
-
-    it("does not upload through entity-service when attachments are off (images stay embedded)", () => {
-      entityAttachmentsEnabled.mockReturnValue(false);
-      renderInput();
-      expect(
-        screen.queryByRole("button", { name: "add image" }),
-      ).not.toBeInTheDocument();
     });
   });
 });

@@ -30,7 +30,7 @@ import (
 )
 
 // StoredAttachmentRepository persists the three attachment tables whose files
-// live in SFTPGo: work_item_attachment, comment_attachment and
+// live in Azure Blob Storage: work_item_attachment, comment_attachment and
 // deployment_attachment.
 //
 // All three are row-level-security protected (migration 100026), so every read

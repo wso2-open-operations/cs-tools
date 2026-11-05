@@ -54,7 +54,6 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { releaseInlineImages } from "@features/csm-cases/api/inlineImageUploads";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import {
   usePatchCsmCase,
@@ -94,6 +93,7 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -2296,12 +2296,11 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
-  // Entity-service stored attachments: only the person who uploaded a file may
-  // delete it, and not once the case is closed. (Off = every row, as before; the
-  // backend still enforces the rule, this only hides a button that would fail.)
+  // Only the person who uploaded a file may delete it, and not once the case is
+  // closed. The backend enforces the rule; this only hides a button that would
+  // fail.
   const canDeleteAttachmentRow = useCallback(
     (a: CaseAttachment): boolean => {
-      if (!isEntityAttachmentsEnabled()) return true;
       if (data?.state === "closed") return false;
       const mine = (currentUser?.email || currentUserEmail)?.trim().toLowerCase();
       const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
@@ -2828,28 +2827,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  // Post the comment when it has text or an image; an attachment-only
-                  // send skips the comment endpoint and just uploads the files.
-                  if (hasCommentContent(bodyHtml)) {
-                    await postComment.mutateAsync({
-                      caseId,
-                      bodyHtml,
-                      authorName: engineerName,
-                      internal,
-                    });
-                  }
-                  // Attachments are case-level (no comment linkage on the BE);
-                  // upload each sequentially so a failure surfaces clearly.
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                    });
-                  }
-                  // Collapse and clear the draft only on success; on error the
-                  // input keeps its draft + files and surfaces the failure.
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
+                  });
+                  // Collapse and clear the draft only when everything went through.
                   setComposerOpen(false);
                   clearComposerDraft();
                 }}

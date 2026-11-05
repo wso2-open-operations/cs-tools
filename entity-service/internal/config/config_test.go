@@ -29,13 +29,12 @@ import (
 // test only needs to override the field(s) under test.
 func baseValidConfig() Config {
 	return Config{
-		DataSource:           DataSourcePostgres,
-		SLADataSource:        SLADataSourcePostgres,
-		UsageReadMode:        UsageReadModePostgres,
-		AttachmentDataSource: AttachmentDataSourcePostgres,
-		DBUser:               "user",
-		DBPassword:           "password",
-		DBName:               "db",
+		DataSource:    DataSourcePostgres,
+		SLADataSource: SLADataSourcePostgres,
+		UsageReadMode: UsageReadModePostgres,
+		DBUser:        "user",
+		DBPassword:    "password",
+		DBName:        "db",
 		// Both ports carry their real defaults: Load always populates them,
 		// and Validate rejects the two being equal — which a zero-value
 		// Config would be.
@@ -395,7 +394,6 @@ func baseValidServiceNowConfig() Config {
 		DataSource:                               DataSourceServiceNow,
 		SLADataSource:                            SLADataSourcePostgres,
 		UsageReadMode:                            UsageReadModePostgres,
-		AttachmentDataSource:                     AttachmentDataSourcePostgres,
 		ServiceNowIntegrationServiceBaseURL:      "https://example.com",
 		ServiceNowIntegrationServiceTokenURL:     "https://example.com/token",
 		ServiceNowIntegrationServiceClientID:     "client-id",
@@ -1408,203 +1406,27 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 	}
 }
 
-func TestConfig_Validate_SFTPGoAllOrNothing(t *testing.T) {
-	tests := []struct {
-		name              string
-		url, user, passwd string
-		wantErr           bool
-	}{
-		{name: "none set"},
-		{name: "all three set", url: "https://sftpgo.internal:8080", user: "svc", passwd: "p"},
-		{name: "only url", url: "https://sftpgo.internal:8080", wantErr: true},
-		{name: "only user", user: "svc", wantErr: true},
-		{name: "only password", passwd: "p", wantErr: true},
-		{name: "missing password", url: "https://sftpgo.internal:8080", user: "svc", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := baseValidConfig()
-			c.SFTPGoURL, c.SFTPGoPublicURL = tt.url, tt.url
-			c.SFTPGoUser, c.SFTPGoPassword = tt.user, tt.passwd
-			err := c.Validate()
-			if tt.wantErr && err == nil {
-				t.Error("Validate() = nil, want an error for a partial SFTPGo configuration")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("Validate() = %v, want nil", err)
-			}
-		})
-	}
-}
-
-func TestConfig_Validate_SFTPGoRequiresHTTPSUnlessOptedOut(t *testing.T) {
-	c := baseValidConfig()
-	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "http://localhost:8080", "http://localhost:8080", "svc", "p"
-	if err := c.Validate(); err == nil {
-		t.Error("an http SFTPGO_URL was accepted without SFTPGO_ALLOW_INSECURE_HTTP")
-	}
-	c.SFTPGoURL = "https://sftpgo.internal"
-	if err := c.Validate(); err == nil {
-		t.Error("an http SFTPGO_PUBLIC_URL was accepted without SFTPGO_ALLOW_INSECURE_HTTP")
-	}
-	c.SFTPGoURL, c.SFTPGoAllowInsecureHTTP = "http://localhost:8080", true
-	if err := c.Validate(); err != nil {
-		t.Errorf("http with the local-development opt-out: %v", err)
-	}
-}
-
-func TestConfig_Validate_SFTPGoURLsMustBeHTTP(t *testing.T) {
-	for _, bad := range []string{"sftpgo.internal:8080", "ftp://sftpgo", "https://", "not a url"} {
-		c := baseValidConfig()
-		c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = bad, bad, "svc", "s3cret"
-		err := c.Validate()
-		if err == nil {
-			t.Errorf("SFTPGO_URL %q accepted, want an error", bad)
-			continue
-		}
-		if strings.Contains(err.Error(), "s3cret") {
-			t.Errorf("error for %q leaks the password: %v", bad, err)
-		}
-	}
-	// A bad public address alone is also refused.
-	c := baseValidConfig()
-	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "files.example.com", "svc", "p"
-	if err := c.Validate(); err == nil {
-		t.Error("a SFTPGO_PUBLIC_URL without a scheme was accepted")
-	}
-}
-
-func TestLoad_SFTPGoDefaultsAndPublicURLFallback(t *testing.T) {
-	for _, k := range []string{"SFTPGO_URL", "SFTPGO_PUBLIC_URL", "SFTPGO_USER", "SFTPGO_PASSWORD",
-		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "ATTACHMENT_READ_LINK_TTL", "ATTACHMENT_UPLOAD_LINK_TTL"} {
+func TestLoad_AttachmentSizeLimits(t *testing.T) {
+	for _, k := range []string{"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES"} {
 		t.Setenv(k, "")
 	}
 	c := Load()
-	if c.HasSFTPGo() {
-		t.Error("HasSFTPGo() = true with nothing configured")
-	}
 	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
 		t.Errorf("size limits = %d / %d, want 100 MiB / 10 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
-	if c.AttachmentReadLinkTTL != time.Minute || c.AttachmentUploadLinkTTL != 15*time.Minute {
-		t.Errorf("link TTLs = %s / %s, want 1m / 15m", c.AttachmentReadLinkTTL, c.AttachmentUploadLinkTTL)
-	}
 
-	t.Setenv("SFTPGO_URL", " https://sftpgo.internal:8080/ ")
-	t.Setenv("SFTPGO_USER", "svc")
-	t.Setenv("SFTPGO_PASSWORD", "p")
-	c = Load()
-	if !c.HasSFTPGo() || c.SFTPGoURL != "https://sftpgo.internal:8080" {
-		t.Errorf("SFTPGoURL = %q, HasSFTPGo = %v", c.SFTPGoURL, c.HasSFTPGo())
-	}
-	if c.SFTPGoPublicURL != c.SFTPGoURL {
-		t.Errorf("public URL = %q, want it to fall back to %q", c.SFTPGoPublicURL, c.SFTPGoURL)
-	}
-
-	t.Setenv("SFTPGO_PUBLIC_URL", "https://files.example.com/")
 	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
-	t.Setenv("ATTACHMENT_READ_LINK_TTL", "2m")
+	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
 	c = Load()
-	if c.SFTPGoPublicURL != "https://files.example.com" || c.AttachmentMaxBytes != 52428800 || c.AttachmentReadLinkTTL != 2*time.Minute {
-		t.Errorf("overrides not read: public=%q max=%d ttl=%s", c.SFTPGoPublicURL, c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
+	if c.AttachmentMaxBytes != 52428800 || c.InlineImageMaxBytes != 1048576 {
+		t.Errorf("overrides not read: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
 
 	// A typo costs the override, not the service.
 	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
-	t.Setenv("ATTACHMENT_READ_LINK_TTL", "-5m")
+	t.Setenv("INLINE_IMAGE_MAX_BYTES", "-5")
 	c = Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.AttachmentReadLinkTTL != time.Minute {
-		t.Errorf("bad values did not fall back to the defaults: %d / %s", c.AttachmentMaxBytes, c.AttachmentReadLinkTTL)
-	}
-}
-
-func TestLoad_AttachmentStorageMode(t *testing.T) {
-	t.Setenv("ATTACHMENT_STORAGE_MODE", "")
-	c := Load()
-	if c.AttachmentStorageMode != AttachmentStorageModeSFTPGo || c.HasBackendAttachmentStorage() {
-		t.Errorf("default mode = %q (backend: %v), want sftpgo", c.AttachmentStorageMode, c.HasBackendAttachmentStorage())
-	}
-
-	// Case and surrounding space in the value do not matter.
-	for _, v := range []string{"backend", "BACKEND", "Backend", " backend "} {
-		t.Setenv("ATTACHMENT_STORAGE_MODE", v)
-		if c := Load(); !c.HasBackendAttachmentStorage() {
-			t.Errorf("ATTACHMENT_STORAGE_MODE=%q did not select backend storage", v)
-		}
-	}
-	t.Setenv("ATTACHMENT_STORAGE_MODE", "sftpgo")
-	if c := Load(); c.HasBackendAttachmentStorage() {
-		t.Error("ATTACHMENT_STORAGE_MODE=sftpgo selected backend storage")
-	}
-}
-
-func TestConfig_Validate_AttachmentStorageMode(t *testing.T) {
-	for _, mode := range []AttachmentStorageMode{"", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend} {
-		c := baseValidConfig()
-		c.AttachmentStorageMode = mode
-		if err := c.Validate(); err != nil {
-			t.Errorf("mode %q refused: %v", mode, err)
-		}
-	}
-
-	// A typo must stop the service: silently falling back to sftpgo would leave the
-	// backends calling routes that are not registered.
-	for _, mode := range []AttachmentStorageMode{"blob", "azure", "backends", " backend"} {
-		c := baseValidConfig()
-		c.AttachmentStorageMode = mode
-		err := c.Validate()
-		if err == nil || !strings.Contains(err.Error(), "ATTACHMENT_STORAGE_MODE") {
-			t.Errorf("mode %q: err = %v, want an ATTACHMENT_STORAGE_MODE error", mode, err)
-		}
-	}
-}
-
-// Backend storage needs no SFTPGo settings, and a deployment that still has them
-// set is not refused: the mode wins and they are ignored.
-func TestConfig_Validate_BackendModeNeedsNoSFTPGo(t *testing.T) {
-	c := baseValidConfig()
-	c.AttachmentStorageMode = AttachmentStorageModeBackend
-	if err := c.Validate(); err != nil {
-		t.Fatalf("backend mode without SFTPGo: %v", err)
-	}
-	c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "https://sftpgo.internal", "svc", "p"
-	if err := c.Validate(); err != nil {
-		t.Fatalf("backend mode with SFTPGo still set: %v", err)
-	}
-}
-
-// A leftover SFTPGO_* setting that would be refused in sftpgo mode (partial, or
-// http without the insecure flag) is ignored in backend mode, and still refused
-// in every other mode.
-func TestConfig_Validate_BackendModeIgnoresBrokenSFTPGoSettings(t *testing.T) {
-	broken := map[string]func(c *Config){
-		"only the url":  func(c *Config) { c.SFTPGoURL = "https://sftpgo.internal" },
-		"only the user": func(c *Config) { c.SFTPGoUser = "svc" },
-		"http without the flag": func(c *Config) {
-			c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "http://sftpgo.internal", "http://sftpgo.internal", "svc", "p"
-		},
-		"a public url that fails": func(c *Config) {
-			c.SFTPGoURL, c.SFTPGoPublicURL, c.SFTPGoUser, c.SFTPGoPassword = "https://sftpgo.internal", "not a url", "svc", "p"
-		},
-	}
-	for name, set := range broken {
-		t.Run(name, func(t *testing.T) {
-			c := baseValidConfig()
-			set(&c)
-			if err := c.Validate(); err == nil {
-				t.Fatal("sftpgo mode accepted a broken SFTPGO_* setting")
-			}
-
-			c.AttachmentStorageMode = AttachmentStorageModeBackend
-			if err := c.Validate(); err != nil {
-				t.Errorf("backend mode refused an ignored SFTPGO_* setting: %v", err)
-			}
-
-			// The mode itself is still validated.
-			c.AttachmentStorageMode = "nope"
-			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "ATTACHMENT_STORAGE_MODE") {
-				t.Errorf("an invalid mode gave %v", err)
-			}
-		})
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
+		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
 }

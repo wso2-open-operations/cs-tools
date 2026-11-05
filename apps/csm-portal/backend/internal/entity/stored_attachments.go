@@ -19,18 +19,9 @@ package entity
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-
-	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
 )
-
-// StoredAttachmentLinks calls POST /attachments/download: metadata and a
-// short-lived link for each attachment file held in SFTPGo. Response is raw JSON.
-func (c *CustomerEntityClient) StoredAttachmentLinks(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/attachments/download", body)
-}
 
 // InitiateStoredAttachmentUpload calls POST /attachments/upload. Response is raw JSON.
 func (c *CustomerEntityClient) InitiateStoredAttachmentUpload(ctx context.Context, body []byte) ([]byte, error) {
@@ -49,45 +40,10 @@ func (c *CustomerEntityClient) DeleteStoredAttachment(ctx context.Context, body 
 	return err
 }
 
-// InlineImageStream is a comment image being streamed from the entity service.
-// The caller closes Body. Length is -1 when the upstream did not say.
-type InlineImageStream struct {
-	Body        io.ReadCloser
-	ContentType string
-	Length      int64
-}
-
-// OpenInlineImage calls GET /attachments/inline/{id}/content and returns the
-// response body unread, so a large image is streamed through instead of being
-// held in memory. A non-2xx answer is returned as an *apierror.Error.
-func (c *CustomerEntityClient) OpenInlineImage(ctx context.Context, id string) (*InlineImageStream, error) {
-	path := fmt.Sprintf("/attachments/inline/%s/content", url.PathEscape(id))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("entity: build request GET %s: %w", path, err)
-	}
-	if token := UserIDTokenFromContext(ctx); token != "" {
-		req.Header.Set("x-user-id-token", token)
-	}
-	if cid := correlationIDFromContext(ctx); cid != "" {
-		req.Header.Set("X-CSM-Correlation-ID", cid)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("entity: GET %s: %w", path, err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		defer resp.Body.Close()
-		excerpt, _ := io.ReadAll(io.LimitReader(resp.Body, maxEntityErrBody))
-		return nil, &apierror.Error{StatusCode: resp.StatusCode, Body: string(excerpt)}
-	}
-	return &InlineImageStream{Body: resp.Body, ContentType: resp.Header.Get("Content-Type"), Length: resp.ContentLength}, nil
-}
-
-// The calls below exist only when entity-service runs with
-// ATTACHMENT_STORAGE_MODE=backend: it decides who may touch which file and says
-// where it lives, and this backend moves the bytes. Their responses carry the
-// storage key, so they are for this backend alone and must never be relayed.
+// The calls below are how this backend learns where a file lives: entity-service
+// decides who may touch which file and says which key to use, and this backend
+// moves the bytes. Their responses carry the storage key, so they are for this
+// backend alone and must never be relayed.
 
 // AuthorizeStoredAttachmentUpload calls POST /attachments/upload/{id}/authorize.
 func (c *CustomerEntityClient) AuthorizeStoredAttachmentUpload(ctx context.Context, id string, body []byte) ([]byte, error) {

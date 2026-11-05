@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { isBackendAttachmentStorage } from "@config/entityAttachmentsConfig";
 import {
   downloadParallelism,
   entityAttachmentMaxBytes,
@@ -37,36 +36,10 @@ export type DownloadProgress = (received: number, total: number) => void;
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
-/** Why a download link is not available, as entity-service reports it. */
-export type AttachmentUnavailableReason =
-  | "DELETED"
-  | "FAILED"
-  | "NOT_STORED"
-  | "STORAGE_UNAVAILABLE";
-
-/** One entry of POST /attachments/download. */
-export interface StoredAttachmentLink {
-  id: string;
-  number?: string;
-  name?: string;
-  contentType?: string;
-  sizeBytes?: number;
-  available: boolean;
-  reason?: AttachmentUnavailableReason | string;
-  url?: string;
-  expiresAt?: string;
-}
-
-/**
- * Response of POST /attachments/upload. With the files held by the portal
- * backend (see `isBackendAttachmentStorage`) there is no `uploadUrl`: the file
- * is sent to the backend in chunks instead.
- */
+/** Response of POST /attachments/upload: the file is then sent to the backend in chunks. */
 export interface StoredAttachmentUploadStart {
   attachmentId: string;
   number?: string;
-  uploadUrl?: string;
-  fieldName?: string;
   expiresAt?: string;
   maxBytes: number;
 }
@@ -90,28 +63,24 @@ export type AuthFetch = (
 export const STORED_ATTACHMENT_RATE_LIMIT_MESSAGE =
   "Too many attachment requests. Please wait a minute and try again.";
 
-const UNAVAILABLE_REASON_MESSAGES: Record<string, string> = {
-  DELETED: "This attachment has been deleted.",
-  FAILED: "This attachment could not be stored.",
-  NOT_STORED: "This attachment is not available yet.",
-  STORAGE_UNAVAILABLE:
-    "File storage is temporarily unavailable. Please try again in a moment.",
-};
-
-/** Raised when a confirmed upload could not be finished; the file is still staged. */
+/** Raised when a confirmed upload could not be finished; the chunks are still stored. */
 export class UploadConfirmPendingError extends Error {
   public readonly attachmentId: string;
   public readonly type: StoredAttachmentType;
+  /** How many chunks were stored; the retried confirm must name the same count. */
+  public readonly chunks: number;
 
   constructor(
     type: StoredAttachmentType,
     attachmentId: string,
     message: string,
+    chunks: number,
   ) {
     super(message);
     this.name = "UploadConfirmPendingError";
     this.type = type;
     this.attachmentId = attachmentId;
+    this.chunks = chunks;
   }
 }
 
@@ -160,51 +129,6 @@ async function postJson(
   });
   if (!response.ok) throw await toApiError(response);
   return response;
-}
-
-/**
- * Asks for the link to one attachment's file. The link is single-use and lasts
- * about a minute, so it must be fetched right after this returns and never kept.
- * Returns undefined when entity-service has no such attachment of this type (a
- * hidden one, or one stored by the older flow).
- */
-export async function requestAttachmentLink(
-  authFetch: AuthFetch,
-  input: {
-    type: StoredAttachmentType;
-    id: string;
-    purpose?: "download" | "preview";
-  },
-): Promise<StoredAttachmentLink | undefined> {
-  const response = await postJson(authFetch, "/attachments/download", {
-    type: input.type,
-    ids: [input.id],
-    purpose: input.purpose ?? "download",
-  });
-  const data = (await response.json()) as { links?: StoredAttachmentLink[] };
-  const wanted = input.id.toLowerCase();
-  return (data.links ?? []).find((l) => l.id?.toLowerCase() === wanted);
-}
-
-/** The message shown for a link that is not available. */
-export function unavailableMessage(reason?: string): string {
-  return (
-    (reason && UNAVAILABLE_REASON_MESSAGES[reason]) ||
-    "This attachment is not available."
-  );
-}
-
-/** Fetches a link's file straight from SFTPGo: no app credentials are sent. */
-async function fetchLinkBlob(url: string): Promise<Blob> {
-  const response = await fetch(url, { credentials: "omit" });
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      response.statusText,
-      `The file could not be downloaded (HTTP ${response.status}).`,
-    );
-  }
-  return response.blob();
 }
 
 /** Saves a blob under a chosen file name through a temporary object URL. */
@@ -448,10 +372,8 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
 }
 
 /**
- * Downloads one attachment: asks for a link, fetches it at once and saves the
- * bytes under the attachment's own name (the stored file's name carries an
- * internal prefix and a cross-origin `<a download>` would be ignored). If
- * fetching the link fails, one fresh link is requested and tried once more.
+ * Downloads one attachment through the portal backend, saving the bytes under
+ * the attachment's own name.
  *
  * Throws an ApiError with status 404 when entity-service has no such stored
  * attachment, which a caller still on the older flow can fall back from.
@@ -460,49 +382,10 @@ export async function downloadStoredAttachment(
   authFetch: AuthFetch,
   input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
 ): Promise<void> {
-  if (isBackendAttachmentStorage()) {
-    await downloadFromBackend(authFetch, input);
-    return;
-  }
-  const link = await requestAttachmentLink(authFetch, {
-    type: input.type,
-    id: input.id,
-    purpose: "download",
-  });
-  if (!link) {
-    throw new ApiError(404, "Not Found", "Attachment not found.");
-  }
-  if (!link.available || !link.url) {
-    throw new ApiError(
-      link.reason === "STORAGE_UNAVAILABLE" ? 503 : 410,
-      "Unavailable",
-      unavailableMessage(link.reason),
-    );
-  }
-
-  let blob: Blob;
-  try {
-    blob = await fetchLinkBlob(link.url);
-  } catch {
-    const fresh = await requestAttachmentLink(authFetch, {
-      type: input.type,
-      id: input.id,
-      purpose: "download",
-    });
-    if (!fresh?.available || !fresh.url) {
-      throw new ApiError(
-        410,
-        "Unavailable",
-        unavailableMessage(fresh?.reason),
-      );
-    }
-    blob = await fetchLinkBlob(fresh.url);
-  }
-  saveBlobAs(blob, link.name || input.name || "attachment");
-  input.onSaved?.("started");
+  await downloadFromBackend(authFetch, input);
 }
 
-/** Step 1 of an upload: records the attachment and returns the one-use upload link. */
+/** Step 1 of an upload: records the attachment and returns its id and the size limit. */
 export async function startStoredUpload(
   authFetch: AuthFetch,
   input: {
@@ -523,47 +406,20 @@ export async function startStoredUpload(
   return (await response.json()) as StoredAttachmentUploadStart;
 }
 
-/**
- * Step 2: the browser sends the file straight to SFTPGo as multipart form data,
- * one file in `fieldName`. No app credentials or auth headers go with it.
- */
-export async function sendFileToUploadLink(
-  start: { uploadUrl: string; fieldName?: string },
-  file: File,
-): Promise<void> {
-  const form = new FormData();
-  form.append(start.fieldName || "filenames", file, file.name);
-  const response = await fetch(start.uploadUrl, {
-    method: "POST",
-    body: form,
-    credentials: "omit",
-  });
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      response.statusText,
-      `The file could not be uploaded (HTTP ${response.status}). Please try again.`,
-    );
-  }
-}
-
-/** Step 3: entity-service checks what arrived and makes the attachment visible. Safe to repeat. */
+/** Step 3: the backend assembles the chunks and entity-service makes the attachment visible. Safe to repeat. */
 export async function confirmStoredUpload(
   authFetch: AuthFetch,
   input: {
     type: StoredAttachmentType;
     attachmentId: string;
-    /** Number of chunks sent, when the files are held by the portal backend. */
-    chunks?: number;
+    /** Number of chunks sent. */
+    chunks: number;
   },
 ): Promise<StoredAttachmentConfirmed> {
   const response = await postJson(
     authFetch,
     `/attachments/upload/${encodeURIComponent(input.attachmentId)}/confirm`,
-    {
-      type: input.type,
-      ...(input.chunks !== undefined ? { chunks: input.chunks } : {}),
-    },
+    { type: input.type, chunks: input.chunks },
   );
   return (await response.json()) as StoredAttachmentConfirmed;
 }
@@ -646,7 +502,7 @@ async function sendChunk(
 }
 
 /**
- * Step 2 when the portal backend holds the files: the file is cut into
+ * Step 2: the file is cut into
  * {@link UPLOAD_CHUNK_BYTES} chunks, sent a few at a time (each one retried on
  * a passing failure), and its confirm step names how many there were. Returns
  * that count.
@@ -694,9 +550,9 @@ export async function sendFileInChunks(
 export type StoredUploadStep = "preparing" | "uploading" | "finishing";
 
 /**
- * Uploads one file in three steps (start, send, confirm), reporting each step:
- * to SFTPGo as one request, or to the portal backend in chunks. If only the confirm step fails, an UploadConfirmPendingError is
- * thrown: the file is already in place, so retry with confirmStoredUpload and
+ * Uploads one file in three steps (start, send in chunks, confirm), reporting
+ * each step. If only the confirm step fails, an UploadConfirmPendingError is
+ * thrown: the chunks are already stored, so retry with confirmStoredUpload and
  * do not upload again.
  */
 export async function uploadStoredAttachment(
@@ -707,9 +563,9 @@ export async function uploadStoredAttachment(
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
-    /** Cancels a chunked upload. */
+    /** Cancels the upload. */
     signal?: AbortSignal;
-    /** Bytes stored so far, for a chunked upload only. */
+    /** Bytes stored so far. */
     onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
@@ -738,18 +594,13 @@ export async function uploadStoredAttachment(
   }
   if (signal?.aborted) throw abortError();
   onStep?.("uploading");
-  let chunks: number | undefined;
-  if (start.uploadUrl) {
-    await sendFileToUploadLink({ ...start, uploadUrl: start.uploadUrl }, file);
-  } else {
-    chunks = await sendFileInChunks(authFetch, {
-      type,
-      attachmentId: start.attachmentId,
-      file,
-      signal,
-      onProgress,
-    });
-  }
+  const chunks = await sendFileInChunks(authFetch, {
+    type,
+    attachmentId: start.attachmentId,
+    file,
+    signal,
+    onProgress,
+  });
   onStep?.("finishing");
   try {
     return await confirmStoredUpload(authFetch, {
@@ -762,6 +613,7 @@ export async function uploadStoredAttachment(
       type,
       start.attachmentId,
       error instanceof Error ? error.message : "Could not finish the upload.",
+      chunks,
     );
   }
 }
@@ -789,7 +641,7 @@ export function toHyphenatedUuid(id: string): string {
     : id;
 }
 
-/** Outcome of loading a comment's inline image through entity-service. */
+/** Outcome of loading a comment's inline image through the backend. */
 export type InlineImageResult =
   | { status: "ok"; blob: Blob }
   | { status: "not-found" }
@@ -797,8 +649,8 @@ export type InlineImageResult =
   | { status: "error" };
 
 /**
- * Fetches a comment's inline image through entity-service (which checks access and
- * streams it). "not-found" (a 404) lets a caller fall back to the older flow;
+ * Fetches a comment's inline image through the portal backend (entity-service
+ * checks access, the backend streams it). "not-found" (a 404) lets a caller fall back to the older flow;
  * "removed" (a 410, the image was deleted) does not, since there is nothing
  * older to try; any other failure is "error".
  */

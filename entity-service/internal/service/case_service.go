@@ -128,9 +128,6 @@ type caseService struct {
 
 	// imageLinker attaches the comment images a new comment shows (nil: none).
 	imageLinker InlineImageLinker
-	// imageExtractor stores the images pasted into a new comment (nil: they stay
-	// embedded in the comment).
-	imageExtractor InlineImageExtractor
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -206,7 +203,6 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 	if cs, ok := svc.(*caseService); ok && l != nil {
 		cs.imageLinker = l
-		cs.imageExtractor, _ = l.(InlineImageExtractor)
 	}
 	return svc
 }
@@ -556,18 +552,6 @@ func validateCreateCaseRequest(req *domain.CreateCaseRequest) error {
 		}
 		if req.Description == "" {
 			return &apierror.ValidationError{Msg: "description is required for security_report_analysis"}
-		}
-		// Attachments are optional here (not backend-enforced by ServiceNow either):
-		// the FE creates the case first, then uploads attachments in a separate
-		// request per file, so a failed attachment upload never masks a
-		// successful case creation.
-		for i, a := range req.Attachments {
-			if a.Name == "" {
-				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].name is required", i)}
-			}
-			if a.File == "" {
-				return &apierror.ValidationError{Msg: fmt.Sprintf("attachments[%d].file is required", i)}
-			}
 		}
 	case "engagement":
 		if req.Subject == "" {
@@ -1395,17 +1379,6 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
-	// The ServiceNow mirror further down is given the content as the caller sent
-	// it: ServiceNow extracts an embedded image itself, and it cannot resolve the
-	// reference this service stores in its place.
-	originalContent := req.Content
-	if s.imageExtractor != nil {
-		content, err := s.imageExtractor.ExtractInlineImages(ctx, req.CaseID, actorEmail, req.Content)
-		if err != nil {
-			return domain.CreateCaseCommentResponse{}, err
-		}
-		req.Content = content
-	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {
@@ -1489,7 +1462,7 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// can ever act on.
 	if s.snWriteback != nil && req.Type != domain.CommentTypeActivity {
 		if m, ok := s.snMirror.(snCommentMirror); ok {
-			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, originalContent
+			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, req.Content
 			s.snWriteback.Dispatch(ctx, "case_comment", req.CaseID, "create",
 				map[string]any{"caseId": mirrorCaseID, "type": mirrorType, "content": mirrorContent},
 				func(writeCtx context.Context) error {
@@ -3739,179 +3712,48 @@ func humanizeSnakeCase(value string) string {
 	return strings.Join(words, " ")
 }
 
-// CreateCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. Unlike ServiceNow, this data source never receives file bytes
-// directly: the caller must have already uploaded the file to SFTPGo and
-// supplies its storage_key plus the size/name/type metadata. Only
-// ReferenceTypeCase is supported -- the other ReferenceType values
-// (conversation, change_request, deployment, incident) have no Postgres
-// schema backing on this data source.
-func (s *caseService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-	if req.ReferenceType != domain.ReferenceTypeCase {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "referenceType must be 'case' for this data source"}
-	}
-	if req.Name == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "name is required"}
-	}
-	if req.Type == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "type is required"}
-	}
-	if req.StorageKey == nil || *req.StorageKey == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "storageKey is required: this data source has no base64 payload alternative, the file must already be uploaded to SFTPGo"}
-	}
-	if req.SizeBytes <= 0 {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "sizeBytes must be greater than zero"}
-	}
-	// Empty defaults to complete: every caller before this change (and every
-	// existing Postgres-path caller that doesn't know about the pending
-	// state) gets exactly today's behavior. Only a caller that explicitly
-	// wants the two-step upload flow passes "pending".
-	switch req.Status {
-	case "":
-		req.Status = domain.AttachmentStatusComplete
-	case domain.AttachmentStatusPending, domain.AttachmentStatusComplete:
-		// valid
-	default:
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("invalid status %q: must be 'pending' or 'complete'", req.Status)}
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-	req.CreatedBy = user.ID
-
-	a, err := s.repo.CreateCaseAttachment(ctx, req)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-
-	return domain.CreateAttachmentResponse{
-		Message: "Attachment created successfully",
-		Attachment: domain.AttachmentDetail{
-			ID:         a.ID,
-			SizeBytes:  a.SizeBytes,
-			CreatedOn:  a.CreatedOn,
-			CreatedBy:  user.Email,
-			StorageKey: a.StorageKey,
-			Status:     a.Status,
-			// No DownloadURL: this service holds no bytes for a Postgres-sourced
-			// attachment, only its storage_key. Resolving storage_key to an
-			// actual download location is the downstream CSM backend's job.
-		},
-	}, nil
-}
-
-// ConfirmCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. It is the second half of the two-step upload flow: the caller
-// (the CSM backend) registers a 'pending' row via CreateCaseAttachment
-// *before* minting an SFTPGo upload credential, then calls this once the
-// browser reports the upload succeeded, transitioning the row to 'complete'.
+// SearchCaseAttachments implements CaseService. It lists attachment metadata
+// from PostgreSQL only; the files are in Azure Blob Storage and are read by the
+// portal backends.
 //
-// Ownership: unlike UpdateAttachment/DeleteCaseAttachment (which any
-// authenticated user may perform on any case attachment -- there is no
-// per-resource ACL in this data source beyond authentication, see
-// resolveActor's doc comment), confirming is restricted to the same actor
-// who created the pending row. A pending row represents an upload a specific
-// user initiated; there is no legitimate case yet for a different user to
-// confirm it on their behalf, and allowing it would let any authenticated
-// user "complete" an attachment they never uploaded.
-func (s *caseService) ConfirmCaseAttachment(ctx context.Context, id string) (domain.ConfirmAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	existing, err := s.repo.GetCaseAttachmentByID(ctx, id)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-	if existing.CreatedBy == nil || existing.CreatedBy.ID == nil || *existing.CreatedBy.ID != user.ID {
-		return domain.ConfirmAttachmentResponse{}, &apierror.ForbiddenError{Msg: "attachment was not created by the current user"}
-	}
-	if existing.Status != domain.AttachmentStatusPending {
-		return domain.ConfirmAttachmentResponse{}, &apierror.ConflictError{Msg: fmt.Sprintf("attachment is not pending (current status: %q)", existing.Status)}
-	}
-
-	a, err := s.repo.ConfirmCaseAttachment(ctx, id)
-	if err != nil {
-		return domain.ConfirmAttachmentResponse{}, err
-	}
-
-	return domain.ConfirmAttachmentResponse{
-		Message: "Attachment confirmed successfully",
-		Attachment: domain.AttachmentDetail{
-			ID:         a.ID,
-			SizeBytes:  a.SizeBytes,
-			CreatedOn:  a.CreatedOn,
-			CreatedBy:  user.Email,
-			StorageKey: a.StorageKey,
-			Status:     a.Status,
-		},
-	}, nil
-}
-
-// SearchCaseAttachments implements CaseService for the CSM-native (Postgres)
-// data source.
-//
-// referenceType "case" reads case_attachment (native uploads) and the synced
+// referenceType "case" reads case_attachment (older uploads) and the
 // work_item_attachment rows of the same case as one deduplicated list (see
-// caseRepo.SearchCaseAttachments). "change_request",
-// "incident" and "conversation" are work_item subtypes and read the generic
-// work_item_attachment table via CaseRepository.SearchWorkItemAttachments;
-// "deployment" is not a work_item subtype and has no attachment table on
-// plain Postgres, where it is rejected with a validation error. Metadata
-// only: a work item with no attachments is a successful empty result.
+// caseRepo.SearchCaseAttachments). "change_request", "incident" and
+// "conversation" are work_item subtypes and read work_item_attachment through
+// CaseRepository.SearchWorkItemAttachments; "deployment" reads
+// deployment_attachment through SearchDeploymentAttachments. Metadata only: a
+// parent with no attachments is a successful empty result.
 //
-// Stopgap: under DATA_SOURCE=postgres-servicenow-dual-write (s.snMirror !=
-// nil) a "deployment", "incident", "change_request" or "conversation" search
-// (see isMirrorOnlyAttachmentRef) is delegated to the mirrored data source and its
-// response or error is returned as-is, until a Postgres-native deployment
-// attachment store exists. Likewise a "case" search that returns zero rows
-// from Postgres at offset 0 falls back to the mirrored data source, because
-// attachments of migrated cases were synced into work_item_attachment, which
-// the case read path does not consult. A Postgres error is returned as-is
-// (no fallback), and a non-zero offset never falls back so paging past the
-// end of a non-empty Postgres list is not masked. Remove this fallback once
-// the case read path reads work_item_attachment. Every other reference type
-// is unaffected.
-//
-// Read-path status decision: the underlying repository query filters out
-// 'pending' rows entirely (see caseRepo.SearchCaseAttachments), so a case's
-// attachment list never shows a still-uploading placeholder to other users.
-// This is a deliberate product-behavior choice, not an oversight: a pending
-// row may never complete (the upload could fail, or the tab could just
-// close), and showing it in a shared list before that's known risks other
-// team members seeing and trying to act on a file that doesn't exist yet. A
-// specific-id lookup (GetAttachmentByID) is not filtered this way -- it
-// still returns a pending row -- which is what the confirm step relies on,
-// and is also how an uploader could be shown their own in-flight upload if
-// the FE chooses to poll it directly rather than via this list.
+// Rows still uploading (pending), failed or deleted are not listed, so nobody
+// sees a placeholder for a file that may never exist.
 func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
-	if isMirrorOnlyAttachmentRef(req.ReferenceType) && s.snMirror != nil {
-		// No Postgres attachment store for these types yet (deployment,
-		// incident, change_request, conversation): serve from the mirrored
-		// data source in dual-write mode. Plain Postgres mode
-		// (snMirror == nil) falls through to the existing handling below.
-		return s.snMirror.SearchCaseAttachments(ctx, req)
+	if req.ReferenceType == domain.ReferenceTypeDeployment {
+		// Deployment attachments are files in Azure Blob Storage with a row in
+		// deployment_attachment: list them from Postgres.
+		if err := normalizePagination(&req.Pagination); err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		attachments, total, err := s.repo.SearchDeploymentAttachments(ctx, req.ReferenceID, req.Pagination)
+		if err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		return domain.SearchAttachmentsResponse{
+			Attachments: attachments,
+			Total:       total,
+			Limit:       req.Pagination.Limit,
+			Offset:      req.Pagination.Offset,
+			HasMore:     req.Pagination.Offset+len(attachments) < total,
+		}, nil
 	}
 	isCase := req.ReferenceType == domain.ReferenceTypeCase
 	if !isCase {
 		// Non-case work items (change_request, incident, conversation) are
-		// backed by work_item_attachment; "deployment" is not a work_item
-		// subtype and has no attachment table on this data source.
+		// backed by work_item_attachment.
 		if _, ok := repository.ReferenceTypeToWorkItemType[req.ReferenceType]; !ok {
-			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident'", req.ReferenceType)}
+			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident' or 'deployment'", req.ReferenceType)}
 		}
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
@@ -3931,12 +3773,6 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 	if err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
-	if isCase && s.snMirror != nil && total == 0 && req.Pagination.Offset == 0 {
-		// Stopgap (see doc comment): Postgres has nothing for this case in
-		// dual-write mode, so serve the list from the mirrored data source.
-		return s.snMirror.SearchCaseAttachments(ctx, req)
-	}
-
 	return domain.SearchAttachmentsResponse{
 		Attachments: attachments,
 		Total:       total,
@@ -3972,49 +3808,6 @@ func (s *caseService) SearchCaseActivities(ctx context.Context, req domain.Searc
 		Offset:   req.Pagination.Offset,
 		HasMore:  req.Pagination.Offset+len(activity) < total,
 	}, nil
-}
-
-// GetCaseAttachmentContent implements CaseService for the CSM-native
-// (Postgres) data source. This service never holds the file bytes for a
-// Postgres-sourced attachment -- they live in SFTPGo, addressed by the
-// attachment's storage_key (see GetAttachmentByID / SearchCaseAttachments).
-// Callers must resolve content externally via that storage_key rather than
-// through this endpoint.
-func (s *caseService) GetCaseAttachmentContent(_ context.Context, _ string) ([]byte, string, error) {
-	return nil, "", &apierror.ServiceUnavailableError{Msg: "this data source does not serve attachment bytes directly; resolve content via the attachment's storageKey"}
-}
-
-// DeleteCaseAttachment implements CaseService for the CSM-native (Postgres)
-// data source. This only removes the metadata row -- it does not delete the
-// backing SFTPGo file, which is the downstream CSM backend's responsibility
-// when it also calls SFTPGo's own delete API.
-func (s *caseService) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
-	if err := validateUUIDs("attachmentId", []string{req.AttachmentID}); err != nil {
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	if _, err := s.resolveActor(ctx); err != nil {
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	if err := s.repo.DeleteCaseAttachment(ctx, req.AttachmentID); err != nil {
-		// No Postgres case_attachment row for this id -- same "no Postgres
-		// deployment attachment table yet" gap SearchCaseAttachments already
-		// falls back to ServiceNow for (see that method's own doc comment):
-		// a deployment-referenced attachment has no case_attachment row at
-		// all in dual-write mode (its id never satisfies case_attachment's
-		// hard FK into "case"), so a bare NotFoundError here is just as
-		// likely "this is a deployment attachment, not a missing one" as a
-		// genuinely absent attachment. Try ServiceNow before giving up.
-		var notFound *apierror.NotFoundError
-		if s.snMirror != nil && errors.As(err, &notFound) {
-			return s.snMirror.DeleteCaseAttachment(ctx, req)
-		}
-		return domain.DeleteAttachmentResponse{}, err
-	}
-	return domain.DeleteAttachmentResponse{Message: "Attachment deleted successfully"}, nil
-}
-
-func (s *caseService) GetAttachment(_ context.Context, _ string) (domain.Attachment, error) {
-	return domain.Attachment{}, &apierror.ServiceUnavailableError{Msg: "attachments are only supported for the ServiceNow data source"}
 }
 
 // AddCaseTag implements CaseService.
@@ -4328,111 +4121,6 @@ func (s *caseService) SubmitCaseFeedback(ctx context.Context, id string, req dom
 			CaseID:    id,
 			CreatedBy: actor.Email,
 			CreatedOn: created.CreatedOn,
-		},
-	}, nil
-}
-
-// GetAttachmentByID implements CaseService for the CSM-native (Postgres) data
-// source. Content is always nil: this service holds no bytes for a
-// Postgres-sourced attachment, only its storage_key -- see
-// GetCaseAttachmentContent's doc comment for why content must be resolved
-// externally via StorageKey instead.
-//
-// Falls back to ServiceNow on a Postgres NotFoundError when s.snMirror != nil
-// (DATA_SOURCE=postgres-servicenow-dual-write) -- the same "no Postgres
-// deployment attachment table yet" gap SearchCaseAttachments already handles
-// by checking req.ReferenceType up front. This method takes only a bare id,
-// with no reference type to branch on ahead of time, so the Postgres lookup
-// is tried first regardless, and a miss there is resolved against ServiceNow
-// instead of reported as a genuine 404 -- it's at least as likely to be a
-// deployment-referenced attachment (which can only ever live in ServiceNow
-// under this data source) as an actually-missing one.
-func (s *caseService) GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.AttachmentDetails{}, err
-	}
-
-	a, err := s.repo.GetCaseAttachmentByID(ctx, id)
-	if err != nil {
-		var notFound *apierror.NotFoundError
-		if s.snMirror != nil && errors.As(err, &notFound) {
-			return s.snMirror.GetAttachmentByID(ctx, id)
-		}
-		return domain.AttachmentDetails{}, err
-	}
-
-	var createdBy string
-	if a.CreatedBy != nil {
-		createdBy = a.CreatedBy.Email
-	}
-
-	return domain.AttachmentDetails{
-		ID:            a.ID,
-		ReferenceID:   a.ReferenceID,
-		ReferenceType: &a.ReferenceType,
-		Name:          a.Name,
-		Type:          a.Type,
-		SizeBytes:     a.SizeBytes,
-		Description:   a.Description,
-		CreatedBy:     createdBy,
-		CreatedOn:     a.CreatedOn,
-		DownloadURL:   a.DownloadURL,
-		PreviewURL:    a.PreviewURL,
-		Content:       nil,
-		StorageKey:    a.StorageKey,
-		Status:        a.Status,
-	}, nil
-}
-
-// validatePGAttachmentUpdate mirrors the ServiceNow path's
-// validateAttachmentUpdate, narrowed to the one reference type this data
-// source's attachments table actually models: deployment attachments have no
-// Postgres schema backing here, so that branch is rejected outright rather
-// than silently accepted.
-func validatePGAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
-	if req.ReferenceType != domain.ReferenceTypeCase {
-		return &apierror.ValidationError{Msg: fmt.Sprintf("invalid reference type %q: only 'case' is supported for this data source", req.ReferenceType)}
-	}
-	if req.Description != nil {
-		return &apierror.ValidationError{Msg: "description field is not allowed for case reference type"}
-	}
-	if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
-		return &apierror.ValidationError{Msg: "name field is required for case reference type"}
-	}
-	return nil
-}
-
-// UpdateAttachment implements CaseService for the CSM-native (Postgres) data
-// source. Only renaming is supported, mirroring the one mutation the
-// ServiceNow path allows for reference type "case" (name required,
-// description forbidden).
-func (s *caseService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{req.AttachmentID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validatePGAttachmentUpdate(req); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	user, err := s.resolveActor(ctx)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	updatedOn, err := s.repo.UpdateCaseAttachmentName(ctx, req.AttachmentID, strings.TrimSpace(*req.Name), user.ID)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	return domain.UpdateAttachmentResponse{
-		Message: "Attachment updated successfully",
-		Attachment: domain.UpdatedAttachment{
-			ID:        req.AttachmentID,
-			UpdatedOn: updatedOn,
-			UpdatedBy: user.Email,
 		},
 	}, nil
 }

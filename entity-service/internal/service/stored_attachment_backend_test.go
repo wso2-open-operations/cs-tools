@@ -27,14 +27,11 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// newBackendSvc is the service in ATTACHMENT_STORAGE_MODE=backend. It has no file
-// store at all, so a call that reached for one would panic on the nil: every test
-// here therefore also shows the call never touches a file.
+// newBackendSvc is the service under test. It has no file store at all: the
+// portal backends hold the files, so every test here also shows the call never
+// touches a file.
 func newBackendSvc(repo *fakeStoredRepo) *storedAttachmentService {
-	svc := NewBackendStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100}).(*storedAttachmentService)
-	svc.now = func() time.Time { return saNow }
-	svc.shares.now = func() time.Time { return saNow }
-	return svc
+	return newStoredSvc(repo)
 }
 
 const workItemKey = "csm/projects/prj_9/workitems/cs0001/attachments/wia0000042_report.pdf"
@@ -83,10 +80,6 @@ func TestBackend_InitiateUploadRecordsARowAndOpensNothing(t *testing.T) {
 	if resp.AttachmentID != saAttID || resp.Number != "WIA0000042" || resp.MaxBytes != 1000 {
 		t.Errorf("response = %+v", resp)
 	}
-	// There is no link: the portal backend holds the file.
-	if resp.UploadURL != "" || resp.FieldName != "" {
-		t.Errorf("response carries a link: %+v", resp)
-	}
 	if want := saNow.Add(abandonedUploadAge); !resp.ExpiresAt.Equal(want) {
 		t.Errorf("ExpiresAt = %v, want %v (when an unconfirmed upload may be cleaned up)", resp.ExpiresAt, want)
 	}
@@ -130,29 +123,6 @@ func TestBackend_AFileOfExactlyTheLimitIsAccepted(t *testing.T) {
 }
 
 func errOf[T any](_ T, err error) error { return err }
-
-func TestBackend_SFTPGoOnlyCallsAreNotAvailable(t *testing.T) {
-	repo := newFakeStoredRepo()
-	svc := newBackendSvc(repo)
-	ctx := saCtx(t, saEmail)
-
-	_, err := svc.ResolveLinks(ctx, domain.AttachmentLinksRequest{Kind: domain.StoredAttachmentWorkItem, IDs: []string{saAttID}})
-	wantErr[*apierror.NotFoundError](t, err, "ResolveLinks")
-	_, err = svc.OpenInlineImage(ctx, saAttID)
-	wantErr[*apierror.NotFoundError](t, err, "OpenInlineImage")
-}
-
-func TestSFTPGoMode_BackendCallsAreNotAvailable(t *testing.T) {
-	svc := newStoredSvc(newFakeStoredRepo(), newFakeStore())
-	ctx := saCtx(t, saEmail)
-
-	_, err := svc.AuthorizeUpload(ctx, domain.AuthorizeAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
-	wantErr[*apierror.NotFoundError](t, err, "AuthorizeUpload")
-	_, err = svc.LocateAttachment(ctx, domain.LocateAttachmentRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID})
-	wantErr[*apierror.NotFoundError](t, err, "LocateAttachment")
-	_, err = svc.LocateInlineImage(ctx, saAttID)
-	wantErr[*apierror.NotFoundError](t, err, "LocateInlineImage")
-}
 
 // ---- authorizing a chunk ----
 
@@ -567,23 +537,6 @@ func TestBackend_DeleteKeepsItsRules(t *testing.T) {
 	}
 }
 
-func TestBackend_EmbeddedImagesAreLeftAsWritten(t *testing.T) {
-	// 1x1 PNG as a data URI, the shape a pasted image has.
-	content := `<p>hi</p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="/>`
-	repo := newFakeStoredRepo()
-
-	got, err := newBackendSvc(repo).ExtractInlineImages(saCtx(t, saEmail), saParentID, saEmail, content)
-	if err != nil {
-		t.Fatalf("ExtractInlineImages: %v", err)
-	}
-	if got != content {
-		t.Errorf("content was changed: %q", got)
-	}
-	if len(repo.inserted) != 0 {
-		t.Error("a row was written for an image this service cannot store")
-	}
-}
-
 const (
 	orphanA = "22222222-2222-4222-8222-222222222222"
 	orphanB = "33333333-3333-4333-8333-333333333333"
@@ -593,7 +546,7 @@ const (
 // backendCleanup builds the cleanup service as backend mode does: a nil store, so
 // a call to it would panic.
 func backendCleanup(repo *fakeStoredRepo) *attachmentUploadCleanupService {
-	svc := NewAttachmentUploadCleanupService(repo, nil, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
+	svc := NewAttachmentUploadCleanupService(repo, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
 	svc.now = func() time.Time { return saNow }
 	return svc
 }
@@ -708,29 +661,7 @@ func TestBackend_AcknowledgeValidationAndAccess(t *testing.T) {
 	_, err = svc.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: tooMany})
 	wantErr[*apierror.ValidationError](t, err, "too many ids")
 
-	restricted := NewAttachmentUploadCleanupService(orphanRepo(), nil, stubAccess{})
+	restricted := NewAttachmentUploadCleanupService(orphanRepo(), stubAccess{})
 	_, err = restricted.AcknowledgeOrphans(ctx, domain.AcknowledgeOrphansRequest{IDs: []string{orphanA}})
 	wantErr[*apierror.ForbiddenError](t, err, "a restricted caller")
-}
-
-func TestSFTPGoMode_AcknowledgeIsNotAvailable(t *testing.T) {
-	svc := NewAttachmentUploadCleanupService(newFakeStoredRepo(), &fakeUploadStore{}, alwaysUnrestrictedAccess{})
-	_, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{IDs: []string{orphanA}})
-	wantErr[*apierror.NotFoundError](t, err, "acknowledge with SFTPGo")
-}
-
-func TestSFTPGoModeCleanupReportsNoKeys(t *testing.T) {
-	repo := newFakeStoredRepo()
-	k := "csm/projects/p/workitems/w/inline_attachments/a_1.png"
-	repo.unlinked = []domain.StoredAttachmentRow{{ID: "22222222-2222-4222-8222-222222222222", StorageKey: &k}}
-	svc := NewAttachmentUploadCleanupService(repo, &fakeUploadStore{}, alwaysUnrestrictedAccess{}).(*attachmentUploadCleanupService)
-	svc.now = func() time.Time { return saNow }
-
-	res, err := svc.CleanupUploads(context.Background())
-	if err != nil {
-		t.Fatalf("CleanupUploads: %v", err)
-	}
-	if res.ImagesRemoved != 1 || len(res.Orphans) != 0 {
-		t.Errorf("result = %+v: with SFTPGo the file is removed here, so there is nothing to hand over", res)
-	}
 }
