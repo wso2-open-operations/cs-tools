@@ -17,11 +17,9 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  LEGACY_ATTACHMENT_MAX_BYTES,
   entityAttachmentMaxBytes,
   formatMegabytes,
   formatSizeLimit,
-  getMaxAttachmentSizeBytes,
   inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
 
@@ -71,19 +69,6 @@ describe("inlineImageMaxBytes", () => {
       setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: raw });
       expect(inlineImageMaxBytes()).toBe(10 * MB);
     }
-  });
-});
-
-describe("getMaxAttachmentSizeBytes", () => {
-  it("uses the configured limit through the entity flow", () => {
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 });
-    expect(getMaxAttachmentSizeBytes()).toBe(25 * MB);
-  });
-
-  it("keeps the older limit whatever the key says when entity attachments are off", () => {
-    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false, CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 });
-    expect(getMaxAttachmentSizeBytes()).toBe(LEGACY_ATTACHMENT_MAX_BYTES);
-    expect(LEGACY_ATTACHMENT_MAX_BYTES).toBe(10 * MB);
   });
 });
 

@@ -49,8 +49,7 @@ import {
 } from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
-import { getMaxAttachmentSizeBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
+import { entityAttachmentMaxBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import {
   dropFailedImages,
   hasBlobSource,
@@ -244,9 +243,7 @@ export default function CsmCaseCommentInput({
   const api = useBackendApi();
   const onImageUpload = useMemo(
     () =>
-      imageUploadParentId && isEntityAttachmentsEnabled()
-        ? (file: File) => queueInlineImage(file)
-        : undefined,
+      imageUploadParentId ? (file: File) => queueInlineImage(file) : undefined,
     [imageUploadParentId],
   );
   const imageStatus = useInlineImageStatus(html);
@@ -352,7 +349,7 @@ export default function CsmCaseCommentInput({
     // (matching submit()'s own single-message pattern below) but still
     // attach whichever dropped files DO pass, rather than rejecting the
     // whole drop over one oversized file.
-    const maxBytes = getMaxAttachmentSizeBytes();
+    const maxBytes = entityAttachmentMaxBytes();
     const tooLarge = incoming.find((f) => f.size > maxBytes);
     const accepted = incoming.filter((f) => f.size <= maxBytes);
 
@@ -434,7 +431,7 @@ export default function CsmCaseCommentInput({
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
-    const maxBytes = getMaxAttachmentSizeBytes();
+    const maxBytes = entityAttachmentMaxBytes();
     const tooLarge = attachments.find((a) => a.file.size > maxBytes);
     if (tooLarge) {
       setError(

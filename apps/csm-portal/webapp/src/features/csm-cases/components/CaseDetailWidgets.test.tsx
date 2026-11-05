@@ -831,7 +831,7 @@ describe("AttachmentsWidget — upload progress", () => {
     );
 
     // Rendering the list alone must never trigger a download resolution
-    // (e.g. a lazily-created SFTPGo share) — only an explicit click does.
+    // (e.g. a streamed file fetch) — only an explicit click does.
     expect(onDownload).not.toHaveBeenCalled();
 
     fireEvent.click(

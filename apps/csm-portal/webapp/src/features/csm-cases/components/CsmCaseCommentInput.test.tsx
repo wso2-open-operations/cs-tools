@@ -232,19 +232,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
       window.config = {} as typeof window.config;
     });
 
-    it("rejects a dropped file over the older 10 MB limit when entity attachments are off", () => {
-      window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as unknown as typeof window.config;
-      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
-      const composer = screen.getByTestId("csm-comment-composer");
-
-      const tooBig = makeFile("huge.zip", 11 * 1024 * 1024);
-      fireEvent.drop(composer, fileDrop([makeFile("ok.txt", 100), tooBig]));
-
-      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-      expect(screen.getByText(/huge\.zip.*too large.*10\.00 MB/i)).toBeInTheDocument();
-    });
-
-    it("rejects a dropped file over the configured limit through the entity flow, but keeps the ones that fit", () => {
+    it("rejects a dropped file over the configured limit, but keeps the ones that fit", () => {
       window.config = { CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 } as unknown as typeof window.config;
       render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
       const composer = screen.getByTestId("csm-comment-composer");
@@ -434,17 +422,6 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
   it("gives the editor no image uploader without a case id, so images are embedded as before", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     expect(screen.queryByRole("button", { name: "paste-image" })).not.toBeInTheDocument();
-  });
-
-  it("gives the editor no image uploader when entity attachments are off", () => {
-    const original = window.config;
-    window.config = { CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED: false } as typeof window.config;
-    try {
-      render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
-      expect(screen.queryByRole("button", { name: "paste-image" })).not.toBeInTheDocument();
-    } finally {
-      window.config = original;
-    }
   });
 
   it("uploads a pasted image only when the comment is sent, then sends its id instead of the preview URL", async () => {
