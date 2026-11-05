@@ -302,10 +302,11 @@ var leadRoles = []string{"lead", "sub_lead", "americas_team_lead", "cre_head", "
 
 // RemoveTeamMember implements RotaAccessRepository.
 //
-// The person's membership rows are locked first, then everything that keeps
-// them on the team is read under that lock, and the rows are deleted only
-// when nothing does -- so a turn or a tier added at the same moment cannot
-// slip past the check. Turns are counted by ends_at, so one under way counts.
+// The person's membership rows are locked first, then what keeps them on the
+// team (a lead role, a Case Alerts tier) is read under that lock, and the rows
+// are deleted only when nothing does -- so a tier added at the same moment
+// cannot slip past the check. Their upcoming turns on the team are removed
+// with the membership (removeUpcomingTurns).
 func (r *rotaAccessRepository) RemoveTeamMember(ctx context.Context, userID, teamKey, actorEmail string, allowLead bool) (domain.TeamMemberRemoval, error) {
 	var out domain.TeamMemberRemoval
 	err := r.inTx(ctx, actorEmail, func(tx pgx.Tx) error {
@@ -343,15 +344,14 @@ func (r *rotaAccessRepository) RemoveTeamMember(ctx context.Context, userID, tea
 		if !out.Member {
 			return nil
 		}
-		if err := tx.QueryRow(ctx, `
-			SELECT COUNT(*) FROM team_schedule_assignment
-			 WHERE user_id = $1::uuid AND team_key = lower($2) AND ends_at > NOW()`,
-			userID, teamKey).Scan(&out.UpcomingTurns); err != nil {
-			return fmt.Errorf("count upcoming turns: %w", err)
-		}
-		if (lead && !allowLead) || out.AlertTier != "" || out.UpcomingTurns > 0 {
+		if (lead && !allowLead) || out.AlertTier != "" {
 			return nil
 		}
+		removed, err := removeUpcomingTurns(ctx, tx, userID, teamKey, actorEmail, "taken off the team")
+		if err != nil {
+			return err
+		}
+		out.RemovedTurns = removed
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM team_member m USING team t
 			 WHERE t.id = m.team_id AND t.key = lower($2) AND m.user_id = $1::uuid`, userID, teamKey); err != nil {
@@ -570,12 +570,6 @@ func (r *rotaAccessRepository) MoveTeamMember(ctx context.Context, userID, fromT
 		if !out.OnSource || out.OnTarget {
 			return nil // nothing to move, or already there (or both: the service refuses)
 		}
-		if err := tx.QueryRow(ctx, `
-			SELECT COUNT(*) FROM team_schedule_assignment
-			 WHERE user_id = $1::uuid AND team_key = $2 AND ends_at > NOW()`,
-			userID, fromKey).Scan(&out.UpcomingTurns); err != nil {
-			return fmt.Errorf("count upcoming turns: %w", err)
-		}
 		// A move span already puts them on the target for its days, and their
 		// membership stays with their own team (the span's end is the move
 		// back). Moving the membership too left their own team's rows with
@@ -594,9 +588,14 @@ func (r *rotaAccessRepository) MoveTeamMember(ctx context.Context, userID, fromT
 			userID, toKey).Scan(&out.SpanUntil); err != nil {
 			return fmt.Errorf("read move spans onto the target team: %w", err)
 		}
-		if out.Lead || out.AlertTier != "" || out.UpcomingTurns > 0 || out.SpanUntil != "" {
+		if out.Lead || out.AlertTier != "" || out.SpanUntil != "" {
 			return nil
 		}
+		removed, err := removeUpcomingTurns(ctx, tx, userID, fromKey, actorEmail, "moved to "+toKey)
+		if err != nil {
+			return err
+		}
+		out.RemovedTurns = removed
 		newRole := "engineer"
 		if subLead {
 			newRole = "sub_lead"
@@ -621,6 +620,33 @@ func (r *rotaAccessRepository) MoveTeamMember(ctx context.Context, userID, fromT
 		return nil
 	})
 	return out, err
+}
+
+// removeUpcomingTurns deletes the person's turns on teamKey that have not
+// ended yet (by ends_at, so one under way goes too, and past turns stay as
+// history), and records each in the roster's history with the caller and
+// why. Somebody leaving a team, taken off it or moved to another, no longer
+// works its rota, and a turn left behind kept them on its Case Alerts chain
+// and in its rota reminders. Runs in the caller's transaction, after the
+// membership rows are locked, so a turn added at the same moment either
+// lands before (and goes) or waits for the lock.
+func removeUpcomingTurns(ctx context.Context, tx pgx.Tx, userID, teamKey, actorEmail, note string) (int, error) {
+	tag, err := tx.Exec(ctx, `
+		WITH gone AS (
+		  DELETE FROM team_schedule_assignment a
+		   WHERE a.user_id = $1::uuid AND a.team_key = lower($2) AND a.ends_at > NOW()
+		  RETURNING a.id, a.user_id, a.team_key, a.rota_date, a.shift_id)
+		INSERT INTO team_schedule_assignment_activity
+		  (id, created_on, created_by, assignment_id, user_id, team_key, rota_date,
+		   shift_code, action, actor_email, note)
+		SELECT gen_random_uuid(), now(), $3, g.id, g.user_id, g.team_key, g.rota_date,
+		       COALESCE(s.code, ''), 'DELETED', $3, $4
+		  FROM gone g LEFT JOIN team_schedule_shift s ON s.id = g.shift_id`,
+		userID, teamKey, actorEmail, note)
+	if err != nil {
+		return 0, fmt.Errorf("remove upcoming turns: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func nilIfEmpty(s string) *string {

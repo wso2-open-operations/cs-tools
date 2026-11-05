@@ -100,7 +100,7 @@ func (f *fakeRotaAccessRepo) RemoveTeamMember(_ context.Context, _, team, actor 
 	f.allowedLead = allowLead
 	res := f.removal
 	blockedByLead := slices.Contains([]string{"lead", "sub_lead", "americas_team_lead", "cre_head", "cs_head"}, res.Role) && !allowLead
-	if res.Member && res.AlertTier == "" && res.UpcomingTurns == 0 && !blockedByLead {
+	if res.Member && res.AlertTier == "" && !blockedByLead {
 		res.Removed = true
 		f.wrote, f.actor = "remove-member:"+team, actor
 	}
@@ -118,7 +118,7 @@ func (f *fakeRotaAccessRepo) UpdateTeamMember(_ context.Context, _, team, actor 
 
 func (f *fakeRotaAccessRepo) MoveTeamMember(_ context.Context, _, from, to, actor string) (domain.TeamMemberMove, error) {
 	res := f.move
-	if res.OnSource && !res.OnTarget && !res.Lead && res.AlertTier == "" && res.UpcomingTurns == 0 && res.SpanUntil == "" {
+	if res.OnSource && !res.OnTarget && !res.Lead && res.AlertTier == "" && res.SpanUntil == "" {
 		res.Moved = true
 		f.wrote, f.actor = "move-member:"+from+">"+to, actor
 	}
@@ -422,10 +422,6 @@ func TestRemovingATeamMemberIsRefusedWhileItChangesWhoIsCalled(t *testing.T) {
 		removal domain.TeamMemberRemoval
 		check   func(t *testing.T, err error)
 	}{
-		{"upcoming turns", domain.TeamMemberRemoval{Member: true, Role: "engineer", UpcomingTurns: 3},
-			func(t *testing.T, err error) { wantConflict(t, err, "turns", "3 upcoming turns") }},
-		{"one upcoming turn", domain.TeamMemberRemoval{Member: true, Role: "engineer", UpcomingTurns: 1},
-			func(t *testing.T, err error) { wantConflict(t, err, "a turn", "1 upcoming turn on") }},
 		{"a responder tier", domain.TeamMemberRemoval{Member: true, Role: "engineer", AlertTier: "T1"},
 			func(t *testing.T, err error) { wantConflict(t, err, "tier", "T1 responder") }},
 		{"a lead", domain.TeamMemberRemoval{Member: true, Role: "lead"},
@@ -452,8 +448,9 @@ func TestRemovingATeamMemberIsRefusedWhileItChangesWhoIsCalled(t *testing.T) {
 	}
 }
 
-// A CSM admin may remove a lead; turns and tiers still keep anyone on.
-func TestCSMAdminRemovesALeadButNotOneWithTurns(t *testing.T) {
+// A CSM admin may remove a lead; a tier still keeps anyone on. Upcoming
+// turns never do: they go with the membership.
+func TestCSMAdminRemovesALeadButNotOneWithATier(t *testing.T) {
 	admin := callerWithRoles("head@example.com", "cs_admin")
 	repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"iaas": "SRE"},
 		removal: domain.TeamMemberRemoval{Member: true, Role: "lead"}}
@@ -462,10 +459,27 @@ func TestCSMAdminRemovesALeadButNotOneWithTurns(t *testing.T) {
 		t.Fatalf("a CSM admin removing a lead: err %v, wrote %q", err, repo.wrote)
 	}
 	repo.wrote = ""
-	repo.removal = domain.TeamMemberRemoval{Member: true, Role: "lead", UpcomingTurns: 2}
-	wantConflict(t, svc.RemoveTeamMember(admin, "iaas", someoneID), "a lead with turns", "2 upcoming turns")
+	repo.removal = domain.TeamMemberRemoval{Member: true, Role: "lead", AlertTier: "T2"}
+	wantConflict(t, svc.RemoveTeamMember(admin, "iaas", someoneID), "a lead with a tier", "T2 responder")
 	if repo.wrote != "" {
-		t.Fatalf("a lead with turns was removed: %q", repo.wrote)
+		t.Fatalf("a lead with a tier was removed: %q", repo.wrote)
+	}
+}
+
+// Somebody with upcoming turns is removed or moved like anyone else: the
+// turns go with them (the repository deletes them in the same transaction).
+func TestUpcomingTurnsNoLongerKeepSomebodyOnATeam(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"iaas": "SRE", "kiwi": "SRE"},
+		removal: domain.TeamMemberRemoval{Member: true, Role: "engineer", RemovedTurns: 3}}
+	svc, _ := newRotaAccess(repo)
+	if err := svc.RemoveTeamMember(admin, "iaas", someoneID); err != nil || repo.wrote != "remove-member:iaas" {
+		t.Fatalf("removing somebody with turns: err %v, wrote %q", err, repo.wrote)
+	}
+	repo.wrote = ""
+	repo.move = domain.TeamMemberMove{OnSource: true, Role: "engineer", RemovedTurns: 2}
+	if _, err := svc.MoveTeamMember(admin, "iaas", someoneID, "kiwi"); err != nil || repo.wrote != "move-member:iaas>kiwi" {
+		t.Fatalf("moving somebody with turns: err %v, wrote %q", err, repo.wrote)
 	}
 }
 
@@ -598,7 +612,6 @@ func TestMoveTeamMemberRefusals(t *testing.T) {
 		"an unknown target": {&fakeRotaAccessRepo{internal: true}, "iaas", "nowhere", someoneID, "notfound", ""},
 		"a non-member":      {&fakeRotaAccessRepo{internal: true}, "iaas", "kiwi", someoneID, "notfound", ""},
 		"a lead":            {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "lead", Lead: true}}, "iaas", "kiwi", someoneID, "conflict", "lead"},
-		"upcoming turns":    {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "engineer", UpcomingTurns: 2}}, "iaas", "kiwi", someoneID, "conflict", "2 upcoming turns"},
 		"a responder tier":  {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "engineer", AlertTier: "T3"}}, "iaas", "kiwi", someoneID, "conflict", "T3 responder"},
 		"on both teams":     {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, OnTarget: true}}, "iaas", "kiwi", someoneID, "conflict", "both"},
 	} {

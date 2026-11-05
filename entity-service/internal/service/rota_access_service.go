@@ -438,9 +438,10 @@ func (s *rotaAccessService) UpdateTeamMember(ctx context.Context, teamKey, userI
 // MoveTeamMember implements RotaAccessService. Only a CSM admin. The person
 // must be active internal staff on teamKey and not on toTeamKey; they arrive
 // as the same engineer or sub_lead, without a tier, and their rota manager
-// grant for teamKey goes with the move. Refused, with nothing changed, under
-// the same conditions as a removal: upcoming turns or an alert tier on
-// teamKey (409), and a lead is never moved (409). Someone a CRE move tag
+// grant for teamKey goes with the move, and their turns on teamKey that have
+// not ended yet are removed with it. Refused, with nothing changed, under the
+// same conditions as a removal: an alert tier on teamKey (409), and a lead is
+// never moved (409). Someone a CRE move tag
 // already puts on toTeamKey today or later (a Brazil rotation, Migration, the
 // India team) is not moved either (409): the tag is the move, and membership
 // stays with their own team. SRE and SME moves are not checked.
@@ -498,7 +499,7 @@ func (s *rotaAccessService) MoveTeamMember(ctx context.Context, teamKey, userID,
 				"change the dates of that move on the roster instead", toTeamKey, until, teamKey)}
 	case !res.Moved:
 		return domain.TeamMembership{}, teamMemberRemovalRefusal(teamKey, domain.TeamMemberRemoval{
-			Member: true, Role: res.Role, AlertTier: res.AlertTier, UpcomingTurns: res.UpcomingTurns})
+			Member: true, Role: res.Role, AlertTier: res.AlertTier})
 	}
 	return res.Membership, nil
 }
@@ -525,15 +526,6 @@ const teamMemberRefusal = "the members of %s are changed by a CSM admin or the %
 func teamMemberRemovalRefusal(teamKey string, res domain.TeamMemberRemoval) error {
 	if res.Removed || !res.Member {
 		return nil
-	}
-	if res.UpcomingTurns > 0 {
-		turns := "turns"
-		if res.UpcomingTurns == 1 {
-			turns = "turn"
-		}
-		return &apierror.ConflictError{Msg: fmt.Sprintf(
-			"this person still has %d upcoming %s on %s: remove or reassign them on the roster first",
-			res.UpcomingTurns, turns, teamKey)}
 	}
 	if res.AlertTier != "" {
 		return &apierror.ConflictError{Msg: fmt.Sprintf(

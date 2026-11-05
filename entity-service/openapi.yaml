@@ -10861,7 +10861,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person still has upcoming turns on the team, or holds its Case Alerts responder tier; the message says which.
+          description: The person holds the team's Case Alerts responder tier. Their upcoming turns on the team are removed with the membership, never a reason to refuse.
           content:
             application/json:
               schema:
@@ -11015,7 +11015,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The person is on both teams, holds a lead role, has upcoming turns, or holds a responder tier on the source team; the message says which.
+          description: The person is on both teams, holds a lead role, holds a responder tier on the source team, or is already moved to the target by a tag on the roster; the message says which. Their upcoming turns on the source team are removed with the move.
           content:
             application/json:
               schema:
