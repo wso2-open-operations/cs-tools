@@ -3511,7 +3511,7 @@
 .csm-ts .cp-modal.cas-dlg:has(.cas-team-emails) { width: min(580px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
 .csm-ts .cas-team-emails tbody th .cas-sub { font-weight: 400; font-size: 11.5px; color: var(--muted); }
 
-/* The daily timesheet window: a notice not to edit the roster. */
+/* The daily timesheet window: a notice that roster changes may affect the report. */
 .csm-ts .freezebar {
   margin: 0 0 12px;
   padding: 10px 14px;

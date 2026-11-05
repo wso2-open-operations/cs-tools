@@ -95,6 +95,22 @@ type WorklogLeaveRow struct {
 	EndsOn time.Time
 }
 
+// WorklogMoveRow is one Team Schedule span that moves a person to another
+// team: a tag whose kind has moves_to_team_key (Brazil rotation onto
+// Americas, Migration, India team). The person stays a member of their own
+// team (migrations 0202, 0274), so the roster alone
+// files them under the team they were moved away from. TeamKey, TeamName
+// and TeamType describe the team the span moves them to.
+type WorklogMoveRow struct {
+	UserID   string
+	TeamKey  string
+	TeamName string
+	TeamType string
+	StartsOn time.Time
+	// EndsOn is zero for an open-ended span.
+	EndsOn time.Time
+}
+
 // WorklogReportRepository reads the three inputs of the CS Worklogs reports.
 type WorklogReportRepository interface {
 	// Roster returns every member of every team of the given types. A user
@@ -165,6 +181,10 @@ type WorklogReportRepository interface {
 	// from Roster because Roster collapses to one row per person, which
 	// would lose a team whose every member was attributed elsewhere.
 	TeamContacts(ctx context.Context, teamTypes, excludedTeamKeys []string) ([]WorklogTeamContacts, error)
+	// MoveSpans returns the spans overlapping [from, to] that move a person
+	// to another team, whatever that team's type; the service decides
+	// which of them it reports under.
+	MoveSpans(ctx context.Context, from, to time.Time) ([]WorklogMoveRow, error)
 }
 
 // WorklogTeamContacts is one team's derived audience. Members and leads
@@ -360,6 +380,23 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
   ) x
  ORDER BY user_id, starts_on`
 
+// The destination is the kind's moves_to_team_key, the team the tag moves
+// people to (0202 files the span itself under that team as well).
+const worklogMoveSpansQuery = `
+SELECT a.user_id::text,
+       t.key,
+       COALESCE(t.name, ''),
+       COALESCE(t.type, ''),
+       a.starts_on,
+       a.ends_on
+  FROM team_schedule_absence a
+  JOIN team_schedule_absence_kind k ON k.id = a.kind_id
+  JOIN team t ON LOWER(t.key) = LOWER(k.moves_to_team_key)
+ WHERE k.moves_to_team_key IS NOT NULL
+   AND a.starts_on <= $2
+   AND (a.ends_on IS NULL OR a.ends_on >= $1)
+ ORDER BY a.user_id, a.starts_on, t.key`
+
 const worklogTeamContactsQuery = `
 SELECT t.key,
        COALESCE(t.name, ''),
@@ -477,6 +514,33 @@ func (r *worklogReportRepo) Leave(ctx context.Context, from, to time.Time) ([]Wo
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate worklog leave: %w", err)
+	}
+	return out, nil
+}
+
+// MoveSpans implements WorklogReportRepository: every span overlapping
+// [from, to] whose kind moves people to another team, with that team.
+func (r *worklogReportRepo) MoveSpans(ctx context.Context, from, to time.Time) ([]WorklogMoveRow, error) {
+	rows, err := r.db.Query(ctx, worklogMoveSpansQuery, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query worklog move spans: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WorklogMoveRow
+	for rows.Next() {
+		var x WorklogMoveRow
+		var ends *time.Time
+		if err := rows.Scan(&x.UserID, &x.TeamKey, &x.TeamName, &x.TeamType, &x.StartsOn, &ends); err != nil {
+			return nil, fmt.Errorf("scan worklog move span: %w", err)
+		}
+		if ends != nil {
+			x.EndsOn = *ends
+		}
+		out = append(out, x)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate worklog move spans: %w", err)
 	}
 	return out, nil
 }
