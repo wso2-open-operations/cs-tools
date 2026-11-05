@@ -63,6 +63,10 @@ import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
 import {
+  SERVICE_REQUEST_SEVERITY_OPTIONS,
+  SEVERITY_OPTIONS,
+} from "@features/csm-cases/utils/caseFilterOptions";
+import {
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
@@ -813,6 +817,12 @@ export default function CsmIssuesView({
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
+        severityOptions={
+          lockedFilters?.caseTypes?.length === 1 &&
+          lockedFilters.caseTypes[0] === "service_request"
+            ? SERVICE_REQUEST_SEVERITY_OPTIONS
+            : SEVERITY_OPTIONS
+        }
         hideTypeFilter={hideTypeFilter}
         typeFilterLabel={typeFilterLabel}
         hideProjectFilter={hideProjectFilter}

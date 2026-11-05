@@ -76,6 +76,10 @@ interface AdvancedFiltersBuilderProps {
    * `accountId` has no Simple-grid control of its own to seed it from, so
    * this is currently always empty in practice; kept for parity/future use. */
   accountNameSeed?: Map<string, string>;
+  /** Overrides the `severity` row's option list (the catalogue default is
+   * S0-S4). A type-locked service-request list passes S1-S4 only so Advanced
+   * mode offers the same values as the Simple severity control. */
+  severityOptions?: { value: string; label: string }[];
 }
 
 /** "YYYY-MM-DD" to a local-midnight Date (avoids the UTC-parse day-shift
@@ -388,6 +392,7 @@ export default function AdvancedFiltersBuilder({
   assigneeNameSeed,
   projectNameSeed,
   accountNameSeed,
+  severityOptions,
 }: AdvancedFiltersBuilderProps): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -479,7 +484,9 @@ export default function AdvancedFiltersBuilder({
                       ? creTeamOptions
                       : row.field === "sreTeam"
                         ? sreTeamOptions
-                        : (fieldMeta?.options ?? [])
+                        : row.field === "severity" && severityOptions
+                          ? severityOptions
+                          : (fieldMeta?.options ?? [])
                   }
                   onChange={(next) => onUpdateRow(row, { ...asRow(row), values: next })}
                 />
