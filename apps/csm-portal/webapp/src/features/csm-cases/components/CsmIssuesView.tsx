@@ -461,21 +461,18 @@ export default function CsmIssuesView({
   // exactly, which comment_updater also holds.
   const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
 
-  // Severity (S1-S4) is a support-case concept, so the severity filter is by
-  // default only shown on the support-cases list — i.e. when the surrounding
-  // view locks the record type to `case`. Every other list (service
-  // requests, engagements, security reports) hides it, unless the caller
+  // Severity (S1-S4) is a support-case and service-request concept, so the
+  // severity filter is by default only shown on those lists — i.e. when the
+  // surrounding view locks the record type to `case` or `service_request`.
+  // Every other list (engagements, security reports) hides it, unless the caller
   // overrides with `showSeverityFilter` (see its own doc comment — the
   // project Work items tab does this since its type filter is unlocked and
   // visible rather than fixed via `lockedFilters`).
   const showSeverityFilter =
     showSeverityFilterOverride ??
     (lockedFilters?.caseTypes?.length === 1 &&
-      lockedFilters.caseTypes[0] === "case");
-  // Service Requests don't carry a severity, so the column is redundant there.
-  const isServiceRequestOnly =
-    lockedFilters?.caseTypes?.length === 1 &&
-    lockedFilters.caseTypes[0] === "service_request";
+      (lockedFilters.caseTypes[0] === "case" ||
+        lockedFilters.caseTypes[0] === "service_request"));
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
@@ -571,10 +568,9 @@ export default function CsmIssuesView({
 
   // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
   // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
-  // (`isServiceRequestOnly || hideSeverityColumn`) so the picker can never offer a
-  // Severity column that would just render "—" for every row (service requests have no
-  // severity concept at all).
-  const showSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // (`hideSeverityColumn`) so the picker can never offer a Severity column that would
+  // just render "—" for every row.
+  const showSeverityColumn = !hideSeverityColumn;
   // Every current caller of this view locks the case type via `lockedFilters` (Case, SR,
   // SRA, Engagements each fix `caseTypes` to one value) — the Type column would then show
   // the same chip on every row, so it's still offered (a legacy row that predates type
@@ -639,10 +635,9 @@ export default function CsmIssuesView({
     [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
-  // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
-  // || hideSeverityColumn}`) so the export's column set can never drift from
-  // what's actually rendered.
-  const showExportSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Same gate `CasesList` is given (`hideSeverityColumn`) so the export's column
+  // set can never drift from what's actually rendered.
+  const showExportSeverityColumn = !hideSeverityColumn;
   const caseToCsvRow = useCallback(
     (c: CsmCaseRow): string[] => {
       const caseId =
@@ -856,7 +851,7 @@ export default function CsmIssuesView({
         isFetching={isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
-        hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        hideSeverityColumn={hideSeverityColumn}
         selectable={canWrite}
         selectedIds={selectedRowIds}
         onToggleRow={toggleRow}
