@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@api/backend/client", () => {
   class BackendApiError extends Error {
@@ -34,15 +34,12 @@ import {
   downloadEntityAttachment,
   ENTITY_ATTACHMENT_RATE_LIMIT_MESSAGE,
   entityAttachmentErrorMessage,
-  EntityAttachmentUnavailableError,
   EntityUploadConfirmError,
   UPLOAD_CHUNK_BYTES,
   UPLOAD_CANCELLED_MESSAGE,
   fetchEntityAttachmentBlob,
   fetchEntityInlineImage,
-  requestDownloadLink,
   uploadEntityAttachment,
-  type FetchLike,
 } from "@features/csm-cases/api/entityAttachments";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -55,130 +52,23 @@ function fakeApi(post: ReturnType<typeof vi.fn>, getBlob = vi.fn()): BackendApi 
   return { post, getBlob } as unknown as BackendApi;
 }
 
-function link(over: Record<string, unknown> = {}) {
-  return {
-    id: ID,
-    number: "WIA0000001",
-    name: "report.pdf",
-    available: true,
-    url: "https://files.test/api/v2/shares/abc?compress=false",
-    ...over,
-  };
-}
-
-const okFetch = (body = "bytes"): FetchLike =>
-  vi.fn(async () => new Response(body, { status: 200 })) as unknown as FetchLike;
-
-describe("requestDownloadLink", () => {
-  it("asks for exactly one id with its purpose and finds it case-insensitively", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link({ id: ID.toUpperCase() })] });
-    const got = await requestDownloadLink(fakeApi(post), "work_item", ID, "preview");
-    expect(post).toHaveBeenCalledWith("/attachments/download", {
-      type: "work_item",
-      ids: [ID],
-      purpose: "preview",
-    });
-    expect(got?.name).toBe("report.pdf");
-  });
-
-  it("is undefined when the row is absent from the response", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [] });
-    expect(await requestDownloadLink(fakeApi(post), "work_item", ID, "download")).toBeUndefined();
-  });
-});
+const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
+  ({ post, putBinary, getResponse }) as unknown as BackendApi;
 
 describe("fetchEntityAttachmentBlob", () => {
-  it("fetches the link with no credentials and returns the bytes", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link()] });
-    const fetchImpl = okFetch("hello");
-    const got = await fetchEntityAttachmentBlob(
-      fakeApi(post),
-      { type: "work_item", id: ID, purpose: "download" },
-      fetchImpl,
+  it("streams the file through the backend route and returns the bytes", async () => {
+    const blob = new Blob(["hello"]);
+    const getBlob = vi.fn().mockResolvedValue(blob);
+    const got = await fetchEntityAttachmentBlob(fakeApi(vi.fn(), getBlob), { type: "work_item", id: ID });
+    expect(getBlob).toHaveBeenCalledWith(`/attachments/download/${ID}/content?type=work_item`);
+    expect(got).toBe(blob);
+  });
+
+  it("throws any other failure, such as a removed file", async () => {
+    const getBlob = vi.fn().mockRejectedValue(apiError(410, "This attachment was removed."));
+    await expect(fetchEntityAttachmentBlob(fakeApi(vi.fn(), getBlob), { type: "work_item", id: ID })).rejects.toThrow(
+      "This attachment was removed.",
     );
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://files.test/api/v2/shares/abc?compress=false",
-      { method: "GET", credentials: "omit" },
-    );
-    expect(await got?.blob.text()).toBe("hello");
-  });
-
-  it("asks for a fresh link once when the first is refused, then succeeds", async () => {
-    const post = vi
-      .fn()
-      .mockResolvedValueOnce({ links: [link({ url: "https://files.test/old" })] })
-      .mockResolvedValueOnce({ links: [link({ url: "https://files.test/new" })] });
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(new Response("gone", { status: 404 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
-    const got = await fetchEntityAttachmentBlob(
-      fakeApi(post),
-      { type: "work_item", id: ID, purpose: "download" },
-      fetchImpl as unknown as FetchLike,
-    );
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls.map((c) => c[0])).toEqual([
-      "https://files.test/old",
-      "https://files.test/new",
-    ]);
-    expect(await got?.blob.text()).toBe("ok");
-  });
-
-  it("gives up after one retry", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link()] });
-    const fetchImpl = vi.fn(async () => new Response("no", { status: 403 }));
-    await expect(
-      fetchEntityAttachmentBlob(
-        fakeApi(post),
-        { type: "work_item", id: ID, purpose: "download" },
-        fetchImpl as unknown as FetchLike,
-      ),
-    ).rejects.toThrow(/HTTP 403/);
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns undefined for an unknown or not-stored attachment so the caller can fall back", async () => {
-    for (const links of [[], [link({ available: false, url: undefined, reason: "NOT_STORED" })]]) {
-      const post = vi.fn().mockResolvedValue({ links });
-      const fetchImpl = vi.fn();
-      expect(
-        await fetchEntityAttachmentBlob(
-          fakeApi(post),
-          { type: "work_item", id: ID, purpose: "download" },
-          fetchImpl as unknown as FetchLike,
-        ),
-      ).toBeUndefined();
-      expect(fetchImpl).not.toHaveBeenCalled();
-    }
-  });
-
-  it("throws for a deleted attachment instead of falling back", async () => {
-    const post = vi.fn().mockResolvedValue({
-      links: [link({ available: false, url: undefined, reason: "DELETED" })],
-    });
-    await expect(
-      fetchEntityAttachmentBlob(fakeApi(post), { type: "work_item", id: ID, purpose: "download" }, okFetch()),
-    ).rejects.toBeInstanceOf(EntityAttachmentUnavailableError);
-  });
-});
-
-describe("downloadEntityAttachment", () => {
-  it("saves the bytes under the attachment's own name, not the stored one", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [link({ name: "My Report.pdf" })] });
-    const save = vi.fn();
-    const done = await downloadEntityAttachment(fakeApi(post), { type: "work_item", id: ID }, okFetch(), save);
-    expect(done).toBe(true);
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save.mock.calls[0][1]).toBe("My Report.pdf");
-  });
-
-  it("reports false (and saves nothing) when entity-service does not hold the file", async () => {
-    const post = vi.fn().mockResolvedValue({ links: [] });
-    const save = vi.fn();
-    expect(await downloadEntityAttachment(fakeApi(post), { type: "work_item", id: ID }, okFetch(), save)).toBe(false);
-    expect(save).not.toHaveBeenCalled();
   });
 });
 
@@ -187,59 +77,47 @@ describe("uploadEntityAttachment", () => {
   const start = {
     attachmentId: "att-1",
     number: "WIA0000001",
-    uploadUrl: "https://files.test/api/v2/shares/up1",
-    fieldName: "filenames",
     expiresAt: "2026-10-27T10:15:00Z",
     maxBytes: 100 * 1024 * 1024,
   };
   const confirmed = { id: "att-1", number: "WIA0000001", name: "report.pdf", sizeBytes: 5, status: "COMPLETE" };
   const args = { type: "work_item" as const, parentId: "wi-1", file };
 
-  it("runs start, then a credential-free multipart post of one file in 'filenames', then confirm", async () => {
+  it("runs start, then the chunk, then confirm with the chunk count", async () => {
     const post = vi.fn().mockResolvedValueOnce(start).mockResolvedValueOnce(confirmed);
-    const fetchImpl = vi.fn(async () => new Response("", { status: 201 }));
+    const putBinary = vi.fn().mockResolvedValue(undefined);
     const progress: number[] = [];
 
-    const out = await uploadEntityAttachment(
-      fakeApi(post),
-      { ...args, onProgress: (p) => progress.push(p) },
-      { fetchImpl: fetchImpl as unknown as FetchLike },
-    );
+    const out = await uploadEntityAttachment(apiWith(putBinary, post), {
+      ...args,
+      onProgress: (p) => progress.push(p),
+    });
 
     expect(out.status).toBe("COMPLETE");
     expect(post.mock.calls[0]).toEqual([
       "/attachments/upload",
       { type: "work_item", parentId: "wi-1", name: "report.pdf", contentType: "application/pdf", sizeBytes: 5 },
     ]);
-    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe(start.uploadUrl);
-    expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("omit");
-    expect(init.headers).toBeUndefined();
-    const form = init.body as FormData;
-    expect([...form.keys()]).toEqual(["filenames"]);
-    expect((form.get("filenames") as File).name).toBe("report.pdf");
-    expect((form.get("filenames") as File).size).toBe(5);
-    expect(post.mock.calls[1]).toEqual(["/attachments/upload/att-1/confirm", { type: "work_item" }]);
+    expect(putBinary).toHaveBeenCalledTimes(1);
+    expect(putBinary.mock.calls[0][0]).toBe("/attachments/upload/att-1/chunks/0?type=work_item");
+    expect(post.mock.calls[1]).toEqual(["/attachments/upload/att-1/confirm", { type: "work_item", chunks: 1 }]);
     expect(progress[0]).toBe(0);
     expect(progress[progress.length - 1]).toBe(100);
   });
 
   it("refuses a file over the limit the server reports, before sending it", async () => {
     const post = vi.fn().mockResolvedValueOnce({ ...start, maxBytes: 3 });
-    const fetchImpl = vi.fn();
-    await expect(
-      uploadEntityAttachment(fakeApi(post), args, { fetchImpl: fetchImpl as unknown as FetchLike }),
-    ).rejects.toThrow(/too large/);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    const putBinary = vi.fn();
+    await expect(uploadEntityAttachment(apiWith(putBinary, post), args)).rejects.toThrow(/too large/);
+    expect(putBinary).not.toHaveBeenCalled();
   });
 
-  it("stops without confirming when SFTPGo refuses the file", async () => {
+  it("stops without confirming when a chunk is refused", async () => {
     const post = vi.fn().mockResolvedValueOnce(start);
-    const fetchImpl = vi.fn(async () => new Response("", { status: 413 }));
-    await expect(
-      uploadEntityAttachment(fakeApi(post), args, { fetchImpl: fetchImpl as unknown as FetchLike }),
-    ).rejects.toThrow(/HTTP 413/);
+    const putBinary = vi.fn().mockRejectedValue(apiError(413, "The upload is larger than allowed."));
+    await expect(uploadEntityAttachment(apiWith(putBinary, post), args)).rejects.toThrow(
+      "The upload is larger than allowed.",
+    );
     expect(post).toHaveBeenCalledTimes(1);
   });
 
@@ -249,43 +127,37 @@ describe("uploadEntityAttachment", () => {
       .mockResolvedValueOnce(start)
       .mockRejectedValueOnce(apiError(503))
       .mockResolvedValueOnce(confirmed);
-    const fetchImpl = vi.fn(async () => new Response("", { status: 201 }));
-    const out = await uploadEntityAttachment(fakeApi(post), args, {
-      fetchImpl: fetchImpl as unknown as FetchLike,
-      confirmDelayMs: 0,
-    });
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    const out = await uploadEntityAttachment(apiWith(putBinary, post), args, { confirmDelayMs: 0 });
     expect(out.status).toBe("COMPLETE");
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(putBinary).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenCalledTimes(3);
   });
 
   it("throws a resumable error when confirm keeps answering 503", async () => {
     const post = vi.fn().mockResolvedValueOnce(start).mockRejectedValue(apiError(503));
-    const fetchImpl = vi.fn(async () => new Response("", { status: 201 }));
-    const err = await uploadEntityAttachment(fakeApi(post), args, {
-      fetchImpl: fetchImpl as unknown as FetchLike,
-      confirmDelayMs: 0,
-    }).catch((e: unknown) => e);
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    const err = await uploadEntityAttachment(apiWith(putBinary, post), args, { confirmDelayMs: 0 }).catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(EntityUploadConfirmError);
     expect((err as EntityUploadConfirmError).attachmentId).toBe("att-1");
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(putBinary).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces a closed-case 409 from start untouched and sends nothing", async () => {
     const post = vi.fn().mockRejectedValueOnce(apiError(409, "This case is closed, so new attachments can't be added."));
-    const fetchImpl = vi.fn();
-    await expect(
-      uploadEntityAttachment(fakeApi(post), args, { fetchImpl: fetchImpl as unknown as FetchLike }),
-    ).rejects.toThrow("This case is closed, so new attachments can't be added.");
-    expect(fetchImpl).not.toHaveBeenCalled();
+    const putBinary = vi.fn();
+    await expect(uploadEntityAttachment(apiWith(putBinary, post), args)).rejects.toThrow(
+      "This case is closed, so new attachments can't be added.",
+    );
+    expect(putBinary).not.toHaveBeenCalled();
   });
 
   it("does not retry a confirm that is refused for another reason", async () => {
     const post = vi.fn().mockResolvedValueOnce(start).mockRejectedValueOnce(apiError(409, "closed"));
-    const fetchImpl = vi.fn(async () => new Response("", { status: 201 }));
-    await expect(
-      uploadEntityAttachment(fakeApi(post), args, { fetchImpl: fetchImpl as unknown as FetchLike, confirmDelayMs: 0 }),
-    ).rejects.toThrow("closed");
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+    await expect(uploadEntityAttachment(apiWith(putBinary, post), args, { confirmDelayMs: 0 })).rejects.toThrow("closed");
     expect(post).toHaveBeenCalledTimes(2);
   });
 });
@@ -333,7 +205,7 @@ describe("uploadEntityAttachment, size limit message", () => {
   });
 });
 
-describe("with the files held by the portal backend", () => {
+describe("chunked upload and streamed download", () => {
   const CHUNK = UPLOAD_CHUNK_BYTES;
   const started = { attachmentId: "att-1", number: "WIA0000001", expiresAt: "2026-10-27T10:15:00Z", maxBytes: 100 * 1024 * 1024 };
   const confirmed = { id: "att-1", number: "WIA0000001", name: "big.bin", sizeBytes: 0, status: "COMPLETE" };
@@ -346,16 +218,9 @@ describe("with the files held by the portal backend", () => {
     }) as unknown as File;
   const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
 
-  beforeEach(() => {
-    (window as unknown as { config?: unknown }).config = { CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend" };
-  });
   afterEach(() => {
-    (window as unknown as { config?: unknown }).config = undefined;
     vi.useRealTimers();
   });
-
-  const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
-    ({ post, putBinary, getResponse }) as unknown as BackendApi;
 
   it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
@@ -423,8 +288,7 @@ describe("with the files held by the portal backend", () => {
     );
     const post = vi.fn();
     const save = vi.fn();
-    const done = await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, undefined, save);
-    expect(done).toBe(true);
+    await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, save);
     expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
     expect(save.mock.calls[0][1]).toBe("report.pdf");
     expect(post).not.toHaveBeenCalled(); // no link is requested
@@ -460,8 +324,7 @@ describe("with the files held by the portal backend", () => {
       .mockResolvedValueOnce(brokenResponse("0123", 10))
       .mockResolvedValueOnce(new Response("456789", { status: 206 }));
     const save = vi.fn();
-    const done = await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
-    expect(done).toBe(true);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
     expect(getResponse).toHaveBeenCalledTimes(2);
     expect(getResponse.mock.calls[1][1]).toEqual({ headers: { Range: "bytes=4-" } });
     expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
@@ -474,7 +337,7 @@ describe("with the files held by the portal backend", () => {
       .mockResolvedValueOnce(brokenResponse("0123", 10))
       .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
     expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
   });
 
@@ -482,19 +345,21 @@ describe("with the files held by the portal backend", () => {
     const getResponse = vi.fn().mockImplementation(async () => brokenResponse("01", 10));
     const save = vi.fn();
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
     expect(getResponse).toHaveBeenCalledTimes(3);
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("reports false on a 404 so the older flow can be tried, and throws for a removed file", async () => {
+  it("throws the backend's message for a missing or removed file", async () => {
     const save = vi.fn();
-    const missing = vi.fn().mockRejectedValue(apiError(404));
-    expect(await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, undefined, save)).toBe(false);
+    const missing = vi.fn().mockRejectedValue(apiError(404, "attachment not found"));
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, save),
+    ).rejects.toThrow("attachment not found");
     const gone = vi.fn().mockRejectedValue(apiError(410, "This attachment was removed."));
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), gone), { type: "work_item", id: ID }, undefined, save),
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), gone), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("This attachment was removed.");
     expect(save).not.toHaveBeenCalled();
   });

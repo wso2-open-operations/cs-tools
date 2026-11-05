@@ -16,16 +16,12 @@
 
 import { useCallback } from "react";
 import { useBackendApi } from "@api/backend/client";
-import { saveBlob } from "@utils/saveBlob";
-import { isSafeAttachmentContentType } from "@features/csm-cases/utils/attachmentPreview";
+import { downloadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
 
 /**
- * Returns a function that fetches a deployment attachment's raw bytes via
- * `GET /attachments/{id}/content`. Streams behind auth as a `Blob` — see
- * {@link isSafeAttachmentContentType} for why the fetched blob is only
- * re-labeled with the list metadata's (uploader-controlled) content type
- * when that type is itself in the backend's safe allowlist.
+ * Returns a function that downloads a deployment attachment: it is streamed
+ * through the portal backend (which checks access) and saved under its own name.
  */
 export function useDownloadDeploymentAttachment(): (
   attachment: DeploymentAttachment,
@@ -34,15 +30,7 @@ export function useDownloadDeploymentAttachment(): (
 
   return useCallback(
     async (attachment: DeploymentAttachment): Promise<void> => {
-      const blob = await api.getBlob(
-        `/attachments/${encodeURIComponent(attachment.id)}/content`,
-      );
-      const toSave =
-        isSafeAttachmentContentType(attachment.contentType) &&
-        blob.type !== attachment.contentType
-          ? blob.slice(0, blob.size, attachment.contentType)
-          : blob;
-      saveBlob(toSave, attachment.name);
+      await downloadEntityAttachment(api, { type: "deployment", id: attachment.id });
     },
     [api],
   );

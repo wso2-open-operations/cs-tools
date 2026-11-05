@@ -111,22 +111,8 @@ declare global {
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
       /**
-       * Entity-service stored attachments (SFTPGo share links for upload and
-       * download, a streamed route for comment images). Only `true` (or the
-       * string `"true"`) turns it on; off is the default and changes nothing.
-       * See `entityAttachmentsConfig.ts`.
-       */
-      CSM_PORTAL_ENTITY_ATTACHMENTS_ENABLED?: boolean | string;
-      /**
-       * Where attachment files live: "sftpgo" (default) or "backend", where the
-       * portal backend stores them in Azure Blob Storage (chunked uploads,
-       * streamed downloads). Must match the backend's `ATTACHMENT_STORAGE_MODE`.
-       * See `entityAttachmentsConfig.ts`.
-       */
-      CSM_PORTAL_ATTACHMENT_STORAGE_MODE?: string;
-      /**
-       * Largest file, in megabytes, offered for upload when entity attachments
-       * are on (default 100, the entity-service default). A number or numeric
+       * Largest file, in megabytes, offered for upload (default 100, the
+       * entity-service default). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;

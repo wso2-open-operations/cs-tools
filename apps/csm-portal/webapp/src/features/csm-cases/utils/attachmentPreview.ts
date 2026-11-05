@@ -18,17 +18,11 @@
 export type AttachmentPreviewKind = "image" | "pdf";
 
 /**
- * A previewable URL for an attachment, resolved one of two ways depending on
- * the signed-in user's `sftpgoAttachmentStorageEnabled` flag (mirrors the
- * same branching {@link useDownloadCsmCaseAttachment} already uses):
- *  - Postgres/default storage: the attachment's bytes are fetched as an
- *    authenticated `Blob` via `GET /attachments/{id}/content` and turned into
- *    a `blob:` object URL. `revoke: true` — the caller must
- *    `URL.revokeObjectURL(url)` once it is no longer displayed.
- *  - SFTPGo storage: the entity-service refuses to serve attachment bytes
- *    directly for this data source, so a short-lived public share URL is
- *    minted instead (`POST /attachments/{id}/share`) and used as-is.
- *    `revoke: false` — this is not a `blob:` URL and must not be revoked.
+ * A previewable URL for an attachment: its bytes are fetched as an
+ * authenticated `Blob` through the portal backend and turned into a `blob:`
+ * object URL. `revoke: true` — the caller must `URL.revokeObjectURL(url)` once
+ * it is no longer displayed. (`revoke: false` is for a URL that is not a
+ * `blob:` URL and must not be revoked.)
  */
 export interface AttachmentPreviewSource {
   url: string;

@@ -41,9 +41,8 @@ interface AttachmentPreviewDialogProps {
    * object URL created from the attachment's authenticated content (the
    * BE content endpoint always sets `Content-Disposition: attachment` and
    * requires auth headers, so a plain `<img src>` pointed at it directly
-   * would force a download instead of rendering) or, for SFTPGo-backed
-   * attachments, a short-lived public share URL that is already directly
-   * usable as-is. See {@link AttachmentPreviewSource}.
+   * would force a download instead of rendering). See
+   * {@link AttachmentPreviewSource}.
    */
   fetchContent: (attachment: CaseAttachment) => Promise<AttachmentPreviewSource>;
 }
