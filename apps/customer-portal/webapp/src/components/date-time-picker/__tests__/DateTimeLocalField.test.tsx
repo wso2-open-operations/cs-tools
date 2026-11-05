@@ -113,6 +113,11 @@ describe("DateTimeLocalField", () => {
     expect(sections()[0]).toHaveFocus();
   });
 
+  it("takes its accessible name from ariaLabel when there is no visible label", () => {
+    render(<DateTimeLocalField ariaLabel="Preferred slot" value="2026-06-10T04:30" onChange={vi.fn()} />);
+    expect(screen.getAllByLabelText("Preferred slot").length).toBeGreaterThan(0);
+  });
+
   it("is not editable when disabled", () => {
     render(<DateTimeLocalField label="Start" value="2026-06-10T04:30" onChange={vi.fn()} disabled />);
     expect(input()).toBeDisabled();
