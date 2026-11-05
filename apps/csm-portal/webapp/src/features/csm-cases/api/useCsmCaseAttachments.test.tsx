@@ -48,6 +48,9 @@ vi.mock("@features/csm-cases/api/attachmentStorageTus", () => ({
   uploadFileViaTus: uploadFileViaTusMock,
 }));
 
+vi.mock("@context/success-banner/SuccessBannerContext", () => ({
+  useSuccessBanner: () => ({ showSuccess: vi.fn() }),
+}));
 vi.mock("@utils/saveBlob", () => ({ saveBlob: vi.fn() }));
 
 import {

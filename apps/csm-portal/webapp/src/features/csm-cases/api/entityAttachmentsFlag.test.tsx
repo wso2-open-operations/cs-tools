@@ -48,6 +48,9 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
   }),
 }));
 
+vi.mock("@context/success-banner/SuccessBannerContext", () => ({
+  useSuccessBanner: () => ({ showSuccess: vi.fn() }),
+}));
 vi.mock("@utils/saveBlob", () => ({ saveBlob: saveBlobMock }));
 
 import { BackendApiError } from "@api/backend/client";

@@ -21,6 +21,7 @@ import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import type { CaseAttachment } from "@features/support/types/cases";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
+import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
 
 const mockCaseAttachments: CaseAttachment[] = [
@@ -105,7 +106,9 @@ function renderPanel(caseId = "case-1") {
       <ThemeProvider theme={createTheme()}>
         <LoggerProvider config={{ level: "ERROR", prefix: "Test" }}>
           <ErrorBannerProvider>
-            <CaseDetailsAttachmentsPanel caseId={caseId} />
+            <SuccessBannerProvider>
+              <CaseDetailsAttachmentsPanel caseId={caseId} />
+            </SuccessBannerProvider>
           </ErrorBannerProvider>
         </LoggerProvider>
       </ThemeProvider>
