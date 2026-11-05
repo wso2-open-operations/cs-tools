@@ -583,6 +583,12 @@ export interface BeServiceRequestCreatePayload {
   catalogItemId: string;
   variables: BeCaseVariable[];
   /**
+   * The service request's internal severity (`critical`, `high`, `medium` or
+   * `low`; `catastrophic` is rejected). Omit to let the server apply its
+   * configured default: the form leaves it out unless the engineer picks one.
+   */
+  severity?: BeCaseSeverity;
+  /**
    * UUID of the case this service request is linked to as its parent, when
    * created from a case's "Create service request" action. Mirrors
    * {@link BeCaseCreatePayload.relatedCaseId}, but for a service request the
@@ -1027,6 +1033,22 @@ export interface BeUpdatedCase {
 export interface BeUpdateCaseResponse {
   message?: string;
   case: BeUpdatedCase;
+  /** Non-fatal notices about what the update did; the update succeeded. Absent when there are none. */
+  warnings?: BeResponseWarning[];
+}
+
+/**
+ * A machine-readable, non-fatal notice attached to a successful response.
+ * `SEVERITY_DOWNGRADED`: a case moved to a service request had a severity a
+ * service request cannot hold (`catastrophic`) and was stored one level lower
+ * (`critical`); `from`/`to` are the wire severity values. Build UI on `code`;
+ * `message` is English fallback text.
+ */
+export interface BeResponseWarning {
+  code: "SEVERITY_DOWNGRADED" | (string & {});
+  message: string;
+  from?: string;
+  to?: string;
 }
 
 export type BeEngagementType =

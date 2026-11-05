@@ -41,7 +41,7 @@ import {
 import { RefreshCw } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type ChangeEvent, type JSX, type MouseEvent } from "react";
 import { Link as RouterLink, useNavigate } from "react-router";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import { severityFromBe, priorityFromSeverity } from "@api/backend/mappers";
 import { caseIdLabel } from "@features/csm-cases/utils/caseIdentity";
 import {
@@ -49,7 +49,6 @@ import {
   CASE_TYPE_COLOR,
   CASE_TYPE_LABEL,
   caseTypeDetailBasePath,
-  caseTypeHasSeverity,
 } from "@features/csm-cases/utils/caseType";
 import type { BeCaseType } from "@api/backend/types";
 import {
@@ -376,11 +375,10 @@ export default function CsmSlaEnginePage(): JSX.Element {
                             )}
                           </TableCell>
                           <TableCell>
-                            {caseTypeHasSeverity(lowerType) ? (
-                              <SeverityChip severity={severityFromBe(status.priority)} />
-                            ) : (
-                              "—"
-                            )}
+                            <CaseSeverityChip
+                              caseType={lowerType}
+                              severity={severityFromBe(status.priority)}
+                            />
                           </TableCell>
                           <TableCell>{status.clockType}</TableCell>
                           <TableCell>{Math.round(status.businessElapsedPercent)}%</TableCell>

@@ -402,7 +402,7 @@ function CaseFamilyWidgetPreview({
   // than starting from scratch here.
   const currentUserId = useCurrentUser().user?.id;
   const currentUserEmail = useIdTokenClaims()?.email;
-  const showSeverityColumn = resourceType === "case";
+  const showSeverityColumn = resourceType === "case" || resourceType === "service_request";
   const availableOptionalColumns: CaseOptionalColumnId[] = [
     "product",
     "type",

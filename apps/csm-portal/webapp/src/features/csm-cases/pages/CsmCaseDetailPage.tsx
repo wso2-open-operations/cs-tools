@@ -105,7 +105,10 @@ import {
   hasPublicComment,
   isGithubRaisedCaseNumber,
 } from "@features/csm-cases/utils/commentContent";
-import { caseTypeTransferLabel } from "@features/csm-cases/utils/caseTypeTransfer";
+import {
+  caseTypeTransferLabel,
+  describeTransferWarnings,
+} from "@features/csm-cases/utils/caseTypeTransfer";
 import SetAutocloseHoldDialog from "@features/csm-cases/components/SetAutocloseHoldDialog";
 import EditCaseDetailsDialog, {
   type FieldSaveResult,
@@ -200,7 +203,7 @@ import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import QueryErrorState from "@components/QueryErrorState";
 import RelativeTime from "@components/RelativeTime";
 import EscalationLevelChip from "@components/EscalationLevelChip";
-import SeverityChip from "@components/SeverityChip";
+import CaseSeverityChip from "@features/csm-cases/components/CaseSeverityChip";
 import StateChip from "@components/StateChip";
 import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 import type {
@@ -1744,11 +1747,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                   issueType: submission.issueType,
                 },
         {
-          onSuccess: () => {
+          onSuccess: (res) => {
             setChangeCaseTypeOpen(false);
+            // The transfer succeeded either way; a warning (e.g. an S0 case
+            // stored as S1 on a service request) is shown with the result.
+            const warning = describeTransferWarnings(res?.warnings);
             setFeedback({
-              message: `Case type changed to ${caseTypeTransferLabel(submission.targetType)}.`,
-              severity: "success",
+              message: `Case type changed to ${caseTypeTransferLabel(submission.targetType)}.${warning ? ` ${warning}` : ""}`,
+              severity: warning ? "warning" : "success",
               sticky: true,
             });
           },
@@ -2481,12 +2487,14 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 sx={{ fontWeight: 600 }}
               />
             )}
-            {!isAnnouncement &&
-              !isServiceRequest &&
-              !isSecurityReport &&
-              !isEngagement && (
-                <SeverityChip severity={c.severity} withLabel />
-              )}
+            {!isAnnouncement && !isSecurityReport && !isEngagement && (
+              <CaseSeverityChip
+                caseType={c.caseType}
+                severity={c.severity}
+                withLabel
+                emptyFallback={null}
+              />
+            )}
             {!isAnnouncement && <StateChip state={c.state} />}
             {!isAnnouncement && !isEscalationLevelUnset(currentEscalationLevel) && (
               <EscalationLevelChip level={currentEscalationLevel as string} short />
@@ -3290,6 +3298,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           // CsmCaseCreatePage.tsx) — caseProject is the same project fetch
           // already used for the Customer card above.
           isManagedCloud={caseProject?.subscriptionType === "managed_cloud_subscription"}
+          isServiceRequest={c.caseType === "service_request"}
           isChanging={patchCase.isPending}
           onClose={() => setSeverityOpen(false)}
           onChange={onChangeSeverity}
