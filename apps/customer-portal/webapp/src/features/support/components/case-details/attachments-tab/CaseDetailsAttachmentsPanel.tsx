@@ -345,6 +345,11 @@ export default function CaseDetailsAttachmentsPanel({
                       (storedDownload.isDownloading &&
                         storedDownload.downloadingId === att.id)
                     }
+                    downloadProgress={
+                      storedDownload.downloadingId === att.id
+                        ? storedDownload.downloadProgress
+                        : null
+                    }
                   />
                 );
               })

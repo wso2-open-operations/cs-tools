@@ -48,18 +48,33 @@ export function useStoredAttachmentDownload(): {
   downloadStoredAttachment: (input: StoredAttachmentDownloadInput) => Promise<void>;
   isDownloading: boolean;
   downloadingId: string | null;
+  /** Percentage (0-100) of the running download, or null while it is not known yet or nothing downloads. */
+  downloadProgress: number | null;
 } {
   const authFetch = useAuthApiClient();
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const mutation = useMutation<void, Error, StoredAttachmentDownloadInput>({
-    mutationFn: (input) => downloadStoredAttachment(authFetch, input),
-    onMutate: (input) => setDownloadingId(input.id),
-    onSettled: () => setDownloadingId(null),
+    mutationFn: (input) =>
+      downloadStoredAttachment(authFetch, {
+        ...input,
+        onProgress: (received, total) =>
+          setDownloadProgress(total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null),
+      }),
+    onMutate: (input) => {
+      setDownloadProgress(null);
+      setDownloadingId(input.id);
+    },
+    onSettled: () => {
+      setDownloadingId(null);
+      setDownloadProgress(null);
+    },
   });
   return {
     downloadStoredAttachment: mutation.mutateAsync,
     isDownloading: mutation.isPending,
     downloadingId,
+    downloadProgress,
   };
 }
 

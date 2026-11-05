@@ -23,7 +23,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   IconButton,
   Skeleton,
   Tooltip,
@@ -40,6 +39,7 @@ import {
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
@@ -555,7 +555,13 @@ function DocumentRow({
             onClick={() => void handleDownloadClick()}
           >
             {isDownloadLoading ? (
-              <CircularProgress color="inherit" size={16} aria-hidden />
+              <DownloadProgressIndicator
+                progress={
+                  storedDownload.downloadingId === doc.id
+                    ? storedDownload.downloadProgress
+                    : null
+                }
+              />
             ) : (
               <Download size={16} aria-hidden />
             )}
