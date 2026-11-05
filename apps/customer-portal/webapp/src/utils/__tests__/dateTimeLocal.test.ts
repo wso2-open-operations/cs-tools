@@ -44,6 +44,32 @@ describe("parseDateTimeLocal", () => {
   );
 });
 
+describe("impossible calendar and clock values", () => {
+  it.each([
+    ["30 February", "2026-02-30T10:00"],
+    ["month 13", "2026-13-01T10:00"],
+    ["month 0", "2026-00-10T10:00"],
+    ["day 0", "2026-06-00T10:00"],
+    ["hour 25", "2026-06-10T25:00"],
+    ["minute 61", "2026-06-10T10:61"],
+    ["a year below 100", "0050-06-10T10:00"],
+  ])("rejects %s instead of rolling it over", (_label, value) => {
+    expect(parseDateTimeLocal(value)).toBeNull();
+  });
+
+  it("accepts 29 February only in a leap year", () => {
+    expect(parseDateTimeLocal("2028-02-29T10:00")?.getDate()).toBe(29);
+    expect(parseDateTimeLocal("2027-02-29T10:00")).toBeNull();
+  });
+
+  it("applies the same checks to date-only values", () => {
+    expect(parseDateOnly("2026-02-30")).toBeNull();
+    expect(parseDateOnly("2026-13-01")).toBeNull();
+    expect(parseDateOnly("0050-06-10")).toBeNull();
+    expect(parseDateOnly("2028-02-29")?.getMonth()).toBe(1);
+  });
+});
+
 describe("formatDateTimeLocal", () => {
   it("round-trips with parseDateTimeLocal", () => {
     expect(formatDateTimeLocal(parseDateTimeLocal("2026-01-05T09:05") as Date)).toBe("2026-01-05T09:05");
