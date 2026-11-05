@@ -93,6 +93,7 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -2826,28 +2827,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  // Post the comment when it has text or an image; an attachment-only
-                  // send skips the comment endpoint and just uploads the files.
-                  if (hasCommentContent(bodyHtml)) {
-                    await postComment.mutateAsync({
-                      caseId,
-                      bodyHtml,
-                      authorName: engineerName,
-                      internal,
-                    });
-                  }
-                  // Attachments are case-level (no comment linkage on the BE);
-                  // upload each sequentially so a failure surfaces clearly.
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                    });
-                  }
-                  // Collapse and clear the draft only on success; on error the
-                  // input keeps its draft + files and surfaces the failure.
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
+                  });
+                  // Collapse and clear the draft only when everything went through.
                   setComposerOpen(false);
                   clearComposerDraft();
                 }}

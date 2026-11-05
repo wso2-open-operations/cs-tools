@@ -60,6 +60,7 @@ import {
   uploadQueuedImages,
   useInlineImageStatus,
 } from "@features/csm-cases/api/inlineImageUploads";
+import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
@@ -497,6 +498,17 @@ export default function CsmCaseCommentInput({
       setResetTrigger(resetTriggerRef.current);
       setEditorMountKey((k) => k + 1);
     } catch (e) {
+      if (e instanceof PartialSendError) {
+        if (e.commentPosted) {
+          releaseInlineImages(html);
+          failedWarnedHtmlRef.current = null;
+          setHtml("");
+          resetTriggerRef.current += 1;
+          setResetTrigger(resetTriggerRef.current);
+          setEditorMountKey((k) => k + 1);
+        }
+        setAttachments((prev) => prev.filter((a) => !e.uploaded.includes(a)));
+      }
       setError(e instanceof Error ? e.message : "Failed to post comment.");
     } finally {
       setSubmitting(false);
