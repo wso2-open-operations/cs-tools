@@ -116,20 +116,6 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
-// AttachmentStorageMode says who stores work item, comment-image and deployment
-// attachment files (see Config.AttachmentStorageMode).
-type AttachmentStorageMode string
-
-const (
-	// AttachmentStorageModeSFTPGo: this service reaches SFTPGo and gives the
-	// browser short-lived share links. The default.
-	AttachmentStorageModeSFTPGo AttachmentStorageMode = "sftpgo"
-	// AttachmentStorageModeBackend: the portal backends store and serve the files
-	// themselves. This service keeps the access checks and the rows, authorizes each
-	// upload and read, and returns the storage key; it never touches a file.
-	AttachmentStorageModeBackend AttachmentStorageMode = "backend"
-)
-
 // AttachmentDataSource identifies which backend three case attachment reads
 // (GET /attachments/{id}, POST /attachments/search, GET
 // /attachments/{id}/content) and the case activity feed (POST
@@ -740,25 +726,6 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// SFTPGo* is the file store behind work item, comment and deployment
-	// attachments. entity-service holds the only credential: it logs in as the
-	// service user (SFTPGO_USER/SFTPGO_PASSWORD, at SFTPGO_URL), and what a
-	// browser receives is a short-lived SFTPGo *share* for exactly one file or
-	// one upload folder, never a token (see StoredAttachmentService). All three
-	// must be set together; with none set the attachment link and upload
-	// routes are not registered.
-	//
-	// SFTPGoPublicURL is the address the BROWSER uses to reach SFTPGo
-	// (SFTPGO_PUBLIC_URL). It differs from SFTPGoURL once SFTPGo sits behind a
-	// public reverse proxy; unset, it falls back to SFTPGoURL.
-	SFTPGoURL       string
-	SFTPGoPublicURL string
-	SFTPGoUser      string
-	SFTPGoPassword  string
-	// SFTPGoAllowInsecureHTTP (SFTPGO_ALLOW_INSECURE_HTTP=true) permits http URLs
-	// for SFTPGo. Local development only: the service password and token travel
-	// in clear text over http, and an http public URL puts share ids on the wire.
-	SFTPGoAllowInsecureHTTP bool
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
 	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
 	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
@@ -766,18 +733,6 @@ type Config struct {
 	// defaults, to be set from the real size distribution.
 	AttachmentMaxBytes  int64
 	InlineImageMaxBytes int64
-	// AttachmentReadLinkTTL and AttachmentUploadLinkTTL are how long a download
-	// link (ATTACHMENT_READ_LINK_TTL, default 1m) and an upload link
-	// (ATTACHMENT_UPLOAD_LINK_TTL, default 15m) stay valid.
-	AttachmentReadLinkTTL   time.Duration
-	AttachmentUploadLinkTTL time.Duration
-	// AttachmentStorageMode (ATTACHMENT_STORAGE_MODE) says who holds the files.
-	// "sftpgo" (the default) keeps today's behaviour: this service reaches SFTPGo
-	// and hands the browser a share link. "backend" means the portal backends hold
-	// the files themselves (in Azure Blob Storage): this service then only decides
-	// who may upload or read what and which storage key each file has, and needs no
-	// SFTPGo settings at all. See AttachmentStorageModeBackend.
-	AttachmentStorageMode AttachmentStorageMode
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
@@ -1012,34 +967,10 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.SFTPGoURL = strings.TrimRight(strings.TrimSpace(os.Getenv("SFTPGO_URL")), "/")
-	cfg.SFTPGoPublicURL = strings.TrimRight(strings.TrimSpace(os.Getenv("SFTPGO_PUBLIC_URL")), "/")
-	if cfg.SFTPGoPublicURL == "" {
-		cfg.SFTPGoPublicURL = cfg.SFTPGoURL
-	}
-	cfg.SFTPGoUser = strings.TrimSpace(os.Getenv("SFTPGO_USER"))
-	cfg.SFTPGoPassword = os.Getenv("SFTPGO_PASSWORD")
-	cfg.SFTPGoAllowInsecureHTTP = os.Getenv("SFTPGO_ALLOW_INSECURE_HTTP") == "true"
 	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
 	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
-	cfg.AttachmentReadLinkTTL = envDuration("ATTACHMENT_READ_LINK_TTL", time.Minute)
-	cfg.AttachmentUploadLinkTTL = envDuration("ATTACHMENT_UPLOAD_LINK_TTL", 15*time.Minute)
-	cfg.AttachmentStorageMode = AttachmentStorageMode(strings.ToLower(strings.TrimSpace(getEnvOrDefault("ATTACHMENT_STORAGE_MODE", string(AttachmentStorageModeSFTPGo)))))
 	cfg.applySREEventHubTopic()
 	return cfg
-}
-
-// HasSFTPGo reports whether the SFTPGo file store is configured, which turns on
-// the attachment link and upload routes.
-func (c *Config) HasSFTPGo() bool {
-	return c.SFTPGoURL != "" && c.SFTPGoUser != "" && c.SFTPGoPassword != ""
-}
-
-// HasBackendAttachmentStorage reports whether the portal backends hold the
-// attachment files (ATTACHMENT_STORAGE_MODE=backend). It turns on the attachment
-// routes without SFTPGo and turns the SFTPGo link routes off.
-func (c *Config) HasBackendAttachmentStorage() bool {
-	return c.AttachmentStorageMode == AttachmentStorageModeBackend
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1351,35 +1282,6 @@ func (c *Config) Validate() error {
 	salesEntitySet := c.SalesEntityBaseURL != "" || c.SalesEntityTokenURL != "" || c.SalesEntityClientID != "" || c.SalesEntityClientSecret != "" || c.SalesEntityScopes != ""
 	if salesEntitySet && !c.SalesEntityConfigured() {
 		return fmt.Errorf("SALES_ENTITY_BASE_URL, SALES_ENTITY_TOKEN_URL, SALES_ENTITY_CLIENT_ID, and SALES_ENTITY_CLIENT_SECRET must be set together or not at all")
-	}
-	switch c.AttachmentStorageMode {
-	case "", AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend:
-	default:
-		return fmt.Errorf("invalid ATTACHMENT_STORAGE_MODE %q: must be %q or %q", c.AttachmentStorageMode, AttachmentStorageModeSFTPGo, AttachmentStorageModeBackend)
-	}
-	// With ATTACHMENT_STORAGE_MODE=backend the SFTPGO_* settings are ignored, so a
-	// partial or insecure leftover from before the cutover must not stop the
-	// service starting. They are checked in every other mode.
-	if !c.HasBackendAttachmentStorage() {
-		// SFTPGO_PASSWORD is never echoed: the error names variables, not values.
-		sftpgoSet := c.SFTPGoURL != "" || c.SFTPGoUser != "" || c.SFTPGoPassword != ""
-		if sftpgoSet && !c.HasSFTPGo() {
-			return fmt.Errorf("SFTPGO_URL, SFTPGO_USER and SFTPGO_PASSWORD must be set together or not at all")
-		}
-		if c.HasSFTPGo() {
-			for _, u := range []struct{ name, val string }{
-				{"SFTPGO_URL", c.SFTPGoURL},
-				{"SFTPGO_PUBLIC_URL", c.SFTPGoPublicURL},
-			} {
-				parsed, err := url.Parse(u.val)
-				if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-					return fmt.Errorf("%s must be an https URL", u.name)
-				}
-				if parsed.Scheme == "http" && !c.SFTPGoAllowInsecureHTTP {
-					return fmt.Errorf("%s must be an https URL (SFTPGO_ALLOW_INSECURE_HTTP=true allows http for local development only)", u.name)
-				}
-			}
-		}
 	}
 	scimSet := c.SCIMBaseURL != "" || c.SCIMTokenURL != "" || c.SCIMClientID != "" || c.SCIMClientSecret != "" || c.SCIMScopes != ""
 	if scimSet && !c.SCIMConfigured() {

@@ -1563,45 +1563,36 @@ type OutageCommunicationService interface {
 	Log(ctx context.Context, number string) ([]domain.OutageCommunicationLogEntry, error)
 }
 
-// StoredAttachmentService issues the links a browser uses to download and
-// upload attachment files held in SFTPGo (work item, comment-image and
-// deployment attachments). It never returns SFTPGo credentials: a download link
-// is an SFTPGo share on exactly one file, and an upload link is a share on a
-// folder created for that one upload that accepts one request.
+// StoredAttachmentService records and authorizes the attachment files (work
+// item, comment-image and deployment attachments) that the portal backends hold
+// in Azure Blob Storage. It never touches a file: it keeps the access checks,
+// the rows, the size and type rules and the storage key, and hands the key to the
+// backend that asked. A storage key must never reach a browser.
 //
 // Access is the caller's own: row-level security on the attachment tables
 // decides which rows they can see and whether they can add one, so a caller
 // outside the parent's project gets "not found". Adding a file to a closed work
 // item is refused for every caller, internal ones included.
 type StoredAttachmentService interface {
-	// ResolveLinks returns metadata, and a download link for each file that is
-	// stored, for the attachments of one kind the caller can see. An id the
-	// caller cannot see is left out of the response.
-	ResolveLinks(ctx context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error)
 	// InitiateUpload starts an upload: it checks the caller may add a file to
 	// the parent (a ConflictError when the work item is closed), checks the size
-	// and type, records a PENDING attachment, and returns the one-use link the
-	// browser sends the file to.
+	// and type, and records a PENDING attachment. The browser then sends the file
+	// to the portal backend in chunks.
 	InitiateUpload(ctx context.Context, req domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error)
-	// ConfirmUpload finishes an upload: it checks the file that arrived (size,
-	// and for a comment image the real type), moves it to its final path, and
-	// marks the attachment COMPLETE. Only the person who started the upload can
-	// confirm it. Repeating a confirm that already succeeded answers the same.
+	// ConfirmUpload finishes an upload the backend has stored: it checks the size
+	// the backend reports against the declaration and the limits (and, for a comment
+	// image, the type) and marks the attachment COMPLETE. Only the person who
+	// started the upload can confirm it. Repeating a confirm that already
+	// succeeded answers the same.
 	ConfirmUpload(ctx context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error)
-	// DeleteAttachment soft-deletes an attachment: its file is removed from
-	// SFTPGo and the row is marked DELETED. Only the person who uploaded it may
+	// DeleteAttachment soft-deletes an attachment: the row is marked DELETED and
+	// the portal backend removes the file. Only the person who uploaded it may
 	// do so (a ForbiddenError otherwise), and not once the work item is closed (a
 	// ConflictError). Repeating a delete that already succeeded answers the same.
 	DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error
-	// OpenInlineImage streams a comment's inline image to a caller who may see
-	// it, so the browser never talks to SFTPGo. An image the caller cannot see,
-	// that is not stored, or that was deleted is a NotFoundError.
-	OpenInlineImage(ctx context.Context, id string) (domain.StoredAttachmentContent, error)
 
-	// The three calls below exist only with ATTACHMENT_STORAGE_MODE=backend, where
-	// the portal backends hold the files and this service never touches one; in the
-	// default SFTPGo mode they answer NotFoundError. Each returns an internal storage
-	// key for the backend that asked, which must never reach a browser.
+	// The three calls below each return an internal storage key for the backend
+	// that asked.
 
 	// AuthorizeUpload checks, as the caller, that a started upload may still receive
 	// data (theirs, still PENDING, parent still open) and returns where the backend
@@ -1611,31 +1602,21 @@ type StoredAttachmentService interface {
 	// returns where its file is, or why it has none (the AttachmentUnavailable*
 	// reasons). An attachment the caller cannot see is a NotFoundError.
 	LocateAttachment(ctx context.Context, req domain.LocateAttachmentRequest) (domain.AttachmentLocation, error)
-	// LocateInlineImage is OpenInlineImage without the file: the same lookup and
-	// refusals (a removed image is a GoneError), and the key to stream from.
+	// LocateInlineImage finds a comment's inline image for a caller who may see it
+	// (a removed image is a GoneError) and returns the key to stream from.
 	LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error)
-}
-
-// AttachmentShareCleanupService removes the spent and expired SFTPGo shares that
-// download and upload links leave behind.
-type AttachmentShareCleanupService interface {
-	// CleanupShares deletes entity-service's own shares that expired (past a short
-	// grace) or whose uses are spent, at most a bounded number per run. Internal
-	// callers only (a ForbiddenError otherwise).
-	CleanupShares(ctx context.Context) (domain.ShareCleanupResult, error)
 }
 
 // AttachmentUploadCleanupService clears out uploads that were started and never
 // confirmed.
 type AttachmentUploadCleanupService interface {
-	// CleanupUploads removes the staging folder of each upload still PENDING after
-	// a day and marks its row FAILED, at most a bounded number per run. Internal
-	// callers only (a ForbiddenError otherwise).
+	// CleanupUploads marks each upload still PENDING after a day FAILED and lists
+	// the comment images that were never linked to a comment, at most a bounded
+	// number per run. Internal callers only (a ForbiddenError otherwise).
 	CleanupUploads(ctx context.Context) (domain.UploadCleanupResult, error)
 	// AcknowledgeOrphans marks DELETED the orphaned comment images (see
 	// UploadCleanupResult.Orphans) whose files the caller has removed from
-	// storage. Only with ATTACHMENT_STORAGE_MODE=backend (a NotFoundError
-	// otherwise). Internal callers only. An id that is no longer an orphan is
+	// storage. Internal callers only. An id that is no longer an orphan is
 	// skipped, so repeating a call is safe.
 	AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error)
 }
@@ -1644,13 +1625,4 @@ type AttachmentUploadCleanupService interface {
 // comment. Best effort: it never returns an error, and a nil linker is a no-op.
 type InlineImageLinker interface {
 	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
-}
-
-// InlineImageExtractor moves the images pasted into a comment out of its HTML
-// before the comment is saved: each base64 data URI becomes a stored comment
-// attachment and the comment keeps src="/<attachment id>". Unlike linking it can
-// fail, and then the comment must not be saved. The linker the services are given
-// is used as an extractor too when it implements this.
-type InlineImageExtractor interface {
-	ExtractInlineImages(ctx context.Context, workItemID, authorEmail, content string) (string, error)
 }

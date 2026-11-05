@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +28,6 @@ import (
 )
 
 type fakeStoredAttachmentSvc struct {
-	links     domain.AttachmentLinksRequest
 	confirm   domain.ConfirmAttachmentUploadRequest
 	deleted   domain.DeleteStoredAttachmentRequest
 	authorize domain.AuthorizeAttachmentUploadRequest
@@ -53,25 +51,13 @@ func (f *fakeStoredAttachmentSvc) LocateInlineImage(_ context.Context, id string
 	return domain.AttachmentLocation{ID: id, Available: true, StorageKey: "k"}, f.err
 }
 
-func (f *fakeStoredAttachmentSvc) OpenInlineImage(_ context.Context, id string) (domain.StoredAttachmentContent, error) {
-	if f.err != nil {
-		return domain.StoredAttachmentContent{}, f.err
-	}
-	return domain.StoredAttachmentContent{Body: io.NopCloser(strings.NewReader("IMG")), ContentType: "image/png", Size: 3}, nil
-}
-
 func (f *fakeStoredAttachmentSvc) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
 	f.deleted = req
 	return f.err
 }
 
-func (f *fakeStoredAttachmentSvc) ResolveLinks(_ context.Context, req domain.AttachmentLinksRequest) (domain.AttachmentLinksResponse, error) {
-	f.links = req
-	return domain.AttachmentLinksResponse{Links: []domain.AttachmentLink{{ID: "x", Available: true, URL: "https://f/x"}}}, f.err
-}
-
 func (f *fakeStoredAttachmentSvc) InitiateUpload(context.Context, domain.InitiateAttachmentUploadRequest) (domain.InitiateAttachmentUploadResponse, error) {
-	return domain.InitiateAttachmentUploadResponse{AttachmentID: "a", UploadURL: "https://f/up", FieldName: "filenames"}, f.err
+	return domain.InitiateAttachmentUploadResponse{AttachmentID: "a", Number: "WIA0000001", MaxBytes: 100}, f.err
 }
 
 func (f *fakeStoredAttachmentSvc) ConfirmUpload(_ context.Context, req domain.ConfirmAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {
@@ -83,11 +69,9 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 	t.Helper()
 	h := NewStoredAttachmentHandler(svc)
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /attachments/download", h.ResolveLinks)
 	mux.HandleFunc("POST /attachments/upload", h.InitiateUpload)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
-	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImageContent)
 	mux.HandleFunc("POST /attachments/upload/{id}/authorize", h.AuthorizeUpload)
 	mux.HandleFunc("POST /attachments/locate", h.LocateAttachment)
 	mux.HandleFunc("GET /attachments/inline/{id}/location", h.InlineImageLocation)
@@ -96,27 +80,13 @@ func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, bod
 	return rec
 }
 
-func TestStoredAttachmentHandler_LinksAreNeverCached(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/download", `{"type":"work_item","ids":["a"]}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
-		t.Errorf("Cache-Control = %q: a response carrying short-lived links must not be cached", got)
-	}
-	if svc.links.Kind != domain.StoredAttachmentWorkItem || len(svc.links.IDs) != 1 {
-		t.Errorf("request not decoded: %+v", svc.links)
-	}
-}
-
 func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodPost, "/attachments/upload",
 		`{"type":"work_item","parentId":"p","name":"a.pdf","contentType":"application/pdf","sizeBytes":5}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}
-	if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"uploadUrl":"https://f/up"`) {
+	if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"attachmentId":"a"`) {
 		t.Errorf("headers = %v body = %s", rec.Header(), rec.Body.String())
 	}
 }
@@ -180,52 +150,6 @@ func TestStoredAttachmentHandler_DeleteMapsErrors(t *testing.T) {
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}
-	}
-}
-
-func TestStoredAttachmentHandler_InlineImageIsStreamedWithSafeHeaders(t *testing.T) {
-	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodGet, "/attachments/inline/abc/content", "")
-	if rec.Code != http.StatusOK || rec.Body.String() != "IMG" {
-		t.Fatalf("status = %d body = %q", rec.Code, rec.Body.String())
-	}
-	for k, want := range map[string]string{
-		"Content-Type": "image/png", "Content-Length": "3", "X-Content-Type-Options": "nosniff",
-		"Cache-Control": "private, max-age=300", "Content-Disposition": "inline",
-	} {
-		if got := rec.Header().Get(k); got != want {
-			t.Errorf("%s = %q, want %q", k, got, want)
-		}
-	}
-	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") {
-		t.Errorf("Content-Security-Policy = %q", rec.Header().Get("Content-Security-Policy"))
-	}
-	rec = serveStored(t, &fakeStoredAttachmentSvc{err: &apierror.NotFoundError{Msg: "x"}}, http.MethodGet, "/attachments/inline/abc/content", "")
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("not found gave %d", rec.Code)
-	}
-}
-
-type fakeCleanup struct {
-	res domain.ShareCleanupResult
-	err error
-}
-
-func (f fakeCleanup) CleanupShares(context.Context) (domain.ShareCleanupResult, error) {
-	return f.res, f.err
-}
-
-func TestStoredAttachmentHandler_CleanupShares(t *testing.T) {
-	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithShareCleanup(fakeCleanup{res: domain.ShareCleanupResult{Scanned: 5, Deleted: 2}})
-	rec := httptest.NewRecorder()
-	h.CleanupShares(rec, httptest.NewRequest(http.MethodPost, "/attachments/shares/cleanup", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deleted":2`) {
-		t.Errorf("status = %d body = %s", rec.Code, rec.Body.String())
-	}
-	h = NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithShareCleanup(fakeCleanup{err: &apierror.ForbiddenError{Msg: "x"}})
-	rec = httptest.NewRecorder()
-	h.CleanupShares(rec, httptest.NewRequest(http.MethodPost, "/attachments/shares/cleanup", nil))
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
 	}
 }
 

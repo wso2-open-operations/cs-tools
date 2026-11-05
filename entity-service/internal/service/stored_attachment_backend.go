@@ -20,7 +20,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -29,19 +28,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/validate"
 )
-
-// NewBackendStoredAttachmentService constructs the StoredAttachmentService for
-// ATTACHMENT_STORAGE_MODE=backend. The portal backends hold the files (in Azure
-// Blob Storage), so there is no file store here: this service keeps the access
-// checks, the rows and the storage keys, authorizes each upload and read, and
-// never touches a file. The SFTPGo-only calls (download links, streaming an inline
-// image) answer "not found" in this mode.
-func NewBackendStoredAttachmentService(repo repository.StoredAttachmentRepository, limits StoredAttachmentLimits) StoredAttachmentService {
-	return &storedAttachmentService{
-		repo: repo, limits: limits, now: time.Now, backend: true,
-		shares: newShareLimiter(maxSharesPerCallerPerMinute, time.Minute),
-	}
-}
 
 // storageKeyFor is the key an attachment's file has once it is stored: the
 // migrator's layout, so new files sit beside migrated ones.
@@ -63,9 +49,6 @@ func storageKeyFor(kind domain.StoredAttachmentKind, row domain.StoredAttachment
 // part-way stops being able to add to the upload. It is cheap (one row read and
 // one parent read) and charges nothing against the per-caller link budget.
 func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domain.AuthorizeAttachmentUploadRequest) (domain.AttachmentUploadTarget, error) {
-	if !s.backend {
-		return domain.AttachmentUploadTarget{}, &apierror.NotFoundError{Msg: "not available"}
-	}
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return domain.AttachmentUploadTarget{}, err
 	}
@@ -180,9 +163,6 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 
 // LocateAttachment implements StoredAttachmentService.
 func (s *storedAttachmentService) LocateAttachment(ctx context.Context, req domain.LocateAttachmentRequest) (domain.AttachmentLocation, error) {
-	if !s.backend {
-		return domain.AttachmentLocation{}, &apierror.NotFoundError{Msg: "not available"}
-	}
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return domain.AttachmentLocation{}, err
 	}
@@ -229,13 +209,10 @@ func (s *storedAttachmentService) LocateAttachment(ctx context.Context, req doma
 	return loc, nil
 }
 
-// LocateInlineImage implements StoredAttachmentService. It is OpenInlineImage
-// without the file: the same lookup, the same refusals, and the storage key for
+// LocateInlineImage implements StoredAttachmentService. It finds a comment's
+// image: the same lookup and refusals as any attachment, and the storage key for
 // the backend to stream from. It is not charged, like streaming an image never was.
 func (s *storedAttachmentService) LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error) {
-	if !s.backend {
-		return domain.AttachmentLocation{}, &apierror.NotFoundError{Msg: "not available"}
-	}
 	img, err := s.findInlineImage(ctx, id)
 	if err != nil {
 		return domain.AttachmentLocation{}, err

@@ -30,7 +30,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/eventbus"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/github"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/handler"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
@@ -630,47 +629,26 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		onboardingStepHandler = handler.NewOnboardingStepHandler(service.NewOnboardingStepService(repository.NewOnboardingStepRepository(db), accessSvc))
 	}
 
-	// Links to the attachment files held in SFTPGo (work item, comment-image and
-	// deployment attachments). Needs a pool, because the metadata and the access
-	// rules (row-level security) live in Postgres, and the SFTPGo settings: with
-	// either missing the routes are not registered and 404, so nothing here can
-	// reach SFTPGo half configured.
+	// The attachment files (work item, comment-image and deployment attachments)
+	// are held by the portal backends in Azure Blob Storage; this service only
+	// records them and checks access. Needs a pool, because the metadata and the
+	// access rules (row-level security) live in Postgres: without one the routes
+	// are not registered and 404.
 	var storedAttachmentHandler *handler.StoredAttachmentHandler
 	var inlineImageLinker service.InlineImageLinker
-	// storedAttachmentBackend is ATTACHMENT_STORAGE_MODE=backend: the portal
-	// backends hold the files, so there is no SFTPGo client at all and the routes
-	// that hand out SFTPGo links are not registered; authorize and locate are.
-	storedAttachmentBackend := db != nil && cfg.HasBackendAttachmentStorage()
-	if storedAttachmentBackend {
-		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
-		storedAttachmentSvc := service.NewBackendStoredAttachmentService(
-			storedAttachmentRepo,
-			service.StoredAttachmentLimits{
-				MaxBytes:       cfg.AttachmentMaxBytes,
-				InlineMaxBytes: cfg.InlineImageMaxBytes,
-			},
-		)
-		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
-		// A nil store: nothing here holds a file, so the cleanup only marks rows.
-		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
-			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, nil, accessSvc))
-	} else if db != nil && cfg.HasSFTPGo() {
-		sftpgoClient := filestore.NewClient(cfg.SFTPGoURL, cfg.SFTPGoPublicURL, cfg.SFTPGoUser, cfg.SFTPGoPassword)
+	if db != nil {
 		storedAttachmentRepo := repository.NewStoredAttachmentRepository(repository.NewScoped(db))
 		storedAttachmentSvc := service.NewStoredAttachmentService(
 			storedAttachmentRepo,
-			sftpgoClient,
 			service.StoredAttachmentLimits{
 				MaxBytes:       cfg.AttachmentMaxBytes,
 				InlineMaxBytes: cfg.InlineImageMaxBytes,
-				ReadLinkTTL:    cfg.AttachmentReadLinkTTL,
-				UploadLinkTTL:  cfg.AttachmentUploadLinkTTL,
 			},
 		)
 		// Comments created or edited from here on attach the images they show.
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
-		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).WithShareCleanup(service.NewAttachmentShareCleanupService(sftpgoClient, accessSvc)).
-			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, sftpgoClient, accessSvc))
+		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
+			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc))
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND
@@ -1931,17 +1909,11 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
-		if storedAttachmentBackend {
-			// The portal backends hold the files: they ask which key to use and read.
-			mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
-			mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
-			mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
-			mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
-		} else {
-			mux.HandleFunc("POST /attachments/download", storedAttachmentHandler.ResolveLinks)
-			mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
-			mux.HandleFunc("POST /attachments/shares/cleanup", storedAttachmentHandler.CleanupShares)
-		}
+		// The portal backends hold the files: they ask which key to use and read.
+		mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
+		mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
+		mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
+		mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 	}
 
 	// event_publish_failures, sla_clocks, scheduled_task_run and

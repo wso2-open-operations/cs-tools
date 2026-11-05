@@ -128,9 +128,6 @@ type caseService struct {
 
 	// imageLinker attaches the comment images a new comment shows (nil: none).
 	imageLinker InlineImageLinker
-	// imageExtractor stores the images pasted into a new comment (nil: they stay
-	// embedded in the comment).
-	imageExtractor InlineImageExtractor
 }
 
 // srNotifier is what caseService needs from SRNoticeService; an interface so
@@ -206,7 +203,6 @@ func WithCSEngineerRole(svc CaseService, csEngineerRole string) CaseService {
 func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 	if cs, ok := svc.(*caseService); ok && l != nil {
 		cs.imageLinker = l
-		cs.imageExtractor, _ = l.(InlineImageExtractor)
 	}
 	return svc
 }
@@ -1395,17 +1391,6 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
-	// The ServiceNow mirror further down is given the content as the caller sent
-	// it: ServiceNow extracts an embedded image itself, and it cannot resolve the
-	// reference this service stores in its place.
-	originalContent := req.Content
-	if s.imageExtractor != nil {
-		content, err := s.imageExtractor.ExtractInlineImages(ctx, req.CaseID, actorEmail, req.Content)
-		if err != nil {
-			return domain.CreateCaseCommentResponse{}, err
-		}
-		req.Content = content
-	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {
@@ -1489,7 +1474,7 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// can ever act on.
 	if s.snWriteback != nil && req.Type != domain.CommentTypeActivity {
 		if m, ok := s.snMirror.(snCommentMirror); ok {
-			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, originalContent
+			mirrorCaseID, mirrorType, mirrorContent := req.CaseID, req.Type, req.Content
 			s.snWriteback.Dispatch(ctx, "case_comment", req.CaseID, "create",
 				map[string]any{"caseId": mirrorCaseID, "type": mirrorType, "content": mirrorContent},
 				func(writeCtx context.Context) error {
@@ -3898,6 +3883,24 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
 		return domain.SearchAttachmentsResponse{}, err
 	}
+	if req.ReferenceType == domain.ReferenceTypeDeployment {
+		// Deployment attachments are files in Azure Blob Storage with a row in
+		// deployment_attachment: list them from Postgres.
+		if err := normalizePagination(&req.Pagination); err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		attachments, total, err := s.repo.SearchDeploymentAttachments(ctx, req.ReferenceID, req.Pagination)
+		if err != nil {
+			return domain.SearchAttachmentsResponse{}, err
+		}
+		return domain.SearchAttachmentsResponse{
+			Attachments: attachments,
+			Total:       total,
+			Limit:       req.Pagination.Limit,
+			Offset:      req.Pagination.Offset,
+			HasMore:     req.Pagination.Offset+len(attachments) < total,
+		}, nil
+	}
 	if isMirrorOnlyAttachmentRef(req.ReferenceType) && s.snMirror != nil {
 		// No Postgres attachment store for these types yet (deployment,
 		// incident, change_request, conversation): serve from the mirrored
@@ -3908,10 +3911,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 	isCase := req.ReferenceType == domain.ReferenceTypeCase
 	if !isCase {
 		// Non-case work items (change_request, incident, conversation) are
-		// backed by work_item_attachment; "deployment" is not a work_item
-		// subtype and has no attachment table on this data source.
+		// backed by work_item_attachment.
 		if _, ok := repository.ReferenceTypeToWorkItemType[req.ReferenceType]; !ok {
-			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident'", req.ReferenceType)}
+			return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("referenceType %q is not supported for this data source: must be one of 'case', 'change_request', 'conversation', 'incident' or 'deployment'", req.ReferenceType)}
 		}
 	}
 	if err := normalizePagination(&req.Pagination); err != nil {
