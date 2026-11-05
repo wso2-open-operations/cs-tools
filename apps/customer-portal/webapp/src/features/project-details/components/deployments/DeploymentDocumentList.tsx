@@ -86,7 +86,6 @@ export default function DeploymentDocumentList({
   deploymentId,
 }: DeploymentDocumentListProps): JSX.Element {
   const { showError } = useErrorBanner();
-  const { showSuccess } = useSuccessBanner();
   const { data: userDetails } = useGetUserDetails();
   const queryClient = useQueryClient();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -283,6 +282,7 @@ function DocumentRow({
   currentUserEmail,
   onError,
 }: DeploymentDocumentRowProps): JSX.Element {
+  const { showSuccess } = useSuccessBanner();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const { downloadAttachment, isDownloading, downloadingId } =
@@ -327,7 +327,12 @@ function DocumentRow({
             id: doc.id,
             name: doc.name,
             size: sizeBytes > 0 ? sizeBytes : undefined,
-            onSaved: () => showSuccess(`Downloaded ${doc.name}.`),
+            onSaved: (outcome) =>
+              showSuccess(
+                outcome === "saved"
+                  ? `Downloaded ${name}.`
+                  : `Download of ${name} started.`,
+              ),
           });
           return;
         } catch (storedError) {

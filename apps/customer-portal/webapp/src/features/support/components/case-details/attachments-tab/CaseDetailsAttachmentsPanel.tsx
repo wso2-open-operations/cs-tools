@@ -167,7 +167,12 @@ export default function CaseDetailsAttachmentsPanel({
             id: att.id,
             name: att.name,
             size: att.size,
-            onSaved: () => showSuccess(`Downloaded ${att.name}.`),
+            onSaved: (outcome) =>
+              showSuccess(
+                outcome === "saved"
+                  ? `Downloaded ${att.name}.`
+                  : `Download of ${att.name} started.`,
+              ),
           });
           return;
         } catch (storedError) {

@@ -24,6 +24,13 @@ import {
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
 
+/**
+ * How a finished download ended: `saved` when the whole file was written to the
+ * file the person picked (observable), `started` when the file was handed to the
+ * browser as a download, which cannot tell whether the person saves it.
+ */
+export type DownloadSaveOutcome = "saved" | "started";
+
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
@@ -295,18 +302,20 @@ async function readRange(
  *
  * Throws an ApiError with status 404 when there is no such stored attachment,
  * which a caller still on the older flow can fall back from. `onSaved` runs once
- * the whole file is saved; a closed save dialog or a failure never calls it.
+ * the download ends, saying whether it was written to the picked file (`saved`)
+ * or handed to the browser (`started`); a closed save dialog or a failure never
+ * calls it.
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
 ): Promise<void> {
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
     await readAndStore(authFetch, input, sink);
-    input.onSaved?.();
+    input.onSaved?.(sink ? "saved" : "started");
   } catch (error) {
     await sink?.abort();
     throw error;
@@ -404,7 +413,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
 ): Promise<void> {
   if (isBackendAttachmentStorage()) {
     await downloadFromBackend(authFetch, input);
@@ -445,6 +454,7 @@ export async function downloadStoredAttachment(
     blob = await fetchLinkBlob(fresh.url);
   }
   saveBlobAs(blob, link.name || input.name || "attachment");
+  input.onSaved?.("started");
 }
 
 /** Step 1 of an upload: records the attachment and returns the one-use upload link. */

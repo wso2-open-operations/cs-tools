@@ -53,6 +53,7 @@ import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
   downloadEntityAttachment,
+  type DownloadSaveOutcome,
   entityAttachmentErrorMessage,
   WORK_ITEM_ATTACHMENT_TYPE,
   fetchEntityAttachmentBlob,
@@ -409,6 +410,11 @@ export function useDownloadCsmCaseAttachment(): (
   const getContent = useGetCsmCaseAttachmentContent();
   const { user } = useCurrentUser();
   const { showSuccess } = useSuccessBanner();
+  const notify = useCallback(
+    (name: string, outcome: DownloadSaveOutcome) =>
+      showSuccess(outcome === "saved" ? `Downloaded ${name}.` : `Download of ${name} started.`),
+    [showSuccess],
+  );
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
   return useCallback(
@@ -422,7 +428,7 @@ export function useDownloadCsmCaseAttachment(): (
           id: attachment.id,
           name: attachment.filename,
           size: attachment.size,
-          onSaved: () => showSuccess(`Downloaded ${attachment.filename}.`),
+          onSaved: (outcome) => notify(attachment.filename, outcome),
         });
         if (done) return;
       }
@@ -432,13 +438,14 @@ export function useDownloadCsmCaseAttachment(): (
           BeAttachmentShareResponse
         >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
         openForDownload(shareUrl);
+        notify(attachment.filename, "started");
         return;
       }
       const blob = await getContent(attachment);
       saveBlob(blob, attachment.filename);
-      showSuccess(`Downloaded ${attachment.filename}.`);
+      notify(attachment.filename, "started");
     },
-    [api, getContent, sftpgoEnabled, showSuccess],
+    [api, getContent, sftpgoEnabled, notify],
   );
 }
 
