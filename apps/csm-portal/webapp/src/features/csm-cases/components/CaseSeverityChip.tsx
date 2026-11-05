@@ -14,7 +14,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-
 import type { JSX, ReactNode } from "react";
 import type { BeCaseType } from "@api/backend/types";
 import type { SeverityOrUnset } from "@features/csm-dashboard/types/abtDashboard";
