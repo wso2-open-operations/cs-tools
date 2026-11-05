@@ -1572,8 +1572,8 @@ paths:
     put:
       summary: Send one chunk of an upload (ATTACHMENT_STORAGE_MODE=backend only).
       description: >
-        The body is the raw bytes of chunk `index` (0-based), at most 16 MiB; every
-        chunk but the last should be exactly 16 MiB. A chunk may be sent again and
+        The body is the raw bytes of chunk `index` (0-based), at most 8 MiB; every
+        chunk but the last should be exactly 8 MiB. A chunk may be sent again and
         in any order. Nothing is visible until the upload is confirmed. Only the
         person who started the upload may send chunks; entity-service checks that.
       operationId: putAttachmentsUploadIdChunksIndex

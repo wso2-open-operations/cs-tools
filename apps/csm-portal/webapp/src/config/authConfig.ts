@@ -137,7 +137,7 @@ declare global {
        */
       CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
       /**
-       * How many 16 MiB ranges of one attachment download are fetched at the
+       * How many 8 MiB ranges of one attachment download are fetched at the
        * same time (default 4, kept between 1 and 8; 1 fetches one at a time).
        * A number or numeric string. See `attachmentLimitsConfig.ts`.
        */

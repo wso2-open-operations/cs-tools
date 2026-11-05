@@ -106,7 +106,7 @@ export class UploadConfirmPendingError extends Error {
 }
 
 /** Bytes in every upload chunk but the last. Must match the backend's chunk size. */
-export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /** Chunks sent at the same time, and tries per chunk. */
 const UPLOAD_CHUNK_CONCURRENCY = 3;
@@ -214,7 +214,7 @@ export function saveBlobAs(blob: Blob, fileName: string): void {
 const DOWNLOAD_RANGE_ATTEMPTS = 3;
 
 /** Bytes asked for in one range of a download. */
-export const DOWNLOAD_RANGE_BYTES = 16 * 1024 * 1024;
+export const DOWNLOAD_RANGE_BYTES = 8 * 1024 * 1024;
 
 const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
 
@@ -283,8 +283,8 @@ async function readRange(
 
 /**
  * Downloads one attachment through the portal backend, which checks access and
- * streams the file. The first 16 MiB are asked for with a `Range` header; the
- * answer says how big the file is, and the rest is fetched as 16 MiB ranges,
+ * streams the file. The first 8 MiB are asked for with a `Range` header; the
+ * answer says how big the file is, and the rest is fetched as 8 MiB ranges,
  * {@link downloadParallelism} at a time.
  *
  * Where the browser can, the file is written straight to a file the person

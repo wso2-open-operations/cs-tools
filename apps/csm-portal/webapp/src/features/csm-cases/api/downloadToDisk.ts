@@ -24,7 +24,7 @@ import { downloadToDiskEnabled } from "@config/attachmentLimitsConfig";
  */
 
 /** Largest download that is still saved through the in-memory path with no dialog. */
-export const SMALL_DOWNLOAD_BYTES = 16 * 1024 * 1024;
+export const SMALL_DOWNLOAD_BYTES = 8 * 1024 * 1024;
 
 interface WritableFile {
   write(chunk: { type: "write"; position: number; data: Blob }): Promise<void>;
