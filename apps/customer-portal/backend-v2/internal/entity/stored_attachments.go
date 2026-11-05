@@ -20,21 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-
-	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 )
 
-// The stored-attachment routes are entity-service's SFTPGo-backed attachment
-// API. Bodies are relayed as raw JSON: entity-service validates them and
+// The stored-attachment routes are entity-service's attachment API. Bodies are relayed as raw JSON: entity-service validates them and
 // decides access (Postgres row-level security), so nothing here interprets them.
-
-// ResolveStoredAttachmentLinks calls POST /attachments/download.
-func (c *Client) ResolveStoredAttachmentLinks(ctx context.Context, body json.RawMessage) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/attachments/download", body)
-}
 
 // InitiateStoredAttachmentUpload calls POST /attachments/upload.
 func (c *Client) InitiateStoredAttachmentUpload(ctx context.Context, body json.RawMessage) ([]byte, error) {
@@ -52,38 +43,9 @@ func (c *Client) DeleteStoredAttachment(ctx context.Context, body json.RawMessag
 	return err
 }
 
-// StreamInlineImage calls GET /attachments/inline/{id}/content and returns the
-// response body unread, so a caller can copy it straight to its own response
-// without holding the image in memory. The caller closes the body. size is -1
-// when entity-service did not send a length.
-func (c *Client) StreamInlineImage(ctx context.Context, id string) (body io.ReadCloser, contentType string, size int64, err error) {
-	path := fmt.Sprintf("/attachments/inline/%s/content", url.PathEscape(id))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return nil, "", 0, fmt.Errorf("entity: build request GET %s: %w", path, err)
-	}
-	if token := userIDTokenFromContext(ctx); token != "" {
-		req.Header.Set("x-user-id-token", token)
-	}
-	if cid := correlationIDFromContext(ctx); cid != "" {
-		req.Header.Set("X-CSM-Correlation-ID", cid)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, "", 0, fmt.Errorf("entity: GET %s: %w", path, err)
-	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		defer resp.Body.Close()
-		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-		return nil, "", 0, apierror.NewUpstreamError(resp.StatusCode, errBody)
-	}
-	return resp.Body, resp.Header.Get("Content-Type"), resp.ContentLength, nil
-}
-
-// The calls below exist only when entity-service runs with
-// ATTACHMENT_STORAGE_MODE=backend: it decides who may touch which file and says
-// where it lives, and this backend moves the bytes. Their responses carry the
-// storage key, so they are for this backend alone and must never be relayed.
+// The three calls below are how entity-service decides who may touch which file
+// and says where it lives; this backend moves the bytes. Their responses carry
+// the storage key, so they are for this backend alone and must never be relayed.
 
 // AuthorizeStoredAttachmentUpload calls POST /attachments/upload/{id}/authorize.
 func (c *Client) AuthorizeStoredAttachmentUpload(ctx context.Context, id string, body json.RawMessage) ([]byte, error) {

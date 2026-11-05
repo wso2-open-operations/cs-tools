@@ -36,13 +36,12 @@ import (
 // maxRequestBodyBytes caps request bodies accepted by search/create/update endpoints.
 const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
-// maxAttachmentBodyBytes caps attachment-create bodies, and case-create bodies
-// carrying inline attachments, at 15 MiB. The webapp
-// base64-encodes the file client-side before embedding it in the JSON body:
-// entity-service enforces a 10 MB decoded-file limit, and base64 inflates
-// that to ~13.3 MB of encoded data, so the blanket 1 MiB maxRequestBodyBytes
-// leaves no headroom for the JSON envelope around it.
-const maxAttachmentBodyBytes = 15 << 20 // 15 MiB
+// maxCaseBodyBytes caps case-create bodies at 15 MiB. The rich-text description
+// can embed images as base64 data URIs, which inflate the image by about a
+// third, so the blanket 1 MiB maxRequestBodyBytes leaves no headroom for them.
+// Attachment files are not sent here: they are uploaded in chunks after the
+// case exists.
+const maxCaseBodyBytes = 15 << 20 // 15 MiB
 
 // maxZipUploadBytes caps the raw (non-JSON) binary body accepted by
 // POST /deployment-usages.
@@ -97,14 +96,6 @@ const (
 	ErrMsgInternal     = "An internal server error occurred. Please try again later."
 	ErrMsgInvalidUUID  = "Invalid UUID format."
 	errMsgReadBody     = "Failed to read request body."
-
-	// Closed-case attachment guards (see caseIsClosed in cases.go). The wording
-	// matches the Ballerina backend's ERR_MSG_CASE_CLOSED_FOR_ATTACHMENT_*
-	// constants so both backends reject the same operation with the same
-	// message — the webapp surfaces it verbatim in its error toast.
-	ErrMsgCaseClosedForAttachmentCreate = "Cannot add attachments to a closed case."
-	ErrMsgCaseClosedForAttachmentUpdate = "Cannot update attachments on a closed case."
-	ErrMsgCaseClosedForAttachmentDelete = "Cannot delete attachments from a closed case."
 
 	// Closed-case feedback guard. Matches the Ballerina backend's
 	// ERR_MSG_CASE_NOT_CLOSED_FOR_FEEDBACK constant so both backends reject
@@ -276,7 +267,7 @@ func readJSONBody(w http.ResponseWriter, r *http.Request) (body []byte, ok bool)
 
 // readJSONBodyWithLimit is readJSONBody with an overridable size cap, for
 // endpoints (attachment create) whose JSON body legitimately exceeds
-// maxRequestBodyBytes — see maxAttachmentBodyBytes.
+// maxRequestBodyBytes — see maxCaseBodyBytes.
 func readJSONBodyWithLimit(w http.ResponseWriter, r *http.Request, maxBytes int64) (body []byte, ok bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	body, err := io.ReadAll(r.Body)

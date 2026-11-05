@@ -20,11 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/middleware"
@@ -32,26 +29,24 @@ import (
 
 // maxStoredAttachmentBodyBytes bounds the JSON bodies of the stored-attachment
 // routes: they carry ids and metadata, never file content (the file goes from
-// the browser straight to SFTPGo).
+// the browser to the backend, which stores it in Azure Blob Storage).
 const maxStoredAttachmentBodyBytes = 64 << 10
 
-// storedAttachmentEntityClient is the entity-service surface of the SFTPGo-backed
+// storedAttachmentEntityClient is the entity-service surface of the stored
 // attachment routes. Bodies are relayed as-is; entity-service validates them
 // and decides who may see what.
 type storedAttachmentEntityClient interface {
-	ResolveStoredAttachmentLinks(ctx context.Context, body json.RawMessage) ([]byte, error)
 	InitiateStoredAttachmentUpload(ctx context.Context, body json.RawMessage) ([]byte, error)
 	ConfirmStoredAttachmentUpload(ctx context.Context, id string, body json.RawMessage) ([]byte, error)
 	DeleteStoredAttachment(ctx context.Context, body json.RawMessage) error
-	StreamInlineImage(ctx context.Context, id string) (body io.ReadCloser, contentType string, size int64, err error)
 }
 
 // StoredAttachmentPermit checks the caller's permission for a module and action,
 // writing the refusal itself and returning false when it is denied.
 type StoredAttachmentPermit func(w http.ResponseWriter, r *http.Request, module middleware.Module, action middleware.Action) bool
 
-// StoredAttachmentHandler relays entity-service's SFTPGo-backed attachment
-// routes. Access to the attachment itself is entity-service's (row-level
+// StoredAttachmentHandler relays entity-service's stored-attachment start and
+// delete routes (the blob handler moves the bytes). Access to the attachment itself is entity-service's (row-level
 // security); this handler only applies the portal's module permission, which
 // depends on the attachment type, and shapes errors the way this backend does.
 type StoredAttachmentHandler struct {
@@ -79,7 +74,7 @@ func moduleForStoredAttachmentType(t string) (middleware.Module, bool) {
 }
 
 // mapStoredAttachmentError is mapUpstreamError plus the one status this API
-// adds: entity-service answers 429 when a caller asks for too many links, and it
+// adds: entity-service answers 429 when a caller makes too many requests, and it
 // is meant to reach the caller.
 func mapStoredAttachmentError(w http.ResponseWriter, err error, fallbackMsg string) {
 	var apiErr *apierror.Error
@@ -128,21 +123,6 @@ func (h *StoredAttachmentHandler) relay(w http.ResponseWriter, r *http.Request, 
 		return nil, false
 	}
 	return body, true
-}
-
-// ResolveLinks handles POST /attachments/download.
-func (h *StoredAttachmentHandler) ResolveLinks(w http.ResponseWriter, r *http.Request) {
-	body, ok := h.relay(w, r, middleware.ActionRead)
-	if !ok {
-		return
-	}
-	out, err := h.entity.ResolveStoredAttachmentLinks(r.Context(), body)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity ResolveStoredAttachmentLinks failed", "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to get attachment links.")
-		return
-	}
-	writeStoredAttachmentJSON(w, http.StatusOK, out)
 }
 
 // InitiateUpload handles POST /attachments/upload.
@@ -204,52 +184,8 @@ var inlineImageTypes = map[string]bool{
 	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
 }
 
-// GetInlineImage handles GET /attachments/inline/{id}/content: it streams a
-// comment's inline image from entity-service, which checks access on every
-// request, so the browser never reaches SFTPGo and no link exists to forward.
-// The body is copied through, never buffered.
-func (h *StoredAttachmentHandler) GetInlineImage(w http.ResponseWriter, r *http.Request) {
-	if middleware.UserInfoFromContext(r.Context()) == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-	id := r.PathValue("id")
-	if !uuidRe.MatchString(id) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-	if !h.permit(w, r, middleware.ModuleCases, middleware.ActionRead) {
-		return
-	}
-	body, contentType, size, err := h.entity.StreamInlineImage(r.Context(), id)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity StreamInlineImage failed", "attachmentID", id, "err", summarizeErr(err))
-		mapStoredAttachmentError(w, err, "Failed to load the image.")
-		return
-	}
-	defer body.Close()
-
-	// Entity-service sends the stored image type; anything else is neutralised
-	// rather than echoed, so a response can never be treated as a page.
-	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
-	if !inlineImageTypes[ct] {
-		ct = "application/octet-stream"
-	}
-	hd := w.Header()
-	hd.Set("Content-Type", ct)
-	if size >= 0 {
-		hd.Set("Content-Length", strconv.FormatInt(size, 10))
-	}
-	hd.Set("X-Content-Type-Options", "nosniff")
-	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	hd.Set("Content-Disposition", "inline")
-	hd.Set("Cache-Control", "private, max-age=300")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, body) // #nosec G705 -- type is one of four image types or octet-stream, with nosniff and a sandboxing CSP
-}
-
-// writeStoredAttachmentJSON relays entity-service's JSON, which carries
-// short-lived links, so it must never be cached.
+// writeStoredAttachmentJSON relays entity-service's JSON, which must never be
+// cached.
 func writeStoredAttachmentJSON(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

@@ -15,12 +15,11 @@ all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search
 `GET /accounts/{id}`, `POST /projects/search`, `GET /projects/{id}`,
 `POST /projects/{id}/cases/search`,
 `GET /cases/{id}`, `POST /cases`, `PATCH /cases/{id}`, `POST /cases/{id}/comments`,
-`POST /cases/{id}/activities/search`, `POST /cases/{id}/attachments`,
+`POST /cases/{id}/activities/search`,
 `POST /projects/{id}/deployments/search`, `POST /projects/{id}/deployments`,
 `PATCH /projects/{projectId}/deployments/{id}`,
 `POST /deployments/{deploymentId}/products/search`, `POST /deployments/{deploymentId}/products`,
-`PATCH /deployments/{deploymentId}/products/{id}`, `POST /attachments`, `POST /attachments/search`,
-`GET /attachments/{id}/content`, `DELETE /attachments/{id}`, `GET /products`,
+`PATCH /deployments/{deploymentId}/products/{id}`, `GET /products`,
 `POST /products/search`,
 `POST /products/{id}/versions/search`, `POST /products/vulnerabilities/search`,
 `GET /products/vulnerabilities/{id}`,
@@ -44,10 +43,8 @@ all). Route list: `GET /health`, `GET`/`PATCH /users/me`, `POST /accounts/search
 `POST /projects/{id}/cases/time-cards/search`,
 `GET /metadata`, `POST /search`, `GET /products/vulnerabilities/meta`,
 `GET /cases/{id}/feedback`, `POST /cases/{id}/feedback`, `GET /cases/{id}/attachments`,
-`GET /attachments/{id}`,
-`GET`/`POST /deployments/{deploymentId}/attachments`,
-`PATCH /deployments/{deploymentId}/attachments/{attachmentId}`,
-`PATCH /cases/{caseId}/attachments/{attachmentId}`,
+`GET /deployments/{deploymentId}/attachments`, and the Azure attachment routes listed under
+"Stored attachments" below,
 `POST /deployments/{deploymentId}/products/{productId}/metrics/search`,
 `POST /deployments/{deploymentId}/products/{productId}/metrics/usage-counts/search`,
 `POST /cases/{caseId}/escalations`, `POST /cases/{caseId}/escalations/search`, the 15-route
@@ -488,7 +485,7 @@ WebSocket handshake is not subject to preflight. See "The AI chat agent" above.
 `REST_WRITE_TIMEOUT` (60s) and `ENTITY_SERVICE_TIMEOUT` (60s), as Go duration strings. Each must parse
 and be > 0, otherwise the server exits at startup; no ordering between them is enforced. Advice only:
 keep the entity timeout shorter than the write timeout so the handler can return a clean error. The
-defaults are sized for create-case relaying ~15 MiB of inline attachments.
+defaults leave room for a create-case body whose description embeds images (`maxCaseBodyBytes`, 15 MiB).
 
 **`CORS` must be outermost, wrapping everything including `Auth`.** A CORS preflight is a bare
 `OPTIONS` request with no JWT at all; if `Auth` ran before `CORS`, it would reject every preflight
@@ -691,7 +688,7 @@ Ballerina backend's own JWT payload type (`modules/authorization/types.bal`) onl
 **Known gap, not covered by this change**: a handful of write-shaped routes are registered as bare
 `mux.HandleFunc` with no `RequirePermission`/`RequirePermissionOneOf`/`RequireRoles` wrapper at all
 today — `POST`/`PATCH /projects/{id}/conversations*`, `PATCH /conversations/{id}`,
-`DELETE /attachments/{id}`, `POST /projects/{projectId}/deployments/{deploymentId}/license`, and
+`POST /projects/{projectId}/deployments/{deploymentId}/license`, and
 `POST /deployment-usages`. The gate above only ever fires through those three guard functions, so an
 `INTERNAL` caller with no configured write group can still reach these specific routes. This predates
 the gate (those routes were already open to any authenticated caller of any role) and wasn't widened
@@ -847,16 +844,6 @@ When a portal request decodes straight into a struct with such a field (no restr
 here, since Cores/TPS/Description/Active are all customer-appropriate), the raw bytes the client
 sent pass through unchanged and this three-state semantic is preserved automatically — don't
 "simplify" the field to `*string` when porting a similar endpoint.
-
-**Binary responses use a `doBinary`-shaped client method, not `getJSON`/`postJSON`.**
-`GET /attachments/{id}/content` returns a raw file, not JSON — `entity.Client.doBinary` (added in
-`internal/entity/client.go` alongside `do`) returns `(body []byte, contentType string, error)`, and
-the handler (`internal/handler/attachments.go`) writes `Content-Type` from entity-service's own
-(already-sanitized) header value and explicitly sets `Content-Disposition: attachment` itself —
-never render an attachment inline, since entity-service's own allowlist coercion to
-`application/octet-stream` for unrecognized types is a stored-XSS mitigation this backend must not
-undo by, say, echoing a client-supplied filename into a `Content-Disposition` you construct
-yourself.
 
 Request bodies are usually the exception: incoming search/filter/create payloads are decoded
 directly into the entity package's request structs (e.g. `entity.SearchProjectsRequest`,
@@ -1021,21 +1008,32 @@ struct actually carries it), and a stray extra check on `PATCH` would just be de
    declare `403` since `mapUpstreamError` can return it.
 9. **gosec** — run `gosec -fmt=text ./...` (must report 0 issues) before opening a PR.
 
-## Stored attachments (SFTPGo-backed, relayed to entity-service)
+## Stored attachments (Azure Blob Storage, authorized by entity-service)
 
-Five routes relay entity-service's SFTPGo-backed attachment API for work item, comment-image and
-deployment attachments (`internal/handler/stored_attachments.go`, `internal/entity/stored_attachments.go`).
-They sit beside the older case-attachment routes (`GET /attachments/{id}/content`, `DELETE /attachments/{id}`,
-...), which are unchanged; the paths do not overlap (`cmd/server/stored_attachment_routes_test.go` registers
-both sets on one mux, since Go's mux panics at startup on an ambiguous pair).
+Work item, comment-image and deployment attachments are stored in Azure Blob Storage. This service holds the
+Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`, `libs/azblobstore`);
+entity-service never touches a file. It keeps the access check (row-level security), the size/type rules and the
+storage key, and hands the key to this service on calls the browser cannot make
+(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is
+for this process only: it is never put in a response, a header or a log.** The handlers are
+`internal/handler/stored_attachments.go` (start and delete, relayed) and `stored_attachments_blob.go` (bytes);
+the entity-service calls are in `internal/entity/stored_attachments.go`.
+They are the only attachment routes besides the two listings (`GET /cases/{id}/attachments`,
+`GET /deployments/{deploymentId}/attachments`, which read entity-service's `POST /attachments/search`). There is no
+base64 or ServiceNow attachment path: files go to Azure in chunks, for cases, deployments and comment images alike, and
+a security report case is created first and its files are uploaded afterwards (the create-case body carries no
+attachments). `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
+startup on an ambiguous pair.
 
-| Route | Relays | Module / action |
+| Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/download` `{type, ids, purpose?}` | links for up to 20 ids | read |
-| `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | 201, one-use upload link | create |
-| `POST /attachments/upload/{id}/confirm` `{type}` | 200 | create |
-| `POST /attachments/delete` `{type, id}` | 204 | create (the module's delete is admin only; entity-service enforces uploader-only) |
-| `GET /attachments/inline/{id}/content` | the image, streamed | cases read |
+| `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 16 MiB, index within the size limit) |
+| `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
+| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
+| `GET /attachments/download/{id}/content?type=` | read | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
+| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline |
+| `POST /attachments/delete` `{type, id}` | create (the module's delete is admin only; entity-service enforces uploader-only) | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
 
 - **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no
   `authorizeAttachmentAccess`-style lookups. The only check here is the portal's module permission, which depends
@@ -1044,15 +1042,20 @@ both sets on one mux, since Go's mux panics at startup on an ambiguous pair).
   registration. An unknown `type` is a 400 before anything is called.
 - **Bodies are relayed as raw JSON** and entity-service validates them; the field is `type`, not `kind`.
 - **Errors keep their status** (400/401/403/404/409/503 through `mapUpstreamError`); 429, which entity-service
-  returns when a caller asks for too many links, is passed through by `mapStoredAttachmentError`.
-- **Inline images are streamed, never buffered** (`entity.Client.StreamInlineImage` returns the body unread, the
-  handler `io.Copy`s it; `doBinary` is not used because it buffers). The response type is one of the four image
-  types or `application/octet-stream`, with `nosniff`, a sandboxing `Content-Security-Policy`,
-  `Content-Disposition: inline` and `Cache-Control: private, max-age=300`. The webapp uses the route as the
-  `<img src>`: the session authenticates it and entity-service checks access on every load.
-- **Links are for immediate use**: a download link serves one request and lasts about a minute (`purpose`
-  `preview` allows two). Ask for a link when the user opens or downloads one file, never for a whole list. The
-  browser sends an uploaded file straight to `uploadUrl` (multipart field `filenames`), then calls confirm.
+  returns when a caller makes too many requests, is passed through by `mapStoredAttachmentError`.
+- **Inline images are streamed, never buffered**, with one of the four image types or
+  `application/octet-stream`, `nosniff`, a sandboxing `Content-Security-Policy`, `Content-Disposition: inline`
+  and `Cache-Control: private, max-age=300`. The webapp uses the route as the `<img src>`: the session
+  authenticates it and entity-service checks access on every load.
+
+Config (all required at startup; the service exits if the container cannot be reached): `AZURE_STORAGE_ACCOUNT` and
+`AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**,
+`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the
+container only; or `AZURE_STORAGE_KEY` (the account's shared key, full control of the account); or
+`AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional `AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in
+the secret store, never in the repo or a log. With a container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development).
+`libs/azblobstore` is a separate Go module, required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job
+that deletes orphan files (`POST /attachments/uploads/cleanup`, then `.../acknowledge`).
 
 ## Handler conventions
 
@@ -1124,32 +1127,3 @@ The portal deliberately does **not** write to Salesforce itself for this. entity
   `middleware.TokenValidator` instead (see "The AI chat agent"). It is still JWT-authenticated —
   do not add a second exception without the same browser-level justification.
 - **Run gosec on every change** — `gosec -fmt=text ./...` must report 0 issues before opening a PR.
-
-## Stored attachments in Azure Blob Storage (`ATTACHMENT_STORAGE_MODE=backend`)
-
-Must match entity-service's setting of the same name; default `sftpgo` keeps everything above. In `backend`
-mode this service holds the Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`,
-`libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
-size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
-(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is
-for this process only: it is never put in a response, a header or a log.**
-
-| Route | Does |
-|---|---|
-| `POST /attachments/upload` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
-| `PUT /attachments/upload/{id}/chunks/{index}?type=` | authorize, then Put Block (<= 16 MiB, index within the size limit) |
-| `GET /attachments/upload/{id}/chunks?type=` | the stored chunks, to resume |
-| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
-| `GET /attachments/download/{id}/content?type=` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
-| `GET /attachments/inline/{id}/content` | locate, then stream; only four image types are shown inline |
-| `POST /attachments/delete` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
-
-Config: `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**,
-`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the
-container only; or `AZURE_STORAGE_KEY` (the account's shared key, full control of the account); or
-`AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional `AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in
-the secret store, never in the repo or a log. With a container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development).
-`libs/azblobstore` is a separate Go module: until `libs/azblobstore/v0.1.0` is tagged, build
-with an uncommitted `go.work` listing this module and the library, and add the `require` line once the tag exists
-(it makes a workspace build fail while the tag is missing). Not done yet: the job that deletes orphan files
-(`POST /attachments/uploads/cleanup`, then `.../acknowledge`).
