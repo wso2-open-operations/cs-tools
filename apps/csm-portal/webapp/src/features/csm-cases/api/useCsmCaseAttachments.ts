@@ -36,9 +36,11 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import {
   deleteEntityAttachment,
   downloadEntityAttachment,
+  type DownloadSaveOutcome,
   entityAttachmentErrorMessage,
   WORK_ITEM_ATTACHMENT_TYPE,
   fetchEntityAttachmentBlob,
@@ -221,15 +223,24 @@ export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
+  const { showSuccess } = useSuccessBanner();
+  const notify = useCallback(
+    (name: string, outcome: DownloadSaveOutcome) =>
+      showSuccess(outcome === "saved" ? `Downloaded ${name}.` : `Download of ${name} started.`),
+    [showSuccess],
+  );
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
       await downloadEntityAttachment(api, {
         type: WORK_ITEM_ATTACHMENT_TYPE,
         id: attachment.id,
+        name: attachment.filename,
+        size: attachment.size,
+        onSaved: (outcome) => notify(attachment.filename, outcome),
       });
     },
-    [api],
+    [api, notify],
   );
 }
 

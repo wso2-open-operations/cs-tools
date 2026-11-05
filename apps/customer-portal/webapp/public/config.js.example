@@ -142,7 +142,7 @@ window.config = {
   // ── Entity-service attachments ──────────────────────────────────────────────
   //
   // Attachments are stored in Azure Blob Storage by the portal backend: uploads
-  // are sent in 16 MiB chunks and downloads stream from the backend, so no
+  // are sent in 8 MiB chunks and downloads stream from the backend, so no
   // storage address is exposed to the browser.
   //
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 100)
@@ -156,6 +156,20 @@ window.config = {
   //   Largest image pasted or inserted into a comment, in MB. Match entity-service's
   //   INLINE_IMAGE_MAX_BYTES. Same value rules as above.
   // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
+  //   How many 8 MiB ranges of one attachment download are fetched at the same
+  //   time. 1 fetches one range at a time. A number or numeric string; a whole
+  //   number is kept between 1 and 8, anything else (text) uses the default.
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK  (optional — default: true)
+  //   Save a download straight to a file the person picks (the browser's save
+  //   dialog), so a large attachment is not held whole in memory. Works in Chrome
+  //   and Edge; other browsers keep the in-memory download. Files of 8 MiB or
+  //   less skip the dialog. Only the boolean false or the string "false" turns it
+  //   off; true (or leaving it unset) keeps it on.
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
 
   // ── Top banners ─────────────────────────────────────────────────────────────
   //

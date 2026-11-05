@@ -61,6 +61,39 @@ export function inlineImageMaxBytes(): number {
   );
 }
 
+/** Ranges of one download fetched at once when nothing is configured. */
+export const DEFAULT_DOWNLOAD_PARALLELISM = 4;
+
+/** The most ranges of one download that may be fetched at once. */
+export const MAX_DOWNLOAD_PARALLELISM = 8;
+
+/**
+ * How many ranges of one attachment download are fetched at the same time, from
+ * `window.config.CSM_PORTAL_DOWNLOAD_PARALLELISM` (a number or numeric string).
+ * 1 fetches one range at a time. A whole number is kept between 1 and
+ * {@link MAX_DOWNLOAD_PARALLELISM}; a missing or unparseable value gives
+ * {@link DEFAULT_DOWNLOAD_PARALLELISM}. Read at call time.
+ */
+export function downloadParallelism(): number {
+  const raw = window.config?.CSM_PORTAL_DOWNLOAD_PARALLELISM;
+  const value =
+    typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isFinite(value)) return DEFAULT_DOWNLOAD_PARALLELISM;
+  return Math.min(MAX_DOWNLOAD_PARALLELISM, Math.max(1, Math.floor(value)));
+}
+
+/**
+ * Whether a download is saved straight to a file the person picks, where the
+ * browser can (Chrome, Edge), from `window.config.CSM_PORTAL_DOWNLOAD_TO_DISK`
+ * (a boolean or the string "true"/"false"). On unless it is `false`. Read at
+ * call time.
+ */
+export function downloadToDiskEnabled(): boolean {
+  const raw = window.config?.CSM_PORTAL_DOWNLOAD_TO_DISK;
+  if (typeof raw === "string") return raw.trim().toLowerCase() !== "false";
+  return raw !== false;
+}
+
 /** A size limit for a message: "10 MB", "2.5 MB". */
 export function formatMegabytes(bytes: number): string {
   return `${Number((bytes / BYTES_PER_MB).toFixed(2))} MB`;

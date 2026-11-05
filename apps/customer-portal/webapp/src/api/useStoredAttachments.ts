@@ -23,6 +23,7 @@ import {
   deleteStoredAttachment,
   downloadStoredAttachment,
   uploadStoredAttachment,
+  type DownloadSaveOutcome,
   type StoredAttachmentConfirmed,
   type StoredAttachmentType,
   type StoredUploadStep,
@@ -33,6 +34,10 @@ export interface StoredAttachmentDownloadInput {
   type: StoredAttachmentType;
   id: string;
   name?: string;
+  /** Size in bytes, when known: a small file skips the save dialog. */
+  size?: number;
+  /** Runs once the download ends (not on a closed save dialog or a failure); `saved` means written to the picked file, `started` handed to the browser. */
+  onSaved?: (outcome: DownloadSaveOutcome) => void;
 }
 
 /**

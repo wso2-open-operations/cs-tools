@@ -49,7 +49,7 @@ sets `obj.Partial` and `obj.ContentRange`; a range past the end of the blob is
 `ErrRangeNotSatisfiable`:
 
 ```go
-obj, err := store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 16 << 20})
+obj, err := store.Open(ctx, key, &azblobstore.Range{Offset: 0, Length: 8 << 20})
 if err != nil { /* ErrNotFound, ErrRangeNotSatisfiable, ... */ }
 defer obj.Body.Close()
 ```
@@ -70,7 +70,7 @@ check belongs to entity-service.
 ## Limits to know
 
 - `PutBlock` reads the whole chunk into memory before sending it, so memory use
-  is one chunk per request. `MaxBlockSize` is 100 MiB; the portals send 16 MiB.
+  is one chunk per request. `MaxBlockSize` is 100 MiB; the portals send 8 MiB.
 - A blob has at most `MaxBlocks` (50,000) blocks.
 - Every block id in a blob must be the same length; the package handles this.
 

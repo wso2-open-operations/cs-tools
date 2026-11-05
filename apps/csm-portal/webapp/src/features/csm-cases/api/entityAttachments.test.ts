@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@api/backend/client", () => {
   class BackendApiError extends Error {
@@ -31,6 +31,7 @@ import { BackendApiError, type BackendApi } from "@api/backend/client";
 import {
   confirmEntityAttachment,
   deleteEntityAttachment,
+  DOWNLOAD_RANGE_BYTES,
   downloadEntityAttachment,
   ENTITY_ATTACHMENT_RATE_LIMIT_MESSAGE,
   entityAttachmentErrorMessage,
@@ -218,11 +219,18 @@ describe("chunked upload and streamed download", () => {
     }) as unknown as File;
   const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
 
+  beforeEach(() => {
+    window.config = {} as typeof window.config;
+  });
   afterEach(() => {
     vi.useRealTimers();
+    window.config = {} as typeof window.config;
   });
 
-  it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+  const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
+    ({ post, putBinary, getResponse }) as unknown as BackendApi;
+
+  it("sends the file in 8 MiB chunks, then confirms with the chunk count", async () => {
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
     const putBinary = vi.fn().mockResolvedValue(undefined);
     const progress: number[] = [];
@@ -282,34 +290,24 @@ describe("chunked upload and streamed download", () => {
   it("downloads through the backend route and saves it under the name it suggests", async () => {
     const getResponse = vi.fn().mockResolvedValue(
       new Response("0123456789", {
-        status: 200,
-        headers: { "Content-Length": "10", "Content-Disposition": 'attachment; filename="report.pdf"' },
+        status: 206,
+        headers: {
+          "Content-Range": "bytes 0-9/10",
+          "Content-Disposition": 'attachment; filename="report.pdf"',
+        },
       }),
     );
     const post = vi.fn();
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, save);
+    const done = await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, save);
+    expect(done).toBe(true);
+    expect(getResponse).toHaveBeenCalledTimes(1);
     expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
+    expect(getResponse.mock.calls[0][1]).toEqual({ headers: { Range: `bytes=0-${DOWNLOAD_RANGE_BYTES - 1}` } });
     expect(save.mock.calls[0][1]).toBe("report.pdf");
     expect(post).not.toHaveBeenCalled(); // no link is requested
   });
 
-  // A response that delivers `text` and then breaks, like a dropped connection.
-  const brokenResponse = (text: string, total: number) => {
-    let sentFirst = false;
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        // Deliver the bytes on the first read and fail on the next, as a dropped
-        // connection does (erroring straight after enqueue would drop the bytes).
-        pull(controller) {
-          if (sentFirst) controller.error(new Error("connection reset"));
-          else controller.enqueue(new TextEncoder().encode(text));
-          sentFirst = true;
-        },
-      }),
-      { status: 200, headers: { "Content-Length": String(total), "Content-Disposition": 'attachment; filename="r.bin"' } },
-    );
-  };
   const blobText = (blob: Blob) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -318,49 +316,354 @@ describe("chunked upload and streamed download", () => {
       reader.readAsText(blob);
     });
 
-  it("resumes a broken download with a Range request and joins the bytes", async () => {
-    const getResponse = vi
-      .fn()
-      .mockResolvedValueOnce(brokenResponse("0123", 10))
-      .mockResolvedValueOnce(new Response("456789", { status: 206 }));
+  /** A file of `size` bytes where byte i is the letter for floor(i / RANGE), served by Range. */
+  const rangeServer = (size: number, delay: (start: number) => number = () => 0) => {
+    const byteAt = (i: number) => 65 + Math.floor(i / DOWNLOAD_RANGE_BYTES);
+    let inFlight = 0;
+    let peak = 0;
+    const getResponse = vi.fn(async (_path: string, options?: { headers?: Record<string, string> }) => {
+      const match = /bytes=(\d+)-(\d+)/.exec(options?.headers?.Range ?? "");
+      const start = Number(match?.[1] ?? 0);
+      const end = Math.min(Number(match?.[2] ?? size - 1), size - 1);
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, delay(start)));
+      inFlight -= 1;
+      const body = new Uint8Array(end - start + 1).map((_, i) => byteAt(start + i));
+      return new Response(body, {
+        status: 206,
+        headers: {
+          "Content-Range": `bytes ${start}-${end}/${size}`,
+          "Content-Disposition": 'attachment; filename="big.bin"',
+        },
+      });
+    });
+    return { getResponse, peak: () => peak };
+  };
+
+  it("fetches a large file as ranges and joins them in order, whatever order they finish in", async () => {
+    const size = DOWNLOAD_RANGE_BYTES * 3 + 5;
+    // The later ranges answer first.
+    const server = rangeServer(size, (start) => (start === 0 ? 0 : 40 - (start / DOWNLOAD_RANGE_BYTES) * 10));
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
-    expect(getResponse).toHaveBeenCalledTimes(2);
-    expect(getResponse.mock.calls[1][1]).toEqual({ headers: { Range: "bytes=4-" } });
-    expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
-    expect(save.mock.calls[0][1]).toBe("r.bin");
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+    expect(server.getResponse).toHaveBeenCalledTimes(4);
+    const blob = save.mock.calls[0][0] as Blob;
+    expect(blob.size).toBe(size);
+    // jsdom's Blob has no arrayBuffer(), so read the bytes through a FileReader.
+    const bytes = new Uint8Array(
+      await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(blob);
+      }),
+    );
+    for (const [i, letter] of [[0, 65], [DOWNLOAD_RANGE_BYTES, 66], [DOWNLOAD_RANGE_BYTES * 2, 67], [size - 1, 68]]) {
+      expect(bytes[i]).toBe(letter);
+    }
+    expect(save.mock.calls[0][1]).toBe("big.bin");
   });
 
-  it("starts over when the resumed response is a 200 instead of a 206", async () => {
-    const getResponse = vi
-      .fn()
-      .mockResolvedValueOnce(brokenResponse("0123", 10))
-      .mockResolvedValueOnce(new Response("0123456789", { status: 200 }));
+  it("never fetches more ranges at once than the configured parallelism", async () => {
+    const size = DOWNLOAD_RANGE_BYTES * 6;
+    for (const [configured, expected] of [[undefined, 4], [2, 2], ["1", 1]] as const) {
+      (window as unknown as { config: unknown }).config = {
+        CSM_PORTAL_DOWNLOAD_PARALLELISM: configured,
+      };
+      const server = rangeServer(size, () => 5);
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, vi.fn());
+      expect(server.getResponse).toHaveBeenCalledTimes(6);
+      expect(server.peak()).toBeLessThanOrEqual(expected);
+      if (expected > 1) expect(server.peak()).toBeGreaterThan(1);
+    }
+  }, 30_000);
+
+  it("reads the whole body when the server ignores the Range header", async () => {
+    const getResponse = vi.fn().mockResolvedValue(new Response("0123456789", { status: 200 }));
     const save = vi.fn();
     await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
+    expect(getResponse).toHaveBeenCalledTimes(1);
     expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
+    expect(save.mock.calls[0][1]).toBe("attachment");
   });
 
-  it("gives up with an interruption error after three failed attempts", async () => {
-    const getResponse = vi.fn().mockImplementation(async () => brokenResponse("01", 10));
+  it("fetches a range again when its connection breaks", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const server = rangeServer(size);
+    let broke = false;
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (!broke && options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) {
+        broke = true;
+        throw new TypeError("network error");
+      }
+      return server.getResponse(path, options);
+    });
+    const save = vi.fn();
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
+    expect(getResponse).toHaveBeenCalledTimes(3); // first range, the broken one, its retry
+    expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+  });
+
+  it("fetches a range again when its body is short", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const server = rangeServer(size);
+    let shortOnce = true;
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (shortOnce && options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) {
+        shortOnce = false;
+        return new Response(new Uint8Array(1), {
+          status: 206,
+          headers: { "Content-Range": `bytes ${DOWNLOAD_RANGE_BYTES}-${size - 1}/${size}` },
+        });
+      }
+      return server.getResponse(path, options);
+    });
+    const save = vi.fn();
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
+    expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+  });
+
+  it("gives up with an interruption error after three failed attempts at a range", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const server = rangeServer(size);
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) throw new TypeError("network error");
+      return server.getResponse(path, options);
+    });
     const save = vi.fn();
     await expect(
       downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
-    expect(getResponse).toHaveBeenCalledTimes(3);
+    expect(getResponse).toHaveBeenCalledTimes(1 + 3);
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("throws the backend's message for a missing or removed file", async () => {
+  it("rejects a first range that is shorter than the file allows, even when it agrees with itself", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const getResponse = vi.fn(
+      async () =>
+        new Response(new Uint8Array(10), { status: 206, headers: { "Content-Range": `bytes 0-9/${size}` } }),
+    );
     const save = vi.fn();
-    const missing = vi.fn().mockRejectedValue(apiError(404, "attachment not found"));
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, save),
-    ).rejects.toThrow("attachment not found");
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("rejects a later range whose Content-Range is not the one asked for", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const server = rangeServer(size);
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) {
+        // The right number of bytes, but from the wrong place.
+        return new Response(new Uint8Array(3), {
+          status: 206,
+          headers: { "Content-Range": `bytes 0-2/${size}` },
+        });
+      }
+      return server.getResponse(path, options);
+    });
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("stops at the first refusal of a later range, with the backend's message", async () => {
+    const size = DOWNLOAD_RANGE_BYTES * 5;
+    const server = rangeServer(size, () => 5);
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) throw apiError(410, "This attachment was removed.");
+      return server.getResponse(path, options);
+    });
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
+    ).rejects.toThrow("This attachment was removed.");
+    expect(getResponse.mock.calls.length).toBeLessThan(6); // the ranges not yet started never are
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reports false on a 404 so the older flow can be tried, and throws for a removed file", async () => {
+    const save = vi.fn();
+    const missing = vi.fn().mockRejectedValue(apiError(404));
+    expect(await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, save)).toBe(false);
     const gone = vi.fn().mockRejectedValue(apiError(410, "This attachment was removed."));
     await expect(
       downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), gone), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("This attachment was removed.");
     expect(save).not.toHaveBeenCalled();
+  });
+  describe("straight to disk", () => {
+    const readFirstByte = (blob: Blob) =>
+      new Promise<number>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(new Uint8Array(reader.result as ArrayBuffer)[0]);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(blob.slice(0, 1));
+      });
+
+    /** A fake save dialog whose file records every write. */
+    const fakeDisk = () => {
+      const writes: { position: number; size: number; first: number }[] = [];
+      const writable = {
+        write: vi.fn(async ({ position, data }: { position: number; data: Blob }) => {
+          writes.push({ position, size: data.size, first: await readFirstByte(data) });
+        }),
+        close: vi.fn(async () => undefined),
+        abort: vi.fn(async () => undefined),
+      };
+      const picker = vi.fn<(options?: { suggestedName?: string }) => Promise<{ createWritable: () => Promise<typeof writable> }>>(async () => ({
+        createWritable: vi.fn(async () => writable),
+      }));
+      (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker = picker;
+      return { picker, writable, writes };
+    };
+    const run = (getResponse: Parameters<typeof apiWith>[2], save: (blob: Blob, name: string) => void, extra: { size?: number } = {}) =>
+      downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), getResponse),
+        { type: "work_item", id: ID, name: "big.bin", ...extra },
+        save,
+      );
+
+    afterEach(() => {
+      delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+    });
+
+    it("asks where to save before the first request and writes each range at its own offset", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 3 + 5;
+      const disk = fakeDisk();
+      // The later ranges answer first.
+      const server = rangeServer(size, (start) => (start === 0 ? 0 : 40 - (start / DOWNLOAD_RANGE_BYTES) * 10));
+      const save = vi.fn();
+      expect(await run(server.getResponse, save)).toBe(true);
+      expect(disk.picker).toHaveBeenCalledWith({ suggestedName: "big.bin" });
+      expect(disk.picker.mock.invocationCallOrder[0]).toBeLessThan(server.getResponse.mock.invocationCallOrder[0]);
+      const byPosition = [...disk.writes].sort((a, b) => a.position - b.position);
+      expect(byPosition).toEqual([
+        { position: 0, size: DOWNLOAD_RANGE_BYTES, first: 65 },
+        { position: DOWNLOAD_RANGE_BYTES, size: DOWNLOAD_RANGE_BYTES, first: 66 },
+        { position: DOWNLOAD_RANGE_BYTES * 2, size: DOWNLOAD_RANGE_BYTES, first: 67 },
+        { position: DOWNLOAD_RANGE_BYTES * 3, size: 5, first: 68 },
+      ]);
+      expect(disk.writable.close).toHaveBeenCalledTimes(1);
+      expect(disk.writable.abort).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled(); // nothing is held for a Blob
+    });
+
+    it("reports `saved` only when the file was written to the picked file", async () => {
+      fakeDisk();
+      const onSaved = vi.fn();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        vi.fn(),
+      );
+      expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
+    });
+
+    it("reports `started`, not a completed save, when the Blob is handed to the browser", async () => {
+      delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+      const onSaved = vi.fn();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        vi.fn(),
+      );
+      expect(onSaved).toHaveBeenCalledExactlyOnceWith("started");
+    });
+
+    it("never reports a closed save dialog or a failed download", async () => {
+      const disk = fakeDisk();
+      disk.picker.mockRejectedValue(new DOMException("Closed.", "AbortError"));
+      const onSaved = vi.fn();
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), rangeServer(DOWNLOAD_RANGE_BYTES + 5).getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        vi.fn(),
+      );
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+
+    it("drops the half-written file when a range is refused", async () => {
+      const disk = fakeDisk();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES * 2 + 5);
+      const failing = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+        if (!/bytes=0-/.test(options?.headers?.Range ?? "")) throw apiError(403, "Not allowed.");
+        return server.getResponse(path, options);
+      });
+      const save = vi.fn();
+      await expect(run(failing, save)).rejects.toThrow("Not allowed.");
+      expect(disk.writable.abort).toHaveBeenCalledTimes(1);
+      expect(disk.writable.close).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("drops the file and reports false on a 404, so the older flow can be tried", async () => {
+      const disk = fakeDisk();
+      const save = vi.fn();
+      expect(await run(vi.fn().mockRejectedValue(apiError(404)), save)).toBe(false);
+      expect(disk.writable.abort).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing, and shows no error, when the save dialog is closed", async () => {
+      const disk = fakeDisk();
+      disk.picker.mockRejectedValue(new DOMException("The user aborted a request.", "AbortError"));
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES * 2);
+      const save = vi.fn();
+      expect(await run(server.getResponse, save)).toBe(true);
+      expect(server.getResponse).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("uses the in-memory save when the dialog is refused for another reason", async () => {
+      const disk = fakeDisk();
+      disk.picker.mockRejectedValue(new DOMException("Needs a click.", "SecurityError"));
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      const save = vi.fn();
+      expect(await run(server.getResponse, save)).toBe(true);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(DOWNLOAD_RANGE_BYTES + 5);
+    });
+
+    it("uses the in-memory save when the browser has no save dialog", async () => {
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      const save = vi.fn();
+      expect(await run(server.getResponse, save)).toBe(true);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(DOWNLOAD_RANGE_BYTES + 5);
+    });
+
+    it("skips the dialog for a small file whose size is known", async () => {
+      const disk = fakeDisk();
+      const save = vi.fn();
+      const small = vi.fn().mockResolvedValue(
+        new Response("0123456789", { status: 200, headers: { "Content-Disposition": 'attachment; filename="s.txt"' } }),
+      );
+      await run(small, save, { size: 10 });
+      expect(disk.picker).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+
+    it("asks for a save location when the size is not known", async () => {
+      const disk = fakeDisk();
+      const small = vi.fn().mockResolvedValue(new Response("0123456789", { status: 200 }));
+      await run(small, vi.fn());
+      expect(disk.picker).toHaveBeenCalledTimes(1);
+      expect(disk.writes).toEqual([{ position: 0, size: 10, first: 48 }]);
+    });
+
+    it("skips the dialog when CSM_PORTAL_DOWNLOAD_TO_DISK is false", async () => {
+      window.config = { CSM_PORTAL_DOWNLOAD_TO_DISK: false } as typeof window.config;
+      const disk = fakeDisk();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      const save = vi.fn();
+      await run(server.getResponse, save);
+      expect(disk.picker).not.toHaveBeenCalled();
+      expect(save).toHaveBeenCalledTimes(1);
+    });
   });
 });

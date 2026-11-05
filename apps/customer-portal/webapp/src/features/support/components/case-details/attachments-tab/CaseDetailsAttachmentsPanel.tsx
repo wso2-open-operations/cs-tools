@@ -31,6 +31,7 @@ import {
   type StoredUploadVariables,
 } from "@api/useStoredAttachments";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
@@ -58,6 +59,7 @@ export default function CaseDetailsAttachmentsPanel({
   isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
   const { data: userDetails } = useGetUserDetails();
   const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
   const storedDownload = useStoredAttachmentDownload();
@@ -150,6 +152,13 @@ export default function CaseDetailsAttachmentsPanel({
         type: "work_item",
         id: att.id,
         name: att.name,
+        size: att.size,
+        onSaved: (outcome) =>
+          showSuccess(
+            outcome === "saved"
+              ? `Downloaded ${att.name}.`
+              : `Download of ${att.name} started.`,
+          ),
       });
     } catch (error) {
       const message =

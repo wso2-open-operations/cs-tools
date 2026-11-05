@@ -21,6 +21,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import DeploymentDocumentList from "@features/project-details/components/deployments/DeploymentDocumentList";
 import type { DeploymentDocument } from "@features/project-details/types/deployments";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
+import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
 
 const mockDocuments: DeploymentDocument[] = [
@@ -146,7 +147,9 @@ function renderWithProviders(ui: ReactElement) {
   return render(
     <QueryClientProvider client={queryClient}>
       <LoggerProvider config={{ level: "ERROR", prefix: "Test" }}>
-        <ErrorBannerProvider>{ui}</ErrorBannerProvider>
+        <ErrorBannerProvider>
+          <SuccessBannerProvider>{ui}</SuccessBannerProvider>
+        </ErrorBannerProvider>
       </LoggerProvider>
     </QueryClientProvider>,
   );
