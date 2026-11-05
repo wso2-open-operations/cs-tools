@@ -153,7 +153,7 @@ window.config = {
   // CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE  (optional — default: "sftpgo")
   //   "sftpgo"  – (default) the browser sends and fetches files with SFTPGo links.
   //   "backend" – the portal backend holds the files in Azure Blob Storage:
-  //               uploads go to it in 16 MiB chunks and downloads stream from it,
+  //               uploads go to it in 8 MiB chunks and downloads stream from it,
   //               so no storage address is exposed. Must match the backend's
   //               ATTACHMENT_STORAGE_MODE.
   // CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
@@ -171,7 +171,7 @@ window.config = {
   // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
 
   // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
-  //   How many 16 MiB ranges of one attachment download are fetched at the same
+  //   How many 8 MiB ranges of one attachment download are fetched at the same
   //   time. 1 fetches one range at a time. A number or numeric string; a whole
   //   number is kept between 1 and 8, anything else (text) uses the default.
   // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: 4,
@@ -179,7 +179,7 @@ window.config = {
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK  (optional — default: true)
   //   Save a download straight to a file the person picks (the browser's save
   //   dialog), so a large attachment is not held whole in memory. Works in Chrome
-  //   and Edge; other browsers keep the in-memory download. Files of 16 MiB or
+  //   and Edge; other browsers keep the in-memory download. Files of 8 MiB or
   //   less skip the dialog. Only the boolean false or the string "false" turns it
   //   off; true (or leaving it unset) keeps it on.
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,

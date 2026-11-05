@@ -70,7 +70,7 @@ export const DEFAULT_DOWNLOAD_PARALLELISM = 4;
 export const MAX_DOWNLOAD_PARALLELISM = 8;
 
 /**
- * How many 16 MiB ranges of one attachment download are fetched at the same
+ * How many 8 MiB ranges of one attachment download are fetched at the same
  * time (`CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM`, default 4; 1 fetches one at a
  * time). A number or numeric string; a whole number is kept between 1 and 8 and
  * anything unparseable gives the default. Read at call time.

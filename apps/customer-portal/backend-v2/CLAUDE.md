@@ -1129,7 +1129,7 @@ for this process only: it is never put in a response, a header or a log.**
 | Route | Does |
 |---|---|
 | `POST /attachments/upload` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
-| `PUT /attachments/upload/{id}/chunks/{index}?type=` | authorize, then Put Block (<= 16 MiB, index within the size limit) |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
 | `GET /attachments/download/{id}/content?type=` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |

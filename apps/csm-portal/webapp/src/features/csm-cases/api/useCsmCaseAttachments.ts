@@ -45,6 +45,7 @@ import {
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
 import { BackendApiError } from "@api/backend/client";
 import { LEGACY_ATTACHMENT_MAX_BYTES } from "@config/attachmentLimitsConfig";
@@ -52,6 +53,7 @@ import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
   downloadEntityAttachment,
+  type DownloadSaveOutcome,
   entityAttachmentErrorMessage,
   WORK_ITEM_ATTACHMENT_TYPE,
   fetchEntityAttachmentBlob,
@@ -407,6 +409,12 @@ export function useDownloadCsmCaseAttachment(): (
   const api = useBackendApi();
   const getContent = useGetCsmCaseAttachmentContent();
   const { user } = useCurrentUser();
+  const { showSuccess } = useSuccessBanner();
+  const notify = useCallback(
+    (name: string, outcome: DownloadSaveOutcome) =>
+      showSuccess(outcome === "saved" ? `Downloaded ${name}.` : `Download of ${name} started.`),
+    [showSuccess],
+  );
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
   return useCallback(
@@ -420,6 +428,7 @@ export function useDownloadCsmCaseAttachment(): (
           id: attachment.id,
           name: attachment.filename,
           size: attachment.size,
+          onSaved: (outcome) => notify(attachment.filename, outcome),
         });
         if (done) return;
       }
@@ -429,12 +438,14 @@ export function useDownloadCsmCaseAttachment(): (
           BeAttachmentShareResponse
         >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
         openForDownload(shareUrl);
+        notify(attachment.filename, "started");
         return;
       }
       const blob = await getContent(attachment);
       saveBlob(blob, attachment.filename);
+      notify(attachment.filename, "started");
     },
-    [api, getContent, sftpgoEnabled],
+    [api, getContent, sftpgoEnabled, notify],
   );
 }
 

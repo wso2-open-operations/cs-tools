@@ -212,8 +212,8 @@ func TestBlobConfirm_MissingChunksAndBadCounts(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Errorf("missing chunks = %d", rec.Code)
 	}
-	// 100 MiB is 7 chunks of 16 MiB: 7 is the most, 8 is refused.
-	rec = serveBlob(t, e, &fakeBlobStore{}, &fakeStoredEntity{}, http.MethodPost, "/attachments/upload/"+storedID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":8}`), nil)
+	// 100 MiB is 13 chunks of 8 MiB: 13 is the most, 14 is refused.
+	rec = serveBlob(t, e, &fakeBlobStore{}, &fakeStoredEntity{}, http.MethodPost, "/attachments/upload/"+storedID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":14}`), nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("too many chunks = %d", rec.Code)
 	}

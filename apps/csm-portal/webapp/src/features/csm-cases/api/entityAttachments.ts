@@ -33,6 +33,13 @@ import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadT
  * prefetched or put in React state.
  */
 
+/**
+ * How a finished download ended: `saved` when the whole file was written to the
+ * file the person picked (observable), `started` when the file was handed to the
+ * browser as a download, which cannot tell whether the person saves it.
+ */
+export type DownloadSaveOutcome = "saved" | "started";
+
 /** Which attachment table a request is about (the request body's `type`). */
 export type EntityAttachmentType = "work_item" | "comment" | "deployment";
 
@@ -201,7 +208,7 @@ export async function fetchEntityAttachmentBlob(
 const DOWNLOAD_RANGE_ATTEMPTS = 3;
 
 /** Bytes asked for in one range of a download. */
-export const DOWNLOAD_RANGE_BYTES = 16 * 1024 * 1024;
+export const DOWNLOAD_RANGE_BYTES = 8 * 1024 * 1024;
 
 /** The file name a download response suggests, if it names one. */
 function fileNameFromDisposition(headers: Headers): string | undefined {
@@ -277,27 +284,31 @@ async function readRange(
 /**
  * Downloads an attachment through the portal backend, which checks access and
  * streams the file under its own name. Resolves `false` on a 404 so the caller can
- * use the older flow. The first 16 MiB are asked for with a
+ * use the older flow. The first 8 MiB are asked for with a
  * `Range` header; the answer says how big the file is, and the rest is fetched
- * as 16 MiB ranges, {@link downloadParallelism} at a time.
+ * as 8 MiB ranges, {@link downloadParallelism} at a time.
  *
  * Where the browser can, the file is written straight to a file the person
  * picked, each range at its own offset as it arrives, so it is never held whole
  * in memory; otherwise the ranges are joined in order and saved as one Blob. A
  * range that breaks is fetched again on its own. A refusal (404, a removed
  * file) throws with the backend's message and stops the other ranges. A closed
- * save dialog resolves `true` with nothing downloaded.
+ * save dialog resolves `true` with nothing downloaded and never calls `onSaved`,
+ * which runs once the download ends, saying whether it was written to the picked
+ * file (`saved`) or handed to the browser (`started`).
  */
 async function downloadFromBackend(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
   save: (blob: Blob, name: string) => void,
 ): Promise<boolean> {
   const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
-    return await readAndStore(api, args, save, sink);
+    const done = await readAndStore(api, args, save, sink);
+    if (done) args.onSaved?.(sink ? "saved" : "started");
+    return done;
   } catch (err) {
     await sink?.abort();
     throw err;
@@ -382,7 +393,7 @@ async function readAndStore(
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
   fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
@@ -391,6 +402,7 @@ export async function downloadEntityAttachment(
   const got = await fetchEntityAttachmentBlob(api, { ...args, purpose: "download" }, fetchImpl, first);
   if (!got) return false;
   save(got.blob, got.link.name);
+  args.onSaved?.("started");
   return true;
 }
 
@@ -441,7 +453,7 @@ export class EntityUploadAbortedError extends Error {
 }
 
 /** Bytes in every upload chunk but the last. Must match the backend's chunk size. */
-export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /** Chunks sent at the same time, and tries per chunk. */
 const UPLOAD_CHUNK_CONCURRENCY = 3;

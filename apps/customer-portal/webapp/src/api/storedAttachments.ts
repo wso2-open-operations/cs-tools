@@ -24,6 +24,13 @@ import {
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
 import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
 
+/**
+ * How a finished download ended: `saved` when the whole file was written to the
+ * file the person picked (observable), `started` when the file was handed to the
+ * browser as a download, which cannot tell whether the person saves it.
+ */
+export type DownloadSaveOutcome = "saved" | "started";
+
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
 
@@ -106,7 +113,7 @@ export class UploadConfirmPendingError extends Error {
 }
 
 /** Bytes in every upload chunk but the last. Must match the backend's chunk size. */
-export const UPLOAD_CHUNK_BYTES = 16 * 1024 * 1024;
+export const UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /** Chunks sent at the same time, and tries per chunk. */
 const UPLOAD_CHUNK_CONCURRENCY = 3;
@@ -214,7 +221,7 @@ export function saveBlobAs(blob: Blob, fileName: string): void {
 const DOWNLOAD_RANGE_ATTEMPTS = 3;
 
 /** Bytes asked for in one range of a download. */
-export const DOWNLOAD_RANGE_BYTES = 16 * 1024 * 1024;
+export const DOWNLOAD_RANGE_BYTES = 8 * 1024 * 1024;
 
 const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
 
@@ -283,8 +290,8 @@ async function readRange(
 
 /**
  * Downloads one attachment through the portal backend, which checks access and
- * streams the file. The first 16 MiB are asked for with a `Range` header; the
- * answer says how big the file is, and the rest is fetched as 16 MiB ranges,
+ * streams the file. The first 8 MiB are asked for with a `Range` header; the
+ * answer says how big the file is, and the rest is fetched as 8 MiB ranges,
  * {@link downloadParallelism} at a time.
  *
  * Where the browser can, the file is written straight to a file the person
@@ -294,17 +301,21 @@ async function readRange(
  * ranges. A closed save dialog ends the download with nothing saved and no error.
  *
  * Throws an ApiError with status 404 when there is no such stored attachment,
- * which a caller still on the older flow can fall back from.
+ * which a caller still on the older flow can fall back from. `onSaved` runs once
+ * the download ends, saying whether it was written to the picked file (`saved`)
+ * or handed to the browser (`started`); a closed save dialog or a failure never
+ * calls it.
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
 ): Promise<void> {
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
     await readAndStore(authFetch, input, sink);
+    input.onSaved?.(sink ? "saved" : "started");
   } catch (error) {
     await sink?.abort();
     throw error;
@@ -402,7 +413,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
 ): Promise<void> {
   if (isBackendAttachmentStorage()) {
     await downloadFromBackend(authFetch, input);
@@ -443,6 +454,7 @@ export async function downloadStoredAttachment(
     blob = await fetchLinkBlob(fresh.url);
   }
   saveBlobAs(blob, link.name || input.name || "attachment");
+  input.onSaved?.("started");
 }
 
 /** Step 1 of an upload: records the attachment and returns the one-use upload link. */

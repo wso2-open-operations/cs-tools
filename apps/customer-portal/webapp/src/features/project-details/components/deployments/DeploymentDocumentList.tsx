@@ -41,6 +41,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
 import { useGetAttachment } from "@api/useGetAttachment";
 import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
@@ -281,6 +282,7 @@ function DocumentRow({
   currentUserEmail,
   onError,
 }: DeploymentDocumentRowProps): JSX.Element {
+  const { showSuccess } = useSuccessBanner();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const { downloadAttachment, isDownloading, downloadingId } =
@@ -325,6 +327,12 @@ function DocumentRow({
             id: doc.id,
             name: doc.name,
             size: sizeBytes > 0 ? sizeBytes : undefined,
+            onSaved: (outcome) =>
+              showSuccess(
+                outcome === "saved"
+                  ? `Downloaded ${name}.`
+                  : `Download of ${name} started.`,
+              ),
           });
           return;
         } catch (storedError) {

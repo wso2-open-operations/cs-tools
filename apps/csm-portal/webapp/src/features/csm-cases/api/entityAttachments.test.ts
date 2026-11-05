@@ -359,7 +359,7 @@ describe("with the files held by the portal backend", () => {
   const apiWith = (putBinary: ReturnType<typeof vi.fn>, post: ReturnType<typeof vi.fn>, getResponse = vi.fn()) =>
     ({ post, putBinary, getResponse }) as unknown as BackendApi;
 
-  it("sends the file in 16 MiB chunks, then confirms with the chunk count", async () => {
+  it("sends the file in 8 MiB chunks, then confirms with the chunk count", async () => {
     const post = vi.fn().mockResolvedValueOnce(started).mockResolvedValueOnce(confirmed);
     const putBinary = vi.fn().mockResolvedValue(undefined);
     const progress: number[] = [];
@@ -683,6 +683,45 @@ describe("with the files held by the portal backend", () => {
       expect(disk.writable.close).toHaveBeenCalledTimes(1);
       expect(disk.writable.abort).not.toHaveBeenCalled();
       expect(save).not.toHaveBeenCalled(); // nothing is held for a Blob
+    });
+
+    it("reports `saved` only when the file was written to the picked file", async () => {
+      fakeDisk();
+      const onSaved = vi.fn();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        undefined,
+        vi.fn(),
+      );
+      expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
+    });
+
+    it("reports `started`, not a completed save, when the Blob is handed to the browser", async () => {
+      delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+      const onSaved = vi.fn();
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        undefined,
+        vi.fn(),
+      );
+      expect(onSaved).toHaveBeenCalledExactlyOnceWith("started");
+    });
+
+    it("never reports a closed save dialog or a failed download", async () => {
+      const disk = fakeDisk();
+      disk.picker.mockRejectedValue(new DOMException("Closed.", "AbortError"));
+      const onSaved = vi.fn();
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), rangeServer(DOWNLOAD_RANGE_BYTES + 5).getResponse),
+        { type: "work_item", id: ID, name: "big.bin", onSaved },
+        undefined,
+        vi.fn(),
+      );
+      expect(onSaved).not.toHaveBeenCalled();
     });
 
     it("drops the half-written file when a range is refused", async () => {
