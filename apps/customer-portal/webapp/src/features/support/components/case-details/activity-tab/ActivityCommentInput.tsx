@@ -242,36 +242,52 @@ export default function ActivityCommentInput({
     });
   };
 
+  // Uploads each queued file as its own work_item attachment of the case, one
+  // after another, through the same chunked flow as the Attachments tab. One
+  // that fails does not stop the others; the result says which went through.
   const uploadAttachmentsFromSnapshot = async (
     attachmentsSnapshot: Array<{ id: string; file: File }>,
     namesSnapshot: Map<string, string>,
-  ): Promise<boolean> => {
-    if (attachmentsSnapshot.length === 0) return true;
+  ): Promise<{ uploadedIds: string[]; failures: string[] }> => {
+    const uploadedIds: string[] = [];
+    const failures: string[] = [];
+    if (attachmentsSnapshot.length === 0) return { uploadedIds, failures };
 
     setIsUploadingAttachments(true);
     try {
       for (const { id, file } of attachmentsSnapshot) {
         const attachmentName = namesSnapshot.get(id) || file.name;
-
-        await storedUpload.mutateAsync({
-          type: "work_item",
-          parentId: caseId,
-          caseId,
-          file,
-          body: { name: attachmentName },
-        });
+        try {
+          await storedUpload.mutateAsync({
+            type: "work_item",
+            parentId: caseId,
+            caseId,
+            file,
+            body: { name: attachmentName },
+          });
+          uploadedIds.push(id);
+        } catch (error) {
+          failures.push(
+            `"${attachmentName}": ${
+              error instanceof Error && error.message
+                ? error.message
+                : "the upload failed"
+            }`,
+          );
+        }
       }
-      return true;
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Failed to upload attachments. Please try again.";
-      showError(message);
-      return false;
     } finally {
       setIsUploadingAttachments(false);
     }
+    return { uploadedIds, failures };
+  };
+
+  // Takes the files that were stored out of the queue; a failed one stays so
+  // pressing Send again uploads only it.
+  const dropUploaded = (uploadedIds: string[]) => {
+    if (uploadedIds.length === 0) return;
+    uploadedIds.forEach((id) => attachmentNamesRef.current.delete(id));
+    setAttachments((prev) => prev.filter((a) => !uploadedIds.includes(a.id)));
   };
 
   const handleSend = async () => {
@@ -291,11 +307,9 @@ export default function ActivityCommentInput({
     const attachmentsSnapshot = [...currentAttachments];
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
 
-    const clearUI = () => {
+    const clearEditor = () => {
       setValue("");
       setResetTrigger((prev) => prev + 1);
-      setAttachments([]);
-      attachmentNamesRef.current.clear();
       releasePreviews();
     };
 
@@ -318,47 +332,60 @@ export default function ActivityCommentInput({
         }
       }
 
-      // Attachment-only: skip comment endpoint, upload directly
-      if (!hasText && hasAttachments) {
-        const ok = await uploadAttachmentsFromSnapshot(
+      // The comment and the attachments are two separate requests, started
+      // together: a comment that fails does not hold the files back, and a file
+      // that fails does not lose the comment.
+      const commentResult: Promise<{ ok: true } | { ok: false; message: string }> =
+        hasText
+          ? new Promise((resolve) =>
+              postComment.mutate(
+                {
+                  caseId,
+                  body: { content: finalValue.trim(), type: CommentType.COMMENT },
+                },
+                {
+                  onSuccess: () => resolve({ ok: true }),
+                  onError: (error: unknown) =>
+                    resolve({
+                      ok: false,
+                      message:
+                        error instanceof Error && error.message
+                          ? error.message
+                          : "Failed to post comment. Please try again.",
+                    }),
+                },
+              ),
+            )
+          : Promise.resolve({ ok: true });
+      const [comment, uploads] = await Promise.all([
+        commentResult,
+        uploadAttachmentsFromSnapshot(
           attachmentsSnapshot,
           attachmentNamesSnapshot,
+        ),
+      ]);
+
+      if (hasText && comment.ok) clearEditor();
+      dropUploaded(uploads.uploadedIds);
+
+      const problems: string[] = [];
+      if (!comment.ok) {
+        problems.push(
+          `The comment was not posted (${comment.message}). It is still in the editor; press Send to try again.`,
         );
-        if (ok) {
-          clearUI();
-          window.location.reload();
-        }
+      }
+      if (uploads.failures.length > 0) {
+        problems.push(
+          `${uploads.failures.length === 1 ? "An attachment was" : "Some attachments were"} not uploaded: ${uploads.failures.join("; ")}. ${
+            uploads.failures.length === 1 ? "It is" : "They are"
+          } still attached; press Send to try again.`,
+        );
+      }
+      if (problems.length > 0) {
+        showError(problems.join(" "));
         return;
       }
-
-      // Text (with or without attachments): post comment first, then upload attachments
-      postComment.mutate(
-        {
-          caseId,
-          body: { content: finalValue.trim(), type: CommentType.COMMENT },
-        },
-        {
-          onSuccess: async () => {
-            clearUI();
-            if (attachmentsSnapshot.length > 0) {
-              const ok = await uploadAttachmentsFromSnapshot(
-                attachmentsSnapshot,
-                attachmentNamesSnapshot,
-              );
-              if (ok) {
-                window.location.reload();
-              }
-            }
-          },
-          onError: (error: unknown) => {
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : "Failed to post comment. Please try again.";
-            showError(message);
-          },
-        },
-      );
+      if (attachmentsSnapshot.length > 0) window.location.reload();
     };
 
     // Warn about PII in the comment text before posting. Attachment-only
