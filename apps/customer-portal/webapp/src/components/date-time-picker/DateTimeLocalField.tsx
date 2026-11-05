@@ -106,7 +106,8 @@ export default function DateTimeLocalField({
             required,
             error,
             helperText,
-            "aria-label": ariaLabel,
+            // A name on a role-less element is not announced, so the field is a named group.
+            ...(ariaLabel ? { role: "group", "aria-label": ariaLabel } : {}),
             onBlur: handleBlur,
           },
         }}
