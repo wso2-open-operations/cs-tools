@@ -541,6 +541,12 @@ type CaseRepository interface {
 	// "deployment", which is not a work_item subtype) returns a
 	// ValidationError.
 	SearchWorkItemAttachments(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	// SearchDeploymentAttachments returns a paginated slice of attachment metadata
+	// for a deployment, most recently created first, together with the total
+	// matching count. Backed by deployment_attachment, whose row-level security
+	// (migration 100026) scopes the result to the caller's projects. A deployment
+	// with no attachments yields an empty slice and total 0, never an error.
+	SearchDeploymentAttachments(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
 	// GetCaseAttachmentByID returns the attachment identified by id.
 	// Returns a NotFoundError if no matching row exists.
 	GetCaseAttachmentByID(ctx context.Context, id string) (domain.Attachment, error)
@@ -3311,6 +3317,90 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate work item attachments: %w", err)
+		}
+		attachments = result
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return nil, 0, err
+	}
+
+	return attachments, total, nil
+}
+
+// SearchDeploymentAttachments implements CaseRepository.
+//
+// Reads deployment_attachment. The table's own row-level security (migration
+// 100026) carries the visibility: an internal caller sees everything, any other
+// caller only the attachments of deployments in projects they belong to. A row
+// the uploader deleted, one whose upload failed and one still in flight are not
+// listed. No bytes or download links are produced here: the file is read through
+// POST /attachments/locate.
+func (r *caseRepo) SearchDeploymentAttachments(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
+	const where = `
+		WHERE da.deployment_id = $1
+		  AND da.status NOT IN ('DELETED', 'FAILED', 'PENDING')`
+	const countQuery = `SELECT COUNT(*) FROM deployment_attachment da` + where
+	// created_by is a free-form string on this table; it is matched to a user by
+	// email, with a LATERAL ... LIMIT 1 for the reason SearchWorkItemAttachments
+	// gives ("user".email has no unique constraint).
+	const dataQuery = `
+		SELECT da.id, da.deployment_id, COALESCE(da.name, ''), COALESCE(da.content_type, ''),
+		       COALESCE(da.size_bytes, 0), da.created_by, COALESCE(u.id::text, ''),
+		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
+		       da.created_on
+		FROM deployment_attachment da
+		LEFT JOIN LATERAL (
+			SELECT u2.id, u2.name, u2.first_name, u2.last_name
+			FROM "user" u2
+			WHERE LOWER(u2.email) = LOWER(da.created_by)
+			ORDER BY u2.id
+			LIMIT 1
+		) u ON TRUE` + where + `
+		ORDER BY da.created_on DESC, da.id
+		LIMIT $2 OFFSET $3`
+
+	var total int
+	var attachments []domain.Attachment
+
+	eg, egCtx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		if err := r.db.QueryRow(egCtx, countQuery, deploymentID).Scan(&total); err != nil {
+			return fmt.Errorf("count deployment attachments: %w", err)
+		}
+		return nil
+	})
+
+	eg.Go(func() error {
+		rows, err := r.db.Query(egCtx, dataQuery, deploymentID, pagination.Limit, pagination.Offset)
+		if err != nil {
+			return fmt.Errorf("query deployment attachments: %w", err)
+		}
+		defer rows.Close()
+
+		result := make([]domain.Attachment, 0, pagination.Limit)
+		for rows.Next() {
+			var (
+				a                                   domain.Attachment
+				sizeBytes                           int64
+				createdBy, uploaderID, uploaderName string
+			)
+			if err := rows.Scan(
+				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
+				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+			); err != nil {
+				return fmt.Errorf("scan deployment attachment: %w", err)
+			}
+			a.SizeBytes = int(sizeBytes)
+			a.ReferenceType = domain.ReferenceTypeDeployment
+			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
+			a.Status = domain.AttachmentStatusComplete
+			result = append(result, a)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate deployment attachments: %w", err)
 		}
 		attachments = result
 		return nil

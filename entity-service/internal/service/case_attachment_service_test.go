@@ -873,6 +873,38 @@ func TestCaseService_SearchCaseAttachments_WorkItemTypes(t *testing.T) {
 	}
 }
 
+// TestCaseService_SearchCaseAttachments_DeploymentReadsDeploymentAttachments
+// proves a deployment search is listed from Postgres (deployment_attachment),
+// never from the work item path and never from the mirrored data source.
+func TestCaseService_SearchCaseAttachments_DeploymentReadsDeploymentAttachments(t *testing.T) {
+	repo := &stubCaseRepo{
+		searchDeploymentAttachments: func(_ context.Context, id string, p domain.Pagination) ([]domain.Attachment, int, error) {
+			if id != testWorkItemID || p.Limit != 1 || p.Offset != 0 {
+				t.Fatalf("got id=%q pagination=%+v", id, p)
+			}
+			return []domain.Attachment{{
+				ID: testAttachmentID, ReferenceID: id, ReferenceType: domain.ReferenceTypeDeployment,
+				Name: "topology.pdf", Type: "application/pdf", SizeBytes: 10, Status: domain.AttachmentStatusComplete,
+			}}, 2, nil
+		},
+	}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	resp, err := svc.SearchCaseAttachments(context.Background(), domain.SearchAttachmentsRequest{
+		ReferenceID:   testWorkItemID,
+		ReferenceType: domain.ReferenceTypeDeployment,
+		Pagination:    domain.Pagination{Limit: 1, Offset: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Attachments) != 1 || resp.Attachments[0].ReferenceType != domain.ReferenceTypeDeployment {
+		t.Fatalf("unexpected attachments: %+v", resp.Attachments)
+	}
+	if resp.Total != 2 || !resp.HasMore {
+		t.Fatalf("total %d hasMore %v, want 2/true", resp.Total, resp.HasMore)
+	}
+}
+
 // TestCaseService_SearchCaseAttachments_WorkItemEmptyIsSuccess: no
 // attachments is total 0 and no error.
 func TestCaseService_SearchCaseAttachments_WorkItemEmptyIsSuccess(t *testing.T) {
@@ -916,11 +948,11 @@ func TestCaseService_SearchCaseAttachments_CaseStaysOnCasePath(t *testing.T) {
 	}
 }
 
-// TestCaseService_SearchCaseAttachments_UnsupportedType: deployment and
-// unknown types stay a validation error, before any repository call.
+// TestCaseService_SearchCaseAttachments_UnsupportedType: unknown types stay a
+// validation error, before any repository call.
 func TestCaseService_SearchCaseAttachments_UnsupportedType(t *testing.T) {
 	svc := NewCaseService(&stubCaseRepo{}, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
-	for _, rt := range []domain.ReferenceType{domain.ReferenceTypeDeployment, "bogus", ""} {
+	for _, rt := range []domain.ReferenceType{"bogus", ""} {
 		_, err := svc.SearchCaseAttachments(context.Background(), domain.SearchAttachmentsRequest{
 			ReferenceID:   testWorkItemID,
 			ReferenceType: rt,
@@ -948,9 +980,9 @@ func (m *stubAttachmentSearchMirror) SearchCaseAttachments(ctx context.Context, 
 	return m.search(ctx, req)
 }
 
-// TestCaseService_SearchCaseAttachments_DeploymentDualWrite covers the
-// stopgap for deployment, incident, change_request and conversation: delegated
-// to the mirror only when one is configured.
+// TestCaseService_SearchCaseAttachments_DeploymentDualWrite covers the stopgap
+// for incident, change_request and conversation (delegated to the mirror only
+// when one is configured) and shows deployment is always listed from Postgres.
 func TestCaseService_SearchCaseAttachments_DeploymentDualWrite(t *testing.T) {
 	mirrorErr := errors.New("mirror unavailable")
 	mirrorResp := domain.SearchAttachmentsResponse{
@@ -968,9 +1000,8 @@ func TestCaseService_SearchCaseAttachments_DeploymentDualWrite(t *testing.T) {
 		wantValid   bool
 		wantMirrorR bool
 	}{
-		{name: "dual-write deployment delegates to mirror", refType: domain.ReferenceTypeDeployment, withMirror: true, wantMirror: 1, wantMirrorR: true},
-		{name: "dual-write deployment returns mirror error", refType: domain.ReferenceTypeDeployment, withMirror: true, mirrorErr: mirrorErr, wantMirror: 1, wantErr: mirrorErr},
-		{name: "plain postgres deployment is a validation error", refType: domain.ReferenceTypeDeployment, withMirror: false, wantValid: true},
+		{name: "dual-write deployment reads deployment_attachment, not the mirror", refType: domain.ReferenceTypeDeployment, withMirror: true, wantRepo: true},
+		{name: "plain postgres deployment reads deployment_attachment", refType: domain.ReferenceTypeDeployment, withMirror: false, wantRepo: true},
 		{name: "dual-write incident delegates to mirror", refType: domain.ReferenceTypeIncident, withMirror: true, wantMirror: 1, wantMirrorR: true},
 		{name: "dual-write change_request delegates to mirror", refType: domain.ReferenceTypeChangeRequest, withMirror: true, wantMirror: 1, wantMirrorR: true},
 		{name: "dual-write conversation delegates to mirror", refType: domain.ReferenceTypeConversation, withMirror: true, wantMirror: 1, wantMirrorR: true},
@@ -989,6 +1020,10 @@ func TestCaseService_SearchCaseAttachments_DeploymentDualWrite(t *testing.T) {
 					return nil, 0, nil
 				},
 				searchWorkItemAttachments: func(context.Context, string, domain.ReferenceType, domain.Pagination) ([]domain.Attachment, int, error) {
+					repoCalled = true
+					return nil, 0, nil
+				},
+				searchDeploymentAttachments: func(context.Context, string, domain.Pagination) ([]domain.Attachment, int, error) {
 					repoCalled = true
 					return nil, 0, nil
 				},

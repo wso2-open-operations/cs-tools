@@ -17,12 +17,11 @@
 package domain
 
 import (
-	"io"
 	"time"
 )
 
 // StoredAttachmentKind says which attachment table a request is about. These
-// are the three whose files live in SFTPGo: work_item_attachment,
+// are the three whose files live in Azure Blob Storage: work_item_attachment,
 // comment_attachment (the images embedded in a comment) and
 // deployment_attachment. case_attachment is a separate, older flow.
 type StoredAttachmentKind string
@@ -33,64 +32,20 @@ const (
 	StoredAttachmentDeployment StoredAttachmentKind = "deployment"
 )
 
-// Why an attachment has no download link.
+// Why an attachment has no file to download.
 const (
 	// AttachmentUnavailableNotStored: the row exists but its file is not in
-	// SFTPGo (an upload that was never confirmed).
+	// storage (an upload that was never confirmed).
 	AttachmentUnavailableNotStored = "NOT_STORED"
 	// AttachmentUnavailableFailed: the upload or the copy failed.
 	AttachmentUnavailableFailed = "FAILED"
-	// AttachmentUnavailableStorage: the file store could not be reached, so no
-	// link could be made right now. Trying again later can succeed.
+	// AttachmentUnavailableStorage: the file store could not be reached right now.
+	// Trying again later can succeed.
 	AttachmentUnavailableStorage = "STORAGE_UNAVAILABLE"
 	// AttachmentUnavailableDeleted: the attachment was deleted by the person who
 	// uploaded it; its file is gone.
 	AttachmentUnavailableDeleted = "DELETED"
 )
-
-// AttachmentLinksRequest is the body of POST /attachments/download.
-type AttachmentLinksRequest struct {
-	Kind StoredAttachmentKind `json:"type"`
-	// IDs are attachment ids of that kind, at most 20.
-	IDs []string `json:"ids"`
-	// Purpose is "download" (the default; a link that serves one request) or
-	// "preview" (an inline image; a link that serves two).
-	Purpose string `json:"purpose,omitempty"`
-}
-
-// The purposes of a download link.
-const (
-	AttachmentPurposeDownload = "download"
-	AttachmentPurposePreview  = "preview"
-)
-
-// AttachmentLink is one attachment's metadata and, when its file can be
-// fetched, a short-lived link to it. An id the caller may not see is simply
-// absent from the response, the same as one that does not exist.
-type AttachmentLink struct {
-	ID          string  `json:"id"`
-	Number      string  `json:"number"`
-	Name        string  `json:"name"`
-	ContentType *string `json:"contentType,omitempty"`
-	SizeBytes   *int64  `json:"sizeBytes,omitempty"`
-	Available   bool    `json:"available"`
-	// Reason is set when Available is false: one of the AttachmentUnavailable*
-	// values.
-	Reason string `json:"reason,omitempty"`
-	// URL is where the browser fetches the file, valid until ExpiresAt.
-	URL       string     `json:"url,omitempty"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
-	// LargeFile is set on a download link for a file big enough that the
-	// browser should hand the URL to its own downloader (it can then stream to
-	// disk and resume) instead of reading the whole file into memory. Such a
-	// link serves several requests, so a resume works.
-	LargeFile bool `json:"largeFile,omitempty"`
-}
-
-// AttachmentLinksResponse is the body returned by POST /attachments/download.
-type AttachmentLinksResponse struct {
-	Links []AttachmentLink `json:"links"`
-}
 
 // InitiateAttachmentUploadRequest is the body of POST /attachments/upload.
 type InitiateAttachmentUploadRequest struct {
@@ -104,25 +59,13 @@ type InitiateAttachmentUploadRequest struct {
 	SizeBytes   int64  `json:"sizeBytes"`
 }
 
-// Upload methods an InitiateAttachmentUploadResponse can ask for.
-const (
-	UploadMethodMultipart = "multipart"
-	UploadMethodTUS       = "tus"
-)
-
-// InitiateAttachmentUploadResponse tells the browser where to send the file.
-// The browser POSTs a multipart form with the file in the FieldName field to
-// UploadURL, exactly once, before ExpiresAt, then calls confirm.
-//
-// With ATTACHMENT_STORAGE_MODE=backend there is no UploadURL or FieldName: the
+// InitiateAttachmentUploadResponse tells the browser how to send the file. The
 // portal backend holds the file, so the browser sends it there, in chunks, using
-// AttachmentID. ExpiresAt is then when a still-unconfirmed upload may be cleaned
-// up, not a deadline on a link.
+// AttachmentID, then calls confirm. ExpiresAt is when a still-unconfirmed upload
+// may be cleaned up.
 type InitiateAttachmentUploadResponse struct {
 	AttachmentID string    `json:"attachmentId"`
 	Number       string    `json:"number"`
-	UploadURL    string    `json:"uploadUrl,omitempty"`
-	FieldName    string    `json:"fieldName,omitempty"`
 	ExpiresAt    time.Time `json:"expiresAt"`
 	MaxBytes     int64     `json:"maxBytes"`
 }
@@ -130,8 +73,8 @@ type InitiateAttachmentUploadResponse struct {
 // ConfirmAttachmentUploadRequest is the body of
 // POST /attachments/upload/{id}/confirm. ID comes from the path.
 //
-// With ATTACHMENT_STORAGE_MODE=backend this service cannot look at the file, so
-// the portal backend that committed it says what it stored: SizeBytes is
+// This service cannot look at the file, so the portal backend that committed it
+// says what it stored: SizeBytes is
 // required, and ContentType is the type it found by reading the file's leading
 // bytes (required for a comment image, where it must be a real image type).
 type ConfirmAttachmentUploadRequest struct {
@@ -153,8 +96,7 @@ type ConfirmAttachmentUploadResponse struct {
 }
 
 // AuthorizeAttachmentUploadRequest is the body of
-// POST /attachments/upload/{id}/authorize. ID comes from the path. It exists only
-// with ATTACHMENT_STORAGE_MODE=backend.
+// POST /attachments/upload/{id}/authorize. ID comes from the path.
 type AuthorizeAttachmentUploadRequest struct {
 	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"-"`
@@ -176,8 +118,7 @@ type AttachmentUploadTarget struct {
 	StorageKey string `json:"storageKey"`
 }
 
-// LocateAttachmentRequest is the body of POST /attachments/locate. It exists only
-// with ATTACHMENT_STORAGE_MODE=backend.
+// LocateAttachmentRequest is the body of POST /attachments/locate.
 type LocateAttachmentRequest struct {
 	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"id"`
@@ -245,25 +186,6 @@ type StoredAttachmentInsert struct {
 	CreatedBy   string
 }
 
-// StoredAttachmentContent is an attachment's file being streamed to the caller.
-// The caller closes Body.
-type StoredAttachmentContent struct {
-	Body io.ReadCloser
-	// ContentType is the stored type when it is an image type, else
-	// application/octet-stream. Size is -1 when unknown.
-	ContentType string
-	Size        int64
-}
-
-// ShareCleanupResult is what one share cleanup run did.
-type ShareCleanupResult struct {
-	// Scanned is how many shares were read, Deleted how many of ours were
-	// removed (a share already gone counts), Failed how many could not be.
-	Scanned int `json:"scanned"`
-	Deleted int `json:"deleted"`
-	Failed  int `json:"failed"`
-}
-
 // AbandonedUpload is an upload that was started and never confirmed.
 type AbandonedUpload struct {
 	Kind StoredAttachmentKind
@@ -282,8 +204,7 @@ type UploadCleanupResult struct {
 	// uploaded and never linked to a comment.
 	ImagesRemoved int `json:"imagesRemoved"`
 	ImagesFailed  int `json:"imagesFailed"`
-	// Orphans is set only with ATTACHMENT_STORAGE_MODE=backend, where this service
-	// holds no files: the unlinked comment images whose files the caller must
+	// Orphans are the unlinked comment images whose files the caller must
 	// remove from storage. They are NOT yet marked DELETED, so every run lists
 	// them again until the caller removes the files and acknowledges them
 	// (AcknowledgeOrphansRequest). A lost response therefore loses nothing.
@@ -299,8 +220,7 @@ type OrphanedImage struct {
 }
 
 // AcknowledgeOrphansRequest is the body of POST /attachments/uploads/cleanup/acknowledge:
-// the ids of orphaned images whose files the caller has removed from storage. It
-// exists only with ATTACHMENT_STORAGE_MODE=backend.
+// the ids of orphaned images whose files the caller has removed from storage.
 type AcknowledgeOrphansRequest struct {
 	IDs []string `json:"ids"`
 }

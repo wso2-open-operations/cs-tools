@@ -18,7 +18,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -26,16 +25,14 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/filestore"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 const (
 	// abandonedUploadAge is how old a PENDING upload must be to count as
-	// abandoned. A confirm that failed with a storage error leaves the row
-	// PENDING and the file staged on purpose so it can be retried, so this is
-	// long next to the 15 minute upload link.
+	// abandoned. A chunked upload of a large file can run for hours on a slow
+	// link, so this is long.
 	abandonedUploadAge = 24 * time.Hour
 	// uploadCleanupMaxPerRun bounds one run; a larger backlog is worked off over
 	// several runs.
@@ -46,36 +43,27 @@ const (
 // is removed: the time to write a comment, with room to spare.
 const unlinkedImageAge = 24 * time.Hour
 
-// uploadStore is the part of the SFTPGo client the upload cleanup uses.
-type uploadStore interface {
-	RemoveDir(ctx context.Context, dir string) error
-	RemoveFile(ctx context.Context, path string) error
-}
-
 type attachmentUploadCleanupService struct {
 	repo   repository.StoredAttachmentRepository
-	store  uploadStore
 	access AccessService
 	now    func() time.Time
 }
 
 // NewAttachmentUploadCleanupService constructs an AttachmentUploadCleanupService.
-// A nil store is ATTACHMENT_STORAGE_MODE=backend: this service holds no files, so
-// it marks abandoned rows FAILED and hands the unlinked comment images to the
-// caller to remove (domain.UploadCleanupResult.Orphans), marking them DELETED only
-// when the caller acknowledges them (AcknowledgeOrphans). An upload that was never
-// confirmed leaves nothing in storage to remove (uncommitted blocks expire by
-// themselves).
-func NewAttachmentUploadCleanupService(repo repository.StoredAttachmentRepository, store uploadStore, access AccessService) AttachmentUploadCleanupService {
-	return &attachmentUploadCleanupService{repo: repo, store: store, access: access, now: time.Now}
+// This service holds no files, so it marks abandoned rows FAILED and hands the
+// unlinked comment images to the caller to remove
+// (domain.UploadCleanupResult.Orphans), marking them DELETED only when the caller
+// acknowledges them (AcknowledgeOrphans). An upload that was never confirmed
+// leaves nothing in storage to remove (uncommitted blocks expire by themselves).
+func NewAttachmentUploadCleanupService(repo repository.StoredAttachmentRepository, access AccessService) AttachmentUploadCleanupService {
+	return &attachmentUploadCleanupService{repo: repo, access: access, now: time.Now}
 }
 
 // CleanupUploads implements AttachmentUploadCleanupService.
 //
-// An upload that was started and never confirmed leaves a PENDING row and a
-// staging folder under csm/staging. This removes the folder and marks the row
-// FAILED (which every list already hides and a later confirm refuses). A folder
-// that cannot be removed leaves the row PENDING, so the next run tries it again.
+// An upload that was started and never confirmed leaves a PENDING row. This marks
+// it FAILED (which every list already hides and a later confirm refuses). A row
+// that cannot be marked stays PENDING, so the next run tries it again.
 func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (domain.UploadCleanupResult, error) {
 	if err := RequireInternalCaller(ctx, s.access, "upload cleanup is only available to internal services"); err != nil {
 		return domain.UploadCleanupResult{}, err
@@ -87,14 +75,6 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	}
 	res := domain.UploadCleanupResult{Found: len(abandoned)}
 	for _, u := range abandoned {
-		if s.store != nil {
-			if err := s.store.RemoveDir(ctx, filestore.StagingDir(u.ID)); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-				res.Failed++
-				slog.WarnContext(ctx, "could not remove an abandoned upload folder", "attachmentId", u.ID, "error", err)
-				s.deferRetry(ctx, sys, u.Kind, u.ID)
-				continue
-			}
-		}
 		if err := s.repo.MarkFailed(sys, u.Kind, u.ID, "upload abandoned: never confirmed"); err != nil {
 			res.Failed++
 			slog.WarnContext(ctx, "could not mark an abandoned upload failed", "attachmentId", u.ID, "error", err)
@@ -110,21 +90,13 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	}
 	for _, img := range unlinked {
 		hasFile := img.StorageKey != nil && *img.StorageKey != ""
-		if s.store == nil && hasFile {
+		if hasFile {
 			// Not marked DELETED here: this service cannot remove the file, and a
 			// DELETED row is never listed again, so a key in a lost response would be
 			// lost with it. The row stays COMPLETE and unlinked, so every run lists it
 			// again until the caller acknowledges it.
 			res.Orphans = append(res.Orphans, domain.OrphanedImage{ID: img.ID, StorageKey: *img.StorageKey})
 			continue
-		}
-		if s.store != nil && hasFile {
-			if err := s.store.RemoveFile(ctx, strings.TrimLeft(*img.StorageKey, "/")); err != nil && !errors.Is(err, filestore.ErrNotFound) {
-				res.ImagesFailed++
-				slog.WarnContext(ctx, "could not remove an unlinked comment image", "attachmentId", img.ID, "error", err)
-				s.deferRetry(ctx, sys, domain.StoredAttachmentComment, img.ID)
-				continue
-			}
 		}
 		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentComment, img.ID, "inline-image-cleanup"); err != nil {
 			res.ImagesFailed++
@@ -149,10 +121,6 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 // comment since, was already acknowledged, or never was an orphan is skipped
 // instead of deleted. The caller cannot use this to delete an arbitrary image.
 func (s *attachmentUploadCleanupService) AcknowledgeOrphans(ctx context.Context, req domain.AcknowledgeOrphansRequest) (domain.AcknowledgeOrphansResult, error) {
-	if s.store != nil {
-		// With SFTPGo this service removes the files itself; there is nothing to acknowledge.
-		return domain.AcknowledgeOrphansResult{}, &apierror.NotFoundError{Msg: "not available"}
-	}
 	if err := RequireInternalCaller(ctx, s.access, "upload cleanup is only available to internal services"); err != nil {
 		return domain.AcknowledgeOrphansResult{}, err
 	}
