@@ -246,7 +246,12 @@ async function readAndStore(
   const first = await readRange(authFetch, url, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
     if (response.status !== 206) return true; // the whole file, the range was ignored
     const range = parseContentRange(response.headers);
-    return range !== null && range.start === 0 && partsLength(parts) === range.end + 1;
+    return (
+      range !== null &&
+      range.start === 0 &&
+      range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
+      partsLength(parts) === range.end + 1
+    );
   });
   const fileName = input.name || fileNameFromDisposition(first.response.headers);
   const total =
@@ -270,7 +275,17 @@ async function readAndStore(
             url,
             start,
             end,
-            ({ parts }) => partsLength(parts) === end - start + 1,
+            ({ response, parts }) => {
+              const range = parseContentRange(response.headers);
+              return (
+                response.status === 206 &&
+                range !== null &&
+                range.start === start &&
+                range.end === end &&
+                range.total === total &&
+                partsLength(parts) === end - start + 1
+              );
+            },
           );
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;

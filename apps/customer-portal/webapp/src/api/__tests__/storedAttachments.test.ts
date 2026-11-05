@@ -509,6 +509,46 @@ describe("storedAttachments", () => {
       click.mockRestore();
     });
 
+    it("rejects a first range that is shorter than the file allows, even when it agrees with itself", async () => {
+      withMode();
+      const size = DOWNLOAD_RANGE_BYTES + 3;
+      authFetch.mockImplementation(
+        async () =>
+          new Response(new Uint8Array(10), {
+            status: 206,
+            headers: { "Content-Range": `bytes 0-9/${size}` },
+          }),
+      );
+      const { saved, click } = stubSave();
+      await expect(
+        downloadStoredAttachment(authFetch, { type: "work_item", id: ID }),
+      ).rejects.toMatchObject({ message: "The download was interrupted. Please try again." });
+      expect(saved).toHaveLength(0);
+      click.mockRestore();
+    });
+
+    it("rejects a later range whose Content-Range is not the one asked for", async () => {
+      withMode();
+      const size = DOWNLOAD_RANGE_BYTES + 3;
+      const server = rangeServer(size);
+      authFetch.mockImplementation(async (url: string, init?: { headers?: Record<string, string> }) => {
+        if (secondRange(init)) {
+          // The right number of bytes, but from the wrong place.
+          return new Response(new Uint8Array(3), {
+            status: 206,
+            headers: { "Content-Range": `bytes 0-2/${size}` },
+          });
+        }
+        return server.fetchRange(url, init);
+      });
+      const { saved, click } = stubSave();
+      await expect(
+        downloadStoredAttachment(authFetch, { type: "work_item", id: ID }),
+      ).rejects.toMatchObject({ message: "The download was interrupted. Please try again." });
+      expect(saved).toHaveLength(0);
+      click.mockRestore();
+    });
+
     it("stops at the first refusal of a later range, with the backend's message", async () => {
       withMode();
       const size = DOWNLOAD_RANGE_BYTES * 5;

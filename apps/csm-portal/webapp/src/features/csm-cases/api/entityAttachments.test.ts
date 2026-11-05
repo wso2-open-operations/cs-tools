@@ -434,6 +434,39 @@ describe("chunked upload and streamed download", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("rejects a first range that is shorter than the file allows, even when it agrees with itself", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const getResponse = vi.fn(
+      async () =>
+        new Response(new Uint8Array(10), { status: 206, headers: { "Content-Range": `bytes 0-9/${size}` } }),
+    );
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("rejects a later range whose Content-Range is not the one asked for", async () => {
+    const size = DOWNLOAD_RANGE_BYTES + 3;
+    const server = rangeServer(size);
+    const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+      if (options?.headers?.Range?.startsWith(`bytes=${DOWNLOAD_RANGE_BYTES}-`)) {
+        // The right number of bytes, but from the wrong place.
+        return new Response(new Uint8Array(3), {
+          status: 206,
+          headers: { "Content-Range": `bytes 0-2/${size}` },
+        });
+      }
+      return server.getResponse(path, options);
+    });
+    const save = vi.fn();
+    await expect(
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+    ).rejects.toThrow("The download was interrupted.");
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("stops at the first refusal of a later range, with the backend's message", async () => {
     const size = DOWNLOAD_RANGE_BYTES * 5;
     const server = rangeServer(size, () => 5);
