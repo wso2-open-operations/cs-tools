@@ -17,6 +17,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Customer Portal</title>
     <script src="/config.js"></script>
+    <script>
+      // Apply the configured app name and logo to the tab before React loads.
+      (function () {
+        var c = window.config || {};
+        var v = function (k) {
+          return typeof c[k] === "string" && c[k].trim() ? c[k].trim() : "";
+        };
+        if (v("CUSTOMER_PORTAL_APP_NAME")) {
+          document.title = v("CUSTOMER_PORTAL_APP_NAME");
+        }
+        var light = v("CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL");
+        var dark = v("CUSTOMER_PORTAL_LOGO_DARK_MODE_URL") || light;
+        var icons = document.querySelectorAll('link[rel="icon"]');
+        if (light && icons[0]) icons[0].setAttribute("href", light);
+        if (dark && icons[1]) icons[1].setAttribute("href", dark);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

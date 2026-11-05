@@ -81,4 +81,27 @@ describe("config modules", () => {
     expect(logger.loggerConfig).toBeDefined();
     expect(getMobileAppConfig()).toBeDefined();
   });
+
+  it("appearanceConfig falls back to the stock WSO2 defaults when nothing is set", async () => {
+    const { appearanceConfig } = await import("@config/appearanceConfig");
+    expect(appearanceConfig).toEqual({
+      name: "Customer Portal",
+      companyName: "WSO2 LLC",
+      logoLightModeUrl: "/logo-dark.svg",
+      logoDarkModeUrl: "/logo-white.svg",
+    });
+  });
+
+  it("appearanceConfig uses configured values, and one logo covers both colour schemes", async () => {
+    const config = (window as unknown as { config: Record<string, string> })
+      .config;
+    config.CUSTOMER_PORTAL_APP_NAME = "  Acme Support  ";
+    config.CUSTOMER_PORTAL_COMPANY_NAME = "Acme Inc";
+    config.CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL = "https://cdn.test/logo.svg";
+    const { appearanceConfig } = await import("@config/appearanceConfig");
+    expect(appearanceConfig.name).toBe("Acme Support");
+    expect(appearanceConfig.companyName).toBe("Acme Inc");
+    expect(appearanceConfig.logoLightModeUrl).toBe("https://cdn.test/logo.svg");
+    expect(appearanceConfig.logoDarkModeUrl).toBe("https://cdn.test/logo.svg");
+  });
 });

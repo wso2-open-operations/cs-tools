@@ -57,6 +57,27 @@ window.config = {
   //   Available values: "acrylicOrange"
   CUSTOMER_PORTAL_THEME: "acrylicOrange",
 
+  // ── Appearance (all optional) ────────────────────────────────────────────────
+  //
+  // Each key falls back to the stock WSO2 value when omitted.
+  //
+  // CUSTOMER_PORTAL_APP_NAME  (default: "Customer Portal")
+  //   Product name shown beside the logo in the header and in the browser tab.
+  // CUSTOMER_PORTAL_COMPANY_NAME  (default: "WSO2 LLC")
+  //   Company name in the footer copyright line.
+  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL  (default: "/logo-dark.svg")
+  //   Logo for the light colour scheme and the light-mode tab icon. A path
+  //   under public/ or an absolute https URL. When no dark-mode logo is set,
+  //   this one is used for both colour schemes. The defaults are the stock
+  //   files public/logo-dark.svg and public/logo-white.svg; to use your own
+  //   logos without changing this file, mount your SVGs over those two paths.
+  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL  (default: "/logo-white.svg")
+  //   Logo for the dark colour scheme and the dark-mode tab icon.
+  // CUSTOMER_PORTAL_APP_NAME: "<your-portal-name>",
+  // CUSTOMER_PORTAL_COMPANY_NAME: "<your-company-name>",
+  // CUSTOMER_PORTAL_LOGO_LIGHT_MODE_URL: "/logo-dark.svg",
+  // CUSTOMER_PORTAL_LOGO_DARK_MODE_URL: "/logo-white.svg",
+
   // ── Chatbot ────────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_CHATBOT_WEBSOCKET_URL  (optional)

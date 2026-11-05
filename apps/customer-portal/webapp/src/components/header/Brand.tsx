@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { appearanceConfig } from "@config/appearanceConfig";
 import { Box, Header as HeaderUI, useTheme } from "@wso2/oxygen-ui";
 import { useEffect, useState, type JSX } from "react";
 import { useNavigate } from "react-router";
@@ -67,7 +68,9 @@ export default function Brand({
     return () => observer.disconnect();
   }, []);
 
-  const logoSrc = isDarkMode ? "/logo-white.svg" : "/logo-dark.svg";
+  const logoSrc = isDarkMode
+    ? appearanceConfig.logoDarkModeUrl
+    : appearanceConfig.logoLightModeUrl;
 
   return (
     <HeaderUI.Brand
@@ -117,7 +120,7 @@ export default function Brand({
           },
         }}
       >
-        Customer Portal
+        {appearanceConfig.name}
       </HeaderUI.BrandTitle>
     </HeaderUI.Brand>
   );
