@@ -377,6 +377,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	var standardChangeHandler *handler.StandardChangeHandler
 	var standardChangeRepo repository.StandardChangeRepository
 	var portalBannerHandler *handler.PortalBannerHandler
+	var featureOverrideHandler *handler.FeatureOverrideHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
 	var productRegressionReportHandler *handler.ProductRegressionReportHandler
 	// runbookRepo stays a nil interface without a pool, so no incident service gets a catalog.
@@ -1778,6 +1779,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		portalBannerHandler = handler.NewPortalBannerHandler(
 			service.NewPortalBannerService(repository.NewPortalBannerRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
 		)
+		featureOverrideHandler = handler.NewFeatureOverrideHandler(
+			service.NewFeatureOverrideService(repository.NewFeatureOverrideRepository(db), accessSvc, cfg.CSMPortalBackendClientID),
+		)
 		// Product catalogue routes of the products API: editable by
 		// AUTH_PRODUCT_CATALOG_MANAGER_ROLES and by CSM admins. Postgres data
 		// source only: in ServiceNow mode the product searches read ServiceNow.
@@ -2350,6 +2354,12 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /portal-banners/manage", portalBannerHandler.ListAdminBanners)
 		mux.HandleFunc("POST /portal-banners", portalBannerHandler.CreateBanner)
 		mux.HandleFunc("PUT /portal-banners/{id}", portalBannerHandler.UpdateBanner)
+	}
+	if featureOverrideHandler != nil {
+		// Shared per-page feature state. Any internal caller reads it. A write
+		// is gated on the CSM portal backend's client id, like banner changes.
+		mux.HandleFunc("GET /feature-overrides", featureOverrideHandler.ListFeatureOverrides)
+		mux.HandleFunc("PUT /feature-overrides", featureOverrideHandler.PutFeatureOverride)
 	}
 	if caseAlertSettingsHandler != nil {
 		// Case Alerts settings: chat rooms, group routes and the other ladder
