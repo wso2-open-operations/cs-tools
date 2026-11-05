@@ -316,7 +316,12 @@ async function readAndStore(
     first = await readRange(api, path, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
       if (response.status !== 206) return true; // the whole file, the range was ignored
       const range = parseContentRange(response.headers);
-      return range !== null && range.start === 0 && partsLength(parts) === range.end + 1;
+      return (
+        range !== null &&
+        range.start === 0 &&
+        range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
+        partsLength(parts) === range.end + 1
+      );
     });
   } catch (err) {
     if (err instanceof BackendApiError && err.status === 404) {
@@ -341,7 +346,17 @@ async function readAndStore(
         const start = index * DOWNLOAD_RANGE_BYTES;
         const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
         try {
-          const { parts } = await readRange(api, path, start, end, ({ parts }) => partsLength(parts) === end - start + 1);
+          const { parts } = await readRange(api, path, start, end, ({ response, parts }) => {
+            const range = parseContentRange(response.headers);
+            return (
+              response.status === 206 &&
+              range !== null &&
+              range.start === start &&
+              range.end === end &&
+              range.total === total &&
+              partsLength(parts) === end - start + 1
+            );
+          });
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
         } catch (error) {
