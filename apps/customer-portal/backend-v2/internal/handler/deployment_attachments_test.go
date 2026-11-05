@@ -31,17 +31,11 @@ const testDeploymentID = "22222222-2222-2222-2222-222222222222"
 type attachFakeEntity struct {
 	entityDeploymentClient
 	gotSearch entity.SearchAttachmentsRequest
-	gotCreate entity.CreateAttachmentRequest
 }
 
 func (f *attachFakeEntity) SearchAttachments(_ context.Context, req entity.SearchAttachmentsRequest) (entity.SearchAttachmentsResponse, error) {
 	f.gotSearch = req
 	return entity.SearchAttachmentsResponse{Total: 0, Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}, nil
-}
-
-func (f *attachFakeEntity) CreateAttachment(_ context.Context, req entity.CreateAttachmentRequest) (entity.CreateAttachmentResponse, error) {
-	f.gotCreate = req
-	return entity.CreateAttachmentResponse{}, nil
 }
 
 // TestSearchDeploymentAttachments_ScopesToPathDeployment checks the route reaches
@@ -84,38 +78,5 @@ func TestSearchDeploymentAttachments_RejectsNonUUID(t *testing.T) {
 	}
 	if fake.gotSearch.ReferenceID != "" {
 		t.Error("upstream was called despite an invalid deploymentId")
-	}
-}
-
-// TestCreateDeploymentAttachment_ForcesReferenceFromPath is the security-relevant
-// case: a client supplying its own referenceId/referenceType in the body must not
-// be able to attach a file to another deployment. The portal request DTO has no
-// such fields, and the reference is always injected from the path.
-func TestCreateDeploymentAttachment_ForcesReferenceFromPath(t *testing.T) {
-	fake := &attachFakeEntity{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /deployments/{deploymentId}/attachments", NewDeploymentHandler(fake).CreateDeploymentAttachment)
-
-	body := `{"name":"runbook.pdf","type":"application/pdf","content":"YmFzZTY0","referenceId":"99999999-9999-9999-9999-999999999999","referenceType":"case"}`
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, authedRequest(http.MethodPost, "/deployments/"+testDeploymentID+"/attachments", body))
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201 (body: %s)", w.Code, w.Body.String())
-	}
-	if fake.gotCreate.ReferenceID != testDeploymentID {
-		t.Errorf("ReferenceID = %q, want the path value %q — a body-supplied reference must never win",
-			fake.gotCreate.ReferenceID, testDeploymentID)
-	}
-	if fake.gotCreate.ReferenceType != entity.ReferenceTypeDeployment {
-		t.Errorf("ReferenceType = %q, want %q", fake.gotCreate.ReferenceType, entity.ReferenceTypeDeployment)
-	}
-	// Content becomes File, rebuilt into the base64 data URI entity-service
-	// requires (the frontend strips that prefix; see dto.attachmentFileDataURI).
-	if fake.gotCreate.File != "data:application/pdf;base64,YmFzZTY0" {
-		t.Errorf("File = %q, want the content rebuilt as a data URI", fake.gotCreate.File)
-	}
-	if fake.gotCreate.Name != "runbook.pdf" {
-		t.Errorf("Name = %q, want runbook.pdf", fake.gotCreate.Name)
 	}
 }

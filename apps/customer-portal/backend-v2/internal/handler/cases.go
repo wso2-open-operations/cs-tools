@@ -41,11 +41,9 @@ type entityCaseClient interface {
 	SearchCaseActivities(ctx context.Context, caseID string, req entity.SearchCaseActivitiesRequest) (entity.SearchCaseActivitiesResponse, error)
 	GetCaseFeedback(ctx context.Context, caseID string) (entity.CaseFeedback, error)
 	SubmitCaseFeedback(ctx context.Context, caseID string, req entity.SubmitCaseFeedbackRequest) (entity.SubmitCaseFeedbackResponse, error)
-	UpdateAttachment(ctx context.Context, id string, req entity.UpdateAttachmentRequest) (entity.UpdateAttachmentResponse, error)
 	CreateEscalation(ctx context.Context, req entity.CreateEscalationRequest) (entity.CreateEscalationResponse, error)
 	SearchEscalations(ctx context.Context, req entity.SearchEscalationsRequest) (entity.SearchEscalationsResponse, error)
 	SearchAttachments(ctx context.Context, req entity.SearchAttachmentsRequest) (entity.SearchAttachmentsResponse, error)
-	CreateAttachment(ctx context.Context, req entity.CreateAttachmentRequest) (entity.CreateAttachmentResponse, error)
 	SearchUsers(ctx context.Context, req entity.SearchUsersRequest) (entity.SearchUsersResponse, error)
 }
 
@@ -180,78 +178,6 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 	writeJSONValue(w, http.StatusOK, dto.MapCaseAttachments(result))
 }
 
-// caseStateReader is the single entity-service call the closed-case guard
-// needs. It is declared separately from entityCaseClient/entityAttachmentClient
-// so both handlers can share one guard implementation.
-type caseStateReader interface {
-	GetCase(ctx context.Context, id string) (entity.CaseView, error)
-}
-
-// caseIsClosed reports whether caseID names a case in the closed state.
-//
-// A closed case's attachments are read-only, and this backend is where that
-// rule lives: entity-service still accepts the write, and the webapp only
-// disables the upload/delete controls, so the direct-API path needs closing
-// too. Used by CreateCaseAttachment, PatchCaseAttachment, and — via the
-// attachment's own referenceId — AttachmentHandler.DeleteAttachment.
-//
-// The extra lookup deliberately fails open: an entity-service error leaves the
-// operation to proceed rather than blocking a legitimate write on a failed
-// guard read. That also covers DeleteAttachment's case, where referenceId may
-// name a deployment or conversation instead of a case and GetCase 404s. This
-// mirrors the Ballerina backend's
-// `caseResponse is entity:CaseResponse && isCaseClosed(caseResponse)` guard,
-// which ignores the error branch the same way.
-func caseIsClosed(ctx context.Context, client caseStateReader, caseID string) bool {
-	caseView, err := client.GetCase(ctx, caseID)
-	if err != nil {
-		return false
-	}
-	return dto.IsCaseStateClosed(caseView.State)
-}
-
-// CreateCaseAttachment handles POST /cases/{id}/attachments. Rejected with 400
-// when the case is closed (see caseIsClosed).
-func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	id := r.PathValue("id")
-	if id == "" || !uuidRe.MatchString(id) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-
-	body, ok := readJSONBodyWithLimit(w, r, maxAttachmentBodyBytes)
-	if !ok {
-		return
-	}
-
-	var req dto.CreateCaseAttachmentRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-
-	if caseIsClosed(r.Context(), h.entity, id) {
-		slog.WarnContext(r.Context(), "rejected attachment create on a closed case", "userID", user.UserID, "caseID", id)
-		writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentCreate)
-		return
-	}
-
-	result, err := h.entity.CreateAttachment(r.Context(), dto.BuildEntityCreateCaseAttachmentRequest(id, req))
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity CreateAttachment failed", "userID", user.UserID, "caseID", id, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to create case attachment.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusCreated, dto.MapAttachmentCreate(result))
-}
-
 // GetCase handles GET /cases/{id}.
 func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
@@ -276,8 +202,10 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 	writeJSONValue(w, http.StatusOK, dto.MapCaseDetails(result))
 }
 
-// CreateCase handles POST /cases. The body may carry inline base64 attachments,
-// so it is read with maxAttachmentBodyBytes rather than the blanket 1 MiB cap.
+// CreateCase handles POST /cases. The rich-text description may embed images as
+// base64, so the body is read with maxCaseBodyBytes rather than the blanket
+// 1 MiB cap. Files are uploaded after the case exists, through the Azure
+// attachment routes.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -285,7 +213,7 @@ func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, ok := readJSONBodyWithLimit(w, r, maxAttachmentBodyBytes)
+	body, ok := readJSONBodyWithLimit(w, r, maxCaseBodyBytes)
 	if !ok {
 		return
 	}
@@ -578,55 +506,6 @@ func (h *CaseHandler) SubmitCaseFeedback(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSONValue(w, http.StatusCreated, dto.MapSubmitCaseFeedbackResponse(result))
-}
-
-// PatchCaseAttachment handles PATCH /cases/{caseId}/attachments/{attachmentId}.
-// referenceId/referenceType are injected server-side (caseId path param,
-// ReferenceTypeCase). Only Name is read from the request body — Description
-// is never wired through here, by design for this route (case attachments
-// don't carry a description). Rejected with 400 when the case is closed (see
-// caseIsClosed).
-func (h *CaseHandler) PatchCaseAttachment(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserInfoFromContext(r.Context())
-	if user == nil {
-		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
-		return
-	}
-
-	caseID := r.PathValue("caseId")
-	attachmentID := r.PathValue("attachmentId")
-	if !uuidRe.MatchString(caseID) || !uuidRe.MatchString(attachmentID) {
-		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
-		return
-	}
-
-	body, ok := readJSONBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req dto.AttachmentUpdateRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
-		return
-	}
-	req.Description = nil // this route never forwards description (case attachments don't carry one)
-
-	if caseIsClosed(r.Context(), h.entity, caseID) {
-		slog.WarnContext(r.Context(), "rejected attachment update on a closed case", "userID", user.UserID, "caseID", caseID, "attachmentID", attachmentID)
-		writeError(w, http.StatusBadRequest, ErrMsgCaseClosedForAttachmentUpdate)
-		return
-	}
-
-	entityReq := dto.BuildEntityUpdateAttachmentRequest(req, caseID, entity.ReferenceTypeCase)
-	result, err := h.entity.UpdateAttachment(r.Context(), attachmentID, entityReq)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "entity UpdateAttachment failed", "userID", user.UserID, "attachmentID", attachmentID, "err", summarizeErr(err))
-		mapUpstreamError(w, err, "Failed to update the attachment.")
-		return
-	}
-
-	writeJSONValue(w, http.StatusOK, dto.MapUpdatedAttachment(result))
 }
 
 // CreateCaseEscalation handles POST /cases/{caseId}/escalations.

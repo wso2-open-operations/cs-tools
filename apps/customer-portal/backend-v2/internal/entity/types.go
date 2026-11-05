@@ -704,13 +704,6 @@ type Variable struct {
 	Value string `json:"value"`
 }
 
-// CaseAttachment is a file attachment for security-report-analysis case
-// creation. File must be a base64 data URI (e.g. "data:application/pdf;base64,...").
-type CaseAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
-}
-
 // CreateCaseRequest is the input for POST /cases. CreatedBy is never
 // serialized (json:"-") — entity-service derives the creator from its own
 // auth context, not the request body.
@@ -730,7 +723,6 @@ type CreateCaseRequest struct {
 	RelatedCaseID     string           `json:"relatedCaseId,omitempty"`
 	ConversationID    string           `json:"conversationId,omitempty"`
 	WatchList         []string         `json:"watchList,omitempty"`
-	Attachments       []CaseAttachment `json:"attachments,omitempty"`
 }
 
 // CreateCaseDetails carries the key fields of a newly created case.
@@ -1398,34 +1390,6 @@ const (
 	ReferenceTypeIncident      ReferenceType = "incident"
 )
 
-// CreateAttachmentRequest is the input for POST /attachments.
-type CreateAttachmentRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	File          string        `json:"file"`
-	Description   *string       `json:"description,omitempty"`
-}
-
-// AttachmentDetail holds the core fields returned after creating an attachment.
-type AttachmentDetail struct {
-	ID        string    `json:"id"`
-	SizeBytes int       `json:"sizeBytes"`
-	CreatedOn time.Time `json:"createdOn"`
-	CreatedBy string    `json:"createdBy"`
-	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
-	// entity-service holds no download location for it, only its storage key.
-	// Always non-nil for ServiceNow-sourced attachments.
-	DownloadURL *string `json:"downloadUrl"`
-}
-
-// CreateAttachmentResponse is entity-service's response for POST /attachments.
-type CreateAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
-}
-
 // SearchAttachmentsRequest is the input for POST /attachments/search.
 type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
@@ -1466,11 +1430,6 @@ type SearchAttachmentsResponse struct {
 	Limit       int          `json:"limit"`
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
-}
-
-// DeleteAttachmentResponse is entity-service's response for DELETE /attachments/{id}.
-type DeleteAttachmentResponse struct {
-	Message string `json:"message"`
 }
 
 // --- case activities ---
@@ -2525,54 +2484,6 @@ type CaseFeedback struct {
 	CreatedBy         string               `json:"createdBy"`
 	CreatedOn         string               `json:"createdOn"`
 	AdditionalComment *string              `json:"additionalComment"`
-}
-
-// --- attachment gaps ---
-
-// AttachmentDetails is entity-service's response for GET /attachments/{id}.
-type AttachmentDetails struct {
-	ID          string `json:"id"`
-	ReferenceID string `json:"referenceId"`
-	// ReferenceType identifies which entity type ReferenceID points at. Nil
-	// when entity-service's own lookup doesn't report one -- a caller
-	// authorizing access per referenced resource must treat a nil value as
-	// unknown and fail closed (see entity-service's own
-	// domain.AttachmentDetails.ReferenceType doc comment, and
-	// authorizeAttachmentAccess in internal/handler/attachments.go).
-	ReferenceType *ReferenceType `json:"referenceType"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	SizeBytes     int            `json:"sizeBytes"`
-	Description   *string        `json:"description"`
-	CreatedBy     string         `json:"createdBy"`
-	CreatedOn     time.Time      `json:"createdOn"`
-	DownloadURL   *string        `json:"downloadUrl"`
-	PreviewURL    *string        `json:"previewUrl"`
-	// Content is nil for a CSM-native (Postgres) data source attachment:
-	// entity-service holds no bytes for it, only its storage key. Always
-	// non-nil for ServiceNow-sourced attachments.
-	Content *string `json:"content"`
-}
-
-// UpdateAttachmentRequest is entity-service's request body for PATCH /attachments/{id}.
-type UpdateAttachmentRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          *string       `json:"name,omitempty"`
-	Description   *string       `json:"description,omitempty"`
-}
-
-// UpdatedAttachment holds the fields returned after updating an attachment.
-type UpdatedAttachment struct {
-	ID        string    `json:"id"`
-	UpdatedOn time.Time `json:"updatedOn"`
-	UpdatedBy string    `json:"updatedBy"`
-}
-
-// UpdateAttachmentResponse is entity-service's response for PATCH /attachments/{id}.
-type UpdateAttachmentResponse struct {
-	Message    string            `json:"message"`
-	Attachment UpdatedAttachment `json:"attachment"`
 }
 
 // --- deployed product metrics ---

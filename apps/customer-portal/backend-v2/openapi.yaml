@@ -1374,78 +1374,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/download:
-    post:
-      summary: Get metadata and short-lived download links for stored attachments.
-      description: >
-        Relays entity-service's POST /attachments/download. Returns one entry per
-        attachment the caller may see; each stored file carries a link that serves
-        one request (`purpose` download) or two (`purpose` preview) and lasts about
-        a minute, so ask for a link only when the user opens or downloads one file,
-        and fetch it immediately. At most 20 ids per call, and a caller may have 60
-        links created per minute (429 beyond that). The module permission follows
-        `type`: cases for work_item and comment, deployments for deployment.
-        The response is never cacheable.
-      operationId: postAttachmentsDownload
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StoredAttachmentLinksRequest'
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StoredAttachmentLinksResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "429":
-          description: "TooManyRequests: too many links requested; retry shortly."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /attachments/upload:
     post:
       summary: Start an upload to a work item, comment or deployment.
       description: >
         Relays entity-service's POST /attachments/upload. Records a PENDING
-        attachment and returns a one-use upload link. The browser POSTs the file
-        (multipart form field `filenames`) straight to `uploadUrl`, then calls
-        /attachments/upload/{id}/confirm. 409 when the work item is closed. 429
-        beyond 60 links per caller per minute.
+        attachment and returns its id and the largest size allowed. The browser
+        then sends the file in chunks (PUT /attachments/upload/{id}/chunks/{index})
+        and calls /attachments/upload/{id}/confirm. 409 when the work item is
+        closed. 429 when the caller makes too many requests.
       operationId: postAttachmentsUpload
       requestBody:
         required: true
@@ -1505,11 +1442,11 @@ paths:
 
   /attachments/upload/{id}/confirm:
     post:
-      summary: Finish an upload once the file has been sent to the upload link.
+      summary: Finish an upload once every chunk has been sent.
       description: >
-        Relays entity-service's POST /attachments/upload/{id}/confirm. Only the
-        person who started the upload can confirm it. Repeating a confirm that
-        succeeded answers the same.
+        Assembles the stored chunks into the file and asks entity-service to
+        confirm it. Only the person who started the upload can confirm it.
+        Repeating a confirm that succeeded answers the same.
       operationId: postAttachmentsUploadIdConfirm
       parameters:
         - name: id
@@ -1570,7 +1507,7 @@ paths:
 
   /attachments/upload/{id}/chunks/{index}:
     put:
-      summary: Send one chunk of an upload (ATTACHMENT_STORAGE_MODE=backend only).
+      summary: Send one chunk of an upload.
       description: >
         The body is the raw bytes of chunk `index` (0-based), at most 16 MiB; every
         chunk but the last should be exactly 16 MiB. A chunk may be sent again and
@@ -1656,7 +1593,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /attachments/upload/{id}/chunks:
     get:
-      summary: List the chunks already stored for an upload (ATTACHMENT_STORAGE_MODE=backend only).
+      summary: List the chunks already stored for an upload.
       description: Lets an interrupted upload carry on from the first missing chunk.
       operationId: getAttachmentsUploadIdChunks
       parameters:
@@ -1729,7 +1666,7 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /attachments/download/{id}/content:
     get:
-      summary: Download an attachment (ATTACHMENT_STORAGE_MODE=backend only).
+      summary: Download an attachment.
       description: >
         Streams the file as an attachment of an opaque type: always sent with
         `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
@@ -1877,8 +1814,9 @@ paths:
     get:
       summary: Show a comment's inline image.
       description: >
-        Streams the image from entity-service, which checks access on every request,
-        so the browser never talks to the file store and no link exists to forward.
+        Streams the image from Azure Blob Storage after entity-service has checked
+        access on every request, so the browser never talks to the file store and no
+        link exists to forward.
         Use it directly as an `<img src>`. The type is one of image/png, image/jpeg,
         image/gif or image/webp (anything else is sent as application/octet-stream),
         with `X-Content-Type-Options: nosniff`, a sandboxing Content-Security-Policy
@@ -1931,188 +1869,6 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "503":
           description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/{id}/content:
-    get:
-      summary: Download an attachment's raw file content.
-      description: >
-        Response body is the raw file, not JSON. Content-Disposition:
-        attachment is always set, forcing a download rather than inline
-        rendering, mirroring entity-service's own XSS mitigation for this
-        endpoint.
-      operationId: getAttachmentsIdContent
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: caseId
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: >
-            Optional hint: the case the caller is viewing this attachment
-            from. Used only as a fallback when the attachment is one pasted
-            inline into a case comment (its own referenceId is then the
-            comment's id, not the case's, so it cannot otherwise be resolved
-            to a case at all). Never a trust boundary by itself -- the caller's
-            access to this case, and that the attachment genuinely belongs to
-            one of its comments, are both independently re-verified.
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/{id}:
-    get:
-      summary: Get an attachment's metadata plus base64-encoded content.
-      description: >
-        Distinct from GET /attachments/{id}/content, which streams the raw
-        binary file.
-      operationId: getAttachmentsId
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: caseId
-          in: query
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: >
-            Optional hint: the case the caller is viewing this attachment
-            from. See GET /attachments/{id}/content's caseId parameter for why
-            this exists.
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentDetails'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-    delete:
-      summary: Delete an attachment.
-      description: >
-        Rejected with 400 when the attachment belongs to a closed case: a
-        closed case's attachments are read-only. The case is resolved from the
-        attachment's own referenceId, since this route is not nested under one.
-      operationId: deleteAttachmentsId
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeleteResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
           content:
             application/json:
               schema:
@@ -4233,64 +3989,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-    post:
-      summary: Create a case attachment.
-      description: >
-        The case is scoped by the {id} path parameter — there is no
-        referenceId field in the request body. Rejected with 400 when the case
-        is closed: a closed case's attachments are read-only.
-      operationId: postCasesIdAttachments
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateCaseAttachmentRequest'
-        required: true
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentCreateResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /cases/{id}/feedback:
     get:
       summary: Get feedback submitted for a case.
@@ -4458,203 +4156,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-    post:
-      summary: Upload an attachment to a deployment.
-      operationId: postDeploymentsDeploymentIdAttachments
-      parameters:
-        - name: deploymentId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateDeploymentAttachmentRequest'
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentCreateResponse'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: PayloadTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-  /deployments/{deploymentId}/attachments/{attachmentId}:
-    patch:
-      summary: Update a deployment's attachment.
-      operationId: patchDeploymentsDeploymentIdAttachmentsAttachmentId
-      parameters:
-        - name: deploymentId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: attachmentId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AttachmentUpdateRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdatedAttachment'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /cases/{caseId}/attachments/{attachmentId}:
-    patch:
-      summary: Update a case's attachment.
-      description: >
-        Only name is forwarded here — description is always dropped, by
-        design for this route. Rejected with 400 when the case is closed: a
-        closed case's attachments are read-only.
-      operationId: patchCasesCaseIdAttachmentsAttachmentId
-      parameters:
-        - name: caseId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: attachmentId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AttachmentUpdateRequest'
-        required: true
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UpdatedAttachment'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
   /deployments/{deploymentId}/products/{productId}/metrics/search:
     post:
       summary: Get core-count metrics for a deployed product.
@@ -6777,48 +6278,6 @@ components:
       type: string
       enum: [work_item, comment, deployment]
       description: Which kind of attachment the request is about.
-    StoredAttachmentLinksRequest:
-      type: object
-      required: [type, ids]
-      additionalProperties: false
-      properties:
-        type:
-          $ref: '#/components/schemas/StoredAttachmentType'
-        ids:
-          type: array
-          minItems: 1
-          maxItems: 20
-          items: {type: string, format: uuid}
-        purpose:
-          type: string
-          enum: [download, preview]
-          default: download
-          description: A download link serves one request, a preview link two.
-    StoredAttachmentLink:
-      type: object
-      required: [id, number, name, available]
-      properties:
-        id: {type: string, format: uuid}
-        number: {type: string}
-        name: {type: string}
-        contentType: {type: string}
-        sizeBytes: {type: integer, format: int64}
-        available: {type: boolean}
-        reason:
-          type: string
-          description: Why there is no link when `available` is false (for example DELETED).
-        url:
-          type: string
-          description: Short-lived link; fetch it immediately.
-        expiresAt: {type: string, format: date-time}
-    StoredAttachmentLinksResponse:
-      type: object
-      required: [links]
-      properties:
-        links:
-          type: array
-          items:
-            $ref: '#/components/schemas/StoredAttachmentLink'
     StoredAttachmentUploadRequest:
       type: object
       required: [type, parentId, name, sizeBytes]
@@ -6840,15 +6299,6 @@ components:
       properties:
         attachmentId: {type: string, format: uuid}
         number: {type: string}
-        uploadMethod:
-          type: string
-          enum: [multipart, tus]
-          description: multipart is one POST of a form; tus is the resumable chunked upload used for a large file.
-        uploadUrl: {type: string, description: "multipart - POST the form here once. tus - the TUS creation endpoint."}
-        fieldName: {type: string, example: filenames, description: multipart only}
-        shareId: {type: string, description: "tus only. Sent as share_id in Upload-Metadata. A secret; never log it."}
-        path: {type: string, description: "tus only. Sent as path in Upload-Metadata."}
-        chunkSize: {type: integer, format: int64, description: "tus only. Bytes per chunk."}
         expiresAt: {type: string, format: date-time}
         maxBytes: {type: integer, format: int64}
     StoredAttachmentConfirmRequest:
@@ -6861,7 +6311,7 @@ components:
         chunks:
           type: integer
           minimum: 1
-          description: Number of uploaded chunks to assemble. Required, and only accepted, with ATTACHMENT_STORAGE_MODE=backend.
+          description: Number of uploaded chunks to assemble. Required.
     StoredAttachmentConfirmResponse:
       type: object
       properties:
@@ -7674,17 +7124,6 @@ components:
           type: array
           items:
             type: string
-        attachments:
-          type: array
-          description: Required (at least one) when type is "security_report_analysis".
-          items:
-            type: object
-            properties:
-              name:
-                type: string
-              file:
-                type: string
-                description: Base64 data URI, e.g. "data:application/pdf;base64,...".
 
     CaseCreateResponse:
       type: object
@@ -8065,24 +7504,6 @@ components:
 
     # ---- attachments ----
 
-    CreateCaseAttachmentRequest:
-      description: >
-        The case is scoped by the {id} path parameter — referenceId/
-        referenceType are injected server-side, not client-supplied.
-      type: object
-      required: [name, type, content]
-      properties:
-        name:
-          type: string
-        type:
-          type: string
-          description: MIME/content type of the file.
-        content:
-          type: string
-          description: Base64-encoded file content.
-        description:
-          type: string
-
     DeploymentAttachmentsResponse:
       type: object
       properties:
@@ -8096,43 +7517,6 @@ components:
           type: integer
         totalRecords:
           type: integer
-    CreateDeploymentAttachmentRequest:
-      type: object
-      description: >-
-        The deployment is taken from the {deploymentId} path parameter; there is
-        deliberately no referenceId/referenceType field, so a client cannot
-        attach a file to a different entity.
-      required:
-        - name
-        - type
-        - content
-      properties:
-        name:
-          type: string
-        type:
-          type: string
-        content:
-          type: string
-          description: Base64-encoded file content.
-        description:
-          type: string
-          nullable: true
-    AttachmentCreateResponse:
-      type: object
-      properties:
-        id:
-          type: string
-        sizeBytes:
-          type: integer
-        createdOn:
-          type: string
-        downloadUrl:
-          type: string
-          nullable: true
-          description: >-
-            Null for a CSM-native (Postgres) data source attachment. Always
-            set for ServiceNow-sourced attachments.
-
     AttachmentSummary:
       type: object
       properties:
@@ -10416,73 +9800,6 @@ components:
           $ref: '#/components/schemas/SubmittedCaseFeedback'
 
     # ---- attachments (get-by-id, reference-scoped update) ----
-
-    AttachmentDetails:
-      description: >-
-        Metadata plus base64-encoded content — entity-service's response has
-        no fields worth restricting here, so this is a direct passthrough
-        shape.
-      type: object
-      required: [id, referenceId, name, type, sizeBytes, createdBy, createdOn, content]
-      properties:
-        id:
-          type: string
-        referenceId:
-          type: string
-        name:
-          type: string
-        type:
-          type: string
-        sizeBytes:
-          type: integer
-        description:
-          type: string
-          nullable: true
-        createdBy:
-          type: string
-        createdOn:
-          type: string
-          format: date-time
-        downloadUrl:
-          type: string
-          nullable: true
-        previewUrl:
-          type: string
-          nullable: true
-        content:
-          description: >-
-            Base64-encoded file content. Null for a CSM-native (Postgres)
-            data source attachment. Always set for ServiceNow-sourced
-            attachments.
-          type: string
-          nullable: true
-
-    AttachmentUpdateRequest:
-      description: >-
-        referenceId/referenceType are never client-supplied — each handler
-        injects them from its own path params. The case-scoped route
-        (PATCH /cases/{caseId}/attachments/{attachmentId}) only ever reads
-        name, never description, by design for that route.
-      type: object
-      properties:
-        name:
-          type: string
-        description:
-          type: string
-
-    UpdatedAttachment:
-      type: object
-      required: [id, updatedOn, updatedBy]
-      properties:
-        id:
-          type: string
-        updatedOn:
-          type: string
-          format: date-time
-        updatedBy:
-          type: string
-
-    # ---- deployed product metrics / usage counts ----
 
     DateRangePayload:
       description: >-

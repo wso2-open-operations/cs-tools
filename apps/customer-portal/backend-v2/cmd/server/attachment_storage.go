@@ -27,26 +27,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
-// Where attachment files live. It must match entity-service's setting of the
-// same name: "sftpgo" keeps the browser-to-SFTPGo links, "backend" has this
-// service move the bytes to and from Azure Blob Storage.
-const (
-	attachmentStorageSFTPGo  = "sftpgo"
-	attachmentStorageBackend = "backend"
-)
-
-// parseAttachmentStorageMode reads ATTACHMENT_STORAGE_MODE (empty means sftpgo).
-func parseAttachmentStorageMode(v string) (string, error) {
-	switch m := strings.ToLower(strings.TrimSpace(v)); m {
-	case "", attachmentStorageSFTPGo:
-		return attachmentStorageSFTPGo, nil
-	case attachmentStorageBackend:
-		return attachmentStorageBackend, nil
-	default:
-		return "", fmt.Errorf("ATTACHMENT_STORAGE_MODE must be %q or %q, got %q", attachmentStorageSFTPGo, attachmentStorageBackend, v)
-	}
-}
-
 // newAttachmentStore builds the Azure store from the environment and checks that
 // its container is reachable (or creates it when AZURE_STORAGE_CREATE_CONTAINER=true). Sign in as an Entra app (AZURE_TENANT_ID, AZURE_CLIENT_ID,
 // AZURE_CLIENT_SECRET with AZURE_STORAGE_ACCOUNT), or with an account key or
@@ -82,10 +62,9 @@ func newAttachmentStore(getenv func(string) string) (*azblobstore.Store, error) 
 	return store, nil
 }
 
-// registerBlobAttachmentRoutes registers the routes that replace the SFTPGo
-// download links and inline-image proxy when files live in Azure. Start and
-// delete keep their paths; the rest are new. The paths avoid the case-attachment
-// routes (GET /attachments/{id}/content): see the route test.
+// registerBlobAttachmentRoutes registers the stored-attachment routes: files
+// live in Azure Blob Storage and this service moves the bytes. The paths avoid
+// the case-attachment routes (GET /attachments/{id}/content): see the route test.
 func registerBlobAttachmentRoutes(mux *http.ServeMux, stored *handler.StoredAttachmentHandler, blob *handler.BlobAttachmentHandler) {
 	mux.HandleFunc("POST /attachments/upload", stored.InitiateUpload)
 	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", blob.PutChunk)
