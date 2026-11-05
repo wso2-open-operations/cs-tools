@@ -22,6 +22,22 @@ const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})/;
 const MIN_COMPLETE_YEAR = 1000;
 
 /**
+ * Builds a local Date from calendar fields, or null when they name a day or a
+ * time that does not exist. The Date constructor rolls such fields over (30
+ * February becomes 2 March, month 13 the next January, a year below 100 maps to
+ * 19xx), which would make the picker show a different day from the stored text.
+ * The calendar fields are checked by round trip; the hour and minute are only
+ * range-checked, because a wall-clock time that falls in a daylight-saving gap
+ * of the browser's zone is shifted by the Date and must not be refused for it.
+ */
+function buildLocalDate(year: number, month: number, day: number, hours = 0, minutes = 0): Date | null {
+  if (hours > 23 || minutes > 59) return null;
+  const date = new Date(year, month - 1, day, hours, minutes);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+/**
  * Parses a `YYYY-MM-DDTHH:mm` wall-clock string into a Date carrying the same
  * wall-clock fields in the browser's zone. No zone conversion happens here: the
  * string stays the source of truth and callers convert it to an instant with
@@ -33,14 +49,13 @@ const MIN_COMPLETE_YEAR = 1000;
 export function parseDateTimeLocal(value: string | null | undefined): Date | null {
   const match = DATE_TIME_LOCAL_RE.exec(value?.trim() ?? "");
   if (!match) return null;
-  const date = new Date(
+  return buildLocalDate(
     Number(match[1]),
-    Number(match[2]) - 1,
+    Number(match[2]),
     Number(match[3]),
     Number(match[4]),
     Number(match[5]),
   );
-  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**
@@ -62,8 +77,7 @@ export function formatDateTimeLocal(date: Date): string {
 export function parseDateOnly(value: string | null | undefined): Date | null {
   const match = DATE_ONLY_RE.exec(value?.trim() ?? "");
   if (!match) return null;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return Number.isNaN(date.getTime()) ? null : date;
+  return buildLocalDate(Number(match[1]), Number(match[2]), Number(match[3]));
 }
 
 /**
