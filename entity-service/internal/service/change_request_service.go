@@ -692,6 +692,7 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	if _, err := s.repo.ValidateChangeRequestLinks(ctx, domain.ChangeRequestLinkSelection{
 		ProjectID: req.ProjectID, AssignmentGroupID: req.GroupID,
 		DeploymentIDs: req.DeploymentIDs, DeploymentProductIDs: req.DeploymentProductIDs,
+		StandardChangeTemplateVersionID: req.StandardChangeTemplateVersionID,
 	}); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}

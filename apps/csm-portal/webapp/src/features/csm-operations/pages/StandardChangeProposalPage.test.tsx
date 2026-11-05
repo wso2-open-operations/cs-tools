@@ -689,7 +689,8 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
     expect(dialog).toHaveTextContent("Yours is the last approval needed");
     fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
-    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved" }, expect.anything());
+    // It names the stage this page shows, so a decision meant for another stage is refused, not recorded.
+    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved", stageId: "st-2" }, expect.anything());
   });
 
   it("tells the CAB that the authority is asked next", () => {
@@ -717,6 +718,30 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: /reason/i }), { target: { value: "The proposer left" } });
     fireEvent.click(confirm);
     expect(mocks.cancel).toHaveBeenCalledWith({ id: "scp-1", reason: "The proposer left" }, expect.anything());
+  });
+
+  it("shows a stage left open by a cancellation as cancelled, not as waiting", () => {
+    mocks.proposal = { ...AUTHORITY_REVIEW, state: "cancelled", decisionComment: "The proposer left" };
+    renderPage();
+    const authority = screen.getByRole("region", { name: "Standard Change Authority approvers" });
+    expect(authority).toHaveTextContent("Cancelled");
+    expect(authority).not.toHaveTextContent("1 of 2 approvals");
+  });
+
+  it("shows the summary to whoever reviews it", () => {
+    mocks.proposal = AUTHORITY_REVIEW;
+    renderPage();
+    expect(screen.getByRole("region", { name: "What the template specifies" })).toHaveTextContent(
+      "SummaryRotates a gateway's TLS certificate.",
+    );
+  });
+
+  it("says a proposal approved before the authority's stage existed was approved by the CAB", () => {
+    mocks.proposal = { ...AUTHORITY_REVIEW, state: "approved", stages: [CAB_STAGE] };
+    renderPage();
+    const decision = screen.getByRole("region", { name: "Decision" });
+    expect(decision).toHaveTextContent("Approved by the CAB");
+    expect(decision).not.toHaveTextContent("Standard Change Authority");
   });
 
   it("says who ended a cancelled proposal, and why", () => {

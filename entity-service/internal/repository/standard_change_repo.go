@@ -92,7 +92,9 @@ type StandardChangeRepository interface {
 	// CAB's approval opens the Standard Change Authority stage; that stage's last
 	// required approval applies the proposal (new template, new version, or
 	// retirement) in the same transaction. Any rejection ends it.
-	DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string) error
+	// expectedStage, when not nil, is the stage the caller meant: another
+	// (latest) stage is a 409 with nothing written.
+	DecideProposal(ctx context.Context, id, actor string, approve bool, comment, expectedStage *string) error
 }
 
 // StandardChangeProposalCreate is what CreateProposal writes.
@@ -1852,7 +1854,7 @@ func currentProposalStage(ctx context.Context, tx pgx.Tx, id string) (proposalSt
 }
 
 // crvis: internal callers only; decides the approval rows of a standard change proposal, never a change request's
-func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment *string) error {
+func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment, expectedStage *string) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
 		kind, state, proposer, err := lockProposal(ctx, tx, id)
 		if err != nil {
@@ -1870,6 +1872,9 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		stage, err := currentProposalStage(ctx, tx, id)
 		if err != nil {
 			return err
+		}
+		if expectedStage != nil && !strings.EqualFold(*expectedStage, stage.id) {
+			return &apierror.ConflictError{Msg: fmt.Sprintf("this proposal has moved on to the %s stage since the page was loaded, so nothing was recorded: reload it to see what you are now asked to decide", stage.label)}
 		}
 		authority := stage.label == standardChangeAuthorityStageLabel
 		var rowID, userID string

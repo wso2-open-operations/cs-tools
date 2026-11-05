@@ -1759,6 +1759,7 @@ describe("EditChangeRequestDialog — a change raised from a standard change tem
     renderDialog({
       ...TEMPLATED,
       priority: "high",
+      project: { id: "proj-a", name: "Acme Project" },
       standardChange: { ...TEMPLATED.standardChange!, priority: "high", deploymentTypes: ["primary_production"] },
     });
     expect(screen.getByRole("combobox", { name: /^priority/i })).toHaveAttribute("aria-disabled", "true");

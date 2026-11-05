@@ -5432,6 +5432,10 @@ type ChangeRequestLinkSelection struct {
 	// DeploymentProductIDs is nil when the caller did not state them. Deployment
 	// products are read-only: when stated they must equal the derived set.
 	DeploymentProductIDs []string
+	// StandardChangeTemplateVersionID, when set, is the standard change template
+	// version the change is raised from: its deployment types (if it names any)
+	// are checked against the chosen deployments too.
+	StandardChangeTemplateVersionID *string
 }
 
 // ChangeRequestLinkSet is a validated, derived ChangeRequestLinkSelection --

@@ -256,6 +256,9 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     expect(within(dialog).getByText(/25\/1000/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Suspend" }));
     expect(mocks.suspend).toHaveBeenCalledWith({ id: "tpl-1", reason: "Rolled back twice on prod" }, expect.anything());
+    // The confirmation closes once the server agrees.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    act(() => mocks.suspend.mock.calls[0]![1].onSuccess());
 
     await waitForElementToBeRemoved(() => screen.queryByRole("dialog"));
     fireEvent.click(screen.getByRole("button", { name: "Suspend" }));
@@ -300,6 +303,18 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "Root cause fixed" } });
     fireEvent.click(resume);
     expect(mocks.resume).toHaveBeenCalledWith({ id: "tpl-1", note: "Root cause fixed" }, expect.anything());
+  });
+
+  it("keeps a refused resume open with its note and the server's reason", () => {
+    mocks.template = { ...TEMPLATE, state: "suspended", canSuspend: false, canResume: true };
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "Root cause fixed" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+    act(() => mocks.resume.mock.calls[0]![1].onError(new Error("only a member of the Standard Change Authority can do this")));
+    expect(within(screen.getByRole("dialog")).getByText("only a member of the Standard Change Authority can do this")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("textbox", { name: /note/i })).toHaveValue("Root cause fixed");
   });
 
   it("says who can resume a suspended template, and offers no Resume to anyone else", () => {

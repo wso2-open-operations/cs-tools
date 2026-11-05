@@ -838,8 +838,12 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   Authority" "1 of 2 approvals"), "2. Standard Change Authority: asked once the CAB approves." while the CAB decides.
   Approve (the CAB) or Authorise (the authority) / Reject on the viewer's own `canDecide` row; the dialog says what
   the decision does at that stage (the CAB's approval opens the authority's stage; the authority's last needed
-  approval applies it). A rejection needs a comment. `canCancel` (an authority member, someone else's open proposal)
-  offers **Cancel proposal** with a required reason. The decision banner names who ended it (approved by both,
+  approval applies it); the decision sends the `stageId` of the row it was offered on, so a CAB vote from a page loaded
+  before the CAB settled is refused (409, the page reloads) rather than recorded as an authorisation. A stage left
+  open by a withdrawal or a cancellation reads "Withdrawn" / "Cancelled", not as waiting. The read-only view shows the
+  Summary above what the template specifies. A rejection needs a comment. `canCancel` (an authority member, someone else's open proposal)
+  offers **Cancel proposal** with a required reason. The decision banner names who ended it (approved by both, or by
+  the CAB alone for a proposal approved before the second stage existed,
   rejected by the CAB or by the authority, withdrawn, cancelled). "Copy into a new proposal" only for a rejected /
   withdrawn / cancelled **new** proposal: the API's `copyFromProposalId` starts new templates only.
 - **Create form**: type Standard shows a template picker (active only, of the project's customer, each result with its

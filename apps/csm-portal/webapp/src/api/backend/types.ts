@@ -5891,6 +5891,12 @@ export interface BeDecideStandardChangeProposalPayload {
   decision: "approved" | "rejected";
   /** Required for a rejection. */
   comment?: string;
+  /**
+   * The stage the page showed the caller deciding on: if the proposal has moved
+   * on since (the CAB settled while the page was open), the server refuses (409)
+   * and writes nothing, so a CAB vote is never recorded as an authorisation.
+   */
+  stageId?: string;
 }
 
 export interface BeSearchStandardChangeProposalsPayload {

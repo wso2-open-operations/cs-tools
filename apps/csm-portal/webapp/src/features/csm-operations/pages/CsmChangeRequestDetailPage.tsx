@@ -831,8 +831,18 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           onSuccess: (proposal) =>
             citeAsEvidence.mutate(
               { id: proposal.id, patch: { evidenceChangeRequestIds: [cr.id] } },
-              // The revision is open either way; the evidence can be added there.
-              { onSettled: () => open(proposal.id) },
+              {
+                // The revision is open either way, but say why this change is not its evidence.
+                onError: (err) =>
+                  showError(
+                    backendErrorMessage(
+                      err,
+                      `The revision was started, but ${cr.number || "this change request"} could not be cited as its evidence.`,
+                    ),
+                    err,
+                  ),
+                onSettled: () => open(proposal.id),
+              },
             ),
           onError,
         },

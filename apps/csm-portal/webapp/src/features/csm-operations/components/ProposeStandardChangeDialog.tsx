@@ -71,8 +71,10 @@ export default function ProposeStandardChangeDialog({
     { accountId: customer?.id, pagination: { offset: 0, limit: EXISTING_SHOWN } },
     { enabled: open && !!customer },
   );
-  const templates = customer ? (existing.data?.templates ?? []) : [];
-  const more = customer && existing.data ? existing.data.total - templates.length : 0;
+  // Not the previous customer's list while the new one loads (the hook keeps it as placeholder data).
+  const current = !!customer && !existing.isPlaceholderData;
+  const templates = current ? (existing.data?.templates ?? []) : [];
+  const more = current && existing.data ? existing.data.total - templates.length : 0;
   const ready = !!name.trim() && !!customer;
 
   const reset = (): void => {

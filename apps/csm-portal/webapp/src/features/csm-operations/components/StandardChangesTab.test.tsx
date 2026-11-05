@@ -523,6 +523,19 @@ describe("StandardChangesTab — Propose a standard change", () => {
     expect(mocks.createProposal).not.toHaveBeenCalled();
   });
 
+  it("does not show the previous customer's templates while the chosen one's load", async () => {
+    renderTab();
+    mocks.templateSearch.mockImplementation((payload: { accountId?: string }) => ({
+      data: { templates: TEMPLATES, total: 2, limit: 8, offset: 0 },
+      isPlaceholderData: !!payload.accountId,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    }));
+    const dialog = await fillDialog("Rotate certs");
+    expect(within(dialog).queryByRole("region", { name: /templates$/ })).not.toBeInTheDocument();
+  });
+
   it("is offered from the proposals view too, with Back returning there", async () => {
     renderTab(PROPOSALS_VIEW);
     const dialog = await fillDialog("Restart a gateway");

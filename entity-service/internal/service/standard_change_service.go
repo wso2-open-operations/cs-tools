@@ -631,7 +631,12 @@ func (s *standardChangeService) DecideProposal(ctx context.Context, id string, r
 	if !approve && comment == nil {
 		return domain.StandardChangeProposal{}, &apierror.ValidationError{Msg: "a rejection needs a comment saying why, for the proposal's record"}
 	}
-	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment); err != nil {
+	if req.StageID != nil {
+		if err := checkUUIDFields(map[string]string{"stageId": *req.StageID}); err != nil {
+			return domain.StandardChangeProposal{}, err
+		}
+	}
+	if err := s.repo.DecideProposal(ctx, id, actor, approve, comment, lowerPtr(req.StageID)); err != nil {
 		return domain.StandardChangeProposal{}, err
 	}
 	return s.proposalFor(ctx, actor, id)

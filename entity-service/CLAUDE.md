@@ -8472,7 +8472,10 @@ template itself is gated twice:
    out by every user row of their email (as the proposer already is, `changeRequestCreatorUserIDs`),
    and `resolveAuthorityPool` counts eligible members by distinct email.
 
-`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). Submit refuses (400)
+`DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
+the stage it was meant for (`stageId`, which the webapp always sends): when the proposal has moved on
+since (the CAB settled while a CAB member's page was open, and that member also sits on the
+authority), it is a 409 with nothing written, so a CAB vote is never recorded as an authorisation. Submit refuses (400)
 when the authority group has fewer than two eligible members besides the proposer
 (`resolveAuthorityPool`), so a proposal never waits on a group that could not authorise it; the CAB's
 approval refuses (409, nothing written) when its own approver leaves too few. **Approved**: `NEW`
@@ -8517,7 +8520,9 @@ leaves open the caller chooses: when the version sets `priority` it is the chang
 `priority` sent is a 400 `change_request_standard_template_field`), else the caller's; when it sets
 `deploymentTypes` the change request needs at least one deployment (400 in `prepareStandardChange`)
 and every deployment of those types (`checkStandardChangeDeployments`, in the create transaction once
-the deployments are written: 400 naming the others, an untyped deployment included). The repository records
+the deployments are written: 400 naming the others, an untyped deployment included; on dual-write the
+same check runs before the previous system is called, through `ValidateChangeRequestLinks` with the
+version id). The repository records
 the version and values in the create transaction under `FOR SHARE` on the template, refusing (409)
 a template suspended, retired or revised in between. On dual-write the previous system gets the
 rendered content and none of the template fields (`DATA_SOURCE=servicenow` refuses them: 400).

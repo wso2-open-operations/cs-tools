@@ -157,6 +157,13 @@ func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeReques
 		  FROM chosen c JOIN deployment d ON d.id = c.id`, changeRequestID, types).Scan(&total, &other); err != nil {
 		return fmt.Errorf("check standard change deployments: %w", err)
 	}
+	return standardChangeDeploymentsRefusal(name, types, total, other)
+}
+
+// standardChangeDeploymentsRefusal is the 400 for a change of template name,
+// which is for deployments of types, with total deployments of which other
+// (named "name (type)") are of another type; nil when they are acceptable.
+func standardChangeDeploymentsRefusal(name string, types []string, total int, other []string) error {
 	switch {
 	case total == 0:
 		return &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,

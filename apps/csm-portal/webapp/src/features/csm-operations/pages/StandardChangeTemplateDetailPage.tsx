@@ -211,25 +211,25 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
     );
   };
 
+  // The confirmation stays open until the server agrees: a refusal is shown in
+  // it, with the reason or note still there to correct or send again.
   const runConfirm = (): void => {
     const which = confirm;
-    setConfirm(null);
     setActionError(null);
+    const done = { onSuccess: () => setConfirm(null) };
     if (which === "suspend") {
-      suspend.mutate(
-        { id: template.id, reason: suspendReason },
-        { onError: onError("Could not suspend the template.") },
-      );
+      suspend.mutate({ id: template.id, reason: suspendReason }, { ...done, onError: onError("Could not suspend the template.") });
     }
     if (which === "resume") {
-      resume.mutate({ id: template.id, note: suspendReason }, { onError: onError("Could not resume the template.") });
+      resume.mutate({ id: template.id, note: suspendReason }, { ...done, onError: onError("Could not resume the template.") });
     }
     if (which === "clear-review") {
-      clearReview.mutate({ id: template.id, note: suspendReason }, { onError: onError("Could not clear the review flag.") });
+      clearReview.mutate({ id: template.id, note: suspendReason }, { ...done, onError: onError("Could not clear the review flag.") });
     }
   };
   const openConfirm = (which: Exclude<PendingConfirm, null>): void => {
     setSuspendReason("");
+    setActionError(null);
     setConfirm(which);
   };
   const noteRequired = confirm === "resume" || confirm === "clear-review";
@@ -343,7 +343,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         </Box>
       </Box>
 
-      {actionError && (
+      {actionError && confirm === null && (
         <Alert severity="error" onClose={() => setActionError(null)}>
           {actionError}
         </Alert>
@@ -610,6 +610,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
                 ? "Change requests can be raised from it again, following its current version, with no review of it. Say why that is safe."
                 : "The template stays as it is. Say why the change that flagged it does not call for a revision."}
           </DialogContentText>
+          {actionError && <Alert severity="error">{actionError}</Alert>}
           <TextField
             label={noteRequired ? "Note (required)" : "Reason (optional)"}
             multiline
@@ -630,7 +631,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
           <Button
             variant="contained"
             color={confirm === "suspend" ? "warning" : "primary"}
-            disabled={noteRequired && !suspendReason.trim()}
+            disabled={busy || (noteRequired && !suspendReason.trim())}
+            loading={busy}
             onClick={runConfirm}
           >
             {confirm === "suspend" ? "Suspend" : confirm === "resume" ? "Resume" : "Clear review"}

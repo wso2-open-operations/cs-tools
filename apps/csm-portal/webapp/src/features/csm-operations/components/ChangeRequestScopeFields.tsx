@@ -145,7 +145,8 @@ export default function ChangeRequestScopeFields({
           <TextField
             {...params}
             label="Deployments"
-            required={typed}
+            // Only while it can be filled in: a locked field asks for nothing.
+            required={typed && hasProject && !disabled}
             placeholder={deploymentValue.length ? undefined : "Select deployments…"}
             error={scope.lookups.isError}
             helperText={

@@ -90,6 +90,7 @@ import {
   hasParameterIssues,
   insertPlaceholderAt,
   isStandardChangeProposalFinal,
+  isStandardChangeProposalInReview,
   MAX_STANDARD_CHANGE_SUMMARY,
   normalizeStandardChangeParameters,
   STANDARD_CHANGE_APPROVAL_RULE,
@@ -1130,10 +1131,12 @@ function StageApprovers({
   stage,
   index,
   approvers,
+  proposalState,
 }: {
   stage: BeStandardChangeProposalStage | null;
   index: number;
   approvers: BeStandardChangeProposalApprover[];
+  proposalState: string;
 }): JSX.Element {
   const label = stage?.label === STANDARD_CHANGE_AUTHORITY ? STANDARD_CHANGE_AUTHORITY : "CAB";
   const status = !stage
@@ -1142,7 +1145,13 @@ function StageApprovers({
       ? { text: "Approved", color: "success" as const }
       : stage.decision === "REJECTED"
         ? { text: "Rejected", color: "error" as const }
-        : {
+        : !isStandardChangeProposalInReview(proposalState)
+          ? // Ended before the stage was settled: it waits for nobody now.
+            {
+              text: proposalState === "cancelled" ? "Cancelled" : proposalState === "withdrawn" ? "Withdrawn" : "Not decided",
+              color: "default" as const,
+            }
+          : {
             text:
               stage.requiredApprovals > 1
                 ? `${stage.approvals} of ${stage.requiredApprovals} approvals`
@@ -1195,10 +1204,13 @@ function StageApprovers({
 
 /** How a final proposal ended, for the decision banner. */
 function decisionHeadline(proposal: BeStandardChangeProposal): string {
-  const rejectedAt = (proposal.stages ?? []).find((s) => s.decision === "REJECTED");
+  const stages = proposal.stages ?? [];
+  const rejectedAt = stages.find((s) => s.decision === "REJECTED");
+  // A proposal approved before the second stage existed was approved by the CAB alone.
+  const authorised = stages.some((s) => s.label === STANDARD_CHANGE_AUTHORITY && s.decision === "APPROVED");
   switch (proposal.state) {
     case "approved":
-      return `Approved by the CAB and the ${STANDARD_CHANGE_AUTHORITY}`;
+      return authorised ? `Approved by the CAB and the ${STANDARD_CHANGE_AUTHORITY}` : "Approved by the CAB";
     case "rejected":
       return rejectedAt?.label === STANDARD_CHANGE_AUTHORITY ? `Rejected by the ${STANDARD_CHANGE_AUTHORITY}` : "Rejected by the CAB";
     case "cancelled":
@@ -1471,6 +1483,14 @@ export default function StandardChangeProposalPage(): JSX.Element {
           </Section>
           {proposal.kind !== "retire" && (
             <Section title="What the template specifies">
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  Summary
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
+                  {proposal.summary?.trim() || "—"}
+                </Typography>
+              </Box>
               <StandardChangeContentView content={proposal} />
               <Typography variant="subtitle2">Parameters</Typography>
               <StandardChangeParametersTable parameters={proposal.parameters ?? []} />
@@ -1502,7 +1522,13 @@ export default function StandardChangeProposalPage(): JSX.Element {
             {STANDARD_CHANGE_APPROVAL_RULE}
           </Typography>
           {stageGroups.map((g, i) => (
-            <StageApprovers key={g.stage?.id ?? "all"} stage={g.stage} index={i} approvers={g.rows} />
+            <StageApprovers
+              key={g.stage?.id ?? "all"}
+              stage={g.stage}
+              index={i}
+              approvers={g.rows}
+              proposalState={proposal.state}
+            />
           ))}
           {proposal.state === "cab_review" && (
             <Typography variant="caption" color="text.secondary">
@@ -1523,7 +1549,14 @@ export default function StandardChangeProposalPage(): JSX.Element {
         }}
         onDecide={(comment) =>
           decide.mutate(
-            { id: proposal.id, decision: decision!, ...(comment ? { comment } : {}) },
+            {
+              id: proposal.id,
+              decision: decision!,
+              ...(comment ? { comment } : {}),
+              // The stage this page shows: a decision meant for the CAB is refused,
+              // not recorded as an authorisation, if the CAB settled meanwhile.
+              ...(myRow?.stageId ? { stageId: myRow.stageId } : {}),
+            },
             { onSuccess: () => setDecision(null) },
           )
         }

@@ -446,6 +446,12 @@ type DecideStandardChangeProposalRequest struct {
 	Decision string `json:"decision"`
 	// Comment is required for a rejection.
 	Comment *string `json:"comment,omitempty"`
+	// StageID is the stage the caller decides on, as their page showed it. When
+	// sent and the proposal has moved on to another stage since (the CAB settled
+	// while the page was open), the decision is refused (409) and nothing is
+	// written, so a CAB vote is never recorded as an authorisation. The webapp
+	// always sends it.
+	StageID *string `json:"stageId,omitempty"`
 }
 
 // CancelStandardChangeProposalRequest is the body of POST

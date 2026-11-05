@@ -481,6 +481,19 @@ func stdChangeRequestScope(t *testing.T, env *stdEnv, crs ChangeRequestService) 
 	}
 	_, err = raise(nil)
 	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "no deployment")
+	// Dual-write: the deployment types are checked before the previous system is called.
+	mirror := &stubMirrorChangeRequestService{
+		createChangeRequest: func(context.Context, domain.CreateChangeRequestRequest) (domain.CreateChangeRequestResponse, error) {
+			t.Error("the previous system was called for a staging deployment of a production-only template")
+			return domain.CreateChangeRequestResponse{}, nil
+		},
+	}
+	dual := WithStandardChangeTemplates(NewChangeRequestServiceWithSNMirror(repository.NewChangeRequestRepository(env.scoped), stubUserRepo{}, mirror),
+		repository.NewStandardChangeRepository(env.scoped))
+	_, err = dual.CreateChangeRequest(ctx, domain.CreateChangeRequestRequest{Type: &standard, GroupID: &group, ProjectID: &projectA,
+		StandardChangeTemplateID: &tpl.ID, StandardChangeParameters: map[string]string{"cluster": "aks-1", "env": "prod"},
+		DeploymentIDs: []string{deployments["staging"]}})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "dual-write: a staging deployment")
 	_, err = raise(func(r *domain.CreateChangeRequestRequest) { r.DeploymentIDs = []string{deployments["staging"]} })
 	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "a staging deployment")
 	_, err = raise(func(r *domain.CreateChangeRequestRequest) {

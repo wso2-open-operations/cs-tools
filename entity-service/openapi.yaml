@@ -34092,6 +34092,14 @@ components:
       properties:
         decision: {type: string, enum: [approved, rejected]}
         comment: {type: string, nullable: true, description: 'Required when rejecting.'}
+        stageId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            The stage the caller decides on, as their page showed it. When sent and the proposal has
+            moved on to another stage since (the CAB settled while the page was open), the decision is
+            a 409 and nothing is written: a CAB vote is never recorded as an authorisation.
     SearchStandardChangeProposalsRequest:
       type: object
       properties:

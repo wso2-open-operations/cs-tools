@@ -18,7 +18,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -676,6 +678,32 @@ func (r *changeRequestRepo) ValidateChangeRequestLinks(ctx context.Context, sel 
 	res, err := resolveChangeRequestLinks(ctx, r.db, sel, resolveLinkOpts{})
 	if err != nil {
 		return domain.ChangeRequestLinkSet{}, err
+	}
+	if sel.StandardChangeTemplateVersionID != nil {
+		// The create transaction checks this again (checkStandardChangeDeployments);
+		// here it is checked before the previous system is called on dual-write.
+		var types []string
+		var name string
+		err := r.db.QueryRow(ctx, `SELECT v.deployment_types, t.name FROM standard_change_template_version v
+			JOIN standard_change_template t ON t.id = v.template_id WHERE v.id = $1::uuid`, *sel.StandardChangeTemplateVersionID).Scan(&types, &name)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return domain.ChangeRequestLinkSet{}, fmt.Errorf("validate change request links: template deployment types: %w", err)
+		}
+		if len(types) > 0 {
+			var other []string
+			for _, d := range res.deployments {
+				if !slices.Contains(types, d.typ) {
+					t := d.typ
+					if t == "" {
+						t = "no type"
+					}
+					other = append(other, d.ref.Name+" ("+t+")")
+				}
+			}
+			if refusal := standardChangeDeploymentsRefusal(name, types, len(res.deployments), other); refusal != nil {
+				return domain.ChangeRequestLinkSet{}, refusal
+			}
+		}
 	}
 	return res.linkSet(), nil
 }

@@ -4987,6 +4987,13 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
       expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-2", {
         state: { from: "/operations/change-requests/chg-1" },
       });
+      // A refused citation is said, not dropped; the revision still opens.
+      const refusal = new Error("evidence must be change requests of the proposal's customer");
+      citeEvidenceMutateMock.mock.calls[0]![1].onError(refusal);
+      expect(showErrorMock).toHaveBeenCalledWith(
+        expect.stringMatching(/^The revision was started, but CHG\S+ could not be cited as its evidence\.$/),
+        refusal,
+      );
     });
 
     it("shows a refusal in the error banner", () => {

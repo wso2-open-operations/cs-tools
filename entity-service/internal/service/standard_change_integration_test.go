@@ -1257,6 +1257,31 @@ func stdAuthority(t *testing.T, env *stdEnv) {
 		t.Fatalf("after the rejection = %v", s)
 	}
 
+	// A decision made from a page that still showed the CAB stage, sent after the
+	// CAB settled, is not recorded on the authority's stage: stdCAB1 sits on both.
+	stale := readyDraft(t, env, stdTag+" Stale page")
+	if stale, err = env.svc.SubmitProposal(ctx, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+	cabStage := stale.Stages[0].ID
+	if _, err := env.svc.DecideProposal(stdCtx(stdCAB2), stale.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", StageID: &cabStage}); err != nil {
+		t.Fatalf("the CAB approves on its own stage: %v", err)
+	}
+	_, err = env.svc.DecideProposal(stdCtx(stdCAB1), stale.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved", StageID: &cabStage})
+	expectErr[*apierror.ConflictError](t, err, "a CAB decision sent after the CAB settled")
+	got, _ := env.svc.GetProposal(ctx, stale.ID)
+	if got.Stages[1].Approvals != 0 {
+		t.Fatalf("a stale CAB decision was recorded as an authorisation: %+v", got.Stages)
+	}
+	for _, a := range got.Approvers {
+		if a.StageID == got.Stages[1].ID && a.Approver != nil && a.Approver.Email == stdCAB1 && a.State != "REQUESTED" {
+			t.Fatalf("stdCAB1's authority row was decided by a stale CAB decision: %+v", a)
+		}
+	}
+	if _, err := env.svc.WithdrawProposal(ctx, stale.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	// After one authorisation, the second member's rejection still ends it.
 	p = readyDraft(t, env, stdTag+" Authority split")
 	if _, err := env.svc.SubmitProposal(ctx, p.ID); err != nil {
