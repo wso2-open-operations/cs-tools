@@ -181,4 +181,32 @@ describe("CsmIssuesView severity options follow the locked record type", () => {
 
     expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S0,S1,S2,S3,S4$/);
   });
+
+  it("a service-request view keeps S0 listed when the URL already selects it, so it can be removed", () => {
+    render(
+      <MemoryRouter initialEntries={["/service-requests?severities=S0"]}>
+        <CsmIssuesView
+          title="Service requests"
+          hideTypeFilter
+          lockedFilters={{ caseTypes: ["service_request"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S0,S1,S2,S3,S4$/);
+  });
+
+  it("a service-request view without S0 selected does not offer it", () => {
+    render(
+      <MemoryRouter initialEntries={["/service-requests?severities=S2"]}>
+        <CsmIssuesView
+          title="Service requests"
+          hideTypeFilter
+          lockedFilters={{ caseTypes: ["service_request"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S1,S2,S3,S4$/);
+  });
 });

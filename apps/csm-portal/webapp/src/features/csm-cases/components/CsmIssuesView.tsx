@@ -817,10 +817,15 @@ export default function CsmIssuesView({
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
+        // Service requests have no S0, so it is not offered as a new pick.
+        // A shared URL or saved view can still carry `severities=S0`, so keep
+        // it listed while selected, otherwise the user could not deselect it.
         severityOptions={
           lockedFilters?.caseTypes?.length === 1 &&
           lockedFilters.caseTypes[0] === "service_request"
-            ? SERVICE_REQUEST_SEVERITY_OPTIONS
+            ? filters.severities.includes("S0")
+              ? SEVERITY_OPTIONS
+              : SERVICE_REQUEST_SEVERITY_OPTIONS
             : SEVERITY_OPTIONS
         }
         hideTypeFilter={hideTypeFilter}
