@@ -52,6 +52,7 @@ import type {
   UpdateHistoryTimelineItemProps,
 } from "@features/project-details/types/projectDetailsComponents";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import DateLocalField from "@components/date-time-picker/DateLocalField";
 
 /**
  * Displays update history timeline and allows adding/editing/deleting updates.
@@ -415,21 +416,13 @@ export default function UpdateHistoryTab({
                     </MenuItem>
                   ))}
               </TextField>
-              <TextField
+              <DateLocalField
                 id="new-applied-on"
                 label="Applied On *"
-                type="date"
                 value={form.date}
-                onChange={handleFormChange("date")}
-                fullWidth
-                size="small"
+                onChange={(date) => setForm((prev) => ({ ...prev, date }))}
+                disableFuture
                 disabled={isSaving}
-                slotProps={{
-                  inputLabel: { shrink: true },
-                  input: {
-                    inputProps: { max: new Date().toISOString().split("T")[0] },
-                  },
-                }}
               />
             </Box>
             <TextField
@@ -642,25 +635,13 @@ function TimelineItem({
                     ))}
                   </TextField>
                 )}
-                <TextField
+                <DateLocalField
                   label="Date"
-                  type="date"
                   value={editForm.date}
-                  onChange={handleEditChange("date")}
-                  size="small"
-                  fullWidth
+                  onChange={(date) => setEditForm((prev) => ({ ...prev, date }))}
+                  disableFuture
                   disabled={isSaving}
-                  slotProps={{
-                    inputLabel: { shrink: true },
-                    input: {
-                      inputProps: {
-                        max: new Date().toISOString().split("T")[0],
-                      },
-                    },
-                  }}
-                  sx={{
-                    "& .MuiInputBase-root": { bgcolor: "background.paper" },
-                  }}
+                  sx={{ "& .MuiInputBase-root": { bgcolor: "background.paper" } }}
                 />
               </Box>
               <TextField
