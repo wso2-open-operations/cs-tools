@@ -221,7 +221,7 @@ describe("ActivityCommentInput", () => {
   });
 
   describe("files attached to the comment", () => {
-    it("uploads an attached file through the stored upload, as an attachment of the case, after the comment is posted", async () => {
+    it("uploads an attached file through the stored upload, as an attachment of the case, alongside the comment", async () => {
       mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
       mockMutate.mockImplementation(
         (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
@@ -248,6 +248,55 @@ describe("ActivityCommentInput", () => {
           file: expect.any(File),
         }),
       );
+    });
+  });
+
+  describe("the comment and the attached files are sent separately", () => {
+    const attachAndType = (html: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      fireEvent.click(screen.getByRole("button", { name: "pick file" }));
+      fireEvent.change(screen.getByTestId("case-description-editor"), { target: { value: html } });
+    };
+    const send = async () => {
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /send comment/i })).not.toBeDisabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /send comment/i }));
+    };
+
+    it("uploads the file even when the comment cannot be posted, and keeps the comment", async () => {
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onError?: (e: unknown) => void }) =>
+          options?.onError?.(new Error("Comments are closed.")),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/The comment was not posted \(Comments are closed\.\)/)).toBeTruthy();
+      // The file went through, so it is no longer queued.
+      expect(screen.queryByRole("button", { name: /send comment/i })).not.toBeDisabled();
+    });
+
+    it("posts the comment even when the file cannot be uploaded, and keeps the file attached", async () => {
+      mockAttachmentUpload.mockRejectedValue(new Error("The upload was interrupted."));
+      mockMutate.mockImplementation(
+        (_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.(),
+      );
+      renderInput("case-001");
+      attachAndType("<p>see the file</p>");
+      await send();
+
+      await waitFor(() => expect(mockMutate).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/"notes\.txt": The upload was interrupted\./)).toBeTruthy();
+
+      // Sending again uploads only the file; there is no comment left to post.
+      mockAttachmentUpload.mockResolvedValue({ id: "att-1", status: "COMPLETE" });
+      await send();
+      await waitFor(() => expect(mockAttachmentUpload).toHaveBeenCalledTimes(2));
+      expect(mockMutate).toHaveBeenCalledTimes(1);
     });
   });
 
