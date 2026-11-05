@@ -68,7 +68,11 @@ type caseService struct {
 	//     Postgres at all — see CreateCase's own doc comment for why create
 	//     is SN-first while update/comment are Postgres-first.
 	snWriteback *SNWritebackDispatcher
-	snMirror    CaseService
+	// srDefaultSeverity is the severity a service request created without one
+	// gets (SERVICE_REQUEST_DEFAULT_SEVERITY); empty means low (S4). See
+	// WithServiceRequestDefaultSeverity.
+	srDefaultSeverity domain.CaseSeverity
+	snMirror          CaseService
 	// slaEngine registers CSM-native SLA clocks for createCaseSNFirst's own
 	// dual-write path — see registerCaseSLAClocksEvent's own doc comment for
 	// why this must run here (after this service's own Postgres insert)
@@ -689,6 +693,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err := validateCreateCaseRequest(&req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	if err := s.applyServiceRequestSeverityOnCreate(ctx, &req); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
 	// announcement/service_request/engagement/security_report_analysis used to
 	// exist only on the SN-first path (s.snMirror != nil): case_repo's direct
 	// Postgres insert only knew how to write a "CASE" work_item row. CaseRepository.CreateCase
@@ -779,7 +786,12 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// until/unless its severity happened to change later (which calls
 	// ReviseCaseClocks, registering clocks as a side effect).
 	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
-		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
+		clockSeverity := &req.Severity
+		if req.Type == "service_request" {
+			// A service request's severity never reaches the SLA engine.
+			clockSeverity = nil
+		}
+		s.slaEngine.RegisterCaseClocks(ctx, c.ID, clockSeverity, req.ProjectID)
 	}
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
@@ -1960,6 +1972,14 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	if req.Severity != nil && !validCaseSeverity[*req.Severity] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(*req.Severity)}
 	}
+	// A service request's severity is internal and has its own, narrower path
+	// (no SLA revision, no notification, no mirror write). The record's type is
+	// read first; a read that fails falls through so the usual path reports it.
+	if req.Severity != nil {
+		if cv, err := s.GetCaseByID(ctx, req.ID); err == nil && cv.Type != nil && *cv.Type == "service_request" {
+			return s.updateServiceRequestSeverity(ctx, req)
+		}
+	}
 	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
 	}
@@ -3035,7 +3055,7 @@ func (s *caseService) publishCaseAcknowledged(ctx context.Context, caseID, ackno
 		CaseID:           caseID,
 		CaseNumber:       cv.Number,
 		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Severity:         strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
 		Product:          caseProductName(cv),
 		Team:             caseTeamName(cv),
 		AcknowledgerName: acknowledgerName,

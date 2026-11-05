@@ -1196,7 +1196,7 @@ func registerCaseSLAClocksEvent(ctx context.Context, slaEngine SLAEngineService,
 	if cv.ProjectDetails != nil {
 		projectID = cv.ProjectDetails.ID
 	}
-	slaEngine.RegisterCaseClocks(ctx, caseID, cv.Severity, projectID)
+	slaEngine.RegisterCaseClocks(ctx, caseID, slaSeverity(cv), projectID)
 }
 
 // publishCaseCreated best-effort publishes a case.created event for a newly
@@ -1364,7 +1364,7 @@ func publishCaseCreatedEvent(
 		WSO2CaseID:           cv.InternalID,
 		CaseTitle:            cv.Subject,
 		CaseType:             strings.ToUpper(req.Type),
-		Priority:             strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Priority:             strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
 		Product:              product,
 		Team:                 caseTeamName(cv),
 		SRETeamID:            sreTeamID,
@@ -2164,7 +2164,7 @@ func (s *snCaseService) publishCaseAcknowledged(ctx context.Context, caseID, ack
 		CaseID:           caseID,
 		CaseNumber:       cv.Number,
 		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Severity:         strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
 		Product:          product,
 		Team:             caseTeamName(cv),
 		AcknowledgerName: acknowledgerName,
@@ -3216,6 +3216,18 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	}
 	if req.AddPublicComment == nil && (req.Product != nil || req.PublicTicket != nil) {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "product and publicTicket are only allowed when addPublicComment is also provided"}
+	}
+
+	// A service request's severity is internal and exists in Postgres only: the
+	// backing data source has no field for it, so on this data source the
+	// request is refused (like markFixIssued above) rather than sent on as a
+	// case severity or accepted and dropped. Only a severity sent on its own
+	// needs the check; with a type it is the companion of a transfer, which
+	// validateCaseTypeTransfer judges.
+	if req.Severity != nil && req.Type == nil {
+		if cv, err := s.GetCaseByID(ctx, req.ID); err == nil && cv.Type != nil && *cv.Type == "service_request" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity of a service request is only supported for the Postgres data source"}
+		}
 	}
 
 	token := middleware.UserIDTokenFromContext(ctx)

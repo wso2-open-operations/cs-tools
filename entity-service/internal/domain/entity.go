@@ -3796,6 +3796,27 @@ type UpdateCaseRequest struct {
 type UpdateCaseResponse struct {
 	Message string      `json:"message"`
 	Case    UpdatedCase `json:"case"`
+	// Warnings lists non-fatal notices about what the update did that the caller
+	// may want to show: the update succeeded either way. Absent when there is
+	// none. Today the only one is ResponseWarningSeverityDowngraded.
+	Warnings []ResponseWarning `json:"warnings,omitempty"`
+}
+
+// ResponseWarningSeverityDowngraded is the ResponseWarning code returned when a
+// case moved to a service request had a severity a service request cannot hold
+// (catastrophic) and was stored one level lower (critical). From and To are the
+// severity values, in the wire vocabulary of CaseSeverity.
+const ResponseWarningSeverityDowngraded = "SEVERITY_DOWNGRADED"
+
+// ResponseWarning is a machine-readable, non-fatal notice attached to a
+// successful response. Code is a stable identifier to build UI on; Message is
+// English text for logs and fallback display; From and To are set when the
+// warning describes a value that was changed.
+type ResponseWarning struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
 }
 
 // CaseLabelRef is a generic id/label pair returned by ServiceNow for choice-list fields.

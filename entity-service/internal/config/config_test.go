@@ -1453,3 +1453,30 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
 	}
 }
+
+// TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
+// valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
+// S0 included, refuses to start.
+func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
+	for _, v := range []string{"", "S1", "s2", " S3 ", "S4"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: unexpected error %v", v, err)
+		}
+	}
+	for _, v := range []string{"S0", "S5", "critical", "4", "S"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "SERVICE_REQUEST_DEFAULT_SEVERITY") {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: error = %v, want one naming the variable", v, err)
+		}
+	}
+	if got, _ := NormalizeServiceRequestSeverity(""); got != "S4" {
+		t.Errorf("unset normalizes to %q, want S4", got)
+	}
+	if got, _ := NormalizeServiceRequestSeverity(" s2 "); got != "S2" {
+		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
+	}
+}

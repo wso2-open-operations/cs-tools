@@ -6931,6 +6931,11 @@ paths:
         `mostLikelyFixEta`, or `worstCaseFixEta`. `bestCaseFixEta`, `mostLikelyFixEta`, and
         `worstCaseFixEta` are supported only when the ServiceNow data source is active;
         `watchList`, `assigneeEmail`, and `acknowledge` are supported by every data source.
+        `severity` also applies to a service request, where it is an internal field: only internal
+        users and integration clients may set it (403 otherwise), it accepts `critical`, `high`,
+        `medium` or `low` only (`catastrophic` is a 400), it exists in the platform database only
+        (so when the platform database is not the data source it is refused with a 400), and it does not revise SLA
+        clocks or notify anyone.
       operationId: patchCase
       parameters:
         - name: id
@@ -24822,6 +24827,8 @@ components:
         exclusive fields above, though.
         The combinable group is supported only for the ServiceNow data source. `watchList`,
         `assigneeEmail`, and `acknowledge` are supported by every data source.
+        When the case is a service request, `severity` is its internal severity (see the
+        `severity` property).
         `resolutionCode`, `cause`, and `closeNotes` are optional and may only be provided alongside
         `state` when the state is `closed` or `solution_proposed`.
         `type` transfers the case to another type and is supported by every data source, for
@@ -24837,6 +24844,10 @@ components:
         Both flavours of `case` can be moved, in either direction: an Incident (severity S0-S3)
         and a Query (severity S4); moving an S4 case out of, or into, `case` re-marks its time
         cards billable or not, as a severity change across the S4 line does.
+        Moving a case to `service_request` keeps its severity (critical, high, medium, low). A
+        `catastrophic` case, which a service request cannot hold, is stored as `critical` and the
+        response carries a `SEVERITY_DOWNGRADED` entry in `warnings`; a source with no severity
+        (including every non-case type) is stored as `low`. The transfer never fails for this.
         Its companion fields carry the target type's mandatory data:
         `severity` and `issueType` alongside `type: case`; `engagementType` and
         `engagementPaymentType` alongside `type: engagement`; `catalogId`, `catalogItemId`
@@ -24865,7 +24876,10 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: The new severity of the case.
+          description: |
+            The new severity of the case. For a service request it is the internal severity:
+            `critical`, `high`, `medium` or `low` only, settable by internal users and integration
+            clients only (403 for anyone else), Postgres data sources only.
         type:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
@@ -25032,6 +25046,34 @@ components:
           type: string
         case:
           $ref: '#/components/schemas/UpdatedCase'
+        warnings:
+          type: array
+          description: >
+            Non-fatal notices about what the update did; the update succeeded. Absent when there
+            is none.
+          items:
+            $ref: '#/components/schemas/ResponseWarning'
+
+    ResponseWarning:
+      type: object
+      required: [code, message]
+      description: A machine-readable, non-fatal notice attached to a successful response.
+      properties:
+        code:
+          type: string
+          enum: [SEVERITY_DOWNGRADED]
+          description: >
+            `SEVERITY_DOWNGRADED`: a case moved to a service request had a severity a service
+            request cannot hold (`catastrophic`) and was stored one level lower (`critical`).
+        message:
+          type: string
+          description: English text for logs and fallback display.
+        from:
+          type: string
+          description: The value before the change (`catastrophic` for `SEVERITY_DOWNGRADED`).
+        to:
+          type: string
+          description: The value stored (`critical` for `SEVERITY_DOWNGRADED`).
 
     UpdatedCase:
       type: object
@@ -25052,6 +25094,9 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+          description: >
+            The resulting severity. For a service request it is the internal severity
+            (`critical`, `high`, `medium` or `low`).
         workState:
           type: string
           enum: [ongoing, paused]
@@ -25273,7 +25318,13 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: Required for `case` type.
+          description: |
+            Required for `case` type. For `service_request` it is optional and internal: honoured
+            only from internal users and integration clients, who may send `critical`, `high`,
+            `medium` or `low` (`catastrophic` is a 400). From any other caller it is ignored. A
+            service request created without one gets the configured default
+            (`SERVICE_REQUEST_DEFAULT_SEVERITY`, `low` when unset). It is never returned to a
+            customer. Ignored for every other type.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -26084,6 +26135,10 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+          description: >
+            Severity of a case. For a service request it is the internal severity (`critical`,
+            `high`, `medium` or `low`; Postgres data sources), returned to internal callers only
+            and null for a customer caller.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -26118,6 +26173,10 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+          description: >
+            Severity of a case. For a service request it is the internal severity (`critical`,
+            `high`, `medium` or `low`; Postgres data sources), returned to internal callers only
+            and null for a customer caller.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -26335,7 +26394,12 @@ components:
         severity:
           type: string
           nullable: true
-          description: Severity enum value (Postgres) or raw SN label (ServiceNow). Null for non-case types.
+          description: >
+            Severity enum value (Postgres) or raw SN label (ServiceNow). Null for types other than
+            `case` and `service_request`. On a service request (Postgres data sources) it is the
+            internal severity, `critical`, `high`, `medium` or `low`, always present for an internal
+            caller and always null for a customer caller (including internal users acting through
+            the customer portal).
         catalog:
           nullable: true
           $ref: '#/components/schemas/EntityRef'

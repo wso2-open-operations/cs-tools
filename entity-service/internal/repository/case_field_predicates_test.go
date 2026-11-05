@@ -201,3 +201,30 @@ func TestCaseLikeStateLookupUsesTheColumnNotACast(t *testing.T) {
 		t.Errorf("announcement lost its CLOSE->CLOSED normalization: %s", got)
 	}
 }
+
+// TestCaseFieldPredicates_SeverityColumn: the severity filter matches
+// "case".severity alone unless the caller may see a service request's
+// severity, in which case it matches the case-or-service-request column.
+func TestCaseFieldPredicates_SeverityColumn(t *testing.T) {
+	set := caseFieldSet{Severities: []domain.CaseSeverity{domain.CaseSeverityHigh}}
+	external, _, _, _ := caseFieldPredicates(set, 1)
+	if len(external) != 1 || !strings.HasPrefix(external[0], "c.severity = ANY(") || strings.Contains(external[0], "sr.") {
+		t.Errorf("default column predicate = %v, want c.severity only", external)
+	}
+	for _, tc := range []struct {
+		scope        SearchScope
+		wantInternal bool
+	}{
+		{SearchScope{Unrestricted: true}, true},
+		{SearchScope{Unrestricted: true, ViaCustomerPortal: true}, false},
+		{SearchScope{ProjectIDs: []string{"p"}}, false},
+	} {
+		scope, wantInternal := tc.scope, tc.wantInternal
+		set.SeverityColumn = severityColumnFor(scope)
+		got, _, _, _ := caseFieldPredicates(set, 1)
+		has := strings.Contains(got[0], "sr.severity")
+		if has != wantInternal {
+			t.Errorf("scope %+v: predicate %q includes sr.severity = %v, want %v", scope, got[0], has, wantInternal)
+		}
+	}
+}

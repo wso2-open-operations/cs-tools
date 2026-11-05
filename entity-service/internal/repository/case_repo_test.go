@@ -332,7 +332,7 @@ func TestValidateUpdateCaseFieldsForType(t *testing.T) {
 			req: domain.UpdateCaseRequest{
 				Severity: &sev,
 			},
-			wantErrSubstr: "severity is only supported for cases",
+			wantErrSubstr: "severity is only supported for cases and service requests",
 		},
 		{
 			name:         "SECURITY_REPORT_ANALYSIS allows workState",
@@ -350,10 +350,21 @@ func TestValidateUpdateCaseFieldsForType(t *testing.T) {
 			state: "CLOSED",
 		},
 		{
-			name:          "SERVICE_REQUEST rejects severity",
+			name:         "SERVICE_REQUEST allows an S1-S4 severity",
+			workItemType: "SERVICE_REQUEST",
+			req:          domain.UpdateCaseRequest{Severity: &sev},
+		},
+		{
+			name:          "SERVICE_REQUEST rejects catastrophic severity",
 			workItemType:  "SERVICE_REQUEST",
+			req:           domain.UpdateCaseRequest{Severity: func() *domain.CaseSeverity { s := domain.CaseSeverityCatastrophic; return &s }()},
+			wantErrSubstr: "catastrophic is not allowed for a service request",
+		},
+		{
+			name:          "ENGAGEMENT rejects severity",
+			workItemType:  "ENGAGEMENT",
 			req:           domain.UpdateCaseRequest{Severity: &sev},
-			wantErrSubstr: "severity is only supported for cases",
+			wantErrSubstr: "severity is only supported for cases and service requests",
 		},
 		{
 			name:         "SERVICE_REQUEST allows workState",
