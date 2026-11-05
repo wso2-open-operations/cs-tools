@@ -40,6 +40,7 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
@@ -561,22 +562,17 @@ export default function VariableFormFields({
         }
       }
 
-      const inputConstraints = !isStart && !isEnd ? { min: minDatetime } : {};
-
       return (
         <Grid key={variable.id} size={{ xs: 12, sm: 6 }}>
           <Box sx={{ mb: 1 }}>
             <FieldLabel questionText={variable.questionText ?? ""} />
           </Box>
-          <TextField
-            fullWidth
-            size="small"
-            type="datetime-local"
+          <DateTimeLocalField
+            ariaLabel={variable.questionText ?? "Date and time"}
             value={displayValue}
-            onChange={(e) => onChange(variable.id, e.target.value)}
+            onChange={(next) => onChange(variable.id, next)}
+            minDateTime={isStart || isEnd ? undefined : minDatetime}
             disabled={isContext}
-            slotProps={{ inputLabel: { shrink: true } }}
-            inputProps={inputConstraints}
             error={dateError}
             helperText={dateHelperText}
           />
