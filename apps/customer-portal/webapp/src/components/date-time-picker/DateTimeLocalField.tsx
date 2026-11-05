@@ -23,6 +23,8 @@ const { LocalizationProvider, DateTimePicker } = DatePickers;
 export type DateTimeLocalFieldProps = {
   id?: string;
   label?: string;
+  /** Accessible name for a field whose visible label is rendered elsewhere. */
+  ariaLabel?: string;
   /** `YYYY-MM-DDTHH:mm` wall-clock text, or "" for none. */
   value: string;
   /** Called with a finished `YYYY-MM-DDTHH:mm`, or "" once the field is left unfinished. */
@@ -55,6 +57,7 @@ export type DateTimeLocalFieldHandle = { focus: () => void };
 export default function DateTimeLocalField({
   id,
   label,
+  ariaLabel,
   value,
   onChange,
   minDateTime,
@@ -103,6 +106,7 @@ export default function DateTimeLocalField({
             required,
             error,
             helperText,
+            "aria-label": ariaLabel,
             onBlur: handleBlur,
           },
         }}
