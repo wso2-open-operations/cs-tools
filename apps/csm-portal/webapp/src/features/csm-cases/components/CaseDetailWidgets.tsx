@@ -1023,30 +1023,55 @@ function AttachmentDownloadButton({
   const progress = useAttachmentDownloadProgress(attachment.id);
   const downloading = progress !== undefined;
   const known = progress !== undefined && progress >= 0;
+  // Announced from beside the button: a disabled button is skipped by screen
+  // readers, so a status inside it would never be read. Every 10 percent only.
+  const announced = known ? Math.floor(progress / 10) * 10 : null;
   return (
-    <Button
-      size="small"
-      variant="outlined"
-      startIcon={
-        downloading ? (
-          <CircularProgress
-            size={14}
-            color="inherit"
-            variant={known ? "determinate" : "indeterminate"}
-            value={known ? progress : undefined}
-            aria-hidden
-          />
-        ) : (
-          <Download size={14} />
-        )
-      }
-      onClick={() => onDownload?.(attachment)}
-      disabled={!onDownload || downloading}
-      aria-busy={downloading || undefined}
-      aria-label={`Download ${attachment.filename}`}
-    >
-      {known ? `${progress}%` : downloading ? "Starting" : "Download"}
-    </Button>
+    <>
+      <Box
+        component="span"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        sx={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {downloading
+          ? announced === null
+            ? `Downloading ${attachment.filename}`
+            : `Downloading ${attachment.filename}: ${announced}%`
+          : ""}
+      </Box>
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={
+          downloading ? (
+            <CircularProgress
+              size={14}
+              color="inherit"
+              variant={known ? "determinate" : "indeterminate"}
+              value={known ? progress : undefined}
+              aria-hidden
+            />
+          ) : (
+            <Download size={14} />
+          )
+        }
+        onClick={() => onDownload?.(attachment)}
+        disabled={!onDownload || downloading}
+        aria-busy={downloading || undefined}
+        aria-label={`Download ${attachment.filename}`}
+      >
+        {known ? `${progress}%` : downloading ? "Starting" : "Download"}
+      </Button>
+    </>
   );
 }
 
