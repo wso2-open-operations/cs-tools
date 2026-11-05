@@ -218,17 +218,19 @@ async function readRange(
  * ranges. A closed save dialog ends the download with nothing saved and no error.
  *
  * Throws an ApiError with status 404 when there is no such stored attachment,
- * which a caller still on the older flow can fall back from.
+ * which a caller still on the older flow can fall back from. `onSaved` runs once
+ * the whole file is saved; a closed save dialog or a failure never calls it.
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
 ): Promise<void> {
   const target = await openDiskTarget(input.name || "attachment", input.size);
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
     await readAndStore(authFetch, input, sink);
+    input.onSaved?.();
   } catch (error) {
     await sink?.abort();
     throw error;
@@ -324,7 +326,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
 ): Promise<void> {
   await downloadFromBackend(authFetch, input);
 }

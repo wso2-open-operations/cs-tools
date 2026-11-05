@@ -40,6 +40,10 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
+import { useGetAttachment } from "@api/useGetAttachment";
+import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   useStoredAttachmentDelete,
   useStoredAttachmentDownload,
@@ -76,6 +80,7 @@ export default function DeploymentDocumentList({
   deploymentId,
 }: DeploymentDocumentListProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
   const { data: userDetails } = useGetUserDetails();
   const queryClient = useQueryClient();
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -310,6 +315,7 @@ function DocumentRow({
             id: doc.id,
             name: doc.name,
             size: sizeBytes > 0 ? sizeBytes : undefined,
+            onSaved: () => showSuccess(`Downloaded ${doc.name}.`),
           });
           return;
         } catch (storedError) {

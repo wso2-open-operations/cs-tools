@@ -36,6 +36,12 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
+import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
+import { BackendApiError } from "@api/backend/client";
+import { LEGACY_ATTACHMENT_MAX_BYTES } from "@config/attachmentLimitsConfig";
+import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
   downloadEntityAttachment,
@@ -221,6 +227,10 @@ export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
+  const getContent = useGetCsmCaseAttachmentContent();
+  const { user } = useCurrentUser();
+  const { showSuccess } = useSuccessBanner();
+  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
@@ -233,6 +243,7 @@ export function useDownloadCsmCaseAttachment(): (
           id: attachment.id,
           name: attachment.filename,
           size: attachment.size,
+          onSaved: () => showSuccess(`Downloaded ${attachment.filename}.`),
         });
         if (done) return;
       }
@@ -246,8 +257,9 @@ export function useDownloadCsmCaseAttachment(): (
       }
       const blob = await getContent(attachment);
       saveBlob(blob, attachment.filename);
+      showSuccess(`Downloaded ${attachment.filename}.`);
     },
-    [api],
+    [api, getContent, sftpgoEnabled, showSuccess],
   );
 }
 

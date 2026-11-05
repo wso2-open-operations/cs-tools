@@ -35,6 +35,8 @@ export interface StoredAttachmentDownloadInput {
   name?: string;
   /** Size in bytes, when known: a small file skips the save dialog. */
   size?: number;
+  /** Runs once the whole file is saved (not on a closed save dialog or a failure). */
+  onSaved?: () => void;
 }
 
 /**

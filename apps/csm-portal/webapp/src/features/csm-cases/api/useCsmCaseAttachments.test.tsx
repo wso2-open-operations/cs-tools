@@ -47,6 +47,15 @@ vi.mock("@features/csm-cases/api/entityAttachments", () => ({
     err instanceof Error ? err.message : fallback,
 }));
 
+vi.mock("@features/csm-cases/api/attachmentStorageTus", () => ({
+  uploadFileViaTus: uploadFileViaTusMock,
+}));
+
+vi.mock("@context/success-banner/SuccessBannerContext", () => ({
+  useSuccessBanner: () => ({ showSuccess: vi.fn() }),
+}));
+vi.mock("@utils/saveBlob", () => ({ saveBlob: vi.fn() }));
+
 import {
   useGetCsmCaseAttachments,
   usePostCsmCaseAttachment,

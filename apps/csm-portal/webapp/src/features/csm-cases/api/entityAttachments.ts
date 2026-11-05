@@ -238,18 +238,21 @@ async function readRange(
  * in memory; otherwise the ranges are joined in order and saved as one Blob. A
  * range that breaks is fetched again on its own. A refusal (404, a removed
  * file) throws with the backend's message and stops the other ranges. A closed
- * save dialog resolves `true` with nothing downloaded.
+ * save dialog resolves `true` with nothing downloaded and never calls `onSaved`,
+ * which runs once the whole file is saved.
  */
 export function fetchEntityAttachmentBlob(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
   save: (blob: Blob, name: string) => void,
 ): Promise<boolean> {
   const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
-    return await readAndStore(api, args, save, sink);
+    const done = await readAndStore(api, args, save, sink);
+    if (done) args.onSaved?.();
+    return done;
   } catch (err) {
     await sink?.abort();
     throw err;
@@ -334,7 +337,7 @@ async function readAndStore(
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: () => void },
   fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
