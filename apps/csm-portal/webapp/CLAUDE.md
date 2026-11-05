@@ -852,7 +852,9 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   leaves it out (sending one is a 400); one that fixes **deployment types** offers only the project's deployments of
   those types (`ChangeRequestScopeFields deploymentTypes`, filtering on `ScopeOption.type`), marks Deployments
   required ("Required: the template is for <types> deployments only."), drops a deployment of another type chosen
-  before the template, and holds Create with "still needs a <types> deployment".
+  before the template, and holds Create with "still needs a <types> deployment". The Edit dialog does the same from
+  the detail's `standardChange.priority` / `deploymentTypes` (priority disabled with the template hint; Deployments
+  narrowed and required). The bulk edit does not know each change's template: the backend refuses there, in words.
 - **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
   every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard
   change with `customerApprovalRequired === false` labels Request Approval "Schedule" (`requestApprovalSchedulesDirectly`; still

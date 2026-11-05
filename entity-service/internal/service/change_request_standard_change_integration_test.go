@@ -513,6 +513,14 @@ func stdChangeRequestScope(t *testing.T, env *stdEnv, crs ChangeRequestService) 
 	if _, err := crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{DeploymentIDs: &[]string{deployments["prod1"], deployments["prod2"]}}); err != nil {
 		t.Fatalf("PATCH to two production deployments: %v", err)
 	}
+	// The single deploymentId an older client sends is held to the same types.
+	staging := deployments["staging"]
+	_, err = crs.PatchChangeRequest(ctx, id, domain.PatchChangeRequestRequest{DeploymentID: &staging})
+	wantCode(t, err, apierror.CodeChangeRequestStandardTemplateField, "PATCH the single deploymentId to a staging deployment")
+	if cr, _ := crs.GetChangeRequest(ctx, id); cr.StandardChange == nil || cr.StandardChange.Priority == nil ||
+		*cr.StandardChange.Priority != high || len(cr.StandardChange.DeploymentTypes) != 1 {
+		t.Fatalf("the detail carries what the template fixes: %+v", cr.StandardChange)
+	}
 
 	// A template that fixes neither leaves both open.
 	free := stdApprovedTemplate(t, env, stdTag+" Open scope")

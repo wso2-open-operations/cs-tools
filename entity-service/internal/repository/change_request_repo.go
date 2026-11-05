@@ -2059,8 +2059,9 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 		return "", fmt.Errorf("patch change request: %w", err)
 	}
 	// A change raised from a standard change template that names deployment
-	// types keeps at least one deployment, all of those types.
-	if linkPlan != nil && linkPlan.writeDeployments {
+	// types keeps at least one deployment, all of those types (the single
+	// deploymentId an older client sends included).
+	if (linkPlan != nil && linkPlan.writeDeployments) || req.DeploymentID != nil {
 		if err := checkStandardChangeDeployments(ctx, tx, id); err != nil {
 			return "", err
 		}

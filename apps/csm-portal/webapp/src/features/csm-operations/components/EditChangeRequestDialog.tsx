@@ -322,6 +322,8 @@ export default function EditChangeRequestDialog({
   // parameters' values cannot be edited either. Everything else stays editable.
   const templateLock = cr.standardChange ? STANDARD_TEMPLATE_FIELD_LOCKED_REASON : null;
   const templateDisabled = fieldsDisabled || !!templateLock;
+  // A priority the template fixes is frozen like the rest of what it specifies.
+  const priorityFixed = !!cr.standardChange?.priority;
   // The deviation is not under that lock: it is recorded in implement, review
   // and customer_review, and elsewhere shown read-only when one is stored. In New
   // a stored one (a clone carried it) can be cleared, and has to be before
@@ -839,7 +841,7 @@ export default function EditChangeRequestDialog({
             </Select>
             {templateLock && <FormHelperText>{TEMPLATE_FIELD_HINT}</FormHelperText>}
           </FormControl>
-          <FormControl fullWidth size="small" disabled={fieldsDisabled}>
+          <FormControl fullWidth size="small" disabled={priorityFixed ? templateDisabled : fieldsDisabled}>
             <InputLabel id="cr-edit-priority-label" shrink>
               Priority
             </InputLabel>
@@ -863,6 +865,7 @@ export default function EditChangeRequestDialog({
                 </MenuItem>
               ))}
             </Select>
+            {priorityFixed && <FormHelperText>{TEMPLATE_FIELD_HINT}</FormHelperText>}
           </FormControl>
           {/*
             No `clearable` on either picker. The patch payload has no way to
@@ -1003,6 +1006,8 @@ export default function EditChangeRequestDialog({
               projectClearable={!initialProjectId}
               projectRequired={projectNeededForApproval}
               projectHelperText={projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined}
+              // The deployment types the template fixes: only those are offered (the backend refuses others).
+              deploymentTypes={cr.standardChange?.deploymentTypes}
             />
             <ChangeRequestCustomerGroupField scope={scope} idPrefix="cr-edit" />
           </Box>

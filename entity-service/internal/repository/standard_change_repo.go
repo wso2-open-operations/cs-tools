@@ -147,16 +147,22 @@ var standardChangeAuthorityCheckpoint = changeRequestApprovalCheckpoint{Position
 // resolveAuthorityPool resolves the Standard Change Authority's approvers and
 // refuses (400) a group with fewer than the required number of eligible members
 // once excluded (the proposer, and at decision time the CAB member who approved).
+// Members are counted as people, by email: one person may have several "user"
+// rows (the email is not unique), and two rows of one person are one approver.
 func resolveAuthorityPool(ctx context.Context, q crQuerier, excluded map[string]bool) (approvalPool, error) {
 	pool, err := resolveApprovalPool(ctx, q, standardChangeAuthorityCheckpoint, nil, excluded)
 	if err != nil {
 		return approvalPool{}, err
 	}
-	eligible := 0
+	var open []string
 	for _, m := range pool.members {
 		if !excluded[strings.ToLower(m)] {
-			eligible++
+			open = append(open, m)
 		}
+	}
+	var eligible int
+	if err := q.QueryRow(ctx, `SELECT COUNT(DISTINCT LOWER(email)) FROM "user" WHERE id::text = ANY($1::text[])`, open).Scan(&eligible); err != nil {
+		return approvalPool{}, fmt.Errorf("count the Standard Change Authority's members: %w", err)
 	}
 	if eligible < domain.StandardChangeAuthorityApprovals {
 		return approvalPool{}, &apierror.ValidationError{Msg: fmt.Sprintf("the %q group has %d member(s) who may authorise this proposal, and %d different people must: the proposer and the CAB member who approved cannot; ask for members to be added to the group",
@@ -1669,6 +1675,12 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		// Another proposal of the same customer already before the CAB or the
 		// authority under that name is the same template proposed twice.
 		if p.Kind != domain.StandardChangeProposalKindRetire {
+			// Two submits of one name for one customer queue here, so the second
+			// sees the first in review.
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('standard-change-name:' || $1 || ':' || lower(btrim($2)), 0))`,
+				p.Customer.ID, p.Name); err != nil {
+				return fmt.Errorf("submit standard change proposal: lock the name: %w", err)
+			}
 			if strings.EqualFold(strings.TrimSpace(p.Name), untitledStandardChangeName) {
 				return &apierror.ValidationError{Msg: "the proposal is not complete; it still needs: a name (it is still called \"" + untitledStandardChangeName + "\")"}
 			}
@@ -1875,6 +1887,18 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		if err != nil {
 			return fmt.Errorf("decide standard change proposal: %w", err)
 		}
+		if authority {
+			// One person, one authorisation: a second "user" row of someone who
+			// already approved this stage is the same person.
+			var already bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+				WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED' AND LOWER(u.email) = LOWER($2))`, stage.id, actor).Scan(&already); err != nil {
+				return fmt.Errorf("decide standard change proposal: %w", err)
+			}
+			if already {
+				return &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another member of the Standard Change Authority must"}
+			}
+		}
 		internal, err := internalApproverIDs(ctx, tx, []string{userID})
 		if err != nil {
 			return err
@@ -1895,10 +1919,18 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			return err
 		}
 		if approve && authority {
-			// The stage needs several different approvers: until it has them the
-			// other rows stay open.
+			// The stage needs several different people: until it has them the
+			// others' rows stay open. The approver's other rows (another "user"
+			// row with the same email) are no longer asked.
+			if _, err := tx.Exec(ctx, `UPDATE approval_stage_approver a SET state = 'CANCELLED', updated_on = NOW(), updated_by = $2
+				  FROM "user" u
+				 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED' AND u.id = a.approver_user_id AND LOWER(u.email) = LOWER($2)`,
+				stage.id, actor); err != nil {
+				return fmt.Errorf("decide standard change proposal: %w", err)
+			}
 			var approvals int
-			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM approval_stage_approver WHERE stage_id = $1::uuid AND state = 'APPROVED'`, stage.id).Scan(&approvals); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT LOWER(u.email)) FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+				WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED'`, stage.id).Scan(&approvals); err != nil {
 				return fmt.Errorf("decide standard change proposal: count approvals: %w", err)
 			}
 			if approvals < stage.required {
@@ -1935,7 +1967,18 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			if err != nil {
 				return err
 			}
-			excluded[strings.ToLower(userID)] = true
+			// The CAB member who approved, by every "user" row of theirs.
+			rows, err := tx.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, actor)
+			if err != nil {
+				return fmt.Errorf("decide standard change proposal: %w", err)
+			}
+			cabIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				return fmt.Errorf("decide standard change proposal: %w", err)
+			}
+			for _, cid := range append(cabIDs, userID) {
+				excluded[strings.ToLower(cid)] = true
+			}
 			pool, err := resolveAuthorityPool(ctx, tx, excluded)
 			if err != nil {
 				var ve *apierror.ValidationError

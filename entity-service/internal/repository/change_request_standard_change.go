@@ -124,8 +124,10 @@ func DeploymentTypesText(types []string) string {
 // checkStandardChangeDeployments refuses (400, CodeChangeRequestStandardTemplateField)
 // a templated change request whose template version names deployment types
 // (migration 0277) when it has no deployment, or a deployment of another type
-// (an untyped one included). Run in the writing transaction, after its
-// deployments are written, by create and by any PATCH that writes them.
+// (an untyped one included). The deployments are the link rows and the single
+// work_item.deployment_id an older client still writes. Run in the writing
+// transaction, after its deployments are written, by create and by any PATCH
+// that writes them.
 //
 // crvis: reads one change request's own deployments by id inside a transaction that has just written them
 func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeRequestID string) error {
@@ -146,10 +148,13 @@ func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeReques
 	var total int
 	var other []string
 	if err := tx.QueryRow(ctx, `
+		WITH chosen AS (
+		    SELECT l.deployment_id AS id FROM change_request_deployment l WHERE l.change_request_id = $1::uuid
+		    UNION
+		    SELECT wi.deployment_id FROM work_item wi WHERE wi.id = $1::uuid AND wi.deployment_id IS NOT NULL)
 		SELECT COUNT(*), COALESCE(array_agg(d.name || ' (' || COALESCE(LOWER(d.type::text), 'no type') || ')' ORDER BY d.name)
 		                     FILTER (WHERE d.type IS NULL OR NOT (LOWER(d.type::text) = ANY($2::text[]))), '{}')
-		  FROM change_request_deployment l JOIN deployment d ON d.id = l.deployment_id
-		 WHERE l.change_request_id = $1::uuid`, changeRequestID, types).Scan(&total, &other); err != nil {
+		  FROM chosen c JOIN deployment d ON d.id = c.id`, changeRequestID, types).Scan(&total, &other); err != nil {
 		return fmt.Errorf("check standard change deployments: %w", err)
 	}
 	switch {
@@ -400,9 +405,10 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 	var accountID, accountName *string
 	var raw []byte
 	var paramsRaw []byte
+	var priority *string
 	err := q.QueryRow(ctx, `
 		SELECT t.id::text, t.name, t.number, a.id::text, a.name, v.id::text, v.version, COALESCE(v.parameters, '[]'::jsonb), cr.standard_change_parameter_values,
-		       t.account_id IS DISTINCT FROM p.account_id
+		       t.account_id IS DISTINCT FROM p.account_id, v.priority, v.deployment_types
 		  FROM change_request cr
 		  JOIN work_item wi ON wi.id = cr.id
 		  LEFT JOIN project p ON p.id = wi.project_id
@@ -411,7 +417,7 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		  LEFT JOIN account a ON a.id = t.account_id
 		 WHERE cr.id = $1::uuid`, id).
 		Scan(&out.Template.ID, &out.Template.Name, &out.TemplateNumber, &accountID, &accountName, &out.VersionID, &out.Version, &paramsRaw, &raw,
-			&out.CustomerMismatch)
+			&out.CustomerMismatch, &priority, &out.DeploymentTypes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -419,6 +425,10 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		return nil, fmt.Errorf("read change request standard change: %w", err)
 	}
 	out.Customer = accountRef(accountID, accountName)
+	if priority != nil {
+		v := domain.ChangeRequestPriority(*priority)
+		out.Priority = &v
+	}
 	var params []domain.StandardChangeParameter
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return nil, fmt.Errorf("read change request standard change: parameters: %w", err)

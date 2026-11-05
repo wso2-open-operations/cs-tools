@@ -34158,6 +34158,16 @@ components:
             `standard_change_template_other_customer`.
         versionId: {type: string, format: uuid}
         version: {type: integer}
+        priority:
+          type: string
+          nullable: true
+          enum: [critical, high, moderate, low]
+          description: The priority the version fixes (a PATCH cannot change it); null when it fixes none.
+        deploymentTypes:
+          type: array
+          nullable: true
+          items: {type: string}
+          description: The deployment types the version fixes (every deployment must be of them, and one is required); null when it fixes none.
         parameters:
           type: array
           items:

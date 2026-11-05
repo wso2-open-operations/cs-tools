@@ -1013,11 +1013,13 @@ function DecisionDialog({
   const reject = decision === "rejected";
   const commentMissing = reject && !comment.trim();
   const authority = stage?.label === STANDARD_CHANGE_AUTHORITY;
+  // From the page as loaded: another member may have authorised since, so it
+  // never promises that nothing will be applied.
   const remaining = stage ? Math.max(stage.requiredApprovals - stage.approvals, 1) : 1;
   const approveText = !authority
     ? `Your approval settles the CAB's stage. Nothing is applied yet: two members of the ${STANDARD_CHANGE_AUTHORITY} are asked next.`
     : remaining > 1
-      ? `${stage!.requiredApprovals} members of the ${STANDARD_CHANGE_AUTHORITY} must approve. Yours is the first; the template change is applied when the next one approves.`
+      ? `${stage!.requiredApprovals} different members of the ${STANDARD_CHANGE_AUTHORITY} must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
       : `Yours is the last approval needed: approving applies the template change.`;
   return (
     <Dialog

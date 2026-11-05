@@ -5945,6 +5945,10 @@ export interface BeChangeRequestStandardChange {
   customerMismatch?: boolean;
   versionId: string;
   version: number;
+  /** The priority the version fixes (a PATCH cannot change it); null when it fixes none. */
+  priority?: BeChangeRequestPriority | null;
+  /** The deployment types the version fixes (every deployment of them, one required); null when none. */
+  deploymentTypes?: BeDeploymentType[] | null;
   /** The version's parameters with the values the change request was raised with. */
   parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
 }

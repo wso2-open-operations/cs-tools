@@ -1302,6 +1302,86 @@ func stdAuthority(t *testing.T, env *stdEnv) {
 	if _, err := env.svc.WithdrawProposal(ctx, p.ID); err != nil {
 		t.Fatal(err)
 	}
+
+	// People, not "user" rows: the email is not unique. A second row of stdAuth1
+	// and one of stdCAB2, both on the authority. stdAuth1 authorises once, and
+	// stdCAB2, having approved for the CAB, does not authorise at all.
+	sys := repository.WithSystemIdentity(context.Background())
+	for _, email := range []string{stdAuth1, stdCAB2} {
+		var id string
+		if err := env.scoped.QueryRow(sys, `INSERT INTO "user" (id, created_on, updated_on, created_by, updated_by, user_name, email, name, is_active)
+			VALUES (gen_random_uuid(), NOW(), NOW(), 't', 't', $1 || '-second', $1, 'second row', true) RETURNING id::text`, email).Scan(&id); err != nil {
+			t.Fatalf("a second user row for %s: %v", email, err)
+		}
+		if _, err := env.scoped.Exec(sys, `INSERT INTO user_role (created_on, updated_on, user_id, role_id) VALUES (NOW(), NOW(), $1::uuid, '00000000-0000-0000-0000-000000000101')`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.scoped.Exec(sys, `INSERT INTO group_member (id, created_on, updated_on, created_by, updated_by, group_id, user_id)
+			SELECT gen_random_uuid(), NOW(), NOW(), 't', 't', g.id, $1::uuid FROM "group" g WHERE g.name = $2 ORDER BY g.created_on LIMIT 1`,
+			id, domain.StandardChangeAuthorityGroupName); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = env.scoped.Exec(sys, `DELETE FROM approval_stage_approver WHERE approver_user_id = $1::uuid`, id)
+			_, _ = env.scoped.Exec(sys, `DELETE FROM group_member WHERE user_id = $1::uuid`, id)
+			_, _ = env.scoped.Exec(sys, `DELETE FROM user_role WHERE user_id = $1::uuid`, id)
+			_, _ = env.scoped.Exec(sys, `DELETE FROM "user" WHERE id = $1::uuid`, id)
+		})
+	}
+	twice := readyDraft(t, env, stdTag+" One person, one authorisation")
+	if _, err := env.svc.SubmitProposal(ctx, twice.ID); err != nil {
+		t.Fatal(err)
+	}
+	if twice, err = env.svc.DecideProposal(stdCtx(stdCAB2), twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+		t.Fatalf("the CAB approves: %v", err)
+	}
+	for _, a := range twice.Approvers {
+		if a.StageID == twice.Stages[1].ID && a.Approver != nil && a.Approver.Email == stdCAB2 && a.State != "CANCELLED" {
+			t.Fatalf("the CAB approver's second row is asked to authorise: %+v", a)
+		}
+	}
+	if twice, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
+		t.Fatalf("first authorisation: %v", err)
+	}
+	if twice.State != domain.StandardChangeProposalStateAuthorityReview || twice.Stages[1].Approvals != 1 {
+		t.Fatalf("after one person's authorisation = %s %+v", twice.State, twice.Stages[1])
+	}
+	for _, a := range twice.Approvers {
+		if a.CanDecide {
+			t.Fatalf("stdAuth1 is offered a second authorisation: %+v", a)
+		}
+	}
+	_, err = env.svc.DecideProposal(stdCtx(stdAuth1), twice.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"})
+	expectErr[*apierror.ForbiddenError](t, err, "the same person authorises through a second user row")
+	if got, _ := env.svc.GetProposal(ctx, twice.ID); got.State != domain.StandardChangeProposalStateAuthorityReview {
+		t.Fatalf("one person applied the proposal alone: %s", got.State)
+	}
+	if _, err := env.svc.WithdrawProposal(ctx, twice.ID); err != nil {
+		t.Fatal(err)
+	}
+	// Two rows of one person are one eligible member: with stdAuth2 and stdCAB1
+	// out, only stdAuth1 (two rows) and stdCAB2's second row... and stdCAB2 is the
+	// only other person, so a proposal stdCAB2 makes has one eligible authoriser.
+	setAuthorityMember(t, env, stdAuth2, false)
+	setAuthorityMember(t, env, stdCAB1, false)
+	one, err := env.svc.CreateProposal(stdCtx(stdCAB2), domain.CreateStandardChangeProposalRequest{
+		Kind: domain.StandardChangeProposalKindNew, AccountID: stdp(env.accounts["A"])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	makeProposalCompleteAs(t, env, stdCAB2, one.ID, stdTag+" Two rows, one person")
+	impact := domain.ChangeRequestImpactLow
+	if _, err := env.svc.UpdateProposal(stdCtx(stdCAB2), one.ID, domain.UpdateStandardChangeProposalRequest{
+		BackoutPlan: stdp("<p>x</p>"), TestPlan: stdp("<p>x</p>"), Impact: &impact}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = env.svc.SubmitProposal(stdCtx(stdCAB2), one.ID)
+	expectErr[*apierror.ValidationError](t, err, "submit with one eligible person who has two user rows")
+	setAuthorityMember(t, env, stdAuth2, true)
+	setAuthorityMember(t, env, stdCAB1, true)
+	if err := env.svc.DeleteProposal(stdCtx(stdCAB2), one.ID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // stdDeleteCancel: a draft never submitted can be deleted by its proposer; an

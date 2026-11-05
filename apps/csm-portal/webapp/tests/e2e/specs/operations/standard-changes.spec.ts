@@ -1216,7 +1216,7 @@ test.describe("standard changes (real stack)", () => {
         await expect(approval.getByRole("button", { name: "Authorise" })).toBeVisible({ timeout: 20_000 });
         await approval.getByRole("button", { name: "Authorise" }).click();
         const dialog = page.getByRole("dialog", { name: "Authorise the proposal" });
-        await expect(dialog).toContainText(last ? "Yours is the last approval needed" : "Yours is the first");
+        await expect(dialog).toContainText(last ? "Yours is the last approval needed" : "the template change is applied by the last of them");
         await dialog.getByRole("button", { name: "Authorise", exact: true }).click();
         await expect(dialog).toBeHidden();
         if (!last) {

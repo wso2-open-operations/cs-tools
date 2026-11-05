@@ -8466,7 +8466,11 @@ template itself is gated twice:
    cancelled. `approval_stage.required_approvals` (0277, default 1, so every change request stage is
    unchanged) is `domain.StandardChangeAuthorityApprovals` = 2: the stage stays open until two
    different members approve, each once; the second approval applies the proposal. Any rejection (at
-   either stage) ends it and needs a comment.
+   either stage) ends it and needs a comment. **People, not user rows**: `"user".email` is not unique,
+   so the quorum counts distinct emails of APPROVED rows, an approval cancels the approver's other
+   REQUESTED rows on the stage, a second approval by the same email is a 403, the CAB approver is left
+   out by every user row of their email (as the proposer already is, `changeRequestCreatorUserIDs`),
+   and `resolveAuthorityPool` counts eligible members by distinct email.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). Submit refuses (400)
 when the authority group has fewer than two eligible members besides the proposer
@@ -8496,7 +8500,8 @@ template belongs to that template: it cannot start a NEW proposal or be its evid
 of a revision of another template (400 naming the template and pointing to "propose a revision of
 STD…"); it is evidence for a revision of its own template. Checked at create, on every evidence set
 and at Submit. Submit also refuses (409) a name another open proposal of the same customer is already
-waiting for approval under, and the placeholder name "Untitled standard change" (400). Not built yet:
+waiting for approval under (under a transaction-scoped advisory lock on customer + name, so two
+submits at once cannot both pass), and the placeholder name "Untitled standard change" (400). Not built yet:
 a similarity search of existing templates (proposed separately).
 
 **Raising a change request** (`changeRequestService.prepareStandardChange`, wired by
@@ -8521,9 +8526,11 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 - **Frozen**: a PATCH that changes a template-specified field is a 400 in every state
   (`checkStandardChangeTemplateFields`, before the approved-content lock); resending the stored value
   is accepted. `priority` is frozen only when the version fixes one. A PATCH that writes the
-  deployments of a change whose version names deployment types is checked again
-  (`checkStandardChangeDeployments`, after the link rows are written): at least one, all of those
-  types. The parameters cannot be edited either (decision: a typo in New is a cancel and
+  deployments of a change whose version names deployment types (`deploymentIds`, or the single
+  `deploymentId` an older client sends, which writes `work_item.deployment_id`) is checked again
+  (`checkStandardChangeDeployments`, after the rows are written, over both): at least one, all of
+  those types. The detail's `standardChange` carries the version's `priority` and `deploymentTypes`
+  so an edit form can keep them. The parameters cannot be edited either (decision: a typo in New is a cancel and
   re-raise; editing them would need a re-render the dual-write mirror does not have).
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).

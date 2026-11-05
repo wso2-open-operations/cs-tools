@@ -512,6 +512,10 @@ type ChangeRequestStandardChange struct {
 	CustomerMismatch bool   `json:"customerMismatch"`
 	VersionID        string `json:"versionId"`
 	Version          int    `json:"version"`
+	// Priority and DeploymentTypes are what the version fixes (null: chosen per
+	// change), so an edit form can keep them as the server does.
+	Priority        *ChangeRequestPriority `json:"priority"`
+	DeploymentTypes []string               `json:"deploymentTypes"`
 	// Parameters are the template version's parameters with the values this
 	// change request was raised with.
 	Parameters []ChangeRequestStandardChangeParameter `json:"parameters"`
