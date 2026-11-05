@@ -115,7 +115,7 @@ describe("DateTimeLocalField", () => {
 
   it("takes its accessible name from ariaLabel when there is no visible label", () => {
     render(<DateTimeLocalField ariaLabel="Preferred slot" value="2026-06-10T04:30" onChange={vi.fn()} />);
-    expect(screen.getAllByLabelText("Preferred slot").length).toBeGreaterThan(0);
+    expect(screen.getByRole("group", { name: "Preferred slot" })).toBeInTheDocument();
   });
 
   it("is not editable when disabled", () => {
