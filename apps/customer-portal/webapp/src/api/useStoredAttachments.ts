@@ -46,35 +46,43 @@ export interface StoredAttachmentDownloadInput {
  */
 export function useStoredAttachmentDownload(): {
   downloadStoredAttachment: (input: StoredAttachmentDownloadInput) => Promise<void>;
+  /** True while any download runs. */
   isDownloading: boolean;
-  downloadingId: string | null;
-  /** Percentage (0-100) of the running download, or null while it is not known yet or nothing downloads. */
-  downloadProgress: number | null;
+  /** True while this attachment's download runs. */
+  isDownloadingId: (id: string) => boolean;
+  /** Percentage (0-100) of this attachment's download, or null while it is not known yet or it is not downloading. */
+  downloadProgressOf: (id: string) => number | null;
 } {
   const authFetch = useAuthApiClient();
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+  // One entry per running download, so two at once do not overwrite each other.
+  const [downloads, setDownloads] = useState<Record<string, number | null>>({});
+  const setProgress = (id: string, percent: number | null): void =>
+    setDownloads((previous) =>
+      id in previous && previous[id] === percent ? previous : { ...previous, [id]: percent },
+    );
   const mutation = useMutation<void, Error, StoredAttachmentDownloadInput>({
     mutationFn: (input) =>
       downloadStoredAttachment(authFetch, {
         ...input,
         onProgress: (received, total) =>
-          setDownloadProgress(total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null),
+          setProgress(
+            input.id,
+            total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null,
+          ),
       }),
-    onMutate: (input) => {
-      setDownloadProgress(null);
-      setDownloadingId(input.id);
-    },
-    onSettled: () => {
-      setDownloadingId(null);
-      setDownloadProgress(null);
-    },
+    onMutate: (input) => setProgress(input.id, null),
+    onSettled: (_data, _error, input) =>
+      setDownloads((previous) => {
+        const next = { ...previous };
+        delete next[input.id];
+        return next;
+      }),
   });
   return {
     downloadStoredAttachment: mutation.mutateAsync,
-    isDownloading: mutation.isPending,
-    downloadingId,
-    downloadProgress,
+    isDownloading: Object.keys(downloads).length > 0,
+    isDownloadingId: (id) => id in downloads,
+    downloadProgressOf: (id) => downloads[id] ?? null,
   };
 }
 

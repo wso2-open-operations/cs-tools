@@ -153,14 +153,22 @@ export const DOWNLOAD_RANGE_BYTES = 8 * 1024 * 1024;
 const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
 
 /** Reads a response body to the end, keeping the pieces as they arrive. */
-async function readParts(response: Response): Promise<Uint8Array[]> {
+async function readParts(
+  response: Response,
+  onBytes?: (bytes: number) => void,
+): Promise<Uint8Array[]> {
   const reader = response.body?.getReader();
-  if (!reader) return [new Uint8Array(await response.arrayBuffer())];
+  if (!reader) {
+    const whole = new Uint8Array(await response.arrayBuffer());
+    onBytes?.(whole.length);
+    return [whole];
+  }
   const parts: Uint8Array[] = [];
   for (;;) {
     const { done, value } = await reader.read();
     if (done) return parts;
     parts.push(value);
+    onBytes?.(value.length);
   }
 }
 
@@ -188,6 +196,10 @@ interface RangeRead {
  * Asks for bytes `start` to `end` of the file and reads them in full. A dropped
  * connection or a short body is tried again, up to three times; a refusal from
  * the backend is thrown at once, and so is a cancelled request.
+ *
+ * `onBytes` is told of the bytes of each piece as it arrives, with the response
+ * it belongs to. What a failed attempt had reported is taken back (a negative
+ * number) before the next one starts, so a retried range is never counted twice.
  */
 async function readRange(
   authFetch: AuthFetch,
@@ -195,18 +207,29 @@ async function readRange(
   start: number,
   end: number,
   isWhole: (read: RangeRead) => boolean,
+  onBytes?: (bytes: number, response?: Response) => void,
 ): Promise<RangeRead> {
   for (let attempt = 1; ; attempt++) {
+    let reported = 0;
+    const takeBackReported = () => {
+      if (reported > 0) onBytes?.(-reported);
+      reported = 0;
+    };
     try {
       const response = await authFetch(url, {
         method: "GET",
         headers: { Range: `bytes=${start}-${end}` },
       });
       if (!response.ok) throw await toApiError(response);
-      const parts = await readParts(response);
+      const parts = await readParts(response, (bytes) => {
+        reported += bytes;
+        onBytes?.(bytes, response);
+      });
       const read = { response, parts };
       if (isWhole(read)) return read;
+      takeBackReported();
     } catch (error) {
+      takeBackReported();
       if (error instanceof ApiError || isAbortError(error)) throw error;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) {
@@ -257,16 +280,34 @@ async function readAndStore(
   const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
     toHyphenatedUuid(input.id),
   )}/content?type=${encodeURIComponent(input.type)}`;
-  const first = await readRange(authFetch, url, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
-    if (response.status !== 206) return true; // the whole file, the range was ignored
-    const range = parseContentRange(response.headers);
-    return (
-      range !== null &&
-      range.start === 0 &&
-      range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
-      partsLength(parts) === range.end + 1
-    );
-  });
+  // Bytes received so far, counted as each piece arrives; the size of the file
+  // is known from the first answer's headers on.
+  let received = 0;
+  let knownTotal: number | undefined;
+  const report = (bytes: number, response?: Response): void => {
+    received += bytes;
+    if (knownTotal === undefined && response?.status === 206) {
+      knownTotal = parseContentRange(response.headers)?.total;
+    }
+    if (knownTotal !== undefined) input.onProgress?.(Math.max(0, received), knownTotal);
+  };
+  const first = await readRange(
+    authFetch,
+    url,
+    0,
+    DOWNLOAD_RANGE_BYTES - 1,
+    ({ response, parts }) => {
+      if (response.status !== 206) return true; // the whole file, the range was ignored
+      const range = parseContentRange(response.headers);
+      return (
+        range !== null &&
+        range.start === 0 &&
+        range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
+        partsLength(parts) === range.end + 1
+      );
+    },
+    report,
+  );
   const fileName = input.name || fileNameFromDisposition(first.response.headers);
   const total =
     first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
@@ -274,8 +315,6 @@ async function readAndStore(
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
 
-  let received = partsLength(first.parts);
-  if (total !== undefined) input.onProgress?.(received, total);
   if (total !== undefined && partsLength(first.parts) < total) {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
     let next = 1;
@@ -302,11 +341,10 @@ async function readAndStore(
                 partsLength(parts) === end - start + 1
               );
             },
+            report,
           );
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
-          received += end - start + 1;
-          input.onProgress?.(received, total);
         } catch (error) {
           failure ??= { error };
         }
