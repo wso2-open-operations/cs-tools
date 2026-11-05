@@ -21750,7 +21750,9 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: The new severity of the case.
+          description: >
+            The new severity of the case. For a service request it is the internal severity
+            (`critical`, `high`, `medium` or `low`; `catastrophic` is rejected).
         type:
           type: string
           enum: [case, engagement, security_report_analysis, service_request]
@@ -21896,6 +21898,34 @@ components:
           type: string
         case:
           $ref: '#/components/schemas/UpdatedCase'
+        warnings:
+          type: array
+          description: >
+            Non-fatal notices about what the update did; the update succeeded. Absent when there
+            is none.
+          items:
+            $ref: '#/components/schemas/ResponseWarning'
+
+    ResponseWarning:
+      type: object
+      required: [code, message]
+      description: A machine-readable, non-fatal notice attached to a successful response.
+      properties:
+        code:
+          type: string
+          enum: [SEVERITY_DOWNGRADED]
+          description: >
+            `SEVERITY_DOWNGRADED`: a case moved to a service request had a severity a service
+            request cannot hold (`catastrophic`) and was stored one level lower (`critical`).
+        message:
+          type: string
+          description: English text for logs and fallback display.
+        from:
+          type: string
+          description: The value before the change (`catastrophic` for `SEVERITY_DOWNGRADED`).
+        to:
+          type: string
+          description: The value stored (`critical` for `SEVERITY_DOWNGRADED`).
 
     UpdatedCase:
       type: object
@@ -21916,6 +21946,9 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
+          description: >
+            The resulting severity. For a service request it is the internal severity
+            (`critical`, `high`, `medium` or `low`).
         workState:
           type: string
           enum: [ongoing, paused]
@@ -22134,7 +22167,10 @@ components:
         severity:
           type: string
           enum: [catastrophic, critical, high, medium, low]
-          description: Required for `case` type.
+          description: >
+            Required for `case` type. For `service_request` it is optional and internal
+            (`critical`, `high`, `medium` or `low`; `catastrophic` is a 400); a service request
+            created without one gets the configured default. Ignored for every other type.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -23300,6 +23336,9 @@ components:
           type: string
         severity:
           type: string
+          description: >
+            For a service request this is the internal severity (`critical`, `high`, `medium`
+            or `low`), always present.
           enum:
             - catastrophic
             - critical
