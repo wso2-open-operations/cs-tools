@@ -313,6 +313,8 @@ export type AttachmentListItemProps = {
   deleteTooltip?: string;
   hideDescription?: boolean;
   isDownloadLoading?: boolean;
+  /** Percentage (0-100) of the running download, or null while it is not known. */
+  downloadProgress?: number | null;
 };
 
 export type DeleteCallRequestModalProps = {
