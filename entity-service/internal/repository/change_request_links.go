@@ -328,7 +328,7 @@ func resolveChangeRequestLinks(ctx context.Context, q crQueryer, sel domain.Chan
 
 	// Deployments: exist, active, in the project.
 	rows, err := q.Query(ctx, `
-		SELECT d.id::text, d.name, d.project_id::text, COALESCE(d.is_active, false), lower(d.type::text)
+		SELECT d.id::text, d.name, d.project_id::text, COALESCE(d.is_active, false), COALESCE(lower(d.type::text), '')
 		FROM deployment d
 		WHERE d.id = ANY($1::text[]::uuid[])`, depIDs)
 	if err != nil {
