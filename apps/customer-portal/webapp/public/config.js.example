@@ -170,6 +170,19 @@ window.config = {
   //   INLINE_IMAGE_MAX_BYTES. Same value rules as above.
   // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
 
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
+  //   How many 16 MiB ranges of one attachment download are fetched at the same
+  //   time. 1 fetches one range at a time. A number or numeric string; a whole
+  //   number is kept between 1 and 8, anything else (text) uses the default.
+  // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK  (optional — default: true)
+  //   Save a download straight to a file the person picks (the browser's save
+  //   dialog), so a large attachment is not held whole in memory. Works in Chrome
+  //   and Edge; other browsers keep the in-memory download. Files of 16 MiB or
+  //   less skip the dialog. A boolean or "false" turns it off.
+  // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
+
   // ── Top banners ─────────────────────────────────────────────────────────────
   //
   // CUSTOMER_PORTAL_TOP_BANNERS  (optional — default: [])

@@ -324,6 +324,7 @@ function DocumentRow({
             type: "deployment",
             id: doc.id,
             name: doc.name,
+            size: sizeBytes > 0 ? sizeBytes : undefined,
           });
           return;
         } catch (storedError) {

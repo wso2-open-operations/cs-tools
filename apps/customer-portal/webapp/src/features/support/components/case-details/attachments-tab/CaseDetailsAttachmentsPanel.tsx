@@ -164,6 +164,7 @@ export default function CaseDetailsAttachmentsPanel({
             type: "work_item",
             id: att.id,
             name: att.name,
+            size: att.size,
           });
           return;
         } catch (storedError) {

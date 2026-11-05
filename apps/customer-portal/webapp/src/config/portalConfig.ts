@@ -107,6 +107,17 @@ export interface CustomerPortalWindowConfig {
    * string). Defaults to 10, entity-service's `INLINE_IMAGE_MAX_BYTES` default.
    */
   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
+  /**
+   * How many 16 MiB ranges of one attachment download are fetched at the same
+   * time (a number or numeric string). Defaults to 4, kept between 1 and 8;
+   * 1 fetches one range at a time.
+   */
+  CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM?: number | string;
+  /**
+   * Optional. Save a download straight to a file the person picks, where the
+   * browser supports it. On unless `false` (boolean or "false").
+   */
+  CUSTOMER_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
 }
 
 declare global {
