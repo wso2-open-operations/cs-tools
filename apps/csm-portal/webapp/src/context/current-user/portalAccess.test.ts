@@ -29,6 +29,7 @@ const NONE = {
   canUpdateProjectClosureState: false,
   canEditProjectOnboarding: false,
   canUseSecurityCenter: false,
+  canViewSecurityReportCases: false,
   canUsePlg: false,
   canManagePlaybooks: false,
   canCreateAnnouncement: false,
@@ -71,6 +72,9 @@ describe("getPortalAccess", () => {
       canViewUpdates: true,
       isSplAudience: true,
       canViewCustomerHealth: true,
+      // PermViewSecurityReportCases (access.go) holds viewer too, unlike
+      // canUseSecurityCenter above -- see that flag's own doc comment.
+      canViewSecurityReportCases: true,
       // A viewer who is not also a CS engineer/admin finds Customer Health
       // under Customers in the sidebar.
       showCustomerHealthUnderCustomers: true,
@@ -152,6 +156,7 @@ describe("getPortalAccess", () => {
       canWrite: true,
       canAddWorkNotes: true,
       canUseSecurityCenter: true,
+      canViewSecurityReportCases: true,
       canUsePlg: true,
       // Full access grants canViewCustomerHealth and canViewUsageMetrics too,
       // but neither role holds the viewer role itself, so isSplAudience stays
@@ -310,6 +315,33 @@ describe("getPortalAccess", () => {
     }
   });
 
+  // Deliberately wider than canUseSecurityCenter: PermViewSecurityReportCases
+  // (access.go) also holds viewer, so a plain viewer can read security-report
+  // cases through search without gaining the Security Center section itself.
+  // Regression coverage for a bug where the webapp's own "every type" search
+  // fallback mirrored the narrower canUseSecurityCenter instead, silently
+  // excluding security reports from a viewer's unfiltered case search.
+  it("admin, CS engineer, comment_updater, security_team and viewer can all see security-report cases in search", () => {
+    for (const role of ["admin", "cs_engineer", "comment_updater", "security_team", "viewer"]) {
+      expect(getPortalAccess([role]).canViewSecurityReportCases).toBe(true);
+    }
+  });
+
+  it("no other role grants security-report case search access", () => {
+    for (const role of [
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "worknote_creator",
+      "onboarding_lead",
+      "announcement_creator",
+      "dashboard_designer",
+    ]) {
+      expect(getPortalAccess([role]).canViewSecurityReportCases).toBe(false);
+    }
+  });
+
   it("only CS engineer, admin and the time-card approver get Time cards and Updates", () => {
     for (const role of [
       "viewer",
@@ -371,6 +403,7 @@ describe("getPortalAccess", () => {
       isSplAudience: true,
       canViewCustomerHealth: true,
       showCustomerHealthUnderCustomers: true,
+      canViewSecurityReportCases: true,
     });
   });
 
@@ -448,6 +481,8 @@ describe("getPortalAccess", () => {
         // comment_updater is also one of canViewTeamSchedule's allow-listed
         // roles -- see that flag's own doc comment.
         canViewTeamSchedule: true,
+        // comment_updater also holds PermViewSecurityReportCases.
+        canViewSecurityReportCases: true,
       });
     });
 
@@ -763,9 +798,9 @@ describe("getPortalAccess", () => {
   });
 
   // The dedicated read-only security role: grants canUseOperations,
-  // canUseSecurityCenter and canViewSlaTab and nothing else -- never
-  // canWrite, so both sections render read-only for a holder with no other
-  // role. Mirrors the backend's AccessConfig.SecurityTeam.
+  // canUseSecurityCenter, canViewSecurityReportCases and canViewSlaTab and
+  // nothing else -- never canWrite, so both sections render read-only for a
+  // holder with no other role. Mirrors the backend's AccessConfig.SecurityTeam.
   describe("security_team", () => {
     it("on its own grants exactly Operations, Security Center and the SLA tab, read-only", () => {
       expect(getPortalAccess(["security_team"])).toEqual({
@@ -773,6 +808,7 @@ describe("getPortalAccess", () => {
         hasAnyRole: true,
         canUseOperations: true,
         canUseSecurityCenter: true,
+        canViewSecurityReportCases: true,
         canViewSlaTab: true,
       });
     });
