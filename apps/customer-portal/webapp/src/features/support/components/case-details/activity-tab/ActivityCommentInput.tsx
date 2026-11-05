@@ -25,11 +25,10 @@ import {
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { usePostComment } from "@features/support/api/usePostComment";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 import { useAsgardeo } from "@asgardeo/react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
-import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   confirmStoredUpload,
   uploadStoredAttachment,
@@ -73,7 +72,7 @@ export default function ActivityCommentInput({
   const [value, setValue] = useState("");
   const [resetTrigger, setResetTrigger] = useState(0);
   const postComment = usePostComment();
-  const postAttachments = usePostAttachments();
+  const { upload: storedUpload } = useStoredAttachmentUpload();
   const { canCreateCase, isLoading: isPermissionsLoading } =
     useCustomerPermissions();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
@@ -99,8 +98,7 @@ export default function ActivityCommentInput({
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
 
   // Images pasted or inserted into the comment are shown from a local blob: URL and
-  // kept here; nothing is uploaded until the comment is sent (when entity
-  // attachments are on), so an image that is removed or never posted leaves
+  // kept here; nothing is uploaded until the comment is sent, so an image that is removed or never posted leaves
   // nothing on the server. Each finished upload's id is kept against that URL; the
   // URLs are then replaced by `/<id>` references, so no image bytes travel with
   // the comment.
@@ -109,7 +107,6 @@ export default function ActivityCommentInput({
   const queuedImagesRef = useRef<Map<string, File>>(new Map());
   const previewUrlsRef = useRef<Set<string>>(new Set());
   const [pendingImages, setPendingImages] = useState(0);
-  const uploadImagesInline = isEntityAttachmentsEnabled();
 
   const releasePreviews = () => {
     previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
@@ -196,6 +193,7 @@ export default function ActivityCommentInput({
             await confirmStoredUpload(authFetch, {
               type: "comment",
               attachmentId: error.attachmentId,
+              chunks: error.chunks,
             })
           ).id;
         }
@@ -255,31 +253,12 @@ export default function ActivityCommentInput({
       for (const { id, file } of attachmentsSnapshot) {
         const attachmentName = namesSnapshot.get(id) || file.name;
 
-        await new Promise<void>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 =
-              typeof reader.result === "string" ? reader.result : "";
-            const commaIndex = base64.indexOf(",");
-            const content =
-              commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
-
-            const body = {
-              name: attachmentName,
-              type: file.type || "application/octet-stream",
-              content,
-            };
-
-            postAttachments.mutate(
-              { caseId, body },
-              {
-                onSuccess: () => resolve(),
-                onError: (error) => reject(error),
-              },
-            );
-          };
-          reader.onerror = () => reject(new Error("Failed to read file"));
-          reader.readAsDataURL(file);
+        await storedUpload.mutateAsync({
+          type: "work_item",
+          parentId: caseId,
+          caseId,
+          file,
+          body: { name: attachmentName },
         });
       }
       return true;
@@ -407,7 +386,7 @@ export default function ActivityCommentInput({
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
-            onImageUpload={uploadImagesInline ? uploadInlineImage : undefined}
+            onImageUpload={uploadInlineImage}
             showKeyboardHint={true}
             maxHeight="310px"
             onPasteError={(reason) =>

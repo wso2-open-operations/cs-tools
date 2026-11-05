@@ -47,7 +47,6 @@ function renderBubble(comment: CaseComment = attached) {
           comment={comment}
           isCurrentUser={false}
           primaryBg="rgba(250,123,63,0.1)"
-          caseId="case-1"
         />
       </ThemeProvider>
     </QueryClientProvider>,
@@ -67,7 +66,7 @@ describe("CommentBubble image attachment preview", () => {
 
   it("does not fetch the image until Preview is clicked", () => {
     renderBubble();
-    expect(previewHook).toHaveBeenLastCalledWith(null, "case-1");
+    expect(previewHook).toHaveBeenLastCalledWith(null);
     expect(screen.getByRole("button", { name: /preview/i })).toBeInTheDocument();
   });
 
@@ -80,7 +79,7 @@ describe("CommentBubble image attachment preview", () => {
       refetch: vi.fn(),
     });
     fireEvent.click(screen.getByRole("button", { name: /preview/i }));
-    expect(previewHook).toHaveBeenLastCalledWith("att-1", "case-1");
+    expect(previewHook).toHaveBeenLastCalledWith("att-1");
     expect(screen.getByAltText("screenshot.png")).toHaveAttribute(
       "src",
       "data:image/png;base64,AAAA",

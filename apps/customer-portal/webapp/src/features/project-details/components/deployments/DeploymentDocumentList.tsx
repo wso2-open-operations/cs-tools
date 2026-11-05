@@ -35,26 +35,20 @@ import {
   FileArchive,
   FileImage,
   FileText,
-  PencilLine,
   Trash2,
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
-import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
-import { useGetAttachment } from "@api/useGetAttachment";
-import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   useStoredAttachmentDelete,
   useStoredAttachmentDownload,
 } from "@api/useStoredAttachments";
-import { isNotFoundError } from "@utils/ApiError";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
-import EditDeploymentAttachmentModal from "@features/project-details/components/deployments/EditDeploymentAttachmentModal";
 import {
   useInfiniteDeploymentDocuments,
   flattenDeploymentDocuments,
@@ -66,10 +60,7 @@ import {
   DEPLOYMENT_DOCUMENT_IMAGE_FILE_REGEX,
   PROJECT_DETAILS_NOT_AVAILABLE_DISPLAY,
 } from "@features/project-details/constants/projectDetailsConstants";
-import {
-  DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER,
-  DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER,
-} from "@features/support/constants/supportConstants";
+import { DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER } from "@features/support/constants/supportConstants";
 import type {
   DeploymentDocumentListProps,
   DeploymentDocumentRowProps,
@@ -282,11 +273,6 @@ function DocumentRow({
   onError,
 }: DeploymentDocumentRowProps): JSX.Element {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachment();
-  const deleteAttachment = useDeleteAttachment();
-  const entityAttachments = isEntityAttachmentsEnabled();
   const storedDownload = useStoredAttachmentDownload();
   const storedDelete = useStoredAttachmentDelete();
   const sizeBytes = doc.sizeBytes ?? doc.size ?? 0;
@@ -312,30 +298,15 @@ function DocumentRow({
   }, [name]);
 
   const isDownloadLoading =
-    (isDownloading && downloadingId === doc.id) ||
-    (storedDownload.isDownloading && storedDownload.downloadingId === doc.id);
+    storedDownload.isDownloading && storedDownload.downloadingId === doc.id;
 
   const handleDownloadClick = async () => {
     if (!doc.id) return;
     try {
-      if (entityAttachments) {
-        try {
-          await storedDownload.downloadStoredAttachment({
-            type: "deployment",
-            id: doc.id,
-            name: doc.name,
-          });
-          return;
-        } catch (storedError) {
-          // Not held by entity-service (older document): use the existing download.
-          if (!isNotFoundError(storedError)) throw storedError;
-        }
-      }
-      await downloadAttachment({
+      await storedDownload.downloadStoredAttachment({
+        type: "deployment",
         id: doc.id,
         name: doc.name,
-        content: doc.content,
-        downloadUrl: doc.downloadUrl ?? null,
       });
     } catch (error) {
       onError(error instanceof Error ? error.message : "Download failed");
@@ -344,33 +315,11 @@ function DocumentRow({
 
   const handleConfirmDelete = () => {
     if (!doc.id) return;
-    const attachmentId = doc.id;
-    const deleteOlder = () =>
-      deleteAttachment.mutate(
-        { attachmentId, deploymentId },
-        {
-          onSuccess: () => setDeleteModalOpen(false),
-          onError: (error) => {
-            onError(error.message);
-          },
-        },
-      );
-    if (!entityAttachments) {
-      deleteOlder();
-      return;
-    }
     storedDelete.mutate(
-      { type: "deployment", attachmentId, deploymentId },
+      { type: "deployment", attachmentId: doc.id, deploymentId },
       {
         onSuccess: () => setDeleteModalOpen(false),
-        onError: (error) => {
-          // Not held by entity-service (older document): use the existing delete.
-          if (isNotFoundError(error)) {
-            deleteOlder();
-            return;
-          }
-          onError(error.message);
-        },
+        onError: (error) => onError(error.message),
       },
     );
   };
@@ -487,32 +436,6 @@ function DocumentRow({
         <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0, alignItems: "center" }}>
           {!isOwner ? (
             <Tooltip
-              title={DEPLOYMENT_DOCUMENT_EDIT_TOOLTIP_NOT_OWNER}
-              arrow
-            >
-              <span>
-                <IconButton
-                  size="small"
-                  aria-label={`Edit ${name}`}
-                  sx={{ color: "text.secondary" }}
-                  disabled
-                >
-                  <PencilLine size={16} aria-hidden />
-                </IconButton>
-              </span>
-            </Tooltip>
-          ) : (
-            <IconButton
-              size="small"
-              aria-label={`Edit ${name}`}
-              sx={{ color: "text.secondary" }}
-              onClick={() => setEditModalOpen(true)}
-            >
-              <PencilLine size={16} aria-hidden />
-            </IconButton>
-          )}
-          {!isOwner ? (
-            <Tooltip
               title={DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER}
               arrow
             >
@@ -558,15 +481,7 @@ function DocumentRow({
         attachmentName={name}
         onClose={() => setDeleteModalOpen(false)}
         onConfirm={handleConfirmDelete}
-        isDeleting={deleteAttachment.isPending || storedDelete.isPending}
-      />
-      <EditDeploymentAttachmentModal
-        open={editModalOpen}
-        document={doc}
-        deploymentId={deploymentId}
-        onClose={() => setEditModalOpen(false)}
-        onSuccess={() => {}}
-        onError={onError}
+        isDeleting={storedDelete.isPending}
       />
     </>
   );

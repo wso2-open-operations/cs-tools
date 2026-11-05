@@ -60,7 +60,7 @@ import DOMPurify from "dompurify";
 import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
-import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
+import { useStoredAttachmentDownload } from "@api/useStoredAttachments";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { stripThinkingBlocks } from "@features/support/utils/chat";
@@ -93,12 +93,11 @@ export default function CommentBubble({
   onImageClick,
   hideAvatar = false,
   userDetails,
-  caseId,
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachmentContent();
+  const { downloadStoredAttachment, isDownloading, downloadingId } =
+    useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
   const isNoveraComment = isNoveraOrBotSender(comment.createdBy, comment.type);
@@ -129,7 +128,7 @@ export default function CommentBubble({
     INLINE_COMMENT_HTML_PURIFY,
   );
   const { resolvedHtml: htmlContent, isLoading: isImagesLoading } =
-    useResolvedInlineImageHtml(sanitizedHtml, caseId);
+    useResolvedInlineImageHtml(sanitizedHtml);
   const displayName = useMemo(() => {
     if (isCurrentUser && userDetails) {
       const { firstName, lastName, email } = userDetails;
@@ -172,8 +171,8 @@ export default function CommentBubble({
     attachmentCategory === "image" &&
     /\.(png|jpe?g|webp)$/i.test(comment.fileName ?? "");
   // An attached image is only fetched once the person asks: each preview
-  // costs a one-use SFTPGo link, and a busy feed would otherwise create one per
-  // image on every render.
+  // streams the whole file through the backend, and a busy feed would otherwise
+  // fetch every image on every render.
   const [previewRequested, setPreviewRequested] = useState(false);
   const {
     data: imageDataUrl,
@@ -184,7 +183,6 @@ export default function CommentBubble({
     isAttachmentEntry && isPreviewableImage && previewRequested
       ? comment.id
       : null,
-    caseId,
   );
 
   const renderAttachmentIcon = () => {
@@ -202,11 +200,10 @@ export default function CommentBubble({
   };
 
   const handleAttachmentDownload = async () => {
-    await downloadAttachment({
+    await downloadStoredAttachment({
+      type: "work_item",
       id: comment.id,
       name: comment.fileName ?? "attachment",
-      type: comment.contentType,
-      downloadUrl: comment.downloadUrl,
     });
   };
 
