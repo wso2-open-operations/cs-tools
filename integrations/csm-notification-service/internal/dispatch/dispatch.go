@@ -1160,6 +1160,8 @@ func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record,
 		return d.handleSeverityChanged(ctx, record, env.Payload)
 	case events.TypeWorkaroundProvided:
 		return d.handleWorkaroundProvided(ctx, env.Payload)
+	case events.TypeCaseTypeChanged:
+		return d.handleCaseTypeChanged(ctx, env.Payload)
 	case events.TypeIncidentCreated:
 		return d.handleIncidentCreated(ctx, record, env.EntityID, env.Payload)
 	case events.TypeIncidentAssigned:
@@ -1852,6 +1854,29 @@ func (d *Dispatcher) handleWorkaroundProvided(ctx context.Context, raw json.RawM
 		if err := d.slaEngine.PauseWorkaroundClock(ctx, p.CaseID); err != nil {
 			return fmt.Errorf("dispatch: pause workaround clock: %w", err)
 		}
+	}
+	return nil
+}
+
+// handleCaseTypeChanged reacts to a case type transfer the same way
+// handleSeverityChanged reacts to a severity change (see
+// events.TypeCaseTypeChanged's own doc comment for the incident this
+// closes): entity-service already cancelled and/or re-registered this
+// case's own SLA clocks on its side before publishing this event; this
+// engine's own Redis-held tracking otherwise has no way to learn that, and
+// would keep ticking a now-cancelled (or now-wrong-duration) clock down
+// indefinitely. No Chat/email reaction reads this event — it exists
+// purely to drive Engine.ReviseClocks, which re-syncs all three of this
+// case's clock types with entity-service's current, post-transfer state
+// (clearing a clock type the new facts no longer cover, rebuilding one
+// they still do).
+func (d *Dispatcher) handleCaseTypeChanged(ctx context.Context, raw json.RawMessage) error {
+	var p events.CaseTypeChangedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode case.type_changed payload: %w", err)
+	}
+	if d.slaEngine != nil {
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
 	}
 	return nil
 }
