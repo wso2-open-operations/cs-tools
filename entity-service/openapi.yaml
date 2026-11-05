@@ -24848,6 +24848,9 @@ components:
         `catastrophic` case, which a service request cannot hold, is stored as `critical` and the
         response carries a `SEVERITY_DOWNGRADED` entry in `warnings`; a source with no severity
         (including every non-case type) is stored as `low`. The transfer never fails for this.
+        This applies to the PostgreSQL data sources only: when the backing data source is the only
+        data source, a transfer to `service_request` stores no service request severity and adds
+        no warning.
         Its companion fields carry the target type's mandatory data:
         `severity` and `issueType` alongside `type: case`; `engagementType` and
         `engagementPaymentType` alongside `type: engagement`; `catalogId`, `catalogItemId`
@@ -25324,7 +25327,10 @@ components:
             `medium` or `low` (`catastrophic` is a 400). From any other caller it is ignored. A
             service request created without one gets the configured default
             (`SERVICE_REQUEST_DEFAULT_SEVERITY`, `low` when unset). It is never returned to a
-            customer. Ignored for every other type.
+            customer. Ignored for every other type. This handling and the configured default apply
+            to the PostgreSQL data sources only: when the backing data source is the only data
+            source, the severity is dropped for every caller (internal callers included) and the
+            default is not applied.
         issueType:
           type: string
           enum: [error, partial_outage, performance_degradation, question, security_or_compliance, total_outage]
@@ -26134,6 +26140,7 @@ components:
           type: string
         severity:
           type: string
+          nullable: true
           enum: [catastrophic, critical, high, medium, low]
           description: >
             Severity of a case. For a service request it is the internal severity (`critical`,
@@ -26172,6 +26179,7 @@ components:
           type: string
         severity:
           type: string
+          nullable: true
           enum: [catastrophic, critical, high, medium, low]
           description: >
             Severity of a case. For a service request it is the internal severity (`critical`,

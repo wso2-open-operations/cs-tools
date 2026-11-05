@@ -26,6 +26,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -267,5 +268,80 @@ func TestSNCaseService_UpdateCase_ServiceRequestSeverityIsRefused(t *testing.T) 
 	}
 	if patched {
 		t.Error("a write was sent to the backing data source")
+	}
+}
+
+// A service request's severity is left out of SLA registration and case.created
+// by the Postgres-backed service only. The shared helpers keep the record's own
+// severity, which is what the data-source-only service relies on.
+func srSeverityView() domain.CaseView {
+	srType, sev := "service_request", domain.CaseSeverityHigh
+	return domain.CaseView{
+		ID: testDeploymentUUID, Type: &srType, Severity: &sev,
+		ProjectDetails: &domain.EntityRef{ID: testProjectUUID, Name: "p"},
+		WatchList:      []domain.WatchListUser{{Email: "jane.doe@example.com"}},
+	}
+}
+
+func TestSLARegistrationAndCreatedEvent_DataSourceOnlyPathKeepsTheRecordSeverity(t *testing.T) {
+	cv := srSeverityView()
+	get := func(context.Context, string) (domain.CaseView, error) { return cv, nil }
+
+	sla := &fakeSLAEngineService{}
+	registerCaseSLAClocksEvent(context.Background(), sla, get, cv.ID)
+	if len(sla.registerCalls) != 1 || sla.registerCalls[0].severity == nil || *sla.registerCalls[0].severity != domain.CaseSeverityHigh {
+		t.Errorf("SLA registration calls = %+v, want the record's severity (high)", sla.registerCalls)
+	}
+
+	pub := &mockEventPublisher{}
+	publishCaseCreatedEvent(context.Background(), pub, get, nil, nil, nil, domain.CreateCaseRequest{Type: "service_request"}, cv.ID)
+	if len(pub.calls) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.calls))
+	}
+	var payload events.CaseCreatedPayload
+	if err := json.Unmarshal(pub.calls[0].payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Priority != "HIGH" {
+		t.Errorf("priority = %q, want HIGH", payload.Priority)
+	}
+}
+
+func TestCaseService_SLARegistrationAndCreatedEvent_LeaveOutAServiceRequestSeverity(t *testing.T) {
+	cv := srSeverityView()
+	repo := &stubCaseRepo{getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) { return cv, nil }}
+	svc := NewCaseService(repo, stubUserRepo{}, nil, stubAccessServiceWithScope{srsInternalScope}, nil).(*caseService)
+
+	sla := &fakeSLAEngineService{}
+	registerCaseSLAClocksEvent(context.Background(), sla, svc.getCaseForSLAAndEvents, cv.ID)
+	if len(sla.registerCalls) != 1 || sla.registerCalls[0].severity != nil {
+		t.Errorf("SLA registration calls = %+v, want a nil severity for a service request", sla.registerCalls)
+	}
+
+	pub := &mockEventPublisher{}
+	publishCaseCreatedEvent(context.Background(), pub, svc.getCaseForSLAAndEvents, nil, nil, nil, domain.CreateCaseRequest{Type: "service_request"}, cv.ID)
+	var payload events.CaseCreatedPayload
+	if len(pub.calls) != 1 || json.Unmarshal(pub.calls[0].payload, &payload) != nil || payload.Priority != "" {
+		t.Errorf("calls = %d, priority = %q, want one event with no priority", len(pub.calls), payload.Priority)
+	}
+}
+
+// The data-source-only service must not send a severity on for a record whose
+// type it could not read.
+func TestSNCaseService_UpdateCase_SeverityFailsClosedWhenTheTypeLookupFails(t *testing.T) {
+	var wrote bool
+	client := newTestCaseClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			wrote = true
+		}
+		http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+	})
+	svc := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
+	sev := domain.CaseSeverityHigh
+	if _, err := svc.UpdateCase(contextWithUserIDToken("token"), domain.UpdateCaseRequest{ID: sysidToUUID(testWLCaseSysid), Severity: &sev}); err == nil {
+		t.Fatal("UpdateCase succeeded although the type lookup failed")
+	}
+	if wrote {
+		t.Error("a write was sent to the backing data source after the lookup failed")
 	}
 }

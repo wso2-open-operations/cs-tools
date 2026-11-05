@@ -806,7 +806,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// persisted first (immediately above) for the same reason
 	// createCaseSNFirst orders it this way: publishCaseCreatedEvent's own
 	// GetCaseByID re-fetch needs them already written to resolve Recipients.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.getCaseForSLAAndEvents, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
 	// Plain Postgres only: under dual-write the SR is created in ServiceNow
 	// first, where its own flow still assigns, acknowledges and announces it.
 	if req.Type == "service_request" && s.srNotices != nil {
@@ -980,7 +980,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// ordering constraint is "before the publish," which this now also
 	// satisfies -- see registerCaseSLAClocksEvent's own doc comment.
 	if slaClockEligibleCreateTypes[req.Type] {
-		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
+		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.getCaseForSLAAndEvents, c.ID)
 	}
 
 	// Only now — Postgres has confirmed the row this mode's reads actually
@@ -990,7 +990,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// after the ServiceNow POST, before this Postgres insert was even
 	// attempted) — same reasoning incidentService.createIncidentSNFirst
 	// already established.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.getCaseForSLAAndEvents, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
 
 	responseState := ""
 	if c.State != nil {

@@ -1196,7 +1196,7 @@ func registerCaseSLAClocksEvent(ctx context.Context, slaEngine SLAEngineService,
 	if cv.ProjectDetails != nil {
 		projectID = cv.ProjectDetails.ID
 	}
-	slaEngine.RegisterCaseClocks(ctx, caseID, slaSeverity(cv), projectID)
+	slaEngine.RegisterCaseClocks(ctx, caseID, cv.Severity, projectID)
 }
 
 // publishCaseCreated best-effort publishes a case.created event for a newly
@@ -1364,7 +1364,7 @@ func publishCaseCreatedEvent(
 		WSO2CaseID:           cv.InternalID,
 		CaseTitle:            cv.Subject,
 		CaseType:             strings.ToUpper(req.Type),
-		Priority:             strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
+		Priority:             strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:              product,
 		Team:                 caseTeamName(cv),
 		SRETeamID:            sreTeamID,
@@ -2164,7 +2164,7 @@ func (s *snCaseService) publishCaseAcknowledged(ctx context.Context, caseID, ack
 		CaseID:           caseID,
 		CaseNumber:       cv.Number,
 		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
+		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
 		Product:          product,
 		Team:             caseTeamName(cv),
 		AcknowledgerName: acknowledgerName,
@@ -3225,7 +3225,13 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// needs the check; with a type it is the companion of a transfer, which
 	// validateCaseTypeTransfer judges.
 	if req.Severity != nil && req.Type == nil {
-		if cv, err := s.GetCaseByID(ctx, req.ID); err == nil && cv.Type != nil && *cv.Type == "service_request" {
+		// A failed lookup fails the request: the PATCH below would send the
+		// severity on as a case severity for a record whose type is unknown.
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
 			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity of a service request is only supported for the Postgres data source"}
 		}
 	}

@@ -157,9 +157,23 @@ func (s *caseService) updateServiceRequestSeverity(ctx context.Context, req doma
 	}, nil
 }
 
+// getCaseForSLAAndEvents is GetCaseByID for the paths that feed SLA clock
+// registration and case.* event payloads. It applies to the Postgres-backed
+// service only (the data-source-only service has no internal severity and
+// keeps the severity of the record it reads): a service request's severity
+// never reaches the SLA engine or an event, so both stay severity-agnostic.
+func (s *caseService) getCaseForSLAAndEvents(ctx context.Context, id string) (domain.CaseView, error) {
+	cv, err := s.GetCaseByID(ctx, id)
+	if err != nil {
+		return cv, err
+	}
+	cv.Severity = slaSeverity(cv)
+	return cv, nil
+}
+
 // slaSeverity is the severity to hand an SLA clock registration or revision for
-// a case-like record: a service request's severity never reaches the SLA
-// engine, so its clocks stay severity-agnostic.
+// a Postgres-backed case-like record: a service request's severity never
+// reaches the SLA engine, so its clocks stay severity-agnostic.
 func slaSeverity(cv domain.CaseView) *domain.CaseSeverity {
 	if cv.Type != nil && *cv.Type == "service_request" {
 		return nil
