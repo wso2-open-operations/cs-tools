@@ -731,7 +731,7 @@ csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 -
 
 **Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
 `migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
-`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+`product_regression_report_*`, `eol_product_usage_report` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
 refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
 `RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
 flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
@@ -774,7 +774,8 @@ reading the handlers' code and doc comments (a judgement, not a test):
   `rota_manual_reminder` (claims waiting requests, each reported once).
 - **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
   `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
-  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports.
+  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports,
+  `eol_product_usage_report` (a run-now sends whatever the date).
   `unresolved_products_digest` also mails every run it finds anything.
 - **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
   confirmed), `query_hours_usage_notifications` (mails crossings it derives in process; whether a repeat re-sends
@@ -951,6 +952,7 @@ report emails" below for why that's not a generic engine feature.
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |
 | `MIGRATION_CASE_REPORT_LINK_BASE_URL` | No | The support portal's case page prefix (https), for the links in the migration case scan (`<prefix>/<case number>`). Unset renders plain text |
+| `EOL_USAGE_REPORT_PORTAL_BASE_URL` | No | The CSM portal's base URL (https), for the account and project links in the EOL product usage report (`<base>/customers/accounts/<id>`, `<base>/customers/projects/<id>`). Unset renders plain text |
 
 No app-level execution timeout is configured here — Choreo's own Scheduled Task execution-time
 limit already bounds how long one invocation can run. `cmd/server/main.go` instead cancels its
@@ -994,6 +996,34 @@ unit mail groups, and a failed period is retried on every tick, so failure alert
 `ALERT_RECIPIENTS` only.
 `PRODUCT_REGRESSION_REPORT_LINK_BASE_URL` optionally turns each case id into a link
 (`<prefix>/<case number>`); unset keeps the plain text the PDF had.
+
+## Monthly EOL product usage report
+
+`internal/eolusagescan.SendReport`, registered as **`eol_product_usage_report`**, is the port of ServiceNow's *EOL
+Product Version Usage Monthly Report*: the customers still running a product version past its EOL date in an active
+Primary Production deployment, mailed to the people who should act on it. entity-service builds the list (`GET
+/reports/eol-product-usage?asOf=YYYY-MM-DD`, client in `internal/eolusagereport`; the joins and the EOL rule live
+there) and this task mails it through its own template (`internal/notify/templates/eol_product_usage_report.html`,
+`notify.RenderEolProductUsageReport`): the introduction the ServiceNow mail carried, then one table per region, each
+account's cells (account, CS ABT, account manager, technical owner) spanning its rows; there is no Region column, as each region has its own heading and table and each project's cell
+spanning its versions.
+
+- **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes today's date in Asia/Colombo and
+  sends only on the 1st to the 7th; a later Monday succeeds without fetching anything. A `--run-now` sends whatever
+  the date (`Options.AnyDay`). A `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use
+  `--run-now` with `--recipients` to test on another day.
+- **Report date.** The report is fetched as of the run date in Asia/Colombo, so a retry later the same day lists the
+  same versions.
+- **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
+  account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
+  To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves
+  `To`/`Cc` nil for the same reason as theirs: failures go to `ALERT_RECIPIENTS` alone, never to every account
+  manager on each retry; `eolUsageTaskWithRecipients` carries its audience to the startup `EMAIL_BASE_URL` check.
+- **No EOL usage.** Unlike the regression reports, an empty report **is sent**: a short "no customers are using EOL
+  product versions" note to the configured to/cc only, so the leadership group knows the report ran.
+- `EOL_USAGE_REPORT_PORTAL_BASE_URL` optionally links account and project names to their CSM portal pages; unset
+  keeps plain text, and a non-https value refuses to start.
 
 ## Per-task report emails
 

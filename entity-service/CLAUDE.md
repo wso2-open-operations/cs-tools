@@ -12027,6 +12027,22 @@ pool and not in the ServiceNow data source (there the two searches read ServiceN
 
 Tests: `product_catalog_service_test.go` (unit).
 
+## EOL product usage report (`GET /reports/eol-product-usage`)
+
+`EolProductUsageReportService` (`internal/service/eol_product_usage_report_service.go`) builds the monthly report
+`operations/csm-scheduled-tasks` mails to account managers, technical owners and CS leadership: customers running a
+product version past its EOL date in Primary Production. Internal callers only; reads under the system identity.
+
+- **Rows** (`eol_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an active
+  `PRIMARY_PRODUCTION` deployment whose version's `support_eol_date` is before `asOf` (default today in Asia/Colombo),
+  listed once per (project, product version) however many such deployments run it.
+- **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
+  `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
+- **Shape:** grouped by region (accounts with no region last), then account, then project; versions oldest EOL first.
+
+Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
+(`ENTITY_TEST_DATABASE_URL`).
+
 ## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
 
 An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per

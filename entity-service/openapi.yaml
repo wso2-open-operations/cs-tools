@@ -12645,6 +12645,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /reports/eol-product-usage:
+    get:
+      summary: >-
+        Monthly EOL product usage report: customers running a product version past its EOL date in Primary Production.
+      description: >
+        One entry per (project, product version) where an active deployed product of an active
+        PRIMARY_PRODUCTION deployment runs a version whose support EOL date is before asOf,
+        grouped by the account's region (accounts with no region last), then account and project.
+        A version run by several Primary Production deployments of one project is listed once.
+        Internal callers only; the scheduled task that mails the report is the expected caller.
+      operationId: getEolProductUsageReport
+      tags: [Reports]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Report date, YYYY-MM-DD; a version is EOL when its EOL date is before it. Defaults to today in Asia/Colombo.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EolProductUsageReport'
+        "400":
+          description: asOf is not a date.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /reports/migration-cases:
     get:
       summary: >-
@@ -32906,6 +32957,81 @@ components:
           type: string
           format: date-time
           nullable: true
+    EolProductUsageReport:
+      type: object
+      required: [generatedAt, asOf, totalVersions, totalAccounts, regions]
+      properties:
+        generatedAt: {type: string, format: date-time}
+        asOf: {type: string, format: date}
+        totalVersions:
+          type: integer
+          description: (project, product version) entries listed.
+        totalAccounts: {type: integer}
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageRegion'
+    EolProductUsageRegion:
+      type: object
+      required: [region, accounts]
+      properties:
+        region:
+          type: string
+          description: The account's region; "" for accounts with no region (listed last).
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageAccount'
+    EolProductUsageAccount:
+      type: object
+      required: [accountId, accountName, csAbt, region, projects]
+      properties:
+        accountId: {type: string, format: uuid}
+        accountName: {type: string}
+        csAbt:
+          type: string
+          description: The account's CRE (ABT) team name; "" when it has none.
+        region: {type: string}
+        accountManager:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        technicalOwner:
+          $ref: '#/components/schemas/EolProductUsagePerson'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageProject'
+    EolProductUsagePerson:
+      type: object
+      nullable: true
+      required: [name, email]
+      properties:
+        name: {type: string}
+        email: {type: string}
+    EolProductUsageProject:
+      type: object
+      required: [projectId, projectName, projectKey, versions]
+      properties:
+        projectId: {type: string, format: uuid}
+        projectName: {type: string}
+        projectKey:
+          type: string
+          description: "\"\" when the project has none."
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EolProductUsageVersion'
+    EolProductUsageVersion:
+      type: object
+      required: [productVersionId, productName, version, eolDate]
+      properties:
+        productVersionId: {type: string, format: uuid}
+        productName: {type: string}
+        version: {type: string}
+        supportStatus:
+          type: string
+          nullable: true
+          enum: [AVAILABLE, EXTENDED, DEPRECATED, DISCONTINUED, null]
+        eolDate: {type: string, format: date}
     ProductRegressionReport:
       type: object
       description: One monthly product regression report.

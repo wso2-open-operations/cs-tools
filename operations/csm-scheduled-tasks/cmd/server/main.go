@@ -48,6 +48,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagereport"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/eolusagescan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
@@ -212,6 +214,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service product-regression-report client", "err", err)
+		os.Exit(1)
+	}
+
+	// The EOL product usage report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/eol-product-usage).
+	eolUsageReportClient, err := eolusagereport.NewClient(eolusagereport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service EOL-product-usage-report client", "err", err)
 		os.Exit(1)
 	}
 
@@ -674,6 +690,52 @@ func main() {
 		})
 	}
 
+	// The monthly EOL product usage report: the customers still running a
+	// product version past its EOL date in an active Primary Production
+	// deployment, mailed on the first Monday of the month at 10:00 IST
+	// (04:30 UTC; the schedule fires every Monday and the handler sends only
+	// on the 1st to the 7th). To is its SUB_CRON_RECIPIENTS "to" (the CS
+	// leadership group) plus every listed account's manager and technical
+	// owner; with no "to" the task skips and succeeds. A month with no EOL
+	// usage still sends a short note to the configured to/cc.
+	//
+	// registry.Task.To/Cc are left nil DELIBERATELY, as for the regression
+	// reports: failures go to ALERT_RECIPIENTS alone, never to the account
+	// managers on every retry. eolUsageTaskWithRecipients carries its
+	// audience to the EMAIL_BASE_URL check below for the same reason.
+	//
+	// EOL_USAGE_REPORT_PORTAL_BASE_URL optionally links account and project
+	// names to their CSM portal pages (<base>/customers/accounts/<id>); a
+	// non-https value refuses to start, as every URL here does.
+	eolUsagePortalBase := strings.TrimRight(os.Getenv("EOL_USAGE_REPORT_PORTAL_BASE_URL"), "/")
+	if eolUsagePortalBase != "" {
+		if err := httpsec.RequireSecureURL(eolUsagePortalBase); err != nil {
+			slog.Error("invalid EOL_USAGE_REPORT_PORTAL_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+	}
+	eolUsageTo, eolUsageCc := recipientsFor(recipientOverrides, eolusagescan.TaskName)
+	var eolUsageTaskWithRecipients []string
+	if len(eolUsageTo) > 0 {
+		eolUsageTaskWithRecipients = append(eolUsageTaskWithRecipients, eolusagescan.TaskName)
+	}
+	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
+	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled}
+	eolUsageTask := registry.Task{
+		Name:     eolusagescan.TaskName,
+		Schedule: scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule),
+		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageOptions),
+		// --recipients/--cc of a manual run-now only; see reportRunNow. A
+		// run-now sends whatever the date: it is asked for on purpose.
+		RunNowFlags: reportRunNowFlags,
+		RunNowNarrow: reportRunNow(eolUsageEmail, emailClient,
+			func(email notify.Sender, rec []string) func(ctx context.Context) error {
+				opts := eolUsageOptions
+				opts.AnyDay = true
+				return eolusagescan.SendReport(eolUsageReportClient, email, orRecipients(eolUsageTo, rec), eolUsageCc, opts)
+			}),
+	}
+
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
 
@@ -922,6 +984,7 @@ func main() {
 		// which send them seconds after the change rather than on this tick.
 	}
 	tasks = append(tasks, regressionTasks...)
+	tasks = append(tasks, eolUsageTask)
 
 	// Registered only when enabled, rather than registered-and-inert, so the
 	// ledger shows no run at all for a task that is switched off -- an inert
@@ -1300,12 +1363,14 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// The product regression reports keep their audience out of task.To (see
-	// their registration above), so it is checked here by name instead.
-	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
+	// The product regression reports and the EOL product usage report keep
+	// their audience out of task.To (see their registration above), so it is
+	// checked here by name instead.
+	reportTasksWithOwnRecipients := append(append([]string{}, regressionTasksWithRecipients...), eolUsageTaskWithRecipients...)
+	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(reportTasksWithOwnRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
-			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+			"reportTasksWithOwnRecipients", reportTasksWithOwnRecipients)
 		os.Exit(1)
 	}
 
