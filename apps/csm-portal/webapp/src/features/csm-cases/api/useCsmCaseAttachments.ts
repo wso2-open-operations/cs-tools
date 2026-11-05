@@ -224,10 +224,28 @@ export function useDownloadCsmCaseAttachment(): (
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
-      await downloadEntityAttachment(api, {
-        type: WORK_ITEM_ATTACHMENT_TYPE,
-        id: attachment.id,
-      });
+      // Entity-service stored attachment: fetch the one-use link's bytes now and
+      // save them under the attachment's own name. A file entity-service does
+      // not hold (an older attachment) falls through to the existing paths.
+      if (isEntityAttachmentsEnabled()) {
+        const done = await downloadEntityAttachment(api, {
+          type: WORK_ITEM_ATTACHMENT_TYPE,
+          id: attachment.id,
+          name: attachment.filename,
+          size: attachment.size,
+        });
+        if (done) return;
+      }
+      if (sftpgoEnabled) {
+        const { shareUrl } = await api.post<
+          Record<string, never>,
+          BeAttachmentShareResponse
+        >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
+        openForDownload(shareUrl);
+        return;
+      }
+      const blob = await getContent(attachment);
+      saveBlob(blob, attachment.filename);
     },
     [api],
   );

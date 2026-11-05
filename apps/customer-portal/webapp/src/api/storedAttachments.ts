@@ -15,11 +15,13 @@
 // under the License.
 
 import {
+  downloadParallelism,
   entityAttachmentMaxBytes,
   formatLimit,
   inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
 import { ApiError, parseApiResponseMessage } from "@utils/ApiError";
+import { openDiskTarget, type DiskSink } from "@api/downloadToDisk";
 
 /** Which attachment table a stored attachment lives in. */
 export type StoredAttachmentType = "work_item" | "comment" | "deployment";
@@ -132,69 +134,158 @@ export function saveBlobAs(blob: Blob, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
 }
 
-/** Tries to read a download in, and how many times to resume it after a break. */
-const DOWNLOAD_RESUME_ATTEMPTS = 3;
+/** Tries to read one range of a download before giving up. */
+const DOWNLOAD_RANGE_ATTEMPTS = 3;
+
+/** Bytes asked for in one range of a download. */
+export const DOWNLOAD_RANGE_BYTES = 16 * 1024 * 1024;
+
+const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
+
+/** Reads a response body to the end, keeping the pieces as they arrive. */
+async function readParts(response: Response): Promise<Uint8Array[]> {
+  const reader = response.body?.getReader();
+  if (!reader) return [new Uint8Array(await response.arrayBuffer())];
+  const parts: Uint8Array[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return parts;
+    parts.push(value);
+  }
+}
+
+const partsLength = (parts: Uint8Array[]): number =>
+  parts.reduce((sum, part) => sum + part.length, 0);
+
+/** The `bytes a-b/total` of a `Content-Range` header, or null when it is not that. */
+function parseContentRange(
+  headers: Headers,
+): { start: number; end: number; total: number } | null {
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(
+    (headers.get("Content-Range") ?? "").trim(),
+  );
+  if (!match) return null;
+  const [start, end, total] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return end >= start && total > end ? { start, end, total } : null;
+}
+
+interface RangeRead {
+  response: Response;
+  parts: Uint8Array[];
+}
+
+/**
+ * Asks for bytes `start` to `end` of the file and reads them in full. A dropped
+ * connection or a short body is tried again, up to three times; a refusal from
+ * the backend is thrown at once, and so is a cancelled request.
+ */
+async function readRange(
+  authFetch: AuthFetch,
+  url: string,
+  start: number,
+  end: number,
+  isWhole: (read: RangeRead) => boolean,
+): Promise<RangeRead> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await authFetch(url, {
+        method: "GET",
+        headers: { Range: `bytes=${start}-${end}` },
+      });
+      if (!response.ok) throw await toApiError(response);
+      const parts = await readParts(response);
+      const read = { response, parts };
+      if (isWhole(read)) return read;
+    } catch (error) {
+      if (error instanceof ApiError || isAbortError(error)) throw error;
+    }
+    if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) {
+      throw new ApiError(0, "Download failed", DOWNLOAD_INTERRUPTED_MESSAGE);
+    }
+  }
+}
 
 /**
  * Downloads one attachment through the portal backend, which checks access and
- * streams the file. The bytes are read as they arrive, so a break part-way
- * resumes with a Range request instead of starting again.
+ * streams the file. The first 16 MiB are asked for with a `Range` header; the
+ * answer says how big the file is, and the rest is fetched as 16 MiB ranges,
+ * {@link downloadParallelism} at a time.
+ *
+ * Where the browser can, the file is written straight to a file the person
+ * picked, each range at its own offset as it arrives, so it is never held whole
+ * in memory; otherwise the ranges are joined in order and saved as one Blob. A
+ * range that breaks is fetched again on its own; a refusal stops the other
+ * ranges. A closed save dialog ends the download with nothing saved and no error.
  *
  * Throws an ApiError with status 404 when there is no such stored attachment,
  * which a caller still on the older flow can fall back from.
  */
 async function downloadFromBackend(
   authFetch: AuthFetch,
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
+): Promise<void> {
+  const target = await openDiskTarget(input.name || "attachment", input.size);
+  if (target.kind === "cancelled") return;
+  const sink = target.kind === "sink" ? target.sink : undefined;
+  try {
+    await readAndStore(authFetch, input, sink);
+  } catch (error) {
+    await sink?.abort();
+    throw error;
+  }
+}
+
+async function readAndStore(
+  authFetch: AuthFetch,
   input: { type: StoredAttachmentType; id: string; name?: string },
+  sink: DiskSink | undefined,
 ): Promise<void> {
   const url = `${getBackendBaseUrl()}/attachments/download/${encodeURIComponent(
     toHyphenatedUuid(input.id),
   )}/content?type=${encodeURIComponent(input.type)}`;
-  const parts: Uint8Array[] = [];
-  let received = 0;
-  let total: number | undefined;
-  let fileName = input.name;
-  for (let attempt = 0; ; attempt++) {
-    const response = await authFetch(url, {
-      method: "GET",
-      headers: received > 0 ? { Range: `bytes=${received}-` } : undefined,
-    });
-    if (!response.ok) throw await toApiError(response);
-    if (received === 0) {
-      fileName = fileName || fileNameFromDisposition(response.headers);
-      const length = Number(response.headers.get("Content-Length"));
-      total = Number.isFinite(length) && length > 0 ? length : undefined;
-    } else if (response.status !== 206) {
-      // The server ignored the range: start over rather than glue the wrong bytes.
-      parts.length = 0;
-      received = 0;
-    }
-    try {
-      const reader = response.body?.getReader();
-      if (!reader) {
-        parts.push(new Uint8Array(await response.arrayBuffer()));
-        received += parts[parts.length - 1].length;
-      } else {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          parts.push(value);
-          received += value.length;
+  const first = await readRange(authFetch, url, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
+    if (response.status !== 206) return true; // the whole file, the range was ignored
+    const range = parseContentRange(response.headers);
+    return range !== null && range.start === 0 && partsLength(parts) === range.end + 1;
+  });
+  const fileName = input.name || fileNameFromDisposition(first.response.headers);
+  const total =
+    first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
+  const ranges: Uint8Array[][] = [];
+  if (sink) await sink.write(0, first.parts);
+  else ranges[0] = first.parts;
+
+  if (total !== undefined && partsLength(first.parts) < total) {
+    const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
+    let next = 1;
+    let failure: { error: unknown } | undefined;
+    const worker = async (): Promise<void> => {
+      while (failure === undefined && next < count) {
+        const index = next++;
+        const start = index * DOWNLOAD_RANGE_BYTES;
+        const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
+        try {
+          const { parts } = await readRange(
+            authFetch,
+            url,
+            start,
+            end,
+            ({ parts }) => partsLength(parts) === end - start + 1,
+          );
+          if (sink) await sink.write(start, parts);
+          else ranges[index] = parts;
+        } catch (error) {
+          failure ??= { error };
         }
       }
-      if (total === undefined || received >= total) break;
-      throw new Error("The download ended early.");
-    } catch (error) {
-      if (attempt + 1 >= DOWNLOAD_RESUME_ATTEMPTS || isAbortError(error)) {
-        throw new ApiError(
-          0,
-          "Download failed",
-          "The download was interrupted. Please try again.",
-        );
-      }
-    }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker),
+    );
+    if (failure) throw failure.error;
   }
-  saveBlobAs(new Blob(parts as BlobPart[]), fileName || "attachment");
+  if (sink) await sink.close();
+  else saveBlobAs(new Blob(ranges.flat() as BlobPart[]), fileName || "attachment");
 }
 
 /** The file name a download response suggests, if it names one. */
@@ -218,7 +309,7 @@ function fileNameFromDisposition(headers: Headers): string | undefined {
  */
 export async function downloadStoredAttachment(
   authFetch: AuthFetch,
-  input: { type: StoredAttachmentType; id: string; name?: string },
+  input: { type: StoredAttachmentType; id: string; name?: string; size?: number },
 ): Promise<void> {
   await downloadFromBackend(authFetch, input);
 }

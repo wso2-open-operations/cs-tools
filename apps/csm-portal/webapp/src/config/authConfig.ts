@@ -130,6 +130,18 @@ declare global {
        * string. See `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
+      /**
+       * How many 16 MiB ranges of one attachment download are fetched at the
+       * same time (default 4, kept between 1 and 8; 1 fetches one at a time).
+       * A number or numeric string. See `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_DOWNLOAD_PARALLELISM?: number | string;
+      /**
+       * Optional. Save a download straight to a file the person picks, where the
+       * browser supports it. On unless `false` (boolean or "false"). See
+       * `attachmentLimitsConfig.ts`.
+       */
+      CSM_PORTAL_DOWNLOAD_TO_DISK?: boolean | string;
     };
   }
 }

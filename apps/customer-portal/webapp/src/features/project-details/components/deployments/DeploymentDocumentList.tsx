@@ -303,8 +303,21 @@ function DocumentRow({
   const handleDownloadClick = async () => {
     if (!doc.id) return;
     try {
-      await storedDownload.downloadStoredAttachment({
-        type: "deployment",
+      if (entityAttachments) {
+        try {
+          await storedDownload.downloadStoredAttachment({
+            type: "deployment",
+            id: doc.id,
+            name: doc.name,
+            size: sizeBytes > 0 ? sizeBytes : undefined,
+          });
+          return;
+        } catch (storedError) {
+          // Not held by entity-service (older document): use the existing download.
+          if (!isNotFoundError(storedError)) throw storedError;
+        }
+      }
+      await downloadAttachment({
         id: doc.id,
         name: doc.name,
       });
