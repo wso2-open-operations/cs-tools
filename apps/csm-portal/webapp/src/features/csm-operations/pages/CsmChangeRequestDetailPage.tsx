@@ -82,7 +82,10 @@ import EditChangeRequestDialog from "@features/csm-operations/components/EditCha
 import EntityRefLink from "@features/csm-operations/components/EntityRefLink";
 import ImplementationDeviationSection from "@features/csm-operations/components/ImplementationDeviationSection";
 import StandardChangeTemplateBanner from "@features/csm-operations/components/StandardChangeTemplateBanner";
-import { useCreateStandardChangeProposal } from "@features/csm-operations/api/useStandardChanges";
+import {
+  useCreateStandardChangeProposal,
+  useUpdateStandardChangeProposal,
+} from "@features/csm-operations/api/useStandardChanges";
 import {
   standardChangeProposalPath,
   standardChangeTemplatePath,
@@ -349,6 +352,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   const { user } = useCurrentUser();
   const patchCr = usePatchChangeRequest();
   const proposeStandard = useCreateStandardChangeProposal();
+  const citeAsEvidence = useUpdateStandardChangeProposal();
   const [editOpen, setEditOpen] = useState(false);
   // Kept in the URL (`?tab=`), not local state, so a shared/bookmarked link
   // to a specific tab survives a refresh.
@@ -810,16 +814,32 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
 
   // A completed change request can be proposed as a standard change template: a
   // new proposal starts from its content (and cites it as evidence); the
-  // proposer then generalises it and sends it to the CAB from the proposal page.
+  // proposer then generalises it and submits it from the proposal page. One
+  // raised from a template already belongs to that template: what it shows is a
+  // revision of the template (it is cited as that revision's evidence), never a
+  // second template of the same change (the server refuses that too).
   const crPath = `/operations/change-requests/${cr.id}`;
+  const fromTemplate = cr.standardChange?.template ?? null;
   const proposeAsStandardChange = (): void => {
-    proposeStandard.mutate(
-      { kind: "new", sourceChangeRequestId: cr.id },
-      {
-        onSuccess: (proposal) => navigate(standardChangeProposalPath(proposal.id), { state: { from: crPath } }),
-        onError: (err) => showError(backendErrorMessage(err, "Could not start the standard change proposal."), err),
-      },
-    );
+    const onError = (err: unknown): void =>
+      showError(backendErrorMessage(err, "Could not start the standard change proposal."), err);
+    const open = (id: string): void => navigate(standardChangeProposalPath(id), { state: { from: crPath } });
+    if (fromTemplate) {
+      proposeStandard.mutate(
+        { kind: "modify", templateId: fromTemplate.id },
+        {
+          onSuccess: (proposal) =>
+            citeAsEvidence.mutate(
+              { id: proposal.id, patch: { evidenceChangeRequestIds: [cr.id] } },
+              // The revision is open either way; the evidence can be added there.
+              { onSettled: () => open(proposal.id) },
+            ),
+          onError,
+        },
+      );
+      return;
+    }
+    proposeStandard.mutate({ kind: "new", sourceChangeRequestId: cr.id }, { onSuccess: (proposal) => open(proposal.id), onError });
   };
 
   return (
@@ -920,10 +940,12 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 size="small"
                 startIcon={<Library size={14} />}
                 onClick={proposeAsStandardChange}
-                loading={proposeStandard.isPending}
+                loading={proposeStandard.isPending || citeAsEvidence.isPending}
                 sx={{ flexShrink: 0 }}
               >
-                Propose as standard change
+                {fromTemplate
+                  ? `Propose a revision of ${cr.standardChange?.templateNumber || "its template"}`
+                  : "Propose as standard change"}
               </Button>
             )}
             <Button

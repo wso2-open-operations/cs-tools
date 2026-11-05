@@ -21,7 +21,7 @@ import { useDebouncedValue } from "@hooks/useDebouncedValue";
 interface AsyncEntitySelectOption {
   id: string;
   label: string;
-  /** Set only on the pinned option (see `pinnedOption`). */
+  /** The pinned option's (see `pinnedOption`), or a result's from `getCaption`. */
   caption?: string;
 }
 
@@ -87,6 +87,11 @@ export interface AsyncEntitySelectProps<T> {
    * not repeated among the search results below it. Picking it reports its id,
    * with `item` only when the same entity is also among the current results. */
   pinnedOption?: AsyncEntitySelectPinnedOption | null;
+  /**
+   * A second line under each search result (e.g. what a template is for), or
+   * "" for none. The selected value shows its label only.
+   */
+  getCaption?: (item: T) => string;
   /** Hides the clear (x) button, for a field that can be changed but never
    * emptied (e.g. the backend has no way to unset it). */
   hideClearButton?: boolean;
@@ -120,6 +125,7 @@ export default function AsyncEntitySelect<T>({
   error,
   pinnedOption,
   hideClearButton,
+  getCaption,
 }: AsyncEntitySelectProps<T>): JSX.Element {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
@@ -153,6 +159,7 @@ export default function AsyncEntitySelect<T>({
     let results: AsyncEntitySelectOption[] = items.map((item) => ({
       id: getId(item),
       label: getLabel(item),
+      caption: getCaption?.(item) || undefined,
     }));
     const pinned =
       pinnedOption &&
@@ -168,7 +175,7 @@ export default function AsyncEntitySelect<T>({
       results = [selectedOption, ...results];
     }
     return pinned ? [{ ...pinned }, ...results] : results;
-  }, [items, selectedOption, getId, getLabel, pinnedOption, query]);
+  }, [items, selectedOption, getId, getLabel, getCaption, pinnedOption, query]);
 
   return (
     <Autocomplete<AsyncEntitySelectOption>
@@ -189,7 +196,7 @@ export default function AsyncEntitySelect<T>({
       filterOptions={(opts) => opts}
       getOptionLabel={(opt) => opt.label}
       renderOption={
-        pinnedOption
+        pinnedOption || getCaption
           ? (props, opt) => {
               const { key, ...optionProps } = props as typeof props & { key: string };
               return (

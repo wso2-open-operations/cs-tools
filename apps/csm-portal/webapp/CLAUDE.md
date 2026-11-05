@@ -703,7 +703,8 @@ The previous system has no Emergency CAB and acts on an Emergency change **witho
 
 ## Standard changes: templates, proposals, and a change raised from one
 
-A standard change is raised only from a CAB-approved template (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
+A standard change is raised only from an approved template: approved by the CAB, then authorised by two members of the
+Standard Change Authority (entity-service `CLAUDE.md`, "Standard changes"; the BFF is a
 thin proxy that keeps entity-service's 400 / 403 / 404 / 409 words and `errorCode`). Hooks: `api/useStandardChanges.ts` (every
 write invalidates `STANDARD_CHANGES_KEY`, refused or not); pure rules mirroring `standard_change_template.go` (key shape,
 declarations, values, `{{key}}` placeholders, completeness, the preview's rendering): `utils/standardChanges.ts`.
@@ -711,8 +712,8 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
 - **Inside Operations > Change requests, as one sub-view.** Standard changes are templated change requests, so the
   Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
   before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
-  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, "Propose a standard change",
-  `kind: "new"`); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
+  changes opens on the catalogue (server-side search, state filter, "Review needed" chip, each template's summary
+  under its name, "Propose a standard change"); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
   search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
   absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
   fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
@@ -720,7 +721,11 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
   does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
   (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
-  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your CAB decision · N
+  - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
+    customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
+    leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their
+    live templates (first 8, with each summary) as links: a change one of them covers is a revision of it.
+  - **"Needs your attention"** (`AttentionLine`, above the catalogue only): "N proposals await your decision · N
     draft(s) of yours", each part a link to the proposals filtered to it (`scope=awaiting`; `scope=mine&state=draft`),
     built from the current query so the list's `cr*` filters ride along.
     Counts come from `useCountStandardChangeProposals` (`POST /standard-change-proposals/search` with
@@ -812,24 +817,49 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     `StandardChangeProposalPage.test.tsx` ("its customer: ..."), `CreateChangeRequestPage.test.tsx` ("a template is one
     customer's: the Customer Project's"), `EditChangeRequestDialog.test.tsx`, `CsmChangeRequestDetailPage.test.tsx`,
     `AsyncProjectSelect.test.tsx` ("narrowed to one customer").
-- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): current version with placeholders
-  highlighted, parameters, version history (an older version via the versions endpoint), usage, the review flag (link to the
-  change request, Clear review), Suspend / Resume (who may is the server's call: the 403 words are shown), Propose a revision /
+- **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): the summary under the name,
+  current version with placeholders highlighted (its priority and deployment types too, "Chosen per change" / "Any"
+  when it fixes none, and "No description." when it has none), parameters, version history (an older version via the
+  versions endpoint), usage, the review flag (link to the change request), a **History** table (`template.history`:
+  suspended / resumed / flagged / cleared, the note, the flagging change request, who), Propose a revision /
   retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
+  Suspend, Resume and Clear review follow the server's `canSuspend` / `canResume` / `canClearReview`: Suspend for the
+  owner, the CAB and the Standard Change Authority (optional reason); Resume and Clear review for the authority only,
+  each with a required note in its confirmation (the hooks take `{id, note}`); otherwise the suspended notice and the
+  review flag say "Only a member of the Standard Change Authority can resume it" / "... clears it once reviewed".
 - **Proposal** `/operations/standard-change-proposals/:id` (`StandardChangeProposalPage`): the proposer's editor while `canEdit`
-  (parameters editor, "Insert {{…}}" per text field, live preview with sample values, closed change requests as evidence, Save =
-  one PATCH of the whole draft, Submit saves first); read-only otherwise, with the CAB approvers and Approve / Reject on the
-  viewer's own `canDecide` row (a rejection needs a comment). "Copy into a new proposal" only for a rejected / withdrawn
-  **new** proposal: the API's `copyFromProposalId` starts new templates only.
-- **Create form**: type Standard shows a template picker (active only, of the project's customer), "Change specifics" (one input per parameter type) and a
+  (a required **Summary** under the name; parameters editor, "Insert {{…}}" per text field; **Priority** ("Chosen per
+  change" = `""`) and **Deployment types** (multi-select, none = "Any deployment") beside the classification; the
+  Description is required; live preview with sample values, closed change requests as evidence, Save = one PATCH of
+  the whole draft, "Submit for approval" saves first; "still needs" lists a summary and a description too). A draft
+  never submitted (`canDelete`) offers **Delete draft** (a confirmation; then Back) instead of
+  Withdraw. Read-only otherwise, with an **Approval** section: the two-stage rule (`STANDARD_CHANGE_APPROVAL_RULE`)
+  and one table per stage (`proposal.stages`, approver rows by `stageId`; "1. CAB" Approved / "2. Standard Change
+  Authority" "1 of 2 approvals"), "2. Standard Change Authority: asked once the CAB approves." while the CAB decides.
+  Approve (the CAB) or Authorise (the authority) / Reject on the viewer's own `canDecide` row; the dialog says what
+  the decision does at that stage (the CAB's approval opens the authority's stage; the authority's last needed
+  approval applies it). A rejection needs a comment. `canCancel` (an authority member, someone else's open proposal)
+  offers **Cancel proposal** with a required reason. The decision banner names who ended it (approved by both,
+  rejected by the CAB or by the authority, withdrawn, cancelled). "Copy into a new proposal" only for a rejected /
+  withdrawn / cancelled **new** proposal: the API's `copyFromProposalId` starts new templates only.
+- **Create form**: type Standard shows a template picker (active only, of the project's customer, each result with its
+  summary as a second line: `AsyncEntitySelect getCaption`), "Change specifics" (one input per parameter type) and a
   read-only preview of what the template specifies; the payload is `type`, `standardChangeTemplateId`,
   `standardChangeTemplateVersionId` (the version shown), `standardChangeParameters`, `projectId` (required: a project of the
   template's customer) and only the fields the template does not specify. A 409 `standard_change_template_unavailable` is shown at the template with "Reload template", not in the banner. A
   clone of a templated change carries the template and its values, never the frozen fields (`buildCloneChangeRequestNavState`).
+  A template that fixes a **priority** shows it read-only ("Fixed by the standard change template.") and the payload
+  leaves it out (sending one is a 400); one that fixes **deployment types** offers only the project's deployments of
+  those types (`ChangeRequestScopeFields deploymentTypes`, filtering on `ScopeOption.type`), marks Deployments
+  required ("Required: the template is for <types> deployments only."), drops a deployment of another type chosen
+  before the template, and holds Create with "still needs a <types> deployment".
 - **Detail / Edit / action bar**: `standardChange` shows a banner (template link, version, values); the Edit dialog disables
   every field the template specifies (400 `change_request_standard_template_field`) and keeps the type Standard; a Standard
   change with `customerApprovalRequired === false` labels Request Approval "Schedule" (`requestApprovalSchedulesDirectly`; still
-  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`).
+  `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`); one raised
+  from a template offers "Propose a revision of STD…" instead (a `modify` proposal of that template, then a PATCH citing
+  the change as its evidence, then the proposal opens): it belongs to that template, and the backend refuses it as
+  the start or evidence of any other.
 
 ## Change request Approval tab: opening an Assignment group
 

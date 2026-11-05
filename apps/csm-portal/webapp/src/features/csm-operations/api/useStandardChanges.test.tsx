@@ -231,9 +231,9 @@ describe("standard change writes", () => {
   it.each([
     ["resume", useResumeStandardChangeTemplate, "/standard-change-templates/tpl-1/resume"],
     ["clear the review flag of", useClearStandardChangeTemplateReview, "/standard-change-templates/tpl-1/clear-review"],
-  ] as const)("posts to %s a template, with no body, and refreshes every standard change query", async (_n, hook, path) => {
-    const keys = await run(hook, "tpl-1");
-    expect(postEmptyMock).toHaveBeenCalledWith(path);
+  ] as const)("posts to %s a template with the note, trimmed, and refreshes every standard change query", async (_n, hook, path) => {
+    const keys = await run(hook, { id: "tpl-1", note: "  Root cause fixed \n" });
+    expect(postMock).toHaveBeenCalledWith(path, { note: "Root cause fixed" });
     expect(keys).toContainEqual([...STANDARD_CHANGES_KEY]);
   });
 

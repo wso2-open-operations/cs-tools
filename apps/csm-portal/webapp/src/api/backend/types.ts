@@ -5557,7 +5557,19 @@ export interface BeSpecialistHandoffSummary {
 
 export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
 export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
-export type BeStandardChangeProposalState = "draft" | "cab_review" | "approved" | "rejected" | "withdrawn";
+/**
+ * `authority_review`: the CAB approved; the Standard Change Authority has not yet
+ * (two of its members must). `cancelled`: an authority member ended someone
+ * else's open proposal, with a reason.
+ */
+export type BeStandardChangeProposalState =
+  | "draft"
+  | "cab_review"
+  | "authority_review"
+  | "approved"
+  | "rejected"
+  | "withdrawn"
+  | "cancelled";
 export type BeStandardChangeParameterType = "text" | "textarea" | "number" | "date" | "select";
 /** A change request's risk (`change_request_risk_enum`). A standard change is never `high`. */
 export type BeChangeRequestRisk = "high" | "moderate" | "low";
@@ -5576,6 +5588,12 @@ export interface BeStandardChangeParameter {
 
 /** What a template fixes on every change request raised from it. On a draft proposal any part may be missing. */
 export interface BeStandardChangeContent {
+  /**
+   * What the template is for, when to use it and what it does not cover (plain
+   * text, no placeholders). The template's own description, never copied onto a
+   * change request. Required to submit; null on versions approved before it existed.
+   */
+  summary?: string | null;
   /** Plain text: the change request's subject. */
   subject: string | null;
   description: string | null;
@@ -5588,6 +5606,13 @@ export interface BeStandardChangeContent {
   impact: BeChangeRequestImpact | null;
   risk: BeChangeRequestRisk | null;
   rollbackDurationText: string | null;
+  /** When set, every change request raised from the template has this priority; null: chosen per change. */
+  priority?: BeChangeRequestPriority | null;
+  /**
+   * When set, a change request raised from the template needs at least one
+   * deployment, all of these types; null: any deployments, or none.
+   */
+  deploymentTypes?: BeDeploymentType[] | null;
   isPlanningVisibleToCustomers: boolean;
   customerApprovalRequired: boolean;
   customerReviewRequired: boolean;
@@ -5660,6 +5685,36 @@ export interface BeStandardChangeTemplate {
   updatedBy: string;
   /** On `GET /standard-change-templates/{id}` only, newest first. */
   versions?: BeStandardChangeTemplateVersionSummary[];
+  /** On `GET /standard-change-templates/{id}` only, newest first: suspensions, resumptions, review flags. */
+  history?: BeStandardChangeTemplateEvent[];
+  /**
+   * What the caller may do (advisory). Suspend: its owner, a CAB member or a
+   * Standard Change Authority member. Resume and clear the review flag: a
+   * Standard Change Authority member only.
+   */
+  canSuspend?: boolean;
+  canResume?: boolean;
+  canClearReview?: boolean;
+}
+
+export type BeStandardChangeTemplateEventAction = "suspended" | "resumed" | "review_flagged" | "review_cleared";
+
+/** One entry of a template's history. */
+export interface BeStandardChangeTemplateEvent {
+  action: BeStandardChangeTemplateEventAction;
+  /** The suspension reason, the resume or clear note, or why it was flagged. */
+  note: string | null;
+  /** The change request that flagged it for review. */
+  changeRequest: BeEntityRef | null;
+  /** An email, or a service name. */
+  actor: string;
+  createdOn: string;
+}
+
+/** Body of `POST /standard-change-templates/{id}/resume` and `.../clear-review`. */
+export interface BeStandardChangeTemplateNotePayload {
+  /** Why the template may be used again: required, at most 1000 characters. */
+  note: string;
 }
 
 /** Body of `POST /standard-change-templates/{id}/suspend` (optional). */
@@ -5696,15 +5751,29 @@ export interface BeStandardChangeEvidence {
   customer?: BeEntityRef | null;
 }
 
-/** One CAB member asked to decide a proposal. */
+/** One approval stage of a proposal: the CAB, then the Standard Change Authority. */
+export interface BeStandardChangeProposalStage {
+  id: string;
+  /** "CAB Approval" or "Standard Change Authority". */
+  label: string;
+  /** How many different approvers must approve (1 for the CAB, 2 for the authority). */
+  requiredApprovals: number;
+  approvals: number;
+  /** APPROVED or REJECTED once settled; null while open. */
+  decision: "APPROVED" | "REJECTED" | null;
+}
+
+/** One person asked to decide a proposal. */
 export interface BeStandardChangeProposalApprover {
   id: string;
+  /** The stage (`stages`) the row belongs to. */
+  stageId?: string;
   approver: BeUserReference | null;
   /** REQUESTED, APPROVED, REJECTED or CANCELLED. */
   state: string;
   comments: string | null;
   updatedOn: string;
-  /** The caller's own REQUESTED row while the proposal is in CAB review. */
+  /** The caller's own REQUESTED row of the stage the proposal waits on. */
   canDecide: boolean;
 }
 
@@ -5739,6 +5808,8 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
    */
   copiedFrom?: BeEntityRef | null;
   evidence: BeStandardChangeEvidence[] | null;
+  /** The approval stages, oldest first. */
+  stages?: BeStandardChangeProposalStage[] | null;
   approvers: BeStandardChangeProposalApprover[] | null;
   proposedBy: BeUserReference | null;
   createdOn: string;
@@ -5753,6 +5824,16 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   canEdit: boolean;
   canSubmit: boolean;
   canWithdraw: boolean;
+  /** The proposer, on a draft never submitted. */
+  canDelete?: boolean;
+  /** A Standard Change Authority member, on someone else's open proposal. */
+  canCancel?: boolean;
+}
+
+/** `POST /standard-change-proposals/{id}/cancel`. */
+export interface BeCancelStandardChangeProposalPayload {
+  /** Why it is cancelled: required. */
+  reason: string;
 }
 
 /** `POST /standard-change-proposals`. */
@@ -5794,6 +5875,11 @@ export interface BeUpdateStandardChangeProposalPayload {
   impact?: BeChangeRequestImpact | "";
   risk?: BeChangeRequestRisk | "";
   rollbackDurationText?: string;
+  summary?: string;
+  /** An empty string clears it (chosen per change). */
+  priority?: BeChangeRequestPriority | "";
+  /** Replaces the list; an empty list clears it (any deployment). */
+  deploymentTypes?: BeDeploymentType[];
   isPlanningVisibleToCustomers?: boolean;
   customerApprovalRequired?: boolean;
   customerReviewRequired?: boolean;
@@ -5814,7 +5900,7 @@ export interface BeSearchStandardChangeProposalsPayload {
   /** Narrows the list to the proposals for one customer (account). */
   accountId?: string;
   proposedByMe?: boolean;
-  /** In CAB review, with a pending approval of the caller's. */
+  /** Waiting on a stage (CAB or authority) on which the caller holds a pending approval. */
   awaitingMyDecision?: boolean;
   query?: string;
   pagination: BePagination;

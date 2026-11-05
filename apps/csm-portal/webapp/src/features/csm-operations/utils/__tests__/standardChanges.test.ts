@@ -18,6 +18,11 @@ import { describe, expect, it } from "vitest";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { CR_FILTER_PARAM_KEYS } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
 import {
+  changeRequestPriorityLabel,
+  deploymentTypesText,
+  isStandardChangeProposalFinal,
+  isStandardChangeProposalInReview,
+  standardChangeProposalStateLabel,
   appendPlaceholderToHtml,
   canonicalStandardChangesSearch,
   CHANGE_REQUEST_LIST_PARAM_PREFIX,
@@ -244,7 +249,9 @@ describe("what a proposal still needs before the CAB", () => {
     name: "Rotate",
     rationale: "<p>Done often.</p>",
     accountId: "acct-1",
+    summary: "Rotates a host's keys.",
     subject: "Rotate {{host}}",
+    description: "<p>Rotate the keys of {{host}}</p>",
     implementationPlan: "<p>a</p>",
     backoutPlan: "<p>b</p>",
     testPlan: "<p>c</p>",
@@ -262,7 +269,9 @@ describe("what a proposal still needs before the CAB", () => {
         name: " ",
         rationale: "<p><br></p>",
         accountId: "",
+        summary: " ",
         subject: "",
+        description: "<p><br></p>",
         implementationPlan: "",
         backoutPlan: "<p></p>",
         testPlan: "",
@@ -272,7 +281,9 @@ describe("what a proposal still needs before the CAB", () => {
     ).toEqual([
       "a name",
       "a rationale",
+      "a summary",
       "a subject",
+      "a description",
       "an implementation plan",
       "a backout plan",
       "a test plan",
@@ -282,7 +293,9 @@ describe("what a proposal still needs before the CAB", () => {
   });
 
   it("asks a retirement only for its name and rationale", () => {
-    expect(standardChangeProposalGaps("retire", { ...complete, subject: "", implementationPlan: "", impact: "", risk: "" })).toEqual([]);
+    expect(
+      standardChangeProposalGaps("retire", { ...complete, summary: "", description: "", subject: "", implementationPlan: "", impact: "", risk: "" }),
+    ).toEqual([]);
     expect(standardChangeProposalGaps("retire", { ...complete, rationale: "" })).toEqual(["a rationale"]);
   });
 
@@ -491,5 +504,25 @@ describe("standard changes inside Operations > Change requests", () => {
     expect(standardChangeRecentEntry("proposal", { id: "scp-6", number: "SCP0000006", name: "  " }).title).toBe(
       "SCP0000006 · Untitled proposal",
     );
+  });
+});
+
+describe("the Standard Change Authority's states, and what a template fixes", () => {
+  it("names the two review states and the cancelled one", () => {
+    expect(standardChangeProposalStateLabel("authority_review")).toBe("Awaiting authorisation");
+    expect(standardChangeProposalStateLabel("cancelled")).toBe("Cancelled");
+    expect(isStandardChangeProposalInReview("cab_review")).toBe(true);
+    expect(isStandardChangeProposalInReview("authority_review")).toBe(true);
+    expect(isStandardChangeProposalInReview("draft")).toBe(false);
+    expect(isStandardChangeProposalFinal("cancelled")).toBe(true);
+    expect(isStandardChangeProposalFinal("authority_review")).toBe(false);
+  });
+
+  it("words a template's deployment types and priority", () => {
+    expect(deploymentTypesText(["primary_production"])).toBe("Primary Production");
+    expect(deploymentTypesText(["primary_production", "staging", "uat"])).toBe("Primary Production, Staging or UAT");
+    expect(deploymentTypesText(null)).toBe("");
+    expect(changeRequestPriorityLabel("moderate")).toBe("Moderate");
+    expect(changeRequestPriorityLabel(null)).toBe("—");
   });
 });

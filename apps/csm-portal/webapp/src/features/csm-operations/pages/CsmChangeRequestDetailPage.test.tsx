@@ -130,8 +130,10 @@ vi.mock("@features/csm-operations/api/useGroupDetail", () => ({
 }));
 // "Propose as standard change" (a closed change request): starts a proposal.
 const proposeStandardMutateMock = vi.fn();
+const citeEvidenceMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useCreateStandardChangeProposal: () => ({ mutate: proposeStandardMutateMock, isPending: false }),
+  useUpdateStandardChangeProposal: () => ({ mutate: citeEvidenceMutateMock, isPending: false }),
 }));
 const decideApprovalMutateMock = vi.fn();
 vi.mock("@features/csm-operations/api/useDecideChangeRequestApproval", () => ({
@@ -4954,6 +4956,35 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
       const [, options] = proposeStandardMutateMock.mock.calls[0]!;
       options.onSuccess({ id: "scp-1" });
       expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
+        state: { from: "/operations/change-requests/chg-1" },
+      });
+    });
+
+    it("proposes a revision of the template a closed change was raised from, citing it, never a new template", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({
+        data: {
+          ...CLOSED,
+          standardChange: {
+            template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+            templateNumber: "STD0000001",
+            versionId: "ver-1",
+            version: 1,
+            parameters: [],
+          },
+        },
+      });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Propose a revision of STD0000001" }));
+      expect(proposeStandardMutateMock).toHaveBeenCalledWith({ kind: "modify", templateId: "tpl-1" }, expect.anything());
+      proposeStandardMutateMock.mock.calls[0]![1].onSuccess({ id: "scp-2" });
+      expect(citeEvidenceMutateMock).toHaveBeenCalledWith(
+        { id: "scp-2", patch: { evidenceChangeRequestIds: ["chg-1"] } },
+        expect.anything(),
+      );
+      citeEvidenceMutateMock.mock.calls[0]![1].onSettled();
+      expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-2", {
         state: { from: "/operations/change-requests/chg-1" },
       });
     });

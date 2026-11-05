@@ -97,6 +97,18 @@ func TestStandardChangeHandler_ForwardsEachRoute(t *testing.T) {
 		{"decide", http.MethodPost, "/x", `{"decision":"approved"}`, map[string]string{"id": stdID},
 			func(h *StandardChangeHandler) http.HandlerFunc { return h.DecideProposal },
 			http.MethodPost, "/standard-change-proposals/" + stdID + "/decision", http.StatusOK},
+		{"resume with a note", http.MethodPost, "/x", `{"note":"fixed"}`, map[string]string{"id": stdID},
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.ResumeTemplate },
+			http.MethodPost, "/standard-change-templates/" + stdID + "/resume", http.StatusOK},
+		{"clear review with a note", http.MethodPost, "/x", `{"note":"one-off"}`, map[string]string{"id": stdID},
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.ClearTemplateReview },
+			http.MethodPost, "/standard-change-templates/" + stdID + "/clear-review", http.StatusOK},
+		{"cancel", http.MethodPost, "/x", `{"reason":"left"}`, map[string]string{"id": stdID},
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.CancelProposal },
+			http.MethodPost, "/standard-change-proposals/" + stdID + "/cancel", http.StatusOK},
+		{"delete a draft", http.MethodDelete, "/x", "", map[string]string{"id": stdID},
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.DeleteProposal },
+			http.MethodDelete, "/standard-change-proposals/" + stdID, http.StatusNoContent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

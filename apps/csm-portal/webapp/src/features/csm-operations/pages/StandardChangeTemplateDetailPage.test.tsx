@@ -115,6 +115,11 @@ const TEMPLATE = {
   suspendedOn: null,
   suspendedBy: null,
   openProposal: null,
+  // What the viewer may do: the server's answer (its owner, the CAB or the
+  // authority suspends; only the authority resumes or clears the flag).
+  canSuspend: true,
+  canResume: false,
+  canClearReview: false,
   usage: { total: 12, open: 2, closed: 9, rolledBack: 1, canceled: 0, lastUsedOn: "2026-10-20T00:00:00Z" },
   createdOn: "",
   createdBy: "",
@@ -283,14 +288,57 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     expect(screen.queryByRole("region", { name: "Suspended" })).not.toBeInTheDocument();
   });
 
-  it("resumes a suspended template, which cannot be raised from meanwhile", () => {
-    mocks.template = { ...TEMPLATE, state: "suspended" };
+  it("resumes a suspended template, with a note, which cannot be raised from meanwhile", () => {
+    mocks.template = { ...TEMPLATE, state: "suspended", canSuspend: false, canResume: true };
     renderPage();
     expect(screen.getByText(/no change request can be raised from this template/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /raise a change request/i })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Resume" }));
-    expect(mocks.resume).toHaveBeenCalledWith("tpl-1", expect.anything());
+    const dialog = screen.getByRole("dialog");
+    const resume = within(dialog).getByRole("button", { name: "Resume" });
+    expect(resume).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "Root cause fixed" } });
+    fireEvent.click(resume);
+    expect(mocks.resume).toHaveBeenCalledWith({ id: "tpl-1", note: "Root cause fixed" }, expect.anything());
+  });
+
+  it("says who can resume a suspended template, and offers no Resume to anyone else", () => {
+    mocks.template = { ...TEMPLATE, state: "suspended", canSuspend: false, canResume: false };
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Suspended" })).toHaveTextContent(
+      "Only a member of the Standard Change Authority can resume it.",
+    );
+  });
+
+  it("offers no Suspend to whoever may not suspend it", () => {
+    mocks.template = { ...TEMPLATE, canSuspend: false };
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Suspend" })).not.toBeInTheDocument();
+  });
+
+  it("shows the template's summary and its history", () => {
+    mocks.template = {
+      ...TEMPLATE,
+      currentVersion: { ...CURRENT, summary: "Rotates a gateway's TLS certificate. Not for client certificates." },
+      history: [
+        { action: "resumed", note: "Root cause fixed", changeRequest: null, actor: "head@example.com", createdOn: "2026-10-21T00:00:00Z" },
+        {
+          action: "review_flagged",
+          note: "CHG0001234 was rolled back",
+          changeRequest: { id: "chg-1", name: "CHG0001234" },
+          actor: "csm",
+          createdOn: "2026-10-20T00:00:00Z",
+        },
+      ],
+    };
+    renderPage();
+    expect(screen.getByText("Rotates a gateway's TLS certificate. Not for client certificates.")).toBeInTheDocument();
+    const rows = within(screen.getByRole("table", { name: "Template history" })).getAllByRole("row");
+    expect(rows[1]).toHaveTextContent("ResumedRoot cause fixedhead@example.com");
+    expect(rows[2]).toHaveTextContent("Flagged for review");
+    fireEvent.click(within(rows[2]!).getByRole("button", { name: "CHG0001234" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1", HERE);
   });
 
   it("offers nothing but reading for a retired template", () => {
@@ -320,17 +368,28 @@ describe("StandardChangeTemplateDetailPage — review flag", () => {
     reviewRequiredChangeRequest: { id: "chg-1", name: "CHG0001234" },
   };
 
-  it("says why, links to the change request, and clears it", () => {
-    mocks.template = FLAGGED;
+  it("says why, links to the change request, and clears it with a note", () => {
+    mocks.template = { ...FLAGGED, canClearReview: true };
     renderPage();
     const flag = screen.getByRole("region", { name: "Review needed" });
     expect(flag).toHaveTextContent("CHG0001234 was rolled back");
     fireEvent.click(within(flag).getByRole("button", { name: "CHG0001234" }));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1", HERE);
     fireEvent.click(within(flag).getByRole("button", { name: "Clear review" }));
-    expect(mocks.clearReview).toHaveBeenCalledWith("tpl-1", expect.anything());
-    act(() => mocks.clearReview.mock.calls[0]![1].onError(new Error("only the owner or a CAB member can clear it")));
-    expect(screen.getByText("only the owner or a CAB member can clear it")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: /clear the review flag/i });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /note/i }), { target: { value: "One-off network fault" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear review" }));
+    expect(mocks.clearReview).toHaveBeenCalledWith({ id: "tpl-1", note: "One-off network fault" }, expect.anything());
+    act(() => mocks.clearReview.mock.calls[0]![1].onError(new Error("only a member of the Standard Change Authority can do this")));
+    expect(screen.getByText("only a member of the Standard Change Authority can do this")).toBeInTheDocument();
+  });
+
+  it("offers Clear review only to whoever may clear it, and says who can", () => {
+    mocks.template = FLAGGED;
+    renderPage();
+    const flag = screen.getByRole("region", { name: "Review needed" });
+    expect(within(flag).queryByRole("button", { name: "Clear review" })).not.toBeInTheDocument();
+    expect(flag).toHaveTextContent("a member of the Standard Change Authority clears it once reviewed");
   });
 
   it("shows no flag when none is raised", () => {

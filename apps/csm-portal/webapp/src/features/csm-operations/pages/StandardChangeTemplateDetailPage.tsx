@@ -61,6 +61,7 @@ import StandardChangeContentView, {
 import {
   customerAccountPath,
   raiseFromTemplatePath,
+  STANDARD_CHANGE_AUTHORITY,
   STANDARD_CHANGE_ONE_CUSTOMER_RULE,
   STANDARD_CHANGES_PATH,
   standardChangeProposalPath,
@@ -68,7 +69,7 @@ import {
   standardChangeTemplateStateColor,
   standardChangeTemplateStateLabel,
 } from "@features/csm-operations/utils/standardChanges";
-import type { BeStandardChangeProposalKind } from "@api/backend/types";
+import type { BeStandardChangeProposalKind, BeStandardChangeTemplateEvent } from "@api/backend/types";
 
 function formatDateTime(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "short" }) ?? "—";
@@ -91,8 +92,15 @@ function Meta({ label, children }: { label: string; children: ReactNode }): JSX.
   );
 }
 
-/** A confirmation before a template is suspended or resumed. */
-type PendingConfirm = "suspend" | "resume" | null;
+/** A confirmation before a template is suspended, resumed or its review flag cleared. */
+type PendingConfirm = "suspend" | "resume" | "clear-review" | null;
+
+const HISTORY_ACTION: Record<BeStandardChangeTemplateEvent["action"], string> = {
+  suspended: "Suspended",
+  resumed: "Resumed",
+  review_flagged: "Flagged for review",
+  review_cleared: "Review cleared",
+};
 
 /** "(by X on date)" after a suspension, from what the server recorded; "" when nothing was. */
 function suspendedBySuffix(by: string | null, on: string | null): string {
@@ -104,10 +112,12 @@ function suspendedBySuffix(by: string | null, on: string | null): string {
  * One standard change template (`/operations/standard-changes/:id`): its current
  * version (the text a change request raised from it takes, placeholders
  * highlighted, and its parameters), every earlier version, its usage and the
- * review flag. From here a change request is raised from it, a revision or the
- * retirement is proposed to the CAB, the review flag is cleared and the template
- * suspended or resumed. Who may do the last three (the owner or a CAB member) is
- * the server's decision: the buttons are offered and a refusal's reason shown.
+ * review flag and its history. From here a change request is raised from it, a
+ * revision or the retirement is proposed, and the template suspended (its owner,
+ * the CAB or the Standard Change Authority: a brake) or resumed and its review
+ * flag cleared (the Standard Change Authority only, with a note: both put it back
+ * in use without a review). The buttons follow the server's `canSuspend`,
+ * `canResume` and `canClearReview`; every action is checked again there.
  */
 export default function StandardChangeTemplateDetailPage(): JSX.Element {
   const id = useNormalizedIdParam("id");
@@ -134,7 +144,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
   const clearReview = useClearStandardChangeTemplateReview();
   const createProposal = useCreateStandardChangeProposal();
   const [confirm, setConfirm] = useState<PendingConfirm>(null);
-  // The optional reason typed in the Suspend confirmation.
+  // The optional reason typed in the Suspend confirmation, or the required note of
+  // a resume or a cleared review.
   const [suspendReason, setSuspendReason] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -210,8 +221,18 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         { onError: onError("Could not suspend the template.") },
       );
     }
-    if (which === "resume") resume.mutate(template.id, { onError: onError("Could not resume the template.") });
+    if (which === "resume") {
+      resume.mutate({ id: template.id, note: suspendReason }, { onError: onError("Could not resume the template.") });
+    }
+    if (which === "clear-review") {
+      clearReview.mutate({ id: template.id, note: suspendReason }, { onError: onError("Could not clear the review flag.") });
+    }
   };
+  const openConfirm = (which: Exclude<PendingConfirm, null>): void => {
+    setSuspendReason("");
+    setConfirm(which);
+  };
+  const noteRequired = confirm === "resume" || confirm === "clear-review";
 
   const openProposalNote = template.openProposal && (
     <Alert severity="info">
@@ -246,6 +267,11 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
             {template.reviewRequired && <Chip size="small" variant="outlined" color="warning" label="Review needed" />}
           </Box>
           <Typography variant="h5">{template.name}</Typography>
+          {current?.summary && (
+            <Typography variant="body1" sx={{ whiteSpace: "pre-wrap", maxWidth: 820 }}>
+              {current.summary}
+            </Typography>
+          )}
           {template.customer && (
             <Typography variant="body2" color="text.secondary">
               {"For "}
@@ -295,28 +321,20 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
               >
                 Propose retirement
               </Button>
-              {template.state === "active" ? (
+              {template.canSuspend && (
                 <Button
                   variant="outlined"
                   size="small"
                   color="warning"
                   startIcon={<Pause size={16} />}
                   disabled={busy}
-                  onClick={() => {
-                    setSuspendReason("");
-                    setConfirm("suspend");
-                  }}
+                  onClick={() => openConfirm("suspend")}
                 >
                   Suspend
                 </Button>
-              ) : (
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<Play size={16} />}
-                  disabled={busy}
-                  onClick={() => setConfirm("resume")}
-                >
+              )}
+              {template.canResume && (
+                <Button variant="outlined" size="small" startIcon={<Play size={16} />} disabled={busy} onClick={() => openConfirm("resume")}>
                   Resume
                 </Button>
               )}
@@ -341,6 +359,7 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
           <Typography variant="body2">
             No change request can be raised from this template, and one already raised from it cannot be sent for
             approval, until it is resumed.
+            {!template.canResume && ` Only a member of the ${STANDARD_CHANGE_AUTHORITY} can resume it.`}
           </Typography>
         </Alert>
       )}
@@ -365,16 +384,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
           role="region"
           aria-label="Review needed"
           action={
-            canWrite ? (
-              <Button
-                color="inherit"
-                size="small"
-                disabled={busy}
-                onClick={() => {
-                  setActionError(null);
-                  clearReview.mutate(template.id, { onError: onError("Could not clear the review flag.") });
-                }}
-              >
+            canWrite && template.canClearReview ? (
+              <Button color="inherit" size="small" disabled={busy} onClick={() => openConfirm("clear-review")}>
                 Clear review
               </Button>
             ) : undefined
@@ -400,8 +411,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
             </Link>
           )}
           <Typography variant="caption" sx={{ display: "block", mt: 0.5 }}>
-            The template can still be used. Propose a revision (approving one clears the flag), or clear it once
-            reviewed.
+            The template can still be used. Propose a revision (approving one clears the flag), or a member of the{" "}
+            {STANDARD_CHANGE_AUTHORITY} clears it once reviewed.
           </Typography>
         </Alert>
       )}
@@ -526,6 +537,57 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         </Box>
       </Card>
 
+      {(template.history?.length ?? 0) > 0 && (
+        <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 1.5 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+            History
+          </Typography>
+          <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+            <TableContainer>
+              <Table size="small" aria-label="Template history" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "action.hover" }}>
+                    <TableCell sx={{ width: 170 }}>When</TableCell>
+                    <TableCell sx={{ width: 170 }}>What</TableCell>
+                    <TableCell>Note</TableCell>
+                    <TableCell sx={{ width: 220 }}>By</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {template.history!.map((e, i) => (
+                    <TableRow key={`${e.createdOn}-${i}`}>
+                      <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(e.createdOn)}</TableCell>
+                      <TableCell>{HISTORY_ACTION[e.action] ?? e.action}</TableCell>
+                      <TableCell sx={{ wordBreak: "break-word" }}>
+                        {e.note || "—"}
+                        {e.changeRequest && (
+                          <>
+                            {" ("}
+                            <Link
+                              component="button"
+                              variant="body2"
+                              onClick={() =>
+                                navigate(`/operations/change-requests/${encodeURIComponent(e.changeRequest!.id)}`, {
+                                  state: { from: here },
+                                })
+                              }
+                            >
+                              {e.changeRequest.name || "change request"}
+                            </Link>
+                            {")"}
+                          </>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ wordBreak: "break-word" }}>{e.actor}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Card>
+      )}
+
       <Dialog
         open={confirm !== null}
         onClose={() => setConfirm(null)}
@@ -534,32 +596,44 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
         maxWidth="sm"
       >
         <DialogTitle id="std-confirm-title">
-          {confirm === "suspend" ? `Suspend ${template.number}?` : `Resume ${template.number}?`}
+          {confirm === "suspend"
+            ? `Suspend ${template.number}?`
+            : confirm === "resume"
+              ? `Resume ${template.number}?`
+              : `Clear the review flag of ${template.number}?`}
         </DialogTitle>
         <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <DialogContentText>
             {confirm === "suspend"
-              ? "No change request can be raised from a suspended template, and one already raised from it cannot be sent for approval. It can be resumed later."
-              : "Change requests can be raised from it again, following its current version."}
+              ? "No change request can be raised from a suspended template, and one already raised from it cannot be sent for approval. Only a member of the Standard Change Authority can resume it."
+              : confirm === "resume"
+                ? "Change requests can be raised from it again, following its current version, with no review of it. Say why that is safe."
+                : "The template stays as it is. Say why the change that flagged it does not call for a revision."}
           </DialogContentText>
-          {confirm === "suspend" && (
-            <TextField
-              label="Reason (optional)"
-              multiline
-              minRows={2}
-              value={suspendReason}
-              onChange={(e) => setSuspendReason(e.target.value)}
-              helperText={`Shown on the template while it is suspended. ${suspendReason.length}/${MAX_SUSPEND_REASON_LENGTH}`}
-              slotProps={{ htmlInput: { maxLength: MAX_SUSPEND_REASON_LENGTH } }}
-            />
-          )}
+          <TextField
+            label={noteRequired ? "Note (required)" : "Reason (optional)"}
+            multiline
+            minRows={2}
+            required={noteRequired}
+            value={suspendReason}
+            onChange={(e) => setSuspendReason(e.target.value)}
+            helperText={`${
+              confirm === "suspend" ? "Shown on the template while it is suspended" : "Kept in the template's history"
+            }. ${suspendReason.length}/${MAX_SUSPEND_REASON_LENGTH}`}
+            slotProps={{ htmlInput: { maxLength: MAX_SUSPEND_REASON_LENGTH } }}
+          />
         </DialogContent>
         <DialogActions>
           <Button color="inherit" onClick={() => setConfirm(null)}>
             Go back
           </Button>
-          <Button variant="contained" color={confirm === "suspend" ? "warning" : "primary"} onClick={runConfirm}>
-            {confirm === "suspend" ? "Suspend" : "Resume"}
+          <Button
+            variant="contained"
+            color={confirm === "suspend" ? "warning" : "primary"}
+            disabled={noteRequired && !suspendReason.trim()}
+            onClick={runConfirm}
+          >
+            {confirm === "suspend" ? "Suspend" : confirm === "resume" ? "Resume" : "Clear review"}
           </Button>
         </DialogActions>
       </Dialog>

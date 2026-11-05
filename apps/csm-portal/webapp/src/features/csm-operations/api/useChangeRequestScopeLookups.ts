@@ -27,6 +27,8 @@ import type {
 export interface ScopeOption {
   id: string;
   label: string;
+  /** A deployment's type (its environment role, lower case); absent on other options. */
+  type?: string;
 }
 
 /** A selectable deployment with what choosing it contributes to the form. */
@@ -98,6 +100,7 @@ export function useChangeRequestScopeLookups(
     return (data.deployments ?? []).map((d) => ({
       id: d.id,
       label: d.name || d.id,
+      type: d.type || undefined,
       products:
         productsSettled && chosen.has(d.id)
           ? (data.deploymentProducts ?? [])

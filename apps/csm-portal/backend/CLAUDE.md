@@ -490,15 +490,19 @@ reached the browser; this is what stops them being sent at all to a caller who s
 
 ## Standard changes (`internal/handler/standard_changes.go`)
 
-Operations > Change requests > Standard changes: the CAB-approved standard change templates and the proposals that
-create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The thirteen routes
+Operations > Change requests > Standard changes: the approved standard change templates and the proposals that
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The fifteen routes
 are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
 only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
-proposal (the proposer edits and submits, a CAB member other than the proposer decides, the owner
-or a CAB member suspends) is entity-service's decision, so a 400 / 403 / 404 / 409 keeps its
-message and `errorCode` (a 403 here is a reason the page shows, unlike `mapUpstreamError`'s generic
-one); a 5xx is the generic fallback. Suspend's body `{reason}` is optional (`optionalBody`: empty
-is forwarded as none, otherwise a JSON object under the 1 MiB cap). A change request raised from a template is an ordinary
+proposal (the proposer edits, submits and deletes a draft; the CAB, then two Standard Change
+Authority members, decide; the owner, the CAB or the authority suspends; only the authority resumes,
+clears a review flag or cancels someone else's proposal) is entity-service's decision, so a 400 /
+403 / 404 / 409 keeps its message and `errorCode` (a 403 here is a reason the page shows, unlike
+`mapUpstreamError`'s generic one); a 5xx is the generic fallback. Suspend's body `{reason}` and the
+`{note}` of resume and clear-review go through `optionalBody` (empty is forwarded as none, otherwise
+a JSON object under the 1 MiB cap; entity-service requires the note). `POST
+/standard-change-proposals/{id}/cancel` forwards `{reason}`; `DELETE /standard-change-proposals/{id}`
+answers 204 with no body (`forward` writes no body for a 204). A change request raised from a template is an ordinary
 `POST /change-requests` carrying `standardChangeTemplateId`, `standardChangeTemplateVersionId` and
 `standardChangeParameters`, forwarded like every other create field. A template is one customer's
 (entity-service migration 0254): templates and proposals carry `customer` {id, name}, the search

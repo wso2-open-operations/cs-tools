@@ -16,8 +16,11 @@
 
 import { isBlankHtml } from "@utils/sanitizeHtml";
 import { backendErrorCode } from "@features/csm-operations/utils/changeRequests";
+import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
 import type {
+  BeChangeRequestPriority,
   BeChangeRequestRisk,
+  BeDeploymentType,
   BeStandardChangeContent,
   BeStandardChangeParameter,
   BeStandardChangeParameterType,
@@ -185,9 +188,11 @@ export function standardChangeTemplateStateColor(state?: string | null): ChipCol
 const PROPOSAL_STATE: Record<BeStandardChangeProposalState, { label: string; color: ChipColor }> = {
   draft: { label: "Draft", color: "default" },
   cab_review: { label: "CAB review", color: "info" },
+  authority_review: { label: "Awaiting authorisation", color: "info" },
   approved: { label: "Approved", color: "success" },
   rejected: { label: "Rejected", color: "error" },
   withdrawn: { label: "Withdrawn", color: "default" },
+  cancelled: { label: "Cancelled", color: "default" },
 };
 
 export const STANDARD_CHANGE_PROPOSAL_STATES = Object.keys(PROPOSAL_STATE) as BeStandardChangeProposalState[];
@@ -210,9 +215,53 @@ export function standardChangeProposalKindLabel(kind?: string | null): string {
   return PROPOSAL_KIND[kind as BeStandardChangeProposalKind] ?? (kind || "—");
 }
 
-/** A proposal that can no longer change (approved, rejected, withdrawn). */
+/** A proposal that can no longer change (approved, rejected, withdrawn, cancelled). */
 export function isStandardChangeProposalFinal(state?: string | null): boolean {
-  return state === "approved" || state === "rejected" || state === "withdrawn";
+  return state === "approved" || state === "rejected" || state === "withdrawn" || state === "cancelled";
+}
+
+/** A proposal waiting on a stage: the CAB's, or the Standard Change Authority's. */
+export function isStandardChangeProposalInReview(state?: string | null): boolean {
+  return state === "cab_review" || state === "authority_review";
+}
+
+/** The name of the group that authorises a template after the CAB (the server's `StandardChangeAuthorityGroupName`). */
+export const STANDARD_CHANGE_AUTHORITY = "Standard Change Authority";
+
+/** What the two approval stages are, for the proposal page and its dialogs. */
+export const STANDARD_CHANGE_APPROVAL_RULE =
+  "A standard change skips the CAB every time it is used, so its template is approved twice: by the CAB, then by two members of the Standard Change Authority. Neither the proposer nor the CAB member who approved can authorise it.";
+
+/** The longest summary the server takes. */
+export const MAX_STANDARD_CHANGE_SUMMARY = 2000;
+
+/** The priorities a template may fix ("" leaves it to whoever raises the change). */
+export const STANDARD_CHANGE_PRIORITY_OPTIONS: ReadonlyArray<{ value: BeChangeRequestPriority; label: string }> = [
+  { value: "critical", label: "Critical" },
+  { value: "high", label: "High" },
+  { value: "moderate", label: "Moderate" },
+  { value: "low", label: "Low" },
+];
+
+export function changeRequestPriorityLabel(priority?: string | null): string {
+  return STANDARD_CHANGE_PRIORITY_OPTIONS.find((o) => o.value === priority)?.label ?? (priority || "—");
+}
+
+/** The deployment types a template may be for, in the order shown. */
+export const STANDARD_CHANGE_DEPLOYMENT_TYPES: readonly BeDeploymentType[] = [
+  "primary_production",
+  "staging",
+  "uat",
+  "qa",
+  "stress",
+  "development",
+];
+
+/** "Primary Production or Staging" (the template's types, for a sentence). */
+export function deploymentTypesText(types: readonly string[] | null | undefined): string {
+  const labels = (types ?? []).map((t) => deploymentTypeLabel(t));
+  if (labels.length <= 1) return labels.join("");
+  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
 }
 
 /** One piece of a text split at its placeholders. */
@@ -712,7 +761,9 @@ export function standardChangeProposalGaps(
     rationale: string;
     /** The customer (account) id the proposal is for; "" when none is named. */
     accountId: string;
+    summary: string;
     subject: string;
+    description: string;
     implementationPlan: string;
     backoutPlan: string;
     testPlan: string;
@@ -727,7 +778,9 @@ export function standardChangeProposalGaps(
   // modification or retirement has its template's.
   if (kind === "new" && !draft.accountId.trim()) gaps.push("a customer");
   if (kind === "retire") return gaps;
+  if (!draft.summary.trim()) gaps.push("a summary");
   if (!draft.subject.trim()) gaps.push("a subject");
+  if (isBlankHtml(draft.description)) gaps.push("a description");
   if (isBlankHtml(draft.implementationPlan)) gaps.push("an implementation plan");
   if (isBlankHtml(draft.backoutPlan)) gaps.push("a backout plan");
   if (isBlankHtml(draft.testPlan)) gaps.push("a test plan");

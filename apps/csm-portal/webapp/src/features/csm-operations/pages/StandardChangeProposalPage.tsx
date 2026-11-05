@@ -45,7 +45,7 @@ import {
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Ban, Braces, Check, CopyPlus, Save, Send, Trash2, X } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Ban, Braces, Check, CopyPlus, Save, Send, Trash2, X, XCircle } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
@@ -58,8 +58,10 @@ import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import {
+  useCancelStandardChangeProposal,
   useCreateStandardChangeProposal,
   useDecideStandardChangeProposal,
+  useDeleteStandardChangeProposal,
   useGetStandardChangeProposal,
   useSearchClosedChangeRequestsForSelect,
   useSearchStandardChangeCustomersForSelect,
@@ -84,10 +86,16 @@ import {
 import {
   appendPlaceholderToHtml,
   customerAccountPath,
+  deploymentTypesText,
   hasParameterIssues,
   insertPlaceholderAt,
   isStandardChangeProposalFinal,
+  MAX_STANDARD_CHANGE_SUMMARY,
   normalizeStandardChangeParameters,
+  STANDARD_CHANGE_APPROVAL_RULE,
+  STANDARD_CHANGE_AUTHORITY,
+  STANDARD_CHANGE_DEPLOYMENT_TYPES,
+  STANDARD_CHANGE_PRIORITY_OPTIONS,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
@@ -104,16 +112,21 @@ import {
   unusedParameters,
   validateStandardChangeParameters,
 } from "@features/csm-operations/utils/standardChanges";
+import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
 import type {
   BeChangeRequestCategory,
   BeChangeRequestImpact,
+  BeChangeRequestPriority,
   BeChangeRequestRisk,
   BeChangeRequestSearchView,
+  BeDeploymentType,
   BeEntityRef,
   BeStandardChangeContent,
   BeStandardChangeEvidence,
   BeStandardChangeParameter,
   BeStandardChangeProposal,
+  BeStandardChangeProposalApprover,
+  BeStandardChangeProposalStage,
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
@@ -134,7 +147,11 @@ function personLabel(p?: { name?: string | null; email?: string | null } | null)
 
 /** The proposal's rich-text fields, in the order the form shows them. */
 const RICH_FIELDS = [
-  { field: "description", label: "Description", helper: "What the change does." },
+  {
+    field: "description",
+    label: "Description",
+    helper: "Required. The description of every change request raised from this template; placeholders are filled in.",
+  },
   { field: "justification", label: "Justification", helper: "Why the change is made." },
   { field: "implementationPlan", label: "Implementation plan", helper: "Required. The steps, generalised: mark what varies as {{key}}." },
   { field: "riskImpactAnalysis", label: "Risk and impact analysis", helper: "What could go wrong, and what is affected if it does." },
@@ -152,6 +169,7 @@ interface ProposalForm {
   /** Its name, for the picker before a search has run. */
   customerName: string;
   rationale: string;
+  summary: string;
   subject: string;
   description: string;
   justification: string;
@@ -163,6 +181,10 @@ interface ProposalForm {
   impact: BeChangeRequestImpact | "";
   risk: BeChangeRequestRisk | "";
   rollbackDurationText: string;
+  /** "" leaves the priority to whoever raises the change. */
+  priority: BeChangeRequestPriority | "";
+  /** Empty: any deployment. */
+  deploymentTypes: BeDeploymentType[];
   isPlanningVisibleToCustomers: boolean;
   customerApprovalRequired: boolean;
   customerReviewRequired: boolean;
@@ -176,6 +198,7 @@ function formFromProposal(p: BeStandardChangeProposal): ProposalForm {
     accountId: p.customer?.id ?? "",
     customerName: p.customer?.name ?? "",
     rationale: p.rationale ?? "",
+    summary: p.summary ?? "",
     subject: p.subject ?? "",
     description: p.description ?? "",
     justification: p.justification ?? "",
@@ -187,6 +210,8 @@ function formFromProposal(p: BeStandardChangeProposal): ProposalForm {
     impact: p.impact ?? "",
     risk: p.risk ?? "",
     rollbackDurationText: p.rollbackDurationText ?? "",
+    priority: p.priority ?? "",
+    deploymentTypes: p.deploymentTypes ?? [],
     isPlanningVisibleToCustomers: p.isPlanningVisibleToCustomers,
     customerApprovalRequired: p.customerApprovalRequired,
     customerReviewRequired: p.customerReviewRequired,
@@ -213,6 +238,7 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
   };
   if (customerEditable && form.accountId) patch.accountId = form.accountId;
   if (kind === "retire") return patch;
+  patch.summary = form.summary.trim();
   patch.subject = form.subject.trim();
   for (const { field } of RICH_FIELDS) patch[field] = richOut(form[field]);
   // Always sent: an empty value clears the stored one, so "-- Select --" saves as shown.
@@ -220,6 +246,8 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
   patch.impact = form.impact;
   patch.risk = form.risk;
   patch.rollbackDurationText = form.rollbackDurationText.trim();
+  patch.priority = form.priority;
+  patch.deploymentTypes = form.deploymentTypes;
   patch.isPlanningVisibleToCustomers = form.isPlanningVisibleToCustomers;
   patch.customerApprovalRequired = form.customerApprovalRequired;
   patch.customerReviewRequired = form.customerReviewRequired;
@@ -230,6 +258,7 @@ function buildProposalPatch(kind: string, form: ProposalForm, customerEditable: 
 /** The form as template content, for the live preview and the placeholder checks. */
 function formContent(form: ProposalForm): BeStandardChangeContent {
   return {
+    summary: form.summary,
     subject: form.subject,
     description: form.description,
     justification: form.justification,
@@ -241,6 +270,8 @@ function formContent(form: ProposalForm): BeStandardChangeContent {
     impact: form.impact || null,
     risk: form.risk || null,
     rollbackDurationText: form.rollbackDurationText,
+    priority: form.priority || null,
+    deploymentTypes: form.deploymentTypes.length > 0 ? form.deploymentTypes : null,
     isPlanningVisibleToCustomers: form.isPlanningVisibleToCustomers,
     customerApprovalRequired: form.customerApprovalRequired,
     customerReviewRequired: form.customerReviewRequired,
@@ -397,10 +428,12 @@ function ProposalEditor({
   proposal,
   onOpenChangeRequest,
   onWithdraw,
+  onDelete,
 }: {
   proposal: BeStandardChangeProposal;
   onOpenChangeRequest: (id: string) => void;
   onWithdraw: () => void;
+  onDelete: () => void;
 }): JSX.Element {
   const [form, setForm] = useState<ProposalForm>(() => formFromProposal(proposal));
   // Bumped to remount a rich-text editor whose value was changed from outside
@@ -478,7 +511,7 @@ function ProposalEditor({
     try {
       await submit.mutateAsync(proposal.id);
     } catch (err) {
-      setNotice({ severity: "error", text: `Saved, but not sent to the CAB: ${errorText(err, "the submission was refused.")}` });
+      setNotice({ severity: "error", text: `Saved, but not submitted: ${errorText(err, "the submission was refused.")}` });
     }
   };
 
@@ -522,6 +555,19 @@ function ProposalEditor({
           onChange={(e) => set("name", e.target.value.slice(0, NAME_MAX))}
           helperText={isRetire ? "The template being retired." : "The template's name in the catalogue."}
         />
+        {!isRetire && (
+          <TextField
+            label="Summary"
+            required
+            size="small"
+            multiline
+            minRows={2}
+            value={form.summary}
+            disabled={busy}
+            onChange={(e) => set("summary", e.target.value.slice(0, MAX_STANDARD_CHANGE_SUMMARY))}
+            helperText="What the template is for, when to use it and what it does not cover. Shown in the catalogue and when a template is picked; never copied onto a change request, so no placeholders."
+          />
+        )}
         {customerEditable ? (
           <AsyncEntitySelect<BeEntityRef>
             id="std-proposal-customer"
@@ -696,6 +742,80 @@ function ProposalEditor({
               <FormHelperText>{highRisk ? STANDARD_CHANGE_HIGH_RISK_REASON : "High is not allowed for a standard change."}</FormHelperText>
             </FormControl>
           </Box>
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) minmax(0, 2fr)" },
+              alignItems: "start",
+            }}
+          >
+            <FormControl size="small" fullWidth disabled={busy}>
+              <InputLabel id="std-proposal-priority-label" shrink>
+                Priority
+              </InputLabel>
+              <Select
+                labelId="std-proposal-priority-label"
+                label="Priority"
+                value={form.priority}
+                displayEmpty
+                onChange={(e) => set("priority", e.target.value as BeChangeRequestPriority | "")}
+              >
+                <MenuItem value="">
+                  <Typography component="span" color="text.secondary">
+                    Chosen per change
+                  </Typography>
+                </MenuItem>
+                {STANDARD_CHANGE_PRIORITY_OPTIONS.map((o) => (
+                  <MenuItem key={o.value} value={o.value}>
+                    {o.label}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {form.priority
+                  ? "Every change raised from the template has this priority."
+                  : "Left to whoever raises the change."}
+              </FormHelperText>
+            </FormControl>
+            <FormControl size="small" fullWidth disabled={busy}>
+              <InputLabel id="std-proposal-deployment-types-label" shrink>
+                Deployment types
+              </InputLabel>
+              <Select<BeDeploymentType[]>
+                labelId="std-proposal-deployment-types-label"
+                label="Deployment types"
+                multiple
+                displayEmpty
+                value={form.deploymentTypes}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  set("deploymentTypes", (typeof v === "string" ? v.split(",") : v) as BeDeploymentType[]);
+                }}
+                renderValue={(selected) =>
+                  selected.length === 0 ? (
+                    <Typography component="span" color="text.secondary">
+                      Any deployment
+                    </Typography>
+                  ) : (
+                    selected.map((t) => deploymentTypeLabel(t)).join(", ")
+                  )
+                }
+              >
+                {STANDARD_CHANGE_DEPLOYMENT_TYPES.map((t) => (
+                  <MenuItem key={t} value={t}>
+                    <Checkbox size="small" checked={form.deploymentTypes.includes(t)} sx={{ p: 0, mr: 1 }} />
+                    {deploymentTypeLabel(t)}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {form.deploymentTypes.length > 0
+                  ? `A change raised from the template needs at least one deployment, all ${deploymentTypesText(form.deploymentTypes)}.`
+                  : "The deployments are chosen when the change is raised, of any type, or none."}
+              </FormHelperText>
+            </FormControl>
+          </Box>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
             <TextField
               label="Rollback duration"
@@ -816,12 +936,13 @@ function ProposalEditor({
             </Typography>
           ) : canSubmitNow ? (
             <Typography variant="body2" color="text.secondary">
-              Ready to send to the CAB. Submitting saves first.
+              Ready to submit: the CAB, then two members of the {STANDARD_CHANGE_AUTHORITY}, approve it. Submitting
+              saves first.
             </Typography>
           ) : (
             <Typography variant="body2" color="text.secondary">
               {[
-                gaps.length ? `Before it can be sent to the CAB it still needs ${gaps.join(", ")}.` : "",
+                gaps.length ? `Before it can be submitted it still needs ${gaps.join(", ")}.` : "",
                 undeclared.length ? "Every placeholder needs a parameter." : "",
                 highRisk ? "The risk cannot be high." : "",
               ]
@@ -831,10 +952,17 @@ function ProposalEditor({
           )}
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
-          {proposal.canWithdraw && (
-            <Button variant="outlined" color="error" size="small" startIcon={<Ban size={16} />} disabled={busy} onClick={onWithdraw}>
-              Withdraw
+          {/* A draft never submitted is deleted, not withdrawn: it has been before nobody. */}
+          {proposal.canDelete ? (
+            <Button variant="outlined" color="error" size="small" startIcon={<Trash2 size={16} />} disabled={busy} onClick={onDelete}>
+              Delete draft
             </Button>
+          ) : (
+            proposal.canWithdraw && (
+              <Button variant="outlined" color="error" size="small" startIcon={<Ban size={16} />} disabled={busy} onClick={onWithdraw}>
+                Withdraw
+              </Button>
+            )
           )}
           <Button
             variant="outlined"
@@ -855,7 +983,7 @@ function ProposalEditor({
               loading={submit.isPending}
               onClick={() => void saveAndSubmit()}
             >
-              Submit to CAB
+              Submit for approval
             </Button>
           )}
         </Box>
@@ -864,15 +992,18 @@ function ProposalEditor({
   );
 }
 
-/** A CAB member's Approve / Reject; a rejection needs a comment. */
+/** An approver's Approve / Reject on the stage the proposal waits on; a rejection needs a comment. */
 function DecisionDialog({
   decision,
+  stage,
   pending,
   error,
   onClose,
   onDecide,
 }: {
   decision: "approved" | "rejected" | null;
+  /** The stage the caller decides on. */
+  stage: BeStandardChangeProposalStage | null;
   pending: boolean;
   error: string | null;
   onClose: () => void;
@@ -881,6 +1012,13 @@ function DecisionDialog({
   const [comment, setComment] = useState("");
   const reject = decision === "rejected";
   const commentMissing = reject && !comment.trim();
+  const authority = stage?.label === STANDARD_CHANGE_AUTHORITY;
+  const remaining = stage ? Math.max(stage.requiredApprovals - stage.approvals, 1) : 1;
+  const approveText = !authority
+    ? `Your approval settles the CAB's stage. Nothing is applied yet: two members of the ${STANDARD_CHANGE_AUTHORITY} are asked next.`
+    : remaining > 1
+      ? `${stage!.requiredApprovals} members of the ${STANDARD_CHANGE_AUTHORITY} must approve. Yours is the first; the template change is applied when the next one approves.`
+      : `Yours is the last approval needed: approving applies the template change.`;
   return (
     <Dialog
       open={decision !== null}
@@ -890,12 +1028,14 @@ function DecisionDialog({
       maxWidth="sm"
       slotProps={{ transition: { onExited: () => setComment("") } }}
     >
-      <DialogTitle id="std-decision-title">{reject ? "Reject the proposal" : "Approve the proposal"}</DialogTitle>
+      <DialogTitle id="std-decision-title">
+        {reject ? "Reject the proposal" : authority ? "Authorise the proposal" : "Approve the proposal"}
+      </DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <DialogContentText>
           {reject
-            ? "The catalogue is left as it is and the proposal is kept as the record, with your comment."
-            : "The first decision settles the proposal: approving it writes the template change for the CAB."}
+            ? "A rejection ends the proposal: the catalogue is left as it is and the proposal is kept as the record, with your comment."
+            : approveText}
         </DialogContentText>
         {error && <Alert severity="error">{error}</Alert>}
         <TextField
@@ -920,11 +1060,150 @@ function DecisionDialog({
           loading={pending}
           onClick={() => onDecide(comment.trim())}
         >
-          {reject ? "Reject" : "Approve"}
+          {reject ? "Reject" : authority ? "Authorise" : "Approve"}
         </Button>
       </DialogActions>
     </Dialog>
   );
+}
+
+/** A Standard Change Authority member ends someone else's open proposal; the reason is required. */
+function CancelDialog({
+  open,
+  number,
+  pending,
+  error,
+  onClose,
+  onCancel,
+}: {
+  open: boolean;
+  number: string;
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onCancel: (reason: string) => void;
+}): JSX.Element {
+  const [reason, setReason] = useState("");
+  return (
+    <Dialog
+      open={open}
+      onClose={pending ? undefined : onClose}
+      aria-labelledby="std-cancel-title"
+      fullWidth
+      maxWidth="sm"
+      slotProps={{ transition: { onExited: () => setReason("") } }}
+    >
+      <DialogTitle id="std-cancel-title">Cancel {number}?</DialogTitle>
+      <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <DialogContentText>
+          For a proposal its proposer has abandoned or can no longer take forward. It is kept as the record with your
+          reason; approvals still waiting are cancelled, and a revision or retirement no longer holds its template.
+        </DialogContentText>
+        {error && <Alert severity="error">{error}</Alert>}
+        <TextField
+          label="Reason (required)"
+          multiline
+          minRows={3}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          required
+          disabled={pending}
+          helperText="Shown to the proposer and on the proposal's record."
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button color="inherit" onClick={onClose} disabled={pending}>
+          Go back
+        </Button>
+        <Button variant="contained" color="error" disabled={pending || !reason.trim()} loading={pending} onClick={() => onCancel(reason.trim())}>
+          Cancel the proposal
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/** One approval stage: its progress and its approvers. */
+function StageApprovers({
+  stage,
+  index,
+  approvers,
+}: {
+  stage: BeStandardChangeProposalStage | null;
+  index: number;
+  approvers: BeStandardChangeProposalApprover[];
+}): JSX.Element {
+  const label = stage?.label === STANDARD_CHANGE_AUTHORITY ? STANDARD_CHANGE_AUTHORITY : "CAB";
+  const status = !stage
+    ? null
+    : stage.decision === "APPROVED"
+      ? { text: "Approved", color: "success" as const }
+      : stage.decision === "REJECTED"
+        ? { text: "Rejected", color: "error" as const }
+        : {
+            text:
+              stage.requiredApprovals > 1
+                ? `${stage.approvals} of ${stage.requiredApprovals} approvals`
+                : "Waiting for a decision",
+            color: "info" as const,
+          };
+  return (
+    <Box component="section" aria-label={`${label} approvers`} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
+        <Typography variant="subtitle2">{`${index + 1}. ${label}`}</Typography>
+        {status && <Chip size="small" variant="outlined" color={status.color} label={status.text} />}
+      </Box>
+      <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+        <TableContainer>
+          <Table size="small" aria-label={`${label} approvers`} sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "action.hover" }}>
+                <TableCell>Approver</TableCell>
+                <TableCell sx={{ width: 130 }}>State</TableCell>
+                <TableCell>Comment</TableCell>
+                <TableCell sx={{ width: 170 }}>Updated</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {approvers.map((a) => (
+                <TableRow key={a.id} selected={a.canDecide}>
+                  <TableCell sx={{ maxWidth: 260, wordBreak: "break-word" }}>
+                    {personLabel(a.approver)}
+                    {a.canDecide && (
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        {" "}
+                        (you)
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip size="small" variant="outlined" color={approvalStatusColor(a.state)} label={approvalStatusLabel(a.state)} />
+                  </TableCell>
+                  <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{a.comments || "—"}</TableCell>
+                  <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(a.updatedOn)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    </Box>
+  );
+}
+
+/** How a final proposal ended, for the decision banner. */
+function decisionHeadline(proposal: BeStandardChangeProposal): string {
+  const rejectedAt = (proposal.stages ?? []).find((s) => s.decision === "REJECTED");
+  switch (proposal.state) {
+    case "approved":
+      return `Approved by the CAB and the ${STANDARD_CHANGE_AUTHORITY}`;
+    case "rejected":
+      return rejectedAt?.label === STANDARD_CHANGE_AUTHORITY ? `Rejected by the ${STANDARD_CHANGE_AUTHORITY}` : "Rejected by the CAB";
+    case "cancelled":
+      return `Cancelled by the ${STANDARD_CHANGE_AUTHORITY}`;
+    default:
+      return "Withdrawn by the proposer";
+  }
 }
 
 /**
@@ -954,7 +1233,11 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const withdraw = useWithdrawStandardChangeProposal();
   const decide = useDecideStandardChangeProposal();
   const copy = useCreateStandardChangeProposal();
+  const cancel = useCancelStandardChangeProposal();
+  const remove = useDeleteStandardChangeProposal();
   const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [decision, setDecision] = useState<"approved" | "rejected" | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -1006,12 +1289,32 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const editing = proposal.canEdit && proposal.state === "draft";
   const approvers = proposal.approvers ?? [];
   const myRow = approvers.find((a) => a.canDecide);
-  const canCopy = canWrite && proposal.kind === "new" && (proposal.state === "rejected" || proposal.state === "withdrawn");
+  const stages = proposal.stages ?? [];
+  const myStage = stages.find((st) => st.id === myRow?.stageId) ?? stages[stages.length - 1] ?? null;
+  // One table per stage, latest stage first in the API; shown oldest first. An
+  // answer without stages (an older server) is one table.
+  const stageGroups =
+    stages.length > 0
+      ? stages.map((st) => ({ stage: st, rows: approvers.filter((a) => a.stageId === st.id) }))
+      : [{ stage: null, rows: approvers }];
+  const canCopy =
+    canWrite &&
+    proposal.kind === "new" &&
+    (proposal.state === "rejected" || proposal.state === "withdrawn" || proposal.state === "cancelled");
 
   const runWithdraw = (): void => {
     setConfirmWithdraw(false);
     setPageError(null);
     withdraw.mutate(proposal.id, { onError: (err) => setPageError(errorText(err, "Could not withdraw the proposal.")) });
+  };
+
+  const runDelete = (): void => {
+    setConfirmDelete(false);
+    setPageError(null);
+    remove.mutate(proposal.id, {
+      onSuccess: () => navigate(backTarget),
+      onError: (err) => setPageError(errorText(err, "Could not delete the draft.")),
+    });
   };
 
   const runCopy = (): void => {
@@ -1046,7 +1349,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           <Typography variant="h5">{proposal.name || "Untitled proposal"}</Typography>
           <Typography variant="body2" color="text.secondary">
             {`Proposed by ${personLabel(proposal.proposedBy)} on ${formatDateTime(proposal.createdOn)}`}
-            {proposal.submittedOn ? `; sent to the CAB ${formatDateTime(proposal.submittedOn)}` : ""}
+            {proposal.submittedOn ? `; submitted ${formatDateTime(proposal.submittedOn)}` : ""}
           </Typography>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Typography variant="body2">
@@ -1097,6 +1400,11 @@ export default function StandardChangeProposalPage(): JSX.Element {
               Withdraw
             </Button>
           )}
+          {proposal.canCancel && (
+            <Button variant="outlined" color="error" size="small" startIcon={<XCircle size={16} />} onClick={() => setCancelling(true)}>
+              Cancel proposal
+            </Button>
+          )}
           {canCopy && (
             <Button variant="outlined" size="small" startIcon={<CopyPlus size={16} />} loading={copy.isPending} onClick={runCopy}>
               Copy into a new proposal
@@ -1118,11 +1426,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           aria-label="Decision"
         >
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {proposal.state === "approved"
-              ? "Approved by the CAB"
-              : proposal.state === "rejected"
-                ? "Rejected by the CAB"
-                : "Withdrawn by the proposer"}
+            {decisionHeadline(proposal)}
             {proposal.decidedOn ? ` on ${formatDateTime(proposal.decidedOn)}` : ""}
             {proposal.decidedBy ? ` (${personLabel(proposal.decidedBy)})` : ""}
           </Typography>
@@ -1150,6 +1454,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
           proposal={proposal}
           onOpenChangeRequest={openChangeRequest}
           onWithdraw={() => setConfirmWithdraw(true)}
+          onDelete={() => setConfirmDelete(true)}
         />
       ) : (
         <>
@@ -1177,12 +1482,12 @@ export default function StandardChangeProposalPage(): JSX.Element {
 
       {approvers.length > 0 && (
         <Section
-          title="CAB approval"
+          title="Approval"
           action={
             myRow ? (
               <Box sx={{ display: "flex", gap: 1 }}>
                 <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => setDecision("approved")}>
-                  Approve
+                  {myStage?.label === STANDARD_CHANGE_AUTHORITY ? "Authorise" : "Approve"}
                 </Button>
                 <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => setDecision("rejected")}>
                   Reject
@@ -1191,45 +1496,23 @@ export default function StandardChangeProposalPage(): JSX.Element {
             ) : undefined
           }
         >
-          <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
-            <TableContainer>
-              <Table size="small" aria-label="CAB approvers" sx={{ "& .MuiTableCell-root": { borderColor: "divider" } }}>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: "action.hover" }}>
-                    <TableCell>Approver</TableCell>
-                    <TableCell sx={{ width: 130 }}>State</TableCell>
-                    <TableCell>Comment</TableCell>
-                    <TableCell sx={{ width: 170 }}>Updated</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {approvers.map((a) => (
-                    <TableRow key={a.id} selected={a.canDecide}>
-                      <TableCell sx={{ maxWidth: 260, wordBreak: "break-word" }}>
-                        {personLabel(a.approver)}
-                        {a.canDecide && (
-                          <Typography component="span" variant="caption" color="text.secondary">
-                            {" "}
-                            (you)
-                          </Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Chip size="small" variant="outlined" color={approvalStatusColor(a.state)} label={approvalStatusLabel(a.state)} />
-                      </TableCell>
-                      <TableCell sx={{ maxWidth: 360, wordBreak: "break-word" }}>{a.comments || "—"}</TableCell>
-                      <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(a.updatedOn)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
+          <Typography variant="body2" color="text.secondary">
+            {STANDARD_CHANGE_APPROVAL_RULE}
+          </Typography>
+          {stageGroups.map((g, i) => (
+            <StageApprovers key={g.stage?.id ?? "all"} stage={g.stage} index={i} approvers={g.rows} />
+          ))}
+          {proposal.state === "cab_review" && (
+            <Typography variant="caption" color="text.secondary">
+              {`2. ${STANDARD_CHANGE_AUTHORITY}: asked once the CAB approves.`}
+            </Typography>
+          )}
         </Section>
       )}
 
       <DecisionDialog
         decision={decision}
+        stage={myStage}
         pending={decide.isPending}
         error={decide.isError ? errorText(decide.error, "Could not record the decision.") : null}
         onClose={() => {
@@ -1244,12 +1527,41 @@ export default function StandardChangeProposalPage(): JSX.Element {
         }
       />
 
+      <CancelDialog
+        open={cancelling}
+        number={proposal.number}
+        pending={cancel.isPending}
+        error={cancel.isError ? errorText(cancel.error, "Could not cancel the proposal.") : null}
+        onClose={() => {
+          setCancelling(false);
+          cancel.reset();
+        }}
+        onCancel={(reason) => cancel.mutate({ id: proposal.id, reason }, { onSuccess: () => setCancelling(false) })}
+      />
+
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} aria-labelledby="std-delete-title">
+        <DialogTitle id="std-delete-title">Delete {proposal.number}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The draft has never been submitted, so it is deleted with everything in it. This cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button color="inherit" onClick={() => setConfirmDelete(false)}>
+            Go back
+          </Button>
+          <Button variant="contained" color="error" loading={remove.isPending} onClick={runDelete}>
+            Delete draft
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Dialog open={confirmWithdraw} onClose={() => setConfirmWithdraw(false)} aria-labelledby="std-withdraw-title">
         <DialogTitle id="std-withdraw-title">Withdraw {proposal.number}?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            The proposal is kept as the record but can no longer be edited or sent to the CAB; any approvals still
-            waiting are cancelled.
+            The proposal is kept as the record but can no longer be edited or approved; any approvals still waiting
+            are cancelled.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

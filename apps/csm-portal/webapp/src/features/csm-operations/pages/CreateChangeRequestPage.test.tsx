@@ -199,12 +199,13 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
 // contacts (the read-only Customer Group) are the project's own, per project.
 const SCOPE_FIXTURE: Record<
   string,
-  Array<{ id: string; label: string; products: Array<{ id: string; label: string }> }>
+  Array<{ id: string; label: string; type?: string; products: Array<{ id: string; label: string }> }>
 > = {
   "proj-a": [
     {
       id: "dep-prod",
       label: "Acme Production",
+      type: "primary_production",
       products: [
         { id: "dp-apim", label: "API Manager 4.3.0" },
         { id: "dp-is", label: "Identity Server 7.0.0" },
@@ -213,6 +214,7 @@ const SCOPE_FIXTURE: Record<
     {
       id: "dep-stg",
       label: "Acme Staging",
+      type: "staging",
       products: [{ id: "dp-apim-stg", label: "API Manager 4.2.0" }],
     },
   ],
@@ -239,6 +241,7 @@ vi.mock("@features/csm-operations/api/useChangeRequestScopeLookups", () => ({
     deployments: (projectId ? (SCOPE_FIXTURE[projectId] ?? []) : []).map((d) => ({
       id: d.id,
       label: d.label,
+      type: d.type,
       products: deploymentIds.includes(d.id) ? d.products : undefined,
     })),
     customerContacts: projectId ? (CONTACTS_FIXTURE[projectId] ?? []) : [],
@@ -2519,6 +2522,57 @@ describe("CreateChangeRequestPage — Standard change raised from a template", (
     render(<CreateChangeRequestPage />);
     expect(screen.getByRole("textbox", { name: "Standard change template" })).toHaveValue("tpl-1");
     expect(screen.getByRole("textbox", { name: /^host/i })).toHaveValue("gw-2");
+  });
+
+  it("uses the priority the template fixes, shown read-only, and never sends one", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, priority: "high" } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    pickTemplate();
+    expect(screen.queryByRole("combobox", { name: /^priority/i })).not.toBeInTheDocument();
+    const priority = screen.getByRole("textbox", { name: /^priority/i });
+    expect(priority).toHaveValue("High");
+    expect(priority).toHaveAttribute("readonly");
+    expect(screen.getByText("Fixed by the standard change template.")).toBeInTheDocument();
+    fillSpecifics();
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0]![0]).not.toHaveProperty("priority");
+  });
+
+  it("offers only the deployments of the template's types, and needs one", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, deploymentTypes: ["primary_production"] } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    pickTemplate();
+    fillSpecifics();
+    const create = screen.getByRole("button", { name: /create change request/i });
+    expect(create).toBeDisabled();
+    expect(screen.getByText(/still needs a Primary Production deployment/)).toBeInTheDocument();
+    expect(screen.getByText("Required: the template is for Primary Production deployments only.")).toBeInTheDocument();
+    const deployments = screen.getByRole("combobox", { name: /^deployments/i });
+    fireEvent.mouseDown(deployments);
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Acme Production"]);
+    fireEvent.click(screen.getByRole("option", { name: "Acme Production" }));
+    fireEvent.keyDown(deployments, { key: "Escape" });
+    expect(create).toBeEnabled();
+    fireEvent.click(create);
+    expect(postChangeRequestMutateMock.mock.calls[0]![0]).toMatchObject({ deploymentIds: ["dep-prod"] });
+  });
+
+  it("drops a deployment of another type chosen before the template", () => {
+    templateFixture = { ...TEMPLATE, currentVersion: { ...VERSION, deploymentTypes: ["primary_production"] } };
+    render(<CreateChangeRequestPage />);
+    selectType("Standard");
+    pickProject();
+    const deployments = screen.getByRole("combobox", { name: /^deployments/i });
+    fireEvent.mouseDown(deployments);
+    fireEvent.click(screen.getByRole("option", { name: "Acme Staging" }));
+    fireEvent.keyDown(deployments, { key: "Escape" });
+    pickTemplate();
+    const root = screen.getByRole("combobox", { name: /^deployments/i }).closest(".MuiInputBase-root");
+    expect(Array.from(root?.querySelectorAll(".MuiChip-label") ?? []).map((c) => c.textContent)).toEqual([]);
   });
 
   describe("a template is one customer's: the Customer Project's", () => {

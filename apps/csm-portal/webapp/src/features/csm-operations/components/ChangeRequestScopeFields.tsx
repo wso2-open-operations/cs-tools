@@ -20,6 +20,7 @@ import type { JSX, ReactNode } from "react";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import type { ScopeOption } from "@features/csm-operations/api/useChangeRequestScopeLookups";
 import type { ChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
+import { deploymentTypesText } from "@features/csm-operations/utils/standardChanges";
 
 interface ChangeRequestScopeFieldsProps {
   scope: ChangeRequestScope;
@@ -56,6 +57,12 @@ interface ChangeRequestScopeFieldsProps {
    * place, so the create page draws the two parts in two places.
    */
   parts?: "all" | "project" | "deployments";
+  /**
+   * The deployment types a standard change template is for: only deployments of
+   * these types are offered, and at least one is required (asterisk). Empty or
+   * absent: any deployment, none required.
+   */
+  deploymentTypes?: readonly string[] | null;
 }
 
 function selectedOptions(
@@ -82,6 +89,7 @@ export default function ChangeRequestScopeFields({
   projectRequired = false,
   projectHelperText,
   parts = "all",
+  deploymentTypes,
 }: ChangeRequestScopeFieldsProps): JSX.Element {
   const hasProject = !!scope.projectId;
 
@@ -102,6 +110,13 @@ export default function ChangeRequestScopeFields({
       helperText={projectHelperText}
     />
   );
+  const typed = (deploymentTypes?.length ?? 0) > 0;
+  const deploymentOptions = typed
+    ? scope.deploymentOptions.filter((o) => !!o.type && deploymentTypes!.includes(o.type))
+    : scope.deploymentOptions;
+  const typesHelper = typed
+    ? `Required: the template is for ${deploymentTypesText(deploymentTypes)} deployments only.`
+    : undefined;
   const deploymentFields = (
     <>
       <Autocomplete<ScopeOption, true>
@@ -109,7 +124,7 @@ export default function ChangeRequestScopeFields({
         fullWidth
         size="small"
         id={`${idPrefix}-deployments`}
-        options={scope.deploymentOptions}
+        options={deploymentOptions}
         value={deploymentValue}
         disabled={disabled || !hasProject}
         loading={scope.lookups.isLoading}
@@ -122,12 +137,15 @@ export default function ChangeRequestScopeFields({
             ? "Couldn't load deployments. Try again."
             : scope.lookups.isLoading
               ? "Loading deployments…"
-              : "This project has no deployments"
+              : typed
+                ? `This project has no ${deploymentTypesText(deploymentTypes)} deployments`
+                : "This project has no deployments"
         }
         renderInput={(params) => (
           <TextField
             {...params}
             label="Deployments"
+            required={typed}
             placeholder={deploymentValue.length ? undefined : "Select deployments…"}
             error={scope.lookups.isError}
             helperText={
@@ -140,7 +158,9 @@ export default function ChangeRequestScopeFields({
                 </>
               ) : !hasProject ? (
                 "Select a Customer Project first."
-              ) : undefined
+              ) : (
+                typesHelper
+              )
             }
           />
         )}

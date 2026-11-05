@@ -28,6 +28,7 @@ import type {
   BeChangeRequestSearchPayload,
   BeChangeRequestSearchResponse,
   BeChangeRequestSearchView,
+  BeCancelStandardChangeProposalPayload,
   BeCreateStandardChangeProposalPayload,
   BeDecideStandardChangeProposalPayload,
   BeEntityRef,
@@ -39,6 +40,7 @@ import type {
   BeSearchStandardChangeTemplatesResponse,
   BeStandardChangeProposal,
   BeStandardChangeTemplate,
+  BeStandardChangeTemplateNotePayload,
   BeStandardChangeTemplateVersion,
   BeSuspendStandardChangeTemplatePayload,
   BeUpdateStandardChangeProposalPayload,
@@ -47,9 +49,11 @@ import type {
 // Operations > Change requests > Standard changes: the CAB-approved template
 // catalogue and the proposals that create, revise or retire its templates.
 // Every route is a thin BFF proxy of entity-service, which decides who may act
-// (the proposer edits and submits, a CAB member decides, the owner or a CAB
-// member suspends): a refusal keeps its message and `errorCode`, so callers
-// show `err.message`.
+// (the proposer edits, submits and deletes a draft; the CAB, then two members
+// of the Standard Change Authority, decide; the owner, the CAB or the authority
+// suspends; only the authority resumes, clears a review flag or cancels someone
+// else's proposal): a refusal keeps its message and `errorCode`, so callers show
+// `err.message`.
 
 /** Every standard change query lives under this key, so one write refreshes them all. */
 export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
@@ -64,6 +68,7 @@ const enc = encodeURIComponent;
 /** One page of the catalogue (`POST /standard-change-templates/search`). */
 export function useSearchStandardChangeTemplates(
   payload: BeSearchStandardChangeTemplatesPayload,
+  options?: { enabled?: boolean },
 ): UseQueryResult<BeSearchStandardChangeTemplatesResponse, Error> {
   const api = useBackendApi();
   return useQuery<BeSearchStandardChangeTemplatesResponse, Error>({
@@ -74,6 +79,7 @@ export function useSearchStandardChangeTemplates(
         payload,
       ),
     placeholderData: keepPreviousData,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -229,19 +235,31 @@ export function useSuspendStandardChangeTemplate(): UseMutationResult<
   });
 }
 
-/** `POST /standard-change-templates/{id}/resume` (the owner or a CAB member). */
-export function useResumeStandardChangeTemplate(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+/** `POST /standard-change-templates/{id}/resume` (a Standard Change Authority member, with a note). */
+export function useResumeStandardChangeTemplate(): UseMutationResult<
+  BeStandardChangeTemplate,
+  Error,
+  { id: string; note: string }
+> {
   const api = useBackendApi();
-  return useStandardChangeMutation((id: string) =>
-    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/resume`),
+  return useStandardChangeMutation(({ id, note }: { id: string; note: string }) =>
+    api.post<BeStandardChangeTemplateNotePayload, BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/resume`, {
+      note: note.trim(),
+    }),
   );
 }
 
-/** `POST /standard-change-templates/{id}/clear-review` (the owner or a CAB member). */
-export function useClearStandardChangeTemplateReview(): UseMutationResult<BeStandardChangeTemplate, Error, string> {
+/** `POST /standard-change-templates/{id}/clear-review` (a Standard Change Authority member, with a note). */
+export function useClearStandardChangeTemplateReview(): UseMutationResult<
+  BeStandardChangeTemplate,
+  Error,
+  { id: string; note: string }
+> {
   const api = useBackendApi();
-  return useStandardChangeMutation((id: string) =>
-    api.postEmpty<BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/clear-review`),
+  return useStandardChangeMutation(({ id, note }: { id: string; note: string }) =>
+    api.post<BeStandardChangeTemplateNotePayload, BeStandardChangeTemplate>(`${TEMPLATES}/${enc(id)}/clear-review`, {
+      note: note.trim(),
+    }),
   );
 }
 
@@ -277,7 +295,7 @@ export function useSubmitStandardChangeProposal(): UseMutationResult<BeStandardC
   );
 }
 
-/** `POST /standard-change-proposals/{id}/withdraw`: the proposer, while a draft or in CAB review. */
+/** `POST /standard-change-proposals/{id}/withdraw`: the proposer, while it is open. */
 export function useWithdrawStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
   const api = useBackendApi();
   return useStandardChangeMutation((id: string) =>
@@ -285,7 +303,27 @@ export function useWithdrawStandardChangeProposal(): UseMutationResult<BeStandar
   );
 }
 
-/** `POST /standard-change-proposals/{id}/decision`: a CAB member on their own row. */
+/** `POST /standard-change-proposals/{id}/cancel`: a Standard Change Authority member, on someone else's open proposal. */
+export function useCancelStandardChangeProposal(): UseMutationResult<
+  BeStandardChangeProposal,
+  Error,
+  { id: string; reason: string }
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation(({ id, reason }: { id: string; reason: string }) =>
+    api.post<BeCancelStandardChangeProposalPayload, BeStandardChangeProposal>(`${PROPOSALS}/${enc(id)}/cancel`, {
+      reason: reason.trim(),
+    }),
+  );
+}
+
+/** `DELETE /standard-change-proposals/{id}`: the proposer, on a draft never submitted. */
+export function useDeleteStandardChangeProposal(): UseMutationResult<null, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) => api.del<null>(`${PROPOSALS}/${enc(id)}`));
+}
+
+/** `POST /standard-change-proposals/{id}/decision`: a CAB or authority member on their own row. */
 export function useDecideStandardChangeProposal(): UseMutationResult<
   BeStandardChangeProposal,
   Error,

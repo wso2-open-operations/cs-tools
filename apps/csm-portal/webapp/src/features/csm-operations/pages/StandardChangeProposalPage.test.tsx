@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   withdraw: vi.fn(),
   decide: vi.fn(),
   create: vi.fn(),
+  cancel: vi.fn(),
+  remove: vi.fn(),
   recordView: vi.fn(),
   calls: [] as string[],
 }));
@@ -48,6 +50,8 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useWithdrawStandardChangeProposal: () => ({ mutate: mocks.withdraw, isPending: false }),
   useDecideStandardChangeProposal: () => ({ mutate: mocks.decide, isPending: false, isError: false, reset: vi.fn() }),
   useCreateStandardChangeProposal: () => ({ mutate: mocks.create, isPending: false }),
+  useCancelStandardChangeProposal: () => ({ mutate: mocks.cancel, isPending: false, isError: false, reset: vi.fn() }),
+  useDeleteStandardChangeProposal: () => ({ mutate: mocks.remove, isPending: false }),
   useSearchClosedChangeRequestsForSelect: () => ({ data: [], isFetching: false, isError: false }),
   useSearchStandardChangeCustomersForSelect: () => ({ data: [], isFetching: false, isError: false }),
 }));
@@ -108,6 +112,7 @@ const DRAFT: BeStandardChangeProposal = {
   template: null,
   baseVersion: null,
   sourceChangeRequest: { id: "chg-1", name: "CHG0000001" },
+  summary: "Rotates a gateway's TLS certificate.",
   subject: "Rotate the TLS certificate on {{host}}",
   description: "<p>Rotate the certificate on {{host}}.</p>",
   justification: null,
@@ -119,6 +124,8 @@ const DRAFT: BeStandardChangeProposal = {
   impact: "low",
   risk: "low",
   rollbackDurationText: "15 mins",
+  priority: null,
+  deploymentTypes: null,
   isPlanningVisibleToCustomers: false,
   customerApprovalRequired: false,
   customerReviewRequired: false,
@@ -136,6 +143,8 @@ const DRAFT: BeStandardChangeProposal = {
   canEdit: true,
   canSubmit: true,
   canWithdraw: true,
+  canDelete: false,
+  canCancel: false,
 };
 
 function renderPage(state?: { from: string }): void {
@@ -151,7 +160,7 @@ function renderPage(state?: { from: string }): void {
 const richField = (name: RegExp): HTMLElement => within(screen.getByRole("group", { name })).getByRole("textbox");
 const lastPatch = (): Record<string, unknown> => mocks.update.mock.calls.at(-1)![0].patch;
 const saveButton = (): HTMLElement => screen.getByRole("button", { name: /^save$/i });
-const submitButton = (): HTMLElement => screen.getByRole("button", { name: /submit to cab/i });
+const submitButton = (): HTMLElement => screen.getByRole("button", { name: /submit for approval/i });
 
 beforeEach(() => {
   mocks.navigate.mockReset();
@@ -183,6 +192,7 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
       name: "Rotate a certificate",
       rationale: "<p>Done every quarter without incident.</p>",
       evidenceChangeRequestIds: ["chg-1"],
+      summary: "Rotates a gateway's TLS certificate.",
       subject: "Rotate the TLS certificate on {{host}}",
       description: "<p>Rotate the certificate on {{host}}.</p>",
       justification: "",
@@ -194,6 +204,8 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
       impact: "low",
       risk: "low",
       rollbackDurationText: "15 mins",
+      priority: "",
+      deploymentTypes: [],
       isPlanningVisibleToCustomers: false,
       customerApprovalRequired: false,
       customerReviewRequired: false,
@@ -318,7 +330,7 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     renderPage();
     fireEvent.click(submitButton());
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Saved, but not sent to the CAB: the proposal is not complete; it still needs: testPlan",
+      "Saved, but not submitted: the proposal is not complete; it still needs: testPlan",
     );
   });
 
@@ -595,6 +607,142 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
       state: { from: "/operations/standard-change-proposals/scp-1" },
     });
+  });
+});
+
+describe("StandardChangeProposalPage — what a template fixes, and getting rid of a draft", () => {
+  it("asks for the summary and the description before it can be submitted", () => {
+    mocks.proposal = { ...DRAFT, summary: null, description: null };
+    renderPage();
+    expect(submitButton()).toBeDisabled();
+    expect(screen.getByText(/still needs a summary, a description/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: /^summary/i }), { target: { value: "  Rotates certificates.  " } });
+    fireEvent.click(saveButton());
+    expect(lastPatch()).toMatchObject({ summary: "Rotates certificates." });
+  });
+
+  it("fixes a priority and the deployment types, or leaves both to whoever raises the change", () => {
+    renderPage();
+    expect(screen.getByText("Left to whoever raises the change.")).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^priority/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "High" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^deployment types/i }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Primary Production" }));
+    fireEvent.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Staging" }));
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    expect(
+      screen.getByText("A change raised from the template needs at least one deployment, all Primary Production or Staging."),
+    ).toBeInTheDocument();
+    fireEvent.click(saveButton());
+    expect(lastPatch()).toMatchObject({ priority: "high", deploymentTypes: ["primary_production", "staging"] });
+  });
+
+  it("deletes a draft never submitted, after a confirmation, instead of withdrawing it", () => {
+    mocks.proposal = { ...DRAFT, canDelete: true };
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete draft" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete SCP0000001?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete draft" }));
+    expect(mocks.remove).toHaveBeenCalledWith("scp-1", expect.anything());
+    act(() => mocks.remove.mock.calls[0]![1].onSuccess());
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests?view=standard&show=proposals");
+  });
+});
+
+describe("StandardChangeProposalPage — the Standard Change Authority", () => {
+  const CAB_STAGE = { id: "st-1", label: "CAB Approval", requiredApprovals: 1, approvals: 1, decision: "APPROVED" as const };
+  const AUTHORITY_STAGE = { id: "st-2", label: "Standard Change Authority", requiredApprovals: 2, approvals: 1, decision: null };
+  const AUTHORITY_REVIEW: BeStandardChangeProposal = {
+    ...DRAFT,
+    state: "authority_review",
+    canEdit: false,
+    canSubmit: false,
+    canWithdraw: false,
+    submittedOn: "2026-10-02T00:00:00Z",
+    stages: [CAB_STAGE, AUTHORITY_STAGE],
+    approvers: [
+      { id: "a-3", stageId: "st-2", approver: { id: "u-5", name: "Hana Head", email: "hana@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-03T00:00:00Z", canDecide: true },
+      { id: "a-4", stageId: "st-2", approver: { id: "u-6", name: "Ivan Head", email: "ivan@example.com" }, state: "APPROVED", comments: "Fine", updatedOn: "2026-10-03T00:00:00Z", canDecide: false },
+      { id: "a-1", stageId: "st-1", approver: { id: "u-2", name: "Carol Cab", email: "carol@example.com" }, state: "APPROVED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false },
+    ],
+  };
+
+  it("shows each stage with its progress, the CAB first", () => {
+    mocks.proposal = AUTHORITY_REVIEW;
+    renderPage();
+    expect(screen.getByText("Awaiting authorisation")).toBeInTheDocument();
+    const cab = screen.getByRole("region", { name: "CAB approvers" });
+    expect(cab).toHaveTextContent("1. CAB");
+    expect(cab).toHaveTextContent("Approved");
+    expect(within(cab).getByText("Carol Cab")).toBeInTheDocument();
+    const authority = screen.getByRole("region", { name: "Standard Change Authority approvers" });
+    expect(authority).toHaveTextContent("2. Standard Change Authority");
+    expect(authority).toHaveTextContent("1 of 2 approvals");
+    expect(within(authority).getByText("Hana Head")).toBeInTheDocument();
+  });
+
+  it("authorises: the second approval applies it", () => {
+    mocks.proposal = AUTHORITY_REVIEW;
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+    const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+    expect(dialog).toHaveTextContent("Yours is the last approval needed");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
+    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved" }, expect.anything());
+  });
+
+  it("tells the CAB that the authority is asked next", () => {
+    mocks.proposal = {
+      ...AUTHORITY_REVIEW,
+      state: "cab_review",
+      stages: [{ ...CAB_STAGE, approvals: 0, decision: null }],
+      approvers: [{ ...AUTHORITY_REVIEW.approvers![2]!, state: "REQUESTED", canDecide: true }],
+    };
+    renderPage();
+    expect(screen.getByText("2. Standard Change Authority: asked once the CAB approves.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(screen.getByRole("dialog", { name: /approve the proposal/i })).toHaveTextContent(
+      "two members of the Standard Change Authority are asked next",
+    );
+  });
+
+  it("lets an authority member cancel someone else's proposal, with a reason", () => {
+    mocks.proposal = { ...AUTHORITY_REVIEW, canCancel: true };
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel proposal" }));
+    const dialog = screen.getByRole("dialog", { name: "Cancel SCP0000001?" });
+    const confirm = within(dialog).getByRole("button", { name: "Cancel the proposal" });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /reason/i }), { target: { value: "The proposer left" } });
+    fireEvent.click(confirm);
+    expect(mocks.cancel).toHaveBeenCalledWith({ id: "scp-1", reason: "The proposer left" }, expect.anything());
+  });
+
+  it("says who ended a cancelled proposal, and why", () => {
+    mocks.proposal = {
+      ...AUTHORITY_REVIEW,
+      state: "cancelled",
+      decidedOn: "2026-10-04T00:00:00Z",
+      decidedBy: { id: "u-5", name: "Hana Head", email: "hana@example.com" },
+      decisionComment: "The proposer left",
+    };
+    renderPage();
+    const decision = screen.getByRole("region", { name: "Decision" });
+    expect(decision).toHaveTextContent("Cancelled by the Standard Change Authority");
+    expect(decision).toHaveTextContent("Hana Head");
+    expect(decision).toHaveTextContent("The proposer left");
+  });
+
+  it("says a proposal the authority rejected was rejected by the authority", () => {
+    mocks.proposal = {
+      ...AUTHORITY_REVIEW,
+      state: "rejected",
+      stages: [CAB_STAGE, { ...AUTHORITY_STAGE, decision: "REJECTED" }],
+      decisionComment: "Too broad",
+    };
+    renderPage();
+    expect(screen.getByRole("region", { name: "Decision" })).toHaveTextContent("Rejected by the Standard Change Authority");
   });
 });
 

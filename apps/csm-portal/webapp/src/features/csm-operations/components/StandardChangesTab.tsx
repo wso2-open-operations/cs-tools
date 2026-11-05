@@ -48,9 +48,9 @@ import QueryErrorState from "@components/QueryErrorState";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import ProposeStandardChangeDialog from "@features/csm-operations/components/ProposeStandardChangeDialog";
 import {
   useCountStandardChangeProposals,
-  useCreateStandardChangeProposal,
   useSearchStandardChangeProposals,
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeTemplates,
@@ -309,6 +309,15 @@ function TemplateCatalogue({ leading, trailing }: ToolbarSlots): JSX.Element {
                             <Chip size="small" variant="outlined" color="warning" label="Review needed" />
                           )}
                         </Box>
+                        {t.currentVersion?.summary && (
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+                          >
+                            {t.currentVersion.summary}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell sx={{ maxWidth: 220, wordBreak: "break-word" }}>
                         <CustomerCell customer={t.customer} />
@@ -540,7 +549,7 @@ function plural(n: number, one: string, many: string): string {
 }
 
 /**
- * "2 proposals await your CAB decision · 1 draft of yours" above the
+ * "2 proposals await your decision · 1 draft of yours" above the
  * catalogue, each part a link to the proposals filtered to it. Only what
  * applies to the viewer is said, and nothing at all when nothing does. It is a
  * hint, not the list: nothing is shown until both counts are in (so it does not
@@ -562,7 +571,7 @@ function AttentionLine(): JSX.Element | null {
   if (awaitingCount > 0) {
     parts.push({
       key: "awaiting",
-      text: `${plural(awaitingCount, "proposal awaits", "proposals await")} your CAB decision`,
+      text: `${plural(awaitingCount, "proposal awaits", "proposals await")} your decision`,
       to: proposalsHref({ scope: "awaiting" }),
     });
   }
@@ -606,19 +615,8 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
   const navigate = useNavTransition();
   const location = useLocation();
   const [, setSearchParams] = useSearchParams();
-  const createProposal = useCreateStandardChangeProposal();
-
-  const propose = (): void => {
-    createProposal.mutate(
-      { kind: "new" },
-      {
-        onSuccess: (proposal) =>
-          navigate(standardChangeProposalPath(proposal.id), {
-            state: { from: `${location.pathname}${location.search}` },
-          }),
-      },
-    );
-  };
+  const [proposing, setProposing] = useState(false);
+  const from = { from: `${location.pathname}${location.search}` };
 
   const toggle = (
     <ToggleButtonGroup
@@ -643,8 +641,7 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
       variant="contained"
       size="small"
       startIcon={<Plus size={16} />}
-      loading={createProposal.isPending}
-      onClick={propose}
+      onClick={() => setProposing(true)}
       sx={{ ml: "auto", whiteSpace: "nowrap" }}
     >
       Propose a standard change
@@ -655,10 +652,15 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
     <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {show === "templates" && <AttentionLine />}
 
-      {createProposal.isError && (
-        <Alert severity="error" onClose={() => createProposal.reset()}>
-          {errorText(createProposal.error, "Could not start the proposal.")}
-        </Alert>
+      {/* Mounted only while open: it starts empty every time, and its template
+          lookup runs only then. */}
+      {proposing && (
+        <ProposeStandardChangeDialog
+          open
+          onClose={() => setProposing(false)}
+          onCreated={(proposal) => navigate(standardChangeProposalPath(proposal.id), { state: from })}
+          onOpenTemplate={(id) => navigate(standardChangeTemplatePath(id), { state: from })}
+        />
       )}
 
       {show === "templates" ? (

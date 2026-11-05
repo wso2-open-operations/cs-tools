@@ -68,6 +68,8 @@ import {
 import StandardChangeContentView from "@features/csm-operations/components/StandardChangeContentView";
 import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
 import {
+  changeRequestPriorityLabel,
+  deploymentTypesText,
   isStandardChangeTemplateOtherCustomer,
   isStandardChangeTemplateUnavailable,
   STANDARD_CHANGE_ONE_CUSTOMER_RULE,
@@ -105,6 +107,7 @@ import type {
   BeChangeRequestCategory,
   BeChangeRequestImpact,
   BeChangeRequestPriority,
+  BeDeploymentType,
   BeChangeRequestType,
   BeCreateChangeRequestPayload,
   BeGroup,
@@ -392,6 +395,26 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // project; a template chosen before any project (a template page's "Raise a
   // change request", a clone, a draft) narrows the project picker to its
   // customer instead.
+  // What the template fixes beyond its text: a priority (then shown, not
+  // chosen) and the deployment types the change must be for (then only those
+  // deployments are offered, and one is required).
+  const templatePriority = isStandard ? (templateVersion?.priority ?? null) : null;
+  const templateDeploymentTypes = isStandard && templateVersion?.deploymentTypes?.length ? templateVersion.deploymentTypes : null;
+  const typedDeploymentIds = templateDeploymentTypes
+    ? scope.deploymentIds.filter((id) => {
+        const t = scope.deploymentOptions.find((o) => o.id === id)?.type;
+        return !!t && templateDeploymentTypes.includes(t as BeDeploymentType);
+      })
+    : scope.deploymentIds;
+  // A deployment chosen before the template, of a type it is not for, is dropped
+  // once the project's deployments (and their types) are known.
+  const { setDeployments } = scope;
+  const deploymentsKnown = scope.deploymentOptions.length > 0;
+  useEffect(() => {
+    if (templateDeploymentTypes && deploymentsKnown && typedDeploymentIds.length !== scope.deploymentIds.length) {
+      setDeployments(typedDeploymentIds);
+    }
+  }, [templateDeploymentTypes, deploymentsKnown, typedDeploymentIds, scope.deploymentIds.length, setDeployments]);
   const projectCustomerQuery = useProjectCustomer(isStandard && scope.projectId ? scope.projectId : undefined);
   const projectCustomerKnown = isStandard && !!scope.projectId && projectCustomerQuery.isSuccess;
   const projectCustomer = projectCustomerKnown ? (projectCustomerQuery.data ?? null) : null;
@@ -647,7 +670,11 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const canSubmit =
     isCreatableChangeRequestType(type) &&
     (isStandard
-      ? templateUsable && !templateUnavailable && !otherCustomerMessage && customerMatches
+      ? templateUsable &&
+        !templateUnavailable &&
+        !otherCustomerMessage &&
+        customerMatches &&
+        (!templateDeploymentTypes || typedDeploymentIds.length > 0)
       : subject.trim().length > 0) &&
     !isSubmitting &&
     !isIncidentParentSelected;
@@ -659,6 +686,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
   else if (isStandard) {
     if (!scope.projectId) stillNeeded.push("a Customer Project");
     if (!templateId) stillNeeded.push("a standard change template");
+    else if (templateDeploymentTypes && scope.projectId && typedDeploymentIds.length === 0) {
+      stillNeeded.push(`a ${deploymentTypesText(templateDeploymentTypes)} deployment`);
+    }
   } else if (!subject.trim()) stillNeeded.push("a subject");
   const stillNeededText =
     !isSubmitting && stillNeeded.length ? `Before it can be created it still needs ${stillNeeded.join(" and ")}.` : "";
@@ -680,7 +710,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
       standardChangeTemplateVersionId: templateVersion!.id,
       standardChangeParameters: standardChangeParametersPayload(templateParameters, parameterValues),
     };
-    if (priority) payload.priority = priority as BeChangeRequestPriority;
+    // A priority the template fixes is the template's: sending one is a 400.
+    if (priority && !templatePriority) payload.priority = priority as BeChangeRequestPriority;
     return payload;
   };
 
@@ -901,6 +932,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
       projectHelperText={
         projectHelperText ?? (projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined)
       }
+      deploymentTypes={templateDeploymentTypes}
     />
   );
 
@@ -1100,6 +1132,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
                   searchExtra={projectCustomer?.id}
                   getId={(t) => t.id}
                   getLabel={(t) => `${t.number} — ${t.name}`}
+                  getCaption={(t) => t.currentVersion?.summary ?? ""}
                   knownLabel={pickedTemplateLabel}
                 />
                 {templateClearedNotice && (
@@ -1271,7 +1304,19 @@ export default function CreateChangeRequestPage(): JSX.Element {
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ flex: "1 1 200px" }}>
-              {renderSelect("cr-priority", "Priority", priority, setPriority, PRIORITY_OPTIONS)}
+              {templatePriority ? (
+                <TextField
+                  id="cr-priority"
+                  label="Priority"
+                  size="small"
+                  fullWidth
+                  value={changeRequestPriorityLabel(templatePriority)}
+                  helperText="Fixed by the standard change template."
+                  slotProps={{ input: { readOnly: true }, htmlInput: { "aria-readonly": true } }}
+                />
+              ) : (
+                renderSelect("cr-priority", "Priority", priority, setPriority, PRIORITY_OPTIONS)
+              )}
             </Box>
             {!isStandard && (
               <Box sx={{ flex: "1 1 200px" }}>
