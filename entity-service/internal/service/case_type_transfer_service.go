@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
@@ -310,8 +312,10 @@ func (s *caseService) transferCaseType(ctx context.Context, req domain.UpdateCas
 		switch {
 		case result.Type == "case":
 			s.slaEngine.ReviseCaseClocks(ctx, req.ID, result.Severity, result.ProjectID)
+			s.publishCaseTypeChanged(ctx, req.ID, result)
 		case result.PreviousType == "case":
 			s.slaEngine.ReviseCaseClocks(ctx, req.ID, nil, result.ProjectID)
+			s.publishCaseTypeChanged(ctx, req.ID, result)
 		}
 	}
 
@@ -386,6 +390,59 @@ func (s *caseService) transferCaseType(ctx context.Context, req domain.UpdateCas
 		}
 	}
 	return resp, nil
+}
+
+// publishCaseTypeChanged tells csm-notification-service's own SLA engine
+// that this case's clocks were just revised (ReviseCaseClocks, called right
+// before this by both of this function's own call sites) -- see
+// events.TypeCaseTypeChanged's own doc comment for the incident this
+// closes. Best-effort: a case/comment/incident create already tolerates a
+// publish failure without failing the request (see publishCaseCreatedEvent's
+// own doc comment for the same posture), and this is no different -- the
+// type transfer itself has already committed by the time this runs.
+// CaseNumber/WSO2CaseID/CaseTitle/Product/Team are resolved via a fresh
+// GetCaseByID (the request/result values on hand don't carry them) purely
+// for display on a future breach card; a failed read still publishes with
+// them blank rather than skipping the publish altogether, since the clock
+// re-sync this event exists for needs only CaseID/Priority to work
+// correctly.
+func (s *caseService) publishCaseTypeChanged(ctx context.Context, caseID string, result repository.CaseTypeTransferResult) {
+	if s.publisher == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, publishSeverityChangedTimeout)
+	defer cancel()
+
+	priority := ""
+	if result.Severity != nil {
+		priority = strings.ToUpper(string(*result.Severity))
+	}
+	payload := events.CaseTypeChangedPayload{
+		CaseID:       caseID,
+		Priority:     priority,
+		PreviousType: result.PreviousType,
+		NewType:      result.Type,
+	}
+	if cv, err := s.GetCaseByID(ctx, caseID); err == nil {
+		payload.CaseNumber = cv.Number
+		payload.WSO2CaseID = cv.InternalID
+		payload.CaseTitle = cv.Subject
+		payload.Product = caseProductName(cv)
+		payload.Team = caseTeamName(cv)
+	} else {
+		slog.WarnContext(ctx, "update case: could not resolve display fields for case.type_changed, publishing without them", "caseId", caseID, "err", err)
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		slog.ErrorContext(ctx, "update case: encode case.type_changed payload failed", "caseId", caseID, "error", err)
+		return
+	}
+	if err := s.publisher.Publish(ctx, events.TypeCaseTypeChanged, caseID, body); err != nil {
+		slog.ErrorContext(ctx, "update case: publish case.type_changed failed", "caseId", caseID)
+		return
+	}
+	slog.InfoContext(ctx, "update case: case.type_changed published", "caseId", caseID)
 }
 
 // Time kept back from the request's own deadline for what follows the

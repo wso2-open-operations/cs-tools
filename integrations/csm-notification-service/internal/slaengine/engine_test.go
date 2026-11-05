@@ -1009,9 +1009,13 @@ func TestTick_BreachAlert_RealTeamAudienceIsNotRetargeted(t *testing.T) {
 }
 
 // TestTick_SLANotificationsDisabled_SkipsChatButKeepsPublishAndCursor guards
-// SLA_EMAIL_SENDING_ENABLED=false: no Chat card (and no entity-service
-// lookup), but the event is still published and the tier is still marked
-// alerted and removed from the wake index, so re-enabling cannot replay it.
+// SLA_EMAIL_SENDING_ENABLED=false: no Chat card, but verifyTierStillDue's
+// own entity-service lookup still happens (it runs in processDueMember,
+// before sendBreachAlert ever checks the flag — this tier must be confirmed
+// genuinely due before it's published/logged as reached at all, regardless
+// of whether notifications are even enabled), and once confirmed, the event
+// is still published and the tier is still marked alerted and removed from
+// the wake index, so re-enabling cannot replay it.
 func TestTick_SLANotificationsDisabled_SkipsChatButKeepsPublishAndCursor(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -1031,11 +1035,11 @@ func TestTick_SLANotificationsDisabled_SkipsChatButKeepsPublishAndCursor(t *test
 	if len(chat.calls) != 0 {
 		t.Errorf("chat calls = %+v, want none when SLA notifications are disabled", chat.calls)
 	}
-	if len(ent.calls) != 0 {
-		t.Errorf("entity lookups = %v, want none when disabled", ent.calls)
+	if len(ent.calls) != 1 {
+		t.Errorf("entity lookups = %v, want exactly one -- verifyTierStillDue runs regardless of the notifications flag", ent.calls)
 	}
 	if pub.calls != 1 {
-		t.Errorf("publish calls = %d, want 1 (event still published)", pub.calls)
+		t.Errorf("publish calls = %d, want 1 (entity-service had no record of this clock, which fails open and still publishes)", pub.calls)
 	}
 	if _, stillWaiting := st.wake[wakeMember("case-1", "response", 50)]; stillWaiting {
 		t.Error("wake entry not removed")
@@ -1173,11 +1177,12 @@ func TestRegisterClocks_ClockNotYetRegistered_RetriesAndThenRegistersIt(t *testi
 // with entity-service's own durable record (the clock has actually already
 // completed, e.g. a case closed or a qualifying comment landed, but the
 // Redis-side AdvanceAlertedTier write that should have recorded that was
-// lost) must not produce a false breach alert. The Kafka sla.tier_reached
-// publish still happens regardless (it has no consumer today, and the
-// wall-clock threshold genuinely was crossed) -- only the Chat send itself,
-// and the bookkeeping that follows it, are what entity-service's answer
-// changes.
+// lost) must not produce a false breach alert. verifyTierStillDue runs
+// BEFORE alertTier, so a confirmed-stale tier publishes no Kafka
+// sla.tier_reached event and logs no "sla tier reached" line either -- only
+// the bookkeeping that marks the tier done (AdvanceAlertedTier, RemoveWake)
+// still happens, so a later tier for the same clock isn't re-checked and
+// re-suppressed from scratch.
 func TestTick_EntityServiceReportsClockAlreadyResolved_SuppressesTheAlert(t *testing.T) {
 	st := newFakeStore()
 	chat := &fakeChat{}
@@ -1198,8 +1203,8 @@ func TestTick_EntityServiceReportsClockAlreadyResolved_SuppressesTheAlert(t *tes
 	if len(chat.calls) != 0 {
 		t.Errorf("chat calls = %+v, want none -- entity-service reports this clock already resolved with no breach", chat.calls)
 	}
-	if pub.calls != 1 {
-		t.Errorf("publish calls = %d, want 1 -- the sla.tier_reached event still publishes even when the chat send is suppressed", pub.calls)
+	if pub.calls != 0 {
+		t.Errorf("publish calls = %d, want 0 -- a confirmed-stale tier must publish no sla.tier_reached event either, not just skip the chat send", pub.calls)
 	}
 	if _, stillWaiting := st.wake[wakeMember("case-1", "response", 100)]; stillWaiting {
 		t.Error("wake entry not removed even though the alert was suppressed")
@@ -1221,7 +1226,7 @@ func TestTick_EntityServiceConfirmsClockStillActive_StillSendsTheAlert(t *testin
 	e := newTestEngine(st, chat, pub)
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past},
+		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past, BusinessElapsedPercent: 50},
 	}}
 
 	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: past}
@@ -1253,6 +1258,7 @@ func TestTick_BreachEmail_SendsToAssigneeAndTeam(t *testing.T) {
 			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
 			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
 			TeamEmail: "team-nova@example.com", TeamLeadName: "Lead Person",
+			BusinessElapsedPercent: 50,
 		},
 	}}
 
@@ -1311,7 +1317,7 @@ func TestTick_BreachEmail_NoEmailClientConfigured_IsANoOp(t *testing.T) {
 	e := newTestEngine(st, chat, pub)
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past, AssigneeEmail: "jane@example.com"},
+		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past, AssigneeEmail: "jane@example.com", BusinessElapsedPercent: 50},
 	}}
 
 	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", StartedAt: past}
@@ -1344,6 +1350,7 @@ func TestTick_BreachEmail_DebugModeRedirectsToDebugRecipients(t *testing.T) {
 		"case-1|response": {
 			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
 			AssigneeEmail: "jane@example.com", TeamEmail: "team-nova@example.com",
+			BusinessElapsedPercent: 50,
 		},
 	}}
 
@@ -1383,7 +1390,7 @@ func TestTick_BreachEmail_TeamResolvedButNoGroupEmail_DebugModeShowsTeamName(t *
 	e.emailDebugRecipients = []string{"debug@example.com"}
 	past := time.Now().Add(-time.Minute)
 	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
-		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past},
+		"case-1|response": {Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past, BusinessElapsedPercent: 50},
 	}}
 
 	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", StartedAt: past}
