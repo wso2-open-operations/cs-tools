@@ -454,10 +454,7 @@ export default function CsmIssuesView({
     writePaginationToUrl(clamped, rowsPerPage);
   }, [page, rowsPerPage, writePaginationToUrl]);
 
-  const { canWrite, canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
-  // See visibleCaseTypes's own doc comment: must mirror PermViewSecurityCenter
-  // exactly, which comment_updater also holds.
-  const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
+  const { canWrite, canViewSecurityReportCases } = usePortalAccess();
 
   // Severity (S1-S4) is a support-case concept, so the severity filter is by
   // default only shown on the support-cases list — i.e. when the surrounding
@@ -514,7 +511,7 @@ export default function CsmIssuesView({
       // so a caller without security-report access doesn't get the whole
       // search 403'd by asking for a type they can't see.
       if (merged.caseTypes.length === 0) {
-        merged.caseTypes = visibleCaseTypes(canSeeSecurityReports);
+        merged.caseTypes = visibleCaseTypes(canViewSecurityReportCases);
       }
       return merged;
     },
@@ -524,7 +521,7 @@ export default function CsmIssuesView({
       showSeverityFilter,
       lockedFilters,
       hideTypeFilter,
-      canSeeSecurityReports,
+      canViewSecurityReportCases,
     ],
   );
 

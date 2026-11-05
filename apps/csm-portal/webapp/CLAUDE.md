@@ -124,6 +124,27 @@ failed role(s) still checked for a quick retry rather than clearing the whole fo
 ever renders for a wso2.com-email target (`showCsmPlatformRoles`) — same gating as "CSM Platform roles"
 itself, since a non-wso2.com account can't hold an Asgardeo-backed portal role in the first place.
 
+## `visibleCaseTypes`'s eligibility flag must mirror the exact backend permission, not a related-but-narrower one
+
+`CsmIssuesView.tsx`/`useQuickCaseSearch.ts` build an unlocked, multi-type search's "every type" fallback from
+`visibleCaseTypes(canViewSecurityReportCases)` (`caseType.ts`) — `entity-service`'s `/cases/search` 403s the
+WHOLE request, not just the one type, when the type filter names `security_report_analysis` and the caller
+lacks the backend's `PermViewSecurityReportCases`. **Reported live**: a plain `viewer` searching a project's
+Work items tab by a security report's own case number got no results at all — the fallback used
+`canUseSecurityCenter || canUpdateDeleteAnyComment` (mirroring the backend's narrower `PermViewSecurityCenter`,
+which `viewer` does not hold), while the backend's *actual* gate for this search,
+`PermViewSecurityReportCases`, deliberately also grants `viewer` (per that permission's own doc comment in
+`apps/csm-portal/backend/internal/handler/access.go`: "Viewer needed read access to these cases ... without
+also gaining `/products/vulnerabilities` access"). So a `viewer`'s *explicit* `type=security_report_analysis`
+filter already worked (the backend allowed it); only the *default*, unfiltered "every type" fallback silently
+excluded it, since that one frontend check was never updated when the backend permission was split off —
+noted at the time as "an API-only change, no webapp/nav change alongside it." Fixed by adding a dedicated
+`PortalAccess.canViewSecurityReportCases` flag that mirrors `PermViewSecurityReportCases` exactly (`viewer ||
+cs_engineer || admin || comment_updater || security_team`), used in place of the narrower pairing everywhere
+`visibleCaseTypes` is called. The lesson generalizes: when a frontend eligibility flag exists specifically to
+keep a multi-type/unfiltered search from being rejected, it must mirror the *exact* backend permission that
+search actually checks — not a nearby, semantically-similar one that happens to cover most of the same roles.
+
 ## `useRouteTabs`: must read `PortalAccess`/Feature Preview itself, not rely on its caller to
 
 `useSectionTabs.ts`'s shared `tabsFor` helper used to call `visibleNavChildren(section)`/`featureState(node.id)`
