@@ -33,6 +33,8 @@ export interface StoredAttachmentDownloadInput {
   type: StoredAttachmentType;
   id: string;
   name?: string;
+  /** Size in bytes, when known: a small file skips the save dialog. */
+  size?: number;
 }
 
 /**

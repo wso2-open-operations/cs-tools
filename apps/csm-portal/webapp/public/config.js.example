@@ -236,6 +236,18 @@ window.config = {
   // backend's ATTACHMENT_STORAGE_MODE.
   // CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
 
+  // How many 16 MiB ranges of one attachment download are fetched at the same
+  // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a
+  // time. A number or numeric string; anything else uses the default.
+  // CSM_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // Save a download straight to a file the person picks (the browser's save
+  // dialog), so a large attachment is not held whole in memory. Works in Chrome
+  // and Edge; other browsers keep the in-memory download. Files of 16 MiB or
+  // less skip the dialog. Optional: only the boolean false or the string "false"
+  // turns it off; true (or leaving it unset) keeps it on.
+  // CSM_PORTAL_DOWNLOAD_TO_DISK: true,
+
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when

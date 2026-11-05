@@ -418,6 +418,8 @@ export function useDownloadCsmCaseAttachment(): (
         const done = await downloadEntityAttachment(api, {
           type: WORK_ITEM_ATTACHMENT_TYPE,
           id: attachment.id,
+          name: attachment.filename,
+          size: attachment.size,
         });
         if (done) return;
       }
