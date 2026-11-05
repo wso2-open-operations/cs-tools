@@ -614,65 +614,10 @@ func (c *CustomerEntityClient) DeleteTimeCard(ctx context.Context, id string) ([
 	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/time-cards/%s", url.PathEscape(id)), nil)
 }
 
-// CreateCaseAttachment calls POST /attachments on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, "/attachments", body)
-}
-
 // SearchCaseAttachments calls POST /attachments/search on the entity service.
 // Response is returned as raw JSON.
 func (c *CustomerEntityClient) SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/attachments/search", body)
-}
-
-// GetCaseAttachmentContent calls GET /attachments/{attachmentId}/content
-// and returns the raw binary body with its Content-Type.
-func (c *CustomerEntityClient) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
-	return c.doBinary(ctx, fmt.Sprintf("/attachments/%s/content", url.PathEscape(attachmentID)))
-}
-
-// DeleteCaseAttachment calls DELETE /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) DeleteCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodDelete, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// GetCaseAttachment calls GET /attachments/{attachmentId} on the entity
-// service and returns a single attachment's metadata as raw JSON, including
-// (once the entity service supports it) its storageKey — the SFTPGo path the
-// attachment's file lives at.
-//
-// Assumption flagged: this single-attachment GET is not one of the entity
-// service routes this backend calls elsewhere today (only .../search and
-// .../{id}/content exist — see the other CaseAttachment methods above). It
-// is required by the SFTPGo-backed share-creation path
-// (handler.AttachmentStorageHandler.CreateAttachmentShare) to resolve an
-// attachment's storageKey, and assumes a corresponding entity-service change
-// that is out of scope for this layer/PR.
-func (c *CustomerEntityClient) GetCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// ConfirmCaseAttachment calls POST /attachments/{attachmentId}/confirm on the
-// entity service, transitioning a 'pending' attachment row (see
-// CreateCaseAttachment's status field) to 'complete'. Used by the
-// SFTPGo-backed upload flow once the browser's direct-to-SFTPGo upload has
-// succeeded; see handler.AttachmentStorageHandler.ConfirmUpload.
-func (c *CustomerEntityClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodPost, fmt.Sprintf("/attachments/%s/confirm", url.PathEscape(attachmentID)), nil)
-}
-
-// GetAttachment calls GET /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) GetAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), nil)
-}
-
-// UpdateAttachment calls PATCH /attachments/{attachmentId} on the entity service.
-// Response is returned as raw JSON.
-func (c *CustomerEntityClient) UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/attachments/%s", url.PathEscape(attachmentID)), body)
 }
 
 // SearchCatalogs calls POST /catalogs/search on the entity service.
