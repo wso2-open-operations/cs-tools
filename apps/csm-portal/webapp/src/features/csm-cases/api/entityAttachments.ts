@@ -40,6 +40,9 @@ import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadT
  */
 export type DownloadSaveOutcome = "saved" | "started";
 
+/** Called as a download arrives: bytes received so far and the file's total size, once the first range is back. */
+export type DownloadProgress = (received: number, total: number) => void;
+
 /** Which attachment table a request is about (the request body's `type`). */
 export type EntityAttachmentType = "work_item" | "comment" | "deployment";
 
@@ -299,7 +302,7 @@ async function readRange(
  */
 async function downloadFromBackend(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
   save: (blob: Blob, name: string) => void,
 ): Promise<boolean> {
   const target = await openDiskTarget(args.name || "attachment", args.size);
@@ -317,7 +320,7 @@ async function downloadFromBackend(
 
 async function readAndStore(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string },
+  args: { type: EntityAttachmentType; id: string; onProgress?: DownloadProgress },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
@@ -347,6 +350,8 @@ async function readAndStore(
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
 
+  let received = partsLength(first.parts);
+  if (total !== undefined) args.onProgress?.(received, total);
   if (total !== undefined && partsLength(first.parts) < total) {
     const count = Math.ceil(total / DOWNLOAD_RANGE_BYTES);
     let next = 1;
@@ -370,6 +375,8 @@ async function readAndStore(
           });
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
+          received += end - start + 1;
+          args.onProgress?.(received, total);
         } catch (error) {
           failure ??= { error };
         }
@@ -393,7 +400,7 @@ async function readAndStore(
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
   fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {

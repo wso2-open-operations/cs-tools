@@ -45,6 +45,12 @@ import {
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
+import {
+  DOWNLOAD_STARTED,
+  downloadPercent,
+  isAttachmentDownloading,
+  setAttachmentDownloadProgress,
+} from "@features/csm-cases/api/attachmentDownloadProgress";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
 import { BackendApiError } from "@api/backend/client";
@@ -417,7 +423,7 @@ export function useDownloadCsmCaseAttachment(): (
   );
   const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
-  return useCallback(
+  const download = useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
       // Entity-service stored attachment: fetch the one-use link's bytes now and
       // save them under the attachment's own name. A file entity-service does
@@ -429,6 +435,8 @@ export function useDownloadCsmCaseAttachment(): (
           name: attachment.filename,
           size: attachment.size,
           onSaved: (outcome) => notify(attachment.filename, outcome),
+          onProgress: (received, total) =>
+            setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
         });
         if (done) return;
       }
@@ -446,6 +454,20 @@ export function useDownloadCsmCaseAttachment(): (
       notify(attachment.filename, "started");
     },
     [api, getContent, sftpgoEnabled, notify],
+  );
+
+  // One download of an attachment at a time; its row shows how far it has got.
+  return useCallback(
+    async (attachment: CaseAttachment): Promise<void> => {
+      if (isAttachmentDownloading(attachment.id)) return;
+      setAttachmentDownloadProgress(attachment.id, DOWNLOAD_STARTED);
+      try {
+        await download(attachment);
+      } finally {
+        setAttachmentDownloadProgress(attachment.id, undefined);
+      }
+    },
+    [download],
   );
 }
 
