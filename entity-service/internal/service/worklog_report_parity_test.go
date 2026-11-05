@@ -41,6 +41,7 @@ type fakeWorklogRepo struct {
 	moves  []repository.WorklogMoveRow
 }
 
+// MoveSpans returns the fake's move spans, whatever the range.
 func (f *fakeWorklogRepo) MoveSpans(context.Context, time.Time, time.Time) ([]repository.WorklogMoveRow, error) {
 	return f.moves, nil
 }
@@ -465,6 +466,7 @@ func TestWorklogWeeklyByTypeEqualsTotal(t *testing.T) {
 // MOVED MEMBERS. A Team Schedule move keeps the person a member of their
 // own team, so the report files them under the team the move names.
 
+// move builds a move span onto team (an empty to is open-ended).
 func move(user, team, teamType, from, to string) repository.WorklogMoveRow {
 	m := repository.WorklogMoveRow{UserID: user, TeamKey: team, TeamName: team, TeamType: teamType,
 		StartsOn: wd(from)}
@@ -474,6 +476,8 @@ func move(user, team, teamType, from, to string) repository.WorklogMoveRow {
 	return m
 }
 
+// teamOf returns the one team section a developer is listed under, and fails
+// the test when they are under none or more than one.
 func teamOf(t *testing.T, r domain.WorklogReport, id string) string {
 	t.Helper()
 	var found []string
@@ -490,6 +494,8 @@ func teamOf(t *testing.T, r domain.WorklogReport, id string) string {
 	return found[0]
 }
 
+// The daily report lists a member under the team a move covering its day
+// names, with their hours; somebody with no move stays where they are.
 func TestWorklogDailyFilesMovedMemberUnderTheMoveTeam(t *testing.T) {
 	repo := &fakeWorklogRepo{
 		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
@@ -508,6 +514,7 @@ func TestWorklogDailyFilesMovedMemberUnderTheMoveTeam(t *testing.T) {
 	}
 }
 
+// A move that has not started by the report day leaves the home team.
 func TestWorklogDailyKeepsHomeTeamOutsideTheMoveSpan(t *testing.T) {
 	repo := &fakeWorklogRepo{
 		roster: []repository.WorklogRosterRow{person("u1", "vega")},
@@ -519,6 +526,8 @@ func TestWorklogDailyKeepsHomeTeamOutsideTheMoveSpan(t *testing.T) {
 	}
 }
 
+// The weekly report moves a member only when the move covers more than half
+// of the week's weekdays: 3 of 5 moves them, 2 of 5 does not.
 func TestWorklogWeeklyMovesOnAMajorityOfWeekdays(t *testing.T) {
 	repo := &fakeWorklogRepo{
 		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
@@ -536,6 +545,7 @@ func TestWorklogWeeklyMovesOnAMajorityOfWeekdays(t *testing.T) {
 	}
 }
 
+// A move to a team of another type, or to an excluded team, is ignored.
 func TestWorklogIgnoresMoveToTeamOutsideTheScope(t *testing.T) {
 	repo := &fakeWorklogRepo{
 		roster: []repository.WorklogRosterRow{person("u1", "vega"), person("u2", "vega")},
@@ -558,6 +568,7 @@ func TestWorklogIgnoresMoveToTeamOutsideTheScope(t *testing.T) {
 	}
 }
 
+// A move span never adds somebody who is not on the roster.
 func TestWorklogMoveNeverAddsSomebodyOffTheRoster(t *testing.T) {
 	repo := &fakeWorklogRepo{
 		roster: []repository.WorklogRosterRow{person("u1", "vega")},

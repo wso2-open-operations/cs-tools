@@ -518,6 +518,8 @@ func (r *worklogReportRepo) Leave(ctx context.Context, from, to time.Time) ([]Wo
 	return out, nil
 }
 
+// MoveSpans implements WorklogReportRepository: every span overlapping
+// [from, to] whose kind moves people to another team, with that team.
 func (r *worklogReportRepo) MoveSpans(ctx context.Context, from, to time.Time) ([]WorklogMoveRow, error) {
 	rows, err := r.db.Query(ctx, worklogMoveSpansQuery, from, to)
 	if err != nil {
