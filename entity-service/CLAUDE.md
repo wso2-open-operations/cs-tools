@@ -1686,8 +1686,8 @@ create.
 ## Attachment files held by the portal backends (Azure Blob Storage)
 
 Work item, comment-image and deployment attachment files (`work_item_attachment`,
-`comment_attachment`, `deployment_attachment`; `case_attachment` is the older flow and is not
-touched) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
+`comment_attachment`, `deployment_attachment`; `case_attachment` is the older flow: nothing writes it any
+more, existing rows are only listed and moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
 `apps/csm-portal/backend`) in Azure Blob Storage, through `libs/azblobstore`. **This service never
 touches a file**: it has no file store and needs no storage setting. It keeps the access checks (the
 caller's own row-level security), the three attachment tables, the size and type rules, and the
@@ -1699,6 +1699,20 @@ Routes, registered only when `db != nil` (otherwise 404): `POST /attachments/upl
 `POST /attachments/uploads/cleanup` and `POST /attachments/uploads/cleanup/acknowledge`. Code:
 `internal/filestore` (the key layout), `service.StoredAttachmentService` (`stored_attachment_service.go`,
 `stored_attachment_backend.go`), `repository.StoredAttachmentRepository`, `handler.StoredAttachmentHandler`.
+
+**Listing, and what no longer exists.** `POST /attachments/search` (always registered, PostgreSQL only)
+lists metadata for a case, change request, incident, conversation or deployment (`deployment_attachment`);
+it never lists a pending, failed or deleted row. Attachments have no data source switch: the
+`ATTACHMENT_DATA_SOURCE` setting, the ServiceNow attachment dual-write (`caseAttachmentDualWriteService`),
+the ServiceNow attachment calls in `snCaseService`, the legacy routes (`POST /attachments`,
+`POST /attachments/{id}/confirm`, `GET /attachments/{id}`, `GET /attachments/{id}/content`,
+`GET /attachments/{id}/case`, `PATCH /attachments/{id}`, `DELETE /attachments/{id}`) and the base64
+`attachments` array of `POST /cases` were all removed. Every request decoder rejects an unknown field, so
+a client that still sends `attachments` on create-case gets a 400; a case is created without files and
+they are uploaded afterwards. With `DATA_SOURCE=servicenow` the search is answered by PostgreSQL through
+the service's own fallback. A comment image is authorized through `GET /attachments/inline/{id}/location`,
+not through the removed parent-case route. The case activity feed follows `DATA_SOURCE` like every other
+case route.
 
 **The storage key is internal.** `authorize`, `locate` and `inline/{id}/location` return a
 `storageKey`. It is for the portal backend that asked and **must never be sent to a browser**: a
@@ -3627,11 +3641,10 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   without the build leaves a window with no owner-type check, and 0211 without the build leaves
   the old build reading the link through `"case"`. The old key was
   also the only thing keeping an attachment off every other kind of work item (the announcement
-  tables' row-level security relies on an announcement never owning one), so the two insert
-  paths (`CreateCaseAttachment`, `CreateCaseAttachmentFromServiceNow`) now check in SQL that the
-  work item is a case, engagement, service request or security report analysis, and answer the
-  same "one or more referenced IDs do not exist" as the key did for anything else. The effect
-  is that the three non-case types can own attachments, which the old target made impossible.
+  tables' row-level security relies on an announcement never owning one). That insert rule
+  went with the old insert paths, which are gone (see "Attachment files held by the portal
+  backends"): nothing writes `case_attachment` any more, so the rows that remain are only moved
+  with their ticket.
 - **A slow or failing ServiceNow call does not decide the outcome by guessing.** The call is
   bounded so about 20 s of the request's deadline remain afterwards. A refusal (400/401/403/
   404/409 from the integration service) is final and rolls back. Anything else (a deadline, a
@@ -3660,41 +3673,10 @@ old refusal still applies; `DATA_SOURCE=servicenow` is unchanged.
   inside the transaction and its refusal leaving nothing, ambiguous ServiceNow failures, SLA per
   direction), `case_type_transfer_repo_integration_test.go` (real Postgres as a non-superuser,
   run with `CASE_STATS_TEST_DSN`; every source type to every target, Incident and Query, carried
-  columns, billable flag, attachments, remote state, rollback, who may own an attachment) and
+  columns, billable flag, attachments, remote state, rollback) and
   `case_type_transfer_production_integration_test.go` (another ticket's related link, linked
   change requests / child cases / watchers / tags / comments untouched, a ticket with thousands
   of comments and time cards, a transferred Migration ticket through its normal life).
-
-## Attachment `created_on` under dual-write is the database's clock, not ServiceNow's
-
-`DATA_SOURCE=postgres-servicenow-dual-write` mirrors an uploaded attachment into
-`case_attachment` after ServiceNow accepts it (`caseAttachmentDualWriteService.CreateCaseAttachment`).
-The ServiceNow create reply carries `createdOn` as a zone-less `YYYY-MM-DD HH:MM:SS`, and that
-value is **not UTC** -- it is rendered in a ServiceNow-side timezone. `snCaseService` parses it with
-`snCreatedOnLayout`, which has no zone and so reads it as UTC. The mirror used to store that value
-unchanged, so an upload from Colombo (UTC+5:30) landed 5h30 in the future and the portal showed
-"uploaded 5h from now" (found on csm-dev, ticket CS0450306: stored 19:42:05 against a real
-14:12 UTC; the same skew also puts the row at the top of the case Activity feed, which orders by
-`created_on`).
-
-`CaseRepository.CreateCaseAttachmentFromServiceNow` therefore takes **no timestamp**: the insert
-leaves `created_on` to the column default (`NOW()`), the same clock the plain-Postgres
-`CreateCaseAttachment` uses, a network round trip after ServiceNow accepted the file. The response's
-`createdOn` is the stored value. Do not put a ServiceNow-supplied time back into this insert; if a
-ServiceNow instant is ever needed it has to come from a source that states its zone (the Table API's
-`sys_created_on` is UTC) and be converted explicitly.
-
-Tests: `TestCaseAttachmentDualWriteService_CreateCaseAttachment_IgnoresZonelessServiceNowCreatedOn`
-(real `snCaseService` against a fake ServiceNow answering with a zone-less createdOn),
-`TestCaseAttachmentSNIntegration_CreateAndReadBackWithNullStorageKey` (real Postgres, asserts
-`created_on` falls inside the database clock's own window around the insert).
-
-**Not verified, same shape:** `CreateDeploymentFromServiceNow`, `CreateDeployedProductFromServiceNow`
-and `CreateCallRequestFromServiceNow` also store a `createdOn` that `time.Parse(snCreatedOnLayout, ...)`
-read from a ServiceNow reply (the call request writes the same value into `updated_on` as well, so
-that column cannot serve as an independent clock there). Whether those replies are zone-skewed too has
-not been checked; compare a freshly created row's `created_on` with the real time of the request on a
-dual-write database before assuming either way.
 
 ## Auto-closure hold (`autocloseHoldUntil`) on the Postgres data sources
 

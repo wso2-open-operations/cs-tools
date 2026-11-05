@@ -18,7 +18,6 @@ package service
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -936,33 +935,27 @@ var snIssueTypeID = map[domain.CaseIssueType]int{
 }
 
 type snCreateCasePayload struct {
-	Type                  string             `json:"type"`
-	ProjectID             string             `json:"projectId"`
-	DeploymentID          string             `json:"deploymentId,omitempty"`
-	DeployedProductID     string             `json:"deployedProductId,omitempty"`
-	Title                 string             `json:"title,omitempty"`
-	Description           string             `json:"description,omitempty"`
-	SeverityKey           int                `json:"severityKey,omitempty"`
-	IssueTypeKey          int                `json:"issueTypeKey,omitempty"`
-	EngagementType        int                `json:"engagementType,omitempty"`
-	EngagementPaymentType int                `json:"engagementPaymentType,omitempty"`
-	CatalogID             string             `json:"catalogId,omitempty"`
-	CatalogItemID         string             `json:"catalogItemId,omitempty"`
-	Variables             []snCaseVariable   `json:"variables,omitempty"`
-	RelatedCaseID         string             `json:"relatedCaseId,omitempty"`
-	ConversationID        string             `json:"conversationId,omitempty"`
-	WatchList             []string           `json:"watchList,omitempty"`
-	Attachments           []snCaseAttachment `json:"attachments,omitempty"`
+	Type                  string           `json:"type"`
+	ProjectID             string           `json:"projectId"`
+	DeploymentID          string           `json:"deploymentId,omitempty"`
+	DeployedProductID     string           `json:"deployedProductId,omitempty"`
+	Title                 string           `json:"title,omitempty"`
+	Description           string           `json:"description,omitempty"`
+	SeverityKey           int              `json:"severityKey,omitempty"`
+	IssueTypeKey          int              `json:"issueTypeKey,omitempty"`
+	EngagementType        int              `json:"engagementType,omitempty"`
+	EngagementPaymentType int              `json:"engagementPaymentType,omitempty"`
+	CatalogID             string           `json:"catalogId,omitempty"`
+	CatalogItemID         string           `json:"catalogItemId,omitempty"`
+	Variables             []snCaseVariable `json:"variables,omitempty"`
+	RelatedCaseID         string           `json:"relatedCaseId,omitempty"`
+	ConversationID        string           `json:"conversationId,omitempty"`
+	WatchList             []string         `json:"watchList,omitempty"`
 }
 
 type snCaseVariable struct {
 	ID    string `json:"id"`
 	Value string `json:"value"`
-}
-
-type snCaseAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
 }
 
 type snCreateCaseResponse struct {
@@ -1044,13 +1037,6 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 	case "security_report_analysis":
 		payload.Title = req.Subject
 		payload.Description = req.Description
-		if len(req.Attachments) > 0 {
-			atts := make([]snCaseAttachment, 0, len(req.Attachments))
-			for _, a := range req.Attachments {
-				atts = append(atts, snCaseAttachment{Name: a.Name, File: a.File})
-			}
-			payload.Attachments = atts
-		}
 	case "engagement":
 		payload.Title = req.Subject
 		payload.Description = req.Description
@@ -4096,221 +4082,12 @@ func (s *snCaseService) patchCaseFieldsBundle(ctx context.Context, caseID string
 	return err
 }
 
-type snCreateAttachmentPayload struct {
-	ReferenceID   string  `json:"referenceId"`
-	ReferenceType string  `json:"referenceType"`
-	Name          string  `json:"name"`
-	Type          string  `json:"type"`
-	File          string  `json:"file"`
-	Description   *string `json:"description,omitempty"`
-}
-
-type snCreateAttachmentResponse struct {
-	Message    string `json:"message"`
-	Attachment struct {
-		ID          string `json:"id"`
-		SizeBytes   int    `json:"sizeBytes"`
-		CreatedOn   string `json:"createdOn"`
-		CreatedBy   string `json:"createdBy"`
-		DownloadURL string `json:"downloadUrl"`
-	} `json:"attachment"`
-}
-
-const maxAttachmentBytes = 10 * 1024 * 1024 // 10 MB decoded
-
-func (s *snCaseService) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.CreateAttachmentResponse, error) {
-	if req.Name == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "name is required"}
-	}
-	if req.Type == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "type is required"}
-	}
-	if req.File == "" {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file is required"}
-	}
-
-	// file must be a data URI: data:<mime>;base64,<encoded>
-	const dataURIPrefix = "data:"
-	const base64Marker = ";base64,"
-	if !strings.HasPrefix(req.File, dataURIPrefix) {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file must be a base64 data URI (e.g. data:image/png;base64,...)"}
-	}
-	markerIdx := strings.Index(req.File, base64Marker)
-	if markerIdx == -1 {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file must be a base64 data URI (e.g. data:image/png;base64,...)"}
-	}
-	rawBase64 := req.File[markerIdx+len(base64Marker):]
-
-	// Early size guard: decoded size ≈ 3/4 of base64 length. Reject before allocating.
-	if len(rawBase64)*3/4 > maxAttachmentBytes {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file exceeds maximum allowed size of 10 MB"}
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(rawBase64)
-	if err != nil {
-		// try URL-safe variant
-		decoded, err = base64.URLEncoding.DecodeString(rawBase64)
-		if err != nil {
-			return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file contains invalid base64 data"}
-		}
-	}
-	if len(decoded) > maxAttachmentBytes {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "file exceeds maximum allowed size of 10 MB"}
-	}
-
-	token := middleware.UserIDTokenFromContext(ctx)
-
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
-		return domain.CreateAttachmentResponse{}, &apierror.ValidationError{Msg: "referenceType is invalid: " + string(req.ReferenceType)}
-	}
-
-	payload := snCreateAttachmentPayload{
-		ReferenceID:   uuidToSysid(req.ReferenceID),
-		ReferenceType: string(req.ReferenceType),
-		Name:          req.Name,
-		Type:          req.Type,
-		File:          rawBase64,
-		Description:   req.Description,
-	}
-
-	raw, err := s.client.Post(ctx, "/attachments", token, payload)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, err
-	}
-
-	var snResp snCreateAttachmentResponse
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.CreateAttachmentResponse{}, fmt.Errorf("sn create attachment: parse response: %w", err)
-	}
-
-	createdOn, err := time.Parse(snCreatedOnLayout, snResp.Attachment.CreatedOn)
-	if err != nil {
-		return domain.CreateAttachmentResponse{}, fmt.Errorf("sn create attachment: parse createdOn %q: %w", snResp.Attachment.CreatedOn, err)
-	}
-
-	return domain.CreateAttachmentResponse{
-		Message: snResp.Message,
-		Attachment: domain.AttachmentDetail{
-			ID:          sysidToUUID(snResp.Attachment.ID),
-			SizeBytes:   snResp.Attachment.SizeBytes,
-			CreatedOn:   createdOn,
-			CreatedBy:   snResp.Attachment.CreatedBy,
-			DownloadURL: &snResp.Attachment.DownloadURL,
-			Status:      domain.AttachmentStatusComplete,
-		},
-	}, nil
-}
-
-// ConfirmCaseAttachment implements CaseService. ServiceNow's /attachments API
-// only ever returns fully-uploaded files -- there is no pending/in-progress
-// upload state to confirm -- so this is a CSM-native (Postgres) data
-// source-only operation. See caseService.ConfirmCaseAttachment.
-func (s *snCaseService) ConfirmCaseAttachment(_ context.Context, _ string) (domain.ConfirmAttachmentResponse, error) {
-	return domain.ConfirmAttachmentResponse{}, &apierror.ServiceUnavailableError{Msg: "confirming an attachment is only supported for the CSM-native data source"}
-}
-
 var validReferenceTypes = map[domain.ReferenceType]struct{}{
 	domain.ReferenceTypeCase:          {},
 	domain.ReferenceTypeConversation:  {},
 	domain.ReferenceTypeChangeRequest: {},
 	domain.ReferenceTypeDeployment:    {},
 	domain.ReferenceTypeIncident:      {},
-}
-
-type snSearchAttachmentsPayload struct {
-	ReferenceID   string              `json:"referenceId"`
-	ReferenceType string              `json:"referenceType"`
-	Pagination    snProjectPagination `json:"pagination"`
-}
-
-type snAttachment struct {
-	ID                string  `json:"id"`
-	ReferenceID       string  `json:"referenceId"`
-	Name              string  `json:"name"`
-	Type              string  `json:"type"`
-	SizeBytes         int     `json:"sizeBytes"`
-	Description       *string `json:"description"`
-	CreatedBy         string  `json:"createdBy"`
-	CreatedByFullName string  `json:"createdByFullName"`
-	// CreatedByUser is the uploader's resolved sys_user record: nil when the
-	// uploader is not a real user and when the ServiceNow side predates the
-	// field. See snUserRef.
-	CreatedByUser *snUserRef `json:"createdByUser"`
-	CreatedOn     string     `json:"createdOn"`
-	DownloadURL   *string    `json:"downloadUrl"`
-	PreviewURL    *string    `json:"previewUrl"`
-}
-
-type snSearchAttachmentsResponse struct {
-	Attachments  []snAttachment `json:"attachments"`
-	TotalRecords int            `json:"totalRecords"`
-	Offset       int            `json:"offset"`
-	Limit        int            `json:"limit"`
-}
-
-func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
-	if err := normalizePagination(&req.Pagination); err != nil {
-		return domain.SearchAttachmentsResponse{}, err
-	}
-
-	token := middleware.UserIDTokenFromContext(ctx)
-
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.SearchAttachmentsResponse{}, err
-	}
-	if _, ok := validReferenceTypes[req.ReferenceType]; !ok {
-		return domain.SearchAttachmentsResponse{}, &apierror.ValidationError{Msg: "referenceType is invalid: " + string(req.ReferenceType)}
-	}
-
-	payload := snSearchAttachmentsPayload{
-		ReferenceID:   uuidToSysid(req.ReferenceID),
-		ReferenceType: string(req.ReferenceType),
-		Pagination:    snProjectPagination{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset},
-	}
-
-	raw, err := s.client.Post(ctx, "/attachments/search", token, payload)
-	if err != nil {
-		return domain.SearchAttachmentsResponse{}, err
-	}
-
-	var snResp snSearchAttachmentsResponse
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.SearchAttachmentsResponse{}, fmt.Errorf("sn search attachments: parse response: %w", err)
-	}
-
-	attachments := make([]domain.Attachment, 0, len(snResp.Attachments))
-	for _, a := range snResp.Attachments {
-		createdOn, err := time.Parse(snCreatedOnLayout, a.CreatedOn)
-		if err != nil {
-			return domain.SearchAttachmentsResponse{}, fmt.Errorf("sn search attachments: parse createdOn %q: %w", a.CreatedOn, err)
-		}
-		attachments = append(attachments, domain.Attachment{
-			ID:            sysidToUUID(a.ID),
-			ReferenceID:   sysidToUUID(a.ReferenceID),
-			ReferenceType: req.ReferenceType,
-			Name:          a.Name,
-			Type:          a.Type,
-			SizeBytes:     a.SizeBytes,
-			Description:   a.Description,
-			CreatedBy:     snUserReference(a.CreatedByUser, a.CreatedBy, a.CreatedByFullName),
-			CreatedOn:     createdOn,
-			DownloadURL:   a.DownloadURL,
-			PreviewURL:    a.PreviewURL,
-			Status:        domain.AttachmentStatusComplete,
-		})
-	}
-
-	total := snResp.TotalRecords
-	return domain.SearchAttachmentsResponse{
-		Attachments: attachments,
-		Total:       total,
-		Limit:       req.Pagination.Limit,
-		Offset:      req.Pagination.Offset,
-		HasMore:     req.Pagination.Offset+len(attachments) < total,
-	}, nil
 }
 
 type snSearchActivitiesPayload struct {
@@ -4447,146 +4224,6 @@ func (s *snCaseService) SearchCaseActivities(ctx context.Context, req domain.Sea
 	}, nil
 }
 
-// GetCaseAttachmentContent deliberately does NOT forward the caller's own
-// x-user-id-token to the ServiceNow Integration Service (contrast every
-// other snCaseService method, which does). Evidence gathered live: a
-// sys_attachment row whose table_name is sys_journal_field (ServiceNow's own
-// auto-extraction of a base64 <img> embedded in a case comment) 404s here
-// when the forwarded identity is an external customer, but the identical
-// sys_id succeeds through apps/csm-portal/backend, whose forwarded identity
-// is an internal WSO2 staff user -- same entity-service code path, same
-// shared M2M credential for this integration, only the forwarded
-// x-user-id-token differs. ServiceNow's DownloadAttachmentByIdAPI script
-// (AttachmentDownloadUtils) does a bare GlideRecord('sys_attachment').
-// get(id) with no table_name filter at all, so the only remaining mechanism
-// is a ServiceNow ACL on sys_attachment keyed off the caller's own identity
-// -- evidently granting read access to journal/work-note-scoped attachments
-// for internal roles but not external customer roles.
-//
-// This is safe to omit here specifically because the actual authorization
-// boundary for a customer-facing caller is NOT this identity forward -- it
-// is authorizeAttachmentAccess in apps/customer-portal/backend-v2, which
-// independently verifies the caller may see the attachment's own case
-// BEFORE ever reaching this method (see this repo's own CLAUDE.md, "change
-// request attachments" row: "not reachable through the customer portal
-// (authorizeAttachmentAccess forces case / deployment)"). entity-service's
-// own HTTP handler for this route (handler.CaseHandler.GetCaseAttachmentContent)
-// performs no independent case-visibility check of its own -- it trusts the
-// calling BFF to have already done so, exactly as it does here. Omitting the
-// per-customer token therefore does not weaken that boundary; it only stops
-// ServiceNow's own ACL from additionally (and, for this one attachment
-// shape, incorrectly) vetoing a read access-control.go/backend-v2 has
-// already approved.
-//
-// Unverified assumption, flag for whoever deploys this: that the shared M2M
-// credential alone (no x-user-id-token at all) has sufficient ServiceNow
-// read access to sys_attachment regardless of table_name. Every data point
-// gathered so far paired the M2M credential with SOME x-user-id-token
-// (customer or staff) -- never with none -- so this should be verified
-// against a known sys_journal_field-scoped attachment before being trusted
-// in production. If the M2M identity itself lacks this grant, the result
-// changes (e.g. to 401/403) rather than succeeding, and the real fix
-// remains a ServiceNow-side ACL change.
-func (s *snCaseService) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
-	resp, err := s.client.GetBinary(ctx, "/attachments/"+uuidToSysid(attachmentID)+"/content", "")
-	if err != nil {
-		return nil, "", err
-	}
-
-	return resp.Body, resp.ContentType, nil
-}
-
-func (s *snCaseService) DeleteCaseAttachment(ctx context.Context, req domain.DeleteAttachmentRequest) (domain.DeleteAttachmentResponse, error) {
-	token := middleware.UserIDTokenFromContext(ctx)
-
-	raw, err := s.client.Delete(ctx, "/attachments/"+uuidToSysid(req.AttachmentID), token)
-	if err != nil {
-		return domain.DeleteAttachmentResponse{}, err
-	}
-
-	var snResp struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.DeleteAttachmentResponse{}, fmt.Errorf("sn delete attachment: parse response: %w", err)
-	}
-
-	return domain.DeleteAttachmentResponse{Message: snResp.Message}, nil
-}
-
-// snAttachmentDetails mirrors the Choreo GET /attachments/{id} response
-// (Ballerina's AttachmentResponse -- every Attachment field plus content).
-// The response does carry createdByUser/createdByFullName, but this lookup
-// does not resolve them: createdByUser arrives null, unlike the search path
-// (see snAttachment), so CreatedBy stays the bare string below. Do not
-// "align" this decode with the search path's UserReference shape on the
-// assumption the object is populated here -- it is not. referenceType is
-// genuinely absent from this response.
-type snAttachmentDetails struct {
-	ID          string  `json:"id"`
-	ReferenceID string  `json:"referenceId"`
-	Name        string  `json:"name"`
-	Type        string  `json:"type"`
-	SizeBytes   int     `json:"sizeBytes"`
-	Description *string `json:"description"`
-	CreatedBy   string  `json:"createdBy"`
-	CreatedOn   string  `json:"createdOn"`
-	DownloadURL *string `json:"downloadUrl"`
-	PreviewURL  *string `json:"previewUrl"`
-	Content     string  `json:"content"`
-}
-
-// GetAttachmentByID deliberately does NOT forward the caller's own
-// x-user-id-token to the ServiceNow Integration Service -- same reasoning
-// and same ServiceNow-side ACL finding as GetCaseAttachmentContent's own doc
-// comment above, which this method gates (backend-v2's GetAttachmentContent
-// handler calls this first, purely to resolve ReferenceID for its own
-// authorizeAttachmentAccess check, before ever reaching content). Revealing
-// an attachment's bare metadata (name, size, which case it belongs to) to a
-// caller who turns out not to own that case is not itself the exposure --
-// authorizeAttachmentAccess's subsequent GetCase(ReferenceID) call, which
-// DOES still forward the caller's own identity and is not touched by this
-// change, is what actually decides whether the request may proceed.
-func (s *snCaseService) GetAttachmentByID(ctx context.Context, id string) (domain.AttachmentDetails, error) {
-	if err := validateUUIDs("id", []string{id}); err != nil {
-		return domain.AttachmentDetails{}, err
-	}
-
-	raw, err := s.client.Get(ctx, "/attachments/"+uuidToSysid(id), "")
-	if err != nil {
-		return domain.AttachmentDetails{}, err
-	}
-
-	var snResp snAttachmentDetails
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.AttachmentDetails{}, fmt.Errorf("sn get attachment: parse response: %w", err)
-	}
-
-	createdOn, err := time.Parse(snCreatedOnLayout, snResp.CreatedOn)
-	if err != nil {
-		return domain.AttachmentDetails{}, fmt.Errorf("sn get attachment: parse createdOn %q: %w", snResp.CreatedOn, err)
-	}
-
-	// ReferenceType is left nil (serialized as JSON null): the upstream
-	// attachment-details response carries no reference type (see
-	// snAttachmentDetails), and there is no way to derive one from the id
-	// alone. Callers must fail closed on it.
-	return domain.AttachmentDetails{
-		ID:          sysidToUUID(snResp.ID),
-		ReferenceID: sysidToUUID(snResp.ReferenceID),
-		Name:        snResp.Name,
-		Type:        snResp.Type,
-		SizeBytes:   snResp.SizeBytes,
-		Description: snResp.Description,
-		CreatedBy:   snResp.CreatedBy,
-		CreatedOn:   createdOn,
-		DownloadURL: snResp.DownloadURL,
-		PreviewURL:  snResp.PreviewURL,
-		Content:     &snResp.Content,
-		Status:      domain.AttachmentStatusComplete,
-	}, nil
-}
-
 // validateAttachmentUpdate mirrors the Ballerina reference's
 // validateAttachmentUpdatePayload exactly: referenceType must be case or
 // deployment; case requires name and forbids description; deployment
@@ -4611,92 +4248,14 @@ func rawDescriptionPresent(d json.RawMessage) bool {
 	return true
 }
 
-func validateAttachmentUpdate(req domain.UpdateAttachmentRequest) error {
-	if req.ReferenceType != domain.ReferenceTypeCase && req.ReferenceType != domain.ReferenceTypeDeployment {
-		return &apierror.ValidationError{Msg: fmt.Sprintf("invalid reference type %q. Only 'case' and 'deployment' are allowed", req.ReferenceType)}
+// SearchCaseAttachments lists attachments from PostgreSQL, through pgFallback:
+// attachments are stored in Azure Blob Storage with their metadata in
+// PostgreSQL, and nothing is read from ServiceNow.
+func (s *snCaseService) SearchCaseAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) (domain.SearchAttachmentsResponse, error) {
+	if s.pgFallback == nil {
+		return domain.SearchAttachmentsResponse{}, &apierror.ServiceUnavailableError{Msg: "attachments are listed from PostgreSQL, which is not configured"}
 	}
-	if req.ReferenceType == domain.ReferenceTypeCase {
-		if len(req.Description) > 0 {
-			return &apierror.ValidationError{Msg: "description field is not allowed for case reference type"}
-		}
-		if req.Name == nil || strings.TrimSpace(*req.Name) == "" {
-			return &apierror.ValidationError{Msg: "name field is required for case reference type"}
-		}
-	}
-	if req.ReferenceType == domain.ReferenceTypeDeployment {
-		hasName := req.Name != nil && strings.TrimSpace(*req.Name) != ""
-		hasDescription := rawDescriptionPresent(req.Description)
-		if !hasName && !hasDescription {
-			return &apierror.ValidationError{Msg: "at least one field (name or description) must be provided for deployment reference type"}
-		}
-	}
-	return nil
-}
-
-// snUpdateAttachmentPayload mirrors the Choreo PATCH /attachments/{id} request body.
-type snUpdateAttachmentPayload struct {
-	ReferenceID   string          `json:"referenceId"`
-	ReferenceType string          `json:"referenceType"`
-	Name          *string         `json:"name,omitempty"`
-	Description   json.RawMessage `json:"description,omitempty"`
-}
-
-// snUpdateAttachmentResponse mirrors the Choreo PATCH /attachments/{id} response.
-type snUpdateAttachmentResponse struct {
-	Message    string `json:"message"`
-	Attachment struct {
-		ID        string `json:"id"`
-		UpdatedOn string `json:"updatedOn"`
-		UpdatedBy string `json:"updatedBy"`
-	} `json:"attachment"`
-}
-
-// UpdateAttachment implements CaseService.UpdateAttachment for the ServiceNow data source.
-func (s *snCaseService) UpdateAttachment(ctx context.Context, req domain.UpdateAttachmentRequest) (domain.UpdateAttachmentResponse, error) {
-	if err := validateUUIDs("id", []string{req.AttachmentID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validateUUIDs("referenceId", []string{req.ReferenceID}); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-	if err := validateAttachmentUpdate(req); err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	token := middleware.UserIDTokenFromContext(ctx)
-
-	payload := snUpdateAttachmentPayload{
-		ReferenceID:   uuidToSysid(req.ReferenceID),
-		ReferenceType: string(req.ReferenceType),
-		Name:          req.Name,
-	}
-	if len(req.Description) > 0 {
-		payload.Description = req.Description
-	}
-
-	raw, err := s.client.Patch(ctx, "/attachments/"+uuidToSysid(req.AttachmentID), token, payload)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, err
-	}
-
-	var snResp snUpdateAttachmentResponse
-	if err := json.Unmarshal(raw, &snResp); err != nil {
-		return domain.UpdateAttachmentResponse{}, fmt.Errorf("sn update attachment: parse response: %w", err)
-	}
-
-	updatedOn, err := time.Parse(snCreatedOnLayout, snResp.Attachment.UpdatedOn)
-	if err != nil {
-		return domain.UpdateAttachmentResponse{}, fmt.Errorf("sn update attachment: parse updatedOn %q: %w", snResp.Attachment.UpdatedOn, err)
-	}
-
-	return domain.UpdateAttachmentResponse{
-		Message: snResp.Message,
-		Attachment: domain.UpdatedAttachment{
-			ID:        sysidToUUID(snResp.Attachment.ID),
-			UpdatedOn: updatedOn,
-			UpdatedBy: snResp.Attachment.UpdatedBy,
-		},
-	}, nil
+	return s.pgFallback.SearchCaseAttachments(ctx, req)
 }
 
 // snCaseFeedbackEmojiRef mirrors the emoji reference embedded in the Choreo

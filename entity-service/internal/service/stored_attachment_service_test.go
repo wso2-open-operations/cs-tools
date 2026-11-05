@@ -265,6 +265,27 @@ func TestInitiateUpload_RefusesAClosedWorkItemForEveryone(t *testing.T) {
 	}
 }
 
+// Every kind a portal uploads is accepted: a work item (a case, and the incident
+// and change-request pages, which also send work_item), a comment image and a
+// deployment file. Each is recorded PENDING with the caller as the uploader.
+func TestInitiateUpload_AcceptsWorkItemCommentAndDeployment(t *testing.T) {
+	for name, req := range map[string]domain.InitiateAttachmentUploadRequest{
+		"work_item":  {Kind: domain.StoredAttachmentWorkItem, ParentID: saParentID, Name: "logs.zip", ContentType: "application/zip", SizeBytes: 500},
+		"comment":    {Kind: domain.StoredAttachmentComment, ParentID: saParentID, Name: "shot.png", ContentType: "image/png", SizeBytes: 50},
+		"deployment": {Kind: domain.StoredAttachmentDeployment, ParentID: saParentID, Name: "topology.pdf", ContentType: "application/pdf", SizeBytes: 500},
+	} {
+		repo := newFakeStoredRepo()
+		resp, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req)
+		if err != nil {
+			t.Errorf("%s: InitiateUpload returned %v", name, err)
+			continue
+		}
+		if resp.AttachmentID == "" || len(repo.inserted) != 1 {
+			t.Errorf("%s: want one PENDING row and an attachment id, got %d rows, id %q", name, len(repo.inserted), resp.AttachmentID)
+		}
+	}
+}
+
 func TestInitiateUpload_AParentTheCallerCannotSeeIsNotFound(t *testing.T) {
 	repo := newFakeStoredRepo()
 	repo.parentErr = &apierror.NotFoundError{Msg: "parent record not found"}

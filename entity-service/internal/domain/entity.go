@@ -3803,19 +3803,12 @@ type Variable struct {
 	Value string `json:"value"`
 }
 
-// CaseAttachment is a file attachment for security report analysis case creation.
-// File must be a base64 data URI (e.g. data:application/pdf;base64,...).
-type CaseAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
-}
-
 // CreateCaseRequest is the input for creating a new case.
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 // For type "service_request": catalogId, catalogItemId, and variables are required.
-// For type "security_report_analysis": subject and description are required; attachments are optional
-// (uploaded via a separate request after creation, not bundled into this one).
+// For type "security_report_analysis": subject and description are required. Files are
+// uploaded after the case exists, through the stored-attachment routes.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
 	Type              string        `json:"type"`
@@ -3841,8 +3834,6 @@ type CreateCaseRequest struct {
 	// WatchList is watcher emails (Customer Portal / Ballerina). Platform user
 	// UUIDs are still accepted and resolved to emails for CSM callers.
 	WatchList []string `json:"watchList"`
-	// For security_report_analysis type
-	Attachments []CaseAttachment `json:"attachments"`
 	// For engagement type
 	EngagementType        EngagementType        `json:"engagementType"`
 	EngagementPaymentType EngagementPaymentType `json:"engagementPaymentType"`
@@ -4224,25 +4215,13 @@ type CreateCaseGithubIssueResponse struct {
 	Issue   CaseGithubIssueDetail `json:"issue"`
 }
 
-// AttachmentStatus is the upload lifecycle state of a CSM-native (Postgres)
-// data source attachment. ServiceNow-sourced attachments have no such
-// lifecycle -- SN's /attachments API only ever returns fully-uploaded files --
-// so this is meaningful for the Postgres data source only, where the browser
-// uploads directly to SFTPGo and CSM's row can be registered before that
-// upload finishes.
+// AttachmentStatus is the lifecycle state of an attachment row as it is listed
+// by POST /attachments/search. Only complete rows are listed.
 type AttachmentStatus string
 
 const (
-	// AttachmentStatusPending marks a row created before the browser has
-	// uploaded (or finished uploading) the file to SFTPGo. It exists so an
-	// orphan-file gap can't occur: if the upload never completes or the
-	// browser never calls back, CSM still has a record that something was
-	// started, for a future reconciliation job to find and clean up.
-	AttachmentStatusPending AttachmentStatus = "pending"
 	// AttachmentStatusComplete marks a row whose file is confirmed present in
-	// SFTPGo. This is the only state that has ever existed prior to this
-	// change, and remains the default for every caller that doesn't specify
-	// a status (the ServiceNow path, and any existing Postgres-path caller).
+	// Azure Blob Storage (or was migrated there).
 	AttachmentStatusComplete AttachmentStatus = "complete"
 )
 
@@ -4262,84 +4241,11 @@ type Attachment struct {
 	CreatedOn   time.Time      `json:"createdOn"`
 	DownloadURL *string        `json:"downloadUrl"`
 	PreviewURL  *string        `json:"previewUrl"`
-	// StorageKey identifies the file's location in external object storage
-	// (SFTPGo) for CSM-native (Postgres) data source attachments. Nil for
-	// ServiceNow-sourced attachments, whose bytes are held by ServiceNow itself.
+	// StorageKey identifies the file's location in Azure Blob Storage. Nil for a
+	// row that has no file of its own recorded.
 	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
+	// Status is the lifecycle state -- see AttachmentStatus.
 	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentRequest is the input for POST /attachments.
-//
-// The two data sources populate mutually exclusive fields: ServiceNow requires
-// File (a base64 data URI) and computes SizeBytes from the decoded bytes; the
-// CSM-native (Postgres) data source requires StorageKey (the file was already
-// uploaded to SFTPGo out of band) and SizeBytes, since this service never sees
-// the bytes themselves.
-type CreateAttachmentRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	File          string        `json:"file,omitempty"`
-	Description   *string       `json:"description"`
-	// StorageKey references file bytes already uploaded to SFTPGo. Required
-	// for the CSM-native (Postgres) data source; ignored for ServiceNow.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// SizeBytes is the file size in bytes. Required for the CSM-native
-	// (Postgres) data source (this service cannot compute it, since it never
-	// sees the file bytes); ignored for ServiceNow, which computes it from
-	// the decoded File payload.
-	SizeBytes int `json:"sizeBytes,omitempty"`
-	// Status requests the initial lifecycle state for a CSM-native
-	// (Postgres) data source attachment -- see AttachmentStatus. Empty
-	// defaults to AttachmentStatusComplete, preserving today's behavior for
-	// every existing caller (including the ServiceNow path, which ignores
-	// this field entirely). Callers that upload directly to SFTPGo should
-	// pass AttachmentStatusPending here *before* minting the upload
-	// credential, then call CaseService.ConfirmCaseAttachment once the
-	// browser reports the upload succeeded.
-	Status AttachmentStatus `json:"status,omitempty"`
-	// CreatedBy is the resolved actor user id, wired in by the Postgres-backed
-	// service from the request's auth token before it reaches the repository.
-	// Not part of the wire contract.
-	CreatedBy string `json:"-"`
-}
-
-// AttachmentDetail holds the core fields returned after creating an attachment.
-type AttachmentDetail struct {
-	ID        string    `json:"id"`
-	SizeBytes int       `json:"sizeBytes"`
-	CreatedOn time.Time `json:"createdOn"`
-	CreatedBy string    `json:"createdBy"`
-	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
-	// this service holds no download location for it, only its storage_key --
-	// resolving storage_key to an actual download location is the downstream
-	// CSM backend's job. Always non-nil for ServiceNow-sourced attachments.
-	DownloadURL *string `json:"downloadUrl"`
-	// StorageKey is set only for CSM-native (Postgres) data source attachments.
-	// See Attachment.StorageKey.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentResponse is the response for POST /cases/{id}/attachments.
-type CreateAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
-}
-
-// ConfirmAttachmentResponse is the response for POST /attachments/{id}/confirm.
-// It reports the same shape as CreateAttachmentResponse -- confirming is just
-// the second half of creating an attachment for the CSM-native (Postgres)
-// data source's two-step (pending -> complete) upload flow.
-type ConfirmAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
 }
 
 // ReferenceType identifies the entity type an attachment is associated with.
@@ -4368,40 +4274,6 @@ type SearchAttachmentsResponse struct {
 	Limit       int          `json:"limit"`
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
-}
-
-// DeleteAttachmentRequest is the input for DELETE /attachments/{attachmentId}.
-type DeleteAttachmentRequest struct {
-	AttachmentID string `json:"-"`
-}
-
-// DeleteAttachmentResponse is the output for DELETE /cases/{id}/attachments/{attachmentId}.
-type DeleteAttachmentResponse struct {
-	Message string `json:"message"`
-}
-
-// UpdateAttachmentRequest is the input for PATCH /attachments/{attachmentId}.
-// ReferenceID and ReferenceType scope the update the same way SearchAttachmentsRequest does
-// (an IDOR guard: the caller asserts which entity it believes the attachment belongs to).
-// At least one of Name or Description must be provided.
-// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear,
-// `"value"` = set -- mirroring UpdateDeployedProductRequest.Description, since a plain *string
-// cannot tell an omitted field apart from an explicit null.
-type UpdateAttachmentRequest struct {
-	AttachmentID  string          `json:"-"`
-	ReferenceID   string          `json:"referenceId"`
-	ReferenceType ReferenceType   `json:"referenceType"`
-	Name          *string         `json:"name,omitempty"`
-	Description   json.RawMessage `json:"description,omitempty"`
-}
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{attachmentId}.
-
-// UpdatedAttachment carries the fields that may change after an attachment update.
-type UpdatedAttachment struct {
-	ID        string    `json:"id"`
-	UpdatedOn time.Time `json:"updatedOn"`
-	UpdatedBy string    `json:"updatedBy"`
 }
 
 // ChangeRequestType classifies the change request type.
@@ -7994,64 +7866,6 @@ type CaseEmojiFeedback struct {
 	CreatedBy         string               `json:"createdBy"`
 	CreatedOn         string               `json:"createdOn"`
 	AdditionalComment *string              `json:"additionalComment"`
-}
-
-// --- attachment gaps (formerly ServiceNow data source only; the CSM-native
-// Postgres data source now implements GetAttachmentByID and UpdateAttachment
-// too, in caseService -- see its Content/StorageKey doc comments above for how
-// the two data sources differ) ---
-
-// AttachmentDetails is the response for GET /attachments/{id} — attachment
-// metadata plus its base64-encoded file content. The upstream response does
-// include a createdByUser key, but this lookup leaves it null rather than
-// resolving the uploader the way the search/comment paths do — so CreatedBy is
-// a bare string here. ReferenceType is genuinely absent from the upstream
-// response, so it is deliberately not modeled below.
-type AttachmentDetails struct {
-	ID          string `json:"id"`
-	ReferenceID string `json:"referenceId"`
-	// ReferenceType identifies which entity type ReferenceID points at (see
-	// ReferenceType). Always populated for CSM-native (Postgres) data source
-	// attachments; nil (JSON null) when the backing data source's
-	// attachment-details lookup does not report a reference type. Callers
-	// authorizing access per referenced resource must treat a nil value as
-	// unknown and fail closed.
-	ReferenceType *ReferenceType `json:"referenceType"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	SizeBytes     int            `json:"sizeBytes"`
-	Description   *string        `json:"description"`
-	CreatedBy     string         `json:"createdBy"`
-	CreatedOn     time.Time      `json:"createdOn"`
-	DownloadURL   *string        `json:"downloadUrl"`
-	PreviewURL    *string        `json:"previewUrl"`
-	// Content is nil for CSM-native (Postgres) data source attachments: this
-	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
-	// Always non-nil for ServiceNow-sourced attachments.
-	Content *string `json:"content"`
-	// StorageKey is set only for CSM-native (Postgres) data source
-	// attachments, whose Content is always nil (see above).
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments. A
-	// 'pending' row is still returned here (unlike the default search/list
-	// response, which excludes pending rows) since a direct id lookup is how
-	// the confirm step and an uploader checking their own in-flight upload
-	// both work.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// UpdateAttachmentRequest is the request body for PATCH /attachments/{id}.
-// ReferenceType must be "case" or "deployment"; for "case" Name is required
-// and Description is not allowed; for "deployment" at least one of Name or
-// Description must be present.
-
-// UpdatedAttachment holds the fields returned after updating an attachment.
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{id}.
-type UpdateAttachmentResponse struct {
-	Message    string            `json:"message"`
-	Attachment UpdatedAttachment `json:"attachment"`
 }
 
 // --- deployed product metrics (ServiceNow data source only) ---

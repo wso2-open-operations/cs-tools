@@ -18,9 +18,7 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,42 +30,18 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
 
-// maxAttachmentBodySize caps the CreateCaseAttachment and CreateCase JSON body
-// (CreateCase carries inline base64 attachments) at 15 MiB,
-// matching the csm-portal backend's own maxAttachmentBodyBytes ceiling: a 10
-// MB file becomes ~13.3 MB once base64-encoded, plus JSON envelope overhead.
-// The generic maxRequestBodySize (1 MiB) is far too small for this endpoint
-// and rejects legitimate small attachments (e.g. a 2 MB file) on both endpoints.
-const maxAttachmentBodySize = int64(15 << 20)
+// maxCaseBodySize caps the CreateCase JSON body at 15 MiB. A case description can
+// still carry base64 images pasted into it, and the generic maxRequestBodySize
+// (1 MiB) is too small for that. Attachment files never travel in this body: they
+// are uploaded afterwards through the stored-attachment routes.
+const maxCaseBodySize = int64(15 << 20)
 
 // maxTagSearchLimit caps POST /tags/search results. Tag search backs a
 // type-ahead, not a paged browse, so the ceiling is deliberately low.
 const maxTagSearchLimit = 100
 
-// attachmentTooLargeMsg is deliberately expressed as the file-size limit (10
-// MB) a caller actually cares about, not the raw request-body cap above — the
-// extra headroom in maxAttachmentBodySize exists only to absorb base64/JSON
-// overhead the caller never sees.
-const attachmentTooLargeMsg = "attachment exceeds the maximum allowed size of 10 MB"
-
-// safeAttachmentTypes is the allowlist of Content-Type values that may be
-// forwarded as-is. Anything not in this set is coerced to application/octet-stream
-// to prevent a stored-XSS attack via a crafted upstream Content-Type (e.g. text/html).
-// All responses also carry Content-Disposition: attachment.
-var safeAttachmentTypes = map[string]bool{
-	"image/png":                    true,
-	"image/jpeg":                   true,
-	"image/gif":                    true,
-	"image/webp":                   true,
-	"application/pdf":              true,
-	"text/plain":                   true,
-	"application/zip":              true,
-	"application/x-zip-compressed": true,
-	"application/msword":           true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.ms-excel": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true,
-}
+// caseTooLargeMsg is returned when the CreateCase body is over maxCaseBodySize.
+const caseTooLargeMsg = "request exceeds the maximum allowed size of 15 MB"
 
 // CaseHandler handles HTTP requests for the case resource.
 type CaseHandler struct {
@@ -80,23 +54,6 @@ type CaseHandler struct {
 	// trusted to bypass RLS entirely, so it needs no second, narrower
 	// allowlist just to claim a comment/tag author.
 	m2mClientIDs map[string]bool
-	// comments, when set, lets GetAttachmentParentCase resolve an attachment
-	// whose reference is a comment rather than a case (see that method).
-	comments attachmentCommentResolver
-}
-
-// attachmentCommentResolver is the one comment read GetAttachmentParentCase
-// needs: a single comment by id, read through the caller's own scope.
-type attachmentCommentResolver interface {
-	GetComment(ctx context.Context, id string) (domain.Comment, error)
-}
-
-// WithCommentResolver sets the comment lookup GetAttachmentParentCase falls
-// back to when an attachment's reference is not a case. Optional: without it
-// such an attachment keeps resolving to 404.
-func (h *CaseHandler) WithCommentResolver(r attachmentCommentResolver) *CaseHandler {
-	h.comments = r
-	return h
 }
 
 // NewCaseHandler constructs a CaseHandler with the given service and the
@@ -124,7 +81,7 @@ func (h *CaseHandler) GetCase(w http.ResponseWriter, r *http.Request) {
 // CreateCase handles POST /cases.
 func (h *CaseHandler) CreateCase(w http.ResponseWriter, r *http.Request) {
 	var req domain.CreateCaseRequest
-	if !decodeRequestWithLimit(w, r, &req, maxAttachmentBodySize, attachmentTooLargeMsg) {
+	if !decodeRequestWithLimit(w, r, &req, maxCaseBodySize, caseTooLargeMsg) {
 		return
 	}
 	c, err := h.svc.CreateCase(r.Context(), req)
@@ -297,33 +254,6 @@ func (h *CaseHandler) CaseVolumeTrend(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// CreateCaseAttachment handles POST /attachments.
-func (h *CaseHandler) CreateCaseAttachment(w http.ResponseWriter, r *http.Request) {
-	var req domain.CreateAttachmentRequest
-	if !decodeRequestWithLimit(w, r, &req, maxAttachmentBodySize, attachmentTooLargeMsg) {
-		return
-	}
-	resp, err := h.svc.CreateCaseAttachment(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// ConfirmCaseAttachment handles POST /attachments/{id}/confirm.
-func (h *CaseHandler) ConfirmCaseAttachment(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.ConfirmCaseAttachment(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
 // SearchCaseAttachments handles POST /attachments/search.
 func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Request) {
 	var req domain.SearchAttachmentsRequest
@@ -331,122 +261,6 @@ func (h *CaseHandler) SearchCaseAttachments(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	resp, err := h.svc.SearchCaseAttachments(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// GetCaseAttachmentContent handles GET /attachments/{id}/content.
-func (h *CaseHandler) GetCaseAttachmentContent(w http.ResponseWriter, r *http.Request) {
-	attachmentID := r.PathValue("id")
-	content, contentType, err := h.svc.GetCaseAttachmentContent(r.Context(), attachmentID)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	// Strip Content-Type parameters (e.g. charset) before the allowlist check.
-	ct := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
-	if !safeAttachmentTypes[ct] {
-		ct = "application/octet-stream"
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Disposition", "attachment")
-	_, _ = w.Write(content) // #nosec G705 -- Content-Type is allowlisted above; Content-Disposition: attachment prevents inline rendering
-}
-
-// DeleteCaseAttachment handles DELETE /attachments/{id}.
-func (h *CaseHandler) DeleteCaseAttachment(w http.ResponseWriter, r *http.Request) {
-	req := domain.DeleteAttachmentRequest{
-		AttachmentID: r.PathValue("id"),
-	}
-	resp, err := h.svc.DeleteCaseAttachment(r.Context(), req)
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// GetAttachmentByID handles GET /attachments/{id}.
-func (h *CaseHandler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.svc.GetAttachmentByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// GetAttachmentParentCase handles GET /attachments/{id}/case: resolves an
-// attachment to its own parent case, via the same h.svc both calls below
-// share -- so when this is attachmentReadHandler (AttachmentDataSource's
-// read-only ServiceNow delegate, see routes.go), the attachment lookup and
-// its case lookup are always sourced consistently with each other, unlike a
-// caller doing the two lookups itself against two separately-data-sourced
-// routes (GET /attachments/{id} here vs the general GET /cases/{id}).
-func (h *CaseHandler) GetAttachmentParentCase(w http.ResponseWriter, r *http.Request) {
-	attachment, err := h.svc.GetAttachmentByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		writeServiceError(w, r, err)
-		return
-	}
-	c, err := h.svc.GetCaseByID(r.Context(), attachment.ReferenceID)
-	if err != nil {
-		var nf *apierror.NotFoundError
-		if !errors.As(err, &nf) {
-			writeServiceError(w, r, err)
-			return
-		}
-		// An attachment pasted inline into a comment carries that comment's
-		// id as its reference, not the case's, so the case lookup above can
-		// never find it. Resolve it through the comment instead.
-		resolved, ok := h.parentCaseViaComment(r.Context(), attachment.ReferenceID)
-		if !ok {
-			writeServiceError(w, r, err)
-			return
-		}
-		c = resolved
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(c)
-}
-
-// parentCaseViaComment resolves referenceID as a comment and returns the case
-// that comment belongs to. Fails closed (ok=false) on every doubt: no resolver
-// configured, the comment is not visible to the caller (the comment read is
-// scoped to the caller, so a customer only finds comments of projects they
-// belong to), it is deleted, it is not a customer-visible comment (a work
-// note or activity entry never grants access), or its own reference is not a
-// case the caller can see -- GetCaseByID is again the caller-scoped read that
-// decides that.
-func (h *CaseHandler) parentCaseViaComment(ctx context.Context, referenceID string) (domain.CaseView, bool) {
-	if h.comments == nil {
-		return domain.CaseView{}, false
-	}
-	comment, err := h.comments.GetComment(ctx, referenceID)
-	if err != nil || comment.IsDeleted || comment.Type != domain.CommentTypeComment {
-		return domain.CaseView{}, false
-	}
-	c, err := h.svc.GetCaseByID(ctx, comment.ReferenceID)
-	if err != nil {
-		return domain.CaseView{}, false
-	}
-	return c, true
-}
-
-// UpdateAttachment handles PATCH /attachments/{id}.
-func (h *CaseHandler) UpdateAttachment(w http.ResponseWriter, r *http.Request) {
-	var req domain.UpdateAttachmentRequest
-	if !decodeRequest(w, r, &req) {
-		return
-	}
-	req.AttachmentID = r.PathValue("id")
-	resp, err := h.svc.UpdateAttachment(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

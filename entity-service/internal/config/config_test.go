@@ -29,13 +29,12 @@ import (
 // test only needs to override the field(s) under test.
 func baseValidConfig() Config {
 	return Config{
-		DataSource:           DataSourcePostgres,
-		SLADataSource:        SLADataSourcePostgres,
-		UsageReadMode:        UsageReadModePostgres,
-		AttachmentDataSource: AttachmentDataSourcePostgres,
-		DBUser:               "user",
-		DBPassword:           "password",
-		DBName:               "db",
+		DataSource:    DataSourcePostgres,
+		SLADataSource: SLADataSourcePostgres,
+		UsageReadMode: UsageReadModePostgres,
+		DBUser:        "user",
+		DBPassword:    "password",
+		DBName:        "db",
 		// Both ports carry their real defaults: Load always populates them,
 		// and Validate rejects the two being equal — which a zero-value
 		// Config would be.
@@ -395,7 +394,6 @@ func baseValidServiceNowConfig() Config {
 		DataSource:                               DataSourceServiceNow,
 		SLADataSource:                            SLADataSourcePostgres,
 		UsageReadMode:                            UsageReadModePostgres,
-		AttachmentDataSource:                     AttachmentDataSourcePostgres,
 		ServiceNowIntegrationServiceBaseURL:      "https://example.com",
 		ServiceNowIntegrationServiceTokenURL:     "https://example.com/token",
 		ServiceNowIntegrationServiceClientID:     "client-id",
