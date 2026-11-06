@@ -33,6 +33,10 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
 import Editor from "@components/rich-text-editor/Editor";
+import {
+  preCreateImagesErrorMessage,
+  usePreCreateInlineImages,
+} from "@features/csm-cases/api/usePreCreateInlineImages";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -89,6 +93,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const [subjectEdited, setSubjectEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+
+  const descriptionImages = usePreCreateInlineImages(projectId || undefined);
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
@@ -155,6 +161,17 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
     setSubmitting(true);
+    // The description's images are stored first, under the project, so the
+    // create request carries `/<attachment id>` references. If one cannot be
+    // stored nothing is created and the form stays as it is.
+    let descriptionHtml: string;
+    try {
+      descriptionHtml = await descriptionImages.uploadImages(description);
+    } catch (err) {
+      setSubmitting(false);
+      showError(preCreateImagesErrorMessage(err));
+      return;
+    }
     try {
       const created = await postCase.mutateAsync({
         type: "security_report_analysis",
@@ -162,8 +179,9 @@ export default function CreateSecurityReportPage(): JSX.Element {
         deploymentId,
         deployedProductId,
         subject: subject.trim(),
-        description,
+        description: descriptionHtml,
       });
+      descriptionImages.release(description);
       // The report exists now: upload the chosen files to it. A failed upload
       // does not undo the report, so say which files did not make it and go on
       // to the report, where they can be added again.
@@ -336,6 +354,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
                 maxHeight="300px"
                 toolbarVariant="full"
                 disabled={submitting}
+                onImageUpload={descriptionImages.onImageUpload}
               />
             </Box>
           </Grid>
