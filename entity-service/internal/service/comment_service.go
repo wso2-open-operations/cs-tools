@@ -312,6 +312,14 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 		createdBy = user.Email
 	}
 
+	// At most MaxInlineImagesPerContent images and the total size limit, checked
+	// before the comment is saved.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		if err := s.imageLinker.ValidateCommentImages(ctx, req.ReferenceID, createdBy, req.Content); err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+	}
+
 	row, err := s.repo.CreateComment(ctx, req.ReferenceID, req.ReferenceType, enumType, req.Content, createdBy)
 	if err != nil {
 		return domain.CreateCommentResponse{}, err
@@ -433,6 +441,18 @@ func (s *commentService) UpdateComment(ctx context.Context, req domain.UpdateCom
 	actorEmail, err := s.resolveCommentActor(ctx)
 	if err != nil {
 		return domain.UpdateCommentResponse{}, err
+	}
+
+	// Same limits as on create, before the edit is saved; the comment's work item
+	// is read only when the new content has an image in it.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		current, err := s.repo.GetCommentByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
+		if err := s.imageLinker.ValidateCommentImages(ctx, current.WorkItemID, actorEmail, req.Content); err != nil {
+			return domain.UpdateCommentResponse{}, err
+		}
 	}
 
 	row, err := s.repo.UpdateComment(ctx, req.ID, req.Content, actorEmail)

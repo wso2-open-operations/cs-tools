@@ -704,8 +704,20 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// Postgres.
 	s.fillServiceRequestText(ctx, &req)
 
+	// The description's inline images were uploaded as drafts before this record
+	// existed. Checked BEFORE anything is created, so a bad request leaves nothing
+	// half-created. Nothing runs for a description with no image in it.
+	descImageEmail, err := validateDescriptionImages(ctx, s.imageLinker, req.ProjectID, req.Description)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	if s.snMirror != nil {
-		return s.createCaseSNFirst(ctx, req)
+		resp, err := s.createCaseSNFirst(ctx, req)
+		if err == nil {
+			linkDescriptionImages(ctx, s.imageLinker, resp.Case.ID, req.ProjectID, descImageEmail, req.Description)
+		}
+		return resp, err
 	}
 
 	// The pure-Postgres path below (no ServiceNow mirror at all) now writes
@@ -740,26 +752,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
-	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
-	// same restriction snCaseService.CreateCase applies (see its own
-	// comment and that var's own doc comment for which types are covered
-	// and why). Best-effort and nil-safe: s.slaEngine is nil
-	// when WithSLAEngine was never wired in (e.g. CSM_SLA_ENGINE_ENABLED=
-	// false, or no database configured at all), and a missing/failed clock
-	// registration must never fail case creation, which has already
-	// succeeded by this point. req.Severity/req.ProjectID are used directly
-	// rather than a GetCaseByID re-fetch (unlike snCaseService's own
-	// registerCaseSLAClocksEvent, which needs one because ServiceNow's
-	// create response doesn't echo these back) -- this is a native Postgres
-	// insert, so the request just written already carries both. A real,
-	// reported gap this closes: a case created under plain
-	// DATA_SOURCE=postgres (no ServiceNow mirror at all) got no SLA
-	// tracking whatsoever from creation onward, regardless of severity,
-	// until/unless its severity happened to change later (which calls
-	// ReviseCaseClocks, registering clocks as a side effect).
-	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
-		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
-	}
+	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
 		// the token validateCreateWatchList already accepted.
@@ -1408,6 +1401,13 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// comment.created_by (migration 0040) is a free-text VARCHAR, not a
 	// UUID FK -- see CaseRepository.CreateCaseComment's own doc comment.
 	req.CreatedBy = actorEmail
+	// At most MaxInlineImagesPerContent images and the total size limit, checked
+	// before the comment is saved.
+	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
+		if err := s.imageLinker.ValidateCommentImages(ctx, req.CaseID, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {

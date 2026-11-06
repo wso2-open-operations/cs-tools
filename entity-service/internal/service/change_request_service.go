@@ -46,7 +46,9 @@ import (
 // its own doc comment below.
 
 type changeRequestService struct {
-	repo repository.ChangeRequestRepository
+	// imageLinker validates and links the inline images of the description (nil: none).
+	imageLinker InlineImageLinker
+	repo        repository.ChangeRequestRepository
 	// userRepo resolves the calling user's UUID from their x-user-id-token
 	// for DecideChangeRequestApproval -- approval_stage_approver.
 	// approver_user_id is a "user".id FK, not an email, so the JWT's email
@@ -503,10 +505,39 @@ func (s *changeRequestService) CreateChangeRequest(ctx context.Context, req doma
 	if err := repository.RejectRemovedCreateFields(req); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
-	if s.snMirror != nil {
-		return s.createChangeRequestSNFirst(ctx, req)
+	// Inline images of the description were uploaded as drafts of the project;
+	// checked before anything is created, linked once the record exists.
+	projectID, description := "", ""
+	if req.ProjectID != nil {
+		projectID = *req.ProjectID
 	}
-	return s.createChangeRequestPortal(ctx, req)
+	if req.Description != nil {
+		description = *req.Description
+	}
+	email, err := validateDescriptionImages(ctx, s.imageLinker, projectID, description)
+	if err != nil {
+		return domain.CreateChangeRequestResponse{}, err
+	}
+	var resp domain.CreateChangeRequestResponse
+	if s.snMirror != nil {
+		resp, err = s.createChangeRequestSNFirst(ctx, req)
+	} else {
+		resp, err = s.createChangeRequestPortal(ctx, req)
+	}
+	if err == nil {
+		linkDescriptionImages(ctx, s.imageLinker, resp.ChangeRequest.ID, projectID, email, description)
+	}
+	return resp, err
+}
+
+// WithChangeRequestInlineImageLinker attaches the linker that validates and
+// links the inline images of a change request's description on create. A no-op
+// if svc is not a *changeRequestService or l is nil.
+func WithChangeRequestInlineImageLinker(svc ChangeRequestService, l InlineImageLinker) ChangeRequestService {
+	if cs, ok := svc.(*changeRequestService); ok && l != nil {
+		cs.imageLinker = l
+	}
+	return svc
 }
 
 // createChangeRequestPortal implements CreateChangeRequest's plain-Postgres
