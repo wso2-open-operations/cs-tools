@@ -207,6 +207,8 @@ type githubSyncService struct {
 	// repoConfigs reads each repository's own mapping file. Nil (the
 	// default) leaves account_github_repo the only source, as before.
 	repoConfigs *githubRepoConfigs
+	// issueTemplates reads each repository's issue form labels. Set with WithGithubRepoConfig; nil splits on every ### heading.
+	issueTemplates *githubIssueTemplates
 	// snCases creates a service request in ServiceNow first, under
 	// dual-write, so it takes ServiceNow's CS number and WSO2 Case ID as a
 	// portal-created one does (github_sn_case.go). Nil writes Postgres only
@@ -437,6 +439,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		return Outcome{Action: "creation_prepared"}, nil
 	}
 	issue := snGithubIssueOf(p)
+	issue.Headings = s.issueHeadingsFor(ctx, p.Repository.Owner.Login, p.Repository.Name)
 	if existing != "" {
 		// The issue already produced a record. Its text is the source of
 		// truth, so an edit overwrites -- servicenow_update_case.yml re-sends
@@ -447,10 +450,10 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 			GitReference: p.Issue.HTMLURL,
 			Catalog:      catalog,
 			SRType:       srType,
-			Fields:       ExtractTemplateFields(p.Issue.Body),
+			Fields:       extractTemplateFields(p.Issue.Body, issue.Headings),
 		}
 		if s.snCases != nil {
-			update.ServiceNowDescription = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body), issue)
+			update.ServiceNowDescription = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 		}
 		if err := s.mutate.UpdateFromIssue(ctx, existing, update); err != nil {
 			return Outcome{}, err
@@ -479,7 +482,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		Repository:   p.Repository.Name,
 		Catalog:      catalog,
 		SRType:       srType,
-		Fields:       ExtractTemplateFields(p.Issue.Body),
+		Fields:       extractTemplateFields(p.Issue.Body, issue.Headings),
 		CreatedBy:    p.Issue.User.Login,
 	}
 	in.Severity = githubTemplateSeverity(in.Fields["u_priority"])
@@ -508,7 +511,7 @@ func (s *githubSyncService) handleIssue(ctx context.Context, p IssuePayload, map
 		in.ServiceNowWSO2ID = res.WSO2CaseID
 		// The same text ServiceNow holds, so both stores read alike and the
 		// portal renders it as it renders every ServiceNow-numbered record.
-		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body), issue)
+		in.Description = snGithubCaseDescription(extractSNIssueFields(p.Issue.Body, issue.Headings), issue)
 	}
 
 	id, number, err := s.mutate.CreateServiceRequestFromIssue(ctx, in)
