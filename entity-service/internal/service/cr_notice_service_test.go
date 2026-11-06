@@ -34,6 +34,10 @@ type fakeCRRepo struct {
 	group    []string
 	contacts []string
 	groupFor string
+	// actors answers UserActor; actorsAsked records the ids it was asked for.
+	actors      map[string]repository.CRNoticeActor
+	actorErr    error
+	actorsAsked []string
 }
 
 func (f *fakeCRRepo) ClaimChanges(context.Context, []string, int) ([]repository.OutboxChange, error) {
@@ -41,6 +45,10 @@ func (f *fakeCRRepo) ClaimChanges(context.Context, []string, int) ([]repository.
 }
 func (f *fakeCRRepo) Details(context.Context, string) (repository.CRNoticeDetails, error) {
 	return f.details, nil
+}
+func (f *fakeCRRepo) UserActor(_ context.Context, userID string) (repository.CRNoticeActor, error) {
+	f.actorsAsked = append(f.actorsAsked, userID)
+	return f.actors[userID], f.actorErr
 }
 func (f *fakeCRRepo) GroupMemberEmails(_ context.Context, team string) ([]string, error) {
 	f.groupFor = team
@@ -348,6 +356,200 @@ func TestPlanDate_CustomerProposedNotifiesInternalGroup(t *testing.T) {
 	}
 	if got.Subject != "[WSO2 Support] [CR] (CHG0031234) Customer has updated the plan start date" {
 		t.Errorf("subject = %q", got.Subject)
+	}
+}
+
+// The record of who proposed a date (migration 0249), as a proposal's outbox
+// snapshot carries it: written in the same UPDATE as the date, so
+// customer_proposed_for is the date itself. to_jsonb renders both in the
+// session's zone; the two instants below are the same one in two zones.
+const (
+	crTestProposerID  = "aaaaaaaa-0000-0000-0000-000000000001"
+	crTestProposedOn  = "2026-11-01T10:00:00+00:00"
+	crTestSameInstant = "2026-11-01T15:30:00+05:30"
+)
+
+// proposalChange is the outbox row of a date moved in Customer Approval whose
+// snapshot carries the given record fields (absent when nil).
+func proposalChange(record map[string]any) repository.OutboxChange {
+	snap := map[string]any{crColState: crStateCustomerApproval, crColCustomerDate: crTestProposedOn}
+	for k, v := range record {
+		snap[k] = v
+	}
+	return crChange(map[string]map[string]any{crColCustomerDate: {"from": nil, "to": crTestProposedOn}}, snap)
+}
+
+// planDateNotices runs one row change and returns the plan-date notices sent.
+func planDateNotices(t *testing.T, repo *fakeCRRepo, change repository.OutboxChange) []events.CRPlanDateNoticePayload {
+	t.Helper()
+	pub := &fakePublisher{}
+	if err := newCRService(repo, pub).HandleChange(context.Background(), change); err != nil {
+		t.Fatalf("HandleChange: %v", err)
+	}
+	var out []events.CRPlanDateNoticePayload
+	for _, p := range pub.sent {
+		if p.Type != events.TypeCRPlanDateNotice {
+			t.Fatalf("published %s, want only plan-date notices", p.Type)
+		}
+		var got events.CRPlanDateNoticePayload
+		if err := json.Unmarshal(p.Payload, &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		out = append(out, got)
+	}
+	return out
+}
+
+// A proposal's own snapshot names its proposer, so the actor is that contact
+// whoever wrote the change last: a staff work note saved between the proposal
+// and the drain makes a WSO2 member the last writer, and the internal notice is
+// still sent, naming the customer. The instants are compared, not the text.
+// The record decides both ways: a recorded WSO2 user is suppressed even when
+// the last writer is a customer.
+func TestPlanDate_TheRecordedProposerIsTheActorWhoeverWroteLast(t *testing.T) {
+	t.Run("a customer recorded, a WSO2 member the last writer: sent, naming the customer", func(t *testing.T) {
+		d := baseDetails()
+		d.ActorName, d.ActorIsWSO2 = "Engineer Staff", true
+		repo := &fakeCRRepo{details: d, group: []string{"dev@wso2.com"},
+			actors: map[string]repository.CRNoticeActor{crTestProposerID: {Name: "Aaron Alice"}}}
+		sent := planDateNotices(t, repo, proposalChange(map[string]any{
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestSameInstant,
+		}))
+		if len(sent) != 1 || sent[0].Kind != events.CRPlanDateCustomerProposed || sent[0].Audience != events.CRAudienceInternal {
+			t.Fatalf("sent = %+v, want the one internal customer-proposed notice", sent)
+		}
+		if sent[0].ActorName != "Aaron Alice" {
+			t.Errorf("actorName = %q, want the recorded proposer %q, not the last writer", sent[0].ActorName, "Aaron Alice")
+		}
+		if sent[0].Subject != "[WSO2 Support] [CR] (CHG0031234) Customer has updated the plan start date" {
+			t.Errorf("subject = %q", sent[0].Subject)
+		}
+		if len(repo.actorsAsked) != 1 || repo.actorsAsked[0] != crTestProposerID {
+			t.Errorf("UserActor asked for %v, want the recorded proposer only", repo.actorsAsked)
+		}
+	})
+
+	t.Run("a WSO2 user recorded, a customer the last writer: suppressed", func(t *testing.T) {
+		d := baseDetails()
+		d.ActorName, d.ActorIsWSO2 = "Aaron Alice", false
+		repo := &fakeCRRepo{details: d, group: []string{"dev@wso2.com"},
+			actors: map[string]repository.CRNoticeActor{crTestProposerID: {Name: "Engineer Staff", IsWSO2: true}}}
+		if sent := planDateNotices(t, repo, proposalChange(map[string]any{
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestProposedOn,
+		})); len(sent) != 0 {
+			t.Fatalf("sent = %+v, want none: the recorded actor is WSO2", sent)
+		}
+	})
+
+	t.Run("a recorded user who is gone: sent, unnamed", func(t *testing.T) {
+		d := baseDetails()
+		d.ActorName, d.ActorIsWSO2 = "Engineer Staff", true
+		repo := &fakeCRRepo{details: d, group: []string{"dev@wso2.com"}} // UserActor finds nobody
+		sent := planDateNotices(t, repo, proposalChange(map[string]any{
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestProposedOn,
+		}))
+		if len(sent) != 1 || sent[0].ActorName != "" {
+			t.Fatalf("sent = %+v, want one notice with no actor name (not the last writer's)", sent)
+		}
+	})
+
+	t.Run("reading the recorded user fails: an error, nothing sent", func(t *testing.T) {
+		repo := &fakeCRRepo{details: baseDetails(), group: []string{"dev@wso2.com"}, actorErr: errStub}
+		pub := &fakePublisher{}
+		err := newCRService(repo, pub).HandleChange(context.Background(), proposalChange(map[string]any{
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestProposedOn,
+		}))
+		if !errors.Is(err, errStub) || len(pub.sent) != 0 {
+			t.Fatalf("err = %v, sent = %d, want the read's error and nothing sent", err, len(pub.sent))
+		}
+	})
+}
+
+// Migration 0250's trigger records the proposer of a time that has no record when another writer
+// replaces them as last writer. Its write to change_request touches only the three record columns,
+// so the outbox row it leaves is no turn of the conversation and no move into an approval state:
+// nothing is sent and nobody is read.
+func TestPlanDate_KeepingALegacyProposerSendsNothing(t *testing.T) {
+	repo := &fakeCRRepo{details: baseDetails(), group: []string{"dev@wso2.com"},
+		actors: map[string]repository.CRNoticeActor{crTestProposerID: {Name: "Aaron Alice"}}}
+	pub := &fakePublisher{}
+	change := crChange(
+		map[string]map[string]any{
+			crColProposedBy:        {"from": nil, "to": crTestProposerID},
+			crColProposedFor:       {"from": nil, "to": crTestProposedOn},
+			"customer_proposed_on": {"from": nil, "to": "2026-10-30T08:00:00+00:00"},
+		},
+		map[string]any{
+			crColState: crStateCustomerApproval, crColCustomerDate: crTestProposedOn,
+			crColProposedBy: crTestProposerID, crColProposedFor: crTestProposedOn,
+		},
+	)
+	if err := newCRService(repo, pub).HandleChange(context.Background(), change); err != nil {
+		t.Fatalf("HandleChange: %v", err)
+	}
+	if len(pub.sent) != 0 || len(repo.actorsAsked) != 0 {
+		t.Fatalf("sent %d, asked for actors %v, want nothing sent and nobody read", len(pub.sent), repo.actorsAsked)
+	}
+}
+
+// A record that is not about the date this row carries is no record: the date
+// was moved by a writer that is not a proposal (or the time does not parse).
+// The actor is then the last writer, exactly as for a row with no record.
+func TestPlanDate_AStaleRecordFallsBackToTheLastWriter(t *testing.T) {
+	for name, proposedFor := range map[string]any{
+		"another time":               "2026-10-25T10:00:00+00:00",
+		"an infinite time":           "infinity",
+		"a time that does not parse": "not a time",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertLastWriterDecides(t, map[string]any{crColProposedBy: crTestProposerID, crColProposedFor: proposedFor})
+		})
+	}
+}
+
+// A row with no record -- a date written before migration 0249, or one whose
+// record the 0249 trigger voided on entering Customer Approval (who cleared,
+// customer_proposed_for left at the date) -- keeps the last-writer rule
+// unchanged: a WSO2 last writer suppresses the notice, a customer one is named.
+func TestPlanDate_NoRecordFallsBackToTheLastWriter(t *testing.T) {
+	for name, record := range map[string]map[string]any{
+		"no record columns (before 0249)":   nil,
+		"a voided record":                   {crColProposedBy: nil, crColProposedFor: crTestProposedOn},
+		"a blank proposer":                  {crColProposedBy: "  ", crColProposedFor: crTestProposedOn},
+		"a proposer with no time it is for": {crColProposedBy: crTestProposerID, crColProposedFor: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertLastWriterDecides(t, record)
+		})
+	}
+}
+
+// assertLastWriterDecides runs a proposal row carrying record twice: with a
+// WSO2 last writer (no notice) and with a customer one (one notice naming
+// them), and requires that UserActor was never asked.
+func assertLastWriterDecides(t *testing.T, record map[string]any) {
+	t.Helper()
+	recorded := map[string]repository.CRNoticeActor{crTestProposerID: {Name: "Recorded Proposer"}}
+
+	staff := baseDetails()
+	staff.ActorName, staff.ActorIsWSO2 = "Engineer Staff", true
+	repo := &fakeCRRepo{details: staff, group: []string{"dev@wso2.com"}, actors: recorded}
+	if sent := planDateNotices(t, repo, proposalChange(record)); len(sent) != 0 {
+		t.Errorf("WSO2 last writer: sent = %+v, want none", sent)
+	}
+	if len(repo.actorsAsked) != 0 {
+		t.Errorf("WSO2 last writer: UserActor asked for %v, want never", repo.actorsAsked)
+	}
+
+	customer := baseDetails()
+	customer.ActorName = "Aaron Alice"
+	repo = &fakeCRRepo{details: customer, group: []string{"dev@wso2.com"}, actors: recorded}
+	sent := planDateNotices(t, repo, proposalChange(record))
+	if len(sent) != 1 || sent[0].ActorName != "Aaron Alice" {
+		t.Errorf("customer last writer: sent = %+v, want one notice naming the last writer", sent)
+	}
+	if len(repo.actorsAsked) != 0 {
+		t.Errorf("customer last writer: UserActor asked for %v, want never", repo.actorsAsked)
 	}
 }
 

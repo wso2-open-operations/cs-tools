@@ -221,6 +221,12 @@ interface CasesFilterBarProps {
    * record types (service requests, engagements, etc.) hide it.
    */
   showSeverityFilter?: boolean;
+  /**
+   * Options for the severity control, in both Simple and Advanced modes.
+   * Defaults to every severity (S0-S4); a service-request-locked list passes
+   * S1-S4 since service requests have no S0.
+   */
+  severityOptions?: { value: Severity; label: string }[];
   /** Hide the case-type control when the surrounding view locks the type. */
   hideTypeFilter?: boolean;
   /**
@@ -495,6 +501,7 @@ export default function CasesFilterBar({
   availableAssigneeUsers,
   availableProjects,
   showSeverityFilter = true,
+  severityOptions = SEVERITY_OPTIONS,
   hideTypeFilter = false,
   hideOnboardingStatusFilter = false,
   hideCreTeamFilter = false,
@@ -656,7 +663,6 @@ export default function CasesFilterBar({
   // (`caseFilterOptions.ts` is the one source of truth for each), so a value
   // picked in either mode renders identically in the other. Plain constants,
   // not `useMemo`'d, since they're static imports, not derived from props.
-  const severityOptions = SEVERITY_OPTIONS;
   const stateOptions = STATE_OPTIONS;
   const caseTypeOptions = useMemo(
     () => ALL_CASE_TYPES.map((t) => ({ value: t, label: CASE_TYPE_LABEL[t] })),
@@ -965,6 +971,7 @@ export default function CasesFilterBar({
                 onAddRow={() => onChange(addBlankUnifiedRow(filters))}
                 creTeamOptions={teamOptions}
                 sreTeamOptions={sreTeamOptions}
+                severityOptions={severityOptions}
                 assigneeNameSeed={assigneeNameSeed}
                 projectNameSeed={projectNameSeed}
               />

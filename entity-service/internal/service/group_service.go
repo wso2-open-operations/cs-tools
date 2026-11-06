@@ -38,17 +38,23 @@ func (s *groupService) SearchGroups(ctx context.Context, req domain.SearchGroups
 		return domain.SearchGroupsResponse{}, err
 	}
 	searchQuery := ""
-	supportGroupsOnly := false
+	supportGroupsOnly, extraGroupsOnly := false, false
 	if req.Filters != nil {
 		if err := validateSearchQuery(req.Filters.SearchQuery); err != nil {
 			return domain.SearchGroupsResponse{}, err
 		}
 		searchQuery = req.Filters.SearchQuery
 		supportGroupsOnly = req.Filters.SupportGroupsOnly
+		extraGroupsOnly = req.Filters.IncidentExtraGroupsOnly
 	}
 
 	search := s.repo.SearchGroups
-	if supportGroupsOnly {
+	switch {
+	case extraGroupsOnly:
+		// Only the configured extra assignable groups; wins over
+		// supportGroupsOnly when both are sent.
+		search = s.repo.SearchIncidentExtraGroups
+	case supportGroupsOnly:
 		// The groups an incident may be created in: "group" rows, not the
 		// team registry (GroupRepository.SearchSupportGroups).
 		search = s.repo.SearchSupportGroups

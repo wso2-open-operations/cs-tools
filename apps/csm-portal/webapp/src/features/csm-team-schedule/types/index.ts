@@ -121,6 +121,10 @@ export interface ScheduleTeam {
   rotaCode?: string;
   /** Everyone on the team, with their role. Older servers do not send it. */
   members?: ScheduleTeamMember[];
+  /** Who heads the team from above (the Americas team lead): not in members,
+   *  since they hold no rota. Absent when the team has none, and from older
+   *  servers. */
+  heads?: ScheduleTeamMember[];
   /** The standing window a member's ordinary weekday is (Americas cover for
    *  the Americas team). Absent means Regular hours. */
   defaultShiftCode?: string;
@@ -450,6 +454,9 @@ export interface RotaAccess {
   canManage: {
     rotaAdmins: boolean;
     markerFamilies: RotaFamily[];
+    /** The teams whose Rota Managers the reader may change as their lead.
+     *  Absent from an older server. */
+    markerTeams?: string[];
     /** The families whose teams' members the reader may add and remove (the
      *  same rule as markerFamilies). Absent from an older server. */
     memberFamilies?: RotaFamily[];
@@ -717,7 +724,19 @@ export type SaveRotaReminderSettings = {
   invitesEnabled: boolean;
   weekendRequired: Record<string, number>;
   windows: Record<string, ReminderWindow>;
+  /**
+   * Whether each rotation's reminders carry a calendar invitation, by the
+   * shift code of its window (CRE_MORNING, CRE_EVENING, CRE_WEEKEND,
+   * CRE_WEEKEND_NIGHT). A rotation not named does. Absent on settings saved
+   * before the per-rotation switches.
+   */
+  inviteRotations?: Record<string, boolean>;
   copyTo: string[];
+  /**
+   * Copied (Cc) on the weekend summary email only; copyTo is copied on every
+   * reminder. Absent on settings saved before it existed.
+   */
+  weekendCopyTo?: string[];
 };
 
 /** The saved settings of one group, with who last changed them. */
@@ -727,8 +746,13 @@ export type RotaReminderSettings = SaveRotaReminderSettings & {
   updatedOn: string;
 };
 
-/** Which reminder is asked for: the next working day's, or the weekend's. */
-export type RotaReminderKind = "weekday" | "weekend";
+/**
+ * Which reminder is asked for: the next working day's Morning (with its
+ * on-call) or Evening, or the weekend's. "weekday" is both of the next working
+ * day's at once: what the card asked for before it offered them apart, still
+ * found on older requests.
+ */
+export type RotaReminderKind = "morning" | "evening" | "weekend" | "weekday";
 
 /** Where a request is: waiting for the scheduled task, being sent, or done. */
 export type RotaReminderStatus = "QUEUED" | "SENDING" | "SENT" | "FAILED";

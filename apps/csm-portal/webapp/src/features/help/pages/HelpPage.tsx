@@ -39,6 +39,7 @@ import {
   Headset,
   LifeBuoy,
   Megaphone,
+  Package,
   RefreshCw,
   Search,
   Shield,
@@ -101,6 +102,7 @@ const TOPIC_ICONS: Record<string, ComponentType<{ size?: number | string }>> = {
   "time-cards": Clock,
   announcements: Megaphone,
   customers: Building2,
+  products: Package,
   "people-access": UsersRound,
   settings: UserCog,
 };

@@ -27,7 +27,7 @@ vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock }),
 }));
 
-import { useSearchGroups, useSearchSupportGroups } from "@api/useSearchGroups";
+import { useSearchGroups, useSearchIncidentExtraGroups, useSearchSupportGroups } from "@api/useSearchGroups";
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -104,6 +104,35 @@ describe("useSearchGroups", () => {
     expect(postMock).toHaveBeenLastCalledWith(
       "/groups/search",
       expect.objectContaining({ filters: { searchQuery: "", supportGroupsOnly: true } }),
+    );
+  });
+
+  it("sends incidentExtraGroupsOnly with a roomy page and caches it apart from the others", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const shared = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const plain = renderHook(() => useSearchGroups("", true), { wrapper: shared });
+    await waitFor(() => expect(plain.result.current.isSuccess).toBe(true));
+    const extra = renderHook(() => useSearchIncidentExtraGroups("", true), { wrapper: shared });
+    await waitFor(() => expect(extra.result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(2);
+    expect(postMock).toHaveBeenLastCalledWith("/groups/search", {
+      filters: { searchQuery: "", incidentExtraGroupsOnly: true },
+      pagination: { offset: 0, limit: 50 },
+    });
+  });
+
+  it("lets incidentExtraGroupsOnly win when both options are set", async () => {
+    const { result } = renderHook(
+      () => useSearchGroups("", true, { supportGroupsOnly: true, incidentExtraGroupsOnly: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock).toHaveBeenCalledWith(
+      "/groups/search",
+      expect.objectContaining({ filters: { searchQuery: "", incidentExtraGroupsOnly: true } }),
     );
   });
 });

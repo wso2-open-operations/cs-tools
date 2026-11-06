@@ -131,7 +131,8 @@ vi.mock("@api/useStoredAttachments", () => ({
   useStoredAttachmentDownload: () => ({
     downloadStoredAttachment: mockStoredDownload,
     isDownloading: false,
-    downloadingId: null,
+    isDownloadingId: () => false,
+    downloadProgressOf: () => null,
   }),
   useStoredAttachmentDelete: () => ({
     mutate: mockStoredDelete,
@@ -203,11 +204,13 @@ describe("DeploymentDocumentList", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download Architecture.pdf" }));
 
     await waitFor(() =>
-      expect(mockStoredDownload).toHaveBeenCalledWith({
-        type: "deployment",
-        id: "doc-1",
-        name: "Architecture.pdf",
-      }),
+      expect(mockStoredDownload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "deployment",
+          id: "doc-1",
+          name: "Architecture.pdf",
+        }),
+      ),
     );
   });
 

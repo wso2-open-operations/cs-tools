@@ -90,6 +90,18 @@ func TestPostgresOnlyRoutesAreUnregisteredWithoutADatabase(t *testing.T) {
 		{"save saved filter views", http.MethodPatch, "/users/me/saved-filter-views", `{}`},
 		{"unsupported put saved filter views", http.MethodPut, "/users/me/saved-filter-views", `{}`},
 		{"delete saved filter views", http.MethodDelete, "/users/me/saved-filter-views?listKey=cases&name=Mine", ""},
+		{"list custom dashboards", http.MethodGet, "/users/me/dashboards", ""},
+		{"get custom dashboard", http.MethodGet, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+		{"save custom dashboard", http.MethodPut, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001", `{}`},
+		{"delete custom dashboard", http.MethodDelete, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+		{"list custom dashboard shares", http.MethodGet, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/shares", ""},
+		{"add custom dashboard share", http.MethodPut, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/shares/5e636a12-0000-4000-8000-0000000000aa", ""},
+		{"remove custom dashboard share", http.MethodDelete, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/shares/5e636a12-0000-4000-8000-0000000000aa", ""},
+		{"list dashboards shared with me", http.MethodGet, "/users/me/shared-dashboards", ""},
+		{"get dashboard shared with me", http.MethodGet, "/users/me/shared-dashboards/5e636a12-0000-4000-8000-000000000001", ""},
+		{"list custom dashboard team shares", http.MethodGet, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares", ""},
+		{"add custom dashboard team share", http.MethodPut, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
+		{"remove custom dashboard team share", http.MethodDelete, "/users/me/dashboards/5e636a12-0000-4000-8000-000000000001/team-shares/5e636a12-0000-4000-8000-0000000000bb", ""},
 	}
 
 	for _, tt := range tests {

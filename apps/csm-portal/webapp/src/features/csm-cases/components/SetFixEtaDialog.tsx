@@ -16,6 +16,7 @@
 
 import {
   AdapterDateFns,
+  Alert,
   Box,
   Button,
   CircularProgress,
@@ -28,14 +29,21 @@ import {
   FormControlLabel,
   InputLabel,
   MenuItem,
+  Radio,
+  RadioGroup,
   Select,
   Switch,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
-import { useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { formatDateOnly, isPastDateOnly, parseDateOnly } from "@utils/dateTime";
 import { useSearchProducts } from "@features/csm-projects/api/useSearchProducts";
+import {
+  FIX_ETA_COMMENT_KIND_LABEL,
+  buildFixEtaCommentTemplate,
+  type FixEtaCommentKind,
+} from "@features/csm-cases/utils/fixEtaComment";
 
 const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 
@@ -57,15 +65,14 @@ function isGithubIssueUrl(value: string): boolean {
   }
 }
 
-/** Combined `PATCH /cases/{id}` payload this dialog can produce in one save. */
-export interface FixEtaSavePayload {
+/** `PATCH /cases/{id}` payload for the three estimates (only the ones set). */
+export interface FixEtaDatesPayload {
   bestCaseFixEta?: string;
   mostLikelyFixEta?: string;
   worstCaseFixEta?: string;
-  addPublicComment?: boolean;
-  product?: string;
-  publicTicket?: string;
 }
+
+const COMMENT_KINDS: readonly FixEtaCommentKind[] = ["fix", "report_analysis"];
 
 interface SetFixEtaDialogProps {
   /**
@@ -85,11 +92,20 @@ interface SetFixEtaDialogProps {
   currentMostLikelyFixEta?: string | null;
   /** Current internal-only worst-case estimate, if any (date-only "YYYY-MM-DD"). */
   currentWorstCaseFixEta?: string | null;
-  /** True while the combined PATCH is in flight; disables the whole form. */
+  /** True while an outside save is in flight; disables the whole form. */
   isSaving: boolean;
   onClose: () => void;
-  /** Apply the combined patch in one `PATCH` call. */
-  onSave: (patch: FixEtaSavePayload) => void;
+  /**
+   * Save the estimates (one `PATCH`). Must reject on failure, after reporting
+   * it, so the dialog stays open and does not go on to post the comment.
+   */
+  onSaveDates: (patch: FixEtaDatesPayload) => Promise<void>;
+  /**
+   * Post the (possibly edited) plain-text comment to the customer. Only called
+   * after `onSaveDates` resolved. Must reject on failure, after reporting it,
+   * so the dialog stays open with the text intact for a retry.
+   */
+  onPostComment: (commentText: string) => Promise<void>;
 }
 
 interface FixEtaDatePickerProps {
@@ -154,22 +170,33 @@ function FixEtaDatePicker({
 /**
  * Set the case's three independent internal-only fix-ETA estimates
  * (`bestCaseFixEta` / `mostLikelyFixEta` / `worstCaseFixEta`) and, optionally,
- * share them with the customer as a real comment (the caller posts this via
- * `POST /cases/{id}/comments`, not a PATCH field — see `onSave`'s own
- * `FixEtaSavePayload`). The three dates remain independently optional —
- * saving one doesn't require the others — but they now share a single Save
- * action instead of three. Sharing itself is gated by
- * `publicCommentDisabledReason`, the same work_in_progress + ongoing +
- * assignee rule the comment endpoint enforces for any public comment.
+ * share them with the customer as a real comment. The three dates remain
+ * independently optional — saving one doesn't require the others — and share a
+ * single Save action. Sharing is gated by `publicCommentDisabledReason`, the
+ * same work_in_progress + ongoing + assignee rule the comment endpoint
+ * enforces for any public comment.
+ *
+ * When sharing, the customer-visible text is an editable field pre-filled from
+ * a template (Product / Public ticket / the three estimates, with an opening
+ * line chosen by the Fix / Report analysis choice). It regenerates from those
+ * inputs until the engineer edits it by hand; after that it is left alone and
+ * "Reset to template" restores the generated text. What is in the field when
+ * Save is pressed is what gets posted.
+ *
+ * Save is two sequential steps: `onSaveDates`, then (only if that succeeded)
+ * `onPostComment`. If the comment step fails the estimates stay saved: the
+ * dates and the share switch lock, the text is kept, and Save becomes a
+ * comment-only retry.
  */
 export default function SetFixEtaDialog({
   publicCommentDisabledReason = null,
   currentBestCaseFixEta,
   currentMostLikelyFixEta,
   currentWorstCaseFixEta,
-  isSaving,
+  isSaving: isSavingProp,
   onClose,
-  onSave,
+  onSaveDates,
+  onPostComment,
 }: SetFixEtaDialogProps): JSX.Element {
   const canShareWithCustomer = publicCommentDisabledReason === null;
   const [bestCaseFixEta, setBestCaseFixEta] = useState(
@@ -184,6 +211,23 @@ export default function SetFixEtaDialog({
   const [shareWithCustomer, setShareWithCustomer] = useState(false);
   const [productId, setProductId] = useState("");
   const [publicTicket, setPublicTicket] = useState("");
+  const [commentKind, setCommentKind] = useState<FixEtaCommentKind>("fix");
+  // Once true the text field is no longer derived from the template.
+  const [commentEdited, setCommentEdited] = useState(false);
+  const [editedComment, setEditedComment] = useState("");
+  // Both steps of Save run inside this dialog (see the component doc), so it
+  // tracks its own in-flight/partial-failure state on top of `isSaving`.
+  const [submitting, setSubmitting] = useState(false);
+  const [etaSaved, setEtaSaved] = useState(false);
+  const [commentFailed, setCommentFailed] = useState(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const isSaving = isSavingProp || submitting;
   const { data: products, isLoading: productsLoading } = useSearchProducts();
 
   const hasAnyEta = !!(bestCaseFixEta || mostLikelyFixEta || worstCaseFixEta);
@@ -201,6 +245,17 @@ export default function SetFixEtaDialog({
   const hasPublicTicket = trimmedPublicTicket.length > 0;
   const isPublicTicketValidUrl =
     !hasPublicTicket || isGithubIssueUrl(trimmedPublicTicket);
+
+  const commentTemplate = buildFixEtaCommentTemplate({
+    kind: commentKind,
+    product: selectedProduct?.name,
+    publicTicket: trimmedPublicTicket,
+    bestCaseFixEta,
+    mostLikelyFixEta,
+    worstCaseFixEta,
+  });
+  const commentText = commentEdited ? editedComment : commentTemplate;
+  const hasCommentText = commentText.trim().length > 0;
 
   // Past-date and ordering checks run regardless of whether sharing is on --
   // an internal-only estimate with a date already in the past, or with the
@@ -245,11 +300,17 @@ export default function SetFixEtaDialog({
       ? publicCommentDisabledReason
       : !hasAnyEta
         ? "Pick at least one fix ETA to share with the customer."
-        : !hasProduct
-          ? "Product is required to share with the customer."
-          : !isPublicTicketValidUrl
-            ? "Public ticket must be a GitHub issue or pull request URL."
+        : commentEdited
+          ? // Product / Public ticket only feed the template; a hand-edited
+            // text no longer depends on them, so they stop blocking Save.
+            !hasCommentText
+            ? "Write the comment to share with the customer."
             : undefined
+          : !hasProduct
+            ? "Product is required to share with the customer."
+            : !isPublicTicketValidUrl
+              ? "Public ticket must be a GitHub issue or pull request URL."
+              : undefined
     : !hasPublicTicket || isPublicTicketValidUrl
       ? undefined
       : "Public ticket must be a GitHub issue or pull request URL.";
@@ -265,22 +326,42 @@ export default function SetFixEtaDialog({
     !shareValidationError &&
     !dateValidationError;
 
-  const handleSave = (): void => {
-    if (!canSubmit) return;
-    // canSubmit already requires hasProduct (a real selectedProduct match)
-    // whenever shareWithCustomer is on, so selectedProduct is never
-    // undefined here -- no raw productId fallback, ever.
-    onSave({
-      ...(bestCaseFixEta && { bestCaseFixEta }),
-      ...(mostLikelyFixEta && { mostLikelyFixEta }),
-      ...(worstCaseFixEta && { worstCaseFixEta }),
-      ...(shareWithCustomer && {
-        addPublicComment: true,
-        product: selectedProduct?.name ?? "",
-        // Omitted (not sent as "") when blank.
-        ...(hasPublicTicket && { publicTicket: trimmedPublicTicket }),
-      }),
-    });
+  const handleSave = async (): Promise<void> => {
+    if (!canSubmit || isSaving) return;
+    setSubmitting(true);
+    setCommentFailed(false);
+    // setState is skipped once unmounted (the page closed the dialog because
+    // the engineer moved to another case), but the steps themselves still run:
+    // the save/share was asked for and the handlers captured the right case.
+    const ifMounted = (fn: () => void): void => {
+      if (mountedRef.current) fn();
+    };
+    if (!etaSaved) {
+      try {
+        await onSaveDates({
+          ...(bestCaseFixEta && { bestCaseFixEta }),
+          ...(mostLikelyFixEta && { mostLikelyFixEta }),
+          ...(worstCaseFixEta && { worstCaseFixEta }),
+        });
+      } catch {
+        // Already reported by the caller; stay open and post nothing.
+        ifMounted(() => setSubmitting(false));
+        return;
+      }
+      ifMounted(() => setEtaSaved(true));
+    }
+    if (shareWithCustomer) {
+      try {
+        await onPostComment(commentText);
+      } catch {
+        ifMounted(() => {
+          setCommentFailed(true);
+          setSubmitting(false);
+        });
+        return;
+      }
+    }
+    ifMounted(onClose);
   };
 
   return (
@@ -296,7 +377,7 @@ export default function SetFixEtaDialog({
           <FixEtaDatePicker
             label="Best case"
             value={bestCaseFixEta}
-            disabled={isSaving}
+            disabled={isSaving || etaSaved}
             onChange={setBestCaseFixEta}
             errorText={
               bestIsPast ? "This date is in the past." : bestCaseErrorText
@@ -305,7 +386,7 @@ export default function SetFixEtaDialog({
           <FixEtaDatePicker
             label="Most likely"
             value={mostLikelyFixEta}
-            disabled={isSaving}
+            disabled={isSaving || etaSaved}
             onChange={setMostLikelyFixEta}
             errorText={
               mostLikelyIsPast ? "This date is in the past." : mostLikelyErrorText
@@ -314,7 +395,7 @@ export default function SetFixEtaDialog({
           <FixEtaDatePicker
             label="Worst case"
             value={worstCaseFixEta}
-            disabled={isSaving}
+            disabled={isSaving || etaSaved}
             onChange={setWorstCaseFixEta}
             errorText={worstIsPast ? "This date is in the past." : undefined}
           />
@@ -324,7 +405,7 @@ export default function SetFixEtaDialog({
               <Switch
                 checked={shareWithCustomer}
                 onChange={(e) => setShareWithCustomer(e.target.checked)}
-                disabled={isSaving || !canShareWithCustomer}
+                disabled={isSaving || etaSaved || !canShareWithCustomer}
               />
             }
             label="Share fix ETA with customer"
@@ -338,10 +419,37 @@ export default function SetFixEtaDialog({
           {shareWithCustomer && (
             <>
               <Typography variant="caption" color="text.secondary">
-                Posts a customer-visible comment on this case summarizing the
-                estimate(s) above.
+                Posts a customer-visible comment on this case. The text below
+                is exactly what the customer will see.
               </Typography>
-              <FormControl size="small" fullWidth required>
+              <FormControl>
+                <Typography
+                  id="set-fix-eta-kind-label"
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  This ETA is for
+                </Typography>
+                <RadioGroup
+                  row
+                  aria-labelledby="set-fix-eta-kind-label"
+                  value={commentKind}
+                  onChange={(e) =>
+                    setCommentKind(e.target.value as FixEtaCommentKind)
+                  }
+                >
+                  {COMMENT_KINDS.map((k) => (
+                    <FormControlLabel
+                      key={k}
+                      value={k}
+                      disabled={isSaving}
+                      control={<Radio size="small" />}
+                      label={FIX_ETA_COMMENT_KIND_LABEL[k]}
+                    />
+                  ))}
+                </RadioGroup>
+              </FormControl>
+              <FormControl size="small" fullWidth required={!commentEdited}>
                 <InputLabel id="set-fix-eta-product-label" shrink={productId !== ""}>
                   Product
                 </InputLabel>
@@ -380,7 +488,43 @@ export default function SetFixEtaDialog({
                     : undefined
                 }
               />
+              <TextField
+                label="Comment to customer"
+                multiline
+                minRows={7}
+                fullWidth
+                value={commentText}
+                onChange={(e) => {
+                  setEditedComment(e.target.value);
+                  setCommentEdited(true);
+                }}
+                disabled={isSaving}
+                helperText={
+                  commentEdited
+                    ? "Edited by hand: Product, Public ticket and the dates no longer change this text."
+                    : "Filled in from the fields above until you edit it."
+                }
+              />
+              {commentEdited && (
+                <Box>
+                  <Button
+                    size="small"
+                    disabled={isSaving}
+                    onClick={() => setCommentEdited(false)}
+                  >
+                    Reset to template
+                  </Button>
+                </Box>
+              )}
             </>
+          )}
+
+          {commentFailed && (
+            <Alert severity="warning">
+              The estimates were saved, but the comment could not be posted.
+              Your text is kept: press Post comment to retry, or Close to skip
+              sharing.
+            </Alert>
           )}
 
           {shareValidationError && (
@@ -398,9 +542,9 @@ export default function SetFixEtaDialog({
           variant="contained"
           disabled={!canSubmit || isSaving}
           loading={isSaving}
-          onClick={handleSave}
+          onClick={() => void handleSave()}
         >
-          Save
+          {etaSaved ? "Post comment" : "Save"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -19,7 +19,9 @@ import type { JSX } from "react";
 import type { BeDashboardWidget } from "@api/backend/types";
 import WallboardStatGrid from "@features/csm-dashboard/components/WallboardStatGrid";
 import WallboardSecondaryStat from "@features/csm-dashboard/components/WallboardSecondaryStat";
-import { CRE_PRIMARY_ORDER, CRE_SECONDARY_ORDER, sortByFixedOrder } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import {
+  WALLBOARD_FILL,
+  wb, CRE_PRIMARY_ORDER, CRE_SECONDARY_ORDER, sortByFixedOrder } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardCreSectionProps {
   widgets: BeDashboardWidget[];
@@ -75,24 +77,35 @@ export default function WallboardCreSection({
   );
 
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: 1, minHeight: 0 }}>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: wb(8), ...WALLBOARD_FILL }}>
       <WallboardStatGrid
         widgets={primary}
         section="cre"
         columns={2}
         // A smaller gap than the default (8px) between the 4 tiles
         // themselves, a larger gap between each tile's own value and
-        // label, and — the actual ask this time — more top/bottom padding
-        // inside each tile around that value/label block. All three per
-        // explicit request, in three separate follow-ups.
+        // label, and extra top/bottom padding inside each tile around that
+        // value/label block — all per explicit request. The padding was 3;
+        // it's 2 now so the secondary grid has room for a 4th row (10
+        // tiles once "SLA At Risk" was added) at 1920x1080 without the
+        // bottom row clipping, now that the text is larger.
         gap={0.5}
         valueLabelGap={1.2}
-        paddingY={3}
+        paddingY={2}
         selectedTeamCreGroupId={selectedTeamCreGroupId}
         selectedTeamSreGroupId={selectedTeamSreGroupId}
         selectedTeamLabel={selectedTeamLabel}
       />
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0.75, flex: 1, minHeight: 0 }}>
+      <Box
+        sx={{
+          display: "grid",
+          // 2 columns on a phone, 3 from 600px up.
+          gridTemplateColumns: "repeat(2, 1fr)",
+          "@media (min-width: 600px)": { gridTemplateColumns: "repeat(3, 1fr)" },
+          gap: wb(6),
+          ...WALLBOARD_FILL,
+        }}
+      >
         {secondary.map((widget) => (
           <WallboardSecondaryStat
             key={widget.widgetId}

@@ -44,7 +44,11 @@ vi.mock("@features/csm-cases/api/usePreCreateInlineImages", () => ({
 vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: postCaseMutateAsyncMock }),
 }));
+// AttachmentsField reads only the size constant from this module, whose hooks pull
+// in the current-user context and, through it, the runtime API config that
+// is absent under vitest (same stub as CreateServiceRequestPage.test.tsx).
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
   usePostCsmCaseAttachment: () => ({ mutateAsync: postAttachmentMutateAsyncMock }),
 }));
 vi.mock("@hooks/useEngineerDisplayName", () => ({
@@ -85,8 +89,21 @@ vi.mock("@features/csm-cases/components/ProjectSelectionField", () => ({
   ),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="editor"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 // CreateSecurityReportPage imports BackendApiError from the real API client
@@ -154,8 +171,16 @@ describe("CreateSecurityReportPage — files are chosen in the form and uploaded
 
   it("shows the Attachments field as required, not optional", () => {
     render(<CreateSecurityReportPage />);
-    expect(screen.getByText(/attachments \*/i)).toBeInTheDocument();
+    const caption = screen.getByText("Attachments");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
     expect(screen.getByText(/at least one required/i)).toBeInTheDocument();
+  });
+
+  it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
+    render(<CreateSecurityReportPage />);
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
   });
 
   it("enables Create once a file is chosen, creates the report without files, then uploads them to it", async () => {

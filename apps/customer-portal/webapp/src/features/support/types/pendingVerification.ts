@@ -39,6 +39,9 @@ export interface PendingVerificationView {
   workItemId: string;
   /** The record's human-readable number (e.g. "CS0441731") — display only. */
   caseId: string;
+  /** The record's own internal/WSO2 id (e.g. "CUPRSUB-1170"), distinct from
+   * caseId — absent when the underlying record has none. */
+  internalId?: string;
   caseTitle: string;
   severity?: string;
   recordType: PendingVerificationRecordType;

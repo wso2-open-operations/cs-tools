@@ -42,10 +42,11 @@ import (
 // Americas team leads, L2 also To the America Team lead -- the night calls'
 // own rungs -- and both also Cc the Americas team list (agreed 2026-10-15).
 // By day L1 is the case team's lead and L2 every ABT lead, where the call
-// reaches a few. Every rung of a chain shares one subject ("[Case Alerts]
-// S0 CS0099001 not acknowledged"), so a case's emails group into one
-// conversation; the body's first line says which rung it is ("S0 alert at L1
-// for Atlas ABT Team Lead"), and each email lists the rungs already emailed.
+// reaches a few. Every rung of a chain shares one subject ("[Attention needed]
+// [Case Alerts] S0 CS0099001 Respond to avoid Response SLA breach"), so a
+// case's emails group into one conversation; the body's first line says which
+// rung it is ("S0 alert at L1 for Atlas ABT Team Lead"), and each email lists
+// the rungs already emailed.
 //
 // WHY ITS OWN SCHEDULE, NOT A NOTIFIER. A notifier delivers one attempt to
 // one person, so an L2 email would have gone out once per lead instead of
@@ -116,21 +117,22 @@ func (e *Engine) responseSLA(priority string) (time.Duration, bool) {
 	return d, ok
 }
 
-// rungEmailOpening is the email's first sentence: the case is still open, and
-// how long is left on its response SLA, counted from when the chain started
-// (the case's creation, or its severity change, when entity-service restarts
-// the clock too).
-func (e *Engine) rungEmailOpening(t Trigger, code string, now time.Time) string {
-	open := fmt.Sprintf("Case %s (%s) is still in open state", orNone(t.Number), code)
-	sla, ok := e.responseSLA(t.Priority)
+// rungEmailOpening is the email's first sentence, in two parts: the case is
+// still open, and how long is left on its response SLA (counted from when the
+// chain started: the case's creation, or its severity change, when
+// entity-service restarts the clock too), which the email highlights. sla is
+// empty when the SLA is not known; breached says it has passed.
+func (e *Engine) rungEmailOpening(t Trigger, code string, now time.Time) (open, sla string, breached bool) {
+	open = fmt.Sprintf("Case %s (%s) is still in open state", orNone(t.Number), code)
+	d, ok := e.responseSLA(t.Priority)
 	if !ok || t.At.IsZero() {
-		return open + "."
+		return open, "", false
 	}
-	left := t.At.Add(sla).Sub(now)
+	left := t.At.Add(d).Sub(now)
 	if left <= 0 {
-		return open + " and the response SLA was breached " + shortDuration(-left) + " ago."
+		return open, "the response SLA was breached " + shortDuration(-left) + " ago", true
 	}
-	return open + " and response SLA remaining time is " + shortDuration(left) + "."
+	return open, "response SLA remaining time is " + shortDuration(left), false
 }
 
 // WithRungEmail gives the engine its email sender. Without it, cre.email does
@@ -591,7 +593,7 @@ func (e *Engine) sendRungEmail(ctx context.Context, st LadderState, i int) error
 	email := st.Plan.Emails[i]
 	code, severity := emailSeverity(t.Priority)
 
-	opening := e.rungEmailOpening(t, code, e.now())
+	opening, sla, breached := e.rungEmailOpening(t, code, e.now())
 	night := isNightShift(t.Routing.Shift)
 	var notified []string
 	for j := 0; j < i; j++ {
@@ -639,10 +641,13 @@ func (e *Engine) sendRungEmail(ctx context.Context, st LadderState, i int) error
 	body := notifications.RenderCasePagingEmail(notifications.CasePagingEmailData{
 		Greeting:        email.Greeting,
 		RungLine:        notifications.CasePagingRungLine(code, int(email.Level), emailRungAudience(email.Level, night, t.Team)),
+		StillNeeded:     caseStillNeeded(st, e.cfg.Ladder.RequireBothGestures()),
 		SeverityCode:    code,
 		Rung:            int(email.Level),
 		EscalationLevel: fmt.Sprintf("L%d · %s", int(email.Level), upperFirst(emailRungAudience(email.Level, night, t.Team))),
 		Opening:         opening,
+		OpeningSLA:      sla,
+		SLABreached:     breached,
 		CaseNumber:      t.Number,
 		WSO2CaseID:      t.WSO2CaseID,
 		Title:           t.Title,
@@ -673,4 +678,26 @@ func (e *Engine) sendRungEmail(ctx context.Context, st LadderState, i int) error
 	slog.InfoContext(ctx, "escalation: rung email sent",
 		"incidentId", t.IncidentID, "level", email.Level.String(), "to", len(to), "cc", len(cc))
 	return nil
+}
+
+// caseStillNeeded is the email's second line: where the case stands now and
+// what is still missing to stop the chain. st is read just before the send,
+// so a gesture that has landed since the chain started is reflected. Only a
+// customer case has the two gestures; anything else gets no line.
+func caseStillNeeded(st LadderState, requireBoth bool) string {
+	if !st.Plan.Trigger.isCase() {
+		return ""
+	}
+	switch {
+	case st.SawAssigned && st.SawAssigneeComment:
+		return ""
+	case st.SawAssigned:
+		return "Current state: assigned, but the assignee has not added a public comment yet. To stop the alerts: the assignee adds a public comment."
+	case st.SawAssigneeComment:
+		return "Current state: an engineer has commented, but the case is not assigned to them. To stop the alerts: assign the case."
+	case requireBoth:
+		return "Current state: open, not assigned, no public comment. To stop the alerts: assign an engineer, who then adds a public comment."
+	default:
+		return "Current state: open, not assigned. To stop the alerts: assign an engineer to the case."
+	}
 }

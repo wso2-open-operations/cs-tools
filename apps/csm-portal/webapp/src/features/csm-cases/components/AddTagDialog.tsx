@@ -111,6 +111,7 @@ export default function AddTagDialog({
                 label="Tag"
                 placeholder="e.g. micro-gw, ws-policy"
                 autoFocus
+                required
                 error={isDuplicate}
                 helperText={
                   isDuplicate ? "This case already has that tag." : undefined

@@ -56,7 +56,7 @@ func (r Recipients) IsCustomerFacing() bool {
 // Notice is everything a Notifier needs to send (or, today, log) one ACP
 // notification. There is no more Kind field distinguishing
 // internal/customer/am_nudge audiences — that distinction is now implied by
-// Subject's wording and which Recipients fields are populated, per Chamara's
+// Subject's wording and which Recipients fields are populated, per the product owner's
 // request that the log stop saying "internal"/"external" explicitly.
 type Notice struct {
 	ProjectID   string
@@ -113,7 +113,7 @@ type Notice struct {
 // sending it. The log names the project and says how many recipients the
 // notice has, never who they are: no email address, no name (staff or
 // customer) and no body, masked or not, since logs must hold no personal
-// data in any mode (Rashmika's review of PR #2134). The subject stays: it
+// data in any mode (the review of PR #2134). The subject stays: it
 // names only the project and the customer company.
 type LoggingNotifier struct {
 	Logger *slog.Logger

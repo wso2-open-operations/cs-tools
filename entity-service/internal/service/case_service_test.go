@@ -45,6 +45,19 @@ func (alwaysUnrestrictedAccess) ResolveScope(context.Context) (AccessScope, erro
 	return AccessScope{Unrestricted: true}, nil
 }
 
+// stubAccessServiceWithScope is an AccessService stub that always resolves to
+// a fixed, caller-supplied scope -- used where a test needs to simulate one
+// of ResolveScope's specific branches (e.g. the CSMPortalBackendClientID
+// shape) rather than alwaysUnrestrictedAccess's generic "everything is
+// visible" stand-in.
+type stubAccessServiceWithScope struct {
+	scope AccessScope
+}
+
+func (s stubAccessServiceWithScope) ResolveScope(context.Context) (AccessScope, error) {
+	return s.scope, nil
+}
+
 // stubCaseRepo is a minimal repository.CaseRepository whose SearchCases
 // panics if called: tests using it prove ParseCaseFieldFilters' rejection of
 // an unsupported field happens before the Postgres backend ever reaches the
@@ -122,7 +135,11 @@ func (s *stubCaseRepo) GetCaseByID(ctx context.Context, id string, scope reposit
 	if s.getCaseByID != nil {
 		return s.getCaseByID(ctx, id, scope)
 	}
-	panic("not implemented")
+	// Not a panic: UpdateCase reads the record's type before a severity change
+	// (to route a service request), and fails the request if that read fails.
+	// A test that does not care gets a plain case.
+	caseType := "case"
+	return domain.CaseView{ID: id, Type: &caseType}, nil
 }
 func (s *stubCaseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesRequest, groupBy string, _ repository.SearchScope) ([]domain.AggregateBucket, error) {
 	if s.aggregateCases != nil {
@@ -1388,6 +1405,9 @@ func TestCaseService_UpdateCase_UpdatesFieldsBundle(t *testing.T) {
 	bestCaseFixEta := "2026-10-01"
 	var gotReq domain.UpdateCaseRequest
 	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
 			gotReq = req
 			return time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC), nil
@@ -1432,6 +1452,9 @@ func TestCaseService_UpdateCase_AcceptsAutocloseHold(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotReq domain.UpdateCaseRequest
 			repo := &stubCaseRepo{
+				getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+					return domain.CaseView{}, nil
+				},
 				updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
 					gotReq = req
 					return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
@@ -1476,6 +1499,9 @@ func TestCaseService_UpdateCase_AutocloseHoldIsMirroredToServiceNow(t *testing.T
 	failures := &recordingSNWritebackFailures{}
 	dispatcher := NewSNWritebackDispatcher(failures)
 	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
 		updateCaseFields: func(_ context.Context, _ domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
 			return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
 		},
@@ -1546,6 +1572,9 @@ func TestCaseService_UpdateCase_AutocloseHoldReachesServiceNowOverHTTP(t *testin
 	mirror := NewServiceNowCaseService(client, nil, nil, nil, nil, "", nil)
 
 	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
 		updateCaseFields: func(_ context.Context, _ domain.UpdateCaseRequest, _, _ string) (time.Time, error) {
 			return time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC), nil
 		},
@@ -1597,6 +1626,9 @@ func TestCaseService_UpdateCase_M2MCallerCanSetCombinableFields(t *testing.T) {
 	bestCaseFixEta := "2026-10-15"
 	var gotActorID, gotActorEmail string
 	repo := &stubCaseRepo{
+		getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+			return domain.CaseView{}, nil
+		},
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
 			gotActorID, gotActorEmail = actorID, actorEmail
 			return time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC), nil
@@ -1648,13 +1680,15 @@ func TestCaseService_UpdateCase_M2MCallerCannotProvideWorkaround(t *testing.T) {
 	}
 }
 
-// TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided is the
-// regression guard for a real, previously-accepted gap: no code path
-// anywhere ever completed the workaround SLA clock -- ApplyCaseStateEffects
-// only ever paused it, even on close. WorkaroundProvided:true (the
-// "Provide Workaround" webapp action) is the one genuine "workaround was
-// provided" signal that exists in the domain model, and now completes it.
-func TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided(t *testing.T) {
+// TestCaseService_UpdateCase_WorkaroundProvidedTriggersFieldEffects is the
+// regression guard for a real, previously-accepted bug: WorkaroundProvided:
+// true used to hard-complete the workaround SLA clock directly
+// (CompleteWorkaroundClock), but the real WORKAROUND-target policies' own
+// pause_condition reads "...ORu_workaround_providedISNOTEMPTY" -- providing
+// a workaround should PAUSE that clock, not complete it outright. Fixed by
+// routing through the generic condition re-evaluation (ApplyCaseFieldEffects)
+// instead, which lets each policy's own condition text decide.
+func TestCaseService_UpdateCase_WorkaroundProvidedTriggersFieldEffects(t *testing.T) {
 	workaroundProvided := true
 	repo := &stubCaseRepo{
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
@@ -1672,15 +1706,18 @@ func TestCaseService_UpdateCase_CompletesWorkaroundSLAOnProvided(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.completeWorkaroundCalls) != 1 || slaEngine.completeWorkaroundCalls[0] != testDeploymentUUID {
-		t.Fatalf("expected CompleteWorkaroundClock(%q), got %v", testDeploymentUUID, slaEngine.completeWorkaroundCalls)
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
+		t.Fatalf("expected ApplyCaseFieldEffects(%q), got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }
 
-// TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall proves the
-// hook above only fires on true (provided), not false (a recall) -- there's
-// no "reopen a completed clock" operation, so a recall must not trigger it.
-func TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall(t *testing.T) {
+// TestCaseService_UpdateCase_WorkaroundRecallAlsoTriggersFieldEffects proves
+// a recall (false) now triggers the same re-evaluation as providing one --
+// unlike the old hardcoded-completion hook, which had no "reopen a completed
+// clock" counterpart and so deliberately never fired on a recall, the
+// generic re-evaluation lets a policy's own resume_condition
+// ("u_workaround_providedISEMPTY^...") pick a recall back up for free.
+func TestCaseService_UpdateCase_WorkaroundRecallAlsoTriggersFieldEffects(t *testing.T) {
 	workaroundProvided := false
 	repo := &stubCaseRepo{
 		updateCaseFields: func(_ context.Context, req domain.UpdateCaseRequest, actorID, actorEmail string) (time.Time, error) {
@@ -1698,8 +1735,8 @@ func TestCaseService_UpdateCase_DoesNotCompleteWorkaroundSLAOnRecall(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(slaEngine.completeWorkaroundCalls) != 0 {
-		t.Errorf("expected no CompleteWorkaroundClock call for a recall, got %v", slaEngine.completeWorkaroundCalls)
+	if len(slaEngine.fieldEffectsCalls) != 1 || slaEngine.fieldEffectsCalls[0].caseID != testDeploymentUUID {
+		t.Errorf("expected ApplyCaseFieldEffects(%q) on a recall too, got %v", testDeploymentUUID, slaEngine.fieldEffectsCalls)
 	}
 }
 

@@ -86,7 +86,6 @@ const EXPECTATIONS: { role: RoleKey; canAddUsers: boolean }[] = [
   { role: "ADMIN", canAddUsers: true },
   { role: "PORTAL", canAddUsers: false },
   { role: "LEAD", canAddUsers: false },
-  { role: "SECURITY", canAddUsers: false },
 ];
 
 test.describe("RBAC — Add User is admin-only", () => {

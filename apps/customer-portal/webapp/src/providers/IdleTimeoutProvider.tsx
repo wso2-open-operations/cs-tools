@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { IdleStateContext } from "@providers/IdleStateContext";
 import { useIdleTimer } from "react-idle-timer";
 import { useState, type JSX, type ReactNode } from "react";
 import { useAsgardeo } from "@asgardeo/react";
@@ -80,7 +81,7 @@ export default function IdleTimeoutProvider({
         onContinue={handleContinue}
         onLogout={handleLogout}
       />
-      {children}
+      <IdleStateContext.Provider value={sessionWarningOpen}>{children}</IdleStateContext.Provider>
     </>
   );
 }

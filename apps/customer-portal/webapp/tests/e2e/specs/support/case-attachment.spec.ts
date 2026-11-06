@@ -42,6 +42,7 @@ import {
   ATTACHMENT_FILES,
   ATTACHMENT_TARGETS,
   PROJECTS,
+  FOREIGN_ATTACHMENT_INPUT,
 } from "../../config/testData";
 import { CASE_ATTACHMENTS } from "../../utils/selectors";
 import { expectSuccess } from "../../utils/caseFlows";
@@ -279,4 +280,33 @@ test.describe("Case Attachment", () => {
       });
     });
   }
+
+  // ✅ READ-ONLY. Only the uploader may delete an attachment; this one was
+  // uploaded by someone else.
+  test("does not offer delete on another user's attachment", async ({ page }) => {
+    const { projectType, caseId, fileName } = FOREIGN_ATTACHMENT_INPUT;
+    const project = PROJECTS[projectType];
+    test.skip(!project.id, `${projectType} needs a project id.`);
+
+    await new CaseDetailPage(page).open(project.id, caseId);
+    const attachments = new CaseAttachmentsPage(page);
+    await attachments.openTab();
+    await expect(
+      attachments.attachment(fileName).first(),
+      `${fileName} should be listed on the case`,
+    ).toBeVisible({ timeout: 60_000 });
+
+    // Not usable: either not rendered at all, or rendered disabled (the repo
+    // disables it with "Only the uploader can delete this attachment").
+    const remove = attachments.deleteButton(fileName);
+    const present = (await remove.count()) > 0;
+    if (present) {
+      await expect(remove.first(), `deleting ${fileName} should not be allowed`).toBeDisabled();
+    } else {
+      await expect(remove).toHaveCount(0);
+    }
+    console.log(
+      `Attachments: delete on ${fileName} is ${present ? "shown but disabled" : "hidden"}`,
+    );
+  });
 });

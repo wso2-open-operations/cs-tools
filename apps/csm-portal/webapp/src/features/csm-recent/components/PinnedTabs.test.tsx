@@ -99,7 +99,7 @@ describe("PinnedTabs", () => {
     fireEvent.contextMenu(screen.getByText("My work items view"));
     fireEvent.click(screen.getByText("Rename"));
 
-    const input = screen.getByLabelText("Tab name") as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Tab name" }) as HTMLInputElement;
     expect(input.value).toBe("My work items view");
 
     fireEvent.change(input, { target: { value: "Project X work items" } });
@@ -112,6 +112,16 @@ describe("PinnedTabs", () => {
     );
   });
 
+  it("marks the rename field required", () => {
+    pinnedEntries = [pinnedEntry({ id: "1", title: "My work items view" })];
+    renderPinnedTabs();
+
+    fireEvent.contextMenu(screen.getByText("My work items view"));
+    fireEvent.click(screen.getByText("Rename"));
+
+    expect(screen.getByRole("textbox", { name: "Tab name" })).toBeRequired();
+  });
+
   it("disables Save while the rename field is blank", () => {
     pinnedEntries = [pinnedEntry({ id: "1", title: "My work items view" })];
     renderPinnedTabs();
@@ -119,7 +129,7 @@ describe("PinnedTabs", () => {
     fireEvent.contextMenu(screen.getByText("My work items view"));
     fireEvent.click(screen.getByText("Rename"));
 
-    const input = screen.getByLabelText("Tab name") as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Tab name" }) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "   " } });
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -138,13 +148,13 @@ describe("PinnedTabs", () => {
     fireEvent.contextMenu(screen.getByText("My work items view"));
     fireEvent.click(screen.getByText("Rename"));
 
-    const input = screen.getByLabelText("Tab name") as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Tab name" }) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "<b></b>" } });
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
     fireEvent.keyDown(input, { key: "Enter" });
 
     expect(renameRecentViewMock).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("Tab name")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Tab name" })).toBeInTheDocument();
   });
 });

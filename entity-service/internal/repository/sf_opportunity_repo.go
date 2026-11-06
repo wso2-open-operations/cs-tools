@@ -189,7 +189,17 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 	}
 
 	keep := make([]string, 0, len(row.LineItems))
+	var moved []string
 	for _, li := range row.LineItems {
+		previous, err := previousIDs(ctx, q, previousLineItemOpportunitiesQuery, li.LineItemSfID)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity line item %s: %w", li.LineItemSfID, err)
+		}
+		for _, id := range previous {
+			if id != res.OpportunityID {
+				moved = append(moved, id)
+			}
+		}
 		liArgs := []any{
 			domain.SalesforceSyncActor,
 			res.OpportunityID, li.Name, li.ProductName, li.Quantity,
@@ -210,12 +220,29 @@ func writeSfOpportunity(ctx context.Context, q querier, row domain.SalesforceOpp
 		keep = append(keep, li.LineItemSfID)
 		res.LineItemsWritten++
 	}
-	tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
-	if err != nil {
-		return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+	if !row.KeepStaleLineItems {
+		tag, err := q.Exec(ctx, deleteStaleSfOpportunityProductsQuery, res.OpportunityID, keep)
+		if err != nil {
+			return res, fmt.Errorf("upsert opportunity from salesforce: delete stale line items: %w", err)
+		}
+		res.LineItemsDeleted = int(tag.RowsAffected())
 	}
-	res.LineItemsDeleted = int(tag.RowsAffected())
 
+	if err := deriveOpportunityOnboarding(ctx, q, res.OpportunityID); err != nil {
+		return res, err
+	}
+	if err := deriveMovedLineItemOpportunities(ctx, q, moved, res.OpportunityID); err != nil {
+		return res, err
+	}
+	// Allocated hours follow the lines just written, after the onboarding
+	// window they depend on has been derived. Durations only, and best-effort:
+	// a failure here must not fail the ingest.
+	bestEffortProjectHours(ctx, q, "opportunity", func(q querier) error {
+		if err := recomputeOpportunityProjectHours(ctx, q, res.OpportunityID); err != nil {
+			return err
+		}
+		return recomputeMovedOpportunityProjectHours(ctx, q, moved, res.OpportunityID)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return res, err
 	}
@@ -242,10 +269,19 @@ func deleteSfOpportunity(ctx context.Context, q querier, sfID string, state doma
 	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0::bigint))`, sfOpportunityLockKey(sfID)); err != nil {
 		return 0, fmt.Errorf("delete opportunity by sf_id: lock: %w", err)
 	}
+	ownerProjects, err := previousIDs(ctx, q, previousOpportunityProjectsQuery, sfID)
+	if err != nil {
+		return 0, fmt.Errorf("delete opportunity by sf_id: %w", err)
+	}
 	tag, err := q.Exec(ctx, deleteSfOpportunityQuery, sfID)
 	if err != nil {
 		return 0, fmt.Errorf("delete opportunity by sf_id: %w", err)
 	}
+	// The projects linked to it (the links and lines went with it) lose its
+	// allocation. Best-effort, durations only.
+	bestEffortProjectHours(ctx, q, "opportunity delete", func(q querier) error {
+		return recomputeProjectSet(ctx, q, ownerProjects, nil)
+	})
 	if _, err := upsertSalesforceIngestState(ctx, q, state); err != nil {
 		return 0, err
 	}

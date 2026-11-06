@@ -633,3 +633,67 @@ describe("ChangeCaseTypeDialog — transfer into service_request", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+describe("ChangeCaseTypeDialog — severity note when moving to a service request", () => {
+  function renderFor(currentSeverity: "S0" | "S2" | "unset"): void {
+    mockUseCatalogItemVariables.mockReturnValue(
+      asQueryResult({
+        data: [
+          { id: "var-1", questionText: "Environment name", type: "single_line_text", order: 1 },
+        ],
+        isLoading: false,
+        isError: false,
+        isSuccess: true,
+      }),
+    );
+    render(
+      <ChangeCaseTypeDialog
+        currentType="case"
+        currentSeverity={currentSeverity}
+        hasAttachments
+        isSubmitting={false}
+        deployedProductId="dp-1"
+        onClose={() => {}}
+        onSubmit={() => {}}
+      />,
+    );
+  }
+
+  it("warns on the fields step and again on review that S0 becomes S1", () => {
+    renderFor("S0");
+    pickTargetAndAdvanceToFields(/^service request$/i);
+    expect(screen.getByTestId("transfer-severity-note")).toHaveTextContent(
+      "S0 is not available for service requests; severity will be set to S1.",
+    );
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Catalog" }));
+    fireEvent.click(screen.getByRole("option", { name: /api manager support/i }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Catalog item" }));
+    fireEvent.click(screen.getByRole("option", { name: /request environment scaling/i }));
+    fireEvent.change(screen.getByLabelText(/environment name/i), {
+      target: { value: "prod-eu" },
+    });
+    advanceToReview();
+    // Still visible on the review step, directly above the confirm button.
+    expect(screen.getByTestId("transfer-review-severity-note")).toHaveTextContent(
+      "S0 is not available for service requests; severity will be set to S1.",
+    );
+  });
+
+  it("notes S4 when the case has no severity", () => {
+    renderFor("unset");
+    pickTargetAndAdvanceToFields(/^service request$/i);
+    expect(screen.getByTestId("transfer-severity-note")).toHaveTextContent(/S4/);
+  });
+
+  it("shows no severity note for S2", () => {
+    renderFor("S2");
+    pickTargetAndAdvanceToFields(/^service request$/i);
+    expect(screen.queryByTestId("transfer-severity-note")).not.toBeInTheDocument();
+  });
+
+  it("shows no severity note for other targets", () => {
+    renderFor("S0");
+    pickTargetAndAdvanceToFields(/^engagement$/i);
+    expect(screen.queryByTestId("transfer-severity-note")).not.toBeInTheDocument();
+  });
+});

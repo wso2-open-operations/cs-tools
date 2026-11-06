@@ -41,9 +41,6 @@ func (f *fakeReferenceDataRepo) EnumLabels(context.Context, []string) (map[strin
 func (f *fakeReferenceDataRepo) ListTimeZones(context.Context) ([]repository.TimeZoneRow, error) {
 	return nil, nil
 }
-func (f *fakeReferenceDataRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
-	return nil, nil
-}
 func (f *fakeReferenceDataRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
 	return nil, nil
 }

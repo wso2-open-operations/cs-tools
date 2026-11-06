@@ -110,7 +110,7 @@ export const PROJECTS: Record<ProjectType, ProjectFixture> = {
   [ProjectType.SUBSCRIPTION]: {
     id: "641058e6-3b5a-8710-3e1e-088aa4e45a13",
     name: "Automation Test Customer Project - Subscription",
-    projectKey: "",
+    projectKey: "AUTOMATIONTESTCUSSUB",
     type: ProjectType.SUBSCRIPTION,
     deployment: "Production",
     deploymentId: "8f8a33693bee8b503e1e088aa4e45ab4",
@@ -136,7 +136,7 @@ export const PROJECTS: Record<ProjectType, ProjectFixture> = {
   [ProjectType.CLOUD_SUPPORT]: {
     id: "cd9776ed-3ba2-8b50-3e1e-088aa4e45a81",
     name: "Automation Test Cloud Customer Project - Cloud Support",
-    projectKey: "",
+    projectKey: "AUTOMATIONTESTCUSCLSUB",
     type: ProjectType.CLOUD_SUPPORT,
     // Deployment is hidden and auto-locked to primary production for this type.
     deployment: "",
@@ -224,6 +224,95 @@ export const KNOWLEDGE_BASE_INPUT = {
   projectType: ProjectType.SUBSCRIPTION,
   question: "how to increase api throttle",
 } as const;
+
+/** The file uploaded by the deployment-documents spec.
+ *
+ * Reuses an existing fixture rather than adding one — the content is
+ * irrelevant, only that a real file reaches the endpoint. The name is stamped
+ * per run by the spec, so overlapping runs do not contend for one document. */
+export const DEPLOYMENT_DOCUMENT_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  // Deliberately a tiny (164-byte) PNG, not one of the ~788K screenshots the
+  // case specs use. The upload posts JSON, so the file travels base64-encoded at
+  // ~4/3 its size, and the gateway caps the request body at 1MB — a 788K file
+  // crosses that and comes back 413 even though the app's own client-side limit
+  // (MAX_ATTACHMENT_SIZE_BYTES, 10MB) accepts it. Live-verified.
+  file: "tests/e2e/fixtures/files/deployment-document.png",
+  namePrefix: "Automation Test Document",
+} as const;
+
+/**
+ * Input for the Time Tracking tab tests.
+ *
+ * `rangeStart` is a fixed historical date rather than a relative offset: the
+ * range those tests apply runs from it to TODAY, and a moving start would make
+ * the result set change for a reason unrelated to the code.
+ */
+export const TIME_CARDS_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  /** Start of the range the filter test applies, as `YYYY-MM-DD`. */
+  rangeStart: "2025-01-01",
+} as const;
+
+/**
+ * The user the settings suite invites through Add User.
+ *
+ * ⚠️ A REAL CONTACT is created and an invitation is sent to the address. The
+ * spec deletes it again (`DELETE /projects/{id}/contacts/{email}`), so nothing
+ * accumulates — but the invitation email is already gone by then, and the
+ * address below does not belong to a real mailbox.
+ *
+ * The local part is stamped with a timestamp at use: the backend rejects an
+ * address that is already a contact, so a fixed one would work exactly once.
+ */
+export const SETTINGS_ADD_USER_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  /** A timestamp is appended to this, before the @. */
+  emailPrefix: "automation-test-user",
+  /** Projects enforce an allowed-domain list; this is the one they accept. */
+  emailDomain: "wso2.com",
+  firstName: "Automation",
+  lastName: "Test User",
+} as const;
+
+/** One project's worth of header-search input: the two ids of a single case. */
+export interface GlobalSearchFixture {
+  /** ServiceNow case number. Unique, so this must match exactly one case. */
+  number: string;
+  /** The WSO2 case id of that SAME case — the two exact-match tests therefore
+   * have to land on the same record, which is asserted. */
+  wso2CaseId: string;
+}
+
+/**
+ * The case the header-search tests look for, per project type.
+ *
+ * Per project because the search bar is project-scoped: a case number from one
+ * project returns nothing while another project is selected, so each type needs
+ * a case of its own rather than a shared one.
+ *
+ * Only the case identifiers live here — the project key those tests also search
+ * is read off the project fixture above rather than repeated, so a renamed or
+ * re-keyed project cannot leave the two disagreeing.
+ *
+ * ⚠️ Real records. If an id stops existing the exact-match tests fail on the
+ * data, not on search — repoint them at any live case from that project's Cases
+ * list rather than loosening the assertions.
+ */
+export const GLOBAL_SEARCH_INPUT: Record<ProjectType, GlobalSearchFixture> = {
+  [ProjectType.SUBSCRIPTION]: {
+    number: "CS0448707",
+    wso2CaseId: "AUTOMATIONTESTCUSSUB-210",
+  },
+  [ProjectType.MANAGED_CLOUD_SUBSCRIPTION]: {
+    number: "CS0448090",
+    wso2CaseId: "AUTOMATIONTESTCUSMSSUB-114",
+  },
+  [ProjectType.CLOUD_SUPPORT]: {
+    number: "CS0441378",
+    wso2CaseId: "AUTOMATIONTESTCUSCLSUB-16",
+  },
+};
 
 /** Case content submitted by the create-case flow. */
 export interface CaseInput {
@@ -453,15 +542,16 @@ export const CALL_REQUEST_INPUT = {
  * so the optional fields are exercised too.
  */
 export const DEPLOYMENT_PRODUCT_INPUT = {
-  /** Option label in the modal's Product Name select. */
-  productName: "API Manager",
-  /** The same product as the deployment's product list renders it.
-   *
-   * The two differ: the select offers the short name while the list shows the
-   * full product label, so the row's control reads "Edit WSO2 API Manager" for
-   * a product picked as "API Manager". Verified live. */
+  /** Option label in the modal's Product Name select. The select now offers
+   * the full product label (it used to show the short "API Manager"; live
+   * 2026-10-22), so this matches the listed name. */
+  productName: "WSO2 API Manager",
+  /** The same product as the deployment's product list renders it — the row's
+   * control reads "Edit WSO2 API Manager". */
   listedProductName: "WSO2 API Manager",
-  version: "4.4.0",
+  /** Staging now offers only 3.0.0 / 2.0.0 / 1.0.0 for WSO2 API Manager in
+   * this modal (4.4.0 is gone; live 2026-10-22). */
+  version: "3.0.0",
   cores: "4",
   tps: "100",
   description: "Automation test add product.",
@@ -1058,12 +1148,15 @@ export type DeploymentType =
 export interface DeploymentInput {
   /** Name *prefix*. The spec appends a timestamp because the backend rejects a
    * duplicate name with 409 and there is no delete endpoint, so a fixed name
-   * only ever works on the very first run. */
+   * only ever works on the very first run.
+   *
+   * ⚠️ There is deliberately NO `existingName` companion for the duplicate-name
+   * test. One existed and was silently dead: since every created deployment
+   * carries a timestamp suffix, nothing was ever named exactly
+   * "Automation Test Deployment", so that test skipped on every run while the
+   * suite reported green. It now reads a colliding name off the list instead,
+   * which cannot go stale. */
   namePrefix: string;
-  /** Name of a deployment that already exists on the project, for exercising the
-   * duplicate-name rejection. Durable as a fixture because deployments have no
-   * delete endpoint, so once created this name cannot disappear. */
-  existingName: string;
   type: DeploymentType;
   /** Goes in the field labelled "Description *" — the modal does not call it
    * "Deployment Description". */
@@ -1087,7 +1180,6 @@ export interface DeploymentInput {
  */
 export const DEPLOYMENT_INPUT: DeploymentInput = {
   namePrefix: "Automation Test Deployment",
-  existingName: "Automation Test Deployment",
   type: DeploymentType.PRIMARY_PRODUCTION,
   description:
     "This is a test deployment for Automation Test MS Customer Project",
@@ -1197,3 +1289,18 @@ export const SUBSCRIPTION_SEVERITY_CASES: CaseInput[] = [
     severity: Severity.S3,
   },
 ];
+
+/** Settings → Registry Tokens → Service Tokens: the system (integration) user a
+ * generated service token is created for. Must be one of the project's
+ * integration users offered by the "System User (Created For)" select. */
+export const REGISTRY_SERVICE_TOKEN_INPUT = {
+  createdFor: "integrationuser@snauto.com",
+} as const;
+
+/** A case carrying an attachment uploaded by someone other than the signed-in
+ * user, so the delete control must not be usable on it. */
+export const FOREIGN_ATTACHMENT_INPUT = {
+  projectType: ProjectType.SUBSCRIPTION,
+  caseId: "e7d723c6-ebc0-db50-fcf5-f5dabad0cd61",
+  fileName: "delete.png",
+} as const;

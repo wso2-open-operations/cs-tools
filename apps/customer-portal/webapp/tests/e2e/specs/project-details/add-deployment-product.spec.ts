@@ -643,9 +643,11 @@ test.describe("Deployment Product", () => {
       // into nothing, sent as an empty update, and refused by the API. The user
       // sees whatever that error surfaces as, not "core count must be positive".
       // Worth treating as a product defect.
+      // The wording changed on staging (live 2026-10-22); either is the API
+      // refusing an update that carries nothing.
       expect(response.status(), "the empty update is rejected").toBe(400);
-      expect(await response.text()).toContain(
-        "At least one of cores or tps or description or updates should be provided",
+      expect(await response.text()).toMatch(
+        /At least one of cores or tps or description or updates should be provided|Provide either cores\/tps\/description\/updates or active/,
       );
 
       // The record keeps the value it had — nothing was applied.

@@ -21,6 +21,7 @@ import {
   expect,
 } from "../fixtures/test";
 import {
+  ANNOUNCEMENT_DETAIL,
   CASE_COMMENT_INPUT,
   CASE_DETAIL,
   CASE_DETAILS_PANEL,
@@ -124,7 +125,21 @@ export class CaseDetailPage {
     await this.page.goto(
       `/projects/${projectId}/${CASE_DETAIL.announcementPathSegment}/${announcementId}`,
     );
-    await expect(this.caseNumber()).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
+
+    // Settles on EITHER outcome — the header, or the page's not-found state —
+    // rather than demanding the header.
+    //
+    // Deliberate: an id that no longer resolves is a stale fixture, and waiting
+    // only for the header reports it as "element not found" on a locator that
+    // had nothing to do with the cause. Letting the caller see the error state
+    // is what lets it say so. The caller still has to assert the error is
+    // absent; this only decides when the page has stopped loading.
+    await expect(
+      this.caseNumber()
+        .or(this.page.getByText(ANNOUNCEMENT_DETAIL.notFoundMessage))
+        .first(),
+      "the announcement page rendered neither a header nor an error",
+    ).toBeVisible({ timeout: LOAD_TIMEOUT_MS });
   }
 
   //
@@ -161,6 +176,34 @@ export class CaseDetailPage {
   /** A comment on the Activity tab, matched as a substring. */
   comment(text: string): Locator {
     return this.main().getByText(text, { exact: false }).first();
+  }
+
+  /**
+   * Scrolls the Activity feed until a comment is loaded, then returns it.
+   *
+   * The feed pages in older entries when its bottom sentinel scrolls into view
+   * (IntersectionObserver in CaseDetailsActivityPanel). The fixture cases
+   * collect fresh comments from case-comment.spec.ts on every run, which pushes
+   * their original comment beyond the first page (live 2026-10-27).
+   *
+   * @param text - Comment text, matched as a substring.
+   * @returns Locator for the comment.
+   */
+  async scrollToComment(text: string): Promise<Locator> {
+    const target = this.comment(text);
+    await expect(async () => {
+      if (await target.count()) return;
+      // Bounded so a feed with no paragraph yet cannot stall the retry loop on
+      // the default action timeout.
+      await this.main()
+        .getByRole("paragraph")
+        .last()
+        .scrollIntoViewIfNeeded({ timeout: 2_000 })
+        .catch(() => undefined);
+      await this.page.mouse.wheel(0, 5_000);
+      await expect(target).not.toHaveCount(0, { timeout: 1_000 });
+    }).toPass({ intervals: [500, 1_000, 2_000], timeout: LOAD_TIMEOUT_MS });
+    return target;
   }
 
   //

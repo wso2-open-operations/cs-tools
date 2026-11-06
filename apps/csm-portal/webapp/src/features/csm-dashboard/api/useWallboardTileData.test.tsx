@@ -147,6 +147,10 @@ describe("useWallboardTileData", () => {
       { filters: {}, groupBy: "account", maxGroups: 1000 },
       { signal: expect.any(AbortSignal) },
     );
+    // The click-through opens the grouped-by-account preview, not a flat list.
+    const href = ok.result.current.linkHref ?? "";
+    expect(href.startsWith("/dashboard/preview/cases?")).toBe(true);
+    expect(new URLSearchParams(href.split("?")[1]).get("gb")).toBe("account");
 
     postMock.mockResolvedValueOnce({
       groups: [{ key: "a1", label: "Account One", count: 2 }],

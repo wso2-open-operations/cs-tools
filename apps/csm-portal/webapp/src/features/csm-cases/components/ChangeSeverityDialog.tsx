@@ -34,6 +34,8 @@ import type {
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 
 const SEVERITIES: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
+/** A service request never holds S0: its severity is S1-S4 only. */
+const SERVICE_REQUEST_SEVERITIES: Severity[] = ["S1", "S2", "S3", "S4"];
 
 interface ChangeSeverityDialogProps {
   /**
@@ -46,6 +48,9 @@ interface ChangeSeverityDialogProps {
   /** True when the case's project is a Managed Cloud subscription — S0 is
    * reserved for those, same rule as case creation (see CsmCaseCreatePage.tsx). */
   isManagedCloud: boolean;
+  /** True when the record is a service request: only S1-S4 are offered (no S0
+   * option at all, rather than a disabled one), and the severity is internal. */
+  isServiceRequest?: boolean;
   /** True while a PATCH is in flight; disables the actions. */
   isChanging: boolean;
   onClose: () => void;
@@ -64,6 +69,7 @@ interface ChangeSeverityDialogProps {
 export default function ChangeSeverityDialog({
   currentSeverity,
   isManagedCloud,
+  isServiceRequest = false,
   isChanging,
   onClose,
   onChange,
@@ -76,6 +82,11 @@ export default function ChangeSeverityDialog({
     <Dialog open onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Change severity</DialogTitle>
       <DialogContent>
+        {isServiceRequest && (
+          <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1 }}>
+            A service request&rsquo;s severity is internal and is never shown to the customer.
+          </Typography>
+        )}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
           Current severity:{" "}
           <Typography component="span" variant="body2" sx={{ fontWeight: 600, color: "text.primary" }}>
@@ -90,7 +101,7 @@ export default function ChangeSeverityDialog({
             value={selected}
             onChange={(e) => setSelected(e.target.value as Severity)}
           >
-            {SEVERITIES.map((s) => {
+            {(isServiceRequest ? SERVICE_REQUEST_SEVERITIES : SEVERITIES).map((s) => {
               const s0Blocked = s === "S0" && !isManagedCloud;
               return (
                 <FormControlLabel

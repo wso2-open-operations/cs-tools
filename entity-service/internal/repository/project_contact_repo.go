@@ -35,6 +35,9 @@ import (
 // project_group_role/project_role (migrations 000023-000025) to that
 // contact's roles.
 type ProjectContactRow struct {
+	// ProjectContactID is the project_contact row id, the key the deferred
+	// Salesforce write ledger (salesforce_write_request) is read by.
+	ProjectContactID  string
 	Email             string
 	RegistrationState string
 	// ResolvedUserID/ResolvedName/ResolvedEmail come from the "user" row
@@ -96,7 +99,7 @@ func NewProjectContactRepository(db *pgxpool.Pool) ProjectContactRepository {
 }
 
 const projectContactColumns = `
-	pc.email, pc.state,
+	pc.id, pc.email, pc.state,
 	u.id, COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), '')), u.email,
 	COALESCE(u.is_system_user, FALSE),
 	COALESCE((
@@ -124,7 +127,7 @@ const projectContactFromJoins = `
 func scanProjectContact(row interface{ Scan(...any) error }) (ProjectContactRow, error) {
 	var c ProjectContactRow
 	var state *string
-	err := row.Scan(&c.Email, &state, &c.ResolvedUserID, &c.ResolvedName, &c.ResolvedEmail, &c.IsSystemUser, &c.Roles, &c.AccountRoles)
+	err := row.Scan(&c.ProjectContactID, &c.Email, &state, &c.ResolvedUserID, &c.ResolvedName, &c.ResolvedEmail, &c.IsSystemUser, &c.Roles, &c.AccountRoles)
 	if err != nil {
 		return ProjectContactRow{}, err
 	}

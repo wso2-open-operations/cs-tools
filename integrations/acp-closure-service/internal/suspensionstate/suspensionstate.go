@@ -16,10 +16,10 @@
 
 // Package suspensionstate translates between the real, confirmed shape of a
 // project's suspensionProcessState (a free-form JSON blob written by an
-// existing ServiceNow suspension flow, keyed by
+// existing legacy suspension flow, keyed by
 // based_on_subscription_end_date/based_on_due_invoices/based_on_compliance —
 // confirmed via a real write against the dedicated test project
-// e3e87599-1bc7-6650-182c-0dc5604bcb68) and this component's own
+// 00000000-0000-4000-8000-000000000001) and this component's own
 // closure.NoticeWindow. Phase 1 reads/writes based_on_subscription_end_date;
 // Phase 2 reads/writes based_on_due_invoices the same way, via its own
 // parallel functions below — each track has its own independent
@@ -143,10 +143,40 @@ func WithDueInvoicesState(raw json.RawMessage, window closure.NoticeWindow, acti
 	return withState(raw, dueInvoicesKey, window, actions)
 }
 
+// WithSubscriptionEndDateOpen returns a copy of raw with
+// based_on_subscription_end_date set back to {"event_type":"open"}: no
+// notice sent for the current term. Legacy saved this on every run where the
+// end date was more than 90 days away, so a renewal started the reminders
+// over. Other keys are preserved byte-for-byte, as in
+// WithSubscriptionEndDateState.
+func WithSubscriptionEndDateOpen(raw json.RawMessage) (json.RawMessage, error) {
+	return withSection(raw, subscriptionEndDateKey, map[string]string{"event_type": "open"})
+}
+
+// WithDueInvoicesOpen is WithSubscriptionEndDateOpen for
+// based_on_due_invoices.
+func WithDueInvoicesOpen(raw json.RawMessage) (json.RawMessage, error) {
+	return withSection(raw, dueInvoicesKey, map[string]string{"event_type": "open"})
+}
+
 // withState is the shared implementation behind WithSubscriptionEndDateState
 // and WithDueInvoicesState — both sections are written identically, only the
 // key differs.
 func withState(raw json.RawMessage, key string, window closure.NoticeWindow, actions map[string]string) (json.RawMessage, error) {
+	eventType, ok := windowToEventType[window]
+	if !ok {
+		return nil, fmt.Errorf("suspensionstate: no event_type mapping for window %d", window)
+	}
+
+	section := map[string]string{"event_type": eventType}
+	for action, result := range actions {
+		section[action] = result
+	}
+	return withSection(raw, key, section)
+}
+
+// withSection returns a copy of raw with only key replaced by section.
+func withSection(raw json.RawMessage, key string, section map[string]string) (json.RawMessage, error) {
 	blob := map[string]json.RawMessage{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &blob); err != nil {
@@ -157,16 +187,6 @@ func withState(raw json.RawMessage, key string, window closure.NoticeWindow, act
 	// that never had a notice) decodes into a nil map; start a new blob.
 	if blob == nil {
 		blob = map[string]json.RawMessage{}
-	}
-
-	eventType, ok := windowToEventType[window]
-	if !ok {
-		return nil, fmt.Errorf("suspensionstate: no event_type mapping for window %d", window)
-	}
-
-	section := map[string]string{"event_type": eventType}
-	for action, result := range actions {
-		section[action] = result
 	}
 
 	sectionRaw, err := json.Marshal(section)

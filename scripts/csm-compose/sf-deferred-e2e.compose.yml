@@ -1,0 +1,149 @@
+# Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+#
+# WSO2 LLC. licenses this file to you under the Apache License,
+# Version 2.0 (the "License"); you may not use this file except
+# in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+# LOCAL DEV ONLY -- compose override for the deferred Salesforce membership
+# write (entity-service SALESFORCE_DEFERRED_WRITES_ENABLED + sales-entity-service
+# SALESFORCE_WRITES_CONSUMER_ENABLED). Runs the REAL sales-entity-service from
+# the digiops-sales checkout beside this repo, with MySQL beside it and a fake
+# Salesforce REST API behind it that can be switched into an outage; points
+# entity-service at the real service; turns the portal membership writes, the
+# deferral and the consumer on; shortens the retry policies so the whole
+# scenario runs in a couple of minutes. Driven by
+# scripts/csm-compose/sf-deferred-e2e.sh:
+#
+#   docker compose -f docker-compose.yml -f scripts/csm-compose/sf-deferred-e2e.compose.yml up -d --build entity-service sales-entity-service mock-salesforce kafka-topics-init
+#   scripts/csm-compose/sf-deferred-e2e.sh run
+services:
+  # Fake Salesforce REST API (LOCAL DEV ONLY, scripts/csm-compose/mock-salesforce):
+  # OAuth token endpoint, a SOQL query endpoint that understands the predicates
+  # sales-entity-service emits, sObject create/update, and an outage switch
+  # that turns every /services/* answer into a 503.
+  mock-salesforce:
+    build:
+      context: ./scripts/csm-compose/mock-salesforce
+    environment:
+      PORT: "9300"
+      # The invitation validator refuses addresses outside the account's
+      # domain list; every mock Account answers with this list.
+      MOCK_SF_DOMAIN_LIST: example.com
+    ports:
+      - "127.0.0.1:9300:9300"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9300/healthz"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  # sales-entity-service needs a reachable MySQL at startup (it pings it); the
+  # deferred-write consumer never touches it.
+  sales-mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: devpassword
+      MYSQL_DATABASE: sales
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pdevpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # The REAL sales-entity-service (digiops-sales), built from its own repo
+  # checked out beside this one (override with SALES_ENTITY_SRC), pointed at
+  # the fake Salesforce and the local Kafka, consumer on.
+  sales-entity-service:
+    build:
+      context: ${SALES_ENTITY_SRC:-../digiops-sales/sales-entity-service}
+    depends_on:
+      mock-salesforce:
+        condition: service_healthy
+      sales-mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: "9090"
+      SALESFORCE_BASE_URL: http://mock-salesforce:9300
+      SALESFORCE_TOKEN_URL: http://mock-salesforce:9300/services/oauth2/token
+      SALESFORCE_CLIENT_ID: mock-client
+      SALESFORCE_CLIENT_SECRET: mock-secret
+      SALESFORCE_REFRESH_TOKEN: mock-refresh-token
+      DB_HOST: sales-mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: devpassword
+      DB_NAME: sales
+      EVENT_HUB_BROKER: kafka:9094
+      EVENT_HUB_CONNECTION_STRING: local-dev-shared-secret
+      SSL_CERT_FILE: /certs/ca.crt
+      SALESFORCE_WRITES_CONSUMER_ENABLED: "true"
+      SALESFORCE_WRITES_TOPIC: salesforce-writes
+      SALESFORCE_WRITES_DLQ_TOPIC: salesforce-writes-dlq
+      SALESFORCE_WRITE_RESULTS_TOPIC: salesforce-write-results
+      # Short policies so the scenario exercises both tiers quickly: the main
+      # topic gives up after ~2s and dead-letters; the dead-letter tier
+      # retries 5s, 10s, 20s, 20s, 20s (~75s of cover) before answering failed.
+      SALESFORCE_WRITES_RETRY_ATTEMPTS: "2"
+      SALESFORCE_WRITES_RETRY_DELAY: "2s"
+      SALESFORCE_WRITES_DLQ_RETRY_ATTEMPTS: "6"
+      SALESFORCE_WRITES_DLQ_RETRY_DELAY: "5s"
+      SALESFORCE_WRITES_DLQ_RETRY_MAX_DELAY: "20s"
+    volumes:
+      - csm-dev-certs:/certs:ro
+    ports:
+      - "127.0.0.1:9201:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/health-check"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  kafka-topics-init:
+    entrypoint:
+      - sh
+      - -c
+      - |
+        for t in case-events case-events-dlq sre-events sre-events-dlq project-events project-events-dlq salesforce-writes salesforce-writes-dlq salesforce-write-results salesforce-write-results-dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$t" --partitions 1 --replication-factor 1
+        done
+
+  entity-service:
+    depends_on:
+      sales-entity-service:
+        condition: service_healthy
+      kafka-topics-init:
+        condition: service_completed_successfully
+    environment:
+      SALES_ENTITY_BASE_URL: http://sales-entity-service:9090
+      # The real service does not validate tokens (Choreo's gateway does); the
+      # client only needs a token endpoint that answers client_credentials.
+      SALES_ENTITY_TOKEN_URL: http://mock-oidc:9100/oauth2/token
+      SALES_ENTITY_CLIENT_ID: entity-service-dev-client
+      SALES_ENTITY_CLIENT_SECRET: dev
+      CSM_MIGRATION_PORTAL_WRITES_ENABLED: "true"
+      SALESFORCE_DEFERRED_WRITES_ENABLED: "true"
+      PROJECT_EVENT_HUB_TOPIC: project-events
+      SALESFORCE_WRITE_EVENT_HUB_TOPIC: salesforce-writes
+      SALESFORCE_WRITE_RESULTS_TOPIC: salesforce-write-results
+      SALESFORCE_WRITE_RESULTS_DLQ_TOPIC: salesforce-write-results-dlq
+      # The results consumer only waits on Sales Entity's REST reads and the
+      # database; short policies keep the scenario quick.
+      SALESFORCE_WRITE_RESULTS_RETRY_ATTEMPTS: "2"
+      SALESFORCE_WRITE_RESULTS_RETRY_DELAY: "2s"
+      SALESFORCE_WRITE_RESULTS_DLQ_RETRY_ATTEMPTS: "4"
+      SALESFORCE_WRITE_RESULTS_DLQ_RETRY_DELAY: "5s"
+      SALESFORCE_WRITE_RESULTS_DLQ_RETRY_MAX_DELAY: "10s"

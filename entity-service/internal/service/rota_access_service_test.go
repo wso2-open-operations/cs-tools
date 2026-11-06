@@ -37,8 +37,10 @@ const (
 // records the last write.
 type fakeRotaAccessRepo struct {
 	internal     bool
+	portalAdmin  bool              // the caller holds the global admin role
 	teamFamily   map[string]string // rostered team -> family
 	listedFamily []string
+	listedTeams  []string
 	listed       bool
 	wrote        string // "grant-admin:sre_rota_admin", "revoke-marker:lyra", ...
 	actor        string
@@ -46,6 +48,10 @@ type fakeRotaAccessRepo struct {
 	// the service passed.
 	removal     domain.TeamMemberRemoval
 	allowedLead bool
+	// update and move are what UpdateTeamMember and MoveTeamMember find;
+	// a write is recorded only when the real one would have written.
+	update domain.TeamMemberUpdate
+	move   domain.TeamMemberMove
 }
 
 func (f *fakeRotaAccessRepo) ListRotaAdmins(context.Context) ([]domain.RotaAdminGrant, error) {
@@ -53,10 +59,14 @@ func (f *fakeRotaAccessRepo) ListRotaAdmins(context.Context) ([]domain.RotaAdmin
 	return []domain.RotaAdminGrant{{Family: "SRE", UserID: someoneID}}, nil
 }
 
-func (f *fakeRotaAccessRepo) ListRotaMarkers(_ context.Context, families []string) ([]domain.RotaMarkerGrant, error) {
+func (f *fakeRotaAccessRepo) ListRotaMarkers(_ context.Context, families, teams []string) ([]domain.RotaMarkerGrant, error) {
 	f.listed = true
-	f.listedFamily = families
+	f.listedFamily, f.listedTeams = families, teams
 	return []domain.RotaMarkerGrant{}, nil
+}
+
+func (f *fakeRotaAccessRepo) IsPortalAdmin(context.Context, string) (bool, error) {
+	return f.portalAdmin, nil
 }
 
 func (f *fakeRotaAccessRepo) GrantRotaAdmin(_ context.Context, _, role, actor string) (bool, error) {
@@ -97,6 +107,24 @@ func (f *fakeRotaAccessRepo) RemoveTeamMember(_ context.Context, _, team, actor 
 	return res, nil
 }
 
+func (f *fakeRotaAccessRepo) UpdateTeamMember(_ context.Context, _, team, actor string, _ domain.TeamMemberPatch) (domain.TeamMemberUpdate, error) {
+	res := f.update
+	if res.Member && !res.Lead && res.TierHolder == "" {
+		res.Updated = true
+		f.wrote, f.actor = "update-member:"+team, actor
+	}
+	return res, nil
+}
+
+func (f *fakeRotaAccessRepo) MoveTeamMember(_ context.Context, _, from, to, actor string) (domain.TeamMemberMove, error) {
+	res := f.move
+	if res.OnSource && !res.OnTarget && !res.Lead && res.AlertTier == "" && res.UpcomingTurns == 0 {
+		res.Moved = true
+		f.wrote, f.actor = "move-member:"+from+">"+to, actor
+	}
+	return res, nil
+}
+
 func (f *fakeRotaAccessRepo) UserIsInternal(context.Context, string) (bool, error) {
 	return f.internal, nil
 }
@@ -110,7 +138,15 @@ func (f *fakeRotaAccessRepo) RosteredTeamFamily(_ context.Context, team string) 
 type rotaAdminOf struct {
 	fakeScheduleRepo
 	families []string
+	led      []string // teams the caller leads
 	member   bool
+}
+
+func (r *rotaAdminOf) LeadTeamsFor(context.Context, string) ([]string, error) {
+	if r.led == nil {
+		return []string{}, nil
+	}
+	return r.led, nil
 }
 
 func (r *rotaAdminOf) RotaAdminFamilies(context.Context, string) ([]string, error) {
@@ -430,5 +466,157 @@ func TestCSMAdminRemovesALeadButNotOneWithTurns(t *testing.T) {
 	wantConflict(t, svc.RemoveTeamMember(admin, "iaas", someoneID), "a lead with turns", "2 upcoming turns")
 	if repo.wrote != "" {
 		t.Fatalf("a lead with turns was removed: %q", repo.wrote)
+	}
+}
+
+func wantNotFound(t *testing.T, err error, what string) {
+	t.Helper()
+	var nf *apierror.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("%s: want NotFoundError, got %v", what, err)
+	}
+}
+
+// Changing a role or tier, or moving, is for a CSM admin only: a rota admin
+// of the very family, a team's own marker and an engineer are all refused
+// before anything is looked up or written.
+func TestChangingAMemberIsForACSMAdminOnly(t *testing.T) {
+	repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"iaas": "SRE", "kiwi": "SRE"},
+		update: domain.TeamMemberUpdate{Member: true}, move: domain.TeamMemberMove{OnSource: true}}
+	svc, _ := newRotaAccess(repo, "SRE")
+	patch := domain.TeamMemberPatch{Role: str("sub_lead")}
+	for name, ctx := range map[string]context.Context{
+		"a rota admin of the family": callerWithRoles("sre.rota.admin@example.com", "cs_engineer"),
+		"an engineer":                callerWithRoles("engineer@example.com", "cs_engineer"),
+	} {
+		_, err := svc.UpdateTeamMember(ctx, "iaas", someoneID, patch)
+		wantForbidden(t, err, name+" updating")
+		_, err = svc.MoveTeamMember(ctx, "iaas", someoneID, "kiwi")
+		wantForbidden(t, err, name+" moving")
+	}
+	// A rota admin's own family check is not what lets a request through even
+	// when the caller holds the family admin role itself.
+	if repo.wrote != "" {
+		t.Fatalf("a refused change was written: %q", repo.wrote)
+	}
+}
+
+func TestCSMAdminUpdatesAMember(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	tier := "T2"
+	repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"iaas": "SRE"},
+		update: domain.TeamMemberUpdate{Member: true, Membership: domain.TeamMembership{TeamKey: "iaas", UserID: someoneID, Role: "sub_lead", AlertTier: &tier}}}
+	svc, _ := newRotaAccess(repo)
+	got, err := svc.UpdateTeamMember(admin, "iaas", someoneID, domain.TeamMemberPatch{Role: str("sub_lead"), AlertTierSet: true, AlertTier: &tier})
+	if err != nil || repo.wrote != "update-member:iaas" || repo.actor != "head@example.com" {
+		t.Fatalf("update: err %v, wrote %q by %q", err, repo.wrote, repo.actor)
+	}
+	if got.Role != "sub_lead" || got.AlertTier == nil || *got.AlertTier != "T2" {
+		t.Fatalf("membership = %+v", got)
+	}
+}
+
+func TestUpdateTeamMemberRefusals(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	newSvc := func(r *fakeRotaAccessRepo) RotaAccessService {
+		r.teamFamily = map[string]string{"iaas": "SRE"}
+		svc, _ := newRotaAccess(r)
+		return svc
+	}
+	ok := domain.TeamMemberUpdate{Member: true}
+	for name, tc := range map[string]struct {
+		repo  *fakeRotaAccessRepo
+		team  string
+		user  string
+		patch domain.TeamMemberPatch
+		want  string
+	}{
+		"nothing to change":  {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{}, "invalid"},
+		"a lead role":        {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("lead")}, "invalid"},
+		"a cre head":         {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("cre_head")}, "invalid"},
+		"an unknown role":    {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("boss")}, "invalid"},
+		"a tier T4":          {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{AlertTierSet: true, AlertTier: str("T4")}, "invalid"},
+		"a bad user id":      {&fakeRotaAccessRepo{internal: true, update: ok}, "iaas", "nope", domain.TeamMemberPatch{Role: str("sub_lead")}, "invalid"},
+		"an external user":   {&fakeRotaAccessRepo{internal: false, update: ok}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("sub_lead")}, "invalid"},
+		"an unknown team":    {&fakeRotaAccessRepo{internal: true, update: ok}, "nowhere", someoneID, domain.TeamMemberPatch{Role: str("sub_lead")}, "notfound"},
+		"a non-member":       {&fakeRotaAccessRepo{internal: true, update: domain.TeamMemberUpdate{}}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("sub_lead")}, "notfound"},
+		"a current lead":     {&fakeRotaAccessRepo{internal: true, update: domain.TeamMemberUpdate{Member: true, Lead: true}}, "iaas", someoneID, domain.TeamMemberPatch{Role: str("engineer")}, "conflict"},
+		"a tier someone has": {&fakeRotaAccessRepo{internal: true, update: domain.TeamMemberUpdate{Member: true, TierHolder: someoneID}}, "iaas", someoneID, domain.TeamMemberPatch{AlertTierSet: true, AlertTier: str("T1")}, "conflict"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := newSvc(tc.repo).UpdateTeamMember(admin, tc.team, tc.user, tc.patch)
+			switch tc.want {
+			case "invalid":
+				wantInvalid(t, err, name)
+			case "notfound":
+				wantNotFound(t, err, name)
+			case "conflict":
+				wantConflict(t, err, name, "")
+			}
+			if tc.repo.wrote != "" {
+				t.Fatalf("%s: a refused change was written: %q", name, tc.repo.wrote)
+			}
+		})
+	}
+}
+
+func TestCSMAdminMovesAMember(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	moved := domain.TeamMembership{TeamKey: "kiwi", UserID: someoneID, Role: "sub_lead"}
+	repo := &fakeRotaAccessRepo{internal: true, teamFamily: map[string]string{"iaas": "SRE", "lyra": "CRE", "kiwi": "SRE"},
+		move: domain.TeamMemberMove{OnSource: true, Role: "sub_lead", Membership: moved}}
+	svc, _ := newRotaAccess(repo)
+	// Across families too: the gate is the CSM admin, not either team's family.
+	got, err := svc.MoveTeamMember(admin, "lyra", someoneID, "kiwi")
+	if err != nil || repo.wrote != "move-member:lyra>kiwi" || repo.actor != "head@example.com" || got.TeamKey != "kiwi" {
+		t.Fatalf("move: %+v, err %v, wrote %q by %q", got, err, repo.wrote, repo.actor)
+	}
+	// Already moved: the target's membership, nothing written.
+	repo.wrote = ""
+	repo.move = domain.TeamMemberMove{OnTarget: true, Membership: moved}
+	if got, err := svc.MoveTeamMember(admin, "iaas", someoneID, "kiwi"); err != nil || got.TeamKey != "kiwi" || repo.wrote != "" {
+		t.Fatalf("repeat move: %+v, err %v, wrote %q", got, err, repo.wrote)
+	}
+}
+
+func TestMoveTeamMemberRefusals(t *testing.T) {
+	admin := callerWithRoles("head@example.com", "cs_admin")
+	teams := map[string]string{"iaas": "SRE", "kiwi": "SRE"}
+	for name, tc := range map[string]struct {
+		repo     *fakeRotaAccessRepo
+		from     string
+		to       string
+		user     string
+		want     string
+		mentions string
+	}{
+		"the same team":     {&fakeRotaAccessRepo{internal: true}, "iaas", "IAAS", someoneID, "invalid", ""},
+		"no target":         {&fakeRotaAccessRepo{internal: true}, "iaas", " ", someoneID, "invalid", ""},
+		"a bad user id":     {&fakeRotaAccessRepo{internal: true}, "iaas", "kiwi", "nope", "invalid", ""},
+		"an external user":  {&fakeRotaAccessRepo{internal: false}, "iaas", "kiwi", someoneID, "invalid", ""},
+		"an unknown source": {&fakeRotaAccessRepo{internal: true}, "nowhere", "kiwi", someoneID, "notfound", ""},
+		"an unknown target": {&fakeRotaAccessRepo{internal: true}, "iaas", "nowhere", someoneID, "notfound", ""},
+		"a non-member":      {&fakeRotaAccessRepo{internal: true}, "iaas", "kiwi", someoneID, "notfound", ""},
+		"a lead":            {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "lead", Lead: true}}, "iaas", "kiwi", someoneID, "conflict", "lead"},
+		"upcoming turns":    {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "engineer", UpcomingTurns: 2}}, "iaas", "kiwi", someoneID, "conflict", "2 upcoming turns"},
+		"a responder tier":  {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, Role: "engineer", AlertTier: "T3"}}, "iaas", "kiwi", someoneID, "conflict", "T3 responder"},
+		"on both teams":     {&fakeRotaAccessRepo{internal: true, move: domain.TeamMemberMove{OnSource: true, OnTarget: true}}, "iaas", "kiwi", someoneID, "conflict", "both"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tc.repo.teamFamily = teams
+			svc, _ := newRotaAccess(tc.repo)
+			_, err := svc.MoveTeamMember(admin, tc.from, tc.user, tc.to)
+			switch tc.want {
+			case "invalid":
+				wantInvalid(t, err, name)
+			case "notfound":
+				wantNotFound(t, err, name)
+			case "conflict":
+				wantConflict(t, err, name, tc.mentions)
+			}
+			if tc.repo.wrote != "" {
+				t.Fatalf("%s: a refused move was written: %q", name, tc.repo.wrote)
+			}
+		})
 	}
 }

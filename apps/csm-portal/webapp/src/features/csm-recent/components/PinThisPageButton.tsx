@@ -44,7 +44,14 @@ export default function PinThisPageButton(): JSX.Element | null {
   if (!isSignedIn) return null;
 
   const href = location.pathname + location.search;
-  const existing = recents.find((e) => e.href === href);
+  // The entry this page pins as. Its href can be shorter than the URL: a place
+  // that ignores some parameters (Standard changes keeps the change request
+  // list's `cr*` filters in its URL, unread) pins without them. Matching only
+  // the URL would show "Pin" on a page that is pinned, and the next click would
+  // unpin it.
+  const entry = currentPageEntry(location.pathname, location.search);
+  const existing =
+    recents.find((e) => e.href === href) ?? recents.find((e) => e.href === entry.href);
   const isPinned = !!existing?.pinned;
 
   const onToggle = () => {
@@ -52,7 +59,6 @@ export default function PinThisPageButton(): JSX.Element | null {
       toggleRecentViewPin(existing.kind, existing.id);
       return;
     }
-    const entry = currentPageEntry(location.pathname, location.search);
     record(entry); // adds to recents (unpinned, most recent)
     toggleRecentViewPin(entry.kind, entry.id); // then promote into the bar
   };

@@ -75,20 +75,32 @@ type RotaReminderSettings struct {
 	InvitesEnabled  bool                      `json:"invitesEnabled"`
 	WeekendRequired map[string]int            `json:"weekendRequired"`
 	Windows         map[string]ReminderWindow `json:"windows"`
-	CopyTo          []string                  `json:"copyTo"`
-	UpdatedBy       string                    `json:"updatedBy"`
-	UpdatedOn       time.Time                 `json:"updatedOn"`
+	// InviteRotations is, per rotation (the shift code of its window), whether
+	// its reminders carry a calendar invitation. A rotation not named does.
+	// InvitesEnabled off turns every rotation's off.
+	InviteRotations map[string]bool `json:"inviteRotations"`
+	CopyTo          []string        `json:"copyTo"`
+	// WeekendCopyTo is copied (Cc) on the weekend summary email only, beside
+	// CopyTo, which is copied on every reminder.
+	WeekendCopyTo []string  `json:"weekendCopyTo"`
+	UpdatedBy     string    `json:"updatedBy"`
+	UpdatedOn     time.Time `json:"updatedOn"`
 }
 
 // SaveRotaReminderSettingsRequest replaces a family's settings. Every field
-// is required: the card always sends the whole form.
+// is required, the card always sending the whole form, except
+// InviteRotations and WeekendCopyTo: a card from before they existed sends
+// neither, and its save keeps what is stored rather than turning every
+// rotation's invitations back on or dropping the weekend copies.
 type SaveRotaReminderSettingsRequest struct {
 	WeekdayEnabled  *bool                     `json:"weekdayEnabled"`
 	WeekendEnabled  *bool                     `json:"weekendEnabled"`
 	InvitesEnabled  *bool                     `json:"invitesEnabled"`
 	WeekendRequired map[string]int            `json:"weekendRequired"`
 	Windows         map[string]ReminderWindow `json:"windows"`
+	InviteRotations map[string]bool           `json:"inviteRotations"`
 	CopyTo          []string                  `json:"copyTo"`
+	WeekendCopyTo   []string                  `json:"weekendCopyTo"`
 }
 
 // RotaReminderRequest is a rota reminder asked for by hand ("Send now"),

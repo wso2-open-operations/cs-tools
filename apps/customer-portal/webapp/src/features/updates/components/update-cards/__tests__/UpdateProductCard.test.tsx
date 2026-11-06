@@ -30,7 +30,9 @@ const mockItem: RecommendedUpdateLevelItem = {
   availableSecurityUpdatesCount: 2,
   channel: "full",
   timestamp: 123456789,
-  endingUpdateLevel: 15,
+  // The card's current level and progress are derived from endingUpdateLevel
+  // (the level the deployment is at), not startingUpdateLevel.
+  endingUpdateLevel: 10,
 };
 
 describe("UpdateProductCard", () => {

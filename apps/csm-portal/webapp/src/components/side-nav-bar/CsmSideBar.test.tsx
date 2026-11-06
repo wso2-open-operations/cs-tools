@@ -524,4 +524,45 @@ describe("CsmSideBar — Feature Preview and the Customers shortcut", () => {
     const second = renderAt("/dashboard");
     expect(second.container.querySelector('[data-item-id="customers"]')).not.toBeNull();
   });
+
+  it("marks a top-level item shown only via preview with a Preview badge", () => {
+    currentRoles.value = ["admin"];
+    setOverrides({ "customer-health": "hidden" });
+    setPreview({ "customer-health": true, "customers.customer-health": true });
+    const { container } = renderAt("/customer-health");
+    const item = container.querySelector('[data-item-id="customer-health"]');
+    expect(item).not.toBeNull();
+    expect(item).toHaveTextContent("Preview");
+  });
+
+  it("marks BOTH a submenu parent (promoted purely via a previewed descendant) and the previewed child with a Preview badge", () => {
+    currentRoles.value = ["admin"];
+    setOverrides({ operations: "hidden" });
+    setPreview({ "operations.incidents": true });
+    const { container } = renderAt("/dashboard");
+
+    const parent = container.querySelector('[data-item-id="operations"]');
+    expect(parent).not.toBeNull();
+    // The parent carries no override/preview value of its own -- only its
+    // child does -- so this is specifically the descendant-promotion path.
+    expect(parent).toHaveTextContent("Preview");
+
+    const child = container.querySelector('[data-item-id="operations.incidents"]');
+    expect(child).not.toBeNull();
+    expect(child).toHaveTextContent("Preview");
+
+    // A sibling child that was never previewed stays hidden entirely (it
+    // inherits "hidden" from its still-restricted parent, same as any other
+    // un-previewed descendant of a hidden section) -- not rendered with no
+    // badge, simply not rendered at all.
+    expect(container.querySelector('[data-item-id="operations.problems"]')).toBeNull();
+  });
+
+  it("never shows a Preview badge for a non-admin, even with a stored preview value", () => {
+    currentRoles.value = ["cs_engineer"];
+    setOverrides({ "customer-health": "hidden" });
+    setPreview({ "customer-health": true });
+    const { container } = renderAt("/dashboard");
+    expect(container.querySelector('[data-item-id="customer-health"]')).toBeNull();
+  });
 });

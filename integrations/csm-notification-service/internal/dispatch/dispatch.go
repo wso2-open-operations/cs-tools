@@ -35,6 +35,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/chataudience"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
@@ -107,14 +109,21 @@ type slaEngineService interface {
 	RegisterClocks(ctx context.Context, caseID, priority string, createdAt time.Time, caseNumber, wso2CaseID, caseTitle, caseType, product, team string)
 	ApplyStateEffects(ctx context.Context, caseID, newStatus string)
 	CompleteResponseClock(ctx context.Context, caseID string)
-	// CompleteWorkaroundClock is called from handleWorkaroundProvided — the
-	// one trigger here that is NOT best-effort: unlike the three above, a
-	// lost workaround-provided signal has no later event or reconciliation
-	// pass to re-derive it from (see CompleteWorkaroundClock's own doc
-	// comment), so its error is returned and propagated, failing the
-	// record so eventbus.Consumer retries it instead of silently
-	// acknowledging a clock that was never actually completed.
-	CompleteWorkaroundClock(ctx context.Context, caseID string) error
+	// PauseWorkaroundClock is called from handleWorkaroundProvided — the one
+	// trigger here that is NOT best-effort: unlike the three above, a lost
+	// pause signal has to wait for ApplyStateEffects/RecalculateFromEntity to
+	// next re-derive it from entity-service, rather than being
+	// re-established by this same trigger firing again (see
+	// PauseWorkaroundClock's own doc comment), so its error is returned and
+	// propagated, failing the record so eventbus.Consumer retries it instead
+	// of silently acknowledging a pause that was never actually applied.
+	PauseWorkaroundClock(ctx context.Context, caseID string) error
+	// RecalculateFromEntity is called from handleSLARecalculationRequested,
+	// in its own detached goroutine — see that handler's own doc comment.
+	RecalculateFromEntity(ctx context.Context) error
+	// ReviseClocks is called from handleSeverityChanged — see that method's
+	// own doc comment.
+	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -128,6 +137,8 @@ type linkResolver interface {
 	CSMLink(caseID string) string
 	ChangeRequestLink(audience, changeRequestID, projectID string) string
 	OutageLink(outageID string) string
+	// ProjectLink is a project's page in the CSM portal.
+	ProjectLink(projectID string) string
 	ServiceRequestLink(caseID string) string
 	IncidentLink(incidentID string) string
 	// IsCustomer classifies a single email as external (customer) vs
@@ -227,6 +238,9 @@ type Dispatcher struct {
 	// pagingTests places paging-number test calls; set via
 	// WithPagingTestCalls, nil when not configured.
 	pagingTests pagingTestCaller
+	// mailPager starts the phone escalation for mail.alert.received; set via
+	// WithMailAlertPaging, nil when not configured.
+	mailPager mailAlertPager
 
 	// specialOps is the SME page for incident.special_ops_alert; see
 	// DeferSpecialOpsPage.
@@ -294,6 +308,23 @@ type Dispatcher struct {
 	// argument each caller passes, from linkResolver.CSMLink).
 	defaultCSMEmailCC []string
 
+	// acpReactivationCC (ACP_REACTIVATION_CC) is CC'd on every "Back to Open
+	// state" email (project.reactivated); set via WithACPReactivation. Empty
+	// sends with no CC. Dropped in EMAIL_DEBUG_MODE, like defaultCSMEmailCC.
+	acpReactivationCC []string
+	// acpInternalDomain is the only domain the "Back to Open state" email is
+	// sent to ("@wso2.com" in production; set via WithACPReactivation): it
+	// is an internal notice. Empty means "@wso2.com".
+	acpInternalDomain string
+	// acpReactivationLedger, when set, records the "Back to Open state"
+	// emails already sent (Redis), so a redelivery never sends one twice.
+	acpReactivationLedger ReactivationLedger
+	// acpReactivationWaitFor and acpReactivationPoll bound how long, and how
+	// often, a delivery that finds the notice reserved waits for it to clear
+	// (see reserveReactivation). Set with the ledger; tests shorten them.
+	acpReactivationWaitFor time.Duration
+	acpReactivationPoll    time.Duration
+
 	// defaultOnCallNumber is handleIncidentCreated's fallback value for its
 	// payload's own CallTo when a publisher omits it — see that function's
 	// doc comment for why a publisher (e.g. entity-service) might not know
@@ -302,15 +333,31 @@ type Dispatcher struct {
 
 	// doneMu/done track which (record, channel) pairs have already
 	// succeeded — see handleIncidentCreated's doc comment for why this
-	// exists. In-memory only: this is a stopgap for not having a durable
-	// idempotency store yet, not a substitute for one. It's lost on
-	// restart, which is fine — a restart-triggered redelivery duplicating
-	// one already-succeeded channel is the same accepted at-least-once
-	// trade-off documented elsewhere in this package; what this map fixes
-	// is the much more likely case, retries within a single process's
-	// handling of one record.
+	// exists. In-memory only — the much more likely case this map
+	// protects, retries within a single process's handling of one record,
+	// needs nothing durable. The restart-triggered redelivery case this
+	// comment used to accept as an unfixed trade-off is now closed
+	// separately, one level up in Handle — see redisDedup's own doc
+	// comment.
 	doneMu sync.Mutex
 	done   map[string]bool
+
+	// redisDedup is set via WithDurableDedup — nil (REDIS_ADDR/REDIS_URL
+	// unset, same optional-feature posture as slaEngine above) means
+	// Handle's own durable record-level claim is skipped entirely, exactly
+	// the behavior this service always had before it existed. When set, it
+	// closes a real, reported gap the done map above explicitly could not:
+	// a Kafka consumer-group rebalance or process restart can replay a
+	// record from an older committed offset even though this process
+	// already handled it completely and successfully — done being
+	// in-memory, it has no way to remember that past its own process's
+	// lifetime. A confirmed, reproduced incident showed both a
+	// case.acknowledged and a case.severity_changed record getting
+	// reprocessed this way, each resending its already-sent Chat card a
+	// second time, well after the fact. redisDedup is checked once per
+	// record in Handle, before any handler ever runs — see
+	// durablyClaimRecord's own doc comment for exactly how.
+	redisDedup durableDedup
 
 	// recordsMu/records track, per baseKey (recordBaseKey — one entry per
 	// distinct event content, shared by every concurrent Handle call
@@ -394,6 +441,25 @@ func NewDispatcher(email emailSender, googleChat googleChatSender, call callSend
 	}
 }
 
+// WithACPReactivation sets the CC list of the "Back to Open state" email
+// (project.reactivated) and the only domain it may be sent to ("@wso2.com"
+// in production), and returns d for chaining.
+func (d *Dispatcher) WithACPReactivation(cc []string, internalDomain string) *Dispatcher {
+	d.acpReactivationCC = cc
+	d.acpInternalDomain = internalDomain
+	return d
+}
+
+// WithACPReactivationLedger sets the durable record of "Back to Open state"
+// emails already sent and returns d for chaining. Without one only the
+// in-process claim guards against a second send.
+func (d *Dispatcher) WithACPReactivationLedger(l ReactivationLedger) *Dispatcher {
+	d.acpReactivationLedger = l
+	d.acpReactivationWaitFor = reactivationSendingTTL + reactivationWaitInterval
+	d.acpReactivationPoll = reactivationWaitInterval
+	return d
+}
+
 // WithFrustrationDetection configures handleCommentAdded's
 // frustration-detection step (see escalationDetector) and returns d for
 // chaining. Not part of NewDispatcher's parameter list deliberately — same
@@ -414,6 +480,33 @@ func (d *Dispatcher) WithFrustrationDetection(detector escalationDetector) *Disp
 // entirely rather than erroring.
 func (d *Dispatcher) WithSLAEngine(engine slaEngineService) *Dispatcher {
 	d.slaEngine = engine
+	return d
+}
+
+// durableDedup abstracts the three Redis calls Handle's own durable
+// record-level claim needs — SetNX to atomically claim-and-check (with a
+// short TTL, so a crash mid-dispatch self-heals quickly instead of
+// stranding the record — see durablyClaimRecord's own doc comment), Set to
+// upgrade a successful claim to its full, long-lived TTL, and Del to
+// release a claim on failure so a genuine retry isn't blocked. The real
+// *redis.Client (cmd/server/main.go's own shared instance, the same one
+// slaengine.NewStore wraps) already implements this exactly; nothing new
+// needs constructing for it.
+type durableDedup interface {
+	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd
+	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+}
+
+// WithDurableDedup configures Handle's own durable record-level claim (see
+// Dispatcher.redisDedup's own doc comment) and returns d for chaining. Not
+// part of NewDispatcher's parameter list deliberately — same
+// "optional per deployment" reasoning as WithSLAEngine above: a deployment
+// with no Redis configured gets a nil redisDedup, and Handle's own claim
+// check is skipped entirely, exactly this service's behavior before this
+// feature existed.
+func (d *Dispatcher) WithDurableDedup(client durableDedup) *Dispatcher {
+	d.redisDedup = client
 	return d
 }
 
@@ -491,6 +584,32 @@ func (d *Dispatcher) handlePagingTestCall(ctx context.Context, raw json.RawMessa
 		return nil
 	}
 	return d.pagingTests.HandleTestCall(ctx, p)
+}
+
+// mailAlertPager starts the phone escalation for mail.alert.received;
+// internal/mailpaging's Engine implements it.
+type mailAlertPager interface {
+	HandleAlert(ctx context.Context, p events.MailAlertReceivedPayload) error
+}
+
+// WithMailAlertPaging routes mail.alert.received to p. Optional: a deployment
+// without it logs and acknowledges the event.
+func (d *Dispatcher) WithMailAlertPaging(p mailAlertPager) *Dispatcher {
+	d.mailPager = p
+	return d
+}
+
+// handleMailAlert hands a mail alert to the pager.
+func (d *Dispatcher) handleMailAlert(ctx context.Context, raw json.RawMessage) error {
+	var p events.MailAlertReceivedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return fmt.Errorf("dispatch: decode mail.alert.received payload: %w", err)
+	}
+	if d.mailPager == nil {
+		slog.InfoContext(ctx, "dispatch: mail alert paging is not configured here; ignoring the event", "rule", p.RuleName)
+		return nil
+	}
+	return d.mailPager.HandleAlert(ctx, p)
 }
 
 // specialOpsPager places the SME page for incident.special_ops_alert; the SRE
@@ -747,6 +866,212 @@ func (d *Dispatcher) HandleShared(ctx context.Context, record eventbus.Record) e
 	return d.Handle(ctx, record)
 }
 
+// durableDedupTTL bounds how long Handle's own durable record-level claim
+// remembers a record as fully, successfully DONE, once dispatchByType has
+// actually returned nil for it. Unlike slaengine's own clockTTL (90 days —
+// a clock's own display data genuinely needs to outlive the clock itself),
+// this claim exists purely to survive the one real trigger for a stale
+// redelivery: a consumer-group rebalance or a process restart (deploy,
+// crash, OOM). That window is realistically minutes, not months — 3 days
+// is already generous slack on top of it, and keeps this from
+// accumulating one key per record ever handled for anywhere near as long.
+const durableDedupTTL = 3 * 24 * time.Hour
+
+// durableDedupInProgressTTL bounds how long a claim lives BEFORE
+// dispatchByType has returned anything — see durablyClaimRecord's own doc
+// comment for why this must be short and separate from durableDedupTTL. A
+// CodeRabbit review on an earlier version of this claim caught a real gap
+// it had: claiming at the full 3-day TTL *before* dispatch meant a process
+// killed mid-handler (OOM, a deploy, a crash) left the record claimed —
+// indistinguishable from "succeeded" — for up to 3 days, even though it was
+// never actually sent; Kafka always redelivers an unclaimed-offset record
+// after such a crash (eventbus.Consumer commits only once Handle returns —
+// see Consumer.Run's own doc comment), and that redelivery would have been
+// wrongly skipped as a stale repeat of a record that, in truth, had never
+// completed at all — turning a crash into a silently dropped notification,
+// a worse failure than the duplicate-send bug this whole feature exists to
+// fix. 10 minutes is comfortably above this service's own real per-record
+// processing time (outbound HTTP calls included, normally well under a
+// second) while still being "minutes," not "days," so a crash self-heals
+// quickly rather than stranding the record.
+const durableDedupInProgressTTL = 10 * time.Minute
+
+// durableDedupKeyPrefix namespaces Handle's own claim keys in a Redis
+// instance this service already shares with slaengine's own wake
+// index/clock hashes/tier claims — a distinct prefix keeps the two
+// families of keys from ever colliding.
+const durableDedupKeyPrefix = "dispatch:handled:"
+
+// durablyClaimRecord atomically claims baseKey for this call via Redis
+// SETNX, at durableDedupInProgressTTL (NOT the full durableDedupTTL — see
+// that constant's own doc comment for the crash-safety reason) —
+// claimed=true means this call should go on to dispatch the record;
+// claimed=false means the key already exists, which means EITHER a past
+// call already fully succeeded at it (markRecordDone upgraded the key to
+// durableDedupTTL) OR some call — possibly this very record's own earlier,
+// now-crashed attempt — is or recently was actively working on it. Both
+// are correctly treated the same way, as "don't dispatch again right now":
+// the first because it is genuinely done, the second because a duplicate
+// concurrent attempt must not run alongside one that may still be
+// in-flight. The only case this can get wrong is a crashed attempt's own
+// stale claim — bounded to durableDedupInProgressTTL, after which it
+// expires and the next redelivery proceeds normally. A nil redisDedup
+// (Redis not configured for this deployment) always reports claimed=true:
+// this whole mechanism is simply unavailable, the same as before it
+// existed, not a reason to refuse processing. A Redis error also reports
+// claimed=true (fail open, logged) — never refuse to process a real event
+// just because this one durability check couldn't be made; the in-memory
+// done/chatKey guards elsewhere in this file still cover the common
+// same-process-retry case regardless of whether this one succeeds.
+func (d *Dispatcher) durablyClaimRecord(ctx context.Context, baseKey string) (claimed bool) {
+	if d.redisDedup == nil {
+		return true
+	}
+	ok, err := d.redisDedup.SetNX(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupInProgressTTL).Result()
+	if err != nil {
+		slog.WarnContext(ctx, "dispatch: durable dedup check failed, processing the record anyway", "err", err)
+		return true
+	}
+	return ok
+}
+
+// markRecordDone upgrades a claim durablyClaimRecord made to the full
+// durableDedupTTL, called ONLY once dispatchByType has actually returned
+// nil for this record — this is the one moment a redelivery of this exact
+// content should be remembered and skipped for days, not minutes. Using a
+// plain Set (not SetNX) deliberately overwrites durablyClaimRecord's own
+// short-lived marker unconditionally; there is nothing to race against
+// here since this call owns the claim it is extending. A nil redisDedup is
+// a no-op, matching durablyClaimRecord's own posture; a Redis error here is
+// logged and otherwise ignored — the record did genuinely succeed either
+// way, and the only consequence of this failing is that the short
+// in-progress TTL (not the long done one) governs how soon a later
+// redelivery would be let back through, which only reopens the original
+// duplicate-send risk for a narrow window rather than losing anything.
+func (d *Dispatcher) markRecordDone(ctx context.Context, baseKey string) {
+	if d.redisDedup == nil {
+		return
+	}
+	if err := d.redisDedup.Set(ctx, durableDedupKeyPrefix+baseKey, 1, durableDedupTTL).Err(); err != nil {
+		slog.WarnContext(ctx, "dispatch: failed to extend durable dedup claim to its full TTL after a successful record", "err", err)
+	}
+}
+
+// releaseDurableRecordClaim gives back a claim durablyClaimRecord made,
+// called ONLY when dispatchByType reports an error for this record — a
+// claim is never released on success (markRecordDone extends it instead).
+// A record that failed has to be releasable, or a real retry (the
+// overwhelmingly more common reason Handle is called twice for the same
+// record) would be silently swallowed as if it were a stale redelivery.
+// Takes a context already detached from the caller's own (via
+// context.WithoutCancel, see Handle's own call site) specifically so a
+// shutdown that cancels ctx mid-handler — which is exactly one of the
+// failure paths this whole claim exists to be safe against — doesn't also
+// prevent the release itself from running; with durablyClaimRecord's own
+// short durableDedupInProgressTTL, a release that still fails for some
+// other reason now only delays a retry by minutes, not days. A nil
+// redisDedup is a no-op, matching durablyClaimRecord's own posture.
+func (d *Dispatcher) releaseDurableRecordClaim(ctx context.Context, baseKey string) {
+	if d.redisDedup == nil {
+		return
+	}
+	if err := d.redisDedup.Del(ctx, durableDedupKeyPrefix+baseKey).Err(); err != nil {
+		slog.WarnContext(ctx, "dispatch: failed to release durable dedup claim after a failed record, a retry may be delayed until it expires", "err", err)
+	}
+}
+
+// durableDedupReleaseTimeout bounds releaseDurableRecordClaim's/
+// markRecordDone's own detached context (see Handle's own call sites) —
+// generous for a single Redis round trip, short enough to never meaningfully
+// delay Handle's own return.
+const durableDedupReleaseTimeout = 5 * time.Second
+
+// recordRef is a best-effort set of identifying fields pulled from an
+// event's envelope and payload, for attribution on an error returned from
+// Handle only — never used for dispatch logic. A field is left empty when
+// the envelope couldn't be decoded far enough to have one (the raw bytes
+// aren't valid JSON) or the payload simply doesn't carry it. The payload
+// read is deliberately lenient (plain json.Unmarshal, not decodeStrict): a
+// payload events.Validate rejects for ONE missing required field has still
+// decoded every other field it did carry (decodeStrict's own unmarshal step
+// runs to completion before the required-field check does), so caseNumber/
+// wso2CaseId/commentId are there to read even on a validation failure.
+type recordRef struct {
+	entityID string
+	// isIncident is env.Type's own "incident."-prefix test -- incident.*
+	// payloads carry no caseId/caseNumber field of their own (see events.go's
+	// IncidentCreatedPayload/IncidentAssignedPayload), only a "number", and
+	// the envelope's own identity is an incident id, not a case id; both the
+	// field read below and the label String renders switch on this.
+	isIncident bool
+	commentID  string
+	caseNumber string
+	wso2CaseID string
+}
+
+func recordRefFor(env events.Envelope) recordRef {
+	ref := recordRef{entityID: env.EntityID, isIncident: strings.HasPrefix(string(env.Type), "incident.")}
+	var common struct {
+		CommentID  string `json:"commentId"`
+		CaseNumber string `json:"caseNumber"`
+		Number     string `json:"number"`
+		WSO2CaseID string `json:"wso2CaseId"`
+	}
+	_ = json.Unmarshal(env.Payload, &common)
+	ref.commentID = common.CommentID
+	if ref.isIncident {
+		ref.caseNumber = common.Number
+	} else {
+		ref.caseNumber = common.CaseNumber
+	}
+	ref.wso2CaseID = common.WSO2CaseID
+	return ref
+}
+
+// String renders this ref for appending to an error. wso2CaseId is
+// preferred over caseNumber/number when both are present — they identify the
+// same row, so reporting both is redundant; caseNumber/number only appears
+// when wso2CaseId is not available. The entity id and the number-ish field
+// are both labeled incidentId/number rather than caseId/caseNumber for an
+// incident.* event, matching what the envelope and payload actually are.
+func (r recordRef) String() string {
+	var parts []string
+	if r.entityID != "" {
+		if r.isIncident {
+			parts = append(parts, "incidentId="+r.entityID)
+		} else {
+			parts = append(parts, "caseId="+r.entityID)
+		}
+	}
+	if r.commentID != "" {
+		parts = append(parts, "commentId="+r.commentID)
+	}
+	if r.wso2CaseID != "" {
+		parts = append(parts, "wso2CaseId="+r.wso2CaseID)
+	} else if r.caseNumber != "" {
+		if r.isIncident {
+			parts = append(parts, "number="+r.caseNumber)
+		} else {
+			parts = append(parts, "caseNumber="+r.caseNumber)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// wrapWithRef appends ref's identifying fields to err, so the
+// "eventbus: handler failed" log line (which only ever logs err's own text —
+// see internal/eventbus's own package doc for why that package stays
+// payload-agnostic) carries enough to find the record without a DB query.
+func wrapWithRef(err error, ref recordRef) error {
+	if err == nil {
+		return nil
+	}
+	if s := ref.String(); s != "" {
+		return fmt.Errorf("%w [%s]", err, s)
+	}
+	return err
+}
+
 // Handle implements eventbus.Handle. A non-nil return causes the caller
 // (eventbus.Consumer) to retry — see its package doc for the retry policy.
 func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
@@ -754,17 +1079,72 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 	if err := json.Unmarshal(record.Value, &env); err != nil {
 		return fmt.Errorf("dispatch: decode envelope: %w", err)
 	}
+	// Known even when env.Type turns out to be unrecognized or env.Payload
+	// fails events.Validate below — see recordRefFor's own doc comment.
+	ref := recordRefFor(env)
 	if !env.Type.IsKnown() {
-		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
+		return wrapWithRef(fmt.Errorf("dispatch: unknown event type %q", env.Type), ref)
 	}
 	// The only validation boundary left in this service: callers publish
 	// directly to the event bus now (see events.Validate's doc comment), so
 	// nothing has checked this record's required fields before it reaches
 	// here.
 	if err := events.Validate(env.EntityID, env.Type, env.Payload); err != nil {
-		return fmt.Errorf("dispatch: invalid payload: %w", err)
+		return wrapWithRef(fmt.Errorf("dispatch: invalid payload: %w", err), ref)
 	}
 
+	// Checked before dispatching to any handler, and independent of every
+	// handler's own fine-grained (and in-memory-only) chatKey/done
+	// tracking below — see redisDedup's own doc comment for the
+	// restart/rebalance gap this closes. A record already in progress or
+	// already fully handled is skipped outright, never reaching a single
+	// handler.
+	if ownsItsDedup(env.Type) {
+		return wrapWithRef(d.dispatchByType(ctx, record, env), ref)
+	}
+	baseKey := recordBaseKey(record)
+	if !d.durablyClaimRecord(ctx, baseKey) {
+		slog.InfoContext(ctx, "dispatch: record already in progress or already processed, skipping", "type", string(env.Type))
+		return nil
+	}
+
+	err := d.dispatchByType(ctx, record, env)
+	// A detached, short-lived context for the release/extend call below —
+	// ctx itself may already be cancelled (e.g. a shutdown interrupted
+	// dispatchByType, which is exactly one of the crash-like scenarios this
+	// claim exists to be safe against), and a cancelled context would make
+	// either Redis call fail immediately, defeating the point.
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), durableDedupReleaseTimeout)
+	defer cancel()
+	if err != nil {
+		d.releaseDurableRecordClaim(releaseCtx, baseKey)
+	} else {
+		d.markRecordDone(releaseCtx, baseKey)
+	}
+	return wrapWithRef(err, ref)
+}
+
+// ownsItsDedup reports whether an event type's handler keeps its own durable
+// duplicate record, so Handle's record-level claim is not taken for it.
+//
+// project.reactivated (the "Back to Open state" email) does: its
+// ReactivationLedger reserves the notice before the send and marks it sent
+// after, and a delivery that finds a reservation held waits for it to be
+// released, marked sent or expired. The record-level claim treats "in
+// progress" like "done": after a crash between the claim and the send, the
+// redelivery seconds later would find the claim held, be skipped and
+// committed, and the email would never be sent. With the claim skipped, the
+// redelivery reaches the handler, waits out the crashed attempt's
+// reservation, and sends. The ledger also keys by project and reactivatedOn,
+// not by the record's bytes, and keeps a sent notice for 30 days, not 3.
+func ownsItsDedup(t events.Type) bool {
+	return t == events.TypeProjectReactivated
+}
+
+// dispatchByType is Handle's own event-type switch, split out so Handle
+// itself can wrap it with the durable record-level claim above without
+// touching any of these cases' own logic.
+func (d *Dispatcher) dispatchByType(ctx context.Context, record eventbus.Record, env events.Envelope) error {
 	switch env.Type {
 	case events.TypeCaseCreated:
 		return d.handleCaseCreated(ctx, record, env.Payload)
@@ -805,6 +1185,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleProjectContactInvited(ctx, record, env.Payload)
 	case events.TypeProjectContactRegistered:
 		return d.handleProjectContactRegistered(ctx, record, env.Payload)
+	case events.TypeProjectReactivated:
+		return d.handleProjectReactivated(ctx, record, env.Payload)
 	case events.TypeSRCreated:
 		return d.handleSRCreated(ctx, record, env.Payload)
 	case events.TypeSRAcknowledged:
@@ -813,6 +1195,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		return d.handleSRCommentAdded(ctx, record, env.Payload)
 	case events.TypePagingTestCallRequested:
 		return d.handlePagingTestCall(ctx, env.Payload)
+	case events.TypeMailAlertReceived:
+		return d.handleMailAlert(ctx, env.Payload)
 	case events.TypeIncidentSpecialOpsAlert:
 		return d.handleSpecialOpsAlert(ctx, env.EntityID, env.Payload)
 	case events.TypeSLATierReached:
@@ -826,6 +1210,8 @@ func (d *Dispatcher) Handle(ctx context.Context, record eventbus.Record) error {
 		// required here: erroring would burn this consumer's retries for an
 		// event that was never broken.
 		return nil
+	case events.TypeSLARecalculationRequested:
+		return d.handleSLARecalculationRequested(ctx, env.Payload)
 	default:
 		return fmt.Errorf("dispatch: unknown event type %q", env.Type)
 	}
@@ -863,6 +1249,28 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 		return fmt.Errorf("dispatch: decode case.created payload: %w", err)
 	}
 
+	// Registered before anything is claimed: a concurrent call for the same
+	// record (a rebalance redelivery) must count this one as in flight, or it
+	// could release the keys -- the SRE room card's among them -- while this
+	// call is still sending.
+	baseKey := recordBaseKey(record)
+	chatKey := baseKey + "/chat"
+	sreRoomKey := baseKey + "/sre-room"
+	endRecord := d.beginRecord(baseKey)
+
+	// The S0 SRE room card runs beside everything below and is waited for only
+	// at the end (startCaseSRERoomCard), so it reaches the room about as fast as
+	// an incident's card, ahead of the SRE ladder's first rung, and the SLA
+	// clocks, emails and Incident Monitor card are neither delayed nor changed.
+	sreDone := closedDone
+	if isCustomerCase(p.CaseType) {
+		if rooms := d.caseSRERooms(ctx, events.TypeCaseCreated, p.CaseID, p.Priority, p.SRETeamName); len(rooms) > 0 && d.claim(sreRoomKey) {
+			card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.Priority, p.CaseTitle, p.Product, p.ProjectName, d.links.CSMLink(p.CaseID))
+			card.ThreadKey = notifications.CaseS0ThreadKey(p.CaseID, record.Value)
+			sreDone = d.startCaseSRERoomCard(ctx, events.TypeCaseCreated, p.CaseID, rooms, card)
+		}
+	}
+
 	// Independent of, and does not block, every reaction below — see
 	// slaEngineService's own doc comment. CreatedAt is RFC3339 on every
 	// real publisher (see events.CaseCreatedPayload.CreatedAt); a value
@@ -876,10 +1284,6 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 			d.slaEngine.RegisterClocks(ctx, p.CaseID, p.Priority, createdAt, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.CaseType, p.Product, p.Team)
 		}
 	}
-
-	baseKey := recordBaseKey(record)
-	chatKey := baseKey + "/chat"
-	endRecord := d.beginRecord(baseKey)
 
 	var errs []error
 
@@ -1005,9 +1409,13 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// refcount — so it's called unconditionally here rather than only
 	// inside the else-if, even though its result is ignored on the
 	// NoMoreRetries branch.
+	// The SRE room card's own key is released below with the rest, so it must
+	// be done first: a retry then never races the card it is about to re-claim.
+	<-sreDone
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
 		d.forget(chatKey)
+		d.forget(sreRoomKey)
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
 	}
 
@@ -1418,18 +1826,20 @@ func (d *Dispatcher) handleCaseAcknowledged(ctx context.Context, record eventbus
 
 // handleWorkaroundProvided has no email/Chat reaction at all — unlike every
 // other handler in this file, it exists purely to feed
-// internal/slaengine.Engine.CompleteWorkaroundClock, the same direct
+// internal/slaengine.Engine.PauseWorkaroundClock, the same direct
 // "call straight from this handler" wiring RegisterClocks/ApplyStateEffects/
 // CompleteResponseClock already get from
-// handleCaseCreated/handleStatusChanged/handleCommentAdded — see
-// slaEngineService's own doc comment for why this one trigger, unlike its
-// three siblings, is NOT best-effort: its error is returned (wrapped) so
-// eventbus.Consumer retries the record rather than silently acknowledging a
-// workaround-provided signal that was never actually applied (e.g. a
-// transient Redis outage) — this is a one-shot signal with no later
-// reconciliation pass to recover it otherwise. No idempotency tracking is
-// needed regardless of outcome: CompleteWorkaroundClock is itself idempotent
-// (AdvanceAlertedTier never moves the cursor backward), so a redelivered
+// handleCaseCreated/handleStatusChanged/handleCommentAdded. Was
+// CompleteWorkaroundClock (force-completed the clock) until a real,
+// reported bug: entity-service's own matching fix made its real
+// WORKAROUND-target policies pause this signal, not complete it (see that
+// repo's own CLAUDE.md), and this engine's own, independent copy of the
+// identical old mistake was never updated to match -- see
+// PauseWorkaroundClock's own doc comment for the full story, including why
+// its error is still returned (wrapped) here so eventbus.Consumer retries
+// the record rather than silently acknowledging a pause that was never
+// actually applied. No idempotency tracking is needed regardless of
+// outcome: PauseWorkaroundClock is itself idempotent, so a redelivered
 // retry is harmless. A nil slaEngine (REDIS_ADDR/REDIS_URL unset) is a
 // silent no-op, same posture as every other slaEngine call site in this
 // file.
@@ -1439,10 +1849,64 @@ func (d *Dispatcher) handleWorkaroundProvided(ctx context.Context, raw json.RawM
 		return fmt.Errorf("dispatch: decode case.workaround_provided payload: %w", err)
 	}
 	if d.slaEngine != nil {
-		if err := d.slaEngine.CompleteWorkaroundClock(ctx, p.CaseID); err != nil {
-			return fmt.Errorf("dispatch: complete workaround clock: %w", err)
+		if err := d.slaEngine.PauseWorkaroundClock(ctx, p.CaseID); err != nil {
+			return fmt.Errorf("dispatch: pause workaround clock: %w", err)
 		}
 	}
+	return nil
+}
+
+// slaRecalculationTimeout bounds one RecalculateFromEntity run — generous
+// relative to Reconcile's own 60s startup budget (cmd/server/main.go) since
+// this is explicitly for recovering from a bulk entity-service data change,
+// which can mean reconciling a larger active-clock set than a normal
+// startup ever sees. Runs in its own goroutine, so a long run here never
+// delays this consumer's own event processing.
+const slaRecalculationTimeout = 10 * time.Minute
+
+// handleSLARecalculationRequested reacts to the CSM portal's "Recalculate
+// SLA" admin action (TypeSLARecalculationRequested, published once per
+// click by entity-service). Unlike every other handler in this file, the
+// actual work (Engine.RecalculateFromEntity: rebuild this engine's Redis
+// state in place from entity-service's own durable record — see that
+// method's own doc comment) is kicked off in its own detached goroutine
+// rather than awaited here: a full reconciliation pages through every
+// currently-active clock and must not hold up this consumer's own event
+// processing or risk the record exhausting its retry budget before that
+// pass finishes. The goroutine runs on its own context.Background(), not
+// ctx, since ctx is cancelled the moment Handle returns and the record's
+// offset is committed — well before the recalculation itself can finish.
+//
+// Idempotent under a redelivered record for the same reason
+// RecalculateFromEntity is safe to call more than once in a row at all
+// (Engine.recalculating + every write Reconcile makes being idempotent) —
+// so, like CompleteResponseClock/ApplyStateEffects above and unlike
+// PauseWorkaroundClock, this is best-effort: a nil slaEngine (no Redis
+// configured) and a decode failure both log and return nil rather than
+// failing the record, since there is no reason to burn this consumer's
+// retry budget over an admin action that can simply be clicked again.
+func (d *Dispatcher) handleSLARecalculationRequested(ctx context.Context, raw json.RawMessage) error {
+	var p events.SLARecalculationRequestedPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		slog.ErrorContext(ctx, "dispatch: decode sla.recalculation_requested payload failed", "err", err)
+		return nil
+	}
+	// p.RequestedByEmail is deliberately never logged -- this service's own
+	// logging convention is ids and sanitised summaries only, never PII
+	// like an email address. It's carried in the event payload itself for
+	// any downstream consumer that genuinely needs it for audit.
+	if d.slaEngine == nil {
+		slog.WarnContext(ctx, "sla recalculation requested but the SLA engine is not configured, ignoring")
+		return nil
+	}
+	slog.InfoContext(ctx, "sla recalculation requested, starting in the background", "requestedAt", p.RequestedAt)
+	go func() { // #nosec G118 -- context.Background() below is intentionally detached from this request-scoped ctx, which is cancelled the moment Handle returns, well before this goroutine's own reconciliation pass can finish
+		recalcCtx, cancel := context.WithTimeout(context.Background(), slaRecalculationTimeout)
+		defer cancel()
+		if err := d.slaEngine.RecalculateFromEntity(recalcCtx); err != nil {
+			slog.ErrorContext(recalcCtx, "sla recalculation failed", "err", err)
+		}
+	}()
 	return nil
 }
 
@@ -1462,9 +1926,31 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 		return fmt.Errorf("dispatch: decode case.severity_changed payload: %w", err)
 	}
 
+	// Independent of, and does not block, every reaction below -- see
+	// slaEngineService's own doc comment. A severity change on
+	// entity-service's own side cancels this case's old-severity clock(s)
+	// and registers fresh ones for the new severity, but nothing before
+	// this call ever told this engine's own Redis-held tracking: it kept
+	// ticking down the old severity's clock, under its old duration,
+	// indefinitely. ReviseClocks re-syncs all three clock types with
+	// entity-service's current, post-revision state.
+	if d.slaEngine != nil {
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
+	}
+
+	// Registered before anything is claimed (see handleCaseCreated).
 	baseKey := recordBaseKey(record)
 	chatKey := baseKey + "/chat"
+	sreRoomKey := baseKey + "/sre-room"
 	endRecord := d.beginRecord(baseKey)
+
+	// The S0 SRE room card runs beside everything below (see handleCaseCreated).
+	sreDone := closedDone
+	if rooms := d.caseSRERooms(ctx, events.TypeSeverityChanged, p.CaseID, p.NewSeverity, p.SRETeamName); len(rooms) > 0 && d.claim(sreRoomKey) {
+		card := caseSRERoomCard(p.CaseID, p.CaseNumber, p.WSO2CaseID, p.SRETeamName, p.NewSeverity, p.CaseTitle, p.Product, "", d.links.CSMLink(p.CaseID))
+		card.ThreadKey = notifications.CaseS0ThreadKey(p.CaseID, record.Value)
+		sreDone = d.startCaseSRERoomCard(ctx, events.TypeSeverityChanged, p.CaseID, rooms, card)
+	}
 
 	var errs []error
 
@@ -1523,9 +2009,11 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// Same release reasoning as handleCaseCreated's own matching comment —
 	// see its doc comment for the full explanation of endRecord/
 	// record.NoMoreRetries.
+	<-sreDone
 	safeToRelease := endRecord(len(errs) > 0)
 	if record.NoMoreRetries || safeToRelease {
 		d.forget(chatKey)
+		d.forget(sreRoomKey)
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
 	}
 
@@ -2096,7 +2584,7 @@ func (d *Dispatcher) sendToEachIncidentSpace(ctx context.Context, t events.Type,
 		errs = append(errs, err)
 		if len(audiences) > 1 {
 			slog.WarnContext(ctx, "dispatch: an incident Chat space did not take the card",
-				"type", string(t), "incidentId", incidentID, "audience", audience, "err", err)
+				"type", string(t), "incidentId", incidentID, "audience", audience, "errSummary", chatErrSummary(err))
 		}
 	}
 	if len(errs) < len(audiences) {

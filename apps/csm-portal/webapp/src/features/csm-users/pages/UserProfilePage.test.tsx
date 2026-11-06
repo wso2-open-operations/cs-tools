@@ -31,6 +31,7 @@ const useGetUserByIdMock = vi.fn();
 // `post`: `PermissionsCard` resolves role display names via `useSearchRoles`,
 // which goes through this same client.
 const backendPostMock = vi.fn();
+const backendGetMock = vi.fn();
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
@@ -39,7 +40,7 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
-  useBackendApi: () => ({ post: backendPostMock }),
+  useBackendApi: () => ({ post: backendPostMock, get: backendGetMock }),
 }));
 vi.mock("@features/csm-users/api/useGetUserById", () => ({
   useGetUserById: () => useGetUserByIdMock(),
@@ -156,6 +157,8 @@ describe("UserProfilePage", () => {
   beforeEach(() => {
     backendPostMock.mockReset();
     backendPostMock.mockResolvedValue(ROLES_RESPONSE);
+    backendGetMock.mockReset();
+    backendGetMock.mockResolvedValue({ roles: [{ key: "cs_engineer" }, { key: "escalator" }] });
   });
 
   it("renders a loading skeleton while the query is pending", () => {
@@ -201,6 +204,9 @@ describe("UserProfilePage", () => {
     expect(screen.queryByText(/CSM Platform roles/i)).not.toBeInTheDocument();
     expect(await screen.findByText(/^Platform roles \(2\)/i)).toBeInTheDocument();
     expect(screen.queryByText(/Customer Portal roles/i)).not.toBeInTheDocument();
+    // "Grant role" rides along with the CSM Platform roles section, which a
+    // non-wso2.com internal user doesn't have.
+    expect(screen.queryByRole("button", { name: /grant role/i })).not.toBeInTheDocument();
   });
 
   it("renders a CSM Platform roles section, with resolved labels, for a wso2.com-email user", async () => {
@@ -211,6 +217,18 @@ describe("UserProfilePage", () => {
     expect(await screen.findByText(/CSM Platform roles \(2\)/i)).toBeInTheDocument();
     expect(screen.getByText("CS Engineer", { selector: ".MuiChip-label" })).toBeInTheDocument();
     expect(screen.getByText("Admin", { selector: ".MuiChip-label" })).toBeInTheDocument();
+  });
+
+  it("opens the Grant role dialog, already showing held roles as granted, for a wso2.com-email user", async () => {
+    mockQueryResult({
+      data: { ...INTERNAL_USER, email: "jane.doe@wso2.com", csmPlatformRoles: ["cs_engineer"] },
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /grant role/i }));
+
+    expect(await screen.findByRole("checkbox", { name: "CS Engineer (already granted)" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Escalator" })).toBeEnabled();
   });
 
   it("renders the CSM Platform roles section with an empty state for a wso2.com-email user holding none", () => {

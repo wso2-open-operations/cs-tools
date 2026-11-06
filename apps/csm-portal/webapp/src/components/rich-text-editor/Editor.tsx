@@ -539,6 +539,7 @@ const Editor = ({
   overlayElement,
   onPasteError,
   onImageUpload,
+  ariaRequired = false,
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
@@ -575,6 +576,8 @@ const Editor = ({
    * (no toolbar button, a pasted image is refused). Nothing is embedded as base64.
    */
   onImageUpload?: ImageUploadHandler;
+  /** Tells assistive tech the field is mandatory (`aria-required` on the editable area). */
+  ariaRequired?: boolean;
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
@@ -789,6 +792,7 @@ const Editor = ({
                 id={id}
                 className="editor-input"
                 data-testid="case-description-editor"
+                ariaRequired={ariaRequired || undefined}
               />
             }
             placeholder={

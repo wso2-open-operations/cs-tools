@@ -111,6 +111,10 @@ type entityCaseClient interface {
 	// comment) to provision a worknote_creator-/escalator-only caller who
 	// has no "user" row yet.
 	CreateUser(ctx context.Context, body []byte) ([]byte, error)
+	// CreatePendingVerification calls POST /pending-verifications on the
+	// entity service — used by recordPendingVerificationEntry to add every
+	// case closed through this portal to the Pending Verification list.
+	CreatePendingVerification(ctx context.Context, body []byte) ([]byte, error)
 }
 
 // CaseHandler handles HTTP requests for case operations, delegating to the
@@ -263,9 +267,10 @@ func validateCaseEscalationBody(body []byte) (action string, ok bool) {
 
 // callerIsCaseTeamLead reports whether the caller is one of the case's ABT
 // team leads (entity-service's teamLeads: team_member role 'lead' on the
-// account's CRE team) -- the only people authorized to de-escalate it.
-// Escalating is open to any internal engineer (PermEscalate); only
-// de-escalation is gated this way.
+// account's CRE team) -- the only people authorized to de-escalate it. Being
+// the lead is sufficient: no escalation-capable portal role is needed, and
+// holding one (PermEscalate) does not substitute for it. Escalating is the
+// reverse: it needs PermEscalate and ignores team leadership.
 //
 // Fails closed (returns false) on any lookup/parse error or when the case's
 // team has no lead. Matches by the caller's platform user id first (GET
@@ -1257,6 +1262,11 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		WorstCaseFixEta    *string `json:"worstCaseFixEta"`
 	}
 	patchErr := json.Unmarshal(body, &patch)
+	// previousCaseState is the case's state immediately before this PATCH,
+	// read below purely for transition validation; recordPendingVerificationEntry
+	// (closing branch, below) reuses it so closing a case doesn't need a
+	// second GetCase round trip just to know what state it's leaving.
+	var previousCaseState string
 	if patchErr == nil && (patch.State != nil || patch.WorkState != nil) {
 		current, err := h.entity.GetCase(r.Context(), caseID)
 		if err != nil {
@@ -1265,16 +1275,14 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var currentCase struct {
-			State            string `json:"state"`
-			AssignedEngineer *struct {
-				ID *string `json:"id"`
-			} `json:"assignedEngineer"`
+			State string `json:"state"`
 		}
 		if err := json.Unmarshal(current, &currentCase); err != nil {
 			slog.ErrorContext(r.Context(), "failed to parse current case state", "userID", user.UserID, "caseID", caseID, "err", err)
 			writeError(w, http.StatusInternalServerError, ErrMsgInternal)
 			return
 		}
+		previousCaseState = currentCase.State
 		if patch.State != nil && !isValidStateTransition(currentCase.State, *patch.State) {
 			writeError(w, http.StatusBadRequest, ErrMsgInvalidTransition)
 			return
@@ -1283,23 +1291,9 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, ErrMsgWorkStateNotAllowed)
 			return
 		}
-		// Ownership check: closing a case is restricted to its own assigned
-		// engineer, unless the caller is admin (an operational override).
-		// Scoped to only the transition that sets state to closed — not every
-		// PATCH — since the issue this guards against is specifically about
-		// closing a ticket that isn't yours. Mirrors CreateCaseComment's own
-		// ownership guard above.
-		if patch.State != nil && *patch.State == caseStateClosed && !(h.access != nil && h.access.Permits(PermAdmin, user.Roles)) {
-			currentUserID := resolveCurrentUserID(r.Context(), h.entity, user)
-			if currentUserID == "" {
-				writeError(w, http.StatusInternalServerError, ErrMsgInternal)
-				return
-			}
-			if currentCase.AssignedEngineer == nil || currentCase.AssignedEngineer.ID == nil || *currentCase.AssignedEngineer.ID != currentUserID {
-				writeError(w, http.StatusForbidden, ErrMsgCaseCloseNotOwnCase)
-				return
-			}
-		}
+		// No ownership check on closing: any caller that reached this handler
+		// holds PermWrite (route-level; cs_engineer or admin), and every such
+		// caller may close any case, assigned to them or not.
 	}
 
 	result, err := h.entity.PatchCase(r.Context(), caseID, body)
@@ -1361,7 +1355,94 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
+	// Every case closed through the CSM portal is sent to the Pending
+	// Verification list, so a customer eventually gets a chance to confirm the
+	// fix holds. addedReason is AUTO_CLOSED, recording the case's real
+	// previous state in previousStatus — entity-service's
+	// pending_verification_previous_status_enum originally only covered
+	// SOLUTION_PROPOSED/AWAITING_INFO, neither of which fit work_in_progress
+	// (the state most CSM-portal closes actually come from — see state.go's
+	// own transition table: closed is only reachable from work_in_progress or
+	// solution_proposed), so migration 0269 added WORK_IN_PROGRESS
+	// specifically for this. recordPendingVerificationEntry falls back to
+	// MANUAL only for a previous state that still isn't representable (should
+	// never happen given that transition table). Best-effort and
+	// fire-and-forget, same reasoning as the two notes above: the close PATCH
+	// already succeeded, so this must not delay the response or fail the
+	// request if it errors — including the common, expected case where
+	// Pending Verification is simply disabled for this project (entity-service
+	// 403s) or the case already has an unverified entry from an earlier round
+	// (409).
+	if patchErr == nil && patch.State != nil && *patch.State == caseStateClosed {
+		detached := context.WithoutCancel(r.Context())
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, 15*time.Second)
+			defer cancel()
+			h.recordPendingVerificationEntry(ctx, user, caseID, previousCaseState)
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, result)
+}
+
+// pendingVerificationPreviousStatus maps this handler's own lowercase
+// case-state wire values to entity-service's PendingVerificationPreviousStatus
+// enum (pending_verification_previous_status_enum). Only the two states
+// state.go's own transition table allows immediately before "closed" are
+// listed here — recordPendingVerificationEntry falls back to addedReason
+// MANUAL for anything else, which should never actually happen.
+var pendingVerificationPreviousStatus = map[string]string{
+	caseStateWorkInProgress:   "WORK_IN_PROGRESS",
+	caseStateSolutionProposed: "SOLUTION_PROPOSED",
+}
+
+// recordPendingVerificationEntry adds this case to the Pending Verification
+// list (POST /pending-verifications on the entity service) immediately after
+// the CSM portal closes it. addedReason is AUTO_CLOSED whenever previousState
+// maps to a legal previousStatus value (see pendingVerificationPreviousStatus
+// above) — which, per state.go's own transition table, is always, since
+// "closed" is only ever reached from "work_in_progress" or
+// "solution_proposed" — falling back to MANUAL (with the state folded into
+// the note instead) only as a last resort, so this call can never send
+// entity-service a combination its own chk_previous_status_matches_reason
+// CHECK constraint would reject outright. Best-effort: failures (including
+// the project simply not having Pending Verification enabled, or the case
+// already carrying an unverified entry) are logged, never surfaced to the
+// caller, since the primary close PATCH already succeeded by the time this
+// runs.
+func (h *CaseHandler) recordPendingVerificationEntry(ctx context.Context, user *middleware.UserInfo, caseID, previousState string) {
+	req := map[string]string{
+		"workItemId": caseID,
+		"note":       "Automatically added for verification — case closed by WSO2 Support.",
+	}
+	if status, ok := pendingVerificationPreviousStatus[previousState]; ok {
+		// previousStatus is its own structured field here, and the webapp
+		// already renders it as its own "From <state>" chip (isAutoClosed &&
+		// record.previousStatus in PendingVerificationCard.tsx) -- repeating
+		// it in the note text would just be redundant.
+		req["addedReason"] = "AUTO_CLOSED"
+		req["previousStatus"] = status
+	} else {
+		// Should never happen (see pendingVerificationPreviousStatus's own doc
+		// comment) -- MANUAL forbids previousStatus, so this is the only
+		// place left to record the case's real prior state.
+		label, ok := caseStateToDisplay[previousState]
+		if !ok {
+			label = previousState
+		}
+		req["addedReason"] = "MANUAL"
+		req["note"] += " Previous status: " + label + "."
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build pending verification request body", "userID", user.UserID, "caseID", caseID, "err", err)
+		return
+	}
+
+	if _, err := h.entity.CreatePendingVerification(ctx, body); err != nil {
+		slog.WarnContext(ctx, "failed to add case to pending verification on close", "userID", user.UserID, "caseID", caseID, "err", err)
+	}
 }
 
 // formatHoldDate renders an auto-closure hold timestamp (RFC3339, as sent by the
@@ -1555,15 +1636,24 @@ func (h *CaseHandler) CreateCaseEscalation(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if action == "DEESCALATE" && !h.callerIsCaseTeamLead(r, caseID, user) {
+	// The route only requires PermView; the rule that depends on the body's
+	// action is enforced here. ESCALATE needs PermEscalate (a nil guard
+	// denies). DEESCALATE needs the caller to be one of the case's team
+	// leads and nothing else: a lead with no escalation role passes, a
+	// non-lead holding PermEscalate does not.
+	if action == "DEESCALATE" {
+		if !h.callerIsCaseTeamLead(r, caseID, user) {
+			writeError(w, http.StatusForbidden, ErrMsgForbidden)
+			return
+		}
+	} else if h.access == nil || !h.access.Permits(PermEscalate, user.Roles) {
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return
 	}
 
-	// This route's permission (PermEscalate) is also held by roles that
-	// never write anything else here (escalator), so a caller reaching this
-	// point may have no "user" row yet. See ensureUserProvisioned's own doc
-	// comment.
+	// A caller reaching this point may have no "user" row yet: a team lead
+	// needs no portal role beyond view, and escalator-only callers never
+	// write anything else here. See ensureUserProvisioned's own doc comment.
 	ensureUserProvisioned(r.Context(), h.entity, user)
 
 	result, err := h.entity.CreateCaseEscalation(r.Context(), caseID, body)

@@ -44,6 +44,24 @@ describe("mapCaseSearchViewToRow — Customer column", () => {
   });
 });
 
+describe("mapCaseSearchViewToRow — resolved/closed times", () => {
+  it("carries resolvedOn/closedOn through as resolvedAt/closedAt", () => {
+    const row = mapCaseSearchViewToRow(
+      { id: "c1", resolvedOn: "2026-01-03T00:00:00Z", closedOn: "2026-01-04T00:00:00Z" },
+      undefined,
+    );
+    expect(row.resolvedAt).toBe("2026-01-03T00:00:00Z");
+    expect(row.closedAt).toBe("2026-01-04T00:00:00Z");
+  });
+
+  it("leaves them undefined when null or absent", () => {
+    const row = mapCaseSearchViewToRow({ id: "c1", resolvedOn: null, closedOn: null }, undefined);
+    expect(row.resolvedAt).toBeUndefined();
+    expect(row.closedAt).toBeUndefined();
+    expect(mapCaseSearchViewToRow({ id: "c1" }, undefined).closedAt).toBeUndefined();
+  });
+});
+
 describe("mapCaseSearchViewToRow — escalationLevel", () => {
   it("carries the raw escalation-level id through unmapped", () => {
     const view: BeCaseSearchView = { id: "c1", escalationLevel: "2" };

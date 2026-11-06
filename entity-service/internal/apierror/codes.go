@@ -117,6 +117,66 @@ const (
 	// implemented, so its fields are read-only. Work notes can still be added and the
 	// lifecycle still moves. Nothing was written.
 	CodeChangeRequestApprovedReadOnly = "change_request_approved_read_only"
+
+	// CodeChangeRequestDeviationFinal is the 400 for a PATCH /change-requests/{id}
+	// that changes the deviation from the implementation plan of a change request
+	// that is closed, canceled or rolled back: the record is final. Resending the
+	// stored value is accepted. Nothing was written.
+	CodeChangeRequestDeviationFinal = "change_request_deviation_final"
+
+	// CodeChangeRequestDeviationNotYet is the 400 for a PATCH /change-requests/{id}
+	// that changes the deviation from the implementation plan before implementation
+	// has started: it is recorded from Implement on. In New the only change accepted
+	// is clearing one carried over from a cloned change request; from Assess to
+	// Scheduled no change is. Resending the stored value is accepted. Nothing was
+	// written.
+	CodeChangeRequestDeviationNotYet = "change_request_deviation_not_yet"
+
+	// CodeChangeRequestDeviationNotIncorporated is the 400 for Request Approval
+	// ({state: "assess"} on a change request in New) while the change request still
+	// has a deviation from the implementation plan (one a clone carried over): it
+	// has to be folded into the implementation plan and cleared first, which the
+	// same PATCH may do. Nothing was written.
+	CodeChangeRequestDeviationNotIncorporated = "change_request_deviation_not_incorporated"
+
+	// CodeChangeRequestStandardTemplateField is the 400 for a create or PATCH of a
+	// change request raised from a standard change template that sets or changes a
+	// field the template specifies (the plans, the impact and risk, the customer
+	// gates, the type): those come from the CAB-approved template and cannot
+	// deviate from it. Only the template's parameters and the fields it does not
+	// specify are the caller's. Nothing was written.
+	CodeChangeRequestStandardTemplateField = "change_request_standard_template_field"
+
+	// CodeStandardChangeTemplateUnavailable is the 409 for creating a change request
+	// from, or requesting approval of a change request raised from, a standard
+	// change template that is no longer usable: suspended, retired, or revised
+	// since (the version the caller named, or the change was raised from, is not
+	// the template's current one). Nothing was written.
+	CodeStandardChangeTemplateUnavailable = "standard_change_template_unavailable"
+
+	// CodeStandardChangeTemplateOtherCustomer is the 400 for raising a change
+	// request from a standard change template for a project that is not the
+	// template's customer's (or for no project), and for a PATCH that moves a
+	// change request raised from a template to another customer's project, and
+	// for Request Approval of one whose project is no longer the template's
+	// customer's (the Salesforce project sync re-parented it): a template is
+	// pre-authorised for one customer's deployments only. Nothing was written.
+	CodeStandardChangeTemplateOtherCustomer = "standard_change_template_other_customer"
+)
+
+// The refusals of a portal membership write (PATCH / DELETE /
+// projects/{id}/contacts/{email} and the resend) while the contact's
+// Salesforce half is owed by a deferred write (see
+// service/project_membership_deferred_write.go). The portal tells them
+// apart from the generic missing-id refusal, which has no code.
+const (
+	// CodeSalesforceSyncPending: the deferred write is still PENDING; the
+	// write needs the Salesforce ids it will produce. Retrying later helps.
+	CodeSalesforceSyncPending = "salesforce_sync_pending"
+	// CodeSalesforceSyncFailed: the deferred write ended FAILED (or was
+	// never published). Role changes and resend are refused; removing the
+	// contact is allowed and runs locally.
+	CodeSalesforceSyncFailed = "salesforce_sync_failed"
 )
 
 // CodeAttachmentRemoved is the 410 for an attachment (an inline comment image)

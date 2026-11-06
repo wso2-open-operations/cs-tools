@@ -240,11 +240,97 @@ func TestMapEntityProjectContact_CanResendInvitation(t *testing.T) {
 	}
 }
 
+func TestMapEntityProjectContact_CanResendInvitation_IntegrationUser(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		integration bool
+		want        bool
+	}{
+		{"invited integration user", true, false},
+		{"invited non-integration user", false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MapEntityProjectContact(entity.ProjectContact{
+				Email:               "a@acme.com",
+				RegistrationState:   "INVITED",
+				IsCsIntegrationUser: tt.integration,
+			})
+			if got.CanResendInvitation != tt.want {
+				t.Errorf("CanResendInvitation = %v, want %v", got.CanResendInvitation, tt.want)
+			}
+		})
+	}
+}
+
 // The pre-cutover list never offers a resend: the route answers 404 there.
 func TestMapContact_NeverOffersResend(t *testing.T) {
 	state := "INVITED"
 	got := MapContact(usermanagement.Contact{Email: "a@acme.com", MembershipStatus: &state})
 	if got.CanResendInvitation {
 		t.Error("a pre-cutover contact must not offer a resend")
+	}
+}
+
+func TestMapEntityProjectContact_AdminFlags(t *testing.T) {
+	tests := []struct {
+		name             string
+		roles            []string
+		accountRoles     []string
+		wantCsAdmin      bool
+		wantAccountAdmin bool
+	}{
+		{"project ADMIN only", []string{"ADMIN"}, nil, true, false},
+		{"customer_admin only", []string{"PORTAL_USER"}, []string{"external", "customer_admin"}, false, true},
+		{"partner_admin only", nil, []string{"partner_admin"}, false, true},
+		{"both signals", []string{"ADMIN"}, []string{"customer_admin"}, true, true},
+		{"neither", []string{"PORTAL_USER", "LEAD_USER"}, []string{"external", "customer", "partner"}, false, false},
+		{"mixed case and whitespace project role", []string{" admin "}, nil, true, false},
+		{"mixed case and whitespace account role", nil, []string{"  Customer_Admin "}, false, true},
+		{"nil account roles", []string{"PORTAL_USER"}, nil, false, false},
+		{"empty everything", nil, nil, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MapEntityProjectContact(entity.ProjectContact{
+				Email: "jane.doe@example.com", Roles: tt.roles, AccountRoles: tt.accountRoles,
+			})
+			if got.IsCsAdmin != tt.wantCsAdmin {
+				t.Errorf("IsCsAdmin = %v, want %v", got.IsCsAdmin, tt.wantCsAdmin)
+			}
+			if got.IsAccountAdmin != tt.wantAccountAdmin {
+				t.Errorf("IsAccountAdmin = %v, want %v", got.IsAccountAdmin, tt.wantAccountAdmin)
+			}
+		})
+	}
+}
+
+// The account admin signal must not leak into the other flags, including the
+// editable project admin flag.
+func TestMapEntityProjectContact_AccountAdminLeavesOtherFlagsAlone(t *testing.T) {
+	got := MapEntityProjectContact(entity.ProjectContact{
+		Email: "jane.doe@example.com", Roles: []string{"LEAD_USER"}, AccountRoles: []string{"partner_admin"},
+	})
+	if !got.IsAccountAdmin || got.IsCsAdmin || !got.IsLead || got.IsPortalUser || got.IsSecurityContact {
+		t.Errorf("flags = accountAdmin %v admin %v lead %v portal %v security %v",
+			got.IsAccountAdmin, got.IsCsAdmin, got.IsLead, got.IsPortalUser, got.IsSecurityContact)
+	}
+}
+
+// isAccountAdmin is omitted when false so the pre-cutover list stays
+// byte-identical, and present when true.
+func TestContact_IsAccountAdminJSON(t *testing.T) {
+	off, err := json.Marshal(Contact{ID: "1", Email: "jane.doe@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(off), "isAccountAdmin") {
+		t.Errorf("false value serialised: %s", off)
+	}
+	on, err := json.Marshal(Contact{ID: "1", Email: "jane.doe@example.com", IsAccountAdmin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(on), `"isAccountAdmin":true`) {
+		t.Errorf("true value missing: %s", on)
 	}
 }

@@ -1,0 +1,293 @@
+openapi: 3.0.1
+info:
+  title: Knowledge Portal API
+  version: 1.0.0
+  description: |
+    Public, unauthenticated, read-only access to published knowledge base articles.
+    No token is required or accepted. Only published articles and active knowledge
+    bases are ever returned; a draft, in-review or retired article is reported as
+    `404`. Errors use the `{"message": "..."}` envelope, and upstream failures are
+    mapped to a generic `502` (or `504` on timeout).
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+
+  /public/knowledge-bases:
+    get:
+      summary: List active knowledge bases.
+      operationId: listKnowledgeBases
+      security: []
+      responses:
+        "200":
+          description: >-
+            Active knowledge bases, ordered by title. Served from a cache of up to
+            60 seconds, so a deactivation can take that long to show.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListKnowledgeBasesResponse'
+        "502":
+          $ref: '#/components/responses/UpstreamUnavailable'
+        "504":
+          $ref: '#/components/responses/UpstreamTimeout'
+
+  /public/kb-articles/search:
+    post:
+      summary: Search published articles, newest first.
+      description: >-
+        Only published articles of active knowledge bases are returned. With
+        `knowledgeBaseId`, an inactive or unknown knowledge base is `404` and
+        pagination is exact. Without it, the backing service cannot exclude
+        inactive knowledge bases, so they are removed from each page after it is
+        fetched: a page may hold fewer than `limit` articles (even none while
+        `hasMore` is true) and `total` is an upper bound, exact only when no
+        knowledge base is inactive. `offset` is the backing service's offset, so
+        paging by `hasMore` and `offset + limit` visits every article.
+      operationId: searchKBArticles
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchKBArticlesRequest'
+      responses:
+        "200":
+          description: A page of published articles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchKBArticlesResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "413":
+          description: Request body larger than 16 KiB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          $ref: '#/components/responses/UpstreamUnavailable'
+        "504":
+          $ref: '#/components/responses/UpstreamTimeout'
+
+  /public/kb-articles/{id}:
+    get:
+      summary: Get one published article.
+      operationId: getKBArticle
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleId'
+      responses:
+        "200":
+          description: The article.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KBArticle'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "502":
+          $ref: '#/components/responses/UpstreamUnavailable'
+        "504":
+          $ref: '#/components/responses/UpstreamTimeout'
+
+  /public/kb-articles/{id}/related:
+    get:
+      summary: Articles related to a published article.
+      description: >-
+        Semantically similar published articles when the similarity index is
+        configured, otherwise other published articles in the same knowledge
+        base. Every returned article is verified as published and in an active
+        knowledge base. A source article in an inactive knowledge base is `404`.
+      operationId: getRelatedKBArticles
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ArticleId'
+      responses:
+        "200":
+          description: Up to five related articles (possibly none).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelatedArticlesResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "502":
+          $ref: '#/components/responses/UpstreamUnavailable'
+        "504":
+          $ref: '#/components/responses/UpstreamTimeout'
+
+components:
+  parameters:
+    ArticleId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        Article id: a UUID in canonical 8-4-4-4-12 hex form, any letter case
+        (treated as lower case). Anything else is `400`; a well-formed id that
+        matches no published article is `404`.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+  responses:
+    BadRequest:
+      description: Malformed or out-of-range input, including an id that is not a UUID.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorPayload'
+    NotFound:
+      description: No such published article or knowledge base.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorPayload'
+    UpstreamUnavailable:
+      description: The backing service failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorPayload'
+    UpstreamTimeout:
+      description: The backing service timed out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorPayload'
+  schemas:
+    ErrorPayload:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    KnowledgeBase:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+    ListKnowledgeBasesResponse:
+      type: object
+      required: [knowledgeBases]
+      properties:
+        knowledgeBases:
+          type: array
+          items:
+            $ref: '#/components/schemas/KnowledgeBase'
+    KBArticle:
+      type: object
+      required: [id, knowledgeBaseId, title, body, createdOn, updatedOn, publishedOn]
+      properties:
+        id:
+          type: string
+          format: uuid
+        knowledgeBaseId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+          description: HTML. Sanitise before rendering.
+        number:
+          type: string
+          description: Human-readable reference number; omitted when the article has none.
+        createdOn:
+          type: string
+          format: date-time
+        updatedOn:
+          type: string
+          format: date-time
+        publishedOn:
+          type: string
+          format: date-time
+          nullable: true
+    SearchKBArticlesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        knowledgeBaseId:
+          type: string
+          format: uuid
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          description: Knowledge base id (UUID, any letter case). Anything else is `400`.
+        searchQuery:
+          type: string
+          maxLength: 200
+          description: Case-insensitive title match. No control characters.
+        sortBy:
+          type: string
+          enum: [recent]
+          description: Only `recent` (newest first, also the default) is supported.
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+        offset:
+          type: integer
+          minimum: 0
+          maximum: 10000
+          default: 0
+    SearchKBArticlesResponse:
+      type: object
+      required: [articles, total, limit, offset, hasMore]
+      properties:
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/KBArticle'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+    RelatedArticle:
+      type: object
+      required: [id, title, score]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        score:
+          type: number
+          description: Similarity score; 0 for same-knowledge-base fallback entries.
+    RelatedArticlesResponse:
+      type: object
+      required: [articles]
+      properties:
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelatedArticle'

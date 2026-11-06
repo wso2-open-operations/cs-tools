@@ -34,6 +34,16 @@ export interface PendingVerificationCardProps {
   onMarkVerified?: (record: PendingVerificationView) => void;
 }
 
+// Matches the "<CS-number> | <internal-id>" pairing the Resolved Cases list
+// already shows (formatCasesTableCaseIdentifier in casesTable.ts), minus that
+// helper's own "ID: " prefix -- this card has no such label context.
+function formatPendingVerificationIdentifier(caseId: string, internalId?: string): string {
+  const number = caseId.trim();
+  const wso2Id = internalId?.trim() ?? "";
+  if (number && wso2Id) return `${number} | ${wso2Id}`;
+  return number || wso2Id || "--";
+}
+
 /**
  * PendingVerificationCard renders a single pending-verification record —
  * identifier, severity, added-reason, title, note, and footer metadata.
@@ -73,7 +83,7 @@ export default function PendingVerificationCard({
           <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
             <TypeIcon size={14} color={theme.palette.primary.main} />
             <Typography variant="body2" fontWeight={600} color="text.primary">
-              {record.caseId || "--"}
+              {formatPendingVerificationIdentifier(record.caseId, record.internalId)}
             </Typography>
           </Box>
           {severity && (

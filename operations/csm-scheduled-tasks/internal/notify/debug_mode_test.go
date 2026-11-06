@@ -87,3 +87,32 @@ func TestTestCopyNoticeWithoutBodyTagGoesFirst(t *testing.T) {
 		t.Errorf("no Cc given, none should be named:\n%s", out)
 	}
 }
+
+type recSender struct {
+	to, cc  []string
+	subject string
+	body    string
+}
+
+func (r *recSender) SendEmail(_ context.Context, to, cc []string, subject, body string) error {
+	r.to, r.cc, r.subject, r.body = to, cc, subject, body
+	return nil
+}
+
+func TestForRunNowRedirectsWithCcAndRunNowNotice(t *testing.T) {
+	inner := &recSender{}
+	s := ForRunNow(inner, []string{" jane.doe@example.com ", ""}, []string{"john.roe@example.com"})
+	if err := s.SendEmail(context.Background(), []string{"real@example.com"}, []string{"realcc@example.com"}, "Subj", "<body><p>x</p></body>"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(inner.to, ",") != "jane.doe@example.com" || strings.Join(inner.cc, ",") != "john.roe@example.com" {
+		t.Errorf("to=%v cc=%v", inner.to, inner.cc)
+	}
+	if inner.subject != "[Test copy] Subj" {
+		t.Errorf("subject = %q", inner.subject)
+	}
+	if !strings.Contains(inner.body, "started by hand") || !strings.Contains(inner.body, "real@example.com") ||
+		strings.Contains(inner.body, "Debug mail mode") {
+		t.Errorf("notice wrong:\n%s", inner.body)
+	}
+}

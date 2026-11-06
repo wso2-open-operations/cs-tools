@@ -324,6 +324,14 @@ export type CallsEmptyStateProps = {
   action?: React.ReactNode;
 };
 
+export type CallsStatusFilterProps = {
+  /** Selected status filter value, or "" for every status. */
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+};
+
 export type CallRequestListProps = {
   requests: CallRequest[];
   userTimeZone?: string;

@@ -15,7 +15,7 @@
 // under the License.
 
 import type { ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import LoggerProvider from "@context/logger/LoggerProvider";
@@ -35,27 +35,39 @@ const mockDeployment: ProjectDeploymentItem = {
   type: { id: "3", label: "Staging" },
 };
 
+// Mock results must keep a stable `data` reference across renders: the (closed)
+// AddProductModal syncs state from these arrays in effects, so a fresh `[]` on
+// every render makes it re-render forever once the card is expanded.
 vi.mock(
   "@features/project-details/api/usePostDeploymentProductsSearch",
-  () => ({
-    usePostDeploymentProductsSearchAll: () => ({
-      data: [],
+  () => {
+    const data: never[] = [];
+    return {
+      usePostDeploymentProductsSearchAll: () => ({
+        data,
+        isLoading: false,
+        isError: false,
+      }),
+    };
+  },
+);
+
+vi.mock("@features/project-details/api/useGetProducts", () => {
+  const data: never[] = [];
+  return {
+    useGetProducts: () => ({ data, isLoading: false, isError: false }),
+  };
+});
+vi.mock("@features/project-details/api/useSearchProductVersions", () => {
+  const data: never[] = [];
+  return {
+    useSearchProductVersions: () => ({
+      data,
       isLoading: false,
       isError: false,
     }),
-  }),
-);
-
-vi.mock("@features/project-details/api/useGetProducts", () => ({
-  useGetProducts: () => ({ data: [], isLoading: false, isError: false }),
-}));
-vi.mock("@features/project-details/api/useSearchProductVersions", () => ({
-  useSearchProductVersions: () => ({
-    data: [],
-    isLoading: false,
-    isError: false,
-  }),
-}));
+  };
+});
 vi.mock("@features/project-details/api/usePostDeploymentProduct", () => ({
   usePostDeploymentProduct: () => ({
     mutateAsync: vi.fn(),
@@ -79,6 +91,10 @@ vi.mock("@features/project-details/api/useInfiniteDeploymentDocuments", () => ({
     isFetchingNextPage: false,
   }),
   flattenDeploymentDocuments: () => [],
+}));
+
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ data: undefined }),
 }));
 
 vi.mock("@case-details-attachments/UploadAttachmentModal", () => ({
@@ -120,13 +136,18 @@ function renderWithProviders(ui: ReactElement) {
   );
 }
 
+/** Details (products, documents, license) are unmounted until the accordion is expanded. */
+function expandCard(): void {
+  fireEvent.click(screen.getByRole("button", { name: /Production/ }));
+}
+
 const defaultProductSelection = {
   selectedProduct: null as SelectedDeploymentProduct | null,
   onToggleProductSelect: vi.fn(),
 };
 
 describe("DeploymentCard", () => {
-  it("should render deployment name and url", () => {
+  it("should render deployment name, type and description in the summary", () => {
     renderWithProviders(
       <DeploymentCard
         deployment={mockDeployment}
@@ -137,10 +158,12 @@ describe("DeploymentCard", () => {
     expect(
       screen.getByRole("heading", { name: "Production" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("https://api.example.com")).toBeInTheDocument();
+    expect(screen.getByText("Staging")).toBeInTheDocument();
     expect(
       screen.getByText("Primary production environment"),
     ).toBeInTheDocument();
+    // Details stay unmounted while collapsed.
+    expect(screen.queryByText("WSO2 Products")).not.toBeInTheDocument();
   });
 
   it("should render products section", () => {
@@ -150,6 +173,7 @@ describe("DeploymentCard", () => {
         {...defaultProductSelection}
       />,
     );
+    expandCard();
 
     expect(screen.getByText("WSO2 Products")).toBeInTheDocument();
     expect(screen.getAllByText("(0)").length).toBeGreaterThanOrEqual(1);
@@ -163,6 +187,7 @@ describe("DeploymentCard", () => {
         {...defaultProductSelection}
       />,
     );
+    expandCard();
 
     expect(screen.getByRole("button", { name: /Upload/ })).toBeInTheDocument();
   });
@@ -174,6 +199,7 @@ describe("DeploymentCard", () => {
         {...defaultProductSelection}
       />,
     );
+    expandCard();
 
     expect(screen.getByText("Documents")).toBeInTheDocument();
     expect(screen.getAllByText("(0)").length).toBeGreaterThanOrEqual(1);

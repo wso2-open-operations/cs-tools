@@ -30,9 +30,6 @@ import (
 //go:embed templates/alert.html
 var alertTemplateRaw string
 
-//go:embed templates/stale_cases_report.html
-var staleCasesReportTemplateRaw string
-
 //go:embed templates/open_cases_report.html
 var openCasesReportTemplateRaw string
 
@@ -57,7 +54,6 @@ func bakeLogo(raw string) string {
 }
 
 var alertTemplate = bakeLogo(alertTemplateRaw)
-var staleCasesReportTemplate = bakeLogo(staleCasesReportTemplateRaw)
 var openCasesReportTemplate = bakeLogo(openCasesReportTemplateRaw)
 var unresolvedProductsReportTemplate = bakeLogo(unresolvedProductsReportTemplateRaw)
 
@@ -117,28 +113,6 @@ func RenderAlertEmail(data AlertEmailData) string {
 	return replacer.Replace(alertTemplate)
 }
 
-// StaleCasesReportData holds every value substituted into the "cases open
-// too long" HTML email template.
-type StaleCasesReportData struct {
-	ThresholdDays int
-	Cases         []entitycases.Case
-}
-
-// RenderStaleCasesReport fills in the "cases open too long" HTML email
-// template — one table row per case, oldest (by CreatedOn) first, exactly
-// the order internal/entitycases.Client.SearchOpenCasesOlderThan already
-// returns them in. [YEAR] is today's year, the same footer-only detail
-// RenderAlertEmail's own doc comment describes.
-func RenderStaleCasesReport(data StaleCasesReportData) string {
-	replacer := strings.NewReplacer(
-		"<!-- [CASE_COUNT] -->", strconv.Itoa(len(data.Cases)),
-		"<!-- [THRESHOLD_DAYS] -->", strconv.Itoa(data.ThresholdDays),
-		"<!-- [CASE_ROWS] -->", renderCaseRows(data.Cases),
-		"<!-- [YEAR] -->", strconv.Itoa(time.Now().Year()),
-	)
-	return replacer.Replace(staleCasesReportTemplate)
-}
-
 // OpenCasesReportData holds every value substituted into the "cases still in
 // Open state" HTML email template.
 type OpenCasesReportData struct {
@@ -146,8 +120,7 @@ type OpenCasesReportData struct {
 }
 
 // RenderOpenCasesReport fills in the "cases still in Open state" HTML email
-// template — shares renderCaseRows with RenderStaleCasesReport (the table
-// shape is identical), but its own template file/copy per this component's
+// template. It uses renderCaseRows, with its own template file/copy per this component's
 // own CLAUDE.md ("Per-task report emails" — each report-sending sub-cron
 // owns its own template).
 func RenderOpenCasesReport(data OpenCasesReportData) string {
@@ -228,6 +201,11 @@ type WeekendRotaData struct {
 	Intro string
 	// Days are the teams, one per rota day ("Saturday Team").
 	Days []WeekendRotaDay
+	// SupportTitle heads another family's turns listed after the teams
+	// ("SRE Weekend Support"), SupportDays one entry per day ("Saturday");
+	// nothing is written when SupportDays is empty.
+	SupportTitle string
+	SupportDays  []WeekendRotaDay
 	// Definitions are the rotations, each once.
 	Definitions []RotationDefinition
 	// ZoneNotes are the small print under the table: what each zone name
@@ -251,6 +229,9 @@ type WeekendRotaDay struct {
 // RotationDefinition is one row of the rotation definitions table.
 type RotationDefinition struct {
 	Rotation, Members, LocalTime, UTCWindow, Role string
+	// RoleNote is small print under the role (how a long window is shared);
+	// empty for none.
+	RoleNote string
 }
 
 // RenderWeekendRota writes the weekend summary in the layout the CRE weekend
@@ -274,13 +255,30 @@ func RenderWeekendRota(data WeekendRotaData) string {
 		}
 		b.WriteString("</p>\n")
 	}
+	if len(data.SupportDays) > 0 {
+		fmt.Fprintf(&b, "<p style=\"margin-bottom:4px;\"><b>%s</b></p>\n", escapeHTML(data.SupportTitle))
+		for _, d := range data.SupportDays {
+			fmt.Fprintf(&b, "<p style=\"margin-top:0;\"><b>%s:</b> ", escapeHTML(d.Title))
+			for i, p := range d.People {
+				if i > 0 {
+					b.WriteString("<br/>")
+				}
+				b.WriteString(escapeHTML(p))
+			}
+			b.WriteString("</p>\n")
+		}
+	}
 	if len(data.Definitions) > 0 {
 		b.WriteString("<p style=\"margin-bottom:4px;\"><b>Rotation Definitions</b></p>\n")
 		b.WriteString(`<table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse; font-size:14px; border-color:#dddddd;">` + "\n")
 		b.WriteString(`<tr style="background:#f2f2f2;"><th align="left">Rotation</th><th align="left">Local time</th><th align="left">UTC window</th><th align="left">Role</th></tr>` + "\n")
 		for _, r := range data.Definitions {
+			role := orDash(escapeHTML(r.Role))
+			if r.RoleNote != "" {
+				role += `<br/><span style="color:#666666; font-size:12px;">` + escapeHTML(r.RoleNote) + `</span>`
+			}
 			fmt.Fprintf(&b, `<tr><td>%s<br/><span style="color:#666666; font-size:12px;">%s</span></td><td>%s</td><td>%s</td><td>%s</td></tr>`+"\n",
-				orDash(escapeHTML(r.Rotation)), escapeHTML(r.Members), orDash(escapeHTML(r.LocalTime)), orDash(escapeHTML(r.UTCWindow)), orDash(escapeHTML(r.Role)))
+				orDash(escapeHTML(r.Rotation)), escapeHTML(r.Members), orDash(escapeHTML(r.LocalTime)), orDash(escapeHTML(r.UTCWindow)), role)
 		}
 		b.WriteString("</table>\n")
 		if len(data.ZoneNotes) > 0 {
@@ -345,7 +343,7 @@ func RenderRotaReminderFailure(data RotaReminderFailureData) string {
 	return b.String()
 }
 
-// renderCaseRows builds one <tr> per case for RenderStaleCasesReport. A case
+// renderCaseRows builds one <tr> per case for RenderOpenCasesReport. A case
 // with no account or no assignee (nil AssignedEngineer/AccountDetails on
 // entity-service's side, already flattened to "" by entitycases.Client)
 // shows an em dash rather than a blank cell, so the report never reads as

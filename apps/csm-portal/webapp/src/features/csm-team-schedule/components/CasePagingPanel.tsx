@@ -451,14 +451,15 @@ export default function CasePagingPanel({
                     <td key={t.key} className="am">
                       {/* A compact list -- a lead a line, the number inline --
                           so a long night roster does not make this the
-                          tallest row. Number actions while editing only. */}
+                          tallest row. Each lead's number actions (Test call)
+                          are offered as in every other cell, editing or not. */}
                       <div className="cp-leadcell">
                         {leads.length > 0 ? (
                           <ul className="cp-leads" aria-label={`${t.name} Team leads`}>
                             {leads.map((m) => (
                               <li key={m.membershipId}>
                                 <span className="cp-lname">{nameOf(m)}</span>
-                                <PhoneChip member={m} controls={editing ? phone : undefined} />
+                                <PhoneChip member={m} controls={phone} />
                                 {okLeads ? (
                                   <button
                                     type="button"

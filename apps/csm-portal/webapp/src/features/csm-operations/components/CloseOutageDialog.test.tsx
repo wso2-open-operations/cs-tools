@@ -58,3 +58,15 @@ describe("CloseOutageDialog — UTC end time", () => {
     expect(screen.getByRole("button", { name: "End outage" })).toBeDisabled();
   });
 });
+
+describe("CloseOutageDialog required End", () => {
+  it("marks End required: MUI's asterisk on its label and `required` on the picker's input", () => {
+    render(<CloseOutageDialog begin="2026-03-01 10:00:00" isSaving={false} onClose={vi.fn()} onConfirm={vi.fn()} />);
+
+    // The picker's field is a role=group of spinbuttons labelled by its label.
+    const field = screen.getByRole("group", { name: "End" });
+    const label = document.getElementById(field.getAttribute("aria-labelledby")!) as HTMLLabelElement;
+    expect(label.querySelector(".MuiFormLabel-asterisk")).toHaveAttribute("aria-hidden", "true");
+    expect(document.getElementById(label.htmlFor)).toBeRequired();
+  });
+});

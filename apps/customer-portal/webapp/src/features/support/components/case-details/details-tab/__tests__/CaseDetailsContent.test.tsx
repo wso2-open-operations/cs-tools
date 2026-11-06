@@ -50,6 +50,73 @@ const mockCaseDetails = {
   findingsTotal: null,
 };
 
+vi.mock("@features/support/api/useGetAIChatHistory", () => ({
+  default: () => ({ comments: [], isLoading: false }),
+}));
+
+vi.mock("@features/support/api/useConversationRecommendationsSearch", () => ({
+  useConversationRecommendationsSearch: () => ({
+    data: undefined,
+    isLoading: false,
+  }),
+}));
+
+vi.mock("@features/support/api/usePostCaseEscalationsSearch", () => ({
+  usePostCaseEscalationsSearch: () => ({
+    data: undefined,
+    refetch: vi.fn(),
+  }),
+}));
+
+vi.mock("@features/support/api/usePendingVerificationsSearch", () => ({
+  usePendingVerificationsSearch: () => ({ data: undefined }),
+}));
+
+vi.mock("@features/settings/api/useGetProjectContacts", () => ({
+  default: () => ({ data: [] }),
+}));
+
+vi.mock("@features/settings/api/useGetUserDetails", () => ({
+  default: () => ({ data: undefined, isLoading: false }),
+}));
+
+vi.mock("@api/useGetProjectDetails", () => ({
+  default: () => ({ data: undefined }),
+}));
+
+vi.mock("@hooks/useCustomerPermissions", () => ({
+  useCustomerPermissions: () => ({
+    isExternalUser: true,
+    canCreateCase: true,
+    canUpdateCase: true,
+  }),
+}));
+
+vi.mock("@features/support/api/usePostCaseEscalation", () => ({
+  usePostCaseEscalation: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@features/support/api/usePostComment", () => ({
+  usePostComment: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@features/support/api/useCreatePendingVerification", () => ({
+  useCreatePendingVerification: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@features/support/api/useVerifyPendingVerification", () => ({
+  useVerifyPendingVerification: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
+vi.mock("@hooks/useLogger", () => ({
+  useLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 vi.mock("@api/useGetProjectFilters", () => ({
   default: () => ({
     data: { caseStates: [{ id: "3", label: "Closed" }] },
@@ -129,14 +196,16 @@ describe("CaseDetailsContent", () => {
   it("should render header and action row when not in focus mode", () => {
     renderContent();
     expect(screen.getByText("CS0001001")).toBeInTheDocument();
-    expect(screen.getByText("Manage State")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
   });
 
   it("should hide header and action row when focus mode is on", () => {
     renderContent();
     const focusButton = screen.getByRole("button", { name: /focus mode/i });
     fireEvent.click(focusButton);
-    expect(screen.queryByText("Manage State")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Close" }),
+    ).not.toBeInTheDocument();
   });
 
   it("should show attachment count in Attachments tab label when available", () => {

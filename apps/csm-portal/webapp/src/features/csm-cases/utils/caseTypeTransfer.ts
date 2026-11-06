@@ -14,7 +14,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { BeCaseType } from "@api/backend/types";
+import { severityFromBe } from "@api/backend/mappers";
+import type { BeCaseType, BeResponseWarning } from "@api/backend/types";
+import type { SeverityOrUnset } from "@features/csm-dashboard/types/abtDashboard";
 import { CASE_TYPE_LABEL } from "@features/csm-cases/utils/caseType";
 
 /**
@@ -138,7 +140,12 @@ export function computeTransferPreview(
   const toMeta = TYPE_META[to] ?? { specificFields: [] };
 
   return {
-    lostFields: fromMeta.specificFields,
+    // A service request has its own (internal) severity, so a case moving to
+    // one keeps its severity rather than losing it.
+    lostFields:
+      to === "service_request"
+        ? fromMeta.specificFields.filter((f) => f.key !== "severity")
+        : fromMeta.specificFields,
     neededFields: toMeta.specificFields,
     attachmentNeeded: !!toMeta.requiresAttachment && !hasAttachments,
     catalogNeeded: !!toMeta.requiresCatalog,
@@ -149,4 +156,71 @@ export function computeTransferPreview(
  * this module doesn't otherwise know about (kept in sync with `ALL_CASE_TYPES`). */
 export function caseTypeTransferLabel(type: BeCaseType): string {
   return CASE_TYPE_LABEL[type] ?? type;
+}
+
+/**
+ * What happens to the severity when a case is moved to a service request.
+ * A service request holds S1-S4 only, so an S0 case is stored as S1 and a
+ * source with no severity (including every non-case type) becomes S4. The
+ * transfer never fails for this; the dialog tells the engineer up front.
+ */
+export interface SeverityTransferNote {
+  kind: "downgrade" | "default";
+  message: string;
+}
+
+/**
+ * The severity note to show before confirming a transfer, or `null` when the
+ * target is not a service request or the severity carries over unchanged.
+ *
+ * + to - The type being transferred to
+ * + severity - The source case's severity (`"unset"` when it has none)
+ * + return - The note to display, or null when there is nothing to warn about
+ */
+export function serviceRequestSeverityNote(
+  to: BeCaseType,
+  severity: SeverityOrUnset,
+): SeverityTransferNote | null {
+  if (to !== "service_request") return null;
+  if (severity === "S0") {
+    return {
+      kind: "downgrade",
+      message: "S0 is not available for service requests; severity will be set to S1.",
+    };
+  }
+  if (severity === "unset") {
+    return {
+      kind: "default",
+      message: "This case has no severity; the service request will be given S4.",
+    };
+  }
+  return null;
+}
+
+/**
+ * Turns the warnings on a successful transfer response into text for the
+ * engineer, or `null` when there is nothing to show. A `SEVERITY_DOWNGRADED`
+ * warning is rendered from its `from`/`to` values in the UI's S-scale; any
+ * other code falls back to the backend's own `message`.
+ *
+ * + warnings - `warnings` from the PATCH response (may be absent)
+ * + return - One sentence per warning joined by a space, or null when none
+ */
+export function describeTransferWarnings(
+  warnings: BeResponseWarning[] | undefined,
+): string | null {
+  if (!warnings || warnings.length === 0) return null;
+  const parts = warnings
+    .map((w) => {
+      if (w.code === "SEVERITY_DOWNGRADED") {
+        const from = severityFromBe(w.from);
+        const to = severityFromBe(w.to);
+        if (from !== "unset" && to !== "unset") {
+          return `${from} is not available for service requests; severity was set to ${to}.`;
+        }
+      }
+      return w.message;
+    })
+    .filter((m) => !!m);
+  return parts.length > 0 ? parts.join(" ") : null;
 }

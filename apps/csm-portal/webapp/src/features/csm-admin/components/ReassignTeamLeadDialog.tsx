@@ -141,6 +141,7 @@ export default function ReassignTeamLeadDialog({
               }
             }}
             roleIds={INTERNAL_USER_ROLES}
+            required
           />
 
           {selectedUserId && (

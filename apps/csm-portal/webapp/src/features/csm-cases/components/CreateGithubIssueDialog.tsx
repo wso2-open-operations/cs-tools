@@ -81,8 +81,8 @@ export interface CreateGithubIssueDialogProps {
   /** Prefill for the Description field, taken from the case's description. */
   defaultDescription?: string;
   /** Cloud cases pass true. There is no repository dropdown either way.
-   * When true, Update Level and Public Git Issue are hidden. When false,
-   * a Patch must fill both. */
+   * When true, Update Level and Public Git Issue are hidden. When false, a
+   * Patch must fill Update Level; Public Git Issue is shown but optional. */
   showRepoField?: boolean;
   /** Deployed product name on the case. Matched to the catalogue. */
   productName?: string;
@@ -114,7 +114,8 @@ export interface CreateGithubIssueDialogProps {
  * Subject and Description are always required. Type is Patch or Discussion:
  *   - Discussion: Severity is required. Hotfix Required and Regression are hidden.
  *   - Patch: Severity is hidden. Hotfix Required and Regression are shown. On a
- *     non-cloud case, Update Level and Public Git Issue are required.
+ *     non-cloud case, Update Level is required; Public Git Issue is shown but
+ *     always optional -- not every patch has a public issue or JIRA to link.
  * Migration sends reason "migration"; otherwise reason is "default".
  * The repository comes from GET /products/github-repo for the case product.
  * Submit stays disabled until that lookup returns a mapping.
@@ -181,8 +182,9 @@ export function CreateGithubIssueDialog({
   const showUpdateLevelAndIssueUrl = !showRepoField;
   const requireUpdateLevel =
     type === "Type/Patch" && showUpdateLevelAndIssueUrl;
-  const requirePublicIssueUrl =
-    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
+  // Public Git Issue is shown alongside Update Level on a non-cloud Patch, but
+  // is never required: a patch can legitimately have no public issue or
+  // internal JIRA to link yet.
 
   const resetAndClose = () => {
     setType(UNSET);
@@ -204,7 +206,6 @@ export function CreateGithubIssueDialog({
     description.trim().length > 0 &&
     (!requireSeverity || !!priorityLevel) &&
     (!requireUpdateLevel || updateLevel.trim().length > 0) &&
-    (!requirePublicIssueUrl || publicIssueUrl.trim().length > 0) &&
     !repoOptionsUnavailable &&
     !!selectedRepoOption &&
     !projectStatusPending &&
@@ -338,7 +339,6 @@ export function CreateGithubIssueDialog({
               value={publicIssueUrl}
               onChange={(e) => setPublicIssueUrl(e.target.value)}
               disabled={submitting}
-              required={requirePublicIssueUrl}
               size="small"
               fullWidth
               placeholder="https://github.com/… or JIRA link"

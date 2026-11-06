@@ -618,6 +618,21 @@ func TestLoad_CSMMigrationPortalWritesEnabled(t *testing.T) {
 	}
 }
 
+// TestLoad_CSMSLAEngineEnabled pins envFlagOn's own semantics for the
+// CSM-native SLA engine's toggle: default true (unset, or anything but a
+// case/whitespace-insensitive "false"), so the engine runs on every data
+// source unless a deployment explicitly opts out.
+func TestLoad_CSMSLAEngineEnabled(t *testing.T) {
+	for value, want := range map[string]bool{
+		"true": true, "TRUE": true, "1": true, "": true, "false": false, "FALSE": false, " false ": false,
+	} {
+		t.Setenv("CSM_SLA_ENGINE_ENABLED", value)
+		if got := Load().CSMSLAEngineEnabled; got != want {
+			t.Errorf("CSM_SLA_ENGINE_ENABLED=%q -> %v, want %v", value, got, want)
+		}
+	}
+}
+
 // TestLoad_CSMMigrationMembershipRegistrationEnabled pins the same parse for
 // the registration kill switch. It gates POST /users/me/memberships/register,
 // which clears a contact's Salesforce lockout and flips the membership to
@@ -1433,5 +1448,63 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	c = Load()
 	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 {
 		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	}
+}
+
+// TestLoad_LongOpenCasesReportSets pins the long-open cases report's two
+// filter sets: the defaults, comma-list trimming with blanks dropped, and a
+// blank value falling back to the default rather than emptying the set.
+func TestLoad_LongOpenCasesReportSets(t *testing.T) {
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", "")
+	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription", "Cloud Support", "Development Support", "Professional Services"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.LongOpenCasesReportProjectTypes, want)
+	}
+	if want := []string{"migrartion", "migration-assistance"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
+		t.Errorf("default excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	}
+
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " Subscription , ,Cloud Support,")
+	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "a, b")
+	c = Load()
+	if want := []string{"Subscription", "Cloud Support"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v (trimmed, blanks dropped)", c.LongOpenCasesReportProjectTypes, want)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
+		t.Errorf("excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	}
+
+	// Only commas and spaces is as good as blank: the default applies.
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " , ,")
+	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
+		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
+	}
+}
+
+// TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
+// valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
+// S0 included, refuses to start.
+func TestConfig_Validate_ServiceRequestDefaultSeverity(t *testing.T) {
+	for _, v := range []string{"", "S1", "s2", " S3 ", "S4"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		if err := c.Validate(); err != nil {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: unexpected error %v", v, err)
+		}
+	}
+	for _, v := range []string{"S0", "S5", "critical", "4", "S"} {
+		c := baseValidConfig()
+		c.ServiceRequestDefaultSeverity = v
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "SERVICE_REQUEST_DEFAULT_SEVERITY") {
+			t.Errorf("SERVICE_REQUEST_DEFAULT_SEVERITY %q: error = %v, want one naming the variable", v, err)
+		}
+	}
+	if got, _ := NormalizeServiceRequestSeverity(""); got != "S4" {
+		t.Errorf("unset normalizes to %q, want S4", got)
+	}
+	if got, _ := NormalizeServiceRequestSeverity(" s2 "); got != "S2" {
+		t.Errorf("\" s2 \" normalizes to %q, want S2", got)
 	}
 }

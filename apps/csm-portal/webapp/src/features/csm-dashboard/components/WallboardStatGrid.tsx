@@ -20,7 +20,7 @@ import type { BeDashboardWidget } from "@api/backend/types";
 import WallboardStatTile, {
   type WallboardStatTileVariant,
 } from "@features/csm-dashboard/components/WallboardStatTile";
-import type { WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
+import { wb, type WallboardSection } from "@features/csm-dashboard/utils/wallboardMetricStyle";
 
 export interface WallboardStatGridProps {
   widgets: BeDashboardWidget[];
@@ -70,8 +70,10 @@ export default function WallboardStatGrid({
     <Box
       sx={{
         display: "grid",
-        gridTemplateColumns: `repeat(${columns}, 1fr)`,
-        gap,
+        // At most 2 columns on a phone; the configured count from 600px up.
+        gridTemplateColumns: `repeat(${Math.min(columns, 2)}, 1fr)`,
+        "@media (min-width: 600px)": { gridTemplateColumns: `repeat(${columns}, 1fr)` },
+        gap: wb(gap * 8),
       }}
     >
       {widgets.map((widget) => (

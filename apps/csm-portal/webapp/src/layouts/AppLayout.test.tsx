@@ -68,11 +68,8 @@ vi.mock("@features/csm-recent/hooks/useRecentViews", () => ({
 vi.mock("@components/notification-banner/GlobalNotificationBanner", () => ({
   default: () => null,
 }));
-vi.mock("@components/announcement-banner/HtmlAnnouncementBanner", () => ({
-  default: () => null,
-}));
 vi.mock("@components/mobile-app-banner/MobileAppBanner", () => ({ default: () => null }));
-vi.mock("@components/top-banner/TopBanners", () => ({ default: () => null }));
+vi.mock("@components/portal-banners/PortalBanners", () => ({ default: () => null }));
 vi.mock("@components/header/Header", () => ({ default: () => <div data-testid="header" /> }));
 vi.mock("@components/side-nav-bar/CsmSideBar", () => ({ default: () => null }));
 

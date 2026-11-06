@@ -71,7 +71,7 @@ export function bulkIncidentPlan(
   currentWatchers?: string[],
 ): BulkIncidentPlan {
   if (isIncidentTerminal(incident.state)) return { skip: "Closed or cancelled: it can't be edited." };
-  if (edit.patch.parentId && edit.patch.parentId === incident.id) {
+  if (edit.patch.parentIncidentId && edit.patch.parentIncidentId === incident.id) {
     return { skip: "An incident can't be its own parent incident." };
   }
   const patch: BeUpdateIncidentPayload = { ...edit.patch };

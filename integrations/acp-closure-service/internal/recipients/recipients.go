@@ -23,7 +23,7 @@ package recipients
 import "strings"
 
 // ProjectContact mirrors entity-service's project-contact shape (Supported
-// by the ServiceNow data source only).
+// by the legacy data source only).
 type ProjectContact struct {
 	Name  string
 	Email string
@@ -31,7 +31,7 @@ type ProjectContact struct {
 }
 
 // AccountContact mirrors entity-service's account-contact shape (Supported
-// by the ServiceNow data source only).
+// by the legacy data source only).
 type AccountContact struct {
 	Name      string
 	Email     string
@@ -73,7 +73,7 @@ type Resolution struct {
 // ResolveCustomerContacts implements the three-tier fallback: every Project
 // Contact with the business-contact role first, then every Primary Contact
 // on the account, then a signal to nudge the Account Manager instead. Each
-// tier returns all of its matches, not just the first: the ServiceNow system
+// tier returns all of its matches, not just the first: the legacy system
 // sends the customer notice to several customer addresses (confirmed by the
 // user from real legacy emails), and real accounts can have more than one
 // Primary Contact. A contact only counts if it has a usable (non-empty)
@@ -116,7 +116,7 @@ func appendUniqueEmail(list []Contact, c Contact) []Contact {
 // PersonRef mirrors entity-service's person-reference shape (technicalOwner/
 // accountManager/renewalAccountManager on an Account, per entity-service's
 // domain.PersonRef). Email is nullable — an assigned person doesn't always
-// have a recorded email. Supported by the ServiceNow data source only.
+// have a recorded email. Supported by the legacy data source only.
 type PersonRef struct {
 	ID    string
 	Name  string

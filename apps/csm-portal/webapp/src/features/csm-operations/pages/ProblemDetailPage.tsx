@@ -136,9 +136,8 @@ function ProblemDescription({ text }: { text: string }): JSX.Element {
  * (`New -> Assess -> Root Cause Analysis -> Fix in Progress -> Resolved ->
  * Closed`, see `getNextProblemTransition`), so there's only ever one legal
  * next button, unlike Incident/CR. The `fix` transition routes through
- * `ProblemFixNotesDialog` first to optionally collect `causeNotes`/
- * `fixNotes` (unlike Incident's `RESOLVED`/`CLOSED`, these are genuinely
- * optional, not ServiceNow-required — the dialog is skippable). A separate
+ * `ProblemFixNotesDialog` first to collect the required `causeNotes`/
+ * `fixNotes` (a Fix without them is refused by the data source). A separate
  * `EditProblemDialog` covers `assignedToId`/`assignmentGroupId`/
  * `workaround`/`targetResolutionDate`, independent of any transition.
  */
@@ -238,10 +237,11 @@ export default function ProblemDetailPage(): JSX.Element {
 
   const onFixNotesSubmit = useCallback(
     (fields: { causeNotes: string; fixNotes: string }) => {
-      if (!id) return;
-      const patch: BeUpdateProblemPayload = { transition: "fix" };
-      if (fields.causeNotes) patch.causeNotes = fields.causeNotes;
-      if (fields.fixNotes) patch.fixNotes = fields.fixNotes;
+      const causeNotes = fields.causeNotes.trim();
+      const fixNotes = fields.fixNotes.trim();
+      // Both are required (the dialog enforces it); never send a bare fix.
+      if (!id || !causeNotes || !fixNotes) return;
+      const patch: BeUpdateProblemPayload = { transition: "fix", causeNotes, fixNotes };
       patchProblem.mutate(
         { id, patch },
         {

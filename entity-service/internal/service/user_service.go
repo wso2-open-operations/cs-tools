@@ -271,8 +271,9 @@ func (s *userService) GetUser(ctx context.Context, id string) (domain.UserDetail
 	if u.Groups, err = s.repo.GetUserGroups(ctx, id); err != nil {
 		return domain.UserDetail{}, err
 	}
-	// Project access is a customer concept: staff have no project-contact rows.
-	if u.UserType == domain.UserTypeCustomer && u.Email != "" {
+	// Project access applies to every non-staff user: customers and the
+	// customer-side system accounts both hold project-contact rows.
+	if u.UserType != domain.UserTypeInternal && u.Email != "" {
 		if u.ProjectAccess, err = s.repo.GetUserProjectAccess(ctx, u.Email); err != nil {
 			return domain.UserDetail{}, err
 		}
@@ -555,6 +556,21 @@ func (s *userService) CreateUser(ctx context.Context, req domain.CreateUserReque
 	}
 	if requestsExternalUserType(req.Roles) {
 		return domain.User{}, &apierror.ValidationError{Msg: "creating an external-type user is not available at this time"}
+	}
+
+	// SystemProvisioned overrides actor to SystemActor, but only for a
+	// caller verified as apps/csm-portal/backend forwarding a real
+	// WSO2-domain user token -- the one combination ResolveScope's own
+	// CSMPortalBackendClientID branch produces (Unrestricted and
+	// HasInternalAccess together with a non-empty ViewerEmail; every other
+	// branch leaves at least one of the three unset -- see AccessService's
+	// own doc comment). Any other caller setting this flag is silently
+	// ignored, not honored or rejected: it is never a caller-supplied actor
+	// override, just a signal this one trusted, verified channel can send.
+	if req.SystemProvisioned && s.access != nil {
+		if scope, err := s.access.ResolveScope(ctx); err == nil && scope.Unrestricted && scope.HasInternalAccess && scope.ViewerEmail != "" {
+			actor = domain.SystemActor
+		}
 	}
 
 	return s.repo.CreateUser(ctx, req, actor)

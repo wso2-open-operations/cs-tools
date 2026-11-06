@@ -53,23 +53,160 @@ type CaseHandler struct {
 	// M2M actor identity, used by any caller of these generic case
 	// operations — renaming it is out of scope for the current change.
 	umtActorEmail string
+	// clientActorEmails maps the client id of a third-party consumer calling
+	// through this service -- decoded (not verified; see
+	// clientIDFromJWTAssertion's own doc comment) from the x-jwt-assertion
+	// header Choreo's API Manager gateway forwards -- to that consumer's own
+	// display email. Used only to attribute a markFixIssued PatchCase call
+	// (see attributeMarkFixIssued): entity-service's work_item_activity feed
+	// otherwise shows this service's own single, shared service-to-service
+	// client id for every such call, regardless of which real third-party
+	// integration actually triggered it, since every call through this
+	// service authenticates to entity-service with the same one credential
+	// (internal/entity/client.go). A client id with no entry here is simply
+	// not attributed -- best-effort, never a validation gate. Nil/empty is
+	// safe and disables the enrichment entirely.
+	clientActorEmails map[string]string
 }
 
 // NewCaseHandler creates a CaseHandler backed by the given entity client.
 // umtActorEmail is this service's configured M2M actor identity for
 // CreateCaseComment and AddCaseTag (see the field's own doc comment); pass ""
-// if unset.
-func NewCaseHandler(entity entityCaseClient, umtActorEmail string) *CaseHandler {
-	return &CaseHandler{entity: entity, umtActorEmail: umtActorEmail}
+// if unset. clientActorEmails is the per-client-id map used only by
+// PatchCase's markFixIssued enrichment (see that field's own doc comment);
+// pass nil if unset.
+func NewCaseHandler(entity entityCaseClient, umtActorEmail string, clientActorEmails map[string]string) *CaseHandler {
+	return &CaseHandler{entity: entity, umtActorEmail: umtActorEmail, clientActorEmails: clientActorEmails}
 }
 
-// PatchCase handles PATCH /cases/{id}. The request body is forwarded verbatim;
-// the entity service enforces its own field-combination rules and 400s
-// otherwise, so this handler does not re-validate that. A state/severity/
-// workState-only update succeeds for this M2M-only service on a Postgres data
-// source; every other field this shape accepts is ServiceNow-data-source-only
-// and requires a forwarded end-user identity token this service cannot
-// supply, so those calls receive a mapped 401 from upstream.
+// patchCaseMarkFixIssuedUpstreamRequest mirrors the two fields
+// attributeMarkFixIssued's enrichment cares about -- domain.UpdateCaseRequest's
+// own MarkFixIssued/ActorEmail -- for tests to decode out of an upstream body
+// that may also carry other, untouched fields.
+type patchCaseMarkFixIssuedUpstreamRequest struct {
+	MarkFixIssued *bool   `json:"markFixIssued"`
+	ActorEmail    *string `json:"actorEmail,omitempty"`
+}
+
+// stripCallerActorEmail removes a caller-supplied "actorEmail" field from a
+// PatchCase body, unconditionally and regardless of whether
+// attributeMarkFixIssued goes on to set its own. actorEmail is meaningful to
+// entity-service only because THIS service's own call to it is already
+// trusted (the same M2MClientIDs allowlist AddCaseTag/CreateCaseComment's own
+// actorEmail relies on) -- a caller-supplied value would therefore be
+// accepted by entity-service at face value, letting any caller of this
+// passthrough endpoint claim to be anyone, in a case's permanent activity
+// history. Every actorEmail entity-service ever sees from this service must
+// come from CaseHandler.clientActorEmails, never from the request body it
+// received. Returns body unchanged if it carries no such field, or is not a
+// JSON object at all (PatchCase's own json.Valid check already guards the
+// latter; a non-object body fails there, never reaching this function).
+//
+// Matches the key case-insensitively, on purpose: encoding/json's own
+// struct-field decoding (what entity-service's domain.UpdateCaseRequest
+// uses) falls back to a case-insensitive match when no exact field-tag match
+// is found, so "ActorEmail" or "ACTOREMAIL" reaches entity-service's
+// ActorEmail field exactly as "actorEmail" would. A map keyed by the literal
+// JSON key, which decodes case-sensitively unlike struct decoding, would
+// leave those variants untouched and still forwarded.
+func stripCallerActorEmail(body []byte) []byte {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	changed := false
+	for k := range m {
+		if strings.EqualFold(k, "actorEmail") {
+			delete(m, k)
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+	cleaned, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return cleaned
+}
+
+// attributeMarkFixIssued adds an actorEmail resolved from the caller's own
+// x-jwt-assertion client id (via CaseHandler.clientActorEmails, see that
+// field's own doc comment) to a markFixIssued PatchCase body, preserving
+// every other field the body carried -- unlike an earlier revision of this
+// function, which rebuilt the body from a struct holding only MarkFixIssued/
+// ActorEmail and so silently dropped anything else a caller sent alongside
+// markFixIssued (letting entity-service's own field-combination rejection
+// never see it, and masking what should have been a 400 with a false
+// success). Every other body shape passes through unchanged. A markFixIssued
+// body this handler cannot attribute -- no x-jwt-assertion header, an
+// undecodable one, or a client id with no entry in that map -- also passes
+// through unchanged (no actorEmail added, leaving entity-service's own
+// resolveActorOrM2M fallback to apply as before), but is logged at WARN so
+// an unmapped/misconfigured caller is visible rather than silently never
+// attributed. This is a best-effort enrichment, never a validation gate: it
+// must never block or fail the call, since entity-service enforces its own
+// field-combination and actorEmail-trust rules regardless of what this does
+// here. Callers of this method must pass body through stripCallerActorEmail
+// first -- this function only ever adds its own server-resolved actorEmail,
+// never preserves one found in the input.
+func (h *CaseHandler) attributeMarkFixIssued(r *http.Request, body []byte) []byte {
+	if len(h.clientActorEmails) == 0 {
+		return body
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	raw, ok := m["markFixIssued"]
+	if !ok {
+		return body
+	}
+	// A *bool, not bool: an explicit "markFixIssued": null must be treated
+	// the same as the key being absent (not a markFixIssued update), not as
+	// false -- matching domain.UpdateCaseRequest.MarkFixIssued's own *bool
+	// shape and entity-service's own nil-check for it.
+	var markFixIssued *bool
+	if err := json.Unmarshal(raw, &markFixIssued); err != nil || markFixIssued == nil {
+		return body
+	}
+	clientID := clientIDFromJWTAssertion(r.Header.Get(jwtAssertionHeader))
+	if clientID == "" {
+		slog.WarnContext(r.Context(), "patch case markFixIssued: no x-jwt-assertion client id found, forwarding with no actorEmail")
+		return body
+	}
+	email, ok := h.clientActorEmails[clientID]
+	if !ok {
+		slog.WarnContext(r.Context(), "patch case markFixIssued: caller client id has no configured actor email, forwarding with no actorEmail", "clientId", clientID)
+		return body
+	}
+	emailJSON, err := json.Marshal(email)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "marshal patch case markFixIssued actorEmail failed", "err", err)
+		return body
+	}
+	m["actorEmail"] = emailJSON
+	upstream, err := json.Marshal(m)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "marshal patch case markFixIssued body failed", "err", err)
+		return body
+	}
+	return upstream
+}
+
+// PatchCase handles PATCH /cases/{id}. The request body is forwarded
+// verbatim, except that any caller-supplied "actorEmail" is always stripped
+// first (stripCallerActorEmail) and, for a markFixIssued update,
+// attributeMarkFixIssued may then add back its own server-resolved one (see
+// that method's own doc comment). The entity service enforces its own
+// field-combination rules and
+// 400s otherwise, so this handler does not re-validate that. A state/
+// severity/workState-only update succeeds for this M2M-only service on a
+// Postgres data source; every other field this shape accepts is
+// ServiceNow-data-source-only and requires a forwarded end-user identity
+// token this service cannot supply, so those calls receive a mapped 401 from
+// upstream.
 func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || !uuidRe.MatchString(id) {
@@ -92,6 +229,12 @@ func (h *CaseHandler) PatchCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}
+
+	// stripCallerActorEmail runs unconditionally, before attributeMarkFixIssued
+	// -- a caller must never be able to self-assert the field that attributes
+	// a markFixIssued call's identity (see that function's own doc comment).
+	body = stripCallerActorEmail(body)
+	body = h.attributeMarkFixIssued(r, body)
 
 	result, err := h.entity.PatchCase(r.Context(), id, body)
 	if err != nil {

@@ -68,7 +68,16 @@ const ANY_OF_PARAM = "_anyOf";
  */
 const NESTED_FILTER_PARAM_PREFIX = "_f.";
 
-const RESERVED_PARAMS = new Set(["w", "n", CASE_FILTER_MARKER, ANY_OF_PARAM]);
+/** Optional param asking the preview page to group the widget's cases by a
+ * field (today only `account`) instead of listing them flat. Set only for a
+ * count widget configured with `distinctBy`, so the click-through shows what
+ * the tile counted: one row per distinct value. Never a filter. */
+export const GROUP_BY_PARAM = "gb";
+
+/** The only `distinctBy` field the preview page can group by. */
+export const GROUPABLE_FIELD_ACCOUNT = "account";
+
+const RESERVED_PARAMS = new Set(["w", "n", CASE_FILTER_MARKER, ANY_OF_PARAM, GROUP_BY_PARAM]);
 
 /**
  * Query param carrying a dashboard widget's own `displayName`, appended to a
@@ -255,10 +264,13 @@ export function buildWidgetPreviewHref(params: {
    * verbatim in the URL. Omit if not yet known — the filter value(s) are
    * then left as-is rather than masked. */
   currentUserId?: string;
+  /** Adds `GROUP_BY_PARAM`, so the preview page groups cases by this field. */
+  groupBy?: string;
 }): string {
   const q = new URLSearchParams();
   q.set("w", params.widgetId);
   q.set("n", params.displayName);
+  if (params.groupBy) q.set(GROUP_BY_PARAM, params.groupBy);
   const isCaseDslResourceType = usesCaseFieldFilterDsl(params.resourceType);
   let usesCaseFieldFilterShape = false;
   for (const [key, value] of Object.entries(params.filters)) {
@@ -346,6 +358,13 @@ export function buildWidgetPreviewHref(params: {
       // other widget's filters use. Dropped silently before this branch
       // existed: a rating-pie click-through landed on the unfiltered list
       // with no `rating` param in the URL at all.
+      q.set(key, String(value));
+    } else if (typeof value === "boolean") {
+      // A flat boolean filter (an account search's `hasProject` / `active`,
+      // a user search's `active`) was dropped silently too, widening the
+      // preview list past what the tile counted. It round-trips as "true" /
+      // "false"; the resourceType's own `buildSearchRequestBody` turns it
+      // back into a boolean (`account`, `user`).
       q.set(key, String(value));
     }
   }

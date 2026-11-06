@@ -80,8 +80,11 @@ func (e *Engine) postStopped(ctx context.Context, st LadderState, reason cancelR
 		if t.isCase() {
 			msg.PortalURL = links.CaseLink(t.IncidentID)
 		}
-		if !r.reply && reason == cancelAssigned && t.sreIncident() && e.threadReplies(t) {
-			// An assigned SRE incident ends its thread with the "Incident Acknowledged." card, naming only the assignee.
+		if msg.Answered && t.sreIncident() {
+			// An answered SRE incident posts no stopped reply in any room; only an assignment ends the ladder's own thread with "Incident Acknowledged.".
+			if r.reply || reason != cancelAssigned || !e.threadReplies(t) {
+				continue
+			}
 			ack := notifications.IncidentAssignedAlert{IncidentID: t.IncidentID, Number: t.Number, AssigneeName: st.AssigneeName}
 			if err := r.chat.SendIncidentAssignedAlert(ctx, room, ack); err != nil {
 				slog.ErrorContext(ctx, "escalation: the acknowledged reply was not posted",
@@ -133,6 +136,10 @@ func (e *Engine) stoppedWording(ctx context.Context, st LadderState, reason canc
 		how = "assigned"
 	case cancelAssigneeComment:
 		how = "a public comment by the assignee"
+	case cancelEngineerComment:
+		// The commenter may not be the assignee, so the assignee is not named.
+		return notifications.EscalationStopped{Outcome: "Acknowledged",
+			Detail: "Acknowledged (a public comment by an engineer after the severity change).", Answered: true}
 	case cancelCaseClosed:
 		return notifications.EscalationStopped{Outcome: "Case closed", Detail: "The case was closed."}
 	default:

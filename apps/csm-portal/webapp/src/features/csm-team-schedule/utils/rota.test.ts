@@ -18,8 +18,8 @@
 
 import { describe, expect, it } from "vitest";
 import type { ScheduleAssignment, ScheduleShift } from "../types";
-import { MOE_DAY, MOE_NIGHT, TZ1, TZ1_L1, TZ1_WE, TZ2, TZ2_WE, TZ3, REGULAR } from "../test/fixtures";
-import { escalationGrid, familiesRun, kindsOfferedOn, monthPieces, moveKindFor, movesOfferedOn, narrowsToOneRota, readerFamily, rotasForReader, rosterRange, rotaZoneName, todayClockOptions, utcOffsetMinutes, zoneColumnOf, zoneDisplayName, zoneLabelOn } from "./rota";
+import { MOE_DAY, MOE_NIGHT, TZ1, TZ1_L1, TZ1_WE, TZ2, TZ2_WE, TZ3, REGULAR, shift as fixtureShift } from "../test/fixtures";
+import { escalationGrid, familiesRun, kindsOfferedOn, monthPieces, moveKindFor, movesOfferedOn, narrowsToOneRota, readerFamily, rotationHostOf, rotasForReader, rosterRange, rotaZoneName, todayClockOptions, utcOffsetMinutes, zoneColumnOf, zoneDisplayName, zoneLabelOn } from "./rota";
 import {
   dayLabel,
   zoneAbbreviation,
@@ -547,5 +547,23 @@ describe("todayClockOptions", () => {
     const o = todayClockOptions("Europe/London", SUMMER);
     expect(o.initial).toBe("Europe/London");
     expect(values(o)).toEqual(["Europe/London", "Asia/Colombo", "Etc/GMT+7"]);
+  });
+});
+
+describe("rotationHostOf", () => {
+  const morning = fixtureShift({ code: "CRE_MORNING", label: "Morning 6-9am", startMinute: 360, endMinute: 540 });
+  const aest = fixtureShift({ code: "CRE_REGULAR_AEST", label: "AEST regular hours", isRotation: false, startMinute: 360, endMinute: 540 });
+
+  it("finds the rotation a standing window shares its hours with", () => {
+    expect(rotationHostOf(aest, [morning], false)?.code).toBe("CRE_MORNING");
+  });
+
+  it("does not match the same minutes on another clock", () => {
+    const pacific = { ...aest, authoringTimeZone: "America/Los_Angeles" };
+    expect(rotationHostOf(pacific, [morning], false)).toBeUndefined();
+  });
+
+  it("does not match a rotation that is not worked on that kind of day", () => {
+    expect(rotationHostOf(aest, [{ ...morning, dayScope: "WEEKDAY" }], true)).toBeUndefined();
   });
 });

@@ -1,0 +1,154 @@
+openapi: 3.0.1
+info:
+  title: CSM AI Integration Service API
+  version: 1.0.0
+  description: >
+    The CSM platform's calls to Claude (dashboard generation; other AI features
+    can join under /ai/). Called only by the CSM portal backend, which
+    authenticates and authorises the end user first. Organization-visible behind
+    Choreo's gateway; this service performs no inbound auth of its own.
+security:
+  - oauth2ClientCredentials: []
+servers:
+  - url: "{server}:{port}/"
+    variables:
+      server:
+        default: http://localhost
+      port:
+        default: "8080"
+paths:
+  /health:
+    get:
+      summary: Health check endpoint.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Ok
+  /ai/dashboards/generate:
+    post:
+      summary: Ask the model for a dashboard definition.
+      description: >
+        One model call. Returns every JSON object in the model's reply, in
+        order, or the model's sentence when it declined. The caller decides
+        which candidate, if any, is a valid dashboard.
+      operationId: generateDashboard
+      parameters:
+        - name: X-CSM-User-ID
+          in: header
+          required: false
+          description: >
+            The id of the portal user the call is made for (never their email),
+            logged with the call's token usage. For attribution only; up to 128
+            characters, a longer value is ignored.
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDashboardRequest'
+      responses:
+        "200":
+          description: The model answered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateDashboardResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+        "502":
+          $ref: '#/components/responses/Error'
+        "503":
+          $ref: '#/components/responses/Error'
+        "504":
+          $ref: '#/components/responses/Error'
+components:
+  responses:
+    Error:
+      description: >
+        The request could not be answered; code says why (invalid_request,
+        not_configured, refused, truncated, unusable, timeout,
+        model_call_failed, internal).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Team:
+      type: object
+      required: [key, name, field]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        family:
+          type: string
+          enum: [cre-abt, cre, sre-abt, sre]
+        field:
+          type: string
+          enum: [creTeam, sreTeam]
+    GenerateDashboardRequest:
+      type: object
+      additionalProperties: false
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        draft:
+          type: object
+          nullable: true
+          description: >
+            The dashboard being edited, in the definition file format. At most
+            64 KiB (65,536 bytes), the size a saved definition may be; larger
+            is a 400.
+        teams:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/Team'
+    GenerateDashboardResponse:
+      type: object
+      required: [usage]
+      properties:
+        candidates:
+          type: array
+          description: Every JSON object in the reply, in order.
+          items:
+            type: object
+        declined:
+          type: string
+          description: The model's sentence when it declined the request.
+        usage:
+          type: object
+          properties:
+            inputTokens:
+              type: integer
+            outputTokens:
+              type: integer
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+  securitySchemes:
+    oauth2ClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          # Placeholder — fill in with the actual token endpoint for this service's
+          # Choreo-managed API once it's provisioned. Not a real/guessed URL.
+          tokenUrl: "<token_url>"
+          scopes: {}

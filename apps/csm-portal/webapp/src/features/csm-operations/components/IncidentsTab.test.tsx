@@ -61,6 +61,7 @@ vi.mock("@features/csm-operations/api/useSearchChangeRequestsForSelect", () => (
 vi.mock("@features/csm-operations/api/useSearchProblemsForSelect", () => ({ useSearchProblemsForSelect: noResults }));
 vi.mock("@api/useSearchGroups", () => ({
   useSearchGroups: () => ({ data: [], isFetching: false, isError: false }),
+  useSearchIncidentExtraGroups: () => ({ data: [], isFetching: false, isError: false }),
 }));
 vi.mock("@api/useSearchItServices", () => ({
   useSearchItServices: () => ({ data: [], isFetching: false, isError: false }),
@@ -448,6 +449,36 @@ describe("IncidentsTab — bulk runs follow the incident as it is now", { timeou
       expect(keys).toContain(JSON.stringify(["incident-comments", id]));
       expect(keys).toContain(JSON.stringify(["incident-activities", id]));
     }
+  });
+  // Resolving resolves child incidents the page does not know, so every
+  // incident's records are refreshed: once for the run, not once per incident.
+  it("refreshes every incident's records once for a bulk resolve", async () => {
+    access.canWrite = true;
+    apiMock.patch.mockResolvedValue({ id: "x" });
+    const other = { ...INCIDENT, id: "inc-5", number: "INC0000005" };
+    showRows([INCIDENT, other]);
+    render(<IncidentsTab />);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all incidents on this page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit (2)" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit 2 incidents" });
+    const pick = (field: string, option: string): void => {
+      fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: field }));
+      fireEvent.click(screen.getByRole("option", { name: option }));
+    };
+    pick("State", "Resolved");
+    pick("Resolution code", "Solved (Permanently)");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Resolution notes/ }), { target: { value: "Fixed." } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 incidents" }));
+    await waitFor(() => expect(screen.getByText("Updated 2 of 2 incidents.")).toBeInTheDocument());
+
+    const keys = invalidate.mock.calls.map(([arg]) => JSON.stringify((arg as { queryKey: unknown }).queryKey));
+    const times = (key: unknown[]): number => keys.filter((k) => k === JSON.stringify(key)).length;
+    expect(times(["incident-details"])).toBe(1);
+    expect(times(["incident-activities"])).toBe(1);
+    expect(times(["incident-comments"])).toBe(1);
+    for (const id of ["inc-1", "inc-5"]) expect(times(["csm-incident-tasks", id])).toBe(1);
   });
 });
 

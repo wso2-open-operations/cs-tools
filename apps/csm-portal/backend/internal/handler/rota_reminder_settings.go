@@ -56,7 +56,13 @@ type rotaReminderSettingsBody struct {
 	InvitesEnabled  *bool                     `json:"invitesEnabled"`
 	WeekendRequired map[string]int            `json:"weekendRequired"`
 	Windows         map[string]reminderWindow `json:"windows"`
-	CopyTo          []string                  `json:"copyTo"`
+	// InviteRotations is forwarded as sent, absent (null) included: an older
+	// card sends none and entity-service then keeps what is stored, while an
+	// empty object is a save of no exceptions. So no omitempty.
+	InviteRotations map[string]bool `json:"inviteRotations"`
+	CopyTo          []string        `json:"copyTo"`
+	// WeekendCopyTo likewise: null from an older card keeps what is stored.
+	WeekendCopyTo []string `json:"weekendCopyTo"`
 }
 
 type reminderWindow struct {
@@ -171,6 +177,12 @@ func (h *RotaReminderRequestHandler) ListRotaReminderRequests(w http.ResponseWri
 	writeJSON(w, http.StatusOK, result)
 }
 
+// rotaReminderKinds are what "Send now" may ask for: the Morning (with its
+// on-call), the Evening or the weekend reminder, or "weekday", both of the
+// next working day's at once (what the tab sent before it offered the two
+// apart).
+var rotaReminderKinds = map[string]bool{"weekday": true, "morning": true, "evening": true, "weekend": true}
+
 // CreateRotaReminderRequest handles POST /team-schedule/reminder-requests/{family}.
 func (h *RotaReminderRequestHandler) CreateRotaReminderRequest(w http.ResponseWriter, r *http.Request) {
 	body, userID, ok := readScheduleBody(w, r)
@@ -182,7 +194,7 @@ func (h *RotaReminderRequestHandler) CreateRotaReminderRequest(w http.ResponseWr
 		Kind string `json:"kind"`
 		Test bool   `json:"test"`
 	}
-	if !rotaFamilyRe.MatchString(family) || json.Unmarshal(body, &in) != nil || (in.Kind != "weekday" && in.Kind != "weekend") {
+	if !rotaFamilyRe.MatchString(family) || json.Unmarshal(body, &in) != nil || !rotaReminderKinds[in.Kind] {
 		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
 		return
 	}

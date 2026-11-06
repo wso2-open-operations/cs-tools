@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,11 @@ const (
 	writeContactSfID  = "003000000000009AAA"
 	writeMembershipID = "a0e000000000009AAA"
 	writeEmail        = "jane@acme.com"
+	// writeProjectContactID is the project_contact row the fake repository
+	// reports, and writeRequestID the salesforce_write_request row it
+	// records for a deferred write.
+	writeProjectContactID = "5b3e8d6a-3b4c-4d5e-8f90-123456789abc"
+	writeRequestID        = "0d7f2c1e-9b8a-4c7d-a6e5-f4d3c2b1a098"
 )
 
 // ---- fakes ---------------------------------------------------------------
@@ -90,6 +96,18 @@ func (f *fakeWriteSalesEntity) GetContact(_ context.Context, id string) (salesen
 		return *f.contact, nil
 	}
 	return salesentity.Contact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: contact not found"}
+}
+
+// GetProjectContact answers with the membership the fake holds, as the real
+// client does after a create: the deferred write's completion reads it back.
+func (f *fakeWriteSalesEntity) GetProjectContact(_ context.Context, id string) (salesentity.ProjectContact, error) {
+	if f.searchErr != nil {
+		return salesentity.ProjectContact{}, f.searchErr
+	}
+	if f.membership != nil && f.membership.ID == id {
+		return *f.membership, nil
+	}
+	return salesentity.ProjectContact{}, &apierror.ServiceUnavailableError{Msg: "salesentity: project contact not found"}
 }
 
 func (f *fakeWriteSalesEntity) SearchContactByEmail(_ context.Context, email string) (salesentity.Contact, bool, error) {
@@ -178,6 +196,9 @@ type fakeWriteMembershipRepo struct {
 	steps     []domain.UpsertOnboardingStepRequest
 	getErr    error
 	resolves  int
+	// completedRequests are the salesforce_write_request ids the upserts
+	// marked SUCCEEDED (CompletesSalesforceWriteRequestID).
+	completedRequests []string
 }
 
 func (f *fakeWriteMembershipRepo) Upsert(context.Context, domain.SalesforceMembershipUpsert, domain.UpsertOnboardingStepRequest) (domain.SalesforceMembershipUpsertResult, error) {
@@ -198,13 +219,24 @@ func (f *fakeWriteMembershipRepo) UpsertWithin(ctx context.Context, _, _ string,
 		return domain.SalesforceMembershipUpsertResult{}, err
 	}
 	f.upserts = append(f.upserts, in)
-	f.steps = append(f.steps, step)
+	// The real repository records no step for a blank membership id (a
+	// deferred write); mirror that so a test can assert the ledger was
+	// left alone.
+	if strings.TrimSpace(step.MembershipSfID) != "" {
+		f.steps = append(f.steps, step)
+	}
 	res := domain.SalesforceMembershipUpsertResult{
 		ProjectID:             writeProjectID,
 		AccountID:             writeAccountID,
 		UserID:                "9a2e8d6a-3b4c-4d5e-8f90-123456789abc",
-		ProjectContactID:      "5b3e8d6a-3b4c-4d5e-8f90-123456789abc",
+		ProjectContactID:      writeProjectContactID,
 		CreatedProjectContact: f.existing == nil,
+	}
+	if in.DeferredSalesforceWrite != nil {
+		res.SalesforceWriteRequestID = writeRequestID
+	}
+	if in.CompletesSalesforceWriteRequestID != "" {
+		f.completedRequests = append(f.completedRequests, in.CompletesSalesforceWriteRequestID)
 	}
 	if f.commitErr {
 		return res, fmt.Errorf("%w: connection reset", repository.ErrMembershipCommitFailed)
