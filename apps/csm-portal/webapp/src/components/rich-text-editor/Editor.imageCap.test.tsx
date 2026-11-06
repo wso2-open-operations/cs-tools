@@ -49,6 +49,13 @@ beforeAll(() => {
 });
 
 const png = (name = "shot.png") => new File([new Uint8Array(4)], name, { type: "image/png" });
+const MB = 1024 * 1024;
+/** An image file that reports `mb` megabytes without allocating them. */
+const bigPng = (mb: number, name = "big.png") => {
+  const file = png(name);
+  Object.defineProperty(file, "size", { value: mb * MB });
+  return file;
+};
 
 /** Pastes `files` (all as clipboard image items) into the editor; returns the event. */
 async function pasteImages(files: File[]): Promise<ClipboardEvent> {
@@ -100,6 +107,36 @@ describe("Editor image cap (upload on paste)", () => {
     expect(onPasteError).toHaveBeenCalledWith("count");
     expect(onImageUpload).toHaveBeenCalledTimes(MAX_COMMENT_IMAGES);
     expect(editorImages()).toHaveLength(MAX_COMMENT_IMAGES);
+  });
+
+  it("refuses an image that would take the images past 25 MB in total", async () => {
+    const { onImageUpload, onPasteError } = setup();
+    await pasteImages([bigPng(10, "a.png")]);
+    await pasteImages([bigPng(10, "b.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(2));
+
+    const event = await pasteImages([bigPng(6, "c.png")]);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onPasteError).toHaveBeenCalledWith("total");
+    expect(onImageUpload).toHaveBeenCalledTimes(2);
+    expect(editorImages()).toHaveLength(2);
+
+    await pasteImages([bigPng(5, "d.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(3));
+  });
+
+  it("refuses a single image over the limit and counts a multi-image paste cumulatively", async () => {
+    const { onImageUpload, onPasteError } = setup();
+    await pasteImages([bigPng(26)]);
+    expect(onPasteError).toHaveBeenCalledWith("size");
+    expect(onImageUpload).not.toHaveBeenCalled();
+
+    onPasteError.mockClear();
+    await pasteImages([bigPng(20, "a.png"), bigPng(6, "b.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(1));
+    expect(onPasteError).toHaveBeenCalledWith("total");
+    expect(onImageUpload).toHaveBeenCalledTimes(1);
   });
 
   it("frees a slot when an image is removed from the draft", async () => {

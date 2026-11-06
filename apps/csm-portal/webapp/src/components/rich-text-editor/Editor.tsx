@@ -43,10 +43,13 @@ import {
   htmlToPlainText,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
 import {
-  ALLOWED_IMAGE_MIME_TYPES,
-  MAX_COMMENT_IMAGES,
-} from "@components/rich-text-editor/richTextConstants";
+  inlineImageRefusal,
+  inlineImagesInEditor,
+  rememberInlineImageSize,
+  type InlineImageRoom,
+} from "@components/rich-text-editor/inlineImageLimits";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -56,7 +59,7 @@ import Toolbar, {
 import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
-import { ImageNode, countUploadedImages } from "@components/rich-text-editor/ImageNode";
+import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
@@ -235,7 +238,7 @@ const ClipboardImagePlugin = ({
   onPasteError,
   onImageUpload,
 }: {
-  onPasteError?: (reason: "size" | "type" | "count") => void;
+  onPasteError?: (reason: "size" | "type" | "count" | "total") => void;
   onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
@@ -255,7 +258,7 @@ const ClipboardImagePlugin = ({
       if (!items) return;
 
       // Upload mode only: how many more images this draft may take.
-      let slotsLeft: number | null = null;
+      let room: InlineImageRoom | null = null;
 
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/")) {
@@ -280,14 +283,17 @@ const ClipboardImagePlugin = ({
 
           const upload = onImageUploadRef.current;
           if (upload) {
-            slotsLeft ??= MAX_COMMENT_IMAGES - countUploadedImages(editor);
-            if (slotsLeft <= 0) {
-              onPasteErrorRef.current?.("count");
+            room ??= inlineImagesInEditor(editor);
+            const refusal = inlineImageRefusal(room, file.size);
+            if (refusal) {
+              onPasteErrorRef.current?.(refusal);
               break;
             }
-            slotsLeft -= 1;
+            const src = upload(file);
+            rememberInlineImageSize(src, file.size);
+            room = { count: room.count + 1, bytes: room.bytes + file.size };
             editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-              src: upload(file),
+              src,
               altText: "Pasted Image",
             });
             // Several images may be pasted at once: take as many as fit.
@@ -566,9 +572,10 @@ const Editor = ({
   /**
    * Called when a pasted image is rejected: `"type"` for an unsupported format
    * (e.g. SVG), `"size"` for exceeding the max paste size, `"count"` when the
-   * draft already holds {@link MAX_COMMENT_IMAGES} images (only with `onImageUpload`).
+   * draft already holds the most images, `"total"` when the draft's images would pass the
+   * total size limit (both only with `onImageUpload`).
    */
-  onPasteError?: (reason: "size" | "type" | "count") => void;
+  onPasteError?: (reason: "size" | "type" | "count" | "total") => void;
   /**
    * Stores a pasted or picked image instead of embedding it as base64; see
    * {@link ImageUploadHandler}. Leave unset to keep embedding.
