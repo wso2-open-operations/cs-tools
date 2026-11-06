@@ -256,7 +256,7 @@ func checkStandardChangeTemplateUsable(ctx context.Context, tx pgx.Tx, snap chan
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("patch change request: read standard change template: %w", err)
 	}
-	return templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), *snap.templateVersionID, stringOrEmpty(name), "approval cannot be requested")
+	return templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), *snap.templateVersionID, stringOrEmpty(name), "approval cannot be requested", true)
 }
 
 // checkStandardChangeCustomerAtApproval refuses (400,
@@ -297,20 +297,30 @@ func checkStandardChangeCustomerAtApproval(ctx context.Context, tx pgx.Tx, snap 
 
 // templateUsableRefusal is the 409 for a template that cannot be used (state is
 // the stored upper-case state, "" when the template could not be read), nil when
-// it can.
-func templateUsableRefusal(state, currentVersionID, versionID, name, what string) error {
+// it can. existing is true for a change request already raised from it (Request
+// Approval), which is told what is left to do with it; false on create, where
+// there is no change request yet. A retirement is final, so it is named first; a
+// revision next, since it still refuses the change request once a suspension is
+// lifted; a suspension last.
+func templateUsableRefusal(state, currentVersionID, versionID, name, what string, existing bool) error {
+	refuse := func(msg string) error {
+		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable, Msg: what + ": " + msg}
+	}
 	switch {
 	case state == "":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable, Msg: what + ": the standard change template could not be found"}
-	case state == "SUSPENDED":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q is suspended", what, name)}
-	case state != "ACTIVE":
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q has been retired", what, name)}
+		return refuse("the standard change template could not be found")
+	case state != "ACTIVE" && state != "SUSPENDED":
+		if existing {
+			return refuse(fmt.Sprintf("the standard change template %q has been retired, and a retired template is never used again; cancel this change request, and raise a Normal change if the work is still needed", name))
+		}
+		return refuse(fmt.Sprintf("the standard change template %q has been retired; raise a Normal change instead", name))
 	case !strings.EqualFold(currentVersionID, versionID):
-		return &apierror.ConflictError{Code: apierror.CodeStandardChangeTemplateUnavailable,
-			Msg: fmt.Sprintf("%s: the standard change template %q has been revised since; cancel this change request and raise a new one from the current version", what, name)}
+		if existing {
+			return refuse(fmt.Sprintf("the standard change template %q has been revised since; cancel this change request and raise a new one from the current version", name))
+		}
+		return refuse(fmt.Sprintf("the standard change template %q has been revised since it was loaded; reload it and raise the change request from the current version", name))
+	case state == "SUSPENDED":
+		return refuse(fmt.Sprintf("the standard change template %q is suspended", name))
 	}
 	return nil
 }
@@ -331,7 +341,7 @@ func recordChangeRequestTemplate(ctx context.Context, tx pgx.Tx, changeRequestID
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("create change request: read standard change template: %w", err)
 	}
-	if err := templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), versionID, stringOrEmpty(name), "the change request cannot be raised"); err != nil {
+	if err := templateUsableRefusal(stringOrEmpty(state), stringOrEmpty(current), versionID, stringOrEmpty(name), "the change request cannot be raised", false); err != nil {
 		return err
 	}
 	if err := checkProjectOfTemplateCustomer(ctx, tx, stringOrEmpty(name), accountRef(accountID, accountName), projectID); err != nil {
@@ -456,9 +466,11 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 	var raw []byte
 	var paramsRaw []byte
 	var priority *string
+	var templateState string
 	err := q.QueryRow(ctx, `
 		SELECT t.id::text, t.name, t.number, a.id::text, a.name, v.id::text, v.version, COALESCE(v.parameters, '[]'::jsonb), cr.standard_change_parameter_values,
-		       t.account_id IS DISTINCT FROM p.account_id, v.priority, v.deployment_types
+		       t.account_id IS DISTINCT FROM p.account_id, LOWER(t.state), t.current_version_id IS DISTINCT FROM v.id,
+		       v.priority, v.deployment_types
 		  FROM change_request cr
 		  JOIN work_item wi ON wi.id = cr.id
 		  LEFT JOIN project p ON p.id = wi.project_id
@@ -467,7 +479,7 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		  LEFT JOIN account a ON a.id = t.account_id
 		 WHERE cr.id = $1::uuid`, id).
 		Scan(&out.Template.ID, &out.Template.Name, &out.TemplateNumber, &accountID, &accountName, &out.VersionID, &out.Version, &paramsRaw, &raw,
-			&out.CustomerMismatch, &priority, &out.DeploymentTypes)
+			&out.CustomerMismatch, &templateState, &out.Superseded, &priority, &out.DeploymentTypes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -475,6 +487,7 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 		return nil, fmt.Errorf("read change request standard change: %w", err)
 	}
 	out.Customer = accountRef(accountID, accountName)
+	out.TemplateState = domain.StandardChangeTemplateState(templateState)
 	if priority != nil {
 		v := domain.ChangeRequestPriority(*priority)
 		out.Priority = &v

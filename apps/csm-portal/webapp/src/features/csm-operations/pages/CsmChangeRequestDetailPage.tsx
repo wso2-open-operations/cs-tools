@@ -944,7 +944,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             >
               Clone
             </Button>
-            {canWrite && cr.state === "closed" && (
+            {/* A retired template is never revised, and a change raised from one is not a second template of it. */}
+            {canWrite && cr.state === "closed" && cr.standardChange?.templateState !== "retired" && (
               <Button
                 variant="outlined"
                 size="small"
@@ -1019,6 +1020,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
       {cr.standardChange && (
         <StandardChangeTemplateBanner
           standardChange={cr.standardChange}
+          changeRequestState={cr.state}
           onOpenTemplate={() =>
             navigate(standardChangeTemplatePath(cr.standardChange!.template.id), { state: { from: crPath } })
           }

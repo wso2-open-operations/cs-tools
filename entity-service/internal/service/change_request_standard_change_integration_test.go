@@ -156,6 +156,9 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if sc.Customer == nil || sc.Customer.ID != env.accounts["A"] || sc.Customer.Name != stdTag+" Customer A" {
 		t.Fatalf("standardChange.customer = %+v", sc.Customer)
 	}
+	if sc.TemplateState != domain.StandardChangeTemplateStateActive || sc.Superseded {
+		t.Fatalf("standardChange.templateState = %q, superseded = %v", sc.TemplateState, sc.Superseded)
+	}
 
 	// A proposal's approver rows live in the change request approval tables, but
 	// the change request routes never reach them: it is decided on its own route

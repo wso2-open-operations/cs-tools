@@ -46,6 +46,8 @@ import { useNavTransition } from "@hooks/useNavTransition";
 import { useNormalizedIdParam } from "@hooks/useNormalizedIdParam";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
+import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
+import { PLAN_RICH_TEXT_SX } from "@features/csm-operations/utils/planRichText";
 import {
   MAX_SUSPEND_REASON_LENGTH,
   useClearStandardChangeTemplateReview,
@@ -97,6 +99,7 @@ const HISTORY_ACTION: Record<BeStandardChangeTemplateEvent["action"], string> = 
   resumed: "Resumed",
   review_flagged: "Flagged for review",
   review_cleared: "Review cleared",
+  retired: "Retired",
 };
 
 /** "(by X on date)" after a suspension, from what the server recorded; "" when nothing was. */
@@ -375,7 +378,8 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
       )}
       {openProposalNote}
 
-      {template.reviewRequired && (
+      {/* A retired template is never used again: there is nothing to review (the server clears the flag). */}
+      {template.reviewRequired && template.state !== "retired" && (
         <Alert
           severity="warning"
           role="region"
@@ -556,7 +560,15 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
                       <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDateTime(e.createdOn)}</TableCell>
                       <TableCell>{HISTORY_ACTION[e.action] ?? e.action}</TableCell>
                       <TableCell sx={{ wordBreak: "break-word" }}>
-                        {e.note || "—"}
+                        {/* A retirement's note is its proposal's rationale, which is rich text; every other note is plain text. */}
+                        {e.action === "retired" && e.note && !isBlankHtml(e.note) ? (
+                          <Box
+                            sx={[PLAN_RICH_TEXT_SX, { "& > :first-of-type": { mt: 0 }, "& > :last-child": { mb: 0 } }]}
+                            dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(e.note) }}
+                          />
+                        ) : (
+                          (e.action === "retired" ? "" : e.note) || "—"
+                        )}
                         {e.changeRequest && (
                           <>
                             {" ("}
@@ -570,6 +582,19 @@ export default function StandardChangeTemplateDetailPage(): JSX.Element {
                               }
                             >
                               {e.changeRequest.name || "change request"}
+                            </Link>
+                            {")"}
+                          </>
+                        )}
+                        {e.proposal && (
+                          <>
+                            {" ("}
+                            <Link
+                              component="button"
+                              variant="body2"
+                              onClick={() => navigate(standardChangeProposalPath(e.proposal!.id), { state: { from: here } })}
+                            >
+                              {e.proposal.name || "proposal"}
                             </Link>
                             {")"}
                           </>

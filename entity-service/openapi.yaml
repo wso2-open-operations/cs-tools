@@ -13451,8 +13451,9 @@ paths:
       description: >-
         The proposer only, while it is a draft (409 otherwise). Omitted fields are left
         as they are; parameters and evidenceChangeRequestIds replace the whole list.
-        Evidence must be closed change requests. A retirement takes only its name and
-        rationale. Placeholders are written {{key}} in the text fields.
+        Evidence must be closed change requests. A retirement takes only its rationale and
+        evidence; its name is the template's (another is a 400, resending it is accepted).
+        Placeholders are written {{key}} in the text fields.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -34083,12 +34084,16 @@ components:
     StandardChangeTemplateEvent:
       type: object
       properties:
-        action: {type: string, enum: [suspended, resumed, review_flagged, review_cleared]}
-        note: {type: string, nullable: true, description: 'The suspension reason, the resume or clear note, or why the template was flagged.'}
+        action: {type: string, enum: [suspended, resumed, review_flagged, review_cleared, retired]}
+        note: {type: string, nullable: true, description: "The suspension reason, the resume or clear note or why the template was flagged (plain text); for retired, the retirement proposal's rationale (rich-text HTML, as the proposal stores it)."}
         changeRequest:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true
           description: The change request that flagged the template for review.
+        proposal:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The retirement proposal (id and number) whose approval retired the template; null for every other action.
         actor: {type: string, description: 'Who did it: an email, or a service name.'}
         createdOn: {type: string, format: date-time}
     StandardChangeTemplateNoteRequest:
@@ -34370,6 +34375,14 @@ components:
               nullable: true
             decisionComment: {type: string, nullable: true}
             resultingVersion: {type: integer, nullable: true}
+            changeRequestsInNew:
+              type: array
+              items: {$ref: '#/components/schemas/EntityRef'}
+              description: >
+                An open retirement only (empty otherwise): the change requests raised from the
+                template that are still New, newest 100 (id and number). Once the template is retired
+                they cannot request approval and can only be cancelled.
+            changeRequestsInNewTotal: {type: integer, description: 'How many change requests changeRequestsInNew stands for (it lists at most 100).'}
             createdOn: {type: string, format: date-time}
             updatedOn: {type: string, format: date-time}
             canEdit: {type: boolean}
@@ -34385,7 +34398,7 @@ components:
         templateId: {type: string, format: uuid, nullable: true, description: 'Required for modify and retire.'}
         sourceChangeRequestId: {type: string, format: uuid, nullable: true, description: 'A closed change request to start from (new only).'}
         copyFromProposalId: {type: string, format: uuid, nullable: true, description: 'An earlier proposal to copy (new only).'}
-        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change".'}
+        name: {type: string, nullable: true, description: 'A new proposal with no name and nothing to take one from opens as "Untitled standard change". A modification or retirement with none takes its template''s; a retirement named otherwise is a 400.'}
         accountId:
           type: string
           format: uuid
@@ -34406,7 +34419,7 @@ components:
         another standard change template (a 400 points to a revision of that template). Evidence must be closed change requests of
         the proposal's customer (a 400 names those that are not); a proposal with no customer cites none.
       properties:
-        name: {type: string}
+        name: {type: string, description: "A retirement's name is its template's: another is a 400, resending it is accepted."}
         accountId:
           type: string
           format: uuid
@@ -34522,6 +34535,14 @@ components:
             customer (the Salesforce project sync moved the project to another account after the
             change was raised). Request Approval is then refused with 400
             `standard_change_template_other_customer`.
+        templateState:
+          type: string
+          enum: [active, suspended, retired]
+          description: >
+            The template's state now. A change request still New can request approval only while its
+            template is active and its version current; otherwise Request Approval is refused with 409
+            `standard_change_template_unavailable`.
+        superseded: {type: boolean, description: 'True when the template has been revised since this change request was raised.'}
         versionId: {type: string, format: uuid}
         version: {type: integer}
         priority:

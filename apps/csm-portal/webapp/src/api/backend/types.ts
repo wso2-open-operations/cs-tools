@@ -5702,15 +5702,17 @@ export interface BeStandardChangeTemplate {
   canClearReview?: boolean;
 }
 
-export type BeStandardChangeTemplateEventAction = "suspended" | "resumed" | "review_flagged" | "review_cleared";
+export type BeStandardChangeTemplateEventAction = "suspended" | "resumed" | "review_flagged" | "review_cleared" | "retired";
 
 /** One entry of a template's history. */
 export interface BeStandardChangeTemplateEvent {
   action: BeStandardChangeTemplateEventAction;
-  /** The suspension reason, the resume or clear note, or why it was flagged. */
+  /** The suspension reason, the resume or clear note, why it was flagged, or (retired) the retirement's rationale. */
   note: string | null;
   /** The change request that flagged it for review. */
   changeRequest: BeEntityRef | null;
+  /** The retirement proposal whose approval retired it (`name` is its number); null otherwise. */
+  proposal?: BeEntityRef | null;
   /** An email, or a service name. */
   actor: string;
   createdOn: string;
@@ -5829,6 +5831,14 @@ export interface BeStandardChangeProposal extends BeStandardChangeContent {
   decisionComment: string | null;
   /** The version an approved new or modify proposal wrote. */
   resultingVersion: number | null;
+  /**
+   * An open retirement only (empty otherwise): the change requests raised from the
+   * template that are still New, newest 100 (`name` is the number). Once it is
+   * retired they cannot request approval and can only be cancelled.
+   */
+  changeRequestsInNew?: BeEntityRef[] | null;
+  /** How many change requests `changeRequestsInNew` stands for. */
+  changeRequestsInNewTotal?: number;
   /** What the caller may do now (advisory: every action re-checks). */
   canEdit: boolean;
   canSubmit: boolean;
@@ -5958,6 +5968,14 @@ export interface BeChangeRequestStandardChange {
    * `standard_change_template_other_customer`).
    */
   customerMismatch?: boolean;
+  /**
+   * The template's state now. A change request still New can request approval
+   * only while it is active and its version current (409
+   * `standard_change_template_unavailable` otherwise).
+   */
+  templateState?: BeStandardChangeTemplateState;
+  /** The template has been revised since this change request was raised. */
+  superseded?: boolean;
   versionId: string;
   version: number;
   /** The priority the version fixes (a PATCH cannot change it); null when it fixes none. */

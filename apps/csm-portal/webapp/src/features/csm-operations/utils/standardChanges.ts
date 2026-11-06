@@ -18,6 +18,7 @@ import { isBlankHtml } from "@utils/sanitizeHtml";
 import { backendErrorCode } from "@features/csm-operations/utils/changeRequests";
 import type {
   BeChangeRequestRisk,
+  BeChangeRequestStandardChange,
   BeStandardChangeContent,
   BeStandardChangeParameter,
   BeStandardChangeParameterType,
@@ -131,6 +132,63 @@ export function standardChangeCustomerMismatchWarning(customerName?: string | nu
     `This change request's Customer Project is no longer one of ${whose} projects: it has moved to another customer ` +
     "since the change was raised. The template is pre-authorised only for its own customer, so approval cannot be " +
     "requested. Cancel this change request and raise a new one from a template of the project's customer."
+  );
+}
+
+/**
+ * Why a change request still New cannot request approval because of its
+ * template (retired, suspended, or revised since it was raised), or null: the
+ * server refuses its Request Approval (409 `standard_change_template_unavailable`),
+ * so the action bar disables it with this reason and the template banner says it
+ * with what is left to do (`standardChangeTemplateUnusableWarning`). null for a
+ * change request not raised from a template, when the template can be used, and
+ * once the change request has left New (from then on its template is not checked).
+ */
+export function requestApprovalNeedsUsableTemplateReason(cr: {
+  state?: string | null;
+  standardChange?: Pick<BeChangeRequestStandardChange, "templateState" | "superseded" | "templateNumber"> | null;
+}): string | null {
+  const sc = cr.standardChange;
+  if (!sc || cr.state !== "new") return null;
+  const tpl = sc.templateNumber || "Its standard change template";
+  // As the server judges it: a retirement is final; a revision still refuses the
+  // change request once a suspension is lifted, so it is named before one.
+  if (sc.templateState === "retired") return `${tpl} has been retired, so approval cannot be requested for this change request`;
+  if (sc.superseded) return `${tpl} has been revised since this change request was raised, so approval cannot be requested for it`;
+  if (sc.templateState === "suspended") {
+    return `${tpl} is suspended, so approval cannot be requested for this change request until it is resumed`;
+  }
+  return null;
+}
+
+/**
+ * The template banner's warning on such a change request: the reason
+ * (`requestApprovalNeedsUsableTemplateReason`) and what is left to do. null when
+ * there is none.
+ */
+export function standardChangeTemplateUnusableWarning(
+  standardChange: Pick<BeChangeRequestStandardChange, "templateState" | "superseded" | "templateNumber">,
+  changeRequestState: string | null | undefined,
+): string | null {
+  const reason = requestApprovalNeedsUsableTemplateReason({ state: changeRequestState, standardChange });
+  if (!reason) return null;
+  if (standardChange.templateState === "retired") return `${reason}. Cancel it, and raise a Normal change if the work is still needed.`;
+  if (standardChange.superseded) return `${reason}. Cancel it and raise a new one from the current version.`;
+  return `${reason} by a member of the Standard Change Authority.`;
+}
+
+/**
+ * The warning on an open retirement whose template still has change requests in
+ * New (`changeRequestsInNewTotal`): once it is retired they cannot request
+ * approval and can only be cancelled. null when there are none.
+ */
+export function retirementChangeRequestsInNewText(total: number | null | undefined): string | null {
+  if (!total || total <= 0) return null;
+  const which = total === 1 ? "1 change request raised from this template is" : `${total} change requests raised from this template are`;
+  const them = total === 1 ? "it" : "they";
+  return (
+    `${which} still New. Once the template is retired ${them} cannot request approval and can only be cancelled ` +
+    "(a Normal change can be raised instead)."
   );
 }
 

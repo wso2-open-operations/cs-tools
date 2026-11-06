@@ -388,6 +388,49 @@ describe("ChangeRequestActionBar — per-target blocked reasons", () => {
   // The backend refuses Request Approval (400 change_request_deviation_not_incorporated) while a
   // deviation from the implementation plan is stored: one a clone carried over, which has to be
   // folded into the plan and cleared first (the Edit form's "Clear deviation").
+  describe("a standard change whose template can no longer pre-authorise it", () => {
+    const sc = (templateState: "active" | "suspended" | "retired", superseded = false) => ({
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      templateNumber: "STD0000001",
+      templateState,
+      superseded,
+      versionId: "ver-1",
+      version: 1,
+      parameters: [],
+    });
+    const approvalButton = (): HTMLElement => screen.getByRole("button", { name: /request approval|schedule/i });
+
+    it.each([
+      ["retired", false, "STD0000001 has been retired, so approval cannot be requested for this change request"],
+      ["suspended", false, "STD0000001 is suspended, so approval cannot be requested for this change request until it is resumed"],
+      ["active", true, "STD0000001 has been revised since this change request was raised, so approval cannot be requested for it"],
+    ] as const)("disables Request Approval in New with the reason (template %s, superseded %s), before any other reason", (state, superseded, reason) => {
+      const { onAction } = renderBar({
+        state: "new",
+        type: "standard",
+        legalNextStates: ["assess"],
+        assignedTeam: null,
+        standardChange: sc(state, superseded),
+      });
+      expect(approvalButton()).toBeDisabled();
+      expect(approvalButton().closest('[tabindex="0"]')?.getAttribute("aria-label")).toMatch(new RegExp(`: ${reason}$`));
+      fireEvent.click(approvalButton());
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it("leaves Request Approval enabled while the template can be used", () => {
+      const { onAction } = renderBar({ state: "new", type: "standard", legalNextStates: ["assess"], standardChange: sc("active") });
+      fireEvent.click(approvalButton());
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+
+    it("leaves a change request that is not a standard change as it was", () => {
+      const { onAction } = renderBar({ state: "new", type: "normal", legalNextStates: ["assess"], standardChange: null });
+      fireEvent.click(screen.getByRole("button", { name: /request approval/i }));
+      expect(onAction).toHaveBeenCalledWith("assess");
+    });
+  });
+
   describe("Request Approval needs the deviation a clone carried over cleared", () => {
     const REASON = "Fold the carried-over deviation into the implementation plan and clear it before requesting approval";
     const CARRIED = "<p>Rolled out to one region first.</p>";

@@ -850,7 +850,14 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     projects."; when the detail's `standardChange.customerMismatch` is true (the project sync moved the project to
     another account after the change was raised) the banner turns `warning` and says the project is no longer one of
     the customer's, approval cannot be requested, and to cancel and raise a new one
-    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code; in New the Edit dialog narrows the Customer Project picker to the template's customer
+    (`standardChangeCustomerMismatchWarning`); the backend refuses Request Approval with the same 400 code. While the
+    change request is still New and its template is retired, suspended or revised since (`templateState`,
+    `superseded`) the banner also turns `warning` and says approval cannot be requested and what is left: cancel and
+    raise a Normal change / wait for the authority to resume it / cancel and raise from the current version
+    (`standardChangeTemplateUnusableWarning`; the backend's 409 `standard_change_template_unavailable`), and the action
+    bar disables Request Approval / Schedule with the reason (`requestApprovalNeedsUsableTemplateReason`, first in
+    `TARGET_BLOCKED_REASON.assess`; null for a change not raised from a template, so nothing changes for Normal or
+    Emergency); in New the Edit dialog narrows the Customer Project picker to the template's customer
     (`projectAccountId`) and says so in its template notice. The backend refuses a move to another customer's project
     in every state with the same code; its words show in `saveError`.
   - Tests: `utils/__tests__/standardChanges.test.ts` ("a standard change is one customer's"), `useStandardChanges.test.tsx`,
@@ -861,8 +868,9 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
 - **Template** `/operations/standard-changes/:id` (`StandardChangeTemplateDetailPage`): the summary under the name,
   current version with placeholders highlighted (its priority and deployment types too, "Chosen per change" / "Any"
   when it fixes none, and "No description." when it has none), parameters, version history (an older version via the
-  versions endpoint), usage, the review flag (link to the change request), a **History** table (`template.history`:
-  suspended / resumed / flagged / cleared, the note, the flagging change request, who), Propose a revision /
+  versions endpoint), usage, the review flag (link to the change request; never shown on a retired template, which the
+  server no longer flags), a **History** table (`template.history`: suspended / resumed / flagged / cleared / retired,
+  the note, the flagging change request or the retirement proposal, who), Propose a revision /
   retirement (disabled while one is open: `openProposal`), Raise a change request (`?standardChangeTemplateId=`).
   Suspend, Resume and Clear review follow the server's `canSuspend` / `canResume` / `canClearReview`: Suspend for the
   owner, the CAB and the Standard Change Authority (optional reason); Resume and Clear review for the authority only,
@@ -874,7 +882,10 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   Description is required; live preview with sample values, closed change requests as evidence, Save = one PATCH of
   the whole draft, "Submit for approval" saves first; "still needs" lists a summary and a description too). A draft
   never submitted (`canDelete`) offers **Delete draft** (a confirmation; then Back) instead of
-  Withdraw. A complete draft reads "Ready to submit: two members of the Standard Change Authority other than you must
+  Withdraw. A **retirement** shows its Name disabled (named after the template; the server refuses another) and asks
+  only for the rationale and evidence; while it is open, a warning lists the template's change requests still New
+  (`changeRequestsInNew`, "and N more" past 100, `retirementChangeRequestsInNewText`): once it is retired they can only
+  be cancelled. A complete draft reads "Ready to submit: two members of the Standard Change Authority other than you must
   authorise it." Submit goes straight to `authority_review` ("Awaiting authorisation"; there is no `cab_review` state
   any more, in the type or the State filter, and an old `state=cab_review` link's filter is dropped). Read-only
   otherwise, with an **Approval** section: the rule (`STANDARD_CHANGE_APPROVAL_RULE`: two different members, never the
@@ -912,7 +923,8 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   `{state: "assess"}`). A closed change request offers "Propose as standard change" (`sourceChangeRequestId`); one raised
   from a template offers "Propose a revision of STD…" instead (a `modify` proposal of that template, then a PATCH citing
   the change as its evidence, then the proposal opens): it belongs to that template, and the backend refuses it as
-  the start or evidence of any other.
+  the start or evidence of any other. One raised from a **retired** template (`standardChange.templateState`) offers
+  neither: a retired template is never revised.
 
 ## Change request Approval tab: opening an Assignment group
 

@@ -62,6 +62,8 @@ import {
   undeclaredPlaceholders,
   unusedParameters,
   validateStandardChangeParameters,
+  retirementChangeRequestsInNewText,
+  standardChangeTemplateUnusableWarning,
 } from "@features/csm-operations/utils/standardChanges";
 import type { BeStandardChangeParameter } from "@api/backend/types";
 
@@ -537,5 +539,40 @@ describe("the Standard Change Authority's states, and what a template fixes", ()
     expect(deploymentFitsTypes("staging", ["primary_production", "staging"])).toBe(true);
     expect(deploymentFitsTypes("uat", ["primary_production", "staging"])).toBe(false);
     expect(deploymentFitsTypes(undefined, ["staging"])).toBe(false);
+  });
+});
+
+describe("a template that can no longer be used", () => {
+  const sc = { templateNumber: "STD0000020", templateState: "active" as const, superseded: false };
+
+  it("warns a change request still New when its template is retired, suspended or revised", () => {
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired" }, "new")).toBe(
+      "STD0000020 has been retired, so approval cannot be requested for this change request. " +
+        "Cancel it, and raise a Normal change if the work is still needed.",
+    );
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "suspended" }, "new")).toMatch(
+      /^STD0000020 is suspended, so approval cannot be requested for this change request until it is resumed by a member of the Standard Change Authority\.$/,
+    );
+    expect(standardChangeTemplateUnusableWarning({ ...sc, superseded: true }, "new")).toMatch(/has been revised since/);
+  });
+
+  it("names the revision, not the suspension, of a template both suspended and revised: resuming it would not help", () => {
+    const warning = standardChangeTemplateUnusableWarning({ ...sc, templateState: "suspended", superseded: true }, "new");
+    expect(warning).toMatch(/has been revised since .* Cancel it and raise a new one from the current version\.$/);
+    expect(warning).not.toMatch(/suspended|resumed/);
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired", superseded: true }, "new")).toMatch(/has been retired/);
+  });
+
+  it("says nothing when the template can be used, or once the change request has left New", () => {
+    expect(standardChangeTemplateUnusableWarning(sc, "new")).toBeNull();
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: "retired" }, "scheduled")).toBeNull();
+    expect(standardChangeTemplateUnusableWarning({ ...sc, templateState: undefined }, "new")).toBeNull();
+  });
+
+  it("counts a retirement's change requests still New", () => {
+    expect(retirementChangeRequestsInNewText(0)).toBeNull();
+    expect(retirementChangeRequestsInNewText(undefined)).toBeNull();
+    expect(retirementChangeRequestsInNewText(1)).toMatch(/^1 change request raised from this template is still New\. Once the template is retired it cannot/);
+    expect(retirementChangeRequestsInNewText(4)).toMatch(/^4 change requests raised from this template are still New\. Once the template is retired they cannot/);
   });
 });

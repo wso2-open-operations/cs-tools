@@ -250,16 +250,20 @@ const (
 	StandardChangeTemplateEventResumed       StandardChangeTemplateEventAction = "resumed"
 	StandardChangeTemplateEventReviewFlagged StandardChangeTemplateEventAction = "review_flagged"
 	StandardChangeTemplateEventReviewCleared StandardChangeTemplateEventAction = "review_cleared"
+	StandardChangeTemplateEventRetired       StandardChangeTemplateEventAction = "retired"
 )
 
 // StandardChangeTemplateEvent is one entry of a template's history.
 type StandardChangeTemplateEvent struct {
 	Action StandardChangeTemplateEventAction `json:"action"`
-	// Note is the suspension reason, the resume or clear note, or why the
-	// template was flagged.
+	// Note is the suspension reason, the resume or clear note, why the
+	// template was flagged, or (retired) the retirement proposal's rationale.
 	Note *string `json:"note"`
 	// ChangeRequest is the change request that flagged the template for review.
 	ChangeRequest *EntityRef `json:"changeRequest"`
+	// Proposal is the retirement proposal (id and number) whose approval
+	// retired the template; null for every other action.
+	Proposal *EntityRef `json:"proposal"`
 	// Actor is who did it (an email, or a service's name).
 	Actor     string    `json:"actor"`
 	CreatedOn time.Time `json:"createdOn"`
@@ -387,6 +391,12 @@ type StandardChangeProposal struct {
 	DecisionNote *string                          `json:"decisionComment"`
 	// ResultingVersion is the version an approved new or modify proposal wrote.
 	ResultingVersion *int `json:"resultingVersion"`
+	// ChangeRequestsInNew (an open retirement only; empty otherwise) are the
+	// change requests raised from the template that are still New, newest 100:
+	// once it is retired they cannot request approval and can only be
+	// cancelled. ChangeRequestsInNewTotal counts them all.
+	ChangeRequestsInNew      []EntityRef `json:"changeRequestsInNew"`
+	ChangeRequestsInNewTotal int         `json:"changeRequestsInNewTotal"`
 	// What the caller may do now (advisory; every action re-checks).
 	CanEdit     bool `json:"canEdit"`
 	CanSubmit   bool `json:"canSubmit"`
@@ -528,9 +538,16 @@ type ChangeRequestStandardChange struct {
 	// the source of truth for projects, moved the project to another account
 	// after the change was raised. Request Approval is then refused (400
 	// standard_change_template_other_customer); the UI warns.
-	CustomerMismatch bool   `json:"customerMismatch"`
-	VersionID        string `json:"versionId"`
-	Version          int    `json:"version"`
+	CustomerMismatch bool `json:"customerMismatch"`
+	// TemplateState is the template's state now (active, suspended, retired),
+	// and Superseded is true when the template has been revised since this
+	// change request was raised: a change request still New can request
+	// approval only while its template is active and its version current
+	// (409 standard_change_template_unavailable otherwise).
+	TemplateState StandardChangeTemplateState `json:"templateState"`
+	Superseded    bool                        `json:"superseded"`
+	VersionID     string                      `json:"versionId"`
+	Version       int                         `json:"version"`
 	// Priority and DeploymentTypes are what the version fixes (null: chosen per
 	// change), so an edit form can keep them as the server does.
 	Priority        *ChangeRequestPriority `json:"priority"`

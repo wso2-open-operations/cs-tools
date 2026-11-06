@@ -376,12 +376,37 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     renderPage();
     expect(screen.queryByRole("region", { name: "Parameters (change specifics)" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^subject/i })).not.toBeInTheDocument();
+    // Named after its template, and approving it renames nothing: the name is shown, not edited.
+    expect(screen.getByRole("textbox", { name: /^name/i })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: /^name/i })).not.toBeRequired();
     fireEvent.click(saveButton());
     expect(lastPatch()).toEqual({
       name: "Rotate a TLS certificate",
       rationale: "<p>Done every quarter without incident.</p>",
       evidenceChangeRequestIds: ["chg-1"],
     });
+  });
+
+  it("warns a retirement of the change requests its template still has in New", () => {
+    mocks.proposal = {
+      ...DRAFT,
+      kind: "retire",
+      template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+      changeRequestsInNew: [{ id: "chg-7", name: "CHG0000007" }],
+      changeRequestsInNewTotal: 3,
+    };
+    renderPage();
+    const warning = screen.getByRole("region", { name: "Change requests still New" });
+    expect(warning).toHaveTextContent("3 change requests raised from this template are still New");
+    expect(warning).toHaveTextContent("CHG0000007 and 2 more");
+    fireEvent.click(within(warning).getByRole("button", { name: "CHG0000007" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-7", expect.anything());
+  });
+
+  it("does not warn a retirement whose template has no change request in New", () => {
+    mocks.proposal = { ...DRAFT, kind: "retire", template: { id: "tpl-1", name: "Rotate a TLS certificate" }, changeRequestsInNewTotal: 0 };
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Change requests still New" })).not.toBeInTheDocument();
   });
 
   describe("its customer: a standard change is one customer's", () => {

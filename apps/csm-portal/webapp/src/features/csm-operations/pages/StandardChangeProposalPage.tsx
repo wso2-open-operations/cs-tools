@@ -96,6 +96,7 @@ import {
   MAX_STANDARD_CHANGE_NAME,
   MAX_STANDARD_CHANGE_SUMMARY,
   normalizeStandardChangeParameters,
+  retirementChangeRequestsInNewText,
   STANDARD_CHANGE_APPROVAL_RULE,
   STANDARD_CHANGE_AUTHORITY,
   STANDARD_CHANGE_AUTHORITY_APPROVALS,
@@ -546,12 +547,13 @@ function ProposalEditor({
       )}
 
       <Section title="Proposal">
+        {/* A retirement is named after its template and renames nothing, so its name is not edited (the server refuses another). */}
         <TextField
           label="Name"
-          required
+          required={!isRetire}
           size="small"
           value={form.name}
-          disabled={busy}
+          disabled={busy || isRetire}
           onChange={(e) => set("name", e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
           helperText={isRetire ? "The template being retired." : "The template's name in the catalogue."}
         />
@@ -1519,6 +1521,24 @@ export default function StandardChangeProposalPage(): JSX.Element {
       {pageError && (
         <Alert severity="error" onClose={() => setPageError(null)}>
           {pageError}
+        </Alert>
+      )}
+
+      {proposal.kind === "retire" && retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal) && (
+        <Alert severity="warning" role="region" aria-label="Change requests still New">
+          <Typography variant="body2">{retirementChangeRequestsInNewText(proposal.changeRequestsInNewTotal)}</Typography>
+          <Typography variant="body2">
+            {(proposal.changeRequestsInNew ?? []).map((c, i) => (
+              <span key={c.id}>
+                {i > 0 && ", "}
+                <Link component="button" variant="body2" onClick={() => openChangeRequest(c.id)} sx={{ verticalAlign: "baseline" }}>
+                  {c.name || "change request"}
+                </Link>
+              </span>
+            ))}
+            {(proposal.changeRequestsInNewTotal ?? 0) > (proposal.changeRequestsInNew ?? []).length &&
+              ` and ${(proposal.changeRequestsInNewTotal ?? 0) - (proposal.changeRequestsInNew ?? []).length} more`}
+          </Typography>
         </Alert>
       )}
 

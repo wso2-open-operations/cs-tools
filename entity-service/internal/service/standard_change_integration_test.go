@@ -516,20 +516,38 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 		t.Fatalf("withdrawn = %s %v %+v", w.State, approverStates(w), w.DecidedBy)
 	}
 
-	// Retire.
+	// Retire. The open retirement lists the change requests raised from the
+	// template that are still New (they cannot request approval once it is
+	// retired); one that went further is not listed.
+	_, err = env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindRetire, TemplateID: &tpl.ID, Name: stdp("Another name")})
+	expectErr[*apierror.ValidationError](t, err, "a retirement created under another name")
+	stillNew := raisedFromIn(t, env, tpl, "still new", "NEW")
+	raisedFromIn(t, env, tpl, "already scheduled", "SCHEDULED")
 	r, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindRetire, TemplateID: &tpl.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if r.ChangeRequestsInNewTotal != 1 || len(r.ChangeRequestsInNew) != 1 || r.ChangeRequestsInNew[0].ID != stillNew || r.ChangeRequestsInNew[0].Name == "" {
+		t.Fatalf("change requests in New on the retirement = %d %+v", r.ChangeRequestsInNewTotal, r.ChangeRequestsInNew)
+	}
 	_, err = env.svc.UpdateProposal(stdCtx(stdProposer), r.ID, domain.UpdateStandardChangeProposalRequest{TestPlan: stdp("x")})
 	expectErr[*apierror.ValidationError](t, err, "content on a retirement")
+	_, err = env.svc.UpdateProposal(stdCtx(stdProposer), r.ID, domain.UpdateStandardChangeProposalRequest{Name: stdp(r.Name + " (renamed)")})
+	expectErr[*apierror.ValidationError](t, err, "another name on a retirement")
+	if _, err := env.svc.UpdateProposal(stdCtx(stdProposer), r.ID, domain.UpdateStandardChangeProposalRequest{Name: stdp(" " + r.Name + " ")}); err != nil {
+		t.Fatalf("resend a retirement's own name: %v", err)
+	}
 	if _, err := env.svc.UpdateProposal(stdCtx(stdProposer), r.ID, domain.UpdateStandardChangeProposalRequest{Rationale: stdp("No longer needed")}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), r.ID); err != nil {
 		t.Fatal(err)
 	}
-	// A suspended template can be retired; retiring clears the suspension.
+	// A suspended template can be retired; retiring clears the suspension, and
+	// the review flag, which could not be cleared on a retired template.
+	if _, err := env.scoped.Exec(sys, `UPDATE standard_change_template SET review_required = true, review_required_reason = 'rolled back' WHERE id = $1::uuid`, tpl.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := env.svc.SuspendTemplate(stdCtx(stdCAB1), tpl.ID, domain.SuspendStandardChangeTemplateRequest{Reason: "Going away"}); err != nil {
 		t.Fatalf("suspend before retiring: %v", err)
 	}
@@ -551,6 +569,17 @@ func stdLifecycle(t *testing.T, env *stdEnv) {
 	if err := env.scoped.QueryRow(sys, `SELECT suspended_by FROM standard_change_template WHERE id = $1::uuid`, tpl.ID).Scan(&retiredBy); err != nil ||
 		retiredBy != nil || tpl.SuspendedReason != nil {
 		t.Fatalf("retiring kept the suspension: %v %v %v", retiredBy, tpl.SuspendedReason, err)
+	}
+	if tpl.ReviewRequired || tpl.ReviewRequiredReason != nil {
+		t.Fatalf("retiring kept the review flag: %v %v", tpl.ReviewRequired, tpl.ReviewRequiredReason)
+	}
+	if len(tpl.History) == 0 || tpl.History[0].Action != domain.StandardChangeTemplateEventRetired ||
+		tpl.History[0].Proposal == nil || tpl.History[0].Proposal.ID != r.ID || tpl.History[0].Proposal.Name != r.Number ||
+		tpl.History[0].Note == nil || *tpl.History[0].Note != "No longer needed" || tpl.History[0].Actor != stdCAB1 {
+		t.Fatalf("the retirement in the history = %+v", tpl.History)
+	}
+	if decided, _ := env.svc.GetProposal(stdCtx(stdProposer), r.ID); len(decided.ChangeRequestsInNew) != 0 || decided.ChangeRequestsInNewTotal != 0 {
+		t.Fatalf("a decided retirement still lists change requests in New: %+v", decided.ChangeRequestsInNew)
 	}
 	_, err = env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{Kind: domain.StandardChangeProposalKindModify, TemplateID: &tpl.ID})
 	expectErr[*apierror.ConflictError](t, err, "modify a retired template")
@@ -1216,14 +1245,20 @@ func setAuthorityMember(t *testing.T, env *stdEnv, email string, member bool) {
 // template's current version, and returns its id.
 func raisedFrom(t *testing.T, env *stdEnv, tpl domain.StandardChangeTemplate, label string) string {
 	t.Helper()
+	return raisedFromIn(t, env, tpl, label, "CLOSED")
+}
+
+// raisedFromIn is raisedFrom with the change request in state.
+func raisedFromIn(t *testing.T, env *stdEnv, tpl domain.StandardChangeTemplate, label, state string) string {
+	t.Helper()
 	var id string
 	if err := env.scoped.QueryRow(repository.WithSystemIdentity(context.Background()), `WITH wi AS (
 			INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, subject, type, project_id)
 			VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, 'CHG-STD-' || substr(md5(random()::text), 1, 10), $2, 'CHANGE_REQUEST', $3::uuid)
 			RETURNING id)
 		INSERT INTO change_request (id, state, change_model, implementation_plan, backout_plan, test_plan, risk, impact, standard_change_template_version_id)
-		SELECT id, 'CLOSED', 'STANDARD', '<p>x</p>', '<p>x</p>', '<p>x</p>', 'LOW', 'LOW', $4::uuid FROM wi RETURNING id::text`,
-		stdProposer, stdTag+" "+label, env.projects["A"], tpl.CurrentVersion.ID).Scan(&id); err != nil {
+		SELECT id, $5, 'STANDARD', '<p>x</p>', '<p>x</p>', '<p>x</p>', 'LOW', 'LOW', $4::uuid FROM wi RETURNING id::text`,
+		stdProposer, stdTag+" "+label, env.projects["A"], tpl.CurrentVersion.ID, state).Scan(&id); err != nil {
 		t.Fatalf("raise a change request from %s: %v", tpl.Number, err)
 	}
 	return id

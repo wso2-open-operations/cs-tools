@@ -8397,7 +8397,8 @@ migrations `0251` (work item type `STANDARD_CHANGE_PROPOSAL`), `0252` (tables, n
 `STD` / `SCP`, the two change request columns), `0253` (the suspension's reason / on / by), `0254`
 (the customer: `account_id` on template and proposal), `0277` (the authority, its stage,
 summary / priority / deployment types, the template history), `0287` (no CAB stage: the proposals
-still in CAB review returned to draft, `CAB_REVIEW` out of the state check) and `100026` / `100028`
+still in CAB review returned to draft, `CAB_REVIEW` out of the state check), `0288` (retirement in the
+template history: `RETIRED` and `proposal_id`, backfilled; retired templates' review flags cleared) and `100026` / `100028`
 (row-level security). PostgreSQL data sources only; every route is `internalOnly`.
 
 **Tables.** `standard_change_template` (STD number, its customer `account_id`, name unique among the
@@ -8410,9 +8411,10 @@ reuses `approval_stage` / `approval_stage_approver` for its approval stage; kind
 columns as a version) and `standard_change_proposal_evidence` (closed change requests the proposer
 cites). `change_request.standard_change_template_version_id` (`ON DELETE RESTRICT`) and
 `standard_change_parameter_values` (JSONB object) record what a change request was raised from.
-`standard_change_template_event` (0277) is the template's append-only history outside its proposals
-(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, a note, the flagging change request,
-the actor), read newest first as `history` on `GET /standard-change-templates/{id}`; the template row
+`standard_change_template_event` (0277) is the template's append-only history
+(`SUSPENDED` / `RESUMED` / `REVIEW_FLAGGED` / `REVIEW_CLEARED`, and since 0288 `RETIRED`; a note, the
+flagging change request, the retirement proposal `proposal_id`, the actor; a `RETIRED` entry's note is
+the proposal's rationale, rich text, every other note plain text), read newest first as `history` on `GET /standard-change-templates/{id}`; the template row
 itself keeps only the current values. All five tables are internal-only under row-level security
 (`100026`, `100028`).
 
@@ -8542,16 +8544,34 @@ is a 409 with nothing written. Submit refuses (400) when the authority group has
 eligible members besides the proposer (`resolveAuthorityPool`), so a proposal never waits on a group
 that could not authorise it. **Approved**: `NEW`
 writes the template and version 1 (owner = proposer), `MODIFY` writes version n+1 (and the name) and
-clears the review flag, `RETIRE` retires it; `decided_by_user_id` and the version's `approved_by` are
+clears the review flag, `RETIRE` retires it (below); `decided_by_user_id` and the version's `approved_by` are
 the final authority approver, every decision is in the approver rows. **Rejected**: the catalogue is
-untouched and the proposal stays as the record. A modification or retirement starts from the current
-version and is refused (409) when the template moved on since; at most one is open (`DRAFT`,
+untouched and the proposal stays as the record. A modification starts from the current version and is
+refused (409) at submit and approval when the template moved on to another version since; a
+retirement is checked only for the template having been retired meanwhile (it carries no content, so
+a revision approved in between does not stop it); at most one is open (`DRAFT`,
 `AUTHORITY_REVIEW`) per template (unique partial index, recreated by 0277; its predicate still names
 `CAB_REVIEW`, which no row can hold). The approval stage writes `approval_stage.raw_status` in the
 enum's own spelling (`APPROVED` / `REJECTED`). The proposal reads `stages` (label, required and
 received approvals, decision, generically: a proposal decided before 0287 may show a "CAB Approval"
 stage, required 1, before its authority stage; an open proposal never does) and each approver row's `stageId`;
 `awaitingMyDecision` covers `AUTHORITY_REVIEW` only.
+
+**Retirement.** Anyone internal with write access may propose one (as for a modification; the two
+authorisations are the check). Its draft carries only a rationale and evidence: content is a 400, and
+so is a name other than the template's, on create or edit (it is named after the template, and
+approving it renames nothing; resending that name is accepted). While it is open (`DRAFT`, `AUTHORITY_REVIEW`) the
+proposal reads `changeRequestsInNew` (the change requests raised from any version of the template that
+are still `NEW`, newest 100, id and number) and `changeRequestsInNewTotal`: once the template is retired
+they cannot request approval (409 `standard_change_template_unavailable`) and can only be cancelled,
+so the proposer and the authority see them before deciding. Change requests past `NEW` are not
+affected (the template is checked only at Request Approval). Approved, it sets the template
+`RETIRED`, clears its suspension and its review flag (nothing is left to review on a template never
+used again, and clear-review refuses a retired one), and writes a `RETIRED` history entry with the
+proposal (`proposal_id`, read as the entry's `proposal`) and its rationale (rich text, rendered as such) as the note (migration
+0288, which also backfilled the entry for templates retired before it and cleared their flag). A
+rollback or deviation of a change raised from a retired template no longer flags it
+(`flagStandardTemplateReview` skips `RETIRED`). Final: there is no un-retire.
 
 **0287** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
 `customer_locked` kept), then deleted every stage other than the authority's (its approver rows go
@@ -8621,16 +8641,22 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
 - **Request Approval** needs the template still `ACTIVE` and still at the version raised from (409
-  `standard_change_template_unavailable`): a revised template's old version is no longer authorised;
+  `standard_change_template_unavailable`): a revised template's old version is no longer authorised.
+  `templateUsableRefusal` names a retirement first, then a revision (it still refuses once a suspension
+  is lifted), then a suspension, and only a change request already raised is told to cancel itself (the
+  create path says to raise a Normal change, or to reload the template);
   and the project still the template's customer's (400 `standard_change_template_other_customer`, see
   "Projects move" above).
 - **Review flag**: a rollback (manual, or a customer's failed review) or a non-blank deviation from the
   implementation plan sets `review_required` on the template with the change request and a reason
   (`flagStandardTemplateOnFailure`, last in the PATCH / decision transaction since it escalates the
   identity) and is recorded in the template's history. It does not suspend the template; a Standard
-  Change Authority member clears it (with a note), or approving a modification does.
-- **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`, version,
-  parameters with values), staff only, best-effort like the tags.
+  Change Authority member clears it (with a note), or approving a modification does. A retired
+  template is never flagged.
+- **Read**: `standardChange` on the detail (template, STD number, customer, `customerMismatch`,
+  `templateState` and `superseded` (revised since; with the state, what Request Approval checks, so the
+  page can warn a change still New before anyone tries), version, parameters with values), staff only,
+  best-effort like the tags.
 
 **Error codes**: `change_request_standard_template_field` (400),
 `standard_change_template_unavailable` (409) and `standard_change_template_other_customer` (400).

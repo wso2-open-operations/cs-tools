@@ -17,7 +17,10 @@
 import { Alert, Box, Link, Typography } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
 import type { BeChangeRequestStandardChange } from "@api/backend/types";
-import { standardChangeCustomerMismatchWarning } from "@features/csm-operations/utils/standardChanges";
+import {
+  standardChangeCustomerMismatchWarning,
+  standardChangeTemplateUnusableWarning,
+} from "@features/csm-operations/utils/standardChanges";
 
 /**
  * On a change request raised from a standard change template: which template and
@@ -31,18 +34,26 @@ import { standardChangeCustomerMismatchWarning } from "@features/csm-operations/
  * account after the change was raised) the banner turns into a warning that
  * says so: the backend refuses Request Approval of such a change (400
  * `standard_change_template_other_customer`).
+ *
+ * While the change request is still New (`changeRequestState`) and its template
+ * has been retired, suspended or revised since, the banner turns into a warning
+ * that says approval cannot be requested and what is left to do (the backend
+ * refuses Request Approval with 409 `standard_change_template_unavailable`).
  */
 export default function StandardChangeTemplateBanner({
   standardChange,
+  changeRequestState,
   onOpenTemplate,
 }: {
   standardChange: BeChangeRequestStandardChange;
+  changeRequestState?: string | null;
   onOpenTemplate: () => void;
 }): JSX.Element {
   const parameters = standardChange.parameters ?? [];
   const mismatch = standardChange.customerMismatch === true;
+  const unusable = standardChangeTemplateUnusableWarning(standardChange, changeRequestState);
   return (
-    <Alert severity={mismatch ? "warning" : "info"} role="region" aria-label="Standard change template">
+    <Alert severity={mismatch || unusable ? "warning" : "info"} role="region" aria-label="Standard change template">
       <Typography variant="body2" sx={{ fontWeight: 600 }}>
         Raised from standard change template{" "}
         <Link component="button" variant="body2" onClick={onOpenTemplate} sx={{ fontWeight: 600, verticalAlign: "baseline" }}>
@@ -54,6 +65,11 @@ export default function StandardChangeTemplateBanner({
       {standardChange.customer?.name && (
         <Typography variant="body2">
           {`Customer: ${standardChange.customer.name}. The template is used only for this customer's projects.`}
+        </Typography>
+      )}
+      {unusable && (
+        <Typography variant="body2" sx={{ fontWeight: 600 }} data-testid="standard-change-template-unusable">
+          {unusable}
         </Typography>
       )}
       {mismatch && (

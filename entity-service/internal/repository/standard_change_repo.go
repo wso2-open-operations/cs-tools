@@ -443,10 +443,11 @@ func (r *standardChangeRepo) GetTemplate(ctx context.Context, id string) (*domai
 	}
 	rows.Close()
 	rows, err = r.db.Query(ctx, `
-		SELECT LOWER(e.action), e.note, cr.id::text, w.number, e.actor, e.created_on
+		SELECT LOWER(e.action), e.note, cr.id::text, w.number, pw.id::text, pw.number, e.actor, e.created_on
 		  FROM standard_change_template_event e
 		  LEFT JOIN change_request cr ON cr.id = e.change_request_id
 		  LEFT JOIN work_item w ON w.id = cr.id
+		  LEFT JOIN work_item pw ON pw.id = e.proposal_id
 		 WHERE e.template_id = $1::uuid
 		 ORDER BY e.created_on DESC, e.id`, id)
 	if err != nil {
@@ -457,13 +458,16 @@ func (r *standardChangeRepo) GetTemplate(ctx context.Context, id string) (*domai
 	for rows.Next() {
 		var e domain.StandardChangeTemplateEvent
 		var action string
-		var crID, crNumber *string
-		if err := rows.Scan(&action, &e.Note, &crID, &crNumber, &e.Actor, &e.CreatedOn); err != nil {
+		var crID, crNumber, propID, propNumber *string
+		if err := rows.Scan(&action, &e.Note, &crID, &crNumber, &propID, &propNumber, &e.Actor, &e.CreatedOn); err != nil {
 			return nil, fmt.Errorf("get standard change template: history: scan: %w", err)
 		}
 		e.Action = domain.StandardChangeTemplateEventAction(action)
 		if crID != nil {
 			e.ChangeRequest = &domain.EntityRef{ID: *crID, Name: stringOrEmpty(crNumber)}
+		}
+		if propID != nil {
+			e.Proposal = &domain.EntityRef{ID: *propID, Name: stringOrEmpty(propNumber)}
 		}
 		t.History = append(t.History, e)
 	}
@@ -625,6 +629,9 @@ func flagStandardTemplateReview(ctx context.Context, tx pgx.Tx, changeRequestID,
 		   -- updated (migration 0254's check) until it is given one; flagging it
 		   -- must not fail the change request's own write.
 		   AND t.account_id IS NOT NULL
+		   -- A retired template is never used again: nothing is left to review
+		   -- (and the flag could never be cleared).
+		   AND t.state <> 'RETIRED'
 		   AND NOT (t.review_required AND t.review_required_change_request_id = $3::uuid AND t.review_required_reason = $2)
 		RETURNING t.id::text`,
 		*versionID, reason, changeRequestID, actor).Scan(&templateID)
@@ -879,7 +886,11 @@ func (r *standardChangeRepo) CreateProposal(ctx context.Context, actor string, i
 				}
 			}
 			templateID, baseVersionID = in.TemplateID, current
-			if name == "" {
+			if in.Kind == domain.StandardChangeProposalKindRetire && name != "" && strings.TrimSpace(name) != strings.TrimSpace(tname) {
+				// Named after the template it retires (approving it renames nothing), as UpdateProposal keeps it.
+				return "", &apierror.ValidationError{Msg: "a retirement proposal keeps the name of the template it retires: only its rationale and evidence can be edited"}
+			}
+			if name == "" || in.Kind == domain.StandardChangeProposalKindRetire {
 				name = tname
 			}
 		}
@@ -1178,7 +1189,7 @@ func (r *standardChangeRepo) GetProposal(ctx context.Context, id string) (*domai
 	return getProposal(ctx, r.db, id)
 }
 
-// crvis: internal callers only; reads a proposal's own approval rows and evidence change requests
+// crvis: internal callers only; reads a proposal's own approval rows and evidence change requests, and (an open retirement) the number of each change request still New raised from its template
 func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardChangeProposal, error) {
 	var p domain.StandardChangeProposal
 	var kind, state string
@@ -1285,6 +1296,35 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("get standard change proposal: stages: %w", err)
+	}
+
+	p.ChangeRequestsInNew = []domain.EntityRef{}
+	if p.Kind == domain.StandardChangeProposalKindRetire && tplID != nil && (state == "DRAFT" || state == "AUTHORITY_REVIEW") {
+		rows, err = q.Query(ctx, `
+			SELECT cr.id::text, wi.number, COUNT(*) OVER ()
+			  FROM change_request cr
+			  JOIN work_item wi ON wi.id = cr.id
+			  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
+			 WHERE v.template_id = $1::uuid AND cr.state = 'NEW'
+			 ORDER BY wi.created_on DESC, wi.number
+			 LIMIT 100`, *tplID)
+		if err != nil {
+			return nil, fmt.Errorf("get standard change proposal: change requests in new: %w", err)
+		}
+		for rows.Next() {
+			var ref domain.EntityRef
+			var total int
+			if err := rows.Scan(&ref.ID, &ref.Name, &total); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("get standard change proposal: change requests in new: scan: %w", err)
+			}
+			p.ChangeRequestsInNew = append(p.ChangeRequestsInNew, ref)
+			p.ChangeRequestsInNewTotal = total
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("get standard change proposal: change requests in new: %w", err)
+		}
 	}
 
 	p.Approvers = []domain.StandardChangeProposalApprover{}
@@ -1423,7 +1463,19 @@ func (r *standardChangeRepo) UpdateProposal(ctx context.Context, id, actor strin
 			return &apierror.ConflictError{Msg: "only a draft can be edited; this proposal is " + strings.ToLower(state)}
 		}
 		if kind == "RETIRE" && hasContentEdits(req) {
-			return &apierror.ValidationError{Msg: "a retirement proposal carries only its name, rationale and evidence"}
+			return &apierror.ValidationError{Msg: "a retirement proposal carries only its rationale and evidence"}
+		}
+		if kind == "RETIRE" && req.Name != nil {
+			// A retirement is named after the template it retires, and approving it
+			// renames nothing: resending that name is accepted, another is refused.
+			var stored string
+			if err := tx.QueryRow(ctx, `SELECT subject FROM work_item WHERE id = $1::uuid`, id).Scan(&stored); err != nil {
+				return fmt.Errorf("update standard change proposal: name: %w", err)
+			}
+			if strings.TrimSpace(*req.Name) != strings.TrimSpace(stored) {
+				return &apierror.ValidationError{Msg: "a retirement proposal keeps the name of the template it retires: only its rationale and evidence can be edited"}
+			}
+			req.Name = nil
 		}
 		account, accountChanged, err := updateProposalCustomer(ctx, tx, id, kind, req.AccountID)
 		if err != nil {
@@ -2013,9 +2065,19 @@ func applyApprovedProposal(ctx context.Context, tx pgx.Tx, id, kind, actor strin
 
 	switch kind {
 	case "RETIRE":
+		// A retired template is never used again, so its suspension and its review
+		// flag go with it (the flag could not be cleared afterwards); the history
+		// records the retirement, with the proposal and its rationale.
 		if _, err := tx.Exec(ctx, `UPDATE standard_change_template SET state = 'RETIRED', updated_on = NOW(), updated_by = $2,
-			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
+			suspended_reason = NULL, suspended_on = NULL, suspended_by = NULL,
+			review_required = false, review_required_reason = NULL, review_required_on = NULL,
+			review_required_change_request_id = NULL WHERE id = $1::uuid`, *tplID, actor); err != nil {
 			return nil, nil, templateWriteErr("apply standard change proposal: retire", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_template_event (template_id, action, note, proposal_id, actor)
+			SELECT $1::uuid, 'RETIRED', NULLIF(btrim(COALESCE(p.rationale, '')), ''), p.id, $3
+			  FROM standard_change_proposal p WHERE p.id = $2::uuid`, *tplID, id, actor); err != nil {
+			return nil, nil, fmt.Errorf("apply standard change proposal: retire: record history: %w", err)
 		}
 		return tplID, nil, nil
 	case "NEW":

@@ -4914,6 +4914,24 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
     expect(banner).toHaveTextContent(/approval cannot be requested/i);
   });
 
+  it("warns a change request still New that its retired template can no longer be used, and what is left", () => {
+    mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, templateState: "retired" } } });
+    renderPage();
+    const banner = screen.getByRole("region", { name: "Standard change template" });
+    expect(banner).toHaveClass("MuiAlert-standardWarning");
+    expect(within(banner).getByTestId("standard-change-template-unusable")).toHaveTextContent(
+      "STD0000001 has been retired, so approval cannot be requested for this change request. Cancel it, and raise a Normal change if the work is still needed.",
+    );
+  });
+
+  it("does not warn about the template once the change request has left New", () => {
+    mockQueryResult({
+      data: { ...STANDARD_CR, state: "scheduled", standardChange: { ...STANDARD_CR.standardChange!, templateState: "retired" } },
+    });
+    renderPage();
+    expect(screen.queryByTestId("standard-change-template-unusable")).not.toBeInTheDocument();
+  });
+
   it("names no customer when the response carries none", () => {
     mockQueryResult({ data: { ...STANDARD_CR, standardChange: { ...STANDARD_CR.standardChange!, customer: null } } });
     renderPage();
@@ -4958,6 +4976,26 @@ describe("CsmChangeRequestDetailPage — standard changes", () => {
       expect(navigateMock).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-1", {
         state: { from: "/operations/change-requests/chg-1" },
       });
+    });
+
+    it("offers no proposal for a change raised from a retired template", () => {
+      mockCurrentUser = { ...mockCurrentUser, roles: ["cs_engineer"] };
+      mockQueryResult({
+        data: {
+          ...CLOSED,
+          standardChange: {
+            template: { id: "tpl-1", name: "Rotate a TLS certificate" },
+            templateNumber: "STD0000001",
+            templateState: "retired",
+            versionId: "ver-1",
+            version: 1,
+            parameters: [],
+          },
+        },
+      });
+      renderPage();
+      expect(screen.queryByRole("button", { name: /propose a revision/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /propose as standard change/i })).not.toBeInTheDocument();
     });
 
     it("proposes a revision of the template a closed change was raised from, citing it, never a new template", () => {

@@ -41,6 +41,7 @@ import {
   type PendingCustomerReview,
   isOfferedChangeRequestTarget,
 } from "@features/csm-operations/utils/changeRequests";
+import { requestApprovalNeedsUsableTemplateReason } from "@features/csm-operations/utils/standardChanges";
 import type { BeChangeRequestDetail } from "@api/backend/types";
 
 /**
@@ -163,7 +164,11 @@ interface BlockedReasonContext {
  * stored tick there asks nobody and blocks nothing. And it needs the deviation from the
  * implementation plan a clone carried over folded into the plan and cleared
  * (`requestApprovalNeedsDeviationClearedReason`, every type): the backend refuses
- * Request Approval while one is stored.
+ * Request Approval while one is stored. Before all of these, a change request
+ * raised from a standard change template that has since been retired, suspended
+ * or revised (`requestApprovalNeedsUsableTemplateReason`, standard changes only):
+ * the backend refuses it (409 `standard_change_template_unavailable`) whatever
+ * else is set, so that is the reason given.
  *
  * `rollback` is blocked out of Customer Review only (out of Review it is never
  * blocked): while the customer group's review is pending the backend refuses
@@ -175,11 +180,12 @@ const TARGET_BLOCKED_REASON: Record<
   (cr: BeChangeRequestDetail, context: BlockedReasonContext) => string | null
 > = {
   assess: (cr) =>
-    cr.assignedTeam
+    requestApprovalNeedsUsableTemplateReason(cr) ??
+    (cr.assignedTeam
       ? (requestApprovalNeedsProjectReason(cr) ??
         requestApprovalNeedsContactReason(cr) ??
         requestApprovalNeedsDeviationClearedReason(cr))
-      : "Set an assigned team before requesting approval",
+      : "Set an assigned team before requesting approval"),
   rollback: (cr, { pendingCustomerReview }) =>
     cr.state === "customer_review" ? rollbackPendingReviewReason(pendingCustomerReview) : null,
 };

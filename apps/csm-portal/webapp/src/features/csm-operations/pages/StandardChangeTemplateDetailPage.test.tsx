@@ -356,6 +356,38 @@ describe("StandardChangeTemplateDetailPage — actions", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/change-requests/chg-1", HERE);
   });
 
+  it("records a retirement in the history, with the proposal that retired it", () => {
+    mocks.template = {
+      ...TEMPLATE,
+      state: "retired",
+      history: [
+        {
+          action: "retired",
+          note: "<p>No longer <strong>used</strong></p>",
+          changeRequest: null,
+          proposal: { id: "scp-9", name: "SCP0000009" },
+          actor: "auth2@example.com",
+          createdOn: "2026-11-06T00:00:00Z",
+        },
+      ],
+    };
+    renderPage();
+    const rows = within(screen.getByRole("table", { name: "Template history" })).getAllByRole("row");
+    // The rationale is rich text: rendered, never shown as markup.
+    expect(rows[1]).toHaveTextContent("RetiredNo longer used (SCP0000009)auth2@example.com");
+    expect(rows[1]).not.toHaveTextContent("<p>");
+    expect(within(rows[1]!).getByText("used").tagName).toBe("STRONG");
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: "SCP0000009" }));
+    expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-9", HERE);
+  });
+
+  it("shows no review flag on a retired template: it is never used again", () => {
+    mocks.template = { ...TEMPLATE, state: "retired", reviewRequired: true, reviewRequiredReason: "Rolled back" };
+    renderPage();
+    expect(screen.queryByRole("region", { name: "Review needed" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/can still be used/)).not.toBeInTheDocument();
+  });
+
   it("offers nothing but reading for a retired template", () => {
     mocks.template = { ...TEMPLATE, state: "retired" };
     renderPage();
