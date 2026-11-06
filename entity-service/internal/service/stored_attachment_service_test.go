@@ -79,6 +79,22 @@ type fakeStoredRepo struct {
 	}
 	unlinked []domain.StoredAttachmentRow
 	deferred []string // rows sent to the back of the cleanup queue
+
+	// Draft description images.
+	project    domain.StoredAttachmentParent
+	projectErr error
+	drafts     []domain.StoredAttachmentRow // what ListDescriptionDrafts returns
+	draftCall  struct {
+		project, email string
+		ids            []string
+	}
+	draftLinkWant []string
+	draftLinkCall struct {
+		workItem, project, email string
+		ids                      []string
+		sys                      bool
+		calls                    int
+	}
 }
 
 func newFakeStoredRepo() *fakeStoredRepo {
@@ -156,6 +172,29 @@ func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workIt
 	f.linkCall.comment, f.linkCall.workItem, f.linkCall.email, f.linkCall.ids = commentID, workItemID, email, ids
 	f.linkCall.sys = ok && scope.Unrestricted
 	return f.linkWant, nil
+}
+
+func (f *fakeStoredRepo) GetProject(_ context.Context, id string) (domain.StoredAttachmentParent, error) {
+	if f.projectErr != nil {
+		return domain.StoredAttachmentParent{}, f.projectErr
+	}
+	if f.project.ID == "" {
+		return domain.StoredAttachmentParent{ID: id, Number: "PRJ-9", ProjectNumber: "PRJ-9"}, nil
+	}
+	return f.project, nil
+}
+
+func (f *fakeStoredRepo) ListDescriptionDrafts(_ context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+	f.draftCall.project, f.draftCall.email, f.draftCall.ids = projectID, email, ids
+	return f.drafts, nil
+}
+
+func (f *fakeStoredRepo) LinkDescriptionImages(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	c := &f.draftLinkCall
+	c.workItem, c.project, c.email, c.ids, c.sys = workItemID, projectID, email, ids, ok && scope.Unrestricted
+	c.calls++
+	return f.draftLinkWant, nil
 }
 
 func (f *fakeStoredRepo) ListUnlinkedImages(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
