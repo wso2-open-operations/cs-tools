@@ -149,6 +149,9 @@ func (timeoutErr) Temporary() bool { return true }
 
 var _ net.Error = timeoutErr{}
 
+// TestGenerateMapsEveryError: every generator error answers its own status and
+// code (the usage limit 429 usage_limit, apart from model_call_failed), with
+// a fixed message that never carries upstream detail.
 func TestGenerateMapsEveryError(t *testing.T) {
 	for _, tc := range []struct {
 		err    error

@@ -317,6 +317,10 @@ func TestGeneratedDashboardID(t *testing.T) {
 	}
 }
 
+// TestGenerateDashboard_MapsEachGeneratorError: every generator error answers
+// its own status and message: the AI side's usage limit 503 (never 429, the
+// caller's own limit), a reply cut off apart from an unusable one, a timeout
+// 504, any other call failure 502.
 func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 	cases := []struct {
 		name       string

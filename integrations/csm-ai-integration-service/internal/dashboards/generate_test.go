@@ -240,6 +240,9 @@ func TestGenerateDeclined(t *testing.T) {
 	}
 }
 
+// TestGenerateErrors: each way a call gives no candidates is its own error: a
+// refusal, a reply cut off, a reply with no JSON, a gateway error, a timeout
+// (also a deadline), and a gateway 429 (the usage limit).
 func TestGenerateErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
