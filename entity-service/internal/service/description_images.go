@@ -42,13 +42,21 @@ func callerEmailBestEffort(ctx context.Context) string {
 // reference and no blob: source costs one regexp and nothing else; a nil linker
 // is a no-op.
 //
-// A "data:image" base64 image is deliberately NOT refused: other callers still
-// send their images inline, and this service stores no file for them.
+// A "data:image" base64 image is not refused, but for a user's content it counts
+// against the same limits (ValidateEmbeddedImages): other callers still send their
+// images inline, and this service stores no file for them.
 func validateDescriptionImages(ctx context.Context, l InlineImageLinker, projectID, html string) (string, error) {
-	if l == nil || !mayHaveInlineImages(html) {
+	if l == nil {
 		return "", nil
 	}
 	email := callerEmailBestEffort(ctx)
+	// Images embedded as base64 are held to the same limits for a user's content.
+	if err := l.ValidateEmbeddedImages(ctx, email, html); err != nil {
+		return email, err
+	}
+	if !mayHaveInlineImages(html) {
+		return "", nil
+	}
 	return email, l.ValidateDescriptionImages(ctx, projectID, email, html)
 }
 

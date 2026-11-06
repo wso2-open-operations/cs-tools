@@ -1412,6 +1412,11 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 			return domain.CreateCaseCommentResponse{}, err
 		}
 	}
+	if s.imageLinker != nil {
+		if err := s.imageLinker.ValidateEmbeddedImages(ctx, actorEmail, req.Content); err != nil {
+			return domain.CreateCaseCommentResponse{}, err
+		}
+	}
 	var c domain.CaseComment
 	var err error
 	if asSystem {

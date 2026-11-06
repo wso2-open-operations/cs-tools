@@ -1940,7 +1940,9 @@ HTML refers to it as `src="/<attachment id>"`. When a comment is created or edit
 `InlineImageLinker.LinkFromContent`) entity-service reads those ids out of the content and links each
 image (`comment_id` set), but only if the comment's author uploaded it, it is stored, and it belongs to
 the comment's own work item. That is best effort: a failure is logged and the comment is saved anyway.
-Content that still embeds a base64 image is saved as written; this service stores no file.
+Content that embeds a base64 image is saved as written (this service stores no file), but a NEW comment or a
+record's description typed by a user is held to the same limits (`ValidateEmbeddedImages`: at most 5 images and
+the total size, decoded). A machine caller (no user) and an edit of an existing comment are not checked.
 
 **Limits per comment or description.** One comment or description shows at most 5 images
 (`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_BYTES` together; one image is at most
@@ -1970,7 +1972,8 @@ elsewhere, no `src="blob:`; a 400 in words otherwise; unreferenced drafts are ig
 right after the record exists (`LinkDescriptionImages`, best effort: one guarded UPDATE as the system that sets
 `work_item_id` and `description_image = true` only while the row is still a draft of that project by that
 email). Both are free for a description without an image reference. `data:image` base64 images are NOT
-refused (other callers still send them). Incidents and problems have no project on their create request, so
+refused (other callers still send them) but count against the same 5-image and total-size limits when a
+user typed them (`ValidateEmbeddedImages`; a machine caller is not checked). Incidents and problems have no project on their create request, so
 they take no draft images; the ServiceNow-only data source stores no images.
 `LinkInlineImages` (comments) never takes a `description_image` row.
 

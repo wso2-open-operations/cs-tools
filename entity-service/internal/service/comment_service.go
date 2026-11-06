@@ -320,6 +320,12 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 		}
 	}
 
+	if s.imageLinker != nil {
+		if err := s.imageLinker.ValidateEmbeddedImages(ctx, createdBy, req.Content); err != nil {
+			return domain.CreateCommentResponse{}, err
+		}
+	}
+
 	row, err := s.repo.CreateComment(ctx, req.ReferenceID, req.ReferenceType, enumType, req.Content, createdBy)
 	if err != nil {
 		return domain.CreateCommentResponse{}, err

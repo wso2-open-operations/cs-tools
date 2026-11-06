@@ -770,3 +770,46 @@ func TestDescriptionImageHelpers(t *testing.T) {
 		t.Errorf("links = %+v", l.descLinks)
 	}
 }
+
+// A base64 image in a user's content counts against the same limits as an
+// uploaded one; machine callers and content with no such image are not checked.
+func TestValidateEmbeddedImages(t *testing.T) {
+	// 40 base64 characters without padding decode to 30 bytes.
+	img := func() string { return `<img src="data:image/png;base64,` + strings.Repeat("A", 40) + `">` }
+	cases := []struct {
+		name    string
+		html    string
+		email   string
+		total   int64
+		wantErr string
+	}{
+		{name: "no image", html: "<p>hello</p>", email: saEmail, total: 100},
+		{name: "one image within the limit", html: img(), email: saEmail, total: 100},
+		{name: "five images within the limit", html: strings.Repeat(img(), 3), email: saEmail, total: 100},
+		{name: "more than five images", html: strings.Repeat(img(), 6), email: saEmail, total: 1000, wantErr: "At most 5"},
+		{name: "over the total size", html: strings.Repeat(img(), 4), email: saEmail, total: 100, wantErr: "together"},
+		{name: "exactly at the total size", html: strings.Repeat(img(), 2), email: saEmail, total: 60},
+		{name: "a machine caller is not checked", html: strings.Repeat(img(), 9), email: "-", total: 10},
+		{name: "case of the scheme does not matter", html: strings.Repeat(strings.ToUpper(img()), 6), email: saEmail, total: 1000, wantErr: "At most 5"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svc := NewStoredAttachmentService(newFakeStoredRepo(), StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
+			email := c.email
+			if email == "-" {
+				email = ""
+			}
+			err := svc.ValidateEmbeddedImages(context.Background(), email, c.html)
+			if c.wantErr == "" {
+				if err != nil {
+					t.Fatalf("err = %v, want none", err)
+				}
+				return
+			}
+			var verr *apierror.ValidationError
+			if !errors.As(err, &verr) || !strings.Contains(verr.Msg, c.wantErr) {
+				t.Fatalf("err = %v, want a ValidationError containing %q", err, c.wantErr)
+			}
+		})
+	}
+}

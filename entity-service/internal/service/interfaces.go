@@ -1690,6 +1690,12 @@ type InlineImageLinker interface {
 	// shows more than MaxInlineImagesPerContent of its author's own images, or
 	// more than the total size limit together. Call it BEFORE saving.
 	ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error
+	// ValidateEmbeddedImages refuses (a *apierror.ValidationError) content typed by
+	// a user (authorEmail not empty) that embeds more than MaxInlineImagesPerContent
+	// base64 images, or more than the total size limit together. Call it BEFORE
+	// saving a NEW comment or creating a record. Machine callers (no author) and
+	// edits of existing content are not checked.
+	ValidateEmbeddedImages(ctx context.Context, authorEmail, html string) error
 	// ValidateDescriptionImages checks, BEFORE a record is created, the images its
 	// rich-text description shows: at most MaxInlineImagesPerContent, within the
 	// total size limit, each a COMPLETE draft uploaded to projectID by authorEmail,

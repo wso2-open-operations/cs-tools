@@ -506,6 +506,49 @@ func (s *storedAttachmentService) LinkDescriptionImages(ctx context.Context, wor
 		"workItemId", workItemID, "referenced", len(ids), "linked", len(linked))
 }
 
+// embeddedImageRe finds a base64 image embedded in HTML, capturing its payload.
+var embeddedImageRe = regexp.MustCompile(`(?i)data:image/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=]+)`)
+
+// embeddedImages is how many base64 images html embeds and how large they are
+// together once decoded.
+func embeddedImages(html string) (count int, bytes int64) {
+	if !strings.Contains(strings.ToLower(html), "data:image") {
+		return 0, 0
+	}
+	for _, m := range embeddedImageRe.FindAllStringSubmatch(html, -1) {
+		payload := m[1]
+		n := int64(len(payload)) * 3 / 4
+		n -= int64(len(payload) - len(strings.TrimRight(payload, "=")))
+		count++
+		bytes += n
+	}
+	return count, bytes
+}
+
+// ValidateEmbeddedImages implements InlineImageLinker.
+//
+// A base64 image is stored inside the content itself (this service stores no
+// file for it), so it was never subject to the image limits. For content a user
+// types, the same limits now apply to it as to uploaded images. A machine caller
+// (no author) sends content of other systems, and an edit keeps what an older
+// comment already held, so neither is checked.
+func (s *storedAttachmentService) ValidateEmbeddedImages(_ context.Context, authorEmail, html string) error {
+	if authorEmail == "" {
+		return nil
+	}
+	count, bytes := embeddedImages(html)
+	if count == 0 {
+		return nil
+	}
+	if count > MaxInlineImagesPerContent {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("At most %d images can be added. Remove some and try again.", MaxInlineImagesPerContent)}
+	}
+	if limit := s.limits.inlineTotalMax(); bytes > limit {
+		return &apierror.ValidationError{Msg: "The images are larger than " + formatByteLimit(limit) + " together. Remove some and try again."}
+	}
+	return nil
+}
+
 // ValidateCommentImages implements InlineImageLinker.
 //
 // A comment may show at most MaxInlineImagesPerContent of its author's own images
