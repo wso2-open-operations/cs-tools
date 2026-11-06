@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import { Box, Button, Card, Chip, Skeleton, Tab, Tabs, Tooltip, Typography } from "@wso2/oxygen-ui";
 import {
   Activity,
@@ -118,7 +119,7 @@ import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-oper
 import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
 import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
 import { looksLikeHtml, sanitizeStructuredHtml } from "@utils/sanitizeHtml";
-import { linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
+import { hasCommentContent, linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
 import { withRenderedIncidentNotes } from "@features/csm-operations/utils/incidentNoteHtml";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
@@ -1040,24 +1041,21 @@ export default function CsmIncidentDetailPage(): JSX.Element {
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      incidentId: id,
-                      bodyHtml,
-                      internal,
-                    });
-                  }
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId: id,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                      referenceType: "incident",
-                    });
-                  }
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ incidentId: id, bodyHtml, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({
+                        caseId: id,
+                        file,
+                        name,
+                        uploadedBy: engineerName,
+                        referenceType: "incident",
+                      }),
+                  });
                   setComposerOpen(false);
                 }}
               />
@@ -1256,6 +1254,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           <AttachmentsWidget
             attachments={attachmentList}
             uploading={postAttachment.isPending}
+            uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
+            onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError
                 ? (postAttachment.error?.message ?? "Could not upload the attachment.")

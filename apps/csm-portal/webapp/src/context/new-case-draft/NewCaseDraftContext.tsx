@@ -19,7 +19,6 @@
 import { createContext, useContext, useMemo, useRef, type JSX, type ReactNode } from "react";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import type { BeCaseIssueType } from "@api/backend/types";
-import type { EncodedAttachment } from "@components/attachments/encodeAttachment";
 import type { WatchListEdits } from "@features/csm-cases/utils/createCaseWatchList";
 
 /** The user-entered values of the New case form. */
@@ -37,7 +36,6 @@ export interface NewCaseDraft {
   issueType: BeCaseIssueType | "";
   subject: string;
   description: string;
-  attachments: EncodedAttachment[];
   watchEdits: WatchListEdits;
 }
 

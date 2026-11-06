@@ -84,11 +84,10 @@ import UploadAttachmentModal from "@features/support/components/case-details/att
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseType } from "@features/support/constants/supportConstants";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLogger } from "@hooks/useLogger";
 import {
   uploadServiceRequestAttachments,
-  fileToBase64,
   ATTACHMENT_UPLOAD_WAIT_MS,
 } from "@features/operations/utils/serviceRequestAttachments";
 
@@ -211,7 +210,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const queryClient = useQueryClient();
   const authFetch = useAuthApiClient();
   const logger = useLogger();
-  const postAttachments = usePostAttachments();
+  const { upload: storedUpload } = useStoredAttachmentUpload();
   const { data: userDetails } = useGetUserDetails();
   const userTimeZone = userDetails?.timeZone?.trim() || resolveDisplayTimeZone();
 
@@ -603,8 +602,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
           caseId: data.id,
           attachments,
           attachmentNames: attachmentNamesRef.current,
-          uploadAttachment: postAttachments.mutateAsync,
-          encodeFile: fileToBase64,
+          uploadAttachment: storedUpload.mutateAsync,
           logger,
         });
         const timedOut = await Promise.race([
@@ -617,7 +615,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
           void uploadPromise.then((failed) => {
             if (failed.length > 0) {
               showError(
-                `Failed to upload: ${failed.join(", ")}. You can retry from the Attachments tab.`,
+                `The service request was created, but these files failed to upload: ${failed.join(", ")}. You can add them from the Attachments tab.`,
               );
             }
           });
@@ -625,7 +623,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
           const failed = await uploadPromise;
           if (failed.length > 0) {
             showError(
-              `The service request was created, but ${failed.length} attachment${failed.length === 1 ? "" : "s"} failed to upload. You can retry from the Attachments tab.`,
+              `The service request was created, but these files failed to upload: ${failed.join(", ")}. You can add them from the Attachments tab.`,
             );
           }
         }

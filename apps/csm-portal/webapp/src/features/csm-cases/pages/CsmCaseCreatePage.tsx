@@ -35,10 +35,7 @@ import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
 import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useNewCaseDraft } from "@context/new-case-draft/NewCaseDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -48,7 +45,7 @@ import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeploymen
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { failedUploadsMessage, uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
@@ -148,9 +145,8 @@ export default function CsmCaseCreatePage(): JSX.Element {
   );
   const [subject, setSubject] = useState(restored?.subject ?? relatedCaseState?.subject ?? "");
   const [description, setDescription] = useState(restored?.description ?? "");
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
-    restored?.attachments ?? [],
-  );
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   const deployments = useSearchDeployments(projectId || undefined);
 
@@ -236,7 +232,6 @@ export default function CsmCaseCreatePage(): JSX.Element {
       issueType,
       subject,
       description,
-      attachments,
       watchEdits,
     });
   }, [
@@ -249,7 +244,6 @@ export default function CsmCaseCreatePage(): JSX.Element {
     issueType,
     subject,
     description,
-    attachments,
     watchEdits,
   ]);
 
@@ -270,8 +264,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
   );
   const descriptionOverLimit = descriptionBytes > MAX_DESCRIPTION_CONTENT_BYTES;
   // Attachments are uploaded after the case is created (separate requests), so
-  // they don't count against the create-body budget — only the per-file cap in
-  // AttachmentsField applies.
+  // they don't count against the create-body budget.
   const descriptionError = descriptionOverLimit
     ? `The case description is too large (${formatBytes(
         descriptionBytes,
@@ -338,19 +331,15 @@ export default function CsmCaseCreatePage(): JSX.Element {
       });
       submitted.current = true;
       draftStore.clear();
-      // The create endpoint doesn't attach files for standard cases, so upload
-      // them to the new case afterwards. A partial failure still lands the case.
+      // Files are uploaded to the new case afterwards. A partial failure still
+      // lands the case.
       const failed = await uploadAttachmentsToCase(
         postAttachment.mutateAsync,
         created.id,
         attachments,
         uploadedBy,
       );
-      if (failed > 0) {
-        showError(
-          `The case was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the case page.`,
-        );
-      }
+      if (failed.length > 0) showError(failedUploadsMessage("case", failed));
       navigate(`/cases/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
       setSubmitting(false);
@@ -647,7 +636,6 @@ export default function CsmCaseCreatePage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
-              maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
             />
           </Grid>
         </Grid>

@@ -18,7 +18,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { EncodedAttachment } from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { NewServiceRequestDraftProvider } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 
 const navigateMock = vi.fn();
@@ -105,8 +105,8 @@ vi.mock("@components/attachments/AttachmentsField", () => ({
     attachments,
     onChange,
   }: {
-    attachments: EncodedAttachment[];
-    onChange: (next: EncodedAttachment[]) => void;
+    attachments: PendingAttachment[];
+    onChange: (next: PendingAttachment[]) => void;
   }) => (
     <div>
       <span data-testid="attachment-names">{attachments.map((a) => a.name).join(",")}</span>
@@ -114,7 +114,7 @@ vi.mock("@components/attachments/AttachmentsField", () => ({
         onClick={() =>
           onChange([
             ...attachments,
-            { name: "notes.txt", file: "eA==", size: 1, raw: new File(["x"], "notes.txt") },
+            { name: "notes.txt", size: 1, raw: new File(["x"], "notes.txt") },
           ])
         }
       >
@@ -243,7 +243,8 @@ describe("CreateServiceRequestPage draft retention across in-app tab switches", 
     expect(screen.getByLabelText(CATALOG_ITEM)).toHaveTextContent("Restart service");
     expect(screen.getByLabelText(/Request Details/)).toHaveValue("Please restart the service");
     expect(screen.getByLabelText("Description body")).toHaveValue("<p>Needs a restart</p>");
-    expect(screen.getByTestId("attachment-names")).toHaveTextContent("notes.txt");
+    // Files cannot be kept in a draft, so they are chosen again.
+    expect(screen.getByTestId("attachment-names")).toBeEmptyDOMElement();
     // Everything restored is enough to submit again without re-entering anything.
     expect(screen.getByRole("button", { name: "Create service request" })).toBeEnabled();
   });
@@ -335,7 +336,7 @@ describe("CreateServiceRequestPage draft retention across in-app tab switches", 
 
     expect(screen.getByTestId("project-value")).toHaveTextContent("proj-a");
     expect(screen.getByLabelText(/Request Details/)).toHaveValue("Please restart the service");
-    expect(screen.getByTestId("attachment-names")).toHaveTextContent("notes.txt");
+    expect(screen.getByTestId("attachment-names")).toBeEmptyDOMElement();
   });
 
   it("does not offer a second copy of a create that is still in flight", async () => {

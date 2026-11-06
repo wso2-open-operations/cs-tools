@@ -38,10 +38,7 @@ import type { BeProject } from "@api/backend/types";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useNewServiceRequestDraft } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -51,7 +48,7 @@ import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadat
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { failedUploadsMessage, uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalogs";
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
@@ -150,9 +147,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [severity, setSeverity] = useState<ServiceRequestSeverity | "">(restored?.severity ?? "");
   // Variable answers, keyed by variable id.
   const [answers, setAnswers] = useState<Record<string, string>>(restored?.answers ?? {});
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
-    restored?.attachments ?? [],
-  );
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
   // project is caught before the engineer fills out the rest of the form
@@ -233,7 +229,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
       catalogItemId,
       severity,
       answers,
-      attachments,
     });
   }, [
     draftStore,
@@ -246,7 +241,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
     catalogItemId,
     severity,
     answers,
-    attachments,
     submitting,
   ]);
 
@@ -410,19 +404,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
       // submission is left to clear. Clearing again here would discard a draft
       // that a form reopened mid-create has started since.
       submitted.current = true;
-      // The create endpoint doesn't attach files for service requests, so upload
-      // them to the new case afterwards. A partial failure still lands the case.
+      // Files are uploaded to the new case afterwards. A partial failure still
+      // lands the case.
       const failed = await uploadAttachmentsToCase(
         postAttachment.mutateAsync,
         created.id,
         attachments,
         uploadedBy,
       );
-      if (failed > 0) {
-        showError(
-          `The service request was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the case page.`,
-        );
-      }
+      if (failed.length > 0) showError(failedUploadsMessage("service request", failed));
       navigate(`/cases/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
       setSubmitting(false);
@@ -719,7 +709,6 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 attachments={attachments}
                 onChange={setAttachments}
                 onError={showError}
-                maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
               />
             </Grid>
           )}

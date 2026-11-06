@@ -16,7 +16,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   uploadServiceRequestAttachments,
-  fileToBase64,
   ATTACHMENT_UPLOAD_WAIT_MS,
   type AttachmentUploadItem,
 } from "../serviceRequestAttachments";
@@ -40,9 +39,8 @@ describe("serviceRequestAttachments", () => {
       expect(uploadAttachment).not.toHaveBeenCalled();
     });
 
-    it("uploads all attachments with base64 content and custom names", async () => {
+    it("uploads every file as a work item attachment of the case, with custom names", async () => {
       const uploadAttachment = vi.fn().mockResolvedValue(undefined);
-      const encodeFile = vi.fn().mockImplementation(async (f: File) => `base64-${f.name}`);
       const file1 = new File(["content1"], "log.txt", { type: "text/plain" });
       const file2 = new File(["content2"], "screenshot.png", { type: "image/png" });
 
@@ -59,27 +57,23 @@ describe("serviceRequestAttachments", () => {
         attachments,
         attachmentNames,
         uploadAttachment,
-        encodeFile,
       });
 
       expect(failed).toEqual([]);
-      expect(encodeFile).toHaveBeenCalledTimes(2);
       expect(uploadAttachment).toHaveBeenCalledTimes(2);
       expect(uploadAttachment).toHaveBeenNthCalledWith(1, {
+        type: "work_item",
+        parentId: "sr-999",
         caseId: "sr-999",
-        body: {
-          name: "custom_log.txt",
-          type: "text/plain",
-          content: "base64-log.txt",
-        },
+        file: file1,
+        body: { name: "custom_log.txt" },
       });
       expect(uploadAttachment).toHaveBeenNthCalledWith(2, {
+        type: "work_item",
+        parentId: "sr-999",
         caseId: "sr-999",
-        body: {
-          name: "screenshot.png",
-          type: "image/png",
-          content: "base64-screenshot.png",
-        },
+        file: file2,
+        body: { name: "screenshot.png" },
       });
     });
 
@@ -89,7 +83,6 @@ describe("serviceRequestAttachments", () => {
         .fn()
         .mockRejectedValueOnce(new Error("Network upload failed"))
         .mockResolvedValueOnce(undefined);
-      const encodeFile = vi.fn().mockResolvedValue("base64-data");
 
       const file1 = new File(["1"], "fail.pdf", { type: "application/pdf" });
       const file2 = new File(["2"], "success.pdf", { type: "application/pdf" });
@@ -104,7 +97,6 @@ describe("serviceRequestAttachments", () => {
         attachments,
         attachmentNames: new Map(),
         uploadAttachment,
-        encodeFile,
         logger,
       });
 
@@ -114,43 +106,6 @@ describe("serviceRequestAttachments", () => {
         "Failed to upload attachment fail.pdf",
         expect.any(Error),
       );
-    });
-
-    it("handles file encoding error gracefully and returns failed attachment name", async () => {
-      const logger = { error: vi.fn() };
-      const uploadAttachment = vi.fn().mockResolvedValue(undefined);
-      const encodeFile = vi.fn().mockRejectedValue(new Error("FileReader error"));
-
-      const file = new File(["data"], "corrupted.bin", { type: "application/octet-stream" });
-      const attachments: AttachmentUploadItem[] = [{ id: "att-1", file }];
-
-      const failed = await uploadServiceRequestAttachments({
-        caseId: "sr-200",
-        attachments,
-        attachmentNames: new Map(),
-        uploadAttachment,
-        encodeFile,
-        logger,
-      });
-
-      expect(failed).toEqual(["corrupted.bin"]);
-      expect(uploadAttachment).not.toHaveBeenCalled();
-      expect(logger.error).toHaveBeenCalledWith(
-        "Failed to upload attachment corrupted.bin",
-        expect.any(Error),
-      );
-    });
-  });
-
-  describe("fileToBase64", () => {
-    it("converts a file to base64 string without data prefix", async () => {
-      const file = new File(["hello world"], "hello.txt", { type: "text/plain" });
-      const result = await fileToBase64(file);
-      expect(typeof result).toBe("string");
-      expect(result).not.toContain("data:");
-      expect(result).not.toContain(";base64,");
-      // "hello world" in base64 is "aGVsbG8gd29ybGQ="
-      expect(result).toBe(btoa("hello world"));
     });
   });
 });

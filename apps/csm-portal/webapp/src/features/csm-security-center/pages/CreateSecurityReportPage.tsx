@@ -35,16 +35,18 @@ import { BackendApiError } from "@api/backend/client";
 import Editor from "@components/rich-text-editor/Editor";
 import RequiredMark from "@components/RequiredMark";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  totalEncodedBytes,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
+import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
+import {
+  failedUploadsMessage,
+  uploadAttachmentsToCase,
+} from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
@@ -87,14 +89,14 @@ export default function CreateSecurityReportPage(): JSX.Element {
   // product reselect doesn't clobber their text.
   const [subjectEdited, setSubjectEdited] = useState(false);
   const [description, setDescription] = useState("");
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
+  const postAttachment = usePostCsmCaseAttachment();
+  const uploadedBy = useEngineerDisplayName();
   const [submitting, setSubmitting] = useState(false);
-
-  const overLimit = totalEncodedBytes(attachments) > POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES;
 
   // Auto-generate the report title as "{Deployment} - {Product} - {date}" when
   // the product is chosen (both names are loaded by then), matching the customer
@@ -129,9 +131,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
 
-  // At least one attachment is required here: the backing service validates
-  // the create request atomically for this case type, so an attachment added
-  // only after creation would never satisfy it.
+  // At least one file must be chosen. The files are uploaded right after the
+  // report is created, so the form is where the rule is enforced.
   const canSubmit = useMemo(
     () =>
       !!projectId &&
@@ -140,7 +141,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
       subject.trim().length > 0 &&
       !isEmptyHtml(description) &&
       attachments.length > 0 &&
-      !overLimit &&
       !submitting,
     [
       projectId,
@@ -149,7 +149,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
       subject,
       description,
       attachments,
-      overLimit,
       submitting,
     ],
   );
@@ -165,8 +164,17 @@ export default function CreateSecurityReportPage(): JSX.Element {
         deployedProductId,
         subject: subject.trim(),
         description,
-        attachments: attachments.map((a) => ({ name: a.name, file: a.file })),
       });
+      // The report exists now: upload the chosen files to it. A failed upload
+      // does not undo the report, so say which files did not make it and go on
+      // to the report, where they can be added again.
+      const failed = await uploadAttachmentsToCase(
+        postAttachment.mutateAsync,
+        created.id,
+        attachments,
+        uploadedBy,
+      );
+      if (failed.length > 0) showError(failedUploadsMessage("security report", failed));
       navigate(`/security-center/security-reports/${created.id}`, {
         state: { from: backTarget },
       });
@@ -348,7 +356,6 @@ export default function CreateSecurityReportPage(): JSX.Element {
               attachments={attachments}
               onChange={setAttachments}
               onError={showError}
-              maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
               required
               disabled={submitting}
             />

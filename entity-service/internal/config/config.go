@@ -134,36 +134,6 @@ const (
 	SLADataSourceServiceNow SLADataSource = "servicenow"
 )
 
-// AttachmentDataSource identifies which backend three case attachment reads
-// (GET /attachments/{id}, POST /attachments/search, GET
-// /attachments/{id}/content) and the case activity feed (POST
-// /cases/{id}/activities/search) use. GetAttachmentByID (GET
-// /attachments/{id}) is included even though it is metadata, not content:
-// backend-v2's content-download route resolves an attachment's owning case
-// through it first, purely for its own authorization check, before ever
-// calling the content route -- leaving it on DataSource would silently
-// reintroduce a 404 in front of the content route this flag exists to fix.
-// It does NOT affect PATCH/DELETE /attachments/{id}, POST /attachments, or
-// POST /attachments/{id}/confirm -- those always follow DataSource, because
-// the ServiceNow-backed implementation this switches to is read-only and
-// cannot serve those writes. Independent of DataSource and SLADataSource,
-// same reasoning as SLADataSource: a deployment can run DataSource=postgres
-// for every other entity while pointing these three attachment reads and the
-// activity feed specifically at ServiceNow. This is a stopgap for while
-// Postgres-synced attachment content and activity history aren't reliable
-// yet, meant to go away once that migration lands -- see routes.go for the
-// wiring.
-type AttachmentDataSource string
-
-const (
-	// AttachmentDataSourcePostgres reads case attachments and the activity
-	// feed from this service's own Postgres tables. The default.
-	AttachmentDataSourcePostgres AttachmentDataSource = "postgres"
-	// AttachmentDataSourceServiceNow reads case attachments and the activity
-	// feed live from the ServiceNow integration service instead.
-	AttachmentDataSourceServiceNow AttachmentDataSource = "servicenow"
-)
-
 // Config holds all environment-driven settings for the service.
 type Config struct {
 	DBHost string
@@ -244,11 +214,6 @@ type Config struct {
 	// usage/metrics reads under DATA_SOURCE=postgres-servicenow-dual-write.
 	// Defaults to "postgres" -- see UsageReadMode's own doc comment.
 	UsageReadMode UsageReadMode
-	// AttachmentDataSource controls which backend two case attachment reads
-	// and the activity feed use, independent of DataSource and
-	// SLADataSource. Defaults to "postgres" -- see AttachmentDataSource's
-	// own doc comment.
-	AttachmentDataSource AttachmentDataSource
 	// CSMSLAEngineEnabled gates this service's own in-process SLA clock
 	// engine (internal/service/sla_engine_service.go, source='CSM' "sla"
 	// rows -- see repository.SLAEngineRepository's own doc comment for why
@@ -874,6 +839,14 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
+	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
+	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
+	// (INLINE_IMAGE_MAX_BYTES, default 10 MiB). The declared size is checked
+	// when an upload starts and the real size when it is confirmed. Provisional
+	// defaults, to be set from the real size distribution.
+	AttachmentMaxBytes  int64
+	InlineImageMaxBytes int64
+
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
 	// (POST /organizations/internal/users/search), used by the Salesforce
 	// Account ingest to auto-provision a CSM "user" row for an account person
@@ -996,7 +969,6 @@ func Load() *Config {
 		DataSource:                                    DataSource(getEnvOrDefault("DATA_SOURCE", string(DataSourcePostgres))),
 		SLADataSource:                                 SLADataSource(getEnvOrDefault("SLA_DATA_SOURCE", string(SLADataSourcePostgres))),
 		UsageReadMode:                                 UsageReadMode(getEnvOrDefault("PRODUCT_CONSUMPTION_DATA_READ_MODE", string(UsageReadModePostgres))),
-		AttachmentDataSource:                          AttachmentDataSource(getEnvOrDefault("ATTACHMENT_DATA_SOURCE", string(AttachmentDataSourcePostgres))),
 		CSMSLAEngineEnabled:                           envFlagOn("CSM_SLA_ENGINE_ENABLED"),
 		ServiceNowIntegrationServiceBaseURL:           os.Getenv("SERVICENOW_INTEGRATION_SERVICE_BASE_URL"),
 		ServiceNowIntegrationServiceTokenURL:          os.Getenv("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL"),
@@ -1128,6 +1100,8 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
+	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
+	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 10<<20)
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1360,12 +1334,6 @@ func (c *Config) Validate() error {
 	default:
 		return fmt.Errorf("invalid PRODUCT_CONSUMPTION_DATA_READ_MODE %q: must be %q or %q", c.UsageReadMode, UsageReadModePostgres, UsageReadModeLegacy)
 	}
-	switch c.AttachmentDataSource {
-	case AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow:
-		// valid
-	default:
-		return fmt.Errorf("invalid ATTACHMENT_DATA_SOURCE %q: must be %q or %q", c.AttachmentDataSource, AttachmentDataSourcePostgres, AttachmentDataSourceServiceNow)
-	}
 	// Postgres credentials are required for DATA_SOURCE=postgres and
 	// DATA_SOURCE=postgres-servicenow-dual-write — both serve every entity read
 	// and write from the pool (the fallback mode's ServiceNow leg is a
@@ -1407,24 +1375,22 @@ func (c *Config) Validate() error {
 	// DATA_SOURCE=servicenow (reads go there), for
 	// DATA_SOURCE=postgres-servicenow-dual-write (the best-effort mirror write
 	// goes there, via the same client — see SNWritebackDispatcher), for
-	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead), and for
-	// ATTACHMENT_DATA_SOURCE=servicenow (attachment/activity-feed reads go
-	// there instead) -- all independent of DATA_SOURCE: a plain
-	// DATA_SOURCE=postgres deployment that points SLA or attachment reads at
+	// SLA_DATA_SOURCE=servicenow (SLA reads go there instead) -- independent of
+	// DATA_SOURCE: a plain DATA_SOURCE=postgres deployment that points SLA reads at
 	// ServiceNow still needs real credentials for that client.
-	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow || c.AttachmentDataSource == AttachmentDataSourceServiceNow
+	snRequired := c.DataSource == DataSourceServiceNow || c.DataSource == DataSourcePostgresServiceNowDualWrite || c.SLADataSource == SLADataSourceServiceNow
 	if snRequired {
 		if c.ServiceNowIntegrationServiceBaseURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_BASE_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceTokenURL == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_TOKEN_URL is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientID == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_ID is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 		if c.ServiceNowIntegrationServiceClientSecret == "" {
-			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s, SLA_DATA_SOURCE=%s, or ATTACHMENT_DATA_SOURCE=%s", c.DataSource, c.SLADataSource, c.AttachmentDataSource)
+			return fmt.Errorf("SERVICENOW_INTEGRATION_SERVICE_CLIENT_SECRET is required when DATA_SOURCE=%s or SLA_DATA_SOURCE=%s", c.DataSource, c.SLADataSource)
 		}
 	}
 	// EVENT_HUB_BROKER/EVENT_HUB_CONNECTION_STRING/EVENT_HUB_TOPIC are
@@ -1763,6 +1729,21 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// envPositiveInt64 reads a positive integer, falling back to def when unset,
+// unparseable or not above zero (same posture as envDuration: a typo costs the
+// override, it does not stop the service starting).
+func envPositiveInt64(key string, def int64) int64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
 }
 
 // envDurationOrOff is envDuration for an interval that can be switched off:

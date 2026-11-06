@@ -63,20 +63,15 @@ func (s stubAccessServiceWithScope) ResolveScope(context.Context) (AccessScope, 
 // an unsupported field happens before the Postgres backend ever reaches the
 // repository, not merely that the repository ignores the field.
 type stubCaseRepo struct {
-	aggregateCases             func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
-	caseVolumeTrend            func(ctx context.Context, req domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error)
-	searchCases                func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
-	createCaseAttachment       func(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error)
-	createCaseAttachmentFromSN func(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error)
-	searchCaseAttachments      func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	searchWorkItemAttachments  func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
-	getCaseAttachmentByID      func(ctx context.Context, id string) (domain.Attachment, error)
-	deleteCaseAttachment       func(ctx context.Context, id string) error
-	updateAttachmentName       func(ctx context.Context, id, name, updatedBy string) (time.Time, error)
-	confirmCaseAttachment      func(ctx context.Context, id string) (domain.Attachment, error)
-	addCaseWatcherIfAbsent     func(ctx context.Context, caseID, userID string) error
-	searchCaseComments         func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
-	updateCase                 func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error)
+	aggregateCases              func(ctx context.Context, req domain.SearchCasesRequest, groupBy string) ([]domain.AggregateBucket, error)
+	caseVolumeTrend             func(ctx context.Context, req domain.SearchCasesRequest, days []string) (map[string]domain.CaseVolumeDayCount, error)
+	searchCases                 func(ctx context.Context, req domain.SearchCasesRequest) ([]domain.SearchCaseView, int, error)
+	searchCaseAttachments       func(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	searchWorkItemAttachments   func(ctx context.Context, workItemID string, referenceType domain.ReferenceType, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	searchDeploymentAttachments func(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error)
+	addCaseWatcherIfAbsent      func(ctx context.Context, caseID, userID string) error
+	searchCaseComments          func(ctx context.Context, req domain.SearchCaseCommentsRequest) ([]domain.CaseComment, int, error)
+	updateCase                  func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, error)
 	// updateCasePrev, when set, takes precedence over updateCase and also
 	// reports the repository's under-lock previous state.
 	updateCasePrev                func(ctx context.Context, req domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, *domain.CaseState, error)
@@ -195,18 +190,6 @@ func (s *stubCaseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequ
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) CreateCaseAttachment(ctx context.Context, req domain.CreateAttachmentRequest) (domain.Attachment, error) {
-	if s.createCaseAttachment != nil {
-		return s.createCaseAttachment(ctx, req)
-	}
-	panic("not implemented")
-}
-func (s *stubCaseRepo) CreateCaseAttachmentFromServiceNow(ctx context.Context, req domain.CreateAttachmentRequest, id string, sizeBytes int, uploadedBy string) (domain.Attachment, error) {
-	if s.createCaseAttachmentFromSN != nil {
-		return s.createCaseAttachmentFromSN(ctx, req, id, sizeBytes, uploadedBy)
-	}
-	panic("not implemented")
-}
 func (s *stubCaseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
 	if s.searchCaseAttachments != nil {
 		return s.searchCaseAttachments(ctx, caseID, pagination)
@@ -219,27 +202,9 @@ func (s *stubCaseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID
 	}
 	panic("not implemented")
 }
-func (s *stubCaseRepo) GetCaseAttachmentByID(ctx context.Context, id string) (domain.Attachment, error) {
-	if s.getCaseAttachmentByID != nil {
-		return s.getCaseAttachmentByID(ctx, id)
-	}
-	panic("not implemented")
-}
-func (s *stubCaseRepo) DeleteCaseAttachment(ctx context.Context, id string) error {
-	if s.deleteCaseAttachment != nil {
-		return s.deleteCaseAttachment(ctx, id)
-	}
-	panic("not implemented")
-}
-func (s *stubCaseRepo) UpdateCaseAttachmentName(ctx context.Context, id, name, updatedBy string) (time.Time, error) {
-	if s.updateAttachmentName != nil {
-		return s.updateAttachmentName(ctx, id, name, updatedBy)
-	}
-	panic("not implemented")
-}
-func (s *stubCaseRepo) ConfirmCaseAttachment(ctx context.Context, id string) (domain.Attachment, error) {
-	if s.confirmCaseAttachment != nil {
-		return s.confirmCaseAttachment(ctx, id)
+func (s *stubCaseRepo) SearchDeploymentAttachments(ctx context.Context, deploymentID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
+	if s.searchDeploymentAttachments != nil {
+		return s.searchDeploymentAttachments(ctx, deploymentID, pagination)
 	}
 	panic("not implemented")
 }

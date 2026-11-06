@@ -34,4 +34,9 @@ describe("formatBytes", () => {
     expect(formatBytes(1024 * 1024)).toBe("1.00 MB");
     expect(formatBytes(5 * 1024 * 1024 + 512 * 1024)).toBe("5.50 MB");
   });
+
+  it("renders GB with two decimals", () => {
+    expect(formatBytes(1024 ** 3)).toBe("1.00 GB");
+    expect(formatBytes(10 * 1024 ** 3)).toBe("10.00 GB");
+  });
 });

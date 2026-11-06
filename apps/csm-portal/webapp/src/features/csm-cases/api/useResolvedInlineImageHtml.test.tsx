@@ -19,10 +19,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
-const { postMock, getBlobMock, sftpgoFlag, userRoles } = vi.hoisted(() => ({
+const { postMock, getBlobMock, userRoles } = vi.hoisted(() => ({
   postMock: vi.fn(),
   getBlobMock: vi.fn(),
-  sftpgoFlag: { enabled: false },
   // Defaults to a role that can download attachments, so the existing
   // resolution tests below exercise the real fetch/data-URL path; the
   // permission tests further down override this per-case.
@@ -31,12 +30,18 @@ const { postMock, getBlobMock, sftpgoFlag, userRoles } = vi.hoisted(() => ({
 
 vi.mock("@api/backend/client", () => ({
   useBackendApi: () => ({ post: postMock, getBlob: getBlobMock }),
+  BackendApiError: class BackendApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
 }));
 
 vi.mock("@context/current-user/CurrentUserContext", () => ({
   useCurrentUser: () => ({
     user: {
-      sftpgoAttachmentStorageEnabled: sftpgoFlag.enabled,
       roles: userRoles.value,
     },
     isLoading: false,
@@ -44,6 +49,7 @@ vi.mock("@context/current-user/CurrentUserContext", () => ({
   }),
 }));
 
+import { BackendApiError } from "@api/backend/client";
 import { useResolvedInlineImageHtml } from "@features/csm-cases/api/useResolvedInlineImageHtml";
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -62,11 +68,10 @@ describe("useResolvedInlineImageHtml", () => {
   beforeEach(() => {
     postMock.mockReset();
     getBlobMock.mockReset();
-    sftpgoFlag.enabled = false;
     userRoles.value = ["cs_engineer"];
   });
 
-  it("flag off: resolves via GET /attachments/{id}/content into a data: URL", async () => {
+  it("resolves via the streamed comment-image route into a data: URL", async () => {
     getBlobMock.mockResolvedValue(new Blob(["fake"], { type: "image/png" }));
 
     const { result } = renderHook(() => useResolvedInlineImageHtml(HTML), {
@@ -82,34 +87,11 @@ describe("useResolvedInlineImageHtml", () => {
     expect(result.current.resolvedHtml).toContain("data:image/png;base64,");
   });
 
-  it("flag on: resolves via POST /attachments/{id}/share and uses shareUrl directly, without fetching content", async () => {
-    sftpgoFlag.enabled = true;
-    postMock.mockResolvedValue({
-      shareUrl: "https://sftpgo.example.com/web/client/pubshares/abc?compress=false",
-    });
-
-    const { result } = renderHook(() => useResolvedInlineImageHtml(HTML), {
-      wrapper,
-    });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    expect(getBlobMock).not.toHaveBeenCalled();
-    expect(postMock).toHaveBeenCalledTimes(1);
-    const [calledPath, calledBody] = postMock.mock.calls[0];
-    expect(calledPath).toMatch(/\/attachments\/.+\/share$/);
-    expect(calledBody).toEqual({});
-    expect(result.current.resolvedHtml).toContain(
-      "https://sftpgo.example.com/web/client/pubshares/abc?compress=false",
-    );
-    expect(result.current.resolvedHtml).not.toContain("data:");
-  });
-
   describe("bare attachment-id src (migrated content)", () => {
     const UUID = "0f15cbcc-c36b-8310-af2f-404599013196";
     const BARE_HTML = `<p><img src="/${UUID}"><br></p>`;
 
-    it("flag off: fetches content by canonical uuid and resolves to a data: URL", async () => {
+    it("fetches content by canonical uuid and resolves to a data: URL", async () => {
       getBlobMock.mockResolvedValue(new Blob(["fake"], { type: "image/png" }));
       const { result } = renderHook(
         () => useResolvedInlineImageHtml(BARE_HTML),
@@ -117,23 +99,8 @@ describe("useResolvedInlineImageHtml", () => {
       );
       await waitFor(() => expect(result.current.isLoading).toBe(false));
       expect(getBlobMock).toHaveBeenCalledTimes(1);
-      expect(getBlobMock.mock.calls[0][0]).toBe(`/attachments/${UUID}/content`);
+      expect(getBlobMock.mock.calls[0][0]).toBe(`/attachments/inline/${UUID}/content`);
       expect(result.current.resolvedHtml).toContain("data:image/png;base64,");
-    });
-
-    it("flag on: creates one share for the canonical uuid and uses its url", async () => {
-      sftpgoFlag.enabled = true;
-      postMock.mockResolvedValue({ shareUrl: "https://sftpgo.example.com/s/abc" });
-      const { result } = renderHook(
-        () => useResolvedInlineImageHtml(BARE_HTML),
-        { wrapper },
-      );
-      await waitFor(() => expect(result.current.isLoading).toBe(false));
-      expect(postMock).toHaveBeenCalledTimes(1);
-      expect(postMock.mock.calls[0][0]).toBe(`/attachments/${UUID}/share`);
-      expect(result.current.resolvedHtml).toContain(
-        "https://sftpgo.example.com/s/abc",
-      );
     });
 
     it("does not double-fetch when the same attachment appears bare and as .iix", async () => {
@@ -202,8 +169,8 @@ describe("useResolvedInlineImageHtml", () => {
     expect(result.current.resolvedHtml).toContain("data:image/png;base64,");
   });
 
-  // A raw base64-embedded image (content authored before/without SFTPGo
-  // attachment storage) has no .iix reference at all -- nothing to fetch,
+  // A raw base64-embedded image (content authored before images were stored
+  // as attachments) has no .iix reference at all -- nothing to fetch,
   // since there's no separate attachment record. See
   // useResolvedInlineImageHtml's own doc comment for why this still needs
   // hiding, even though the underlying content already reached the browser.
@@ -233,5 +200,34 @@ describe("useResolvedInlineImageHtml", () => {
     );
 
     expect(result.current.resolvedHtml).toBe(RAW_BASE64_HTML);
+  });
+});
+
+describe("useResolvedInlineImageHtml: entity-service images that are gone", () => {
+  const UUID = "0f15cbcc-c36b-8310-af2f-404599013196";
+  const BARE_HTML = `<p><img src="/${UUID}"></p>`;
+
+  beforeEach(() => {
+    getBlobMock.mockReset();
+    postMock.mockReset();
+    userRoles.value = ["cs_engineer"];
+  });
+
+  it("a 410 shows the removed message and tries nothing else", async () => {
+    getBlobMock.mockRejectedValue(new BackendApiError(410, "This image was removed."));
+    const { result } = renderHook(() => useResolvedInlineImageHtml(BARE_HTML), { wrapper });
+    await waitFor(() => expect(result.current.resolvedHtml).toContain("This image was removed."));
+    expect(result.current.resolvedHtml).toContain('data-unresolved-reason="removed"');
+    expect(result.current.resolvedHtml).not.toContain(UUID);
+    expect(getBlobMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 500 shows the not-available message", async () => {
+    getBlobMock.mockRejectedValue(new BackendApiError(500, "boom"));
+    const { result } = renderHook(() => useResolvedInlineImageHtml(BARE_HTML), { wrapper });
+    // The query retries once (about a second) before it gives up.
+    await waitFor(() => expect(result.current.isLoading).toBe(false), { timeout: 5000 });
+    expect(result.current.resolvedHtml).toContain("This image is not available.");
+    expect(result.current.resolvedHtml).not.toContain("was removed");
   });
 });

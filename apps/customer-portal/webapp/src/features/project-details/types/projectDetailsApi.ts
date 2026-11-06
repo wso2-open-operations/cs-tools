@@ -18,10 +18,8 @@ import type {
   DeployedProductSearchRequest,
   PatchDeploymentProductRequest,
   PatchDeploymentRequest,
-  PostDeploymentAttachmentRequest,
   PostDeploymentProductRequest,
 } from "@features/project-details/types/deployments";
-import type { PatchAttachmentRequest } from "@features/support/types/attachments";
 
 export type UsePostDeploymentProductsSearchInfiniteOptions = {
   request?: DeployedProductSearchRequest;
@@ -40,21 +38,10 @@ export type PostDeploymentProductVariables = {
   body: PostDeploymentProductRequest;
 };
 
-export type PostDeploymentAttachmentVariables = {
-  deploymentId: string;
-  body: PostDeploymentAttachmentRequest;
-};
-
 export type PatchDeploymentProductVariables = {
   deploymentId: string;
   productId: string;
   body: PatchDeploymentProductRequest;
-};
-
-export type PatchDeploymentAttachmentVariables = {
-  deploymentId: string;
-  attachmentId: string;
-  body: PatchAttachmentRequest;
 };
 
 export type PatchDeploymentVariables = {

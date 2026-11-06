@@ -1,0 +1,197 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import { ApiQueryKeys } from "@constants/apiConstants";
+import {
+  confirmStoredUpload,
+  deleteStoredAttachment,
+  downloadStoredAttachment,
+  uploadStoredAttachment,
+  type DownloadSaveOutcome,
+  type StoredAttachmentConfirmed,
+  type StoredAttachmentType,
+  type StoredUploadStep,
+} from "@api/storedAttachments";
+
+/** Input for a download through entity-service. */
+export interface StoredAttachmentDownloadInput {
+  type: StoredAttachmentType;
+  id: string;
+  name?: string;
+  /** Size in bytes, when known: a small file skips the save dialog. */
+  size?: number;
+  /** Runs once the download ends (not on a closed save dialog or a failure); `saved` means written to the picked file, `started` handed to the browser. */
+  onSaved?: (outcome: DownloadSaveOutcome) => void;
+}
+
+/**
+ * Downloads an attachment through entity-service's one-use link. The link is
+ * requested only when this is called (a click) and used at once.
+ */
+export function useStoredAttachmentDownload(): {
+  downloadStoredAttachment: (input: StoredAttachmentDownloadInput) => Promise<void>;
+  /** True while any download runs. */
+  isDownloading: boolean;
+  /** True while this attachment's download runs. */
+  isDownloadingId: (id: string) => boolean;
+  /** Percentage (0-100) of this attachment's download, or null while it is not known yet or it is not downloading. */
+  downloadProgressOf: (id: string) => number | null;
+} {
+  const authFetch = useAuthApiClient();
+  // One entry per running download, so two at once do not overwrite each other.
+  const [downloads, setDownloads] = useState<Record<string, number | null>>({});
+  const setProgress = (id: string, percent: number | null): void =>
+    setDownloads((previous) =>
+      id in previous && previous[id] === percent ? previous : { ...previous, [id]: percent },
+    );
+  const mutation = useMutation<void, Error, StoredAttachmentDownloadInput>({
+    mutationFn: (input) =>
+      downloadStoredAttachment(authFetch, {
+        ...input,
+        onProgress: (received, total) =>
+          setProgress(
+            input.id,
+            total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null,
+          ),
+      }),
+    onMutate: (input) => setProgress(input.id, null),
+    onSettled: (_data, _error, input) =>
+      setDownloads((previous) => {
+        const next = { ...previous };
+        delete next[input.id];
+        return next;
+      }),
+  });
+  return {
+    downloadStoredAttachment: mutation.mutateAsync,
+    isDownloading: Object.keys(downloads).length > 0,
+    isDownloadingId: (id) => id in downloads,
+    downloadProgressOf: (id) => downloads[id] ?? null,
+  };
+}
+
+/** Variables of a stored upload: a case attachment (`caseId`) or a deployment document (`deploymentId`). */
+export interface StoredUploadVariables {
+  type: StoredAttachmentType;
+  parentId: string;
+  file: File;
+  /** Same shape as the older upload's variables, so the pending-upload placeholder works unchanged. */
+  body: { name: string };
+  caseId?: string;
+  deploymentId?: string;
+  onStep?: (step: StoredUploadStep) => void;
+  /** Cancels the upload. */
+  signal?: AbortSignal;
+  /** Bytes sent so far. */
+  onProgress?: (bytesSent: number, bytesTotal: number) => void;
+}
+
+/**
+ * Uploads a file in three steps (start, send in chunks, confirm). Shares the
+ * `postCaseAttachment` mutation key with the older upload so the case's pending
+ * placeholder shows either way. A confirm that failed after the file arrived
+ * throws UploadConfirmPendingError: use `confirm` to retry without re-uploading.
+ */
+export function useStoredAttachmentUpload() {
+  const authFetch = useAuthApiClient();
+  const queryClient = useQueryClient();
+
+  const invalidate = (vars: { caseId?: string; deploymentId?: string }) => {
+    if (vars.caseId) {
+      queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.CASE_ATTACHMENTS, vars.caseId],
+      });
+      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CASE_COMMENTS] });
+      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CASE_DETAILS] });
+    }
+    if (vars.deploymentId) {
+      queryClient.invalidateQueries({
+        queryKey: [ApiQueryKeys.DEPLOYMENT_ATTACHMENTS, vars.deploymentId],
+      });
+      queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.DEPLOYMENTS] });
+    }
+  };
+
+  const upload = useMutation<StoredAttachmentConfirmed, Error, StoredUploadVariables>({
+    mutationKey: ["postCaseAttachment"],
+    mutationFn: ({ type, parentId, file, body, onStep, signal, onProgress }) =>
+      uploadStoredAttachment(authFetch, {
+        type,
+        parentId,
+        file,
+        name: body.name,
+        onStep,
+        signal,
+        onProgress,
+      }),
+    onSuccess: (_data, vars) => invalidate(vars),
+  });
+
+  const confirm = useMutation<
+    StoredAttachmentConfirmed,
+    Error,
+    {
+      type: StoredAttachmentType;
+      attachmentId: string;
+      /** The chunk count the failed upload stored (`UploadConfirmPendingError.chunks`). */
+      chunks: number;
+      caseId?: string;
+      deploymentId?: string;
+    }
+  >({
+    mutationFn: ({ type, attachmentId, chunks }) =>
+      confirmStoredUpload(authFetch, { type, attachmentId, chunks }),
+    onSuccess: (_data, vars) => invalidate(vars),
+  });
+
+  return { upload, confirm };
+}
+
+/** Variables of a stored delete. */
+export interface StoredDeleteVariables {
+  type: StoredAttachmentType;
+  attachmentId: string;
+  caseId?: string;
+  deploymentId?: string;
+}
+
+/**
+ * Deletes a stored attachment. Only its uploader may (403 otherwise) and not once
+ * the case is closed (409); the server's message is the error message.
+ */
+export function useStoredAttachmentDelete() {
+  const authFetch = useAuthApiClient();
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, StoredDeleteVariables>({
+    mutationFn: ({ type, attachmentId }) =>
+      deleteStoredAttachment(authFetch, { type, id: attachmentId }),
+    onSuccess: (_data, { caseId, deploymentId }) => {
+      if (caseId) {
+        queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.CASE_ATTACHMENTS, caseId],
+        });
+      }
+      if (deploymentId) {
+        queryClient.invalidateQueries({
+          queryKey: [ApiQueryKeys.DEPLOYMENT_ATTACHMENTS, deploymentId],
+        });
+      }
+    },
+  });
+}

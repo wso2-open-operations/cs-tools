@@ -178,3 +178,8 @@ const (
 	// contact is allowed and runs locally.
 	CodeSalesforceSyncFailed = "salesforce_sync_failed"
 )
+
+// CodeAttachmentRemoved is the 410 for an attachment (an inline comment image)
+// that was deleted or removed after its work item closed. A client shows
+// "removed" for it and a plain "not available" for a 404.
+const CodeAttachmentRemoved = "attachment_removed"

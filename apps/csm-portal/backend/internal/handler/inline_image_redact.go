@@ -20,10 +20,9 @@ import "regexp"
 
 // base64ImagePayloadRe matches the `data:image/...;base64,<payload>` prefix
 // plus payload of an inline image embedded directly in comment/description
-// HTML — content authored before/without SFTPGo attachment storage never
-// gets its pasted image extracted into a real, separately-stored attachment
-// at all, so it stays as raw base64 image data inside the comment/case JSON
-// itself. The base64 alphabet (`A-Za-z0-9+/=`) never includes `"`, so the
+// HTML — content authored before pasted images were stored as real,
+// separate attachments never had its image extracted, so it stays as raw
+// base64 image data inside the comment/case JSON itself. The base64 alphabet (`A-Za-z0-9+/=`) never includes `"`, so the
 // payload capture naturally stops one character before the JSON string's
 // closing quote without needing to look for it explicitly.
 var base64ImagePayloadRe = regexp.MustCompile(`data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+`)
@@ -53,9 +52,9 @@ const redactedInlineImageSrc = "data:image/png;base64,redacted"
 // substitution keeps that convention rather than adding a typed reshape
 // solely for this, and can't miss a field by name.
 //
-// A `.iix`-referenced inline image (the SFTPGo-backed path) is untouched:
-// its bytes are never in this response at all — the frontend fetches those
-// separately via GET /attachments/{id}/content, itself already gated by
+// An inline image referenced by id (a `.iix` reference or `/<attachment id>`)
+// is untouched: its bytes are never in this response at all — the frontend
+// fetches those separately, through a route itself already gated by
 // PermDownloadAttachment.
 func redactRawBase64Images(body []byte) []byte {
 	return base64ImagePayloadRe.ReplaceAll(body, []byte(redactedInlineImageSrc))

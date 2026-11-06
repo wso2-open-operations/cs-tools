@@ -379,3 +379,20 @@ func TestCaseService_CreateCaseComment_CustomerReplyMoveIsMirroredAndAppliesSLAE
 		t.Errorf("SLA state effects = %+v, want one ApplyCaseStateEffects(%s, waiting_on_wso2)", slaEngine.stateCalls, testDeploymentUUID)
 	}
 }
+
+func TestCaseService_CreateCaseComment_LinksTheImagesItShows(t *testing.T) {
+	f := newCustomerReplyFixture("case", domain.CaseStateOpen)
+	linker := &recordingLinker{}
+	svc := WithInlineImageLinker(NewCaseService(f.repo, f.userRepo, &mockEventPublisher{}, customerReplyExternalAccess, nil), linker)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, customerReplyCustomerEmail))
+	req := customerReplyRequest(domain.CommentTypeComment)
+	req.Content = `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+
+	if _, err := svc.CreateCaseComment(ctx, req); err != nil {
+		t.Fatalf("CreateCaseComment: %v", err)
+	}
+	if len(linker.calls) != 1 || linker.calls[0].comment != "comment-1" || linker.calls[0].workItem != req.CaseID ||
+		linker.calls[0].author != customerReplyCustomerEmail || linker.calls[0].content != req.Content {
+		t.Errorf("linker calls = %+v, want one call for the saved comment, its case and its author", linker.calls)
+	}
+}

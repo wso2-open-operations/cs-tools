@@ -93,6 +93,18 @@ type commentService struct {
 	// narrower interface.
 	snWriteback *SNWritebackDispatcher
 	snMirror    CommentService
+	// imageLinker attaches the comment images a saved comment shows (nil: none).
+	imageLinker InlineImageLinker
+}
+
+// WithCommentInlineImageLinker attaches the linker that, when a comment is
+// created or edited, attaches the comment images it shows to it. A no-op if svc
+// is not the Postgres-backed comment service or l is nil.
+func WithCommentInlineImageLinker(svc CommentService, l InlineImageLinker) CommentService {
+	if cs, ok := svc.(*commentService); ok && l != nil {
+		cs.imageLinker = l
+	}
+	return svc
 }
 
 // NewCommentService constructs a CommentService backed by Postgres.
@@ -304,6 +316,9 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	if err != nil {
 		return domain.CreateCommentResponse{}, err
 	}
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, row.ID, row.WorkItemID, createdBy, req.Content)
+	}
 
 	// Best-effort ServiceNow mirror write, DATA_SOURCE=postgres-servicenow-dual-write
 	// only (snWriteback/snMirror are both nil otherwise -- see
@@ -316,6 +331,7 @@ func (s *commentService) CreateComment(ctx context.Context, req domain.CreateCom
 	if s.snWriteback != nil {
 		// req.CreatedBy is "" or "agent" here; ServiceNow resolves the author from the token otherwise.
 		mirrorReq := req
+		mirrorReq.Content = req.Content
 		s.snWriteback.Dispatch(ctx, "comment", req.ReferenceID, "create",
 			map[string]any{"referenceId": req.ReferenceID, "referenceType": req.ReferenceType, "type": req.Type, "content": req.Content},
 			func(writeCtx context.Context) error {
@@ -422,6 +438,9 @@ func (s *commentService) UpdateComment(ctx context.Context, req domain.UpdateCom
 	row, err := s.repo.UpdateComment(ctx, req.ID, req.Content, actorEmail)
 	if err != nil {
 		return domain.UpdateCommentResponse{}, err
+	}
+	if s.imageLinker != nil {
+		s.imageLinker.LinkFromContent(ctx, row.ID, row.WorkItemID, actorEmail, req.Content)
 	}
 
 	return domain.UpdateCommentResponse{

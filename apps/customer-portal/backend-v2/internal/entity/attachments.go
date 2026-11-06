@@ -18,65 +18,11 @@ package entity
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 )
-
-// CreateAttachment calls POST /attachments.
-func (c *Client) CreateAttachment(ctx context.Context, req CreateAttachmentRequest) (CreateAttachmentResponse, error) {
-	var out CreateAttachmentResponse
-	err := c.postJSON(ctx, "/attachments", req, &out)
-	return out, err
-}
 
 // SearchAttachments calls POST /attachments/search.
 func (c *Client) SearchAttachments(ctx context.Context, req SearchAttachmentsRequest) (SearchAttachmentsResponse, error) {
 	var out SearchAttachmentsResponse
 	err := c.postJSON(ctx, "/attachments/search", req, &out)
-	return out, err
-}
-
-// GetAttachmentContent calls GET /attachments/{id}/content and returns the
-// raw file bytes together with its Content-Type.
-func (c *Client) GetAttachmentContent(ctx context.Context, id string) (body []byte, contentType string, err error) {
-	return c.doBinary(ctx, fmt.Sprintf("/attachments/%s/content", url.PathEscape(id)))
-}
-
-// DeleteAttachment calls DELETE /attachments/{id}.
-func (c *Client) DeleteAttachment(ctx context.Context, id string) (DeleteAttachmentResponse, error) {
-	var out DeleteAttachmentResponse
-	err := c.deleteJSON(ctx, fmt.Sprintf("/attachments/%s", url.PathEscape(id)), &out)
-	return out, err
-}
-
-// GetAttachment calls GET /attachments/{id} — metadata plus base64-encoded
-// content, distinct from GetAttachmentContent's raw binary stream.
-func (c *Client) GetAttachment(ctx context.Context, id string) (AttachmentDetails, error) {
-	var out AttachmentDetails
-	err := c.getJSON(ctx, fmt.Sprintf("/attachments/%s", url.PathEscape(id)), &out)
-	return out, err
-}
-
-// GetAttachmentCase calls GET /attachments/{id}/case — resolves an
-// attachment to its own parent CaseView, sourced consistently with whichever
-// data source entity-service uses for attachment reads
-// (ATTACHMENT_DATA_SOURCE). Used by authorizeAttachmentAccess instead of the
-// plain GetCase: that check resolves an attachment's own parent case, which
-// on ATTACHMENT_DATA_SOURCE=servicenow can exist only in ServiceNow, never
-// synced to Postgres — GetCase (always DATA_SOURCE-scoped) would 404 there
-// even though the attachment's content is otherwise reachable. id is the
-// attachment id, matching every other GetAttachment*/attachments/{id}...
-// method in this file — entity-service resolves it to the parent case
-// server-side.
-func (c *Client) GetAttachmentCase(ctx context.Context, id string) (CaseView, error) {
-	var out CaseView
-	err := c.getJSON(ctx, fmt.Sprintf("/attachments/%s/case", url.PathEscape(id)), &out)
-	return out, err
-}
-
-// UpdateAttachment calls PATCH /attachments/{id}.
-func (c *Client) UpdateAttachment(ctx context.Context, id string, req UpdateAttachmentRequest) (UpdateAttachmentResponse, error) {
-	var out UpdateAttachmentResponse
-	err := c.patchJSON(ctx, fmt.Sprintf("/attachments/%s", url.PathEscape(id)), req, &out)
 	return out, err
 }

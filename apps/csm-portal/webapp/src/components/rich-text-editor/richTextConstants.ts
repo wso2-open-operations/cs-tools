@@ -17,8 +17,8 @@
 // Constants for the shared rich text editor. Relocated here from the support
 // feature so the shared editor no longer imports from `@features/support`.
 
-// Maximum allowed embedded image size in bytes (10MB for base64 images).
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+// The largest image that can be pasted or inserted is a runtime setting, not a
+// constant: see `inlineImageMaxBytes` in `@config/attachmentLimitsConfig`.
 
 // MIME types accepted for inline images (paste or toolbar upload), mirroring
 // the backend's entity-service allow-list ("Unsupported inline image type"
@@ -30,6 +30,15 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
 ] as const;
 
 export const ALLOWED_IMAGE_TYPES_LABEL = "PNG, JPEG, or WEBP";
+
+/**
+ * The most images one comment draft may hold when images are stored through an
+ * `onImageUpload` handler (each one costs a server-side share link and a rate
+ * limit). The base64 editors are capped by the server instead.
+ */
+export const MAX_COMMENT_IMAGES = 5;
+
+export const MAX_COMMENT_IMAGES_MESSAGE = `A comment can have at most ${MAX_COMMENT_IMAGES} images.`;
 
 export type RichTextBlockVariant =
   | "h1"

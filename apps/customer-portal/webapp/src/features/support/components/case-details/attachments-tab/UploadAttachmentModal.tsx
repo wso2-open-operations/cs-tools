@@ -17,6 +17,7 @@
 import type { UploadAttachmentModalProps } from "@features/support/types/supportComponents";
 import {
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -24,17 +25,24 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  LinearProgress,
   TextField,
+  Typography,
 } from "@wso2/oxygen-ui";
 import { X } from "@wso2/oxygen-ui-icons-react";
 import { useCallback, useRef, useState, type JSX } from "react";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
-import { usePostDeploymentAttachment } from "@features/project-details/api/usePostDeploymentAttachment";
-import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
+import {
+  entityAttachmentMaxBytes,
+  formatLimit,
+} from "@config/attachmentLimitsConfig";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
+import {
+  isAbortError,
+  UploadConfirmPendingError,
+  type StoredUploadStep,
+} from "@api/storedAttachments";
 import UploadAttachmentDropZone from "@case-details-attachments/UploadAttachmentDropZone";
 import SelectedFileDisplay from "@case-details-attachments/SelectedFileDisplay";
-
-export { MAX_ATTACHMENT_SIZE_BYTES } from "@features/support/constants/supportConstants";
 
 function getFileExtension(fileName: string): string {
   const dotIndex = fileName.lastIndexOf(".");
@@ -62,7 +70,9 @@ function ensureExtension(fileName: string, extension: string): string {
 
 /**
  * Modal for uploading a case attachment or deployment document: drag-and-drop or file picker.
- * Supports caseId (case attachments) or deploymentId (deployment documents). Max file size 10 MB.
+ * Supports caseId (case attachments) or deploymentId (deployment documents). The file is sent to
+ * the portal backend in chunks (start, chunks, confirm); the size limit is the configured
+ * attachment limit (100 MB by default).
  *
  * @param {UploadAttachmentModalProps} props - open, caseId/deploymentId, onClose, optional onSuccess.
  * @returns {JSX.Element} The upload attachment modal.
@@ -75,23 +85,30 @@ export default function UploadAttachmentModal({
   onSuccess,
   onSelect,
 }: UploadAttachmentModalProps): JSX.Element {
-  const postAttachments = usePostAttachments();
-  const postDeploymentAttachment = usePostDeploymentAttachment();
+  const { upload: storedUpload, confirm: storedConfirm } =
+    useStoredAttachmentUpload();
+  const [uploadStep, setUploadStep] = useState<StoredUploadStep | null>(null);
+  // Bytes sent so far, while the chunks upload.
+  const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [storedError, setStoredError] = useState<string | null>(null);
+  // Set when the chunks arrived but the final confirm failed: retry only that step.
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    attachmentId: string;
+    chunks: number;
+  } | null>(null);
   const isDeploymentMode = !!deploymentId && !caseId;
-  const showDescription = isDeploymentMode;
-  const isPending = isDeploymentMode
-    ? postDeploymentAttachment.isPending
-    : postAttachments.isPending;
+  const maxBytes = entityAttachmentMaxBytes();
+  const maxLabel = formatLimit(maxBytes);
+  const isPending = storedUpload.isPending || storedConfirm.isPending;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [fileSizeErrorVisible, setFileSizeErrorVisible] = useState(false);
-  const [readErrorVisible, setReadErrorVisible] = useState(false);
 
-  const fileTooLarge = file ? file.size > MAX_ATTACHMENT_SIZE_BYTES : false;
+  const fileTooLarge = file ? file.size > maxBytes : false;
   const displayName = name.trim() || (file ? getBaseFileName(file.name) : "");
   const canUpload =
     !!file &&
@@ -102,12 +119,18 @@ export default function UploadAttachmentModal({
   const reset = useCallback(() => {
     setFile(null);
     setName("");
-    setDescription("");
     setFileSizeErrorVisible(false);
-    setReadErrorVisible(false);
+    setUploadStep(null);
+    setProgress(null);
+    setStoredError(null);
+    setPendingConfirm(null);
   }, []);
 
   const handleClose = useCallback(() => {
+    // Cancels an upload still running; the pending row is left to the
+    // server's cleanup. No effect on a finished upload.
+    abortRef.current?.abort();
+    abortRef.current = null;
     reset();
     onClose();
   }, [onClose, reset]);
@@ -115,7 +138,7 @@ export default function UploadAttachmentModal({
   const setFileWithValidation = useCallback(
     (selected: File | null) => {
       setFile(selected);
-      if (selected && selected.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      if (selected && selected.size > maxBytes) {
         setFileSizeErrorVisible(true);
       } else {
         setFileSizeErrorVisible(false);
@@ -124,7 +147,7 @@ export default function UploadAttachmentModal({
         setName(getBaseFileName(selected.name));
       }
     },
-    [name],
+    [name, maxBytes],
   );
 
   const handleDrop = useCallback(
@@ -176,57 +199,81 @@ export default function UploadAttachmentModal({
 
     if (!caseId && !deploymentId) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = typeof reader.result === "string" ? reader.result : "";
-      const commaIndex = base64.indexOf(",");
-      const content = commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
-      const body = {
-        name: attachmentName,
-        type: file.type || "application/octet-stream",
-        content,
-        ...(description.trim() && { description: description.trim() }),
-      };
-
-      if (isDeploymentMode) {
-        postDeploymentAttachment.mutate(
-          { deploymentId: deploymentId!, body },
-          {
-            onSuccess: () => {
-              handleClose();
-              onSuccess?.();
-            },
-          },
-        );
-      } else if (caseId) {
-        postAttachments.mutate(
-          { caseId, body },
-          {
-            onSuccess: () => {
-              handleClose();
-              onSuccess?.();
-            },
-          },
-        );
-      }
-    };
-    reader.onerror = () => {
-      setReadErrorVisible(true);
-    };
-    reader.readAsDataURL(file);
+    setStoredError(null);
+    setProgress(null);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    storedUpload.mutate(
+      {
+        type: isDeploymentMode ? "deployment" : "work_item",
+        parentId: (isDeploymentMode ? deploymentId : caseId)!,
+        file,
+        body: { name: attachmentName },
+        ...(isDeploymentMode ? { deploymentId } : { caseId }),
+        onStep: setUploadStep,
+        signal: controller.signal,
+        onProgress: (sent, total) => setProgress({ sent, total }),
+      },
+      {
+        onSuccess: () => {
+          handleClose();
+          onSuccess?.();
+        },
+        onError: (error) => {
+          if (controller.signal.aborted || isAbortError(error)) return;
+          abortRef.current = null;
+          setUploadStep(null);
+          setProgress(null);
+          if (error instanceof UploadConfirmPendingError) {
+            setPendingConfirm({
+              attachmentId: error.attachmentId,
+              chunks: error.chunks,
+            });
+          }
+          setStoredError(error.message);
+        },
+      },
+    );
   }, [
     caseId,
     deploymentId,
     file,
     name,
-    description,
     fileTooLarge,
     isDeploymentMode,
-    postAttachments,
-    postDeploymentAttachment,
+    storedUpload,
     handleClose,
     onSuccess,
     onSelect,
+  ]);
+
+  // Retries only the final step; the chunks are already stored.
+  const handleRetryConfirm = useCallback(() => {
+    if (!pendingConfirm) return;
+    setStoredError(null);
+    storedConfirm.mutate(
+      {
+        type: isDeploymentMode ? "deployment" : "work_item",
+        attachmentId: pendingConfirm.attachmentId,
+        chunks: pendingConfirm.chunks,
+        ...(isDeploymentMode ? { deploymentId } : { caseId }),
+      },
+      {
+        onSuccess: () => {
+          handleClose();
+          onSuccess?.();
+        },
+        onError: (error) => setStoredError(error.message),
+      },
+    );
+  }, [
+    pendingConfirm,
+    isDeploymentMode,
+    deploymentId,
+    caseId,
+    storedConfirm,
+    handleClose,
+    onSuccess,
   ]);
 
   return (
@@ -258,16 +305,16 @@ export default function UploadAttachmentModal({
             onClose={() => setFileSizeErrorVisible(false)}
             sx={{ mb: 2 }}
           >
-            File size exceeds 10 MB limit.
+            File size exceeds {maxLabel} limit.
           </Alert>
         )}
-        {readErrorVisible && (
+        {storedError && (
           <Alert
             severity="error"
-            onClose={() => setReadErrorVisible(false)}
+            onClose={() => setStoredError(null)}
             sx={{ mb: 2 }}
           >
-            Failed to read file. Please try again.
+            {storedError}
           </Alert>
         )}
         <input
@@ -291,6 +338,25 @@ export default function UploadAttachmentModal({
           <SelectedFileDisplay fileName={file.name} fileType={file.type} />
         )}
 
+        {progress && storedUpload.isPending && (
+          <Box sx={{ mt: 2 }}>
+            <LinearProgress
+              variant="determinate"
+              value={
+                progress.total > 0
+                  ? Math.min(100, (progress.sent / progress.total) * 100)
+                  : 0
+              }
+              aria-label="Upload progress"
+            />
+            <Typography variant="caption" color="text.secondary">
+              {progress.total > 0
+                ? `${Math.min(100, Math.floor((progress.sent / progress.total) * 100))}%`
+                : ""}
+            </Typography>
+          </Box>
+        )}
+
         <TextField
           fullWidth
           label={isDeploymentMode ? "Document name" : "Attachment name"}
@@ -300,22 +366,19 @@ export default function UploadAttachmentModal({
           disabled={!file}
           sx={{ mt: 2 }}
         />
-        {showDescription && (
-          <TextField
-            fullWidth
-            label="Description (optional)"
-            placeholder="Add a short description for this file"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={!file}
-            multiline
-            minRows={2}
-            sx={{ mt: 2 }}
-          />
-        )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2, pt: 1 }}>
-        <Button onClick={handleClose} disabled={isPending}>
+        <Button
+          onClick={handleClose}
+          disabled={
+            isPending &&
+            !(
+              storedUpload.isPending &&
+              (uploadStep === "preparing" ||
+                (uploadStep === "uploading" && progress !== null))
+            )
+          }
+        >
           Cancel
         </Button>
         {isPending ? (
@@ -324,7 +387,20 @@ export default function UploadAttachmentModal({
             startIcon={<CircularProgress color="inherit" size={16} />}
             disabled
           >
-            Uploading
+            {uploadStep === "preparing"
+              ? "Preparing"
+              : uploadStep === "finishing" || storedConfirm.isPending
+                ? "Finishing"
+                : "Uploading"}
+          </Button>
+        ) : pendingConfirm ? (
+          <Button
+            type="button"
+            variant="contained"
+            color="primary"
+            onClick={handleRetryConfirm}
+          >
+            Retry
           </Button>
         ) : (
           <Button

@@ -45,10 +45,23 @@ import {
 import Editor from "@components/rich-text-editor/Editor";
 import {
   ALLOWED_IMAGE_TYPES_LABEL,
-  MAX_IMAGE_SIZE_BYTES,
+  MAX_COMMENT_IMAGES_MESSAGE,
 } from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
-import { MAX_ATTACHMENT_SIZE_BYTES } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useBackendApi } from "@api/backend/client";
+import { entityAttachmentMaxBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import {
+  dropFailedImages,
+  hasBlobSource,
+  inspectInlineImages,
+  queueInlineImage,
+  releaseInlineImages,
+  resolveInlineImageSources,
+  uploadQueuedImages,
+  useInlineImageStatus,
+} from "@features/csm-cases/api/inlineImageUploads";
+import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
+import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmUploadAttachmentModal from "@features/csm-cases/components/CsmUploadAttachmentModal";
 
 /** A file staged for upload, with the display name chosen in the modal. */
@@ -101,6 +114,13 @@ interface CsmCaseCommentInputProps {
   /** Focus the editor as soon as it mounts (e.g. when the composer opens). */
   autoFocus?: boolean;
   /**
+   * The case's id. When set (and entity attachments are on), an image pasted or
+   * picked into the comment is uploaded to the case when the comment is sent
+   * and the comment carries only a reference to it, not the image as base64. Leave unset
+   * where the comment's work item is not a case: images are embedded as before.
+   */
+  imageUploadParentId?: string;
+  /**
    * Draft state, lifted to the parent so it survives this component
    * unmounting (e.g. the case-detail page hides the Activities tab body on
    * tab switch). All four are optional and independently controllable; any
@@ -139,6 +159,15 @@ const MAX_COMMENT_CONTENT_BYTES = MAX_COMMENT_BODY_BYTES - 1024;
 function isEmpty(html: string): boolean {
   const text = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
   return text.length === 0;
+}
+
+/**
+ * Whether there is nothing to send: no text and no image (see
+ * {@link hasCommentContent}). `isEmpty` stays text-only, for the checks that are
+ * about what the reply says.
+ */
+function isBlank(html: string): boolean {
+  return !hasCommentContent(html);
 }
 
 /**
@@ -201,6 +230,7 @@ export default function CsmCaseCommentInput({
   onResumeWork,
   isResumingWork = false,
   autoFocus = false,
+  imageUploadParentId,
   draftHtml,
   onDraftHtmlChange,
   draftAttachments,
@@ -211,8 +241,18 @@ export default function CsmCaseCommentInput({
   onDraftSourceModeChange,
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useDraftState(draftHtml, onDraftHtmlChange, "");
+  const api = useBackendApi();
+  const onImageUpload = useMemo(
+    () =>
+      imageUploadParentId ? (file: File) => queueInlineImage(file) : undefined,
+    [imageUploadParentId],
+  );
+  const imageStatus = useInlineImageStatus(html);
+  const uploadingImages = imageStatus.pending > 0;
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The draft for which the failed-image notice was shown (see the send handler).
+  const failedWarnedHtmlRef = useRef<string | null>(null);
   const [sourceMode, setSourceMode] = useDraftState(
     draftSourceMode,
     onDraftSourceModeChange,
@@ -247,11 +287,13 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
-  const onPasteError = useCallback((reason: "size" | "type") => {
+  const onPasteError = useCallback((reason: "size" | "type" | "count") => {
     setError(
-      reason === "type"
-        ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
-        : `Pasted image exceeds the maximum allowed size of ${formatBytes(MAX_IMAGE_SIZE_BYTES)}.`,
+      reason === "count"
+        ? MAX_COMMENT_IMAGES_MESSAGE
+        : reason === "type"
+          ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
+          : `Pasted image exceeds the maximum allowed size of ${formatBytes(inlineImageMaxBytes())}.`,
     );
   }, []);
 
@@ -308,8 +350,9 @@ export default function CsmCaseCommentInput({
     // (matching submit()'s own single-message pattern below) but still
     // attach whichever dropped files DO pass, rather than rejecting the
     // whole drop over one oversized file.
-    const tooLarge = incoming.find((f) => f.size > MAX_ATTACHMENT_SIZE_BYTES);
-    const accepted = incoming.filter((f) => f.size <= MAX_ATTACHMENT_SIZE_BYTES);
+    const maxBytes = entityAttachmentMaxBytes();
+    const tooLarge = incoming.find((f) => f.size > maxBytes);
+    const accepted = incoming.filter((f) => f.size <= maxBytes);
 
     if (accepted.length > 0) {
       setAttachments((prev) => {
@@ -325,7 +368,7 @@ export default function CsmCaseCommentInput({
     setError(
       tooLarge
         ? `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
-            MAX_ATTACHMENT_SIZE_BYTES,
+            maxBytes,
           )}.`
         : null,
     );
@@ -371,7 +414,7 @@ export default function CsmCaseCommentInput({
   const submit = useCallback(async () => {
     if (submitting || disabled) return;
     // Allow an attachment-only post (no text) — the case still gets the files.
-    if (isEmpty(html) && attachments.length === 0) {
+    if (isBlank(html) && attachments.length === 0) {
       setError("Add a comment or an attachment.");
       return;
     }
@@ -389,27 +432,83 @@ export default function CsmCaseCommentInput({
     // Pre-validate file sizes before posting anything: the send is multi-step
     // (comment then uploads), so catching an oversized file here avoids posting
     // the comment and then failing on the upload (which would double-post on retry).
-    const tooLarge = attachments.find(
-      (a) => a.file.size > MAX_ATTACHMENT_SIZE_BYTES,
-    );
+    const maxBytes = entityAttachmentMaxBytes();
+    const tooLarge = attachments.find((a) => a.file.size > maxBytes);
     if (tooLarge) {
       setError(
         `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
-          MAX_ATTACHMENT_SIZE_BYTES,
+          maxBytes,
         )}.`,
       );
+      return;
+    }
+    // Images added to the comment are uploaded now, not when they were added, so
+    // one that was removed or never posted leaves nothing on the server. Send only
+    // once each is stored, with its reference in place of the local preview; a
+    // `blob:` address must never reach the backend.
+    if (imageUploadParentId && inspectInlineImages(html).queued > 0) {
+      setError(null);
+      setSubmitting(true);
+      try {
+        await uploadQueuedImages(api, imageUploadParentId, html);
+      } finally {
+        setSubmitting(false);
+      }
+    }
+    const images = inspectInlineImages(html);
+    if (images.pending > 0) {
+      setError("Wait for the images to finish uploading.");
+      return;
+    }
+    let sendHtml = html;
+    if (images.failedMessage) {
+      // The first press says what happened. Pressing Send again with nothing
+      // changed posts the comment without the image(s) that did not upload.
+      if (failedWarnedHtmlRef.current !== html) {
+        failedWarnedHtmlRef.current = html;
+        setError(
+          `${images.failedMessage} Press Send again to post the comment without it, or remove it and add it again.`,
+        );
+        return;
+      }
+      sendHtml = dropFailedImages(html);
+      if (isBlank(sendHtml) && attachments.length === 0) {
+        setError("Add a comment or an attachment.");
+        return;
+      }
+    }
+    if (images.unknown > 0) {
+      setError("An image in the comment could not be uploaded. Remove it and add it again.");
+      return;
+    }
+    const body = resolveInlineImageSources(sendHtml);
+    if (hasBlobSource(body)) {
+      setError("An image in the comment could not be uploaded. Remove it and add it again.");
       return;
     }
     setError(null);
     setSubmitting(true);
     try {
-      await onSubmit(html, internal, attachments);
+      await onSubmit(body, internal, attachments);
+      releaseInlineImages(html);
+      failedWarnedHtmlRef.current = null;
       setHtml("");
       setAttachments([]);
       resetTriggerRef.current += 1;
       setResetTrigger(resetTriggerRef.current);
       setEditorMountKey((k) => k + 1);
     } catch (e) {
+      if (e instanceof PartialSendError) {
+        if (e.commentPosted) {
+          releaseInlineImages(html);
+          failedWarnedHtmlRef.current = null;
+          setHtml("");
+          resetTriggerRef.current += 1;
+          setResetTrigger(resetTriggerRef.current);
+          setEditorMountKey((k) => k + 1);
+        }
+        setAttachments((prev) => prev.filter((a) => !e.uploaded.includes(a)));
+      }
       setError(e instanceof Error ? e.message : "Failed to post comment.");
     } finally {
       setSubmitting(false);
@@ -426,6 +525,8 @@ export default function CsmCaseCommentInput({
     overSizeLimit,
     sizeError,
     submitting,
+    api,
+    imageUploadParentId,
   ]);
 
   // Customer replies are blocked for this case state. The composer is locked to
@@ -644,6 +745,7 @@ export default function CsmCaseCommentInput({
             void submit();
           }}
           onPasteError={onPasteError}
+          onImageUpload={onImageUpload}
         />
       )}
 
@@ -674,7 +776,9 @@ export default function CsmCaseCommentInput({
         >
           {sizeError ??
             error ??
-            (showBottomLockReason
+            (uploadingImages
+              ? "Uploading images…"
+              : showBottomLockReason
               ? publicCommentDisabledReason
               : sourceMode
                 ? "Output is sent as-is. Use this to fix paste-formatting or insert tables."
@@ -696,7 +800,8 @@ export default function CsmCaseCommentInput({
               disabled={
                 disabled ||
                 submitting ||
-                (isEmpty(html) && attachments.length === 0) ||
+                uploadingImages ||
+                (isBlank(html) && attachments.length === 0) ||
                 overSizeLimit ||
                 // Safety net: a public reply with text while replies are locked.
                 // Normally unreachable — the toggle is forced to work-note mode.
