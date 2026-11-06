@@ -186,3 +186,15 @@ func slaSeverity(cv domain.CaseView) *domain.CaseSeverity {
 func eventSeverity(cv domain.CaseView) *domain.CaseSeverity {
 	return slaSeverity(cv)
 }
+
+// SetServiceRequestSeverity sets the severity of the service request id names, refusing any other record type.
+func (s *caseService) SetServiceRequestSeverity(ctx context.Context, id string, severity domain.CaseSeverity) (domain.UpdateCaseResponse, error) {
+	cv, err := s.GetCaseByID(ctx, id)
+	if err != nil {
+		return domain.UpdateCaseResponse{}, err
+	}
+	if cv.Type == nil || *cv.Type != "service_request" {
+		return domain.UpdateCaseResponse{}, &apierror.ConflictError{Msg: "the issue's record is not a service request"}
+	}
+	return s.updateServiceRequestSeverity(ctx, domain.UpdateCaseRequest{ID: id, Severity: &severity})
+}

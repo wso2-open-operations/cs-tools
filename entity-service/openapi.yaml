@@ -722,6 +722,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /github/service-requests/{owner}/{repository}/{issueNumber}/severity:
+    put:
+      summary: >-
+        Set the severity of the service request a GitHub issue produced, from
+        the issue's Priority field.
+      operationId: setGithubIssueServiceRequestSeverity
+      description: >-
+        Requires an authorized internal client credential, as POST
+        /github/service-requests. Called by the repository's
+        csm_severity_sync.yml. The change is recorded in the activity feed; a
+        value equal to the current one changes nothing and dispatches nothing
+        back to the issue.
+      security:
+        - internalClientCredential: []
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repository
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: issueNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetIssueSeverityRequest'
+      responses:
+        "200":
+          description: The severity was set.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetIssueSeverityResponse'
+        "400":
+          description: A severity other than critical, high, medium or low, or a bad issue number.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: The request carried no authorized internal client credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: The issue has no service request (yet).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The repository is not mapped, or the issue's record is not a service request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: The configured data source has no service request severity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /github/deliveries:
     post:
       summary: >-
@@ -21975,6 +22056,35 @@ components:
         - message
         - id
         - created
+
+    SetIssueSeverityRequest:
+      type: object
+      properties:
+        severity:
+          type: string
+          enum: [critical, high, medium, low]
+          description: >-
+            The service request's severity (S1-S4). The repository's workflow
+            maps its Priority field to it: Urgent critical, High high, Medium
+            medium, Low low.
+      required:
+        - severity
+
+    SetIssueSeverityResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        id:
+          type: string
+          description: The service request whose severity was set.
+        severity:
+          type: string
+          enum: [critical, high, medium, low]
+      required:
+        - message
+        - id
+        - severity
 
     GithubWebhookPayload:
       type: object
