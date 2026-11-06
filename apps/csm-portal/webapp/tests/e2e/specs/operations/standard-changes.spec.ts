@@ -19,7 +19,7 @@
 //   1. Operations > Change requests has a two-entry strip, "Change requests"
 //      (the list, no `view`) | "Standard changes" (`?view=standard`). Standard
 //      changes opens on the catalogue; the proposals are its secondary view
-//      (the "Templates or proposals" toggle, `&show=proposals`, with `scope` and
+//      (the "Templates, proposals or suggestions" toggle, `&show=proposals`, with `scope` and
 //      `state` in the URL; the scope select is named "Show", a name the toggle
 //      does not share). The proposals open on all proposals (no `scope`). Both
 //      are headed "Standard changes" with the same line, which says nothing
@@ -666,9 +666,9 @@ test.describe("standard changes (real stack)", () => {
       await expectChangeRequestsActive(page);
       // The list's filters do not apply here: its search box is not on the page.
       await expect(listSearch).toHaveCount(0);
-      // The toolbar: the Templates | Proposals toggle on the catalogue, and Propose.
-      const toggle = main.getByRole("group", { name: "Templates or proposals", exact: true });
-      await expect(toggle.getByRole("button")).toHaveText(["Templates", "Proposals"]);
+      // The toolbar: the Templates | Proposals | Suggested toggle on the catalogue, and Propose.
+      const toggle = main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true });
+      await expect(toggle.getByRole("button")).toHaveText(["Templates", "Proposals", "Suggested"]);
       await expect(toggle.getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
       await expect(main.getByRole("button", { name: "Propose a standard change" })).toBeVisible();
       // The strip is a push: Back returns to the filtered list it came from.
@@ -798,9 +798,9 @@ test.describe("standard changes (real stack)", () => {
       // The toggle and the scope select have names of their own: "Show" is the select's only.
       const scopeSelect = main.getByRole("combobox", { name: "Show", exact: true });
       await expect(scopeSelect).toHaveCount(1);
-      await expect(main.getByRole("group", { name: "Templates or proposals", exact: true })).toHaveCount(1);
+      await expect(main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true })).toHaveCount(1);
       await expect(main.getByRole("group", { name: "Show", exact: true })).toHaveCount(0);
-      await expect(main.getByRole("combobox", { name: "Templates or proposals", exact: true })).toHaveCount(0);
+      await expect(main.getByRole("combobox", { name: "Templates, proposals or suggestions", exact: true })).toHaveCount(0);
       // The proposals open on all of them (no scope in the URL), and the select offers the three scopes in this order.
       await expect(scopeSelect).toHaveText("All proposals");
       await scopeSelect.click();
@@ -952,7 +952,7 @@ test.describe("standard changes (real stack)", () => {
 
       // The proposals open on all of them: jane proposed nothing, yet she sees bob's seeded proposals.
       expect(await proposalsBy(USERS.jane), "jane has proposed nothing (Postgres)").toBe(0);
-      await main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" }).click();
+      await main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true }).getByRole("button", { name: "Proposals" }).click();
       await expect(jane).toHaveURL(exactly("/operations/change-requests", "view=standard&show=proposals"));
       await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText("All proposals");
       const proposals = main.getByRole("table", { name: "Standard change proposals" });
@@ -997,7 +997,7 @@ test.describe("standard changes (real stack)", () => {
         const link = strip.getByRole("link", { name: c.part === "awaiting" ? /your decision$/ : /of yours$/ });
         await link.click();
         await expect(page).toHaveURL(exactly("/operations/change-requests", c.search));
-        await expect(main.getByRole("group", { name: "Templates or proposals", exact: true }).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
+        await expect(main.getByRole("group", { name: "Templates, proposals or suggestions", exact: true }).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "true");
         await expect(main.getByRole("combobox", { name: "Show", exact: true })).toHaveText(c.scope);
         await expect(main.getByRole("combobox", { name: "State" })).toHaveText(c.state);
         await expect(attentionStrip(main)).toHaveCount(0);
