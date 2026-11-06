@@ -774,6 +774,7 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	ResourceAnnouncement: true, ResourceEngagement: true,
 	ResourceCaseFeedback:    true,
 	ResourcePlgOrganization: true,
+	ResourcePlgRegistration: true,
 }
 
 var validWidgetShapes = map[Shape]bool{

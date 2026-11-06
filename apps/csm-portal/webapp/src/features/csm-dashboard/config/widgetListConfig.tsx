@@ -75,7 +75,7 @@ import {
 import { resolveAccountTier, type Account } from "@features/csm-accounts/types/csmAccounts";
 import AccountPreviewDrawer from "@features/csm-accounts/components/AccountPreviewDrawer";
 import { StatusChip } from "@features/plg/components/common";
-import type { OrganizationSummary } from "@features/plg/api/types";
+import type { OrganizationSummary, RegistrationItem } from "@features/plg/api/types";
 import type { Project } from "@features/csm-projects/types/csmProjects";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import ProjectPreviewDrawer from "@features/csm-projects/components/ProjectPreviewDrawer";
@@ -809,6 +809,63 @@ function PlgOrganizationWidgetList({ items, isLoading }: WidgetListRendererProps
   );
 }
 
+/** PLG registrations (`POST /plg/registrations/search` rows): one row per
+ * organisation and product, with the product's lifecycle stage and the
+ * organisation's owner. A row opens that product's tab on the organisation's
+ * PLG page with the dashboard's return state. */
+function PlgRegistrationWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
+  const registrations = items as unknown as RegistrationItem[];
+  const dashboardReturnState = useDashboardReturnState();
+  const navigate = useNavTransition();
+  return (
+    <DashboardMiniTable
+      isLoading={isLoading}
+      emptyMessage="No registrations match this widget's filters."
+      columns={[
+        { label: "Organisation", width: "minmax(140px, 2fr)" },
+        { label: "Product", width: "minmax(120px, 1.5fr)" },
+        { label: "Stage", width: "minmax(100px, 1fr)" },
+        { label: "Owner", width: "minmax(100px, 1fr)" },
+        { label: "Registered", width: "minmax(90px, 1fr)" },
+      ]}
+      rows={registrations.map((r) => ({
+        key: r.orgPlatformId,
+        onClick: () =>
+          navigate(
+            `/plg/organizations/${encodeURIComponent(r.organizationId)}/${encodeURIComponent(r.product.code)}`,
+            { state: dashboardReturnState },
+          ),
+        cells: [
+          <Box key="name" sx={{ minWidth: 0 }}>
+            <Typography variant="body2" noWrap title={r.organizationName}>
+              {r.organizationName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              {r.registeredEmail}
+            </Typography>
+          </Box>,
+          <Typography key="product" variant="body2" noWrap title={r.product.name}>
+            {r.product.name}
+          </Typography>,
+          <StatusChip key="stage" value={r.lifecycleStage} kind="lifecycle" />,
+          r.owner ? (
+            <Typography key="owner" variant="body2" noWrap>
+              {r.owner.name}
+            </Typography>
+          ) : (
+            <Typography key="owner" variant="body2" color="warning.main">
+              Unassigned
+            </Typography>
+          ),
+          <Typography key="registered" variant="body2" noWrap>
+            {formatDate(r.registeredOn)}
+          </Typography>,
+        ],
+      }))}
+    />
+  );
+}
+
 function ProductVulnerabilityWidgetList({ items, isLoading }: WidgetListRendererProps): JSX.Element {
   const vulnerabilities = items as unknown as BeProductVulnerabilityView[];
   const dashboardReturnState = useDashboardReturnState();
@@ -1087,4 +1144,5 @@ export const WIDGET_LIST_RENDERERS: Record<
   call_request: CallRequestWidgetList,
   case_feedback: CaseFeedbackWidgetList,
   plg_organization: PlgOrganizationWidgetList,
+  plg_registration: PlgRegistrationWidgetList,
 };

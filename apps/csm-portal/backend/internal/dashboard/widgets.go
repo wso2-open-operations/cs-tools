@@ -78,6 +78,11 @@ const (
 	// /plg/organizations/search. Only PLG users (handler.PermUsePlg) can read
 	// it, so the webapp shows a no-access tile to anyone else.
 	ResourcePlgOrganization ResourceType = "plg_organization"
+	// ResourcePlgRegistration identifies a widget whose data is PLG
+	// registrations, one per organisation and product, searched with
+	// POST /plg/registrations/search. PLG users only, like
+	// ResourcePlgOrganization.
+	ResourcePlgRegistration ResourceType = "plg_registration"
 )
 
 // Shape is how a widget's resolved data should be rendered.

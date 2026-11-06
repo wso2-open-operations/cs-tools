@@ -4442,7 +4442,8 @@ export type BeWidgetResourceType =
   | "engagement"
   | "incident_task"
   | "case_feedback"
-  | "plg_organization";
+  | "plg_organization"
+  | "plg_registration";
 
 /**
  * How a widget's resolved data should be rendered. `pie` and `bar` both

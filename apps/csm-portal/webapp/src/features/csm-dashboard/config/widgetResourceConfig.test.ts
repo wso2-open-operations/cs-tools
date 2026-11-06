@@ -877,3 +877,72 @@ describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
     expect(config.detailHref?.({})).toBeUndefined();
   });
 });
+
+describe("WIDGET_RESOURCE_CONFIG.plg_registration", () => {
+  const config = WIDGET_RESOURCE_CONFIG.plg_registration;
+  const build = config.buildSearchRequestBody!;
+
+  it("searches the PLG registration list and reads its registrations page", () => {
+    expect(config.searchEndpoint).toBe("/plg/registrations/search");
+    expect(config.itemsKey).toBe("registrations");
+  });
+
+  it("moves unacknowledgedOnly out of the filters, beside them", () => {
+    expect(
+      build({ filters: { unacknowledgedOnly: true, productCodes: ["IAM"] }, offset: 0, limit: 5 }),
+    ).toEqual({
+      unacknowledgedOnly: true,
+      filters: { productCodes: ["IAM"] },
+      pagination: { offset: 0, limit: 5 },
+    });
+    expect(build({ filters: { unacknowledgedOnly: ["true"] }, offset: 0, limit: 5 })).toEqual({
+      unacknowledgedOnly: true,
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+    expect(build({ filters: { unacknowledgedOnly: false }, offset: 0, limit: 5 })).toEqual({
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+  });
+
+  it("cleans its filters the way the organisation search does", () => {
+    expect(
+      build({
+        filters: { searchQuery: "acme", unowned: ["true"], registeredFrom: ["2026-07-01"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ query: "acme", unowned: true, registeredFrom: "2026-07-01T00:00:00Z" });
+  });
+
+  it("never sends a sort, which the registration search does not take", () => {
+    expect(
+      build({ filters: {}, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } }),
+    ).toEqual({ filters: {}, pagination: { offset: 0, limit: 5 } });
+  });
+
+  it("opens New Registrations only for exactly the new registrations, and the preview page otherwise", () => {
+    expect(config.buildHref({ unacknowledgedOnly: true })).toBe("/plg/new-registrations");
+    const ctx = { widgetId: "w", displayName: "W" };
+    expect(config.buildHref({ unacknowledgedOnly: true, productCodes: ["IAM"] }, ctx)).toBe(
+      "/dashboard/preview/plg-registrations?w=w&n=W&unacknowledgedOnly=true&productCodes=IAM",
+    );
+    // The page opens on its "new only" view, so all registrations go to the preview.
+    expect(config.buildHref({}, ctx)).toBe("/dashboard/preview/plg-registrations?w=w&n=W");
+  });
+
+  it("labels a row with its organisation and product, and links it to that product's tab", () => {
+    const item = {
+      orgPlatformId: "op-1",
+      organizationId: "org-1",
+      organizationName: "Acme",
+      product: { id: "p-1", code: "IAM", name: "Identity" },
+    };
+    expect(config.primaryLabel(item)).toBe("Acme");
+    expect(config.secondaryLabel?.(item)).toBe("Identity");
+    expect(config.detailHref?.(item)).toBe("/plg/organizations/org-1/IAM");
+    expect(config.detailHref?.({ organizationId: "org-1" })).toBe("/plg/organizations/org-1");
+    expect(config.detailHref?.({})).toBeUndefined();
+  });
+});

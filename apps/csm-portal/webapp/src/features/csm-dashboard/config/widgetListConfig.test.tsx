@@ -573,3 +573,70 @@ describe("plg_organization list", () => {
     expect(screen.getByText("No organisations match this widget's filters.")).toBeInTheDocument();
   });
 });
+
+describe("plg_registration list", () => {
+  function StateProbe() {
+    const location = useLocation();
+    return (
+      <div data-testid="state-probe">
+        {location.pathname} {JSON.stringify(location.state)}
+      </div>
+    );
+  }
+
+  const registration = {
+    orgPlatformId: "op-1",
+    organizationId: "org-1",
+    organizationName: "Acme",
+    product: { id: "p-1", code: "IAM", name: "Identity" },
+    registeredEmail: "a@acme.test",
+    registeredName: null,
+    registeredOn: "2026-02-03T10:00:00Z",
+    lifecycleStage: "ACTIVATED",
+    stageName: "Activated",
+    owner: null,
+  };
+
+  function renderAt(items: Record<string, unknown>[]) {
+    const Renderer = WIDGET_LIST_RENDERERS.plg_registration;
+    return render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/dashboard/preview/plg-registrations", search: "?w=w-1", state: { from: "/dashboard/my/d-1" } },
+        ]}
+      >
+        <Routes>
+          <Route
+            path="/dashboard/preview/plg-registrations"
+            element={<Renderer resourceType="plg_registration" items={items} isLoading={false} />}
+          />
+          <Route path="/plg/organizations/:id/:product" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("shows the organisation, product, stage and owner", () => {
+    renderAt([registration]);
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("Identity")).toBeInTheDocument();
+    expect(screen.getByText("Activated")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("opens the product's tab on the organisation's PLG page, passing the page's own state as parentState", () => {
+    renderAt([registration]);
+    fireEvent.click(screen.getByText("Acme"));
+    expect(screen.getByTestId("state-probe").textContent).toBe(
+      `/plg/organizations/org-1/IAM ${JSON.stringify({
+        from: "/dashboard/preview/plg-registrations?w=w-1",
+        parentState: { from: "/dashboard/my/d-1" },
+      })}`,
+    );
+  });
+
+  it("says so when no registration matches", () => {
+    renderAt([]);
+    expect(screen.getByText("No registrations match this widget's filters.")).toBeInTheDocument();
+  });
+});

@@ -1375,11 +1375,46 @@ export const WIDGET_RESOURCE_CONFIG: Record<
     detailHref: (item) =>
       asString(item.id) ? `/plg/organizations/${asString(item.id)}` : undefined,
   },
+  plg_registration: {
+    searchEndpoint: "/plg/registrations/search",
+    buildSearchRequestBody: plgRegistrationSearchBody,
+    itemsKey: "registrations",
+    primaryLabel: (item) => asString(item.organizationName) ?? "—",
+    secondaryLabel: (item) =>
+      item.product && typeof item.product === "object"
+        ? asString((item.product as { name?: unknown }).name)
+        : undefined,
+    // The PLG New Registrations page reads no filters from its URL and opens
+    // on its "new only" view, so only a widget counting exactly the new
+    // registrations can open it; any other opens the preview page, which
+    // lists exactly what the tile counted.
+    buildHref: (filters, ctx) =>
+      plgBoolean(filters.unacknowledgedOnly) && !hasFiltersBeyond(filters, ["unacknowledgedOnly"])
+        ? "/plg/new-registrations"
+        : widgetPreviewFallbackHref("plg-registrations", "plg_registration", filters, ctx),
+    icon: Rocket,
+    iconColor: "info",
+    previewSlug: "plg-registrations",
+    detailHref: plgRegistrationHref,
+  },
 };
 
-/** The PLG organisation search's single-valued filters (the list ones,
- * `productCodes`, `lifecycleStages`, `subscriptionTiers`, stay arrays). */
-const PLG_ORGANIZATION_SCALAR_FILTERS = [
+/** A registration's own product tab on its organisation's PLG page. */
+function plgRegistrationHref(item: WidgetItem): string | undefined {
+  const organizationId = asString(item.organizationId);
+  const productCode =
+    item.product && typeof item.product === "object"
+      ? asString((item.product as { code?: unknown }).code)
+      : undefined;
+  if (!organizationId) return undefined;
+  return productCode
+    ? `/plg/organizations/${organizationId}/${productCode}`
+    : `/plg/organizations/${organizationId}`;
+}
+
+/** The PLG searches' single-valued filters (the list ones, `productCodes`,
+ * `lifecycleStages`, `subscriptionTiers`, stay arrays). */
+const PLG_SCALAR_FILTERS = [
   "query",
   "organizationName",
   "registeredEmail",
@@ -1387,22 +1422,57 @@ const PLG_ORGANIZATION_SCALAR_FILTERS = [
   "registeredTo",
 ] as const;
 
-/** A plain `YYYY-MM-DD`, which the PLG search's date bounds do not take. */
+/** A plain `YYYY-MM-DD`, which the PLG searches' date bounds do not take. */
 const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A filter value that may have come back from the preview page's URL as a
+ * one-element string array, read as a JSON boolean. */
+function plgBoolean(v: unknown): boolean | undefined {
+  const value = Array.isArray(v) ? (v as unknown[])[0] : v;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return undefined;
+}
+
 /**
- * `POST /plg/organizations/search`'s body. The default `{filters,
- * pagination, sortBy}` shape with three differences:
+ * The `filters` the PLG organisation and registration searches share
+ * (`OrganizationSearchFilters`):
  * - The preview page's URL round trip decodes every filter value as a
  *   comma-split array, so the single-valued keys are unwrapped back, and
  *   `unowned` is turned back into a JSON boolean. The preview page's
- *   search box adds `searchQuery`, which this search calls `query`.
+ *   search box adds `searchQuery`, which these searches call `query`.
  * - `registeredFrom` / `registeredTo` are timestamps: a plain date is sent
  *   as the start of that day (UTC) for `registeredFrom` and its end for
  *   `registeredTo`, so both bounds include the day.
- * - The search sorts by `sortBy: "name"` or, by default, by registration
- *   date, newest first, with `sortOrder` "asc" / "desc" beside it rather
- *   than a `{field, order}` object.
+ */
+function plgSearchFilters(filters: Record<string, unknown>): Record<string, unknown> {
+  const { searchQuery, ...rest } = filters;
+  const flat: Record<string, unknown> = { ...rest };
+  if (typeof searchQuery === "string" && searchQuery.trim()) flat.query = searchQuery.trim();
+  for (const key of PLG_SCALAR_FILTERS) {
+    const v = flat[key];
+    if (Array.isArray(v)) flat[key] = v[0];
+  }
+  if ("unowned" in flat) {
+    const unowned = plgBoolean(flat.unowned);
+    if (unowned === undefined) delete flat.unowned;
+    else flat.unowned = unowned;
+  }
+  for (const [key, time] of [
+    ["registeredFrom", "T00:00:00Z"],
+    ["registeredTo", "T23:59:59Z"],
+  ] as const) {
+    const v = flat[key];
+    if (typeof v === "string" && PLAIN_DATE.test(v)) flat[key] = `${v}${time}`;
+  }
+  return flat;
+}
+
+/**
+ * `POST /plg/organizations/search`'s body: the shared PLG `filters` (see
+ * `plgSearchFilters`) and the page. The search sorts by `sortBy: "name"` or,
+ * by default, by registration date, newest first, with `sortOrder` "asc" /
+ * "desc" beside it rather than a `{field, order}` object.
  */
 function plgOrganizationSearchBody({
   filters,
@@ -1415,25 +1485,38 @@ function plgOrganizationSearchBody({
   limit: number;
   sortBy?: Record<string, unknown>;
 }): Record<string, unknown> {
-  const { searchQuery, ...rest } = filters;
-  const flat: Record<string, unknown> = { ...rest };
-  if (typeof searchQuery === "string" && searchQuery.trim()) flat.query = searchQuery.trim();
-  for (const key of PLG_ORGANIZATION_SCALAR_FILTERS) {
-    const v = flat[key];
-    if (Array.isArray(v)) flat[key] = v[0];
-  }
-  const unowned = Array.isArray(flat.unowned) ? (flat.unowned as unknown[])[0] : flat.unowned;
-  if (unowned === "true" || unowned === "false") flat.unowned = unowned === "true";
-  for (const [key, time] of [
-    ["registeredFrom", "T00:00:00Z"],
-    ["registeredTo", "T23:59:59Z"],
-  ] as const) {
-    const v = flat[key];
-    if (typeof v === "string" && PLAIN_DATE.test(v)) flat[key] = `${v}${time}`;
-  }
-  const body: Record<string, unknown> = { filters: flat, pagination: { offset, limit } };
+  const body: Record<string, unknown> = {
+    filters: plgSearchFilters(filters),
+    pagination: { offset, limit },
+  };
   if (sortBy?.field === "name") body.sortBy = "name";
   if (sortBy?.order === "asc" || sortBy?.order === "desc") body.sortOrder = sortBy.order;
+  return body;
+}
+
+/**
+ * `POST /plg/registrations/search`'s body. A widget's `unacknowledgedOnly`
+ * ("new registrations") sits next to its other filters, but the search takes
+ * it beside `filters`, not in it, and refuses an unknown field, so it is
+ * moved out; the rest are the shared PLG `filters` (see `plgSearchFilters`).
+ * The search has one order (newest registration first) and takes no
+ * `sortBy`, so a widget's is never sent.
+ */
+function plgRegistrationSearchBody({
+  filters,
+  offset,
+  limit,
+}: {
+  filters: Record<string, unknown>;
+  offset: number;
+  limit: number;
+}): Record<string, unknown> {
+  const { unacknowledgedOnly, ...rest } = filters;
+  const body: Record<string, unknown> = {
+    filters: plgSearchFilters(rest),
+    pagination: { offset, limit },
+  };
+  if (plgBoolean(unacknowledgedOnly)) body.unacknowledgedOnly = true;
   return body;
 }
 

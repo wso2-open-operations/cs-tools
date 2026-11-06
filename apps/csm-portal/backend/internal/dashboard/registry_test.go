@@ -1298,6 +1298,31 @@ func TestLoadDir_AcceptsPlgOrganizationWidgets(t *testing.T) {
 	}
 }
 
+// A PLG registration widget loads too, its "new registrations" flag beside
+// the PLG list's other filters.
+func TestLoadDir_AcceptsPlgRegistrationWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "new", "displayName": "New registrations", "resourceType": "plg_registration", "shape": "count", "gridWidth": 3,
+	     "query": {"unacknowledgedOnly": true}},
+	    {"id": "iam", "displayName": "IAM registrations", "resourceType": "plg_registration", "shape": "list", "gridWidth": 6,
+	     "query": {"productCodes": ["IAM"]}, "listLimit": 5}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	for i, w := range dashboards[0].Widgets {
+		if w.ResourceType != ResourcePlgRegistration {
+			t.Errorf("widgets[%d].resourceType = %q, want %q", i, w.ResourceType, ResourcePlgRegistration)
+		}
+	}
+}
+
 // The deprecated single-variable path gets the same widget validation: unlike
 // "type", none of these fields is new, so an already-deployed value carrying
 // one is already broken.

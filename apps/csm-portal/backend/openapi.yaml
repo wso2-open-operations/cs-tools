@@ -21123,6 +21123,7 @@ components:
             - engagement
             - case_feedback
             - plg_organization
+            - plg_registration
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -21137,7 +21138,9 @@ components:
             caller picks the endpoint from resourceType on its own, same as
             every other value here. plg_organization is PLG organisations,
             searched with POST /plg/organizations/search, which only PLG
-            users may call.
+            users may call. plg_registration is PLG registrations (one per
+            organisation and product), searched with POST
+            /plg/registrations/search, PLG users only as well.
         shape:
           type: string
           enum:
