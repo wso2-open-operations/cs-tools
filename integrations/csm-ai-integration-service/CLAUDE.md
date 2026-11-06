@@ -36,7 +36,10 @@ one call can send the model; the per-user rate limit is the CSM portal backend's
 The service makes one call and returns **every JSON object in the reply, in order** (`candidates`), or the
 model's sentence when its last object is the catalogue's refusal shape `{"error": "..."}` (`declined`), plus
 `usage`. It does **not** judge the candidates: the backend runs `dashboard.ParseGenerated` from the last one
-back and keeps the first that passes, so the per-type rules live in one place. Errors are `{code, message}`;
+back and keeps the first that passes, so the per-type rules live in one place. A candidate may carry a
+top-level `note` (catalogue section 1: a request that cannot be built exactly gets the closest dashboard, and
+the note says what differs); it is passed on like the rest of the object, and the backend takes it off and
+starts the chat reply with it. `declined` is only for a request nothing close answers. Errors are `{code, message}`;
 the backend maps the code to its own status and user-facing text:
 
 | Status | `code` | When |
