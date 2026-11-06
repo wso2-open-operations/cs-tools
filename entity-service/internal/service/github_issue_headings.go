@@ -83,6 +83,7 @@ func parseIssueFormLabels(raw []byte) []string {
 	return labels
 }
 
+// issueHeadingsEntry is one cached read of a repository's forms.
 type issueHeadingsEntry struct {
 	headings issueHeadings
 	at       time.Time
@@ -98,6 +99,7 @@ type githubIssueTemplates struct {
 	entries map[string]issueHeadingsEntry
 }
 
+// newGithubIssueTemplates builds the cache over files, refreshed as often as servicenow-config.yml.
 func newGithubIssueTemplates(files githubFileReader) *githubIssueTemplates {
 	return &githubIssueTemplates{files: files, ttl: githubRepoConfigTTL, now: time.Now, entries: map[string]issueHeadingsEntry{}}
 }
@@ -122,9 +124,12 @@ func (c *githubIssueTemplates) get(ctx context.Context, owner, repo string) (iss
 		Type string `json:"type"`
 	}
 	var labels []string
-	if raw != nil && json.Unmarshal(raw, &listing) == nil {
+	if raw != nil {
+		if err := json.Unmarshal(raw, &listing); err != nil {
+			return nil, fmt.Errorf("github: parse %s listing in %s/%s: %w", githubIssueTemplateDir, owner, repo, err)
+		}
 		for _, f := range listing {
-			if f.Type != "file" || !(strings.HasSuffix(f.Name, ".yml") || strings.HasSuffix(f.Name, ".yaml")) {
+			if f.Type != "file" || (!strings.HasSuffix(f.Name, ".yml") && !strings.HasSuffix(f.Name, ".yaml")) {
 				continue
 			}
 			form, err := c.files.FileContent(ctx, owner, repo, f.Path)
