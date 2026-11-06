@@ -105,6 +105,7 @@ func TestServiceGenerateError_MapsEveryCode(t *testing.T) {
 		csmai.CodeUnusable:        errGenerateUnusable,
 		csmai.CodeTimeout:         errGenerateCall,
 		csmai.CodeModelCallFailed: errGenerateCall,
+		csmai.CodeUsageLimit:      errGenerateUsageLimit,
 		csmai.CodeInvalidRequest:  errGenerateCall,
 	} {
 		err := serviceGenerateError(&csmai.Error{StatusCode: 500, Code: code})

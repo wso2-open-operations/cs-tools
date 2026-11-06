@@ -70,8 +70,10 @@ const (
 	errMsgGenerateDraftTooBig  = "The dashboard being edited is too large to change in the chat. Start a new one."
 	errMsgGenerateRefused      = "This request can't be turned into a dashboard. Try rephrasing it."
 	errMsgGenerateUnusable     = "The answer couldn't be turned into a dashboard. Try again, or rephrase the request."
-	errMsgGenerateTimeout      = "Generating the dashboard took too long. Try again."
-	errMsgGenerateCall         = "The dashboard model couldn't be reached. Try again in a moment."
+	errMsgGenerateTruncated    = "The dashboard was too large to create in one go. Ask for fewer widgets, or build it in steps."
+	errMsgGenerateTimeout      = "The AI assistant took too long to answer. Try again."
+	errMsgGenerateCall         = "The AI assistant can't be reached right now. Try again in a few minutes."
+	errMsgGenerateUsageLimit   = "The AI assistant has reached its usage limit. Try again later."
 )
 
 // writeGenerateError maps a generator error to a status and message, and
@@ -84,7 +86,10 @@ const (
 //   - errDashboardTeam (a team filter that cannot   422, the reason (an unknown
 //     work: see dashboardTeams)                         team, the wrong field, ...)
 //   - errGenerateRefused                             422
-//   - errGenerateUnusable, errGenerateTruncated      502
+//   - errGenerateUnusable                            502
+//   - errGenerateTruncated (the reply was cut off)   502, its own message
+//   - errGenerateUsageLimit (the AI side's limit,    503 (429 stays this
+//     not the per-user one)                              backend's own limit)
 //   - errGenerateCall, timed out                     504
 //   - errGenerateCall, otherwise                     502 (a gateway 401/403 is
 //     this backend's key problem, never passed on as the caller's)
@@ -111,9 +116,15 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, errGenerateRefused):
 		slog.InfoContext(ctx, "dashboard generate: model refused")
 		writeError(w, http.StatusUnprocessableEntity, errMsgGenerateRefused)
-	case errors.Is(err, errGenerateUnusable), errors.Is(err, errGenerateTruncated):
+	case errors.Is(err, errGenerateTruncated):
+		slog.WarnContext(ctx, "dashboard generate: model reply cut off", "err", err)
+		writeError(w, http.StatusBadGateway, errMsgGenerateTruncated)
+	case errors.Is(err, errGenerateUnusable):
 		slog.WarnContext(ctx, "dashboard generate: unusable model reply", "err", err)
 		writeError(w, http.StatusBadGateway, errMsgGenerateUnusable)
+	case errors.Is(err, errGenerateUsageLimit):
+		slog.WarnContext(ctx, "dashboard generate: model usage limit reached", "err", err)
+		writeError(w, http.StatusServiceUnavailable, errMsgGenerateUsageLimit)
 	case errors.Is(err, errGenerateCall) && isTimeout(err):
 		slog.WarnContext(ctx, "dashboard generate: model call timed out", "err", err)
 		writeError(w, http.StatusGatewayTimeout, errMsgGenerateTimeout)
