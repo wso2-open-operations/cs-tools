@@ -30,7 +30,10 @@ import {
 } from "@wso2/oxygen-ui";
 import { useState, type JSX } from "react";
 import type { BeDeploymentCreatePayload, BeDeploymentType } from "@api/backend/types";
-import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
+import {
+  DEPLOYMENT_TYPES,
+  deploymentTypeLabel,
+} from "@features/csm-projects/utils/deployments";
 
 interface CreateDeploymentDialogProps {
   /** The project this deployment belongs to (pre-populated, read-only). */
@@ -44,15 +47,6 @@ interface CreateDeploymentDialogProps {
 
 const NAME_MAX = 200;
 const DESCRIPTION_MAX = 4000;
-
-const DEPLOYMENT_TYPES: BeDeploymentType[] = [
-  "primary_production",
-  "staging",
-  "qa",
-  "stress",
-  "uat",
-  "development",
-];
 
 /**
  * Create a new deployment under the current project. All four fields are

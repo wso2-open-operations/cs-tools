@@ -527,6 +527,11 @@ export function backendErrorCode(err: unknown): string | undefined {
   return typeof code === "string" && code ? code : undefined;
 }
 
+/** A failed request's message, or `fallback` when it has none. */
+export function errorText(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message.trim() ? err.message : fallback;
+}
+
 /**
  * Whether a failed answer to a time (Accept proposed time, or the Re-schedule / counter PATCH) was
  * refused because the change request is no longer what the dialog was opened on: a 409 that names one

@@ -55,7 +55,7 @@ import {
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeTemplates,
 } from "@features/csm-operations/api/useStandardChanges";
-import { changeRequestImpactLabel } from "@features/csm-operations/utils/changeRequests";
+import { changeRequestImpactLabel, errorText } from "@features/csm-operations/utils/changeRequests";
 import {
   CHANGE_REQUESTS_PATH,
   changeRequestRiskLabel,
@@ -110,10 +110,6 @@ const PROPOSAL_SCOPE_OPTIONS: ReadonlyArray<{ value: ProposalScope; label: strin
 
 function formatDate(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium" }) ?? "—";
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 /** The search box's text, sent once typing pauses. */

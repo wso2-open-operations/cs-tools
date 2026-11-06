@@ -30,12 +30,12 @@ import { isBlankHtml, sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { PLAN_RICH_TEXT_SX } from "@features/csm-operations/utils/planRichText";
 import {
   changeRequestCategoryLabel,
+  changeRequestChoiceLabel,
   changeRequestImpactLabel,
 } from "@features/csm-operations/utils/changeRequests";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 import {
-  changeRequestPriorityLabel,
   changeRequestRiskLabel,
-  deploymentTypesText,
   highlightStandardChangeHtml,
   splitPlaceholders,
   standardChangeParameterTypeLabel,
@@ -129,7 +129,8 @@ function RichSection({
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+/** A caption over its value, as the template's facts are shown. */
+export function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25, minWidth: 0 }}>
       <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
@@ -172,7 +173,7 @@ export default function StandardChangeContentView({
         <Field label="Category">{changeRequestCategoryLabel(content.category)}</Field>
         <Field label="Impact">{content.impact ? changeRequestImpactLabel(content.impact) : "—"}</Field>
         <Field label="Risk">{changeRequestRiskLabel(content.risk)}</Field>
-        <Field label="Priority">{content.priority ? changeRequestPriorityLabel(content.priority) : "Chosen per change"}</Field>
+        <Field label="Priority">{content.priority ? changeRequestChoiceLabel(content.priority) : "Chosen per change"}</Field>
         <Field label="Deployments">
           {content.deploymentTypes?.length ? `${deploymentTypesText(content.deploymentTypes)} only` : "Any, chosen per change"}
         </Field>

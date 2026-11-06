@@ -17,9 +17,10 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeRichTextHtml } from "@utils/sanitizeHtml";
 import { CR_FILTER_PARAM_KEYS } from "@features/csm-operations/utils/changeRequestsFiltersUrl";
+import { changeRequestChoiceLabel } from "@features/csm-operations/utils/changeRequests";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 import {
-  changeRequestPriorityLabel,
-  deploymentTypesText,
+  deploymentFitsTypes,
   isStandardChangeProposalFinal,
   isStandardChangeProposalInReview,
   standardChangeProposalStateLabel,
@@ -522,7 +523,13 @@ describe("the Standard Change Authority's states, and what a template fixes", ()
     expect(deploymentTypesText(["primary_production"])).toBe("Primary Production");
     expect(deploymentTypesText(["primary_production", "staging", "uat"])).toBe("Primary Production, Staging or UAT");
     expect(deploymentTypesText(null)).toBe("");
-    expect(changeRequestPriorityLabel("moderate")).toBe("Moderate");
-    expect(changeRequestPriorityLabel(null)).toBe("—");
+    expect(changeRequestChoiceLabel("moderate")).toBe("Moderate");
+    expect(changeRequestChoiceLabel(null)).toBe("—");
+  });
+
+  it("offers only the deployments of a template's types", () => {
+    expect(deploymentFitsTypes("staging", ["primary_production", "staging"])).toBe(true);
+    expect(deploymentFitsTypes("uat", ["primary_production", "staging"])).toBe(false);
+    expect(deploymentFitsTypes(undefined, ["staging"])).toBe(false);
   });
 });

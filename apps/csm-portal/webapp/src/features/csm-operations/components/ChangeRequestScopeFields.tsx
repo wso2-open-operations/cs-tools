@@ -20,7 +20,8 @@ import type { JSX, ReactNode } from "react";
 import AsyncProjectSelect from "@features/csm-cases/components/AsyncProjectSelect";
 import type { ScopeOption } from "@features/csm-operations/api/useChangeRequestScopeLookups";
 import type { ChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
-import { deploymentTypesText } from "@features/csm-operations/utils/standardChanges";
+import { deploymentFitsTypes } from "@features/csm-operations/utils/standardChanges";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 
 interface ChangeRequestScopeFieldsProps {
   scope: ChangeRequestScope;
@@ -112,7 +113,7 @@ export default function ChangeRequestScopeFields({
   );
   const typed = (deploymentTypes?.length ?? 0) > 0;
   const deploymentOptions = typed
-    ? scope.deploymentOptions.filter((o) => !!o.type && deploymentTypes!.includes(o.type))
+    ? scope.deploymentOptions.filter((o) => deploymentFitsTypes(o.type, deploymentTypes!))
     : scope.deploymentOptions;
   const typesHelper = typed
     ? `Required: the template is for ${deploymentTypesText(deploymentTypes)} deployments only.`

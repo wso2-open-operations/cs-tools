@@ -68,8 +68,7 @@ import {
 import StandardChangeContentView from "@features/csm-operations/components/StandardChangeContentView";
 import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
 import {
-  changeRequestPriorityLabel,
-  deploymentTypesText,
+  deploymentFitsTypes,
   isStandardChangeTemplateOtherCustomer,
   isStandardChangeTemplateUnavailable,
   STANDARD_CHANGE_ONE_CUSTOMER_RULE,
@@ -81,6 +80,7 @@ import {
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   CHANGE_REQUEST_CREATE_TYPE_OPTIONS,
   CHANGE_REQUEST_JOURNAL_MAX,
+  changeRequestChoiceLabel,
   changeRequestDraftKey,
   clearChangeRequestDraft,
   CLONE_SOURCE_GAP_MESSAGE,
@@ -103,11 +103,11 @@ import {
   type ParentRecordOption,
 } from "@features/csm-operations/utils/changeRequests";
 import type { CreateChangeRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
+import { deploymentTypesText } from "@features/csm-projects/utils/deployments";
 import type {
   BeChangeRequestCategory,
   BeChangeRequestImpact,
   BeChangeRequestPriority,
-  BeDeploymentType,
   BeChangeRequestType,
   BeCreateChangeRequestPayload,
   BeGroup,
@@ -401,10 +401,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const templatePriority = isStandard ? (templateVersion?.priority ?? null) : null;
   const templateDeploymentTypes = isStandard && templateVersion?.deploymentTypes?.length ? templateVersion.deploymentTypes : null;
   const typedDeploymentIds = templateDeploymentTypes
-    ? scope.deploymentIds.filter((id) => {
-        const t = scope.deploymentOptions.find((o) => o.id === id)?.type;
-        return !!t && templateDeploymentTypes.includes(t as BeDeploymentType);
-      })
+    ? scope.deploymentIds.filter((id) =>
+        deploymentFitsTypes(scope.deploymentOptions.find((o) => o.id === id)?.type, templateDeploymentTypes),
+      )
     : scope.deploymentIds;
   // A deployment chosen before the template, of a type it is not for, is dropped
   // once the project's deployments (and their types) are known.
@@ -678,18 +677,18 @@ export default function CreateChangeRequestPage(): JSX.Element {
       : subject.trim().length > 0) &&
     !isSubmitting &&
     !isIncidentParentSelected;
-  // What Create is still waiting for, said beside the button (its other blockers
-  // -- a template that can't be used, an incident as the originating record --
-  // are explained where they are).
+  // What a standard change's Create is still waiting for, said beside the
+  // button (its other blockers -- a template that can't be used, an incident as
+  // the originating record -- are explained where they are). Normal and
+  // Emergency changes show no such line.
   const stillNeeded: string[] = [];
-  if (!isCreatableChangeRequestType(type)) stillNeeded.push("the change type");
-  else if (isStandard) {
+  if (isStandard) {
     if (!scope.projectId) stillNeeded.push("a Customer Project");
     if (!templateId) stillNeeded.push("a standard change template");
     else if (templateDeploymentTypes && scope.projectId && typedDeploymentIds.length === 0) {
       stillNeeded.push(`a ${deploymentTypesText(templateDeploymentTypes)} deployment`);
     }
-  } else if (!subject.trim()) stillNeeded.push("a subject");
+  }
   const stillNeededText =
     !isSubmitting && stillNeeded.length ? `Before it can be created it still needs ${stillNeeded.join(" and ")}.` : "";
   // Non-blocking: a past planned start/end is unusual but not forbidden
@@ -1310,7 +1309,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
                   label="Priority"
                   size="small"
                   fullWidth
-                  value={changeRequestPriorityLabel(templatePriority)}
+                  value={changeRequestChoiceLabel(templatePriority)}
                   helperText="Fixed by the standard change template."
                   slotProps={{ input: { readOnly: true }, htmlInput: { "aria-readonly": true } }}
                 />
@@ -1650,7 +1649,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
         </Box>
 
         <Box
-          sx={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", gap: 1.5, mt: 2.5 }}
+          sx={{ display: "flex", ...(isStandard && { flexWrap: "wrap", alignItems: "center" }), justifyContent: "flex-end", gap: 1.5, mt: 2.5 }}
         >
           {stillNeededText && (
             <Typography

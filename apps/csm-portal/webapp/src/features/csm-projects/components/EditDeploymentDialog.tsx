@@ -33,7 +33,10 @@ import type {
   BeDeploymentDetailUpdatePayload,
   BeDeploymentType,
 } from "@api/backend/types";
-import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
+import {
+  DEPLOYMENT_TYPES,
+  deploymentTypeLabel,
+} from "@features/csm-projects/utils/deployments";
 
 interface EditDeploymentDialogProps {
   deployment: BeDeployment;
@@ -46,15 +49,6 @@ interface EditDeploymentDialogProps {
 
 const NAME_MAX = 200;
 const DESCRIPTION_MAX = 4000;
-
-const DEPLOYMENT_TYPES: BeDeploymentType[] = [
-  "primary_production",
-  "staging",
-  "qa",
-  "stress",
-  "uat",
-  "development",
-];
 
 /**
  * Edit a deployment's name, type, and description (`PATCH /deployments/{id}`

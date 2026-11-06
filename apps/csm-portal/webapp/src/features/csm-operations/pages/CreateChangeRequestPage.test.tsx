@@ -1537,15 +1537,17 @@ describe("CreateChangeRequestPage — customer project, deployments, deployment 
     expect(screen.getAllByRole("combobox", { name: "Deployments" })).toHaveLength(1);
   });
 
-  it("says beside Create what a Normal change still needs, until nothing is missing", () => {
+  it("says nothing beside Create for a Normal change, or before a type is chosen", () => {
     render(<CreateChangeRequestPage />);
     const create = screen.getByRole("button", { name: /create change request/i });
-    expect(create).toHaveAccessibleDescription("Before it can be created it still needs the change type.");
+    expect(create).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
     selectType("Normal");
-    expect(create).toHaveAccessibleDescription("Before it can be created it still needs a subject.");
+    expect(create).toBeDisabled();
+    expect(create).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: /^subject/i }), { target: { value: "Rotate keys" } });
     expect(create).toBeEnabled();
-    expect(screen.queryByText(/still needs/i)).not.toBeInTheDocument();
   });
 
   it("has no Environments field: a deployment carries its own environment", () => {

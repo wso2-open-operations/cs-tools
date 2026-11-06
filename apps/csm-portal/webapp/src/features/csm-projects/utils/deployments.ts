@@ -34,6 +34,19 @@ export function formatDeploymentDate(value?: string | null): string {
   );
 }
 
+/**
+ * Every deployment type, in the order the pickers offer them (the deployment
+ * create/edit dialogs, a standard change template's types).
+ */
+export const DEPLOYMENT_TYPES: readonly BeDeploymentType[] = [
+  "primary_production",
+  "staging",
+  "qa",
+  "stress",
+  "uat",
+  "development",
+];
+
 /** Human label for each deployment-type enum value returned by the backend. */
 const DEPLOYMENT_TYPE_LABEL: Record<BeDeploymentType, string> = {
   primary_production: "Primary Production",
@@ -53,6 +66,15 @@ export function deploymentTypeLabel(type?: BeDeploymentType | string): string {
   return (
     DEPLOYMENT_TYPE_LABEL[type as BeDeploymentType] ?? type.replace(/_/g, " ")
   );
+}
+
+/** "Primary Production, Staging or UAT": several deployment types, for a sentence. */
+export function deploymentTypesText(
+  types: readonly string[] | null | undefined,
+): string {
+  const labels = (types ?? []).map((t) => deploymentTypeLabel(t));
+  if (labels.length <= 1) return labels.join("");
+  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
 }
 
 /**

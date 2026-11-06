@@ -16,11 +16,8 @@
 
 import { isBlankHtml } from "@utils/sanitizeHtml";
 import { backendErrorCode } from "@features/csm-operations/utils/changeRequests";
-import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
 import type {
-  BeChangeRequestPriority,
   BeChangeRequestRisk,
-  BeDeploymentType,
   BeStandardChangeContent,
   BeStandardChangeParameter,
   BeStandardChangeParameterType,
@@ -235,33 +232,12 @@ export const STANDARD_CHANGE_APPROVAL_RULE =
 /** The longest summary the server takes. */
 export const MAX_STANDARD_CHANGE_SUMMARY = 2000;
 
-/** The priorities a template may fix ("" leaves it to whoever raises the change). */
-export const STANDARD_CHANGE_PRIORITY_OPTIONS: ReadonlyArray<{ value: BeChangeRequestPriority; label: string }> = [
-  { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "moderate", label: "Moderate" },
-  { value: "low", label: "Low" },
-];
+/** The longest name the server takes (`maxStandardChangeName`), which also bounds the template's subject. */
+export const MAX_STANDARD_CHANGE_NAME = 255;
 
-export function changeRequestPriorityLabel(priority?: string | null): string {
-  return STANDARD_CHANGE_PRIORITY_OPTIONS.find((o) => o.value === priority)?.label ?? (priority || "—");
-}
-
-/** The deployment types a template may be for, in the order shown. */
-export const STANDARD_CHANGE_DEPLOYMENT_TYPES: readonly BeDeploymentType[] = [
-  "primary_production",
-  "staging",
-  "uat",
-  "qa",
-  "stress",
-  "development",
-];
-
-/** "Primary Production or Staging" (the template's types, for a sentence). */
-export function deploymentTypesText(types: readonly string[] | null | undefined): string {
-  const labels = (types ?? []).map((t) => deploymentTypeLabel(t));
-  if (labels.length <= 1) return labels.join("");
-  return `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
+/** Whether a deployment of `type` may be chosen for a template that is for `types`. */
+export function deploymentFitsTypes(type: string | null | undefined, types: readonly string[]): boolean {
+  return !!type && types.includes(type);
 }
 
 /** One piece of a text split at its placeholders. */

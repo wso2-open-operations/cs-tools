@@ -34,17 +34,15 @@ import {
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeTemplates,
 } from "@features/csm-operations/api/useStandardChanges";
-import { STANDARD_CHANGE_ONE_CUSTOMER_RULE } from "@features/csm-operations/utils/standardChanges";
+import { errorText } from "@features/csm-operations/utils/changeRequests";
+import {
+  MAX_STANDARD_CHANGE_NAME,
+  STANDARD_CHANGE_ONE_CUSTOMER_RULE,
+} from "@features/csm-operations/utils/standardChanges";
 import type { BeEntityRef, BeStandardChangeProposal } from "@api/backend/types";
 
 /** How many of the customer's templates the dialog lists. */
 const EXISTING_SHOWN = 8;
-
-const NAME_MAX = 255;
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
-}
 
 /**
  * "Propose a standard change": the name and the customer first, then the draft.
@@ -108,7 +106,7 @@ export default function ProposeStandardChangeDialog({
           autoFocus
           value={name}
           disabled={create.isPending}
-          onChange={(e) => setName(e.target.value.slice(0, NAME_MAX))}
+          onChange={(e) => setName(e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
           helperText="The template's name in the catalogue. You can change it in the draft."
         />
         <AsyncEntitySelect<BeEntityRef>

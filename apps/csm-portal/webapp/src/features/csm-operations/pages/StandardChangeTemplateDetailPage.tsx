@@ -58,6 +58,7 @@ import {
 import StandardChangeContentView, {
   StandardChangeParametersTable,
 } from "@features/csm-operations/components/StandardChangeContentView";
+import { errorText } from "@features/csm-operations/utils/changeRequests";
 import {
   customerAccountPath,
   raiseFromTemplatePath,
@@ -73,10 +74,6 @@ import type { BeStandardChangeProposalKind, BeStandardChangeTemplateEvent } from
 
 function formatDateTime(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "short" }) ?? "—";
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 function Meta({ label, children }: { label: string; children: ReactNode }): JSX.Element {

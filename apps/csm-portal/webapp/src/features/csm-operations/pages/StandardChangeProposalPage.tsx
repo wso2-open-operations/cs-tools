@@ -71,6 +71,7 @@ import {
 } from "@features/csm-operations/api/useStandardChanges";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import StandardChangeContentView, {
+  Field,
   StandardChangeParametersTable,
 } from "@features/csm-operations/components/StandardChangeContentView";
 import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
@@ -81,22 +82,22 @@ import {
   approvalStatusLabel,
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   CHANGE_REQUEST_IMPACT_OPTIONS,
+  CHANGE_REQUEST_PRIORITY_OPTIONS,
   CHANGE_REQUEST_ROLLBACK_DURATION_MAX,
+  errorText,
 } from "@features/csm-operations/utils/changeRequests";
 import {
   appendPlaceholderToHtml,
   customerAccountPath,
-  deploymentTypesText,
   hasParameterIssues,
   insertPlaceholderAt,
   isStandardChangeProposalFinal,
   isStandardChangeProposalInReview,
+  MAX_STANDARD_CHANGE_NAME,
   MAX_STANDARD_CHANGE_SUMMARY,
   normalizeStandardChangeParameters,
   STANDARD_CHANGE_APPROVAL_RULE,
   STANDARD_CHANGE_AUTHORITY,
-  STANDARD_CHANGE_DEPLOYMENT_TYPES,
-  STANDARD_CHANGE_PRIORITY_OPTIONS,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
@@ -113,7 +114,11 @@ import {
   unusedParameters,
   validateStandardChangeParameters,
 } from "@features/csm-operations/utils/standardChanges";
-import { deploymentTypeLabel } from "@features/csm-projects/utils/deployments";
+import {
+  DEPLOYMENT_TYPES,
+  deploymentTypeLabel,
+  deploymentTypesText,
+} from "@features/csm-projects/utils/deployments";
 import type {
   BeChangeRequestCategory,
   BeChangeRequestImpact,
@@ -131,15 +136,8 @@ import type {
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
-/** The proposal's subject is the template's name on the change requests raised from it (work_item.subject). */
-const NAME_MAX = 255;
-
 function formatDateTime(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium", timeStyle: "short" }) ?? "—";
-}
-
-function errorText(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.trim() ? err.message : fallback;
 }
 
 function personLabel(p?: { name?: string | null; email?: string | null } | null): string {
@@ -553,7 +551,7 @@ function ProposalEditor({
           size="small"
           value={form.name}
           disabled={busy}
-          onChange={(e) => set("name", e.target.value.slice(0, NAME_MAX))}
+          onChange={(e) => set("name", e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
           helperText={isRetire ? "The template being retired." : "The template's name in the catalogue."}
         />
         {!isRetire && (
@@ -646,7 +644,7 @@ function ProposalEditor({
               value={form.subject}
               disabled={busy}
               inputRef={subjectRef}
-              onChange={(e) => set("subject", e.target.value.slice(0, NAME_MAX))}
+              onChange={(e) => set("subject", e.target.value.slice(0, MAX_STANDARD_CHANGE_NAME))}
               helperText="The change request's subject (plain text). Placeholders are filled in."
             />
             <Box>
@@ -767,7 +765,7 @@ function ProposalEditor({
                     Chosen per change
                   </Typography>
                 </MenuItem>
-                {STANDARD_CHANGE_PRIORITY_OPTIONS.map((o) => (
+                {CHANGE_REQUEST_PRIORITY_OPTIONS.map((o) => (
                   <MenuItem key={o.value} value={o.value}>
                     {o.label}
                   </MenuItem>
@@ -803,7 +801,7 @@ function ProposalEditor({
                   )
                 }
               >
-                {STANDARD_CHANGE_DEPLOYMENT_TYPES.map((t) => (
+                {DEPLOYMENT_TYPES.map((t) => (
                   <MenuItem key={t} value={t}>
                     <Checkbox size="small" checked={form.deploymentTypes.includes(t)} sx={{ p: 0, mr: 1 }} />
                     {deploymentTypeLabel(t)}
@@ -993,6 +991,83 @@ function ProposalEditor({
   );
 }
 
+/**
+ * A dialog that asks for a text before its action: kept open while the action is
+ * pending, cleared once closed, and the action held back while a required text
+ * is blank.
+ */
+function ReasonDialog({
+  open,
+  titleId,
+  title,
+  text,
+  label,
+  required,
+  helperText,
+  confirmLabel,
+  confirmColor,
+  pending,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  titleId: string;
+  title: ReactNode;
+  text: ReactNode;
+  label: string;
+  required: boolean;
+  helperText?: string;
+  confirmLabel: string;
+  confirmColor: "error" | "success";
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onConfirm: (text: string) => void;
+}): JSX.Element {
+  const [value, setValue] = useState("");
+  return (
+    <Dialog
+      open={open}
+      onClose={pending ? undefined : onClose}
+      aria-labelledby={titleId}
+      fullWidth
+      maxWidth="sm"
+      slotProps={{ transition: { onExited: () => setValue("") } }}
+    >
+      <DialogTitle id={titleId}>{title}</DialogTitle>
+      <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <DialogContentText>{text}</DialogContentText>
+        {error && <Alert severity="error">{error}</Alert>}
+        <TextField
+          label={label}
+          multiline
+          minRows={3}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          required={required}
+          disabled={pending}
+          helperText={helperText}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button color="inherit" onClick={onClose} disabled={pending}>
+          Go back
+        </Button>
+        <Button
+          variant="contained"
+          color={confirmColor}
+          disabled={pending || (required && !value.trim())}
+          loading={pending}
+          onClick={() => onConfirm(value.trim())}
+        >
+          {confirmLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /** An approver's Approve / Reject on the stage the proposal waits on; a rejection needs a comment. */
 function DecisionDialog({
   decision,
@@ -1010,9 +1085,7 @@ function DecisionDialog({
   onClose: () => void;
   onDecide: (comment: string) => void;
 }): JSX.Element {
-  const [comment, setComment] = useState("");
   const reject = decision === "rejected";
-  const commentMissing = reject && !comment.trim();
   const authority = stage?.label === STANDARD_CHANGE_AUTHORITY;
   // From the page as loaded: another member may have authorised since, so it
   // never promises that nothing will be applied.
@@ -1023,50 +1096,25 @@ function DecisionDialog({
       ? `${stage!.requiredApprovals} different members of the ${STANDARD_CHANGE_AUTHORITY} must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
       : `Yours is the last approval needed: approving applies the template change.`;
   return (
-    <Dialog
+    <ReasonDialog
       open={decision !== null}
-      onClose={pending ? undefined : onClose}
-      aria-labelledby="std-decision-title"
-      fullWidth
-      maxWidth="sm"
-      slotProps={{ transition: { onExited: () => setComment("") } }}
-    >
-      <DialogTitle id="std-decision-title">
-        {reject ? "Reject the proposal" : authority ? "Authorise the proposal" : "Approve the proposal"}
-      </DialogTitle>
-      <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <DialogContentText>
-          {reject
-            ? "A rejection ends the proposal: the catalogue is left as it is and the proposal is kept as the record, with your comment."
-            : approveText}
-        </DialogContentText>
-        {error && <Alert severity="error">{error}</Alert>}
-        <TextField
-          label={reject ? "Comment (required)" : "Comment (optional)"}
-          multiline
-          minRows={3}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          required={reject}
-          disabled={pending}
-          helperText={reject ? "Say why, so the proposer can act on it." : undefined}
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button color="inherit" onClick={onClose} disabled={pending}>
-          Go back
-        </Button>
-        <Button
-          variant="contained"
-          color={reject ? "error" : "success"}
-          disabled={pending || commentMissing}
-          loading={pending}
-          onClick={() => onDecide(comment.trim())}
-        >
-          {reject ? "Reject" : authority ? "Authorise" : "Approve"}
-        </Button>
-      </DialogActions>
-    </Dialog>
+      titleId="std-decision-title"
+      title={reject ? "Reject the proposal" : authority ? "Authorise the proposal" : "Approve the proposal"}
+      text={
+        reject
+          ? "A rejection ends the proposal: the catalogue is left as it is and the proposal is kept as the record, with your comment."
+          : approveText
+      }
+      label={reject ? "Comment (required)" : "Comment (optional)"}
+      required={reject}
+      helperText={reject ? "Say why, so the proposer can act on it." : undefined}
+      confirmLabel={reject ? "Reject" : authority ? "Authorise" : "Approve"}
+      confirmColor={reject ? "error" : "success"}
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onConfirm={onDecide}
+    />
   );
 }
 
@@ -1086,40 +1134,62 @@ function CancelDialog({
   onClose: () => void;
   onCancel: (reason: string) => void;
 }): JSX.Element {
-  const [reason, setReason] = useState("");
   return (
-    <Dialog
+    <ReasonDialog
       open={open}
-      onClose={pending ? undefined : onClose}
-      aria-labelledby="std-cancel-title"
-      fullWidth
-      maxWidth="sm"
-      slotProps={{ transition: { onExited: () => setReason("") } }}
-    >
-      <DialogTitle id="std-cancel-title">Cancel {number}?</DialogTitle>
-      <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <DialogContentText>
+      titleId="std-cancel-title"
+      title={`Cancel ${number}?`}
+      text={
+        <>
           For a proposal its proposer has abandoned or can no longer take forward. It is kept as the record with your
           reason; approvals still waiting are cancelled, and a revision or retirement no longer holds its template.
-        </DialogContentText>
-        {error && <Alert severity="error">{error}</Alert>}
-        <TextField
-          label="Reason (required)"
-          multiline
-          minRows={3}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          required
-          disabled={pending}
-          helperText="Shown to the proposer and on the proposal's record."
-        />
+        </>
+      }
+      label="Reason (required)"
+      required
+      helperText="Shown to the proposer and on the proposal's record."
+      confirmLabel="Cancel the proposal"
+      confirmColor="error"
+      pending={pending}
+      error={error}
+      onClose={onClose}
+      onConfirm={onCancel}
+    />
+  );
+}
+
+/** A yes / no question before a destructive action, answered with "Go back" or the action. */
+function ConfirmDialog({
+  open,
+  titleId,
+  title,
+  text,
+  confirmLabel,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  titleId: string;
+  title: string;
+  text: string;
+  confirmLabel: string;
+  pending?: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  return (
+    <Dialog open={open} onClose={onClose} aria-labelledby={titleId}>
+      <DialogTitle id={titleId}>{title}</DialogTitle>
+      <DialogContent>
+        <DialogContentText>{text}</DialogContentText>
       </DialogContent>
       <DialogActions>
-        <Button color="inherit" onClick={onClose} disabled={pending}>
+        <Button color="inherit" onClick={onClose}>
           Go back
         </Button>
-        <Button variant="contained" color="error" disabled={pending || !reason.trim()} loading={pending} onClick={() => onCancel(reason.trim())}>
-          Cancel the proposal
+        <Button variant="contained" color="error" loading={pending} onClick={onConfirm}>
+          {confirmLabel}
         </Button>
       </DialogActions>
     </Dialog>
@@ -1483,14 +1553,9 @@ export default function StandardChangeProposalPage(): JSX.Element {
           </Section>
           {proposal.kind !== "retire" && (
             <Section title="What the template specifies">
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}>
-                  Summary
-                </Typography>
-                <Typography variant="body2" sx={{ whiteSpace: "pre-wrap" }}>
-                  {proposal.summary?.trim() || "—"}
-                </Typography>
-              </Box>
+              <Field label="Summary">
+                <Box sx={{ whiteSpace: "pre-wrap" }}>{proposal.summary?.trim() || "—"}</Box>
+              </Field>
               <StandardChangeContentView content={proposal} />
               <Typography variant="subtitle2">Parameters</Typography>
               <StandardChangeParametersTable parameters={proposal.parameters ?? []} />
@@ -1574,40 +1639,26 @@ export default function StandardChangeProposalPage(): JSX.Element {
         onCancel={(reason) => cancel.mutate({ id: proposal.id, reason }, { onSuccess: () => setCancelling(false) })}
       />
 
-      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} aria-labelledby="std-delete-title">
-        <DialogTitle id="std-delete-title">Delete {proposal.number}?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            The draft has never been submitted, so it is deleted with everything in it. This cannot be undone.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button color="inherit" onClick={() => setConfirmDelete(false)}>
-            Go back
-          </Button>
-          <Button variant="contained" color="error" loading={remove.isPending} onClick={runDelete}>
-            Delete draft
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        titleId="std-delete-title"
+        title={`Delete ${proposal.number}?`}
+        text="The draft has never been submitted, so it is deleted with everything in it. This cannot be undone."
+        confirmLabel="Delete draft"
+        pending={remove.isPending}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={runDelete}
+      />
 
-      <Dialog open={confirmWithdraw} onClose={() => setConfirmWithdraw(false)} aria-labelledby="std-withdraw-title">
-        <DialogTitle id="std-withdraw-title">Withdraw {proposal.number}?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            The proposal is kept as the record but can no longer be edited or approved; any approvals still waiting
-            are cancelled.
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button color="inherit" onClick={() => setConfirmWithdraw(false)}>
-            Go back
-          </Button>
-          <Button variant="contained" color="error" onClick={runWithdraw}>
-            Withdraw
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmWithdraw}
+        titleId="std-withdraw-title"
+        title={`Withdraw ${proposal.number}?`}
+        text="The proposal is kept as the record but can no longer be edited or approved; any approvals still waiting are cancelled."
+        confirmLabel="Withdraw"
+        onClose={() => setConfirmWithdraw(false)}
+        onConfirm={runWithdraw}
+      />
     </Box>
   );
 }
