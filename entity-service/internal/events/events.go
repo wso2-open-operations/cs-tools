@@ -246,10 +246,16 @@ type StatusChangedPayload struct {
 	CaseID     string `json:"caseId"`
 	CaseNumber string `json:"caseNumber,omitempty"`
 	// WSO2CaseID — see CommentAddedPayload's own doc comment.
-	WSO2CaseID string   `json:"wso2CaseId,omitempty"`
-	CaseTitle  string   `json:"caseTitle,omitempty"`
-	NewStatus  string   `json:"newStatus"`
-	Recipients []string `json:"recipients"`
+	WSO2CaseID string `json:"wso2CaseId,omitempty"`
+	CaseTitle  string `json:"caseTitle,omitempty"`
+	NewStatus  string `json:"newStatus"`
+	// PreviousStatus is the state the case was in before this change, as a
+	// display label. Optional: a consumer uses it to tell whether the change
+	// is visible to a given audience, e.g. customers see Work In Progress and
+	// Waiting On WSO2 as one state, so a move between the two is not news to
+	// them.
+	PreviousStatus string   `json:"previousStatus,omitempty"`
+	Recipients     []string `json:"recipients"`
 }
 
 // CaseAssignedPayload is the Payload shape for TypeCaseAssigned — mirrors

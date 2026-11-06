@@ -1930,14 +1930,20 @@ func publishStatusChangedEvent(ctx context.Context, publisher EventPublisherServ
 		return
 	}
 
+	previousStatus := ""
+	if before.State != nil {
+		previousStatus = caseStateDisplayLabel[*before.State]
+	}
+
 	payload, err := json.Marshal(events.StatusChangedPayload{
-		ProjectID:  before.ProjectDetails.ID,
-		CaseID:     caseID,
-		CaseNumber: before.Number,
-		WSO2CaseID: before.InternalID,
-		CaseTitle:  before.Subject,
-		NewStatus:  newStatus,
-		Recipients: recipients,
+		ProjectID:      before.ProjectDetails.ID,
+		CaseID:         caseID,
+		CaseNumber:     before.Number,
+		WSO2CaseID:     before.InternalID,
+		CaseTitle:      before.Subject,
+		NewStatus:      newStatus,
+		PreviousStatus: previousStatus,
+		Recipients:     recipients,
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "update case: encode case.status_changed payload failed", "caseId", caseID, "error", err)
