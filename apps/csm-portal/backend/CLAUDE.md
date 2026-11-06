@@ -491,7 +491,8 @@ reached the browser; this is what stops them being sent at all to a caller who s
 ## Standard changes (`internal/handler/standard_changes.go`)
 
 Operations > Change requests > Standard changes: the approved standard change templates and the proposals that
-create, revise or retire them (entity-service CLAUDE.md, "Standard changes"). The fifteen routes
+create, revise or retire them (entity-service CLAUDE.md, "Standard changes"), and the suggestions mined from
+completed change requests (below). The fifteen template and proposal routes
 are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
 only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
 proposal (the proposer edits, submits and deletes a draft; the CAB, then two Standard Change
@@ -510,6 +511,16 @@ bodies' `accountId` filter and a proposal's `accountId` pass through raw, and ra
 from a template for another customer's project (or none), or a PATCH moving it there, is entity-service's
 400 `standard_change_template_other_customer`, echoed with its message and code by `mapUpstreamError`
 (`standard_change_customer_test.go`).
+
+**Suggestions** (entity-service CLAUDE.md, "Standard change suggestions"): `GET
+/standard-change-suggestions` (`PermViewOperations`) reads entity-service's snapshot, which its scheduled
+refresh computes once a day (a read never computes; the refresh route is service-only and not proxied
+here). It forwards only `accountId` (a UUID) and `includeIneligible` / `includeDismissed` (`true` or
+`false`), each shape-checked here (400 with no upstream call), anything else dropped (the threshold
+overrides it once forwarded are configuration now); `POST
+/standard-change-suggestions/dismissals` (201) and `DELETE /standard-change-suggestions/dismissals/{id}`
+(204) are `PermWrite`, through the same `forward`, so a refusal keeps its message and code.
+`TestStandardChangeHandler_SuggestionsQuery`.
 
 ## Change request tags go through the case tag routes
 
@@ -533,6 +544,11 @@ the previous system (see entity-service's `CLAUDE.md`, "Change requests: Tags").
 to the entity service as-is (no field allow-list), with two checks on top:
 
 * `POST` requires `type` of `standard`, `normal` or `emergency` (`validateChangeRequestCreateType`).
+* `POST`'s `clonedFromChangeRequestId` (the change request a clone is made from, sent by the webapp's
+  Clone) must be a UUID string in every spelling of the key (`validateChangeRequestCloneSource`, 400
+  `clonedFromChangeRequestId must be a UUID string`, no upstream call); whether it names an existing
+  change request is entity-service's 400, echoed. The detail's `clonedFrom` passes through.
+  `TestCreateChangeRequest_CloneSource`.
 * **An Emergency change takes no customer step** (the previous system has no Emergency CAB and acts on an Emergency
   change without the customer's consent): a `POST` with `type: emergency` and either box true, a `PATCH` that
   turns a box on of an Emergency change, and a `PATCH {type: emergency}` that leaves a box ticked are refused by

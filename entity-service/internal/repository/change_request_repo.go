@@ -1055,6 +1055,12 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 		} else {
 			cr.StandardChange = sc
 		}
+		// The change request it was cloned from: staff only, best-effort too.
+		if src, err := readChangeRequestClonedFrom(ctx, r.db, id); err != nil {
+			slog.WarnContext(ctx, "get change request: clone source lookup failed", "changeRequestId", id, "error", err)
+		} else {
+			cr.ClonedFrom = src
+		}
 	}
 
 	// While the customer group's review request is pending (a live "Customer
@@ -1864,6 +1870,11 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	}
 	if effectiveState != nil {
 		addCR("state = $%d::change_request_state_enum", strings.ToUpper(string(*effectiveState)))
+		// Entering Closed / Rollback records when and by whom (the CASE reads the
+		// state before this UPDATE, so a resend keeps the first stamp).
+		crSets = append(crSets, changeRequestClosureSets(fmt.Sprintf("$%d", crIdx-1), fmt.Sprintf("$%d", crIdx)))
+		crArgs = append(crArgs, actorEmail)
+		crIdx++
 	}
 	if req.Type != nil {
 		enumValue, ok := changeRequestTypeToChangeModel[*req.Type]
@@ -2557,6 +2568,9 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 			if err := insertChangeRequestJournalEntry(ctx, tx, row.id, "WORK_NOTE", createdBy, *req.WorkNote); err != nil {
 				return createdChangeRequestRow{}, err
 			}
+		}
+		if err := recordChangeRequestCloneSource(ctx, tx, row.id, req.ClonedFromChangeRequestID); err != nil {
+			return createdChangeRequestRow{}, err
 		}
 		// Raised from a standard change template: the service rendered the
 		// template into req; record which version and the values, refused (409)
@@ -3524,7 +3538,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 				// The customer group's answer: Customer Approval ->
 				// Scheduled (customer approval recorded), Customer Review
 				// -> Closed (customer review recorded).
-				if _, err := applyCustomerStageOutcome(ctx, tx, id, customerStageSpecForKind(stageKind), currentState.String, true); err != nil {
+				if _, err := applyCustomerStageOutcome(ctx, tx, id, customerStageSpecForKind(stageKind), currentState.String, true, actorEmail); err != nil {
 					return "", err
 				}
 			}
@@ -3560,7 +3574,7 @@ func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverU
 					return "", fmt.Errorf("decide change request approval: check current state: %w", err)
 				}
 				if currentState.Valid {
-					if _, err := applyCustomerStageOutcome(ctx, tx, id, spec, currentState.String, false); err != nil {
+					if _, err := applyCustomerStageOutcome(ctx, tx, id, spec, currentState.String, false, actorEmail); err != nil {
 						return "", err
 					}
 				}

@@ -559,7 +559,7 @@ export const CHANGE_REQUEST_LIST_PARAM_PREFIX = "cr";
 const LEGACY_VIEWS = ["catalogue", "proposals"] as const;
 
 export type ChangeRequestsView = "list" | "standard";
-export type StandardChangesShow = "templates" | "proposals";
+export type StandardChangesShow = "templates" | "proposals" | "suggested";
 /** Whose proposals the proposals view lists. */
 export type ProposalScope = "all" | "mine" | "awaiting";
 export const PROPOSAL_SCOPES: readonly ProposalScope[] = ["all", "mine", "awaiting"];
@@ -570,6 +570,7 @@ export const DEFAULT_PROPOSAL_SCOPE: ProposalScope = "all";
 export const STANDARD_CHANGES_LABELS: Readonly<Record<StandardChangesShow, string>> = {
   templates: "Standard changes",
   proposals: "Standard change proposals",
+  suggested: "Suggested standard changes",
 };
 
 function isLegacyView(view: string | null): view is (typeof LEGACY_VIEWS)[number] {
@@ -582,8 +583,9 @@ export function changeRequestsView(params: URLSearchParams): ChangeRequestsView 
   return view === STANDARD_CHANGES_VIEW || isLegacyView(view) ? "standard" : "list";
 }
 
-/** Which part of Standard changes a URL's query selects: the catalogue unless it asks for the proposals. */
+/** Which part of Standard changes a URL's query selects: the catalogue unless it asks for the proposals or the suggestions. */
 export function standardChangesShow(params: URLSearchParams): StandardChangesShow {
+  if (params.get(STANDARD_CHANGES_SHOW_PARAM) === "suggested") return "suggested";
   return params.get(STANDARD_CHANGES_SHOW_PARAM) === "proposals" || params.get(CHANGE_REQUESTS_VIEW_PARAM) === "proposals"
     ? "proposals"
     : "templates";
@@ -633,6 +635,7 @@ export function standardChangesSearch(
 ): URLSearchParams {
   const next = new URLSearchParams();
   next.set(CHANGE_REQUESTS_VIEW_PARAM, STANDARD_CHANGES_VIEW);
+  if (show === "suggested") next.set(STANDARD_CHANGES_SHOW_PARAM, "suggested");
   if (show === "proposals") {
     next.set(STANDARD_CHANGES_SHOW_PARAM, "proposals");
     if (filters.scope && filters.scope !== DEFAULT_PROPOSAL_SCOPE) next.set(PROPOSAL_SCOPE_PARAM, filters.scope);
@@ -682,6 +685,8 @@ export function standardChangesPath(
 export const STANDARD_CHANGES_PATH = standardChangesPath();
 /** The proposals (all of them): `/operations/change-requests?view=standard&show=proposals`. */
 export const STANDARD_CHANGE_PROPOSALS_PATH = standardChangesPath("proposals");
+/** The suggestions mined from completed change requests: `...?view=standard&show=suggested`. */
+export const STANDARD_CHANGE_SUGGESTIONS_PATH = standardChangesPath("suggested");
 
 /**
  * Where a link to the old, separate Operations tab lands: the standard change

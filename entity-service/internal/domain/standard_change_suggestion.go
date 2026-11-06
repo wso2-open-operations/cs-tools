@@ -1,0 +1,174 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package domain
+
+import "time"
+
+// StandardChangeSuggestionCriteria are the thresholds a cluster of completed
+// change requests is judged by: fixed configuration
+// (STANDARD_CHANGE_SUGGESTION_*), applied when the snapshot is computed.
+type StandardChangeSuggestionCriteria struct {
+	// WindowMonths: only change requests completed within this many months count.
+	WindowMonths int `json:"windowMonths"`
+	// MinClosed: at least this many members closed (not rolled back) in the window.
+	MinClosed int `json:"minClosed"`
+	// MinSuccessPercent: closed / (closed + rolled back), at least this, in percent.
+	MinSuccessPercent int `json:"minSuccessPercent"`
+	// PlanSimilarityPercent: two members with the same normalised subject are the
+	// same change only when their implementation plans are at least this similar
+	// (word-set Jaccard, percent).
+	PlanSimilarityPercent int `json:"planSimilarityPercent"`
+}
+
+// StandardChangeSuggestionsRequest is GET /standard-change-suggestions' query,
+// applied over the stored snapshot.
+type StandardChangeSuggestionsRequest struct {
+	// AccountID limits the suggestions to one customer; empty is every customer.
+	AccountID string
+	// IncludeIneligible also returns clusters of two or more that miss a
+	// criterion, each naming what it misses (for measuring the thresholds).
+	IncludeIneligible bool
+	// IncludeDismissed also returns dismissed suggestions, with their dismissal.
+	IncludeDismissed bool
+}
+
+// StandardChangeSuggestionsResponse is GET /standard-change-suggestions' answer:
+// the last published snapshot. ComputedOn is when it was published; nil (with no
+// suggestions) when none has been computed yet.
+type StandardChangeSuggestionsResponse struct {
+	Suggestions []StandardChangeSuggestion       `json:"suggestions"`
+	Criteria    StandardChangeSuggestionCriteria `json:"criteria"`
+	ComputedOn  *time.Time                       `json:"computedOn"`
+	// Scanned: completed change requests the snapshot considered (not raised from
+	// a template, of a customer, completed in the window) and the clusters they
+	// formed (two or more members); Dismissed is counted when read.
+	Scanned StandardChangeSuggestionScan `json:"scanned"`
+}
+
+// RefreshStandardChangeSuggestionsRequest is the body of
+// POST /standard-change-suggestions/refresh. The first call names no run and
+// starts one; each later call continues it from the cursor the previous call
+// returned, until one answers more = false, which publishes it.
+type RefreshStandardChangeSuggestionsRequest struct {
+	RunID  string `json:"runId,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	// Limit is the most customers this call computes (default 50, at most 500); a
+	// call short of time stops earlier, after at least one.
+	Limit int `json:"limit,omitempty"`
+}
+
+// RefreshStandardChangeSuggestionsResponse is one refresh call's answer.
+type RefreshStandardChangeSuggestionsResponse struct {
+	RunID string `json:"runId"`
+	// What this call computed.
+	Customers      int `json:"customers"`
+	ChangeRequests int `json:"changeRequests"`
+	Suggestions    int `json:"suggestions"`
+	// More: call again with runId and nextCursor. When false the run was
+	// published (ComputedOn) and Totals are the whole run's.
+	More       bool                          `json:"more"`
+	NextCursor string                        `json:"nextCursor,omitempty"`
+	ComputedOn *time.Time                    `json:"computedOn,omitempty"`
+	Totals     *StandardChangeSuggestionScan `json:"totals,omitempty"`
+}
+
+// StandardChangeSuggestionScan counts what one computation looked at.
+type StandardChangeSuggestionScan struct {
+	Customers      int `json:"customers"`
+	ChangeRequests int `json:"changeRequests"`
+	Clusters       int `json:"clusters"`
+	Eligible       int `json:"eligible"`
+	Dismissed      int `json:"dismissed"`
+}
+
+// StandardChangeSuggestion is one cluster of a customer's completed change
+// requests that look like the same change done again and again.
+type StandardChangeSuggestion struct {
+	// Key is the normalised subject the cluster is known (and dismissed) by.
+	Key      string    `json:"key"`
+	Customer EntityRef `json:"customer"`
+	// Subject is the newest member's subject, as written.
+	Subject       string  `json:"subject"`
+	MemberCount   int     `json:"memberCount"`
+	ClosedCount   int     `json:"closedCount"`
+	RollbackCount int     `json:"rollbackCount"`
+	SuccessRate   float64 `json:"successRate"`
+	// Incidents caused by a member (incident.caused_by_id or change_request_id).
+	Incidents []EntityRef                       `json:"incidents"`
+	Risk      StandardChangeSuggestionBreakdown `json:"risk"`
+	Impact    StandardChangeSuggestionBreakdown `json:"impact"`
+	// FirstCompletedOn / LastCompletedOn bound the members' completions.
+	FirstCompletedOn time.Time `json:"firstCompletedOn"`
+	LastCompletedOn  time.Time `json:"lastCompletedOn"`
+	// Eligible: every criterion is met; Unmet names those that are not.
+	Eligible bool     `json:"eligible"`
+	Unmet    []string `json:"unmet"`
+	// ProposeFrom is the newest clean member (closed, no deviation from its
+	// implementation plan): what a proposal starts from. Evidence is every other
+	// closed member, newest first, so that ProposeFrom plus Evidence is at most
+	// the 100 a proposal can cite.
+	ProposeFrom *EntityRef  `json:"proposeFrom"`
+	Evidence    []EntityRef `json:"evidence"`
+	// OpenProposals already started from, or citing, a member (draft or under
+	// review): proposing again would duplicate them.
+	OpenProposals []EntityRef `json:"openProposals"`
+	// Members, newest completion first.
+	Members   []StandardChangeSuggestionMember   `json:"members"`
+	Dismissal *StandardChangeSuggestionDismissal `json:"dismissal"`
+}
+
+// StandardChangeSuggestionBreakdown counts members by level; Unknown is a
+// member with none recorded.
+type StandardChangeSuggestionBreakdown struct {
+	Low      int `json:"low"`
+	Moderate int `json:"moderate"`
+	High     int `json:"high"`
+	Unknown  int `json:"unknown"`
+}
+
+// StandardChangeSuggestionMember is one completed change request of a cluster.
+type StandardChangeSuggestionMember struct {
+	ID          string    `json:"id"`
+	Number      string    `json:"number"`
+	Subject     string    `json:"subject"`
+	State       string    `json:"state"`
+	CompletedOn time.Time `json:"completedOn"`
+	Risk        *string   `json:"risk"`
+	Impact      *string   `json:"impact"`
+	// ClonedFrom is the member's clone source, when it was recorded.
+	ClonedFrom   *string `json:"clonedFromId"`
+	HasDeviation bool    `json:"hasDeviation"`
+	// Why the member is in the cluster: "subject" (same normalised subject and a
+	// similar or no implementation plan) or "clone" (cloned from a member).
+	JoinedBy string `json:"joinedBy"`
+}
+
+// StandardChangeSuggestionDismissal records that a suggestion was dismissed.
+type StandardChangeSuggestionDismissal struct {
+	ID          string     `json:"id"`
+	Reason      string     `json:"reason"`
+	DismissedBy *EntityRef `json:"dismissedBy"`
+	DismissedOn time.Time  `json:"dismissedOn"`
+}
+
+// DismissStandardChangeSuggestionRequest is the body of
+// POST /standard-change-suggestions/dismissals.
+type DismissStandardChangeSuggestionRequest struct {
+	AccountID string `json:"accountId"`
+	Key       string `json:"key"`
+	Reason    string `json:"reason"`
+}

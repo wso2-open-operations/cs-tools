@@ -99,6 +99,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` | no | `12` / `5` / `90` / `50` | Thresholds the daily refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. A value outside its range (1-60 months, 1-1000 closes, 1-100 percent) or not a whole number takes the default, with a warning. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -4927,6 +4928,50 @@ the same `validChangeRequestSortField`/`validChangeRequestSortOrder` maps
 value is a 400 on both data sources instead of silently falling back to
 `created_on DESC` only on Postgres.
 
+### Completion: `closed_on` / `closed_by_user_id` (migration 0279)
+
+Both columns (0043) were written only by the previous system's sync, never by this service, so
+a change request completed in the CSM had no completion time (the `closedStartDate` /
+`closedEndDate` search filters matched nothing for it). Every writer that moves a change request
+INTO **Closed or Rollback** now stamps them, in the same UPDATE as the state
+(`changeRequestClosureSets`, `change_request_closure.go`, the CASE shape of `case_repo.go`'s
+`closed_on`): the PATCH path (`patchChangeRequestTx`, the actor's `"user"` by email), the
+customer stage's outcome (`applyCustomerStageOutcome`: the customer who answered the review
+closes or rolls back the change) and the GitHub sync (`SetState`: a time, no closer). Rollback
+counts because it is a completion too (a failed one), and both states are final, so nothing
+clears the stamp; a resend of the state keeps the first one; Canceled stamps nothing. An actor
+email with no `"user"` row records no closer.
+
+`0279_change_request_closed_on_backfill.sql` fills the rows completed before this from
+`event_outbox` (0051): the first outbox row whose `state` went from any other state to Closed /
+Rollback gives `closed_on` (its `occurred_on`, the writing transaction's `NOW()`); the closer is
+`work_item.updated_by` only while the work item still carries that exact `updated_on` (the PATCH
+stamps both in the same transaction; anything written since leaves no closer rather than a
+guess). Rows with `closed_on` already set, or with no recorded transition, are left alone;
+re-running it writes nothing. Tests: `change_request_closure_integration_test.go`
+(`CHANGE_REQUEST_TEST_DSN`, superuser and `csm_app`).
+
+### Clone lineage: `cloned_from_change_request_id` (migration 0282)
+
+The portal's Clone used to leave no trace: a clone could not be told apart from a change request
+typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
+change_request(id) ON DELETE SET NULL`, partial index) records the source.
+- **Write**: `POST /change-requests` `clonedFromChangeRequestId` (`change_request_clone_source.go`):
+  trimmed and lower-cased, blank is none, not a UUID or not an existing change request (a work item
+  of another type included, read under the caller's identity) is a 400 naming the field that
+  creates nothing. Checked in the create transaction (`recordChangeRequestCloneSource`, both create
+  paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
+  called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
+  leaves it out; `DATA_SOURCE=servicenow` refuses it (400), like `projectId`, which a clone carries
+  anyway. Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
+  is a 400).
+- **Read**: `clonedFrom` {id, name: the source's number} on the detail, staff only and best-effort
+  like the tags; omitted when none was recorded or the source was deleted.
+- No backfill: clones made before this are not recognisable. The standard change suggestions
+  (below) join a clone to its source's cluster directly.
+
+Tests: `change_request_clone_source_integration_test.go`, `TestSNChangeRequestService_RefusesTheCloneSource`.
+
 ### Tags
 
 A change request's tags are the case's tags, on its own work item: the same
@@ -8583,6 +8628,125 @@ suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
+
+## Standard change suggestions (`GET /standard-change-suggestions`)
+
+Which of a customer's completed change requests look like the same change done again and again, so a
+standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
+normalising, clustering, judging), `standard_change_suggestion_service.go`,
+`standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
+dismissals), `0283` (the snapshot) and `100029` / `100030` (their row-level security, internal only).
+PostgreSQL data sources only.
+
+**Computed on a schedule, read from a snapshot.** Reading every completed change request with its plan
+text and comparing the plans is too much to do whenever the page opens (there can be tens of thousands),
+so `GET /standard-change-suggestions` (`internalOnly`) **never computes**: it reads the snapshot the
+scheduled refresh last published (`computedOn`; with none yet, an empty list and no `computedOn`, not an
+error). `POST /standard-change-suggestions/refresh` (`serviceOnly`: an internal client in
+`M2M_CLIENT_IDS` with no user token, so a page view can never start it) computes a new one, driven once
+a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh` (its CLAUDE.md,
+"Standard change suggestions refresh"), the way `/incidents/autoclose` is driven by `incident_autoclose`.
+- **Paged by customer, published at the end.** The first call (`{}`) starts a run
+  (`standard_change_suggestion_run`, carrying the criteria it computes by); each call computes the next
+  customers in id order after `cursor`, **one customer at a time** (only that customer's change requests
+  and plans are held), at most `limit` (default 50, at most 500), and stops starting new ones after 40
+  seconds (`suggestionRefreshBudget`, inside the 60s `REQUEST_TIMEOUT`; it always computes at least one).
+  While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
+  `more: false` **publishes**: in one transaction the run gets `completed_on` and its totals (summed from
+  `standard_change_suggestion_run_customer` and the rows), and every other run is deleted with its rows
+  (`ON DELETE CASCADE`). Readers read the newest published run, so they see the old snapshot until that
+  commit and the whole new one after it. A page sent again replaces that customer's rows and count
+  (`SaveCustomer`), never counting it twice; a run that never finishes is never read, and is deleted by
+  the next publish or by a run started a day later. A page of a published or replaced run is a 409.
+- **The window and the criteria are the run's**: the window counts back from the run's start, and every
+  page judges by the criteria stored with it.
+- **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
+  dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
+  are as they were at the refresh.
+- **Logged**: each page (`refresh page`: customers, change requests, suggestions, `more`, `pageMs`) and the
+  publish (`refresh published`: customers, change requests, clusters, eligible, `durationMs` of the run).
+- **Cost.** One page: the customer list (`CandidateAccounts`), then per customer one read of its window's
+  completed change requests with their plans, its clusters' incidents, and the writes.
+  The pairwise plan comparison is inside one subject group of one customer. A single customer with a very
+  large group is still computed in one go (not split across pages).
+
+**What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
+`closed_on`, which 0279 made reliable; a row with none falls back to the work item's last update), **not**
+raised from a template (`standard_change_template_version_id IS NULL`: those already are standard changes),
+whose project has a customer. Clusters never mix customers: a template belongs to one
+(`project.account_id`), so the clustering runs per customer.
+
+**A cluster** (`clusterSuggestionCandidates`):
+1. Same normalised subject (`suggestionKey`): HTML and `{{placeholders}}` removed, lower case, `[tags]`,
+   ticket numbers (`CHG…`, `INC…`, `SCP…`, …), dates, times, versions, ordinals and digits removed, then
+   filler words (articles, prepositions, "please", "change", month and day names) and one-letter words
+   dropped. The key is the cluster's name and what a dismissal is stored under.
+2. Confirmed by the implementation plans: inside one subject group, two members whose plans both have at
+   least three meaningful words are the same change only when the plans' word sets are at least
+   `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
+   the subject, so it joins the group's largest confirmed cluster (it never bridges two).
+3. Clone lineage (`cloned_from_change_request_id`, 0282) joins a member to its source's cluster directly,
+   whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
+Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
+self-hosted models would be allowed anyway.
+
+**Eligible** (`judgeSuggestionCluster`, every threshold configurable): closed at least `minClosed` times in
+the window; success rate closed / (closed + rolled back) at least `minSuccessPercent`; no incident names a
+member, as `incident.caused_by_id` **or** `incident.change_request_id` (both are counted, as asked; the
+incident form labels them "Caused by" and "Change request", and the second may name a change raised to
+fix the incident rather than one that caused it, which then blocks its cluster too: check this against
+production data); no member with high risk; no member with high impact. An unknown
+risk or impact is counted (`unknown`) and does not block. `unmet` says, in words, each one it misses.
+`proposeFrom` is the newest closed member with no deviation from its plan (none: nothing to propose
+from), `evidence` the other closed members newest first, at most 99, so the source plus the evidence fit
+the 100 a proposal may cite. `openProposals` are the open proposals (draft, CAB or authority review)
+already started from or citing a member.
+
+**Not related to the customer's templates, on purpose.** An earlier version labelled each cluster
+"covered by STD…", "close to STD…: revise it" or "new" by the word overlap of its subject and plan with the
+customer's live templates. That was removed, together with the similar-templates check on a proposal
+(user decision 2026-11-06): whether two changes are "the same" by word overlap can be wildly off, and the
+dynamics of defining similarity are too complicated to decide that way for now. What remains is exact: a
+change request raised from a template is never a candidate, and a suggestion lists the open proposals
+already started from or citing one of its change requests (`openProposals`). Whether a suggestion is
+already covered by a template is for the person reading it to judge.
+
+**Thresholds** (server settings, environment variables read at startup by `config.Load`, applied when the
+snapshot is computed; listed with their meaning in `.env.example`; the user chose server settings over a
+portal screen):
+
+| Variable | Default | Range | Meaning |
+|---|---|---|---|
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` | 12 | 1-60 | Months back a completed change request counts |
+| `STANDARD_CHANGE_SUGGESTION_MIN_CLOSED` | 5 | 1-1000 | Closes (not rollbacks) in the window before a repeated change is suggested |
+| `STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT` | 90 | 1-100 | Closed / (closed + rolled back), at least this |
+| `STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT` | 50 | 1-100 | Plan word-set similarity for two members with one subject to be one change |
+
+A value that is not a whole number in its range (zero, negative, a percent over 100, a typo) falls back to
+the default with a warning naming the key (`envIntInRange`); it never stops the service. The minimum was 3
+at first and raised to 5 (user decision 2026-11-06). How often the refresh runs is csm-scheduled-tasks'
+`SUB_CRON_SCHEDULES` (daily by default, `0 2 * * *`). The other criteria (no linked incident, no high risk
+or impact) are fixed. Starting values, **not yet measured on production data**. They are no longer request parameters: to
+measure them, read with `includeIneligible=true` (every cluster of two or more with its `unmet`), change
+the variables and refresh. The response carries the `criteria` the snapshot used and `scanned` counts
+(the run's, or the one customer's when `accountId` is given; `dismissed` is counted when read).
+
+**Request**: `accountId` (optional, a UUID: one customer), `includeIneligible`, `includeDismissed`, applied
+over the stored rows. Order: eligible first, then most often closed, then most recent. At most 100 members
+are listed per suggestion (`memberCount` is the true count).
+
+**Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
+`POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
+suggestion key, i.e. `suggestionKey(key) == key`; a reason of at most 1000 characters is required; a
+second one is a 409, no such customer a 400) hides the suggestion for that customer however many members
+it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
+/standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
+for a machine caller).
+
+Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; the refresh's
+paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
+`standard_change_suggestion_integration_test.go` (real PostgreSQL, a full paged refresh twice,
+`STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s
 

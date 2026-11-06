@@ -120,6 +120,11 @@ func (h *ChangeRequestHandler) CreateChangeRequest(w http.ResponseWriter, r *htt
 		return
 	}
 
+	if msg := validateChangeRequestCloneSource(body); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	result, err := h.entity.CreateChangeRequest(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateChangeRequest failed", "userID", user.UserID, "err", err)
@@ -329,6 +334,24 @@ const (
 // is customerGroupId / environmentIds, which are no longer accepted at all and
 // are refused here (any value, null included) with the same messages. A body
 // that is not a JSON object is left for the upstream to reject.
+// validateChangeRequestCloneSource shape-checks a create's
+// clonedFromChangeRequestId (the change request it is a clone of, sent by the
+// webapp's Clone): a UUID string, in every spelling of the key. Whether it names
+// an existing change request is the entity service's call (400, echoed).
+func validateChangeRequestCloneSource(body []byte) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	for _, raw := range payloadValues(payload, "clonedFromChangeRequestId") {
+		var v string
+		if json.Unmarshal(raw, &v) != nil || !uuidRe.MatchString(v) {
+			return "clonedFromChangeRequestId must be a UUID string"
+		}
+	}
+	return ""
+}
+
 func validateChangeRequestScopeFields(body []byte, patch bool) string {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(body, &payload); err != nil {

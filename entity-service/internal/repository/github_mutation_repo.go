@@ -298,9 +298,11 @@ func (r *githubMutationRepository) SetState(ctx context.Context, id, state strin
 	// IS DISTINCT FROM so a move to the state it already holds writes nothing:
 	// the outbound trigger would otherwise enqueue a push announcing a change
 	// that did not happen.
-	const query = `
+	// A closed issue closing the change is a completion with no person behind it:
+	// closed_on is stamped, closed_by_user_id stays empty.
+	query := `
 		UPDATE change_request
-		SET state = $2::change_request_state_enum
+		SET state = $2::change_request_state_enum, ` + changeRequestClosureSets("$2", "") + `
 		WHERE id = $1::uuid AND state IS DISTINCT FROM $2::change_request_state_enum`
 	changed := false
 	err = r.db.InTx(ctx, func(tx pgx.Tx) error {

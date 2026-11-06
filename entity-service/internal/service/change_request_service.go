@@ -693,6 +693,7 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 		ProjectID: req.ProjectID, AssignmentGroupID: req.GroupID,
 		DeploymentIDs: req.DeploymentIDs, DeploymentProductIDs: req.DeploymentProductIDs,
 		StandardChangeTemplateVersionID: req.StandardChangeTemplateVersionID,
+		CloneSourceID:                   req.ClonedFromChangeRequestID,
 	}); err != nil {
 		return domain.CreateChangeRequestResponse{}, err
 	}
@@ -712,6 +713,8 @@ func (s *changeRequestService) createChangeRequestSNFirst(ctx context.Context, r
 	// The standard change catalogue is PostgreSQL's: the previous system gets the
 	// rendered content (req's fields), not the template it came from.
 	mirrorReq.StandardChangeTemplateID, mirrorReq.StandardChangeTemplateVersionID, mirrorReq.StandardChangeParameters = nil, nil, nil
+	// Clone lineage is this database's alone, too.
+	mirrorReq.ClonedFromChangeRequestID = nil
 	if mirrorReq.PlannedStartDate != nil {
 		v := repository.PlannedTimestampForServiceNow(*mirrorReq.PlannedStartDate)
 		mirrorReq.PlannedStartDate = &v

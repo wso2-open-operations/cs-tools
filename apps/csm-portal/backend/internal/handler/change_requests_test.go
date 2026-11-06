@@ -1908,3 +1908,56 @@ func TestChangeRequestBodyGuardsIgnoreTheCaseOfKeys(t *testing.T) {
 		}
 	})
 }
+
+// A clone names the change request it was cloned from; the BFF forwards it
+// untouched and refuses only a value that is not a UUID string (in any spelling
+// of the key), with no upstream call.
+func TestCreateChangeRequest_CloneSource(t *testing.T) {
+	const source = "6f1a9c2e-3b4d-4e5f-8a7b-9c0d1e2f3a4b"
+	t.Run("forwards a UUID untouched", func(t *testing.T) {
+		payload := `{"subject":"Deploy v2","type":"normal","clonedFromChangeRequestId":"` + source + `"}`
+		var forwarded []byte
+		client := &mockEntityChangeRequestClient{
+			createChangeRequestFn: func(_ context.Context, b []byte) ([]byte, error) {
+				forwarded = b
+				return []byte(`{"message":"ok"}`), nil
+			},
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(payload)))
+		w := httptest.NewRecorder()
+		NewChangeRequestHandler(client).CreateChangeRequest(w, r)
+		assertStatus(t, w, http.StatusCreated)
+		if string(forwarded) != payload {
+			t.Errorf("upstream received %q, want %q", forwarded, payload)
+		}
+	})
+	for name, value := range map[string]string{
+		"not a uuid": `"CHG0001"`,
+		"a number":   `42`,
+		"null":       `null`,
+		"other case": `"x"`,
+	} {
+		t.Run("refuses "+name, func(t *testing.T) {
+			key := "clonedFromChangeRequestId"
+			if name == "other case" {
+				key = "CLONEDFROMCHANGEREQUESTID"
+			}
+			payload := `{"subject":"Deploy v2","type":"normal","` + key + `":` + value + `}`
+			called := false
+			client := &mockEntityChangeRequestClient{
+				createChangeRequestFn: func(context.Context, []byte) ([]byte, error) {
+					called = true
+					return nil, nil
+				},
+			}
+			r := withUser(httptest.NewRequest(http.MethodPost, "/change-requests", strings.NewReader(payload)))
+			w := httptest.NewRecorder()
+			NewChangeRequestHandler(client).CreateChangeRequest(w, r)
+			assertStatus(t, w, http.StatusBadRequest)
+			assertErrorMessage(t, w, "clonedFromChangeRequestId must be a UUID string")
+			if called {
+				t.Error("the entity service was called")
+			}
+		})
+	}
+}

@@ -1818,19 +1818,21 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 // Closed (stamping is_customer_review_required), rejected -> Rollback. The change
 // must still be in the stage's state (a stage whose change has moved on has
 // had its approvers cancelled, so this is a defence, not a path). Returns
-// whether the state moved.
-func applyCustomerStageOutcome(ctx context.Context, tx pgx.Tx, workItemID string, spec *customerStageSpec, currentState string, approved bool) (bool, error) {
+// whether the state moved. The customer who answered (actorEmail) is who closed
+// or rolled back the change (changeRequestClosureSets).
+func applyCustomerStageOutcome(ctx context.Context, tx pgx.Tx, workItemID string, spec *customerStageSpec, currentState string, approved bool, actorEmail string) (bool, error) {
 	if !strings.EqualFold(currentState, spec.state) {
 		return false, nil
 	}
 	var ct pgconn.CommandTag
 	var err error
+	closure := changeRequestClosureSets("$2", "$3")
 	if approved {
 		ct, err = tx.Exec(ctx,
-			fmt.Sprintf(`UPDATE change_request SET state = $2::change_request_state_enum, %s = true WHERE id = $1`, spec.approvedFlagColumn),
-			workItemID, spec.approvedState)
+			fmt.Sprintf(`UPDATE change_request SET state = $2::change_request_state_enum, %s = true, %s WHERE id = $1`, spec.approvedFlagColumn, closure),
+			workItemID, spec.approvedState, actorEmail)
 	} else {
-		ct, err = tx.Exec(ctx, `UPDATE change_request SET state = $2::change_request_state_enum WHERE id = $1`, workItemID, spec.rejectedState)
+		ct, err = tx.Exec(ctx, `UPDATE change_request SET state = $2::change_request_state_enum, `+closure+` WHERE id = $1`, workItemID, spec.rejectedState, actorEmail)
 	}
 	if err != nil {
 		return false, fmt.Errorf("decide change request approval: apply customer %s outcome: %w", spec.what, err)

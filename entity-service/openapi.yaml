@@ -13787,6 +13787,193 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions:
+    get:
+      summary: The last computed standard change suggestions.
+      operationId: getStandardChangeSuggestions
+      description: >-
+        Reads the snapshot the scheduled refresh last published (POST
+        /standard-change-suggestions/refresh, once a day); it never computes. A snapshot holds,
+        per customer, the clusters of completed change requests (Closed or Rollback, not raised
+        from a template, completed within the configured window) that look like the same change
+        done again: the same normalised subject, confirmed by the implementation plans, joined
+        directly by clone lineage, each judged by the configured criteria
+        (STANDARD_CHANGE_SUGGESTION_*, returned as criteria). A cluster is not related to the
+        customer's existing templates (by design). The open proposals and the dismissals are read
+        live.
+        computedOn is when the snapshot was published; with none yet the answer is an empty list
+        and no computedOn. Internal callers only.
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}, description: "One customer; every customer when absent."}
+        - {name: includeIneligible, in: query, required: false, schema: {type: boolean}, description: "Also the clusters that miss a criterion (each names what it misses)."}
+        - {name: includeDismissed, in: query, required: false, schema: {type: boolean}, description: "Also the dismissed suggestions, with their dismissal."}
+      responses:
+        "200":
+          description: The suggestions, eligible first, then the most often closed, then the most recent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeSuggestionsResponse'
+        "400":
+          description: "Bad request: accountId is not a UUID."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/refresh:
+    post:
+      summary: Compute one page of a new standard change suggestion snapshot (the scheduled refresh).
+      operationId: refreshStandardChangeSuggestions
+      description: >-
+        Driven once a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
+        The first call (no runId) starts a run; each call computes the next customers in id order
+        after the cursor, one at a time, at most limit of them and fewer when the call runs short
+        of time (after at least one), and stores their suggestions in the run. While more is true,
+        call again with runId and nextCursor. The call that answers more = false publishes the
+        run: in one transaction it becomes what GET /standard-change-suggestions reads and every
+        older run is deleted, so a reader never sees a half-written snapshot. Sending a page again
+        replaces that customer's rows (never counted twice). Service credentials only (an internal
+        client in M2M_CLIENT_IDS, no user token).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshStandardChangeSuggestionsRequest'
+      responses:
+        "200":
+          description: The page computed, and whether the run was published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshStandardChangeSuggestionsResponse'
+        "400":
+          description: '"Bad request: a cursor without its runId, a malformed id, or a limit outside 1-500."'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The run is no longer open (published, or replaced by another run); start a new one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/dismissals:
+    post:
+      summary: Dismiss a standard change suggestion for a customer.
+      operationId: dismissStandardChangeSuggestion
+      description: >-
+        Hides the suggestion with this key for this customer from then on (however many
+        members it gains), recording who dismissed it and why. The key is the one the
+        suggestion carries. Internal callers with a user identity only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissStandardChangeSuggestionRequest'
+      responses:
+        "201":
+          description: The dismissal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardChangeSuggestionDismissal'
+        "400":
+          description: "Bad request: accountId is not a UUID or no such customer, the key is missing or not a suggestion key, or the reason is missing or longer than 1000 characters."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The suggestion is already dismissed for this customer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/dismissals/{id}:
+    delete:
+      summary: Restore a dismissed standard change suggestion.
+      operationId: restoreStandardChangeSuggestion
+      description: Deletes the dismissal, so the suggestion shows again. Internal callers with a user identity only.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Restored.
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "The caller has no user identity (an x-user-id-token is required)."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such dismissal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /runbooks:
     get:
       summary: List the runbook catalog.
@@ -27629,6 +27816,12 @@ components:
                 with the values of its parameters. Staff only; omitted otherwise. While it is
                 set, what the template specifies is read-only (errorCode
                 change_request_standard_template_field).
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name), when
+                one was recorded on create. Staff only; omitted otherwise, and once the source is
+                deleted.
             justification:
               type: string
               nullable: true
@@ -28695,6 +28888,14 @@ components:
           type: object
           additionalProperties: {type: string}
           description: The values of the template version's parameters, by key (400 for a missing required value, an undeclared key or a value of the wrong kind).
+        clonedFromChangeRequestId:
+          type: string
+          format: uuid
+          description: >-
+            The change request this one is a clone of (the portal's Clone), recorded as its
+            clonedFrom and never changed afterwards. Must be an existing change request (400
+            otherwise, refused before the previous system is called on dual-write).
+            PostgreSQL data sources only: DATA_SOURCE=servicenow refuses it (400).
 
     ChangeRequestLinkOptionsRequest:
       type: object
@@ -33893,6 +34094,125 @@ components:
           type: string
           maxLength: 1000
           description: Why the template may be used again. Required (blank is a 400), at most 1000 characters.
+    StandardChangeSuggestionsResponse:
+      type: object
+      required: [suggestions, criteria, scanned]
+      properties:
+        suggestions:
+          type: array
+          items: {$ref: '#/components/schemas/StandardChangeSuggestion'}
+        criteria:
+          $ref: '#/components/schemas/StandardChangeSuggestionCriteria'
+        computedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the snapshot was published; null when none has been computed yet.
+        scanned:
+          type: object
+          description: >-
+            What the snapshot looked at, for every customer or for the one asked for (dismissed
+            ones counted when read, whether shown or not).
+          properties:
+            customers: {type: integer}
+            changeRequests: {type: integer}
+            clusters: {type: integer}
+            eligible: {type: integer}
+            dismissed: {type: integer}
+    RefreshStandardChangeSuggestionsRequest:
+      type: object
+      properties:
+        runId: {type: string, format: uuid, description: "The run to continue; absent starts one."}
+        cursor: {type: string, format: uuid, description: "The previous page's nextCursor (needs runId)."}
+        limit: {type: integer, minimum: 1, maximum: 500, description: "Most customers this call computes (default 50)."}
+    RefreshStandardChangeSuggestionsResponse:
+      type: object
+      properties:
+        runId: {type: string, format: uuid}
+        customers: {type: integer, description: "Customers this call computed."}
+        changeRequests: {type: integer}
+        suggestions: {type: integer}
+        more: {type: boolean}
+        nextCursor: {type: string, format: uuid}
+        computedOn: {type: string, format: date-time, description: "Set on the call that published the run."}
+        totals:
+          type: object
+          description: The whole run's counts, on the call that published it.
+          properties:
+            customers: {type: integer}
+            changeRequests: {type: integer}
+            clusters: {type: integer}
+            eligible: {type: integer}
+    StandardChangeSuggestionCriteria:
+      type: object
+      properties:
+        windowMonths: {type: integer}
+        minClosed: {type: integer}
+        minSuccessPercent: {type: integer}
+        planSimilarityPercent: {type: integer}
+    StandardChangeSuggestion:
+      type: object
+      properties:
+        key: {type: string, description: "The normalised subject the cluster is known and dismissed by."}
+        customer: {$ref: '#/components/schemas/EntityRef'}
+        subject: {type: string, description: "The newest member's subject, as written."}
+        memberCount: {type: integer}
+        closedCount: {type: integer}
+        rollbackCount: {type: integer}
+        successRate: {type: number, description: "closed / (closed + rolled back), 0 to 1."}
+        incidents: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Incidents naming a member as their cause or their change request."}
+        risk: {$ref: '#/components/schemas/StandardChangeSuggestionBreakdown'}
+        impact: {$ref: '#/components/schemas/StandardChangeSuggestionBreakdown'}
+        firstCompletedOn: {type: string, format: date-time}
+        lastCompletedOn: {type: string, format: date-time}
+        eligible: {type: boolean}
+        unmet: {type: array, items: {type: string}, description: "Each criterion it misses, in words."}
+        proposeFrom:
+          allOf: [{$ref: '#/components/schemas/EntityRef'}]
+          nullable: true
+          description: The newest closed member with no deviation from its plan, what a NEW proposal starts from (null when there is none).
+        evidence: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Every other closed member, newest first, at most 99 (a proposal cites at most 100)."}
+        openProposals: {type: array, items: {$ref: '#/components/schemas/EntityRef'}, description: "Open proposals already started from or citing a member."}
+        members:
+          type: array
+          description: Newest completion first, at most 100 (memberCount is the true count).
+          items:
+            type: object
+            properties:
+              id: {type: string, format: uuid}
+              number: {type: string}
+              subject: {type: string}
+              state: {type: string, enum: [closed, rollback]}
+              completedOn: {type: string, format: date-time}
+              risk: {type: string, nullable: true}
+              impact: {type: string, nullable: true}
+              clonedFromId: {type: string, format: uuid, nullable: true}
+              hasDeviation: {type: boolean}
+              joinedBy: {type: string, enum: [subject, clone]}
+        dismissal:
+          allOf: [{$ref: '#/components/schemas/StandardChangeSuggestionDismissal'}]
+          nullable: true
+    StandardChangeSuggestionBreakdown:
+      type: object
+      properties:
+        low: {type: integer}
+        moderate: {type: integer, description: "Moderate risk, or medium impact."}
+        high: {type: integer}
+        unknown: {type: integer}
+    StandardChangeSuggestionDismissal:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        reason: {type: string}
+        dismissedBy: {$ref: '#/components/schemas/EntityRef'}
+        dismissedOn: {type: string, format: date-time}
+    DismissStandardChangeSuggestionRequest:
+      type: object
+      required: [accountId, key, reason]
+      properties:
+        accountId: {type: string, format: uuid}
+        key: {type: string, maxLength: 512}
+        reason: {type: string, maxLength: 1000}
     CancelStandardChangeProposalRequest:
       type: object
       required: [reason]

@@ -2978,6 +2978,9 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * What the template specifies cannot be edited (400
    * `change_request_standard_template_field`). */
   standardChange?: BeChangeRequestStandardChange | null;
+  /** The change request this one was cloned from ({id, name: its number}), when
+   * one was recorded on create (staff only; absent otherwise). */
+  clonedFrom?: { id: string; name: string } | null;
 }
 
 /**
@@ -3232,6 +3235,9 @@ export interface BeCreateChangeRequestPayload {
   standardChangeTemplateVersionId?: string;
   /** The values of the version's parameters, by key. */
   standardChangeParameters?: Record<string, string>;
+  /** The change request this one is a clone of (the detail page's Clone):
+   * recorded once, read back as `clonedFrom`. */
+  clonedFromChangeRequestId?: string;
 }
 
 /**
@@ -5957,4 +5963,95 @@ export interface BeChangeRequestStandardChange {
   deploymentTypes?: BeDeploymentType[] | null;
   /** The version's parameters with the values the change request was raised with. */
   parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
+}
+
+// ---------------------------------------------------------------------------
+// Standard change suggestions (GET /standard-change-suggestions): clusters of one
+// customer's completed change requests that look like the same change done again.
+// entity-service computes them on a schedule and the read returns the last
+// snapshot (see its openapi.yaml).
+
+export interface BeStandardChangeSuggestionCriteria {
+  windowMonths: number;
+  minClosed: number;
+  minSuccessPercent: number;
+  planSimilarityPercent: number;
+}
+
+export interface BeStandardChangeSuggestionBreakdown {
+  low: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface BeStandardChangeSuggestionMember {
+  id: string;
+  number: string;
+  subject: string;
+  state: "closed" | "rollback";
+  completedOn: string;
+  risk?: string | null;
+  impact?: string | null;
+  clonedFromId?: string | null;
+  hasDeviation: boolean;
+  /** "subject": same normalised subject and a similar (or no) plan; "clone": cloned from a member. */
+  joinedBy: "subject" | "clone";
+}
+
+export interface BeStandardChangeSuggestionDismissal {
+  id: string;
+  reason: string;
+  dismissedBy?: BeEntityRef | null;
+  dismissedOn: string;
+}
+
+export interface BeStandardChangeSuggestion {
+  /** The normalised subject the cluster is known (and dismissed) by. */
+  key: string;
+  customer: BeEntityRef;
+  /** The newest member's subject, as written. */
+  subject: string;
+  memberCount: number;
+  closedCount: number;
+  rollbackCount: number;
+  /** closed / (closed + rolled back), 0 to 1. */
+  successRate: number;
+  incidents: BeEntityRef[];
+  risk: BeStandardChangeSuggestionBreakdown;
+  impact: BeStandardChangeSuggestionBreakdown;
+  firstCompletedOn: string;
+  lastCompletedOn: string;
+  eligible: boolean;
+  /** Each criterion it misses, in words. */
+  unmet: string[];
+  /** The newest closed member with no deviation: what a new proposal starts from. */
+  proposeFrom?: BeEntityRef | null;
+  /** Every other closed member, newest first, at most 99. */
+  evidence: BeEntityRef[];
+  /** Open proposals already started from or citing a member. */
+  openProposals: BeEntityRef[];
+  members: BeStandardChangeSuggestionMember[];
+  dismissal?: BeStandardChangeSuggestionDismissal | null;
+}
+
+export interface BeStandardChangeSuggestionsQuery {
+  accountId?: string;
+  includeIneligible?: boolean;
+  includeDismissed?: boolean;
+}
+
+export interface BeStandardChangeSuggestionsResponse {
+  suggestions: BeStandardChangeSuggestion[];
+  /** The thresholds the snapshot was computed by (configuration, not a request parameter). */
+  criteria: BeStandardChangeSuggestionCriteria;
+  /** When the snapshot was published (a scheduled refresh, once a day); null before the first. */
+  computedOn?: string | null;
+  scanned: { customers?: number; changeRequests: number; clusters: number; eligible: number; dismissed: number };
+}
+
+export interface BeDismissStandardChangeSuggestionPayload {
+  accountId: string;
+  key: string;
+  reason: string;
 }

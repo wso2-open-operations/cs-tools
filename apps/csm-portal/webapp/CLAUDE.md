@@ -408,6 +408,9 @@ The change request create page and edit dialog share `useChangeRequestScope` (`f
   Every field Create needs carries the required asterisk (see "Required fields").
 - **Refusals of the create are worded by the entity service and shown as written.** A person with no ServiceNow account (a user created in this database, which nothing in the web can tell apart in the picker) or an assignment group ServiceNow does not have is refused by the create itself with a 400 that says who or what cannot be used, why, and which field to change. The create form shows every 4xx message of the entity service as written in its error banner (`CreateChangeRequestPage` `onError`), so keep that wording on the entity-service side and do not replace it with a generic message here.
 - Sent only when non-empty. The create page sends `projectId`, `deploymentIds`, `deploymentProductIds` (plus `category`, `comment`, `workNote`); the edit dialog sends the three scope fields **together** when any of them changed (the backend validates them as a unit), and not at all once the CR has been approved -- from Customer Approval / Scheduled on, i.e. editable only in New, Assess and Authorize (the dialog locks the deployments with the reason; the backend refuses from there on). The **Customer Project itself is editable only in New** (see the next section): after New the dialog shows it read-only and, when only the deployments changed, sends the stored project beside them, which the backend accepts as a no-op. A saved project can be swapped (in New) but not cleared (the patch cannot express "no project").
+- Clone sends the source's id as `clonedFromChangeRequestId` on create (`CloneChangeRequestNavState.sourceId`),
+  so the new change request records what it was cloned from (entity-service migration 0282; the detail reads
+  it back as `clonedFrom`, and the standard change suggestions use it).
 - Clone carries the project and category, but deliberately **not** deployments / products: they name the deployment the change targets, and a clone exists to promote the change to another one. A draft or clone from before this change may still hold `customerGroupId` / `environmentIds`; they are ignored (not read, not re-saved).
 - The draft keeps display names next to the ids (`*Labels`), because the pickers only know ids; without them a restored form shows raw UUIDs.
 - The detail response's `category` is the enum value (or an `{id, name|label}` ref on older responses) — always read it through `changeRequestCategoryValue` / `changeRequestCategoryLabel`.
@@ -713,14 +716,39 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
   before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
   changes opens on the catalogue (server-side search, state filter, "Review needed" chip, each template's summary
-  under its name, "Propose a standard change"); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
-  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  under its name, "Propose a standard change"); the proposals and the suggestions are secondary views of the same tab, a
+  **Templates | Proposals | Suggested** toggle beside the search (`&show=proposals`, `&show=suggested`); the proposals keep their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
   absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
   fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
   me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
-  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  by me, Awaiting my decision). The toggle is a group named "Templates, proposals or suggestions", so it
   does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
-  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `STANDARD_CHANGE_SUGGESTIONS_PATH`,
+  `standardChangesPath`, `standardChangesSearch`).
+  - **Suggested** (`StandardChangeSuggestions`, `useStandardChangeSuggestions`, rules in
+    `utils/standardChangeSuggestions.ts`): the clusters of a customer's completed change requests that
+    entity-service finds and judges **once a day** (its CLAUDE.md, "Standard change suggestions"); the page
+    reads the last snapshot and nothing is computed or decided here, so opening it costs one cheap read. A
+    Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
+    (`includeDismissed`), not kept in the URL, are the only parameters (the thresholds are entity-service
+    configuration). A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
+    `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
+    and the empty table, say suggestions are computed once a day and none have been yet
+    (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is shown.
+    Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
+    the last completion; and the actions (`suggestionActions`): **Propose** (`kind: "new"` from `proposeFrom`,
+    then a PATCH citing `suggestionProposalEvidence`: the source and the other closed members, at most 100),
+    **Dismiss** with a required reason (at most 1000 characters) and **Restore** for a dismissed one. The
+    proposal opens whatever happens to the evidence PATCH (its refusal goes to the error banner). Propose is
+    shown disabled with the reason as the button's name for a near miss ("Not yet a candidate: …"), one already
+    being proposed ("Already being proposed in SCP…", an exact link: a member is that proposal's source or
+    evidence) and one with no clean change request to start from. Only `canWrite` gets the actions. **A
+    suggestion is not related to the customer's existing templates** (no "covered by" / "close to" label, no
+    Revise or Open template action): that relation came from word overlap, which can be wildly off, and was
+    left out on purpose with the similar-templates check (2026-11-06); whether a template already covers a
+    suggestion is for the reader to judge. The chevron opens the details: what it misses, risk and impact
+    counts (unknown included), incidents, open proposals, the dismissal, and the change requests (newest 100),
+    each marked when it joined as a clone or deviated from its plan.
   - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
     customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
     leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their

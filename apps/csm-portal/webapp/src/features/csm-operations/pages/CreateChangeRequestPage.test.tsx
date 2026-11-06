@@ -319,6 +319,22 @@ describe("CreateChangeRequestPage — Clone prefill", () => {
     expect(screen.getByText("High")).toBeInTheDocument();
   });
 
+  it("sends the source as clonedFromChangeRequestId, and nothing when not a clone", () => {
+    locationState = { sourceNumber: "CHG0009988", sourceId: "chg-1", subject: "Upgrade the gateway cluster", type: "normal" };
+    const { unmount } = render(<CreateChangeRequestPage />);
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).toMatchObject({ clonedFromChangeRequestId: "chg-1" });
+    unmount();
+    sessionStorage.clear();
+    postChangeRequestMutateMock.mockReset();
+    locationState = undefined;
+    render(<CreateChangeRequestPage />);
+    fireEvent.change(screen.getByLabelText(/subject/i), { target: { value: "From scratch" } });
+    fireEvent.click(screen.getByRole("radio", { name: /^normal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create change request/i }));
+    expect(postChangeRequestMutateMock.mock.calls[0][0]).not.toHaveProperty("clonedFromChangeRequestId");
+  });
+
   it("shows a banner naming the source record and the fields that could not be copied", () => {
     locationState = { sourceNumber: "CHG0009988", subject: "Upgrade the gateway cluster" };
     render(<CreateChangeRequestPage />);

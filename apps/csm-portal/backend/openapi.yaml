@@ -7416,6 +7416,14 @@ paths:
                   description: >-
                     The "Implementation Plan visible to customers" checkbox, stored and
                     returned as sent.
+                clonedFromChangeRequestId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The change request this one is a clone of (the portal's Clone),
+                    read back as `clonedFrom` on the detail and never changed afterwards.
+                    A value that is not a UUID string is a 400 here; one that is not an
+                    existing change request is the entity service's 400, echoed.
                 projectId:
                   type: string
                   format: uuid
@@ -15608,6 +15616,143 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "409":
           description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions:
+    get:
+      summary: The last computed standard change suggestions.
+      operationId: getStandardChangeSuggestions
+      description: >
+        Forwarded to the entity service, which answers from the snapshot its
+        scheduled refresh last published (once a day; computedOn says when, and it
+        is absent with an empty list before the first): a read never computes. See
+        its openapi.yaml for the response. Only these parameters are forwarded,
+        each checked for shape here (400 with no upstream call otherwise).
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: includeIneligible, in: query, required: false, schema: {type: boolean}}
+        - {name: includeDismissed, in: query, required: false, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals:
+    post:
+      summary: Dismiss a standard change suggestion for a customer (body {accountId, key, reason}).
+      operationId: dismissStandardChangeSuggestion
+      description: >
+        Forwarded to the entity service; its refusal (400, 403, 404, 409) is returned
+        with its own message and errorCode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: The dismissal.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals/{id}:
+    delete:
+      summary: Restore a dismissed standard change suggestion.
+      operationId: restoreStandardChangeSuggestion
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Restored.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
           content:
             application/json:
               schema:
@@ -26894,6 +27039,11 @@ components:
             requestedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name),
+                when one was recorded on create. Omitted otherwise.
             justification:
               type: string
               nullable: true

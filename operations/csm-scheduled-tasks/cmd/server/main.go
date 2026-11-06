@@ -65,6 +65,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/rotareminder"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/schedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/stalecases"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/standardchangesuggestions"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/teamschedule"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/unresolvedproducts"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/usagerollup"
@@ -1267,6 +1268,17 @@ func main() {
 	// in one tick in registration order, so when one tick covers both (the
 	// driver late, or a restart after 04:00 UTC) a project is reopened before
 	// acp_closure could send it a reminder.
+	// entity-service's standard change suggestion snapshot -- see
+	// internal/standardchangesuggestions and this component's CLAUDE.md,
+	// "Standard change suggestions refresh". OFF unless
+	// STANDARD_CHANGE_SUGGESTIONS_ENABLED=true, like every task that needs a
+	// route a deployed entity-service may not have yet (without it each run
+	// fails with a 404 and alerts). It only computes: a run-now is safe beside
+	// the scheduled run (whichever publishes last wins).
+	if envBool("STANDARD_CHANGE_SUGGESTIONS_ENABLED", false) {
+		tasks = append(tasks, standardChangeSuggestionsTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
 	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
 		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
 			entityServiceScopes, scheduleOverrides, recipientOverrides))
@@ -1362,6 +1374,37 @@ func main() {
 	start := time.Now()
 	eng.Tick(ctx, start)
 	slog.Info("tick complete", "elapsed", time.Since(start).String())
+}
+
+// standardChangeSuggestionsTaskName is the standard change suggestions
+// refresh sub-cron's ledger key.
+const standardChangeSuggestionsTaskName = "standard_change_suggestions_refresh"
+
+// standardChangeSuggestionsTask builds the standard change suggestions refresh.
+// Once a day by default, at 02:00 (UTC with TZ=UTC): standard changes are not
+// frequent, so the page needs nothing fresher. Called only when
+// STANDARD_CHANGE_SUGGESTIONS_ENABLED=true.
+func standardChangeSuggestionsTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	client, err := standardchangesuggestions.NewClient(standardchangesuggestions.ClientConfig{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service standard change suggestions client", "err", err)
+		os.Exit(1)
+	}
+	to, cc := recipientsFor(recipientOverrides, standardChangeSuggestionsTaskName)
+	return registry.Task{
+		Name:     standardChangeSuggestionsTaskName,
+		Schedule: scheduleFor(scheduleOverrides, standardChangeSuggestionsTaskName, "0 2 * * *"),
+		Handler:  standardchangesuggestions.Run(client),
+		To:       to,
+		Cc:       cc,
+	}
 }
 
 // acpTaskName is the acp_closure sub-cron's ledger key.

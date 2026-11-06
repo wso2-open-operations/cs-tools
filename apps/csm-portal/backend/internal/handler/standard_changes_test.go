@@ -109,6 +109,15 @@ func TestStandardChangeHandler_ForwardsEachRoute(t *testing.T) {
 		{"delete a draft", http.MethodDelete, "/x", "", map[string]string{"id": stdID},
 			func(h *StandardChangeHandler) http.HandlerFunc { return h.DeleteProposal },
 			http.MethodDelete, "/standard-change-proposals/" + stdID, http.StatusNoContent},
+		{"suggestions", http.MethodGet, "/x", "", nil,
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.GetSuggestions },
+			http.MethodGet, "/standard-change-suggestions", http.StatusOK},
+		{"dismiss a suggestion", http.MethodPost, "/x", `{"accountId":"` + stdID + `","key":"deploy capps","reason":"one-off"}`, nil,
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.DismissSuggestion },
+			http.MethodPost, "/standard-change-suggestions/dismissals", http.StatusCreated},
+		{"restore a suggestion", http.MethodDelete, "/x", "", map[string]string{"id": stdID},
+			func(h *StandardChangeHandler) http.HandlerFunc { return h.RestoreSuggestion },
+			http.MethodDelete, "/standard-change-suggestions/dismissals/" + stdID, http.StatusNoContent},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -244,5 +253,28 @@ func TestStandardChangeHandler_KeepsTheEntityReasonAndCode(t *testing.T) {
 	NewStandardChangeHandler(fake).SearchProposals(w, withUser(httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{}`))))
 	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("a 500 leaked: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// GET /standard-change-suggestions forwards only the parameters it knows, each
+// checked for shape; anything else (the old threshold overrides included) is
+// dropped, and a malformed one is a 400 with no upstream call.
+func TestStandardChangeHandler_SuggestionsQuery(t *testing.T) {
+	call := func(query string) (*fakeStandardChangeClient, *httptest.ResponseRecorder) {
+		fake := &fakeStandardChangeClient{}
+		w := httptest.NewRecorder()
+		NewStandardChangeHandler(fake).GetSuggestions(w, withUser(httptest.NewRequest(http.MethodGet, "/standard-change-suggestions?"+query, nil)))
+		return fake, w
+	}
+	fake, w := call("accountId=" + stdID + "&includeIneligible=true&includeDismissed=false&minClosed=2&windowMonths=6&other=x")
+	want := "/standard-change-suggestions?accountId=" + stdID + "&includeDismissed=false&includeIneligible=true"
+	if w.Code != http.StatusOK || fake.path != want {
+		t.Fatalf("status %d, path %s; want 200, %s", w.Code, fake.path, want)
+	}
+	for _, bad := range []string{"accountId=acme", "includeIneligible=yes"} {
+		fake, w := call(bad)
+		if w.Code != http.StatusBadRequest || fake.calls != 0 {
+			t.Errorf("%s: status %d, %d upstream calls; want 400 and none", bad, w.Code, fake.calls)
+		}
 	}
 }

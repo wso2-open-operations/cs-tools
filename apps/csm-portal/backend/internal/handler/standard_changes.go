@@ -24,6 +24,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -144,6 +145,51 @@ func (h *StandardChangeHandler) CancelProposal(w http.ResponseWriter, r *http.Re
 // DeleteProposal handles DELETE /standard-change-proposals/{id}: 204.
 func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Request) {
 	h.noBody(w, r, http.MethodDelete, "/standard-change-proposals/{id}", "", "Failed to delete the draft.")
+}
+
+// GetSuggestions handles GET /standard-change-suggestions: the snapshot of
+// standard changes suggested by completed change requests, which entity-service
+// computes on a schedule (a read never computes). Only the known parameters are
+// forwarded, each checked for shape (accountId a UUID, the flags true or false).
+func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+	in := r.URL.Query()
+	out := url.Values{}
+	if v := strings.TrimSpace(in.Get("accountId")); v != "" {
+		if !uuidRe.MatchString(v) {
+			writeError(w, http.StatusBadRequest, "accountId must be a UUID")
+			return
+		}
+		out.Set("accountId", v)
+	}
+	for _, flag := range []string{"includeIneligible", "includeDismissed"} {
+		if v := strings.TrimSpace(in.Get(flag)); v != "" {
+			if v != "true" && v != "false" {
+				writeError(w, http.StatusBadRequest, flag+" must be true or false")
+				return
+			}
+			out.Set(flag, v)
+		}
+	}
+	path := "/standard-change-suggestions"
+	if len(out) > 0 {
+		path += "?" + out.Encode()
+	}
+	h.forward(w, r, user.UserID, http.MethodGet, path, nil, http.StatusOK, "Failed to load standard change suggestions.")
+}
+
+// DismissSuggestion handles POST /standard-change-suggestions/dismissals: 201.
+func (h *StandardChangeHandler) DismissSuggestion(w http.ResponseWriter, r *http.Request) {
+	h.withBody(w, r, http.MethodPost, "/standard-change-suggestions/dismissals", http.StatusCreated, "Failed to dismiss the suggestion.")
+}
+
+// RestoreSuggestion handles DELETE /standard-change-suggestions/dismissals/{id}: 204.
+func (h *StandardChangeHandler) RestoreSuggestion(w http.ResponseWriter, r *http.Request) {
+	h.noBody(w, r, http.MethodDelete, "/standard-change-suggestions/dismissals/{id}", "", "Failed to restore the suggestion.")
 }
 
 // noBody forwards a call that carries no body. base holds "{id}", replaced by the

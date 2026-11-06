@@ -31,6 +31,7 @@ import type {
   BeCancelStandardChangeProposalPayload,
   BeCreateStandardChangeProposalPayload,
   BeDecideStandardChangeProposalPayload,
+  BeDismissStandardChangeSuggestionPayload,
   BeEntityRef,
   BeProjectSearchPayload,
   BeProjectSearchResponse,
@@ -39,6 +40,9 @@ import type {
   BeSearchStandardChangeTemplatesPayload,
   BeSearchStandardChangeTemplatesResponse,
   BeStandardChangeProposal,
+  BeStandardChangeSuggestionDismissal,
+  BeStandardChangeSuggestionsQuery,
+  BeStandardChangeSuggestionsResponse,
   BeStandardChangeTemplate,
   BeStandardChangeTemplateNotePayload,
   BeStandardChangeTemplateVersion,
@@ -59,9 +63,11 @@ import type {
 export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
 const TEMPLATES_KEY = [...STANDARD_CHANGES_KEY, "templates"] as const;
 const PROPOSALS_KEY = [...STANDARD_CHANGES_KEY, "proposals"] as const;
+const SUGGESTIONS_KEY = [...STANDARD_CHANGES_KEY, "suggestions"] as const;
 
 const TEMPLATES = "/standard-change-templates";
 const PROPOSALS = "/standard-change-proposals";
+const SUGGESTIONS = "/standard-change-suggestions";
 
 const enc = encodeURIComponent;
 
@@ -450,4 +456,49 @@ export function useProjectCustomer(projectId: string | undefined): UseQueryResul
     enabled: !!projectId,
     staleTime: 60_000,
   });
+}
+
+/**
+ * `GET /standard-change-suggestions`: clusters of a customer's completed change
+ * requests that look like the same change done again (every customer when no
+ * accountId), from the snapshot entity-service's scheduled refresh last
+ * published (`computedOn`; none before the first). A read never computes.
+ */
+export function useStandardChangeSuggestions(
+  query: BeStandardChangeSuggestionsQuery,
+): UseQueryResult<BeStandardChangeSuggestionsResponse, Error> {
+  const api = useBackendApi();
+  const params = new URLSearchParams();
+  if (query.accountId) params.set("accountId", query.accountId);
+  if (query.includeIneligible) params.set("includeIneligible", "true");
+  if (query.includeDismissed) params.set("includeDismissed", "true");
+  const qs = params.toString();
+  return useQuery({
+    queryKey: [...SUGGESTIONS_KEY, qs],
+    queryFn: async () => {
+      const resp = await api.get<BeStandardChangeSuggestionsResponse>(qs ? `${SUGGESTIONS}?${qs}` : SUGGESTIONS);
+      if (!resp) throw new Error("Empty response from the standard change suggestions.");
+      return resp;
+    },
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+/** `POST /standard-change-suggestions/dismissals`: hide a suggestion for its customer, with a reason. */
+export function useDismissStandardChangeSuggestion(): UseMutationResult<
+  BeStandardChangeSuggestionDismissal,
+  Error,
+  BeDismissStandardChangeSuggestionPayload
+> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((body: BeDismissStandardChangeSuggestionPayload) =>
+    api.post<BeDismissStandardChangeSuggestionPayload, BeStandardChangeSuggestionDismissal>(`${SUGGESTIONS}/dismissals`, body),
+  );
+}
+
+/** `DELETE /standard-change-suggestions/dismissals/{id}`: show a dismissed suggestion again. */
+export function useRestoreStandardChangeSuggestion(): UseMutationResult<null, Error, string> {
+  const api = useBackendApi();
+  return useStandardChangeMutation((id: string) => api.del<null>(`${SUGGESTIONS}/dismissals/${enc(id)}`));
 }
