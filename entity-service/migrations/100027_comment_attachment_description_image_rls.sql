@@ -23,7 +23,14 @@
 --     its uploader while they are a member of the project;
 --   a LINKED description image (comment_id NULL, description_image, work_item_id
 --     set) is visible to anyone who can see the work item's project, so the
---     reader of a case sees the images in its description.
+--     reader of a case sees the images in its description. NOT for a change
+--     request: who may see one is decided by the customer-visibility rule
+--     (CR_STRICT_VISIBILITY_FROM, designation), which lives in Go SQL and cannot
+--     be restated here, so a project member would see the image of a change
+--     request that was never designated to them. Its description images are
+--     therefore internal-only (the work item's type is read under the caller's
+--     own row-level security, so an invisible work item has no type and matches
+--     nothing either).
 -- INSERT: an external caller may also start a draft: PENDING, no storage_key,
 --   project_id set, work_item_id NULL, theirs (created_by) and a project they are
 --   a member of.
@@ -61,6 +68,7 @@ CREATE POLICY comment_attachment_visibility ON comment_attachment
       AND description_image = true
       AND work_item_id IS NOT NULL
       AND is_project_member((SELECT wi.project_id FROM work_item wi WHERE wi.id = comment_attachment.work_item_id))
+      AND (SELECT wi.type::TEXT FROM work_item wi WHERE wi.id = comment_attachment.work_item_id) <> 'CHANGE_REQUEST'
     )
   );
 
