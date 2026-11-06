@@ -19,20 +19,24 @@ import type { BeLineSeries } from "@api/backend/types";
 
 /**
  * The query of one point of a `shape: "line"` widget: the cases created
- * (Opened) or closed (Closed) on that day. `date` is the point's
- * `YYYY-MM-DD`, a UTC calendar day as `POST /cases/volume-trend` buckets it;
- * the case search reads a date-only `gte` as that day's UTC start and a
- * date-only `lte` as its end, and counts by the same `created_on` /
- * `closed_on` columns as the trend, so the list matches the point. Merged
- * over the widget's own query with `mergeWidgetFilters`, so it replaces the
- * widget's own entries on that field.
+ * (Opened) or closed (Closed) on that day, or from `date` to `endDate` for a
+ * week or month point. Both are `YYYY-MM-DD`, UTC calendar days as `POST
+ * /cases/volume-trend` buckets them; the case search reads a date-only `gte`
+ * as that day's UTC start and a date-only `lte` as its end, and counts by the
+ * same `created_on` / `closed_on` columns as the trend, so the list matches
+ * the point. Merged over the widget's own query with `mergeWidgetFilters`, so
+ * it replaces the widget's own entries on that field.
  */
-export function linePointQuery(date: string, series: BeLineSeries): Record<string, unknown> {
+export function linePointQuery(
+  date: string,
+  series: BeLineSeries,
+  endDate?: string,
+): Record<string, unknown> {
   const field = series === "opened" ? "createdOn" : "closedOn";
   return {
     filters: [
       { field, op: "gte", values: [date] },
-      { field, op: "lte", values: [date] },
+      { field, op: "lte", values: [endDate ?? date] },
     ],
   };
 }

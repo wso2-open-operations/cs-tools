@@ -99,6 +99,81 @@ describe("useCaseVolumeTrendData", () => {
     expect(result.current.points).toEqual([]);
   });
 
+  it("sends a fixed window instead of days, and keeps each week's last day", async () => {
+    postMock.mockResolvedValue({
+      days: 31,
+      startDate: "2025-12-01",
+      endDate: "2025-12-31",
+      bucket: "week",
+      series: [
+        {
+          label: "Opened",
+          points: [
+            { date: "2025-12-01", endDate: "2025-12-07", count: 2 },
+            { date: "2025-12-29", endDate: "2025-12-31", count: 1 },
+          ],
+        },
+        {
+          label: "Closed",
+          points: [
+            { date: "2025-12-01", endDate: "2025-12-07", count: 0 },
+            { date: "2025-12-29", endDate: "2025-12-31", count: 3 },
+          ],
+        },
+      ],
+    });
+
+    const { result } = renderHook(
+      () =>
+        useCaseVolumeTrendData("dec_2025", {}, undefined, undefined, undefined, undefined, true, {
+          startDate: "2025-12-01",
+          endDate: "2025-12-31",
+          bucket: "week",
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/cases/volume-trend",
+      { filters: {}, startDate: "2025-12-01", endDate: "2025-12-31", bucket: "week" },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.points).toEqual([
+      { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+      { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+    ]);
+  });
+
+  it("sends a relative window as the viewer's local calendar days", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 6, 9, 0, 0));
+    try {
+      postMock.mockResolvedValue({ days: 365, series: [] });
+
+      const { result } = renderHook(
+        () =>
+          useCaseVolumeTrendData("this_year", {}, undefined, undefined, undefined, undefined, true, {
+            startDate: "__startOfYear:0__",
+            endDate: "__endOfYear:0__",
+            bucket: "month",
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        { filters: {}, startDate: "2026-01-01", endDate: "2026-12-31", bucket: "month" },
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("holds the request while a __current_user__ placeholder hasn't resolved yet", () => {
     const { result } = renderHook(
       () =>

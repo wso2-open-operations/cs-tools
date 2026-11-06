@@ -19,7 +19,7 @@ import { Inbox } from "@wso2/oxygen-ui-icons-react";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 import type { CaseVolumeTrendChartPoint } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
-import type { BeLineSeries } from "@api/backend/types";
+import type { BeLineBucket, BeLineSeries } from "@api/backend/types";
 import { useDarkMode } from "@utils/useDarkMode";
 
 const CHART_HEIGHT_PX = 220;
@@ -32,10 +32,13 @@ interface DashboardLineChartProps {
    * draws both. Drawn in the fixed order Opened, Closed whatever the order
    * given. */
   series?: BeLineSeries[];
+  /** How the points are grouped (`BeDashboardWidget.bucket`), which decides
+   * the x-axis labels; `undefined` is one point per day. */
+  bucket?: BeLineBucket;
   /** Makes each point clickable: called with the point's day (`YYYY-MM-DD`,
-   * a UTC calendar day) and its line. Absent, the points are not clickable,
-   * as on a system dashboard. */
-  onPointClick?: (date: string, series: BeLineSeries) => void;
+   * a UTC calendar day), its line, and for a week or month point its last
+   * day. Absent, the points are not clickable, as on a system dashboard. */
+  onPointClick?: (date: string, series: BeLineSeries, endDate?: string) => void;
 }
 
 /** What recharts hands a function `activeDot` for the hovered point. */
@@ -49,26 +52,47 @@ const ACTIVE_DOT_RADIUS_PX = 5;
 
 const ALL_SERIES: readonly BeLineSeries[] = ["opened", "closed"];
 
-/** Formats a `YYYY-MM-DD` point date for the x-axis — "Sep 1" (no year: this
- * chart's own window is capped at 90 days, see `maxWidgetLineDays` on the
+/** Formats a `YYYY-MM-DD` point date for the x-axis — "Sep 1" (no year: a
+ * day point's window is capped at 90 days, see `maxWidgetLineDays` on the
  * backend, so a label never needs to disambiguate across years). Pinned to
  * `timeZone: "UTC"` for the same reason `useCaseFeedbackTrendData`'s own
  * `formatBucketLabel` is — the date string is already a UTC calendar day, and
  * reading it back in a negative-UTC-offset timezone without pinning the
  * formatter would roll the label back a day. */
-function formatDateLabel(date: string): string {
+function formatDateLabel(
+  date: string,
+  options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" },
+): string {
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) return date;
-  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(
-    parsed,
-  );
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...options }).format(parsed);
+}
+
+/** A point's x-axis label: "Sep 1" for a day, the days a week point covers
+ * for a week ("Dec 1-7", "Dec 29-Jan 4", "Dec 29-31" when the window cuts
+ * it short), and "Jan 2025" for a month (with the year: a month window can
+ * span two). */
+function formatPointLabel(
+  point: CaseVolumeTrendChartPoint,
+  bucket: BeLineBucket | undefined,
+): string {
+  if (bucket === "month") return formatDateLabel(point.date, { month: "short", year: "numeric" });
+  if (bucket !== "week" || !point.endDate || point.endDate === point.date) {
+    return formatDateLabel(point.date);
+  }
+  const start = formatDateLabel(point.date);
+  const sameMonth = point.endDate.slice(0, 7) === point.date.slice(0, 7);
+  const end = sameMonth
+    ? formatDateLabel(point.endDate, { day: "numeric" })
+    : formatDateLabel(point.endDate);
+  return `${start}-${end}`;
 }
 
 /**
  * Two-line (Opened/Closed) trend chart for a `shape: "line"` dashboard
  * widget — the one resourceType/shape combination not resolved via a
  * per-slice/per-bucket fan-out (see `useCaseVolumeTrendData`). A point is one
- * day and one line, which the tile turns into that day's cases query
+ * day (or week or month, `bucket`) and one line, which the tile turns into that day's cases query
  * (`linePointQuery`) when the page allows it. Colors are this app's own semantic palette (`info` for Opened,
  * `success` for Closed) rather than an arbitrary chart-library rotation —
  * matching how severity/status colors are already assigned by meaning
@@ -82,6 +106,7 @@ export default function DashboardLineChart({
   isLoading,
   isError,
   series,
+  bucket,
   onPointClick,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
@@ -145,7 +170,7 @@ export default function DashboardLineChart({
   }
 
   const chartData = points.map((p) => ({
-    label: formatDateLabel(p.date),
+    label: formatPointLabel(p, bucket),
     opened: p.opened,
     closed: p.closed,
   }));
@@ -223,7 +248,8 @@ export default function DashboardLineChart({
                     data-testid={`line-point-${key}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onPointClick(point.date, key);
+                      if (point.endDate) onPointClick(point.date, key, point.endDate);
+                      else onPointClick(point.date, key);
                     }}
                   />
                 );

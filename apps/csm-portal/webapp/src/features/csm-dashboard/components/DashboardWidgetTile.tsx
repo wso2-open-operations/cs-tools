@@ -28,6 +28,7 @@ import type {
   BeDashboardGroupByConfig,
   BeDashboardPieSlice,
   BeDashboardWidgetColumn,
+  BeLineBucket,
   BeLineSeries,
   BeWidgetResourceType,
   BeWidgetShape,
@@ -132,6 +133,12 @@ interface DashboardWidgetTileProps {
   /** Only meaningful for shape "line" (see `BeDashboardWidget.series`):
    * the lines to draw; `undefined` draws both. */
   series?: BeLineSeries[];
+  /** Only meaningful for shape "line" (see `BeDashboardWidget.startDate`):
+   * a fixed window instead of `days`, grouped by `bucket`. Both dates or
+   * neither; `undefined` keeps the trailing `days` window. */
+  startDate?: string;
+  endDate?: string;
+  bucket?: BeLineBucket;
   /** Only meaningful for shape "line": a click on a point opens that day's
    * opened or closed cases, as a pie slice opens its own. Off unless the
    * page turns it on (saved and shared dashboards do; system dashboards and
@@ -274,6 +281,9 @@ function DashboardWidgetTile({
   sortBy,
   days,
   series,
+  startDate,
+  endDate,
+  bucket,
   linePointClickThrough = false,
   selectedTeamCreGroupId,
   selectedTeamSreGroupId,
@@ -542,6 +552,7 @@ function DashboardWidgetTile({
     selectedTeamSreGroupId,
     currentUserId,
     shape === "line" && isVisible,
+    startDate && endDate ? { startDate, endDate, bucket } : undefined,
   );
   // True while this widget carries a `__current_user__` filter and the
   // signed-in user's profile hasn't loaded yet. `useWidgetData`/
@@ -962,12 +973,12 @@ function DashboardWidgetTile({
     // the trend's own cache already keeps today's point fresh server-side
     // (entity-service's case-volume-trend cache), so a manual refresh here
     // has nothing to accomplish.
-    const handlePointClick = (date: string, lineSeries: BeLineSeries): void => {
+    const handlePointClick = (date: string, lineSeries: BeLineSeries, pointEndDate?: string): void => {
       navigate(
-        config.buildHref(resolvePlaceholders(mergeWidgetFilters(filters, linePointQuery(date, lineSeries))), {
-          widgetId,
-          displayName: resolvedDisplayName,
-        }),
+        config.buildHref(
+          resolvePlaceholders(mergeWidgetFilters(filters, linePointQuery(date, lineSeries, pointEndDate))),
+          { widgetId, displayName: resolvedDisplayName },
+        ),
         { state: dashboardReturnState },
       );
     };
@@ -984,6 +995,7 @@ function DashboardWidgetTile({
           isLoading={volumeTrendData.isLoading}
           isError={volumeTrendData.isError}
           series={series}
+          bucket={startDate && endDate ? bucket : undefined}
           onPointClick={linePointClickThrough ? handlePointClick : undefined}
         />
       </Card>

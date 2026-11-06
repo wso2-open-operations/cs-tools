@@ -133,6 +133,54 @@ describe("DashboardLineChart", () => {
     expect(onPointClick).toHaveBeenLastCalledWith("2026-09-02", "opened");
   });
 
+  it("labels week points by the days they cover and month points by month and year", () => {
+    const weeks: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+      { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+    ];
+    const { unmount } = render(
+      <DashboardLineChart points={weeks} isLoading={false} isError={false} bucket="week" />,
+    );
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Dec 1-7=2, Dec 29-31=1");
+    unmount();
+
+    const acrossMonths: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-29", endDate: "2026-01-04", opened: 4, closed: 0 },
+    ];
+    const { unmount: unmountAcross } = render(
+      <DashboardLineChart points={acrossMonths} isLoading={false} isError={false} bucket="week" />,
+    );
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Dec 29-Jan 4=4");
+    unmountAcross();
+
+    const months: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-11-01", endDate: "2025-11-30", opened: 2, closed: 0 },
+      { date: "2025-12-01", endDate: "2025-12-31", opened: 7, closed: 1 },
+    ];
+    render(<DashboardLineChart points={months} isLoading={false} isError={false} bucket="month" />);
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Nov 2025=2, Dec 2025=7");
+  });
+
+  it("reports a week or month point's last day too", () => {
+    const onPointClick = vi.fn();
+    const weeks: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+      { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+    ];
+    render(
+      <DashboardLineChart
+        points={weeks}
+        isLoading={false}
+        isError={false}
+        bucket="week"
+        onPointClick={onPointClick}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("line-point-closed"));
+    expect(onPointClick).toHaveBeenCalledWith("2025-12-29", "closed", "2025-12-31");
+  });
+
   it("makes only the drawn line's points clickable", () => {
     const onPointClick = vi.fn();
     render(

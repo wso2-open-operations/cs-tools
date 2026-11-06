@@ -38,6 +38,15 @@ describe("linePointQuery", () => {
     });
   });
 
+  it("a week or month point is the cases from its first day to its last", () => {
+    expect(linePointQuery("2025-12-29", "opened", "2025-12-31")).toEqual({
+      filters: [
+        { field: "createdOn", op: "gte", values: ["2025-12-29"] },
+        { field: "createdOn", op: "lte", values: ["2025-12-31"] },
+      ],
+    });
+  });
+
   it("keeps the widget's own filters and replaces its own window on the same field", () => {
     const widget = {
       filters: [

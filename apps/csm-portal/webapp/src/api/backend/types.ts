@@ -4947,16 +4947,33 @@ export interface BeDashboardWidget {
    * Absent draws both, as every line widget did before this field. The
    * backend refuses an empty list and an unknown or repeated value. */
   series?: BeLineSeries[];
+  /** Only meaningful for shape "line": the first and last day (inclusive)
+   * of a fixed window instead of `days`'s trailing one, e.g. "2025-12-01"
+   * to "2025-12-31" for December 2025. Two plain `YYYY-MM-DD` dates or two
+   * relative date placeholders; the backend refuses one without the other,
+   * and either with `days`. */
+  startDate?: string;
+  endDate?: string;
+  /** Only meaningful for shape "line" with `startDate`/`endDate`: one point
+   * per day (the default), per week (Monday to Sunday) or per month. */
+  bucket?: BeLineBucket;
 }
 
 /** One of a `shape: "line"` widget's two lines (`BeDashboardWidget.series`). */
 export type BeLineSeries = "opened" | "closed";
 
-/** One day's point in a `shape: "line"` widget's resolved trend — see
+/** How a `shape: "line"` widget's fixed window groups its days
+ * (`BeDashboardWidget.bucket`). */
+export type BeLineBucket = "day" | "week" | "month";
+
+/** One point in a `shape: "line"` widget's resolved trend — see
  * {@link BeCaseVolumeTrendResponse}. */
 export interface BeCaseVolumeTrendPoint {
-  /** `YYYY-MM-DD`, UTC. */
+  /** `YYYY-MM-DD`, UTC; a week or month point's first day in the window. */
   date: string;
+  /** A week or month point's last day in the window (`YYYY-MM-DD`, UTC);
+   * absent for a day point. */
+  endDate?: string;
   count: number;
 }
 
@@ -4972,6 +4989,11 @@ export interface BeCaseVolumeTrendSeries {
  * (Opened, then Closed); every series carries the same set of dates. */
 export interface BeCaseVolumeTrendResponse {
   days: number;
+  /** A fixed window's resolved bounds and grouping; absent for the
+   * trailing window. */
+  startDate?: string;
+  endDate?: string;
+  bucket?: BeLineBucket;
   series: BeCaseVolumeTrendSeries[];
 }
 

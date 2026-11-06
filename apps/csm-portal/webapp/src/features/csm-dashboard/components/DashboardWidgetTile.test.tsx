@@ -1356,6 +1356,63 @@ describe("DashboardWidgetTile", () => {
       },
     );
 
+    it("sends a fixed window and opens a week point's cases from its first day to its last", async () => {
+      postMock.mockResolvedValue({
+        days: 31,
+        startDate: "2025-12-01",
+        endDate: "2025-12-31",
+        bucket: "week",
+        series: [
+          {
+            label: "Opened",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 2 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 1 },
+            ],
+          },
+          {
+            label: "Closed",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 0 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 3 },
+            ],
+          },
+        ],
+      });
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="dec_2025_per_week"
+          displayName="Cases per week in December 2025"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          startDate="2025-12-01"
+          endDate="2025-12-31"
+          bucket="week"
+          linePointClickThrough
+        />,
+        "/cases",
+      );
+
+      fireEvent.click(await screen.findByTestId("line-point-opened"));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        {
+          filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
+          startDate: "2025-12-01",
+          endDate: "2025-12-31",
+          bucket: "week",
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+      expect(params.get("createdFrom")).toBe("2025-12-29");
+      expect(params.get("createdTo")).toBe("2025-12-31");
+      expect(params.get("states")).toBe("open");
+    });
+
     it("has no clickable points unless the page turns it on", async () => {
       postMock.mockResolvedValue(TREND);
       renderWithClient(lineTile({}));

@@ -311,6 +311,9 @@ export default function DashboardWidgetGrid({
           sortBy={widget.sortBy}
           days={widget.days}
           series={widget.series}
+          startDate={widget.startDate}
+          endDate={widget.endDate}
+          bucket={widget.bucket}
           linePointClickThrough={linePointClickThrough}
           inlineDrilldown={widget.inlineDrilldown}
           inlineLabels={widget.inlineLabels}
