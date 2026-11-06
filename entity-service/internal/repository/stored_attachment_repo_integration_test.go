@@ -489,3 +489,46 @@ func TestStoredAttachment_DraftDescriptionImageLifecycle(t *testing.T) {
 		t.Errorf("a member must see the linked image on its work item, got %+v", rows)
 	}
 }
+
+// A linked description image is visible to the members of its work item's
+// project, except for a change request: who may see one follows the customer
+// visibility rule, which row-level security cannot restate, so its description
+// images stay internal.
+func TestStoredAttachment_LinkedDescriptionImageOfAChangeRequestIsInternalOnly(t *testing.T) {
+	pool, repo := storedAttachmentFixture(t)
+	scoped := repository.NewScoped(pool)
+	sys := saSystemCtx()
+	const crID = "5a000000-0000-0000-0000-000000000025"
+	t.Cleanup(func() {
+		_, _ = scoped.Exec(sys, `DELETE FROM comment_attachment WHERE created_by = $1`, saCustomer)
+		_, _ = scoped.Exec(sys, `DELETE FROM work_item WHERE id = $1`, crID)
+	})
+	now := time.Now().UTC()
+	if _, err := scoped.Exec(sys, `INSERT INTO work_item (id, created_on, updated_on, created_by, updated_by, number, wso2_id, subject, type, project_id)
+		VALUES ($1, $2, $2, 't', 't', 'SA-CR-1', 'WSO2-SACR1', 'a change', 'CHANGE_REQUEST', $3)`, crID, now, saProject1); err != nil {
+		t.Fatalf("seed change request: %v", err)
+	}
+	link := func(workItemID string) string {
+		var id string
+		if err := scoped.QueryRow(sys, `INSERT INTO comment_attachment (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, status, storage_key, work_item_id, description_image)
+			VALUES (gen_random_uuid(), now(), now(), $1, $1, 'a.png', 'image/png', 10, 'COMPLETE', 'k', $2, true) RETURNING id::TEXT`, saCustomer, workItemID).Scan(&id); err != nil {
+			t.Fatalf("seed linked image: %v", err)
+		}
+		return id
+	}
+	onCase := link(saWIOpen)
+	onChange := link(crID)
+
+	// The stranger is not a member of the project: sees neither.
+	// The member sees the case's image but not the change request's.
+	kind := domain.StoredAttachmentComment
+	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, []string{onCase}); len(rows) != 1 {
+		t.Errorf("a member must see the description image of a case, got %d rows", len(rows))
+	}
+	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, []string{onChange}); len(rows) != 0 {
+		t.Errorf("a member must not see the description image of a change request, got %d rows", len(rows))
+	}
+	if rows, _ := repo.GetByIDs(saSystemCtx(), kind, []string{onChange}); len(rows) != 1 {
+		t.Errorf("internal callers must see it, got %d rows", len(rows))
+	}
+}

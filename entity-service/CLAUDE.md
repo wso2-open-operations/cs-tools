@@ -1961,7 +1961,7 @@ member of the project (internal callers unrestricted, an unseen project is 404; 
 it is stored at confirm and stays valid after linking. Authorize/confirm resolve the parent through
 `parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
 member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
-visible to anyone who can see the work item's project; an external INSERT of a draft must be PENDING, no
+visible to anyone who can see the work item's project, except a CHANGE REQUEST's (internal-only: the customer-visibility rule cannot be restated in RLS); an external INSERT of a draft must be PENDING, no
 `storage_key`, `created_by` = their email, project member. UPDATE/DELETE stay internal-only.
 Every create path with a rich-text description (`caseService.CreateCase`, both plain and dual-write, so all of
 case/service_request/engagement/security_report_analysis/announcement, and `changeRequestService.CreateChangeRequest`)
