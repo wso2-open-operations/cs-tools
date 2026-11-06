@@ -15,6 +15,7 @@
 // under the License.
 
 import { Box, Typography, type SxProps, type Theme } from "@wso2/oxygen-ui";
+import { Image as ImageIcon } from "@wso2/oxygen-ui-icons-react";
 import DOMPurify from "dompurify";
 import type { JSX, MouseEvent } from "react";
 import {
@@ -64,6 +65,9 @@ const baseHtmlSx: SxProps<Theme> = {
   },
 };
 
+const IMAGE_TAG_RE = /<img\b/gi;
+const FORBIDDEN_CARD_TAGS = ["table", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "code", "pre"];
+
 /**
  * Two-line clamped HTML description for case-style list cards (sanitized; link
  * clicks do not bubble to parent `Form.CardButton`).
@@ -80,8 +84,63 @@ export default function CaseCardDescriptionClamp({
   const isEmpty =
     !description || isAnnouncementDescriptionEffectivelyEmpty(description);
 
-  if (hideWhenEmpty && isEmpty) {
+  // Images are never rendered inside a card: they would make the cards differ in
+  // height. The card shows a small "N images" note instead, in the second line.
+  const imageCount = description ? (description.match(IMAGE_TAG_RE) ?? []).length : 0;
+  const cleanHtml = description
+    ? DOMPurify.sanitize(normalizeAnnouncementDescriptionHtml(description), {
+        FORBID_TAGS: [...FORBIDDEN_CARD_TAGS, "img", "figure"],
+        FORBID_CONTENTS: FORBIDDEN_CARD_TAGS,
+      })
+    : "";
+  const hasText =
+    !!cleanHtml && !isAnnouncementDescriptionEffectivelyEmpty(cleanHtml);
+
+  if (hideWhenEmpty && isEmpty && imageCount === 0) {
     return null;
+  }
+
+  if (imageCount > 0) {
+    const imageNote = (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 0.5,
+          color: "text.secondary",
+          typography: "caption",
+          lineHeight: 1.43,
+        }}
+      >
+        <ImageIcon size={12} aria-hidden />
+        {imageCount === 1 ? "1 image" : `${imageCount} images`}
+      </Box>
+    );
+    const imageSx = [
+      { typography: "body2", color: "text.secondary", mb: 0, minWidth: 0 },
+      ...(sx ? [sx] : []),
+    ] as SxProps<Theme>;
+    return (
+      <Box sx={imageSx}>
+        {hasText ? (
+          <Box
+            component="div"
+            sx={{
+              display: "-webkit-box",
+              WebkitLineClamp: 1,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              wordBreak: "break-word",
+              overflowWrap: "anywhere",
+              "& p": { m: 0 },
+            }}
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized with DOMPurify
+            dangerouslySetInnerHTML={{ __html: cleanHtml }}
+          />
+        ) : null}
+        {imageNote}
+      </Box>
+    );
   }
 
   if (isEmpty) {
