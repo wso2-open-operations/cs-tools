@@ -69,7 +69,7 @@ validation boundary. Types and their reaction, from `dispatch.Dispatcher.Handle`
 
 | Type | Reaction |
 |---|---|
-| `case.created`, `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` | One email per distinct portal link among the recipients (recipients are supplied in the payload). `case.created` and `case.severity_changed` also post a Chat alert to the fixed "Incident Monitor" audience; the two steps are independent. `case.comment_added` also feeds frustration detection and the SLA engine. |
+| `case.created`, `case.comment_added`, `case.status_changed`, `case.assigned`, `case.severity_changed` | One email per distinct portal link among the recipients (recipients are supplied in the payload). `case.created` and `case.severity_changed` also post a Chat alert to the fixed "Incident Monitor" audience; the two steps are independent. `case.comment_added` also feeds frustration detection and the SLA engine. For `case.status_changed`, the customer-portal email shows Work In Progress and Waiting On WSO2 as "In Progress" and is skipped when the change is a move between the two (using the payload's optional `previousStatus`); the staff email is unchanged. |
 | `case.acknowledged` | Chat alert only. |
 | `case.workaround_provided` | Completes the workaround SLA clock (no message). |
 | `case.escalated` | One email to the escalation's notification list. |
