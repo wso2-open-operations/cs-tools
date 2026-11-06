@@ -27,8 +27,9 @@ import (
 // product usage report.
 type EolProductUsageReportRepository interface {
 	// ListEolUsage returns one row per (project, product version) where an
-	// active deployed product of an active Primary Production deployment
-	// runs a version whose support EOL date is before asOf ("YYYY-MM-DD"),
+	// active deployed product of an active Primary Production deployment of a
+	// current customer runs a version whose support EOL date is before asOf
+	// ("YYYY-MM-DD"),
 	// ordered by region ("" last), account name, project name, EOL date,
 	// product name and version.
 	ListEolUsage(ctx context.Context, asOf string) ([]domain.EolProductUsageRow, error)
@@ -47,8 +48,15 @@ func NewEolProductUsageReportRepository(db *Scoped) EolProductUsageReportReposit
 
 // listEolUsageSQL is the report. Notes:
 //
-//   - A deployed product or deployment with no active flag (NULL) counts as
-//     active, as the deployment pages treat it.
+//   - A deployed product, deployment or project with no active flag (NULL)
+//     counts as active, as the deployment pages treat it.
+//   - Customers who have left are not listed: an account deleted in
+//     Salesforce (deleted_on), an inactive project, or a project WSO2 has
+//     closed (wso2_closure_state CLOSED). Read-only, restricted and suspended
+//     projects are still customers and are listed.
+//   - deployed_product.life_cycle_stage_status is deliberately not used:
+//     every active product listed in a Primary Production deployment is
+//     reported, whatever its ServiceNow lifecycle status says.
 //   - DISTINCT ON (project, product version) lists a version once per
 //     project however many Primary Production deployments run it.
 //   - The CS ABT is the account's CRE team; the account manager and the
@@ -87,6 +95,9 @@ FROM (
     WHERE d.type = 'PRIMARY_PRODUCTION'
       AND COALESCE(d.is_active, TRUE)
       AND COALESCE(dp.active, TRUE)
+      AND COALESCE(p.is_active, TRUE)
+      AND p.wso2_closure_state IS DISTINCT FROM 'CLOSED'
+      AND a.deleted_on IS NULL
       AND pv.support_eol_date < $1::date
     ORDER BY p.id, pv.id
 ) r

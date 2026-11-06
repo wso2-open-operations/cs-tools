@@ -142,3 +142,59 @@ func TestEolProductUsageReportIntegration(t *testing.T) {
 		}
 	}
 }
+
+func TestEolProductUsageReportLeavesOutCustomersWhoLeft(t *testing.T) {
+	pool := eolPool(t)
+	ctx := context.Background()
+	eolCleanup(t, pool)
+	t.Cleanup(func() { eolCleanup(t, pool) })
+
+	const audit = `NOW(), 'it', NOW(), 'it'`
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	// 60: a current account; 61: an account deleted in Salesforce.
+	exec(`INSERT INTO account (id, number, name, region, deleted_on, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, 'EOLIT-C', 'EOL IT Current', 'EMEA', NULL, `+audit+`),
+		($2::uuid, 'EOLIT-D', 'EOL IT Deleted', 'EMEA', NOW(), `+audit+`)`, eolID(60), eolID(61))
+	// Projects: 62 open, 63 inactive, 64 closed by WSO2, 65 suspended (still a
+	// customer), 66 the deleted account's.
+	exec(`INSERT INTO project (id, account_id, name, key, is_active, wso2_closure_state, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, $6::uuid, 'EOL IT Open', 'EOLITOPEN', TRUE, 'OPEN', `+audit+`),
+		($2::uuid, $6::uuid, 'EOL IT Inactive', 'EOLITINACT', FALSE, NULL, `+audit+`),
+		($3::uuid, $6::uuid, 'EOL IT Closed', 'EOLITCLOSED', TRUE, 'CLOSED', `+audit+`),
+		($4::uuid, $6::uuid, 'EOL IT Suspended', 'EOLITSUSP', NULL, 'SUSPENDED', `+audit+`),
+		($5::uuid, $7::uuid, 'EOL IT Gone', 'EOLITGONE', TRUE, NULL, `+audit+`)`,
+		eolID(62), eolID(63), eolID(64), eolID(65), eolID(66), eolID(60), eolID(61))
+	exec(`INSERT INTO product (id, name, category, created_on, created_by, updated_on, updated_by) VALUES ($1::uuid, 'EOL IT Product', 'SOFTWARE', `+audit+`)`, eolID(67))
+	exec(`INSERT INTO product_version (id, product_id, version, support_eol_date, current_support_status, created_on, created_by, updated_on, updated_by) VALUES
+		($1::uuid, $2::uuid, '1.0.0', '2022-10-22', 'EXTENDED', `+audit+`)`, eolID(68), eolID(67))
+	// One active Primary Production deployment per project, each running the EOL version.
+	for i := 0; i < 5; i++ {
+		exec(`INSERT INTO deployment (id, project_id, name, number, type, is_active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2::uuid, 'pp', $3, 'PRIMARY_PRODUCTION', TRUE, `+audit+`)`, eolID(70+i), eolID(62+i), "EOLIT-L"+string(rune('0'+i)))
+		exec(`INSERT INTO deployed_product (id, number, deployment_id, version_id, active, created_on, created_by, updated_on, updated_by) VALUES
+			($1::uuid, $2, $3::uuid, $4::uuid, TRUE, `+audit+`)`, eolID(80+i), "EOLIT-Q"+string(rune('0'+i)), eolID(70+i), eolID(68))
+	}
+
+	repo := repository.NewEolProductUsageReportRepository(repository.NewScoped(pool))
+	rows, err := repo.ListEolUsage(repository.WithSystemIdentity(ctx), "2026-11-02")
+	if err != nil {
+		t.Fatalf("ListEolUsage: %v", err)
+	}
+	var keys []string
+	for _, r := range rows {
+		if r.AccountID == eolID(60) || r.AccountID == eolID(61) {
+			keys = append(keys, r.ProjectKey)
+		}
+	}
+	// The inactive project, the project WSO2 closed and the deleted account's
+	// project are left out; the suspended project is still a customer.
+	want := []string{"EOLITOPEN", "EOLITSUSP"}
+	if len(keys) != len(want) || keys[0] != want[0] || keys[1] != want[1] {
+		t.Fatalf("projects = %v, want %v", keys, want)
+	}
+}

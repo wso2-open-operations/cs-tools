@@ -62,14 +62,22 @@ type Options struct {
 	AnyDay bool
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// Anchor returns the scheduled firing time of the run being made (its
+	// period key, schedule.PeriodKey). The engine retries a failed run on
+	// every tick until the next Monday, so a scheduled run takes its date
+	// from here, not the clock: a first-Monday send that fails and succeeds
+	// on a later day still sends, as of that Monday. Nil (a manual run-now)
+	// is the clock.
+	Anchor func() time.Time
 }
 
 // SendReport returns a registry.Task.Handler that mails the report.
 //
-// The run date is today in Timezone. A scheduled run on the 8th or later
+// The run date is the run's scheduled Monday (Options.Anchor) in Timezone,
+// or today for a manual run. A run for a Monday on the 8th or later
 // succeeds without sending: the schedule wakes the task every Monday and
 // only the first one of the month is the report's. The report is fetched as
-// of the run date, so a retry later the same day lists the same versions.
+// of the run date, so a retry later in the week lists the same versions.
 //
 // The audience is the task's own SUB_CRON_RECIPIENTS entry (to: the CS
 // leadership group; cc) plus every listed account's manager and technical
@@ -87,7 +95,11 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 			return nil
 		}
 
-		asOf := runDate(opts.Now)
+		clock := opts.Now
+		if opts.Anchor != nil {
+			clock = opts.Anchor
+		}
+		asOf := runDate(clock)
 		if !opts.AnyDay && asOf.Day() > 7 {
 			slog.Info("EOL product usage report: not the first Monday of the month; not sent", "date", asOf.Format("2006-01-02"))
 			return nil
@@ -121,7 +133,7 @@ func SendReport(reports ReportFetcher, email EmailSender, to, cc []string, opts 
 	}
 }
 
-// runDate is today, midnight, in Timezone.
+// runDate is now()'s date, midnight, in Timezone.
 func runDate(now func() time.Time) time.Time {
 	if now == nil {
 		now = time.Now

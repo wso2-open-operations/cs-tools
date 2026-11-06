@@ -1009,12 +1009,19 @@ account's cells (account, CS ABT, account manager, technical owner) spanning its
 spanning its versions.
 
 - **When.** Default schedule `30 4 * * 1`: every Monday at 10:00 India Standard Time, in UTC (same `TZ=UTC` caveat
-  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes today's date in Asia/Colombo and
-  sends only on the 1st to the 7th; a later Monday succeeds without fetching anything. A `--run-now` sends whatever
+  as "Housekeeping"). Cron cannot say "the first Monday", so the handler takes its run's Monday in Asia/Colombo and
+  sends only when it is the 1st to the 7th; a later Monday succeeds without fetching anything. That Monday is the
+  run's period key (`Options.Anchor`, `periodStart` in `cmd/server/main.go`), not the clock: the engine retries a
+  failed run on every tick until the next Monday, and a retry on the 8th or later must still send the month's report.
+  A month is lost only when every retry fails for the whole week; each failure alerts `ALERT_RECIPIENTS`, and the
+  report can then be sent by hand with `--run-now=eol_product_usage_report`. A `--run-now` sends whatever
   the date (`Options.AnyDay`). A `TRYOUT_TASK` runs the scheduled handler, so it sends only in the first week; use
   `--run-now` with `--recipients` to test on another day.
-- **Report date.** The report is fetched as of the run date in Asia/Colombo, so a retry later the same day lists the
-  same versions.
+- **Report date.** The report is fetched as of the run's Monday in Asia/Colombo, so a retry later in the week lists
+  the same versions.
+- **One report for everyone.** Every recipient gets the whole report, all regions, not only their own accounts: the
+  audience agreed with CS (account managers, technical owners and leadership see the same list). It is internal
+  only.
 - **Audience.** To is the task's own `SUB_CRON_RECIPIENTS` "to" (the CS leadership group) plus every listed
   account's manager and technical owner, each address once (ignoring case); Cc is its "cc", minus anyone already in
   To. With no "to" the task skips its query and succeeds, as the regression reports do. Its `registry.Task` leaves

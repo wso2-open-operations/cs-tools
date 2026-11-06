@@ -100,3 +100,16 @@ func TestGroupEolProductUsageNestsRegionAccountProject(t *testing.T) {
 		t.Errorf("no-region group = %+v, want Gamma last", got.Regions[1])
 	}
 }
+
+func TestGroupEolProductUsageTreatsRegionsDifferingInCaseAsOne(t *testing.T) {
+	// The query orders by lower(region), so "EMEA" and "emea" rows arrive together.
+	rows := []domain.EolProductUsageRow{
+		eolRow("EMEA", "Acme", "Acme Prod", "2.6.0"),
+		eolRow("emea", "Beta", "Beta Prod", "4.0.0"),
+		eolRow("EMEA", "Delta", "Delta Prod", "3.2.0"),
+	}
+	got := service.GroupEolProductUsage(rows)
+	if len(got.Regions) != 1 || got.Regions[0].Region != "EMEA" || len(got.Regions[0].Accounts) != 3 {
+		t.Fatalf("regions = %+v, want one EMEA group with 3 accounts", got.Regions)
+	}
+}

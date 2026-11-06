@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
@@ -86,7 +87,9 @@ func GroupEolProductUsage(rows []domain.EolProductUsageRow) domain.EolProductUsa
 	}
 	for _, r := range rows {
 		n := len(report.Regions)
-		if n == 0 || report.Regions[n-1].Region != r.Region {
+		// The rows are ordered by lower(region): regions that differ only in
+		// case are one group, shown with the first spelling met.
+		if n == 0 || !strings.EqualFold(report.Regions[n-1].Region, r.Region) {
 			report.Regions = append(report.Regions, domain.EolProductUsageRegion{Region: r.Region, Accounts: []domain.EolProductUsageAccount{}})
 			n++
 		}

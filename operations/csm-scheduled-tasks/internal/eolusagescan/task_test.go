@@ -131,6 +131,30 @@ func TestSendReportSkipsMondaysAfterTheFirstWeek(t *testing.T) {
 	}
 }
 
+func TestSendReportRetriedLaterInTheWeekStillSendsAsOfTheFirstMonday(t *testing.T) {
+	// The first Monday of December 2026 is the 7th. Its run failed and the
+	// engine retries it on the 9th: the clock is in the second week, the
+	// period is not.
+	reports := &fakeReports{report: sampleReport()}
+	email := &fakeEmail{}
+	handler := eolusagescan.SendReport(reports, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 9), Anchor: at(2026, 12, 7)})
+	if err := handler(context.Background()); err != nil || email.calls != 1 {
+		t.Fatalf("err=%v sent=%d, want the retry to send", err, email.calls)
+	}
+	if reports.gotAsOf != "2026-12-07" {
+		t.Errorf("asOf = %q, want the first Monday, 2026-12-07", reports.gotAsOf)
+	}
+
+	// A second-week Monday's own run still does not send.
+	email = &fakeEmail{}
+	handler = eolusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,
+		eolusagescan.Options{EmailsEnabled: true, Now: at(2026, 12, 14), Anchor: at(2026, 12, 14)})
+	if err := handler(context.Background()); err != nil || email.calls != 0 {
+		t.Fatalf("err=%v sent=%d, want no mail for the 14th", err, email.calls)
+	}
+}
+
 func TestSendReportAnyDaySendsWhateverTheDate(t *testing.T) {
 	email := &fakeEmail{}
 	handler := eolusagescan.SendReport(&fakeReports{report: sampleReport()}, email, []string{"lead@example.com"}, nil,

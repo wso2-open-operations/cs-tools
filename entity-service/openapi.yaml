@@ -12652,7 +12652,8 @@ paths:
       description: >
         One entry per (project, product version) where an active deployed product of an active
         PRIMARY_PRODUCTION deployment runs a version whose support EOL date is before asOf,
-        grouped by the account's region (accounts with no region last), then account and project.
+        grouped by the account's region (ignoring case; accounts with no region last), then account and project.
+        Customers who have left are not listed: deleted accounts, inactive projects and projects WSO2 has closed.
         A version run by several Primary Production deployments of one project is listed once.
         Internal callers only; the scheduled task that mails the report is the expected caller.
       operationId: getEolProductUsageReport

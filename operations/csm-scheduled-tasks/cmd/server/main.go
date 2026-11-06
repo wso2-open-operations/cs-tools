@@ -720,11 +720,16 @@ func main() {
 		eolUsageTaskWithRecipients = append(eolUsageTaskWithRecipients, eolusagescan.TaskName)
 	}
 	eolUsageEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, eolusagescan.TaskName))
+	eolUsageSchedule := scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule)
 	eolUsageOptions := eolusagescan.Options{PortalBaseURL: eolUsagePortalBase, EmailsEnabled: alertsEnabled}
+	// A scheduled run (and its retries) takes its date from its period; a
+	// run-now below keeps the clock.
+	eolUsageScheduled := eolUsageOptions
+	eolUsageScheduled.Anchor = periodStart(eolUsageSchedule)
 	eolUsageTask := registry.Task{
 		Name:     eolusagescan.TaskName,
-		Schedule: scheduleFor(scheduleOverrides, eolusagescan.TaskName, eolusagescan.DefaultSchedule),
-		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageOptions),
+		Schedule: eolUsageSchedule,
+		Handler:  eolusagescan.SendReport(eolUsageReportClient, eolUsageEmail, eolUsageTo, eolUsageCc, eolUsageScheduled),
 		// --recipients/--cc of a manual run-now only; see reportRunNow. A
 		// run-now sends whatever the date: it is asked for on purpose.
 		RunNowFlags: reportRunNowFlags,
