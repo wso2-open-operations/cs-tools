@@ -1012,6 +1012,21 @@ export function TimeLogsWidget({
 // 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
 
+/** The bar along the bottom of an attachment row while it downloads (the row is `position: relative`). */
+function AttachmentDownloadBar({ id }: { id: string }) {
+  const progress = useAttachmentDownloadProgress(id);
+  if (progress === undefined) return null;
+  const known = progress >= 0;
+  return (
+    <LinearProgress
+      aria-hidden
+      variant={known ? "determinate" : "indeterminate"}
+      value={known ? progress : undefined}
+      sx={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4 }}
+    />
+  );
+}
+
 /** The Download button of an attachment row; while it downloads it shows the percentage. */
 function AttachmentDownloadButton({
   attachment,
@@ -1284,6 +1299,8 @@ export function AttachmentsWidget({
                   borderRadius: 1,
                   border: 1,
                   borderColor: "divider",
+                  position: "relative",
+                  overflow: "hidden",
                   transition: "background-color 120ms, border-color 120ms",
                   "&:hover": {
                     borderColor: "primary.main",
@@ -1291,6 +1308,7 @@ export function AttachmentsWidget({
                   },
                 }}
               >
+                <AttachmentDownloadBar id={a.id} />
                 <Paperclip size={16} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   {onDownload ? (
