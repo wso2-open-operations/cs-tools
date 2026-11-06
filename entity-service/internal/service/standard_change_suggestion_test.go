@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -280,21 +281,47 @@ func TestMatchSuggestionTemplate(t *testing.T) {
 	}
 }
 
-// fakeSuggestionRepo serves fixed data and records dismissals.
+// fakeSuggestionRepo serves fixed candidates and keeps runs, rows and
+// dismissals in memory, as the real one does in the database.
 type fakeSuggestionRepo struct {
-	cands      []repository.SuggestionCandidate
-	since      time.Time
-	account    string
-	incidents  map[string][]domain.EntityRef
-	proposals  map[string][]domain.EntityRef
-	templates  []repository.SuggestionTemplate
-	dismissals map[string]map[string]domain.StandardChangeSuggestionDismissal
-	dismissed  []string
+	cands       []repository.SuggestionCandidate
+	sinces      []time.Time
+	incidents   map[string][]domain.EntityRef
+	proposals   map[string][]domain.EntityRef
+	templates   []repository.SuggestionTemplate
+	dismissals  map[string]map[string]domain.StandardChangeSuggestionDismissal
+	dismissed   []string
+	runs        map[string]*repository.SuggestionRun
+	rows        map[string][]repository.SuggestionSnapshotRow // run id -> rows
+	runCustomer map[string]map[string]int                     // run id -> account -> change requests
+	nextRun     int
+	loaded      []string // accounts whose candidates were read, in order
 }
 
+func (f *fakeSuggestionRepo) CandidateAccounts(_ context.Context, since time.Time, after string, limit int) ([]string, error) {
+	f.sinces = append(f.sinces, since)
+	set := map[string]bool{}
+	for _, c := range f.cands {
+		if !c.CompletedOn.Before(since) && c.AccountID > after {
+			set[c.AccountID] = true
+		}
+	}
+	var out []string
+	for a := range set {
+		out = append(out, a)
+	}
+	sort.Strings(out)
+	return out[:min(limit, len(out))], nil
+}
 func (f *fakeSuggestionRepo) Candidates(_ context.Context, account string, since time.Time) ([]repository.SuggestionCandidate, error) {
-	f.account, f.since = account, since
-	return f.cands, nil
+	f.loaded = append(f.loaded, account)
+	var out []repository.SuggestionCandidate
+	for _, c := range f.cands {
+		if c.AccountID == account && !c.CompletedOn.Before(since) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 func (f *fakeSuggestionRepo) IncidentsOf(context.Context, []string) (map[string][]domain.EntityRef, error) {
 	return f.incidents, nil
@@ -313,6 +340,100 @@ func (f *fakeSuggestionRepo) Dismiss(_ context.Context, account, key, reason, ac
 	return domain.StandardChangeSuggestionDismissal{ID: "d1", Reason: reason}, nil
 }
 func (f *fakeSuggestionRepo) Restore(context.Context, string) error { return nil }
+func (f *fakeSuggestionRepo) StartRun(_ context.Context, crit domain.StandardChangeSuggestionCriteria) (repository.SuggestionRun, error) {
+	if f.runs == nil {
+		f.runs, f.rows, f.runCustomer = map[string]*repository.SuggestionRun{}, map[string][]repository.SuggestionSnapshotRow{}, map[string]map[string]int{}
+	}
+	f.nextRun++
+	run := repository.SuggestionRun{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextRun), StartedOn: sgNow, Criteria: crit}
+	f.runs[run.ID] = &run
+	f.runCustomer[run.ID] = map[string]int{}
+	return run, nil
+}
+func (f *fakeSuggestionRepo) GetRun(_ context.Context, id string) (*repository.SuggestionRun, error) {
+	if r, ok := f.runs[id]; ok {
+		cp := *r
+		return &cp, nil
+	}
+	return nil, nil
+}
+func (f *fakeSuggestionRepo) open(id string) error {
+	if r, ok := f.runs[id]; !ok || r.CompletedOn != nil {
+		return &apierror.ConflictError{Msg: "gone"}
+	}
+	return nil
+}
+func (f *fakeSuggestionRepo) SaveCustomer(_ context.Context, runID, account string, crs int, rows []repository.SuggestionSnapshotRow) error {
+	if err := f.open(runID); err != nil {
+		return err
+	}
+	kept := f.rows[runID][:0:0]
+	for _, r := range f.rows[runID] {
+		if r.AccountID != account {
+			kept = append(kept, r)
+		}
+	}
+	f.rows[runID] = append(kept, rows...)
+	f.runCustomer[runID][account] = crs
+	return nil
+}
+func (f *fakeSuggestionRepo) PublishRun(_ context.Context, id string) (repository.SuggestionRun, error) {
+	if err := f.open(id); err != nil {
+		return repository.SuggestionRun{}, err
+	}
+	run := f.runs[id]
+	done := sgNow.Add(time.Minute)
+	run.CompletedOn = &done
+	run.Counts = domain.StandardChangeSuggestionScan{Customers: len(f.runCustomer[id]), Clusters: len(f.rows[id])}
+	for _, n := range f.runCustomer[id] {
+		run.Counts.ChangeRequests += n
+	}
+	for _, r := range f.rows[id] {
+		if r.Eligible {
+			run.Counts.Eligible++
+		}
+	}
+	for other := range f.runs {
+		if other != id {
+			delete(f.runs, other)
+			delete(f.rows, other)
+		}
+	}
+	return *run, nil
+}
+func (f *fakeSuggestionRepo) LatestRun(context.Context) (*repository.SuggestionRun, error) {
+	for _, r := range f.runs {
+		if r.CompletedOn != nil {
+			cp := *r
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+func (f *fakeSuggestionRepo) CustomerCounts(_ context.Context, runID, account string) (domain.StandardChangeSuggestionScan, error) {
+	var out domain.StandardChangeSuggestionScan
+	if n, ok := f.runCustomer[runID][account]; ok {
+		out.Customers, out.ChangeRequests = 1, n
+	}
+	for _, r := range f.rows[runID] {
+		if r.AccountID == account {
+			out.Clusters++
+			if r.Eligible {
+				out.Eligible++
+			}
+		}
+	}
+	return out, nil
+}
+func (f *fakeSuggestionRepo) SnapshotRows(_ context.Context, runID, account string, includeIneligible bool) ([]repository.SuggestionSnapshotRow, error) {
+	var out []repository.SuggestionSnapshotRow
+	for _, r := range f.rows[runID] {
+		if (account == "" || r.AccountID == account) && (includeIneligible || r.Eligible) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
 
 func sgService(repo *fakeSuggestionRepo, internal bool) *standardChangeSuggestionService {
 	svc := NewStandardChangeSuggestionService(repo, stubAccess{scope: AccessScope{Unrestricted: internal}}, domain.StandardChangeSuggestionCriteria{}).(*standardChangeSuggestionService)
@@ -324,69 +445,166 @@ func sgPersonCtx() context.Context {
 	return auth.WithIdentity(context.Background(), auth.Identity{Validated: true, UserEmail: "jane@wso2.com"})
 }
 
-func TestStandardChangeSuggestionService_GetSuggestions(t *testing.T) {
+// refreshAll drives a whole refresh the way the scheduled task does: page after
+// page while more, then the published totals.
+func refreshAll(t *testing.T, svc *standardChangeSuggestionService, limit int) (pages int, last domain.RefreshStandardChangeSuggestionsResponse) {
+	t.Helper()
+	req := domain.RefreshStandardChangeSuggestionsRequest{Limit: limit}
+	for {
+		resp, err := svc.Refresh(context.Background(), req)
+		if err != nil {
+			t.Fatalf("refresh page %d: %v", pages+1, err)
+		}
+		pages++
+		if !resp.More {
+			return pages, resp
+		}
+		req = domain.RefreshStandardChangeSuggestionsRequest{RunID: resp.RunID, Cursor: resp.NextCursor, Limit: limit}
+	}
+}
+
+func sgFixture() *fakeSuggestionRepo {
 	eligible := []repository.SuggestionCandidate{
 		sgCand(1, "Deploy CApps", "CLOSED", sgPlan), sgCand(2, "Deploy CApps", "CLOSED", sgPlan), sgCand(3, "Deploy CApps", "CLOSED", sgPlan),
 	}
 	short := []repository.SuggestionCandidate{sgCand(4, "Restart gateway", "CLOSED", ""), sgCand(5, "Restart gateway", "CLOSED", "")}
 	// The same subject at another customer never joins Acme's cluster.
-	other := sgCand(6, "Deploy CApps", "CLOSED", sgPlan)
-	other.AccountID, other.AccountName = sgAccountB, "Beta"
-	repo := &fakeSuggestionRepo{cands: append(append(append([]repository.SuggestionCandidate{}, eligible...), short...), other)}
+	other := []repository.SuggestionCandidate{sgCand(6, "Deploy CApps", "CLOSED", sgPlan), sgCand(7, "Deploy CApps", "CLOSED", sgPlan)}
+	for i := range other {
+		other[i].AccountID, other[i].AccountName = sgAccountB, "Beta"
+	}
+	// Outside the 12-month window: never read.
+	old := sgCand(8, "Deploy CApps", "CLOSED", sgPlan)
+	old.CompletedOn = sgNow.AddDate(-2, 0, 0)
+	return &fakeSuggestionRepo{cands: append(append(append(append([]repository.SuggestionCandidate{}, eligible...), short...), other...), old)}
+}
 
-	t.Run("eligible only by default, window from the criteria", func(t *testing.T) {
-		resp, err := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+func TestStandardChangeSuggestionService_Refresh(t *testing.T) {
+	t.Run("one customer at a time, published by the last page", func(t *testing.T) {
+		repo := sgFixture()
+		svc := sgService(repo, true)
+		pages, last := refreshAll(t, svc, 1)
+		if pages != 2 || !reflect.DeepEqual(repo.loaded, []string{sgAccountA, sgAccountB}) {
+			t.Fatalf("pages = %d, customers read = %v; want 2, A then B", pages, repo.loaded)
+		}
+		if last.ComputedOn == nil || last.Totals == nil ||
+			*last.Totals != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 7, Clusters: 3, Eligible: 1}) {
+			t.Fatalf("last page = %+v, totals %+v", last, last.Totals)
+		}
+		if !repo.sinces[0].Equal(sgNow.AddDate(-1, 0, 0)) {
+			t.Errorf("window from %v, want 12 months before the run started", repo.sinces[0])
+		}
+	})
+	t.Run("a page stops once its time is spent, after one customer", func(t *testing.T) {
+		repo := sgFixture()
+		svc := sgService(repo, true)
+		clock := sgNow
+		svc.now = func() time.Time { clock = clock.Add(suggestionRefreshBudget + time.Second); return clock }
+		resp, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{})
+		if err != nil || resp.Customers != 1 || !resp.More || resp.NextCursor != sgAccountA {
+			t.Fatalf("resp = %+v, %v; want one customer and more after A", resp, err)
+		}
+	})
+	t.Run("an unpublished run is not read, and a page sent again counts its customer once", func(t *testing.T) {
+		repo := sgFixture()
+		svc := sgService(repo, true)
+		first, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{Limit: 1})
+		if err != nil || !first.More {
+			t.Fatal(first, err)
+		}
+		if resp, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{}); resp.ComputedOn != nil || len(resp.Suggestions) != 0 {
+			t.Fatalf("a half-done run was read: %+v", resp)
+		}
+		// The first page again (the scheduler retried it), then the rest.
+		if _, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{RunID: first.RunID, Limit: 1}); err != nil {
+			t.Fatal(err)
+		}
+		last, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{RunID: first.RunID, Cursor: first.NextCursor, Limit: 1})
+		if err != nil || last.More || last.Totals.Customers != 2 || last.Totals.ChangeRequests != 7 {
+			t.Fatalf("last = %+v, %v", last, err)
+		}
+		// A published run takes no more pages.
+		_, err = svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{RunID: first.RunID, Cursor: first.NextCursor})
+		var ce *apierror.ConflictError
+		if !errors.As(err, &ce) {
+			t.Fatalf("a page of a published run: %v, want a 409", err)
+		}
+	})
+	t.Run("refuses a cursor without its run, a bad limit, and anyone but staff or a service", func(t *testing.T) {
+		svc := sgService(sgFixture(), true)
+		var ve *apierror.ValidationError
+		if _, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{Cursor: sgAccountA}); !errors.As(err, &ve) {
+			t.Errorf("cursor without runId: %v", err)
+		}
+		if _, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{Limit: 501}); !errors.As(err, &ve) {
+			t.Errorf("limit 501: %v", err)
+		}
+		var fe *apierror.ForbiddenError
+		if _, err := sgService(sgFixture(), false).Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{}); !errors.As(err, &fe) {
+			t.Errorf("an external caller: %v, want a 403", err)
+		}
+	})
+}
+
+func TestStandardChangeSuggestionService_GetSuggestions(t *testing.T) {
+	t.Run("nothing computed yet is an empty list with no computedOn", func(t *testing.T) {
+		resp, err := sgService(sgFixture(), true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+		if err != nil || resp.ComputedOn != nil || resp.Suggestions == nil || len(resp.Suggestions) != 0 || resp.Criteria != DefaultStandardChangeSuggestionCriteria {
+			t.Fatalf("resp = %+v, %v", resp, err)
+		}
+	})
+	repo := sgFixture()
+	svc := sgService(repo, true)
+	refreshAll(t, svc, 0)
+	repo.loaded = nil
+
+	t.Run("reads the snapshot only: eligible by default, computedOn, the run's counts", func(t *testing.T) {
+		resp, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(resp.Suggestions) != 1 || resp.Suggestions[0].Key != "deploy capps" || resp.Suggestions[0].MemberCount != 3 {
 			t.Fatalf("suggestions = %+v", resp.Suggestions)
 		}
-		if resp.Scanned != (domain.StandardChangeSuggestionScan{ChangeRequests: 6, Clusters: 2, Eligible: 1}) {
-			t.Errorf("scanned = %+v", resp.Scanned)
+		if resp.ComputedOn == nil || resp.Scanned != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 7, Clusters: 3, Eligible: 1}) {
+			t.Errorf("computedOn = %v, scanned = %+v", resp.ComputedOn, resp.Scanned)
 		}
-		if !repo.since.Equal(sgNow.AddDate(-1, 0, 0)) || resp.Criteria != DefaultStandardChangeSuggestionCriteria {
-			t.Errorf("since = %v, criteria = %+v", repo.since, resp.Criteria)
+		if len(repo.loaded) != 0 {
+			t.Errorf("a read loaded candidates of %v: it must never compute", repo.loaded)
 		}
 	})
 	t.Run("ineligible on request, after the eligible", func(t *testing.T) {
-		resp, _ := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{IncludeIneligible: true})
-		if len(resp.Suggestions) != 2 || !resp.Suggestions[0].Eligible || resp.Suggestions[1].Eligible {
+		resp, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{IncludeIneligible: true})
+		if len(resp.Suggestions) != 3 || !resp.Suggestions[0].Eligible || resp.Suggestions[1].Eligible {
 			t.Fatalf("suggestions = %+v", resp.Suggestions)
 		}
 	})
-	t.Run("a dismissed suggestion is hidden, or shown with its dismissal", func(t *testing.T) {
+	t.Run("one customer, with that customer's counts", func(t *testing.T) {
+		resp, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: " " + strings.ToUpper(sgAccountB), IncludeIneligible: true})
+		if err != nil || len(resp.Suggestions) != 1 || resp.Suggestions[0].Customer.ID != sgAccountB {
+			t.Fatalf("customer B: %+v, %v", resp.Suggestions, err)
+		}
+		if resp.Scanned != (domain.StandardChangeSuggestionScan{Customers: 1, ChangeRequests: 2, Clusters: 1}) {
+			t.Errorf("scanned = %+v", resp.Scanned)
+		}
+		var ve *apierror.ValidationError
+		if _, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: "acme"}); !errors.As(err, &ve) {
+			t.Fatalf("err = %v, want a 400", err)
+		}
+	})
+	t.Run("open proposals and dismissals are read live", func(t *testing.T) {
+		member := sgCand(1, "", "", "").ID
+		repo.proposals = map[string][]domain.EntityRef{member: {{ID: "p1", Name: "SCP0000001"}}}
 		repo.dismissals = map[string]map[string]domain.StandardChangeSuggestionDismissal{sgAccountA: {"deploy capps": {ID: "d1", Reason: "one-off migration"}}}
-		defer func() { repo.dismissals = nil }()
-		resp, _ := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+		defer func() { repo.proposals, repo.dismissals = nil, nil }()
+		resp, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
 		if len(resp.Suggestions) != 0 || resp.Scanned.Dismissed != 1 {
 			t.Fatalf("suggestions = %+v, scanned = %+v", resp.Suggestions, resp.Scanned)
 		}
-		resp, _ = sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{IncludeDismissed: true})
-		if len(resp.Suggestions) != 1 || resp.Suggestions[0].Dismissal == nil || resp.Suggestions[0].Dismissal.Reason != "one-off migration" {
-			t.Fatalf("suggestions = %+v", resp.Suggestions)
-		}
-	})
-	t.Run("overrides apply and are held to their range", func(t *testing.T) {
-		two, months := 2, 6
-		resp, err := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{MinClosed: &two, WindowMonths: &months})
-		if err != nil || len(resp.Suggestions) != 2 || resp.Criteria.MinClosed != 2 || !repo.since.Equal(sgNow.AddDate(0, -6, 0)) {
-			t.Fatalf("err = %v, suggestions = %d, criteria = %+v", err, len(resp.Suggestions), resp.Criteria)
-		}
-		bad := 101
-		_, err = sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{MinSuccessPercent: &bad})
-		var ve *apierror.ValidationError
-		if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "minSuccessPercent") {
-			t.Fatalf("err = %v, want a 400 naming minSuccessPercent", err)
-		}
-	})
-	t.Run("accountId is passed down, and must be a UUID", func(t *testing.T) {
-		if _, err := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: " " + strings.ToUpper(sgAccountA)}); err != nil || repo.account != sgAccountA {
-			t.Fatalf("err = %v, account = %q", err, repo.account)
-		}
-		var ve *apierror.ValidationError
-		if _, err := sgService(repo, true).GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{AccountID: "acme"}); !errors.As(err, &ve) {
-			t.Fatalf("err = %v, want a 400", err)
+		resp, _ = svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{IncludeDismissed: true})
+		got := resp.Suggestions[0]
+		if got.Dismissal == nil || got.Dismissal.Reason != "one-off migration" || len(got.OpenProposals) != 1 || got.OpenProposals[0].Name != "SCP0000001" {
+			t.Fatalf("suggestion = %+v", got)
 		}
 	})
 	t.Run("staff only", func(t *testing.T) {

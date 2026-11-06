@@ -19,9 +19,8 @@ package domain
 import "time"
 
 // StandardChangeSuggestionCriteria are the thresholds a cluster of completed
-// change requests is judged by. The defaults are configuration
-// (STANDARD_CHANGE_SUGGESTION_*); a request may override them to measure what
-// they should be.
+// change requests is judged by: fixed configuration
+// (STANDARD_CHANGE_SUGGESTION_*), applied when the snapshot is computed.
 type StandardChangeSuggestionCriteria struct {
 	// WindowMonths: only change requests completed within this many months count.
 	WindowMonths int `json:"windowMonths"`
@@ -53,7 +52,8 @@ const (
 	StandardChangeSuggestionNew StandardChangeSuggestionMatch = "new"
 )
 
-// StandardChangeSuggestionsRequest is GET /standard-change-suggestions' query.
+// StandardChangeSuggestionsRequest is GET /standard-change-suggestions' query,
+// applied over the stored snapshot.
 type StandardChangeSuggestionsRequest struct {
 	// AccountID limits the suggestions to one customer; empty is every customer.
 	AccountID string
@@ -62,22 +62,51 @@ type StandardChangeSuggestionsRequest struct {
 	IncludeIneligible bool
 	// IncludeDismissed also returns dismissed suggestions, with their dismissal.
 	IncludeDismissed bool
-	// Overrides of the configured criteria; nil keeps the configured value.
-	WindowMonths, MinClosed, MinSuccessPercent, PlanSimilarityPercent *int
 }
 
-// StandardChangeSuggestionsResponse is GET /standard-change-suggestions' answer.
+// StandardChangeSuggestionsResponse is GET /standard-change-suggestions' answer:
+// the last published snapshot. ComputedOn is when it was published; nil (with no
+// suggestions) when none has been computed yet.
 type StandardChangeSuggestionsResponse struct {
 	Suggestions []StandardChangeSuggestion       `json:"suggestions"`
 	Criteria    StandardChangeSuggestionCriteria `json:"criteria"`
-	// Scanned: completed change requests considered (not raised from a template,
-	// of a customer, completed in the window) and the clusters they formed
-	// (two or more members).
+	ComputedOn  *time.Time                       `json:"computedOn"`
+	// Scanned: completed change requests the snapshot considered (not raised from
+	// a template, of a customer, completed in the window) and the clusters they
+	// formed (two or more members); Dismissed is counted when read.
 	Scanned StandardChangeSuggestionScan `json:"scanned"`
+}
+
+// RefreshStandardChangeSuggestionsRequest is the body of
+// POST /standard-change-suggestions/refresh. The first call names no run and
+// starts one; each later call continues it from the cursor the previous call
+// returned, until one answers more = false, which publishes it.
+type RefreshStandardChangeSuggestionsRequest struct {
+	RunID  string `json:"runId,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	// Limit is the most customers this call computes (default 50, at most 500); a
+	// call short of time stops earlier, after at least one.
+	Limit int `json:"limit,omitempty"`
+}
+
+// RefreshStandardChangeSuggestionsResponse is one refresh call's answer.
+type RefreshStandardChangeSuggestionsResponse struct {
+	RunID string `json:"runId"`
+	// What this call computed.
+	Customers      int `json:"customers"`
+	ChangeRequests int `json:"changeRequests"`
+	Suggestions    int `json:"suggestions"`
+	// More: call again with runId and nextCursor. When false the run was
+	// published (ComputedOn) and Totals are the whole run's.
+	More       bool                          `json:"more"`
+	NextCursor string                        `json:"nextCursor,omitempty"`
+	ComputedOn *time.Time                    `json:"computedOn,omitempty"`
+	Totals     *StandardChangeSuggestionScan `json:"totals,omitempty"`
 }
 
 // StandardChangeSuggestionScan counts what one computation looked at.
 type StandardChangeSuggestionScan struct {
+	Customers      int `json:"customers"`
 	ChangeRequests int `json:"changeRequests"`
 	Clusters       int `json:"clusters"`
 	Eligible       int `json:"eligible"`

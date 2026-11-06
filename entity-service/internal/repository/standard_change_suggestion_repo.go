@@ -18,6 +18,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -30,12 +31,16 @@ import (
 
 // StandardChangeSuggestionRepository reads what the standard change
 // suggestions are computed from (completed change requests, the customers'
-// live templates, open proposals) and keeps the dismissals. The clustering is
-// the service's (standard_change_suggestion.go); nothing here decides.
+// live templates, open proposals), stores the computed snapshot, and keeps the
+// dismissals. The clustering is the service's (standard_change_suggestion.go);
+// nothing here decides.
 type StandardChangeSuggestionRepository interface {
-	// Candidates are the change requests completed (Closed or Rollback) since
-	// the instant given, not raised from a template, whose project has a
-	// customer: of that one customer when accountID is set.
+	// CandidateAccounts lists, in id order after the cursor (exclusive; "" is
+	// the start), at most limit customers with at least one candidate (see
+	// Candidates) completed since the instant given.
+	CandidateAccounts(ctx context.Context, since time.Time, after string, limit int) ([]string, error)
+	// Candidates are one customer's change requests completed (Closed or
+	// Rollback) since the instant given and not raised from a template.
 	Candidates(ctx context.Context, accountID string, since time.Time) ([]SuggestionCandidate, error)
 	// IncidentsOf maps a change request id to the incidents that name it as
 	// their cause (caused_by_id) or their change request (change_request_id).
@@ -46,13 +51,55 @@ type StandardChangeSuggestionRepository interface {
 	// OpenProposalsOf maps a change request id to the open proposals (draft or
 	// under review) that started from it or cite it as evidence.
 	OpenProposalsOf(ctx context.Context, changeRequestIDs []string) (map[string][]domain.EntityRef, error)
-	// Dismissals of the customers given, by account id then key.
+	// Dismissals of the customers given (all customers when nil), by account
+	// id then key.
 	Dismissals(ctx context.Context, accountIDs []string) (map[string]map[string]domain.StandardChangeSuggestionDismissal, error)
 	// Dismiss records a dismissal (409 when the key is already dismissed for
 	// that customer, 400 when the account does not exist).
 	Dismiss(ctx context.Context, accountID, key, reason, actor string) (domain.StandardChangeSuggestionDismissal, error)
 	// Restore deletes a dismissal (404 when there is none with that id).
 	Restore(ctx context.Context, id string) error
+
+	// StartRun opens a refresh run with the criteria it computes by, deleting
+	// runs left unpublished for over a day (a job that died).
+	StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria) (SuggestionRun, error)
+	// GetRun reads a run; nil when there is none with that id.
+	GetRun(ctx context.Context, id string) (*SuggestionRun, error)
+	// SaveCustomer replaces one customer's rows and change-request count in an
+	// unpublished run, in one transaction (409 when the run is gone or already
+	// published), so a call sent again never counts a customer twice.
+	SaveCustomer(ctx context.Context, runID, accountID string, changeRequests int, rows []SuggestionSnapshotRow) error
+	// PublishRun sums the run's totals, makes it the one readers see and deletes
+	// every other run with its rows, in one transaction (409 when it is gone or
+	// already published).
+	PublishRun(ctx context.Context, id string) (SuggestionRun, error)
+	// LatestRun is the newest published run; nil when none has been published.
+	LatestRun(ctx context.Context) (*SuggestionRun, error)
+	// CustomerCounts are one customer's counts in a run (all zero when the run
+	// did not compute it: it had no candidates).
+	CustomerCounts(ctx context.Context, runID, accountID string) (domain.StandardChangeSuggestionScan, error)
+	// SnapshotRows reads a run's rows: of one customer when accountID is set, and
+	// only the eligible ones unless includeIneligible.
+	SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error)
+}
+
+// SuggestionRun is one refresh run (standard_change_suggestion_run).
+type SuggestionRun struct {
+	ID          string
+	StartedOn   time.Time
+	CompletedOn *time.Time
+	Criteria    domain.StandardChangeSuggestionCriteria
+	// Counts: Customers, ChangeRequests, Clusters, Eligible, summed at publish.
+	Counts domain.StandardChangeSuggestionScan
+}
+
+// SuggestionSnapshotRow is one stored suggestion.
+type SuggestionSnapshotRow struct {
+	AccountID  string
+	Key        string
+	Eligible   bool
+	MemberIDs  []string
+	Suggestion domain.StandardChangeSuggestion
 }
 
 // SuggestionCandidate is one completed change request as the clustering reads it.
@@ -85,32 +132,59 @@ func NewStandardChangeSuggestionRepository(db *Scoped) StandardChangeSuggestionR
 	return &standardChangeSuggestionRepo{db: db}
 }
 
-// Candidates implements StandardChangeSuggestionRepository. The completion is
-// closed_on (0279 stamps it on every completion and backfilled the CSM's own);
-// a row completed with none recorded falls back to the work item's last update,
-// which is never earlier than its completion.
-//
-// crvis: internal callers only: GET /standard-change-suggestions is wrapped by internalOnly, and the service requires an internal caller
-func (r *standardChangeSuggestionRepo) Candidates(ctx context.Context, accountID string, since time.Time) ([]SuggestionCandidate, error) {
-	var account *string
-	if accountID != "" {
-		account = &accountID
-	}
-	rows, err := r.db.Query(ctx, `
-		SELECT cr.id::text, wi.number, COALESCE(wi.subject, ''), cr.state::text,
-		       COALESCE(cr.closed_on, wi.updated_on, wi.created_on),
-		       COALESCE(cr.implementation_plan, ''), cr.risk::text, cr.impact::text,
-		       cr.cloned_from_change_request_id::text,
-		       cr.implementation_deviation IS NOT NULL AND btrim(cr.implementation_deviation) <> '',
-		       a.id::text, COALESCE(a.name, '')
+// candidateFilter is what makes a change request a candidate: completed (Closed
+// or Rollback) since $1, not raised from a template, with a customer. The
+// completion is closed_on (0279 stamps it on every completion and backfilled the
+// CSM's own); a row completed with none recorded falls back to the work item's
+// last update, which is never earlier than its completion.
+const candidateFilter = `
 		  FROM change_request cr
 		  JOIN work_item wi ON wi.id = cr.id AND wi.type = 'CHANGE_REQUEST'
 		  JOIN project p ON p.id = wi.project_id
 		  JOIN account a ON a.id = p.account_id
 		 WHERE cr.state IN ('CLOSED', 'ROLLBACK')
 		   AND cr.standard_change_template_version_id IS NULL
-		   AND COALESCE(cr.closed_on, wi.updated_on, wi.created_on) >= $1
-		   AND ($2::uuid IS NULL OR a.id = $2::uuid)`, since, account)
+		   AND COALESCE(cr.closed_on, wi.updated_on, wi.created_on) >= $1`
+
+// CandidateAccounts implements StandardChangeSuggestionRepository.
+//
+// crvis: internal callers only: POST /standard-change-suggestions/refresh is wrapped by serviceOnly, and the service requires an internal caller
+func (r *standardChangeSuggestionRepo) CandidateAccounts(ctx context.Context, since time.Time, after string, limit int) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT a.id::text`+candidateFilter+`
+		   AND ($2 = '' OR a.id > $2::uuid)
+		 ORDER BY 1
+		 LIMIT $3`, since, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("standard change suggestions: customers: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("standard change suggestions: customers: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("standard change suggestions: customers: %w", err)
+	}
+	return out, nil
+}
+
+// Candidates implements StandardChangeSuggestionRepository.
+//
+// crvis: internal callers only: POST /standard-change-suggestions/refresh is wrapped by serviceOnly, and the service requires an internal caller
+func (r *standardChangeSuggestionRepo) Candidates(ctx context.Context, accountID string, since time.Time) ([]SuggestionCandidate, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT cr.id::text, wi.number, COALESCE(wi.subject, ''), cr.state::text,
+		       COALESCE(cr.closed_on, wi.updated_on, wi.created_on),
+		       COALESCE(cr.implementation_plan, ''), cr.risk::text, cr.impact::text,
+		       cr.cloned_from_change_request_id::text,
+		       cr.implementation_deviation IS NOT NULL AND btrim(cr.implementation_deviation) <> '',
+		       a.id::text, COALESCE(a.name, '')`+candidateFilter+`
+		   AND a.id = $2::uuid`, since, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("standard change suggestions: candidates: %w", err)
 	}
@@ -233,13 +307,13 @@ func scanSuggestionDismissal(row pgx.Row) (accountID, key string, d domain.Stand
 // Dismissals implements StandardChangeSuggestionRepository.
 func (r *standardChangeSuggestionRepo) Dismissals(ctx context.Context, accountIDs []string) (map[string]map[string]domain.StandardChangeSuggestionDismissal, error) {
 	out := map[string]map[string]domain.StandardChangeSuggestionDismissal{}
-	if len(accountIDs) == 0 {
+	if accountIDs != nil && len(accountIDs) == 0 {
 		return out, nil
 	}
 	rows, err := r.db.Query(ctx, `SELECT `+suggestionDismissalColumns+`
 		  FROM standard_change_suggestion_dismissal d
 		  LEFT JOIN "user" du ON du.id = d.dismissed_by_user_id
-		 WHERE d.account_id = ANY($1::uuid[])`, accountIDs)
+		 WHERE $1::uuid[] IS NULL OR d.account_id = ANY($1::uuid[])`, accountIDs)
 	if err != nil {
 		return nil, fmt.Errorf("standard change suggestions: dismissals: %w", err)
 	}
@@ -302,4 +376,184 @@ func (r *standardChangeSuggestionRepo) Restore(ctx context.Context, id string) e
 		return &apierror.NotFoundError{Msg: "dismissal not found"}
 	}
 	return nil
+}
+
+// runStaleAfter: an unpublished run older than this is a job that died.
+const runStaleAfter = 24 * time.Hour
+
+var errRunGone = &apierror.ConflictError{Msg: "this refresh run is no longer open (published, or replaced by another): start a new one"}
+
+const suggestionRunColumns = `id::text, started_on, completed_on, criteria, customers, change_requests, clusters, eligible`
+
+func scanSuggestionRun(row pgx.Row) (SuggestionRun, error) {
+	var run SuggestionRun
+	var criteria []byte
+	err := row.Scan(&run.ID, &run.StartedOn, &run.CompletedOn, &criteria,
+		&run.Counts.Customers, &run.Counts.ChangeRequests, &run.Counts.Clusters, &run.Counts.Eligible)
+	if err != nil {
+		return run, err
+	}
+	if err := json.Unmarshal(criteria, &run.Criteria); err != nil {
+		return run, fmt.Errorf("decode criteria: %w", err)
+	}
+	return run, nil
+}
+
+// StartRun implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria) (SuggestionRun, error) {
+	raw, err := json.Marshal(criteria)
+	if err != nil {
+		return SuggestionRun{}, fmt.Errorf("start suggestion run: %w", err)
+	}
+	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (SuggestionRun, error) {
+		if _, err := tx.Exec(ctx, `DELETE FROM standard_change_suggestion_run
+			WHERE completed_on IS NULL AND started_on < NOW() - $1::interval`, runStaleAfter.String()); err != nil {
+			return SuggestionRun{}, fmt.Errorf("start suggestion run: clear stale runs: %w", err)
+		}
+		run, err := scanSuggestionRun(tx.QueryRow(ctx, `INSERT INTO standard_change_suggestion_run (criteria)
+			VALUES ($1::jsonb) RETURNING `+suggestionRunColumns, raw))
+		if err != nil {
+			return SuggestionRun{}, fmt.Errorf("start suggestion run: %w", err)
+		}
+		return run, nil
+	})
+}
+
+// GetRun implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) GetRun(ctx context.Context, id string) (*SuggestionRun, error) {
+	run, err := scanSuggestionRun(r.db.QueryRow(ctx, `SELECT `+suggestionRunColumns+`
+		FROM standard_change_suggestion_run WHERE id = $1::uuid`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read suggestion run: %w", err)
+	}
+	return &run, nil
+}
+
+// LatestRun implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) LatestRun(ctx context.Context) (*SuggestionRun, error) {
+	run, err := scanSuggestionRun(r.db.QueryRow(ctx, `SELECT `+suggestionRunColumns+`
+		FROM standard_change_suggestion_run WHERE completed_on IS NOT NULL
+		ORDER BY completed_on DESC LIMIT 1`))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read the published suggestion run: %w", err)
+	}
+	return &run, nil
+}
+
+// lockOpenRun locks an unpublished run's row for the rest of tx (errRunGone when
+// it is gone or published), so a publish and a save of the same run serialise.
+func lockOpenRun(ctx context.Context, tx pgx.Tx, id string) error {
+	var open bool
+	err := tx.QueryRow(ctx, `SELECT completed_on IS NULL FROM standard_change_suggestion_run WHERE id = $1::uuid FOR UPDATE`, id).Scan(&open)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !open) {
+		return errRunGone
+	}
+	return err
+}
+
+// SaveCustomer implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SaveCustomer(ctx context.Context, runID, accountID string, changeRequests int, rows []SuggestionSnapshotRow) error {
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if err := lockOpenRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		// A customer already saved in this run (a call sent again) is replaced.
+		if _, err := tx.Exec(ctx, `DELETE FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid`, runID, accountID); err != nil {
+			return fmt.Errorf("save suggestions: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests)
+			VALUES ($1::uuid, $2::uuid, $3)
+			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = EXCLUDED.change_requests`,
+			runID, accountID, changeRequests); err != nil {
+			return fmt.Errorf("save suggestions: %w", err)
+		}
+		for _, row := range rows {
+			raw, err := json.Marshal(row.Suggestion)
+			if err != nil {
+				return fmt.Errorf("save suggestions: encode: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_snapshot (run_id, account_id, suggestion_key, eligible, member_ids, suggestion)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid[], $6::jsonb)`,
+				runID, accountID, row.Key, row.Eligible, row.MemberIDs, raw); err != nil {
+				return fmt.Errorf("save suggestions: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
+// PublishRun implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) PublishRun(ctx context.Context, id string) (SuggestionRun, error) {
+	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (SuggestionRun, error) {
+		if err := lockOpenRun(ctx, tx, id); err != nil {
+			return SuggestionRun{}, err
+		}
+		run, err := scanSuggestionRun(tx.QueryRow(ctx, `UPDATE standard_change_suggestion_run r SET completed_on = NOW(),
+			    customers = (SELECT COUNT(*) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id),
+			    change_requests = (SELECT COALESCE(SUM(change_requests), 0) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id),
+			    clusters = (SELECT COUNT(*) FROM standard_change_suggestion_snapshot s WHERE s.run_id = r.id),
+			    eligible = (SELECT COUNT(*) FROM standard_change_suggestion_snapshot s WHERE s.run_id = r.id AND s.eligible)
+			WHERE r.id = $1::uuid RETURNING `+suggestionRunColumns, id))
+		if err != nil {
+			return SuggestionRun{}, fmt.Errorf("publish suggestion run: %w", err)
+		}
+		// Every other run goes, published or not, with its rows (ON DELETE CASCADE):
+		// readers switch at this commit.
+		if _, err := tx.Exec(ctx, `DELETE FROM standard_change_suggestion_run WHERE id <> $1::uuid`, id); err != nil {
+			return SuggestionRun{}, fmt.Errorf("publish suggestion run: drop older runs: %w", err)
+		}
+		return run, nil
+	})
+}
+
+// SnapshotRows implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT account_id::text, suggestion_key, eligible, member_ids::text[], suggestion
+		  FROM standard_change_suggestion_snapshot
+		 WHERE run_id = $1::uuid
+		   AND ($2 = '' OR account_id = $2::uuid)
+		   AND ($3 OR eligible)
+		 ORDER BY id`, runID, accountID, includeIneligible)
+	if err != nil {
+		return nil, fmt.Errorf("read suggestions: %w", err)
+	}
+	defer rows.Close()
+	var out []SuggestionSnapshotRow
+	for rows.Next() {
+		var row SuggestionSnapshotRow
+		var raw []byte
+		if err := rows.Scan(&row.AccountID, &row.Key, &row.Eligible, &row.MemberIDs, &raw); err != nil {
+			return nil, fmt.Errorf("read suggestions: %w", err)
+		}
+		if err := json.Unmarshal(raw, &row.Suggestion); err != nil {
+			return nil, fmt.Errorf("read suggestions: decode: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read suggestions: %w", err)
+	}
+	return out, nil
+}
+
+// CustomerCounts implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) CustomerCounts(ctx context.Context, runID, accountID string) (domain.StandardChangeSuggestionScan, error) {
+	var out domain.StandardChangeSuggestionScan
+	err := r.db.QueryRow(ctx, `
+		SELECT (SELECT COUNT(*) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid),
+		       (SELECT COALESCE(SUM(change_requests), 0) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid),
+		       (SELECT COUNT(*) FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid),
+		       (SELECT COUNT(*) FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid AND eligible)`,
+		runID, accountID).Scan(&out.Customers, &out.ChangeRequests, &out.Clusters, &out.Eligible)
+	if err != nil {
+		return out, fmt.Errorf("read suggestion counts: %w", err)
+	}
+	return out, nil
 }

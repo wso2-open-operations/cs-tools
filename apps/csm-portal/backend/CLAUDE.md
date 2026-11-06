@@ -513,10 +513,11 @@ from a template for another customer's project (or none), or a PATCH moving it t
 (`standard_change_customer_test.go`).
 
 **Suggestions** (entity-service CLAUDE.md, "Standard change suggestions"): `GET
-/standard-change-suggestions` (`PermViewOperations`) forwards only `accountId` (a UUID), `includeIneligible` /
-`includeDismissed` (`true` or `false`) and the four threshold overrides (`windowMonths`, `minClosed`,
-`minSuccessPercent`, `planSimilarityPercent`, whole numbers; their ranges are entity-service's), each
-shape-checked here (400 with no upstream call), anything else dropped; `POST
+/standard-change-suggestions` (`PermViewOperations`) reads entity-service's snapshot, which its scheduled
+refresh computes twice a day (a read never computes; the refresh route is service-only and not proxied
+here). It forwards only `accountId` (a UUID) and `includeIneligible` / `includeDismissed` (`true` or
+`false`), each shape-checked here (400 with no upstream call), anything else dropped (the threshold
+overrides it once forwarded are configuration now); `POST
 /standard-change-suggestions/dismissals` (201) and `DELETE /standard-change-suggestions/dismissals/{id}`
 (204) are `PermWrite`, through the same `forward`, so a refusal keeps its message and code.
 `TestStandardChangeHandler_SuggestionsQuery`.

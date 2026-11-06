@@ -257,8 +257,8 @@ func TestStandardChangeHandler_KeepsTheEntityReasonAndCode(t *testing.T) {
 }
 
 // GET /standard-change-suggestions forwards only the parameters it knows, each
-// checked for shape; anything else is dropped, a malformed one is a 400 with no
-// upstream call.
+// checked for shape; anything else (the old threshold overrides included) is
+// dropped, and a malformed one is a 400 with no upstream call.
 func TestStandardChangeHandler_SuggestionsQuery(t *testing.T) {
 	call := func(query string) (*fakeStandardChangeClient, *httptest.ResponseRecorder) {
 		fake := &fakeStandardChangeClient{}
@@ -266,12 +266,12 @@ func TestStandardChangeHandler_SuggestionsQuery(t *testing.T) {
 		NewStandardChangeHandler(fake).GetSuggestions(w, withUser(httptest.NewRequest(http.MethodGet, "/standard-change-suggestions?"+query, nil)))
 		return fake, w
 	}
-	fake, w := call("accountId=" + stdID + "&includeIneligible=true&includeDismissed=false&minClosed=2&windowMonths=6&minSuccessPercent=80&planSimilarityPercent=40&other=x")
-	want := "/standard-change-suggestions?accountId=" + stdID + "&includeDismissed=false&includeIneligible=true&minClosed=2&minSuccessPercent=80&planSimilarityPercent=40&windowMonths=6"
+	fake, w := call("accountId=" + stdID + "&includeIneligible=true&includeDismissed=false&minClosed=2&windowMonths=6&other=x")
+	want := "/standard-change-suggestions?accountId=" + stdID + "&includeDismissed=false&includeIneligible=true"
 	if w.Code != http.StatusOK || fake.path != want {
 		t.Fatalf("status %d, path %s; want 200, %s", w.Code, fake.path, want)
 	}
-	for _, bad := range []string{"accountId=acme", "includeIneligible=yes", "minClosed=two", "windowMonths=1.5"} {
+	for _, bad := range []string{"accountId=acme", "includeIneligible=yes"} {
 		fake, w := call(bad)
 		if w.Code != http.StatusBadRequest || fake.calls != 0 {
 			t.Errorf("%s: status %d, %d upstream calls; want 400 and none", bad, w.Code, fake.calls)

@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -45,6 +46,17 @@ var DefaultStandardChangeSuggestionCriteria = domain.StandardChangeSuggestionCri
 
 const maxSuggestionDismissalReason = 1000
 
+// Refresh paging: how many customers one call computes unless it asks for
+// fewer, the most it may ask for, and how long a call keeps starting customers
+// before it hands back (it always finishes the customer it is on, and computes
+// at least one). The budget leaves room inside the 60s REQUEST_TIMEOUT.
+const (
+	defaultSuggestionRefreshLimit = 50
+	maxSuggestionRefreshLimit     = 500
+)
+
+var suggestionRefreshBudget = 40 * time.Second
+
 type standardChangeSuggestionService struct {
 	repo     repository.StandardChangeSuggestionRepository
 	access   AccessService
@@ -53,7 +65,7 @@ type standardChangeSuggestionService struct {
 }
 
 // NewStandardChangeSuggestionService constructs a StandardChangeSuggestionService
-// judging by the criteria given (a zero field takes the default).
+// that computes by the criteria given (a zero field takes the default).
 func NewStandardChangeSuggestionService(repo repository.StandardChangeSuggestionRepository, access AccessService, criteria domain.StandardChangeSuggestionCriteria) StandardChangeSuggestionService {
 	d := DefaultStandardChangeSuggestionCriteria
 	pick := func(v, def int) int {
@@ -78,38 +90,10 @@ func NewStandardChangeSuggestionService(repo repository.StandardChangeSuggestion
 
 const standardChangeSuggestionForbidden = "standard change suggestions are available to WSO2 staff only"
 
-// effectiveCriteria applies a request's overrides, each held to its range (400).
-func (s *standardChangeSuggestionService) effectiveCriteria(req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionCriteria, error) {
-	c := s.criteria
-	set := func(name string, v *int, lo, hi int, dst *int) error {
-		if v == nil {
-			return nil
-		}
-		if *v < lo || *v > hi {
-			return &apierror.ValidationError{Msg: fmt.Sprintf("%s must be between %d and %d", name, lo, hi)}
-		}
-		*dst = *v
-		return nil
-	}
-	for _, o := range []struct {
-		name   string
-		v      *int
-		lo, hi int
-		dst    *int
-	}{
-		{"windowMonths", req.WindowMonths, 1, 60, &c.WindowMonths},
-		{"minClosed", req.MinClosed, 1, 1000, &c.MinClosed},
-		{"minSuccessPercent", req.MinSuccessPercent, 0, 100, &c.MinSuccessPercent},
-		{"planSimilarityPercent", req.PlanSimilarityPercent, 1, 100, &c.PlanSimilarityPercent},
-	} {
-		if err := set(o.name, o.v, o.lo, o.hi, o.dst); err != nil {
-			return c, err
-		}
-	}
-	return c, nil
-}
-
-// GetSuggestions implements StandardChangeSuggestionService.
+// GetSuggestions implements StandardChangeSuggestionService: the last published
+// snapshot, filtered as asked. It never computes. The open proposals and the
+// dismissals are read live, so a suggestion proposed or dismissed since the
+// snapshot says so at once.
 func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, error) {
 	if err := RequireInternalCaller(ctx, s.access, standardChangeSuggestionForbidden); err != nil {
 		return domain.StandardChangeSuggestionsResponse{}, err
@@ -118,89 +102,71 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	if account != "" && !validate.IsUUID(account) {
 		return domain.StandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "accountId must be a UUID"}
 	}
-	crit, err := s.effectiveCriteria(req)
-	if err != nil {
-		return domain.StandardChangeSuggestionsResponse{}, err
+	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria}
+	run, err := s.repo.LatestRun(ctx)
+	if err != nil || run == nil {
+		return resp, err // nothing computed yet: an empty list, no computedOn
 	}
-	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: crit}
+	resp.Criteria, resp.ComputedOn = run.Criteria, run.CompletedOn
+	resp.Scanned = run.Counts
+	if account != "" {
+		// The run's totals are every customer's: one customer's are its own.
+		if resp.Scanned, err = s.repo.CustomerCounts(ctx, run.ID, account); err != nil {
+			return resp, err
+		}
+	}
 
-	cands, err := s.repo.Candidates(ctx, account, suggestionWindowStart(s.now(), crit.WindowMonths))
+	rows, err := s.repo.SnapshotRows(ctx, run.ID, account, req.IncludeIneligible)
 	if err != nil {
 		return resp, err
 	}
-	resp.Scanned.ChangeRequests = len(cands)
-	byAccount := map[string][]repository.SuggestionCandidate{}
-	for _, c := range cands {
-		byAccount[c.AccountID] = append(byAccount[c.AccountID], c)
+	var accounts []string // nil: every customer's dismissals
+	if account != "" {
+		accounts = []string{account}
 	}
-	type accountClusters struct {
-		account  string
-		clusters []suggestionCluster
-	}
-	var all []accountClusters
-	var memberIDs, accountIDs []string
-	for a, cs := range byAccount {
-		clusters := clusterSuggestionCandidates(cs, float64(crit.PlanSimilarityPercent)/100)
-		if len(clusters) == 0 {
-			continue
-		}
-		all = append(all, accountClusters{account: a, clusters: clusters})
-		accountIDs = append(accountIDs, a)
-		for _, cl := range clusters {
-			for _, n := range cl.nodes {
-				memberIDs = append(memberIDs, n.c.ID)
-			}
-		}
-	}
-	if len(all) == 0 {
-		return resp, nil
-	}
-	incidents, err := s.repo.IncidentsOf(ctx, memberIDs)
+	dismissals, err := s.repo.Dismissals(ctx, accounts)
 	if err != nil {
 		return resp, err
+	}
+	var memberIDs []string
+	for _, row := range rows {
+		memberIDs = append(memberIDs, row.MemberIDs...)
 	}
 	proposals, err := s.repo.OpenProposalsOf(ctx, memberIDs)
 	if err != nil {
 		return resp, err
 	}
-	templates, err := s.repo.LiveTemplates(ctx, accountIDs)
-	if err != nil {
-		return resp, err
-	}
-	templatesOf := map[string][]repository.SuggestionTemplate{}
-	for _, t := range templates {
-		templatesOf[t.AccountID] = append(templatesOf[t.AccountID], t)
-	}
-	dismissals, err := s.repo.Dismissals(ctx, accountIDs)
-	if err != nil {
-		return resp, err
-	}
 
-	for _, ac := range all {
-		for _, cl := range ac.clusters {
-			resp.Scanned.Clusters++
-			sg := judgeSuggestionCluster(cl, crit, incidents, proposals)
-			sg.Match, sg.Template = matchSuggestionTemplate(cl, templatesOf[ac.account], crit)
-			if sg.Eligible {
-				resp.Scanned.Eligible++
-			}
-			if d, ok := dismissals[ac.account][cl.key]; ok {
-				resp.Scanned.Dismissed++
-				if !req.IncludeDismissed {
-					continue
+	for _, row := range rows {
+		sg := row.Suggestion
+		sg.Dismissal, sg.OpenProposals = nil, []domain.EntityRef{}
+		seen := map[string]bool{}
+		for _, id := range row.MemberIDs {
+			for _, p := range proposals[id] {
+				if !seen[p.ID] {
+					seen[p.ID] = true
+					sg.OpenProposals = append(sg.OpenProposals, p)
 				}
-				dd := d
-				sg.Dismissal = &dd
 			}
-			if !sg.Eligible && !req.IncludeIneligible {
+		}
+		if d, ok := dismissals[row.AccountID][row.Key]; ok {
+			resp.Scanned.Dismissed++
+			if !req.IncludeDismissed {
 				continue
 			}
-			resp.Suggestions = append(resp.Suggestions, sg)
+			dd := d
+			sg.Dismissal = &dd
 		}
+		resp.Suggestions = append(resp.Suggestions, sg)
 	}
-	// Eligible first, then the most often closed, then the most recent.
-	sort.SliceStable(resp.Suggestions, func(a, b int) bool {
-		x, y := resp.Suggestions[a], resp.Suggestions[b]
+	sortSuggestions(resp.Suggestions)
+	return resp, nil
+}
+
+// sortSuggestions: eligible first, then the most often closed, then the most recent.
+func sortSuggestions(list []domain.StandardChangeSuggestion) {
+	sort.SliceStable(list, func(a, b int) bool {
+		x, y := list[a], list[b]
 		if x.Eligible != y.Eligible {
 			return x.Eligible
 		}
@@ -215,7 +181,141 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 		}
 		return x.Key < y.Key
 	})
+}
+
+// Refresh implements StandardChangeSuggestionService: one page of a refresh run
+// (see RefreshStandardChangeSuggestionsRequest). Customers are computed one at
+// a time, so a page never holds more than one customer's change requests and
+// plans; the last page publishes the run.
+func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domain.RefreshStandardChangeSuggestionsRequest) (domain.RefreshStandardChangeSuggestionsResponse, error) {
+	if err := RequireInternalCaller(ctx, s.access, standardChangeSuggestionForbidden); err != nil {
+		return domain.RefreshStandardChangeSuggestionsResponse{}, err
+	}
+	limit := req.Limit
+	switch {
+	case limit == 0:
+		limit = defaultSuggestionRefreshLimit
+	case limit < 0 || limit > maxSuggestionRefreshLimit:
+		return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: fmt.Sprintf("limit must be between 1 and %d", maxSuggestionRefreshLimit)}
+	}
+	runID := strings.ToLower(strings.TrimSpace(req.RunID))
+	cursor := strings.ToLower(strings.TrimSpace(req.Cursor))
+	if cursor != "" && (runID == "" || !validate.IsUUID(cursor)) {
+		return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "cursor continues a run: send it with that run's runId, as the previous call returned it"}
+	}
+	var run repository.SuggestionRun
+	if runID == "" {
+		started, err := s.repo.StartRun(ctx, s.criteria)
+		if err != nil {
+			return domain.RefreshStandardChangeSuggestionsResponse{}, err
+		}
+		run = started
+		slog.InfoContext(ctx, "standard change suggestions: refresh started", "runId", run.ID, "criteria", run.Criteria)
+	} else {
+		if !validate.IsUUID(runID) {
+			return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "runId must be a UUID"}
+		}
+		got, err := s.repo.GetRun(ctx, runID)
+		if err != nil {
+			return domain.RefreshStandardChangeSuggestionsResponse{}, err
+		}
+		if got == nil || got.CompletedOn != nil {
+			return domain.RefreshStandardChangeSuggestionsResponse{}, &apierror.ConflictError{Msg: "this refresh run is no longer open (published, or replaced by another): start a new one"}
+		}
+		run = *got
+	}
+
+	// The window and the criteria are the run's own, so every page of one run
+	// judges alike.
+	crit := run.Criteria
+	since := suggestionWindowStart(run.StartedOn, crit.WindowMonths)
+	pageStart := s.now()
+	accounts, err := s.repo.CandidateAccounts(ctx, since, cursor, limit+1)
+	if err != nil {
+		return domain.RefreshStandardChangeSuggestionsResponse{}, err
+	}
+	resp := domain.RefreshStandardChangeSuggestionsResponse{RunID: run.ID}
+	todo := accounts[:min(limit, len(accounts))]
+	for i, account := range todo {
+		if i > 0 && s.now().Sub(pageStart) > suggestionRefreshBudget {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return resp, err
+		}
+		rows, candidates, err := s.computeCustomer(ctx, account, since, crit)
+		if err != nil {
+			return resp, fmt.Errorf("standard change suggestions: customer %s: %w", account, err)
+		}
+		if err := s.repo.SaveCustomer(ctx, run.ID, account, candidates, rows); err != nil {
+			return resp, err
+		}
+		resp.Customers++
+		resp.ChangeRequests += candidates
+		resp.Suggestions += len(rows)
+		resp.NextCursor = account
+	}
+	resp.More = resp.Customers < len(accounts)
+	if !resp.More {
+		resp.NextCursor = ""
+	}
+	slog.InfoContext(ctx, "standard change suggestions: refresh page", "runId", run.ID,
+		"customers", resp.Customers, "changeRequests", resp.ChangeRequests, "suggestions", resp.Suggestions,
+		"more", resp.More, "pageMs", s.now().Sub(pageStart).Milliseconds())
+	if resp.More {
+		return resp, nil
+	}
+
+	published, err := s.repo.PublishRun(ctx, run.ID)
+	if err != nil {
+		return resp, err
+	}
+	resp.ComputedOn = published.CompletedOn
+	totals := published.Counts
+	resp.Totals = &totals
+	slog.InfoContext(ctx, "standard change suggestions: refresh published", "runId", run.ID,
+		"customers", totals.Customers, "changeRequests", totals.ChangeRequests, "clusters", totals.Clusters,
+		"eligible", totals.Eligible, "durationMs", published.CompletedOn.Sub(published.StartedOn).Milliseconds())
 	return resp, nil
+}
+
+// computeCustomer computes one customer's suggestions: its candidates, their
+// clusters, each judged and related to the customer's live templates. It also
+// returns how many candidates there were.
+func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria) ([]repository.SuggestionSnapshotRow, int, error) {
+	cands, err := s.repo.Candidates(ctx, account, since)
+	if err != nil {
+		return nil, 0, err
+	}
+	clusters := clusterSuggestionCandidates(cands, float64(crit.PlanSimilarityPercent)/100)
+	if len(clusters) == 0 {
+		return nil, len(cands), nil
+	}
+	var memberIDs []string
+	for _, cl := range clusters {
+		for _, n := range cl.nodes {
+			memberIDs = append(memberIDs, n.c.ID)
+		}
+	}
+	incidents, err := s.repo.IncidentsOf(ctx, memberIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	templates, err := s.repo.LiveTemplates(ctx, []string{account})
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]repository.SuggestionSnapshotRow, 0, len(clusters))
+	for _, cl := range clusters {
+		sg := judgeSuggestionCluster(cl, crit, incidents, nil)
+		sg.Match, sg.Template = matchSuggestionTemplate(cl, templates, crit)
+		ids := make([]string, len(cl.nodes))
+		for i, n := range cl.nodes {
+			ids[i] = n.c.ID
+		}
+		rows = append(rows, repository.SuggestionSnapshotRow{AccountID: account, Key: cl.key, Eligible: sg.Eligible, MemberIDs: ids, Suggestion: sg})
+	}
+	return rows, len(cands), nil
 }
 
 // suggestionActor is an internal caller who is a person: a dismissal records who.

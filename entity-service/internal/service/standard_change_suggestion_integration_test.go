@@ -191,9 +191,40 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 				e.cr("B", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, d)
 			}
 
+			// Nothing is computed by a read: before a refresh there is no snapshot
+			// (an earlier test's run is cleared first).
+			e.exec(`DELETE FROM standard_change_suggestion_run`)
+			if resp, err := svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{}); err != nil || resp.ComputedOn != nil || len(resp.Suggestions) != 0 {
+				t.Fatalf("before any refresh: %+v, %v", resp, err)
+			}
+			// Two refreshes, a customer per page: the second replaces the first.
+			for i := 0; i < 2; i++ {
+				req := domain.RefreshStandardChangeSuggestionsRequest{Limit: 1}
+				for page := 0; ; page++ {
+					r, err := svc.Refresh(ctx, req)
+					if err != nil {
+						t.Fatalf("refresh %d page %d: %v", i, page, err)
+					}
+					if !r.More {
+						if r.ComputedOn == nil || r.Totals == nil || r.Totals.Customers < 2 {
+							t.Fatalf("the last page did not publish: %+v", r)
+						}
+						break
+					}
+					req = domain.RefreshStandardChangeSuggestionsRequest{RunID: r.RunID, Cursor: r.NextCursor, Limit: 1}
+				}
+			}
+			var runs int
+			if err := e.s.QueryRow(e.sys, `SELECT COUNT(*) FROM standard_change_suggestion_run`).Scan(&runs); err != nil || runs != 1 {
+				t.Fatalf("runs kept = %d, %v; want only the published one", runs, err)
+			}
+
 			resp, err := svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{IncludeIneligible: true})
 			if err != nil {
 				t.Fatalf("GetSuggestions: %v", err)
+			}
+			if resp.ComputedOn == nil {
+				t.Fatal("no computedOn after a refresh")
 			}
 			a := sgsFind(resp, e.accounts["A"], deploy)
 			if a == nil {
@@ -222,6 +253,18 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			if len(rs.OpenProposals) != 1 || rs.OpenProposals[0].ID != scp || rs.OpenProposals[0].Name != "SCP-SGS-1" {
 				t.Errorf("open proposals = %v, want SCP-SGS-1", rs.OpenProposals)
 			}
+
+			// An open proposal started after the snapshot shows at once (read live).
+			scp2 := e.workItem("STANDARD_CHANGE_PROPOSAL", "SCP-SGS-2")
+			e.exec(`INSERT INTO standard_change_proposal (id, kind, state, source_change_request_id, account_id) VALUES ($1::uuid, 'NEW', 'DRAFT', $2::uuid, $3::uuid)`, scp2, d1, e.accounts["A"])
+			resp, _ = svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{AccountID: e.accounts["A"]})
+			if len(resp.Suggestions) != 1 || len(resp.Suggestions[0].OpenProposals) != 1 || resp.Suggestions[0].OpenProposals[0].ID != scp2 {
+				t.Fatalf("a proposal started since the snapshot: %+v", resp.Suggestions)
+			}
+			if resp.Scanned.Customers != 1 || resp.Scanned.ChangeRequests != 7 || resp.Scanned.Clusters != 2 {
+				t.Errorf("customer A's counts = %+v, want 1 customer, 7 change requests (4 deploy + 3 restart), 2 clusters", resp.Scanned)
+			}
+			e.exec(`DELETE FROM work_item WHERE id = $1::uuid`, scp2)
 
 			// One customer only; eligible only by default.
 			resp, err = svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{AccountID: e.accounts["A"]})

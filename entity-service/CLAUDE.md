@@ -99,7 +99,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
-| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` / `_COVERED_PERCENT` / `_CLOSE_PERCENT` | no | `12` / `3` / `90` / `50` / `80` / `50` | Thresholds of `GET /standard-change-suggestions` (see "Standard change suggestions"). Unset, unparseable or not positive takes the default; percentages are capped at 100 and the close threshold at the covered one. Starting values, to be measured on production data |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` / `_COVERED_PERCENT` / `_CLOSE_PERCENT` | no | `12` / `3` / `90` / `50` / `80` / `50` | Thresholds the scheduled refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. Unset, unparseable or not positive takes the default; percentages are capped at 100 and the close threshold at the covered one. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -8633,8 +8633,40 @@ Which of a customer's completed change requests look like the same change done a
 standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
 normalising, clustering, judging, relating to templates), `standard_change_suggestion_service.go`,
 `standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
-dismissals) and `100029` (their row-level security, internal only). PostgreSQL data sources only; every
-route is `internalOnly`. Computed on every request: nothing is stored but the dismissals.
+dismissals), `0283` (the snapshot) and `100029` / `100030` (their row-level security, internal only).
+PostgreSQL data sources only.
+
+**Computed on a schedule, read from a snapshot.** Reading every completed change request with its plan
+text and comparing the plans is too much to do whenever the page opens (there can be tens of thousands),
+so `GET /standard-change-suggestions` (`internalOnly`) **never computes**: it reads the snapshot the
+scheduled refresh last published (`computedOn`; with none yet, an empty list and no `computedOn`, not an
+error). `POST /standard-change-suggestions/refresh` (`serviceOnly`: an internal client in
+`M2M_CLIENT_IDS` with no user token, so a page view can never start it) computes a new one, driven twice
+a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh` (its CLAUDE.md,
+"Standard change suggestions refresh"), the way `/incidents/autoclose` is driven by `incident_autoclose`.
+- **Paged by customer, published at the end.** The first call (`{}`) starts a run
+  (`standard_change_suggestion_run`, carrying the criteria it computes by); each call computes the next
+  customers in id order after `cursor`, **one customer at a time** (only that customer's change requests
+  and plans are held), at most `limit` (default 50, at most 500), and stops starting new ones after 40
+  seconds (`suggestionRefreshBudget`, inside the 60s `REQUEST_TIMEOUT`; it always computes at least one).
+  While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
+  `more: false` **publishes**: in one transaction the run gets `completed_on` and its totals (summed from
+  `standard_change_suggestion_run_customer` and the rows), and every other run is deleted with its rows
+  (`ON DELETE CASCADE`). Readers read the newest published run, so they see the old snapshot until that
+  commit and the whole new one after it. A page sent again replaces that customer's rows and count
+  (`SaveCustomer`), never counting it twice; a run that never finishes is never read, and is deleted by
+  the next publish or by a run started a day later. A page of a published or replaced run is a 409.
+- **The window and the criteria are the run's**: the window counts back from the run's start, and every
+  page judges by the criteria stored with it.
+- **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
+  dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The template
+  relation (covered / close / new) and the incidents are as they were at the refresh.
+- **Logged**: each page (`refresh page`: customers, change requests, suggestions, `more`, `pageMs`) and the
+  publish (`refresh published`: customers, change requests, clusters, eligible, `durationMs` of the run).
+- **Cost.** One page: the customer list (`CandidateAccounts`), then per customer one read of its window's
+  completed change requests with their plans, its clusters' incidents, its templates, and the writes.
+  The pairwise plan comparison is inside one subject group of one customer. A single customer with a very
+  large group is still computed in one go (not split across pages).
 
 **What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
 `closed_on`, which 0279 made reliable; a row with none falls back to the work item's last update), **not**
@@ -8675,17 +8707,17 @@ penalise), implementation plan by Jaccard, half each (the subject alone when eit
 The nearest scoring at least `coveredPercent` covers the cluster (`covered`: the change requests were
 raised by hand instead of from it), at least `closePercent` is `close` (revise it), else `new`.
 
-**Thresholds**: `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` (12), `_MIN_CLOSED` (3), `_MIN_SUCCESS_PERCENT`
-(90), `_PLAN_SIMILARITY_PERCENT` (50), `_COVERED_PERCENT` (80), `_CLOSE_PERCENT` (50, never above
-covered). Starting values, **not yet measured on production data**: the request may override the first
-four (`windowMonths` 1-60, `minClosed` 1-1000, `minSuccessPercent` 0-100, `planSimilarityPercent` 1-100;
-out of range is a 400), and `includeIneligible=true` returns the near misses with their `unmet`, so the
-values can be measured before they are set. The response carries the `criteria` used and `scanned`
-counts.
+**Thresholds** (fixed configuration, applied when the snapshot is computed):
+`STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` (12), `_MIN_CLOSED` (3), `_MIN_SUCCESS_PERCENT` (90),
+`_PLAN_SIMILARITY_PERCENT` (50), `_COVERED_PERCENT` (80), `_CLOSE_PERCENT` (50, never above covered).
+Starting values, **not yet measured on production data**. They are no longer request parameters: to
+measure them, read with `includeIneligible=true` (every cluster of two or more with its `unmet`), change
+the variables and refresh. The response carries the `criteria` the snapshot used and `scanned` counts
+(the run's, or the one customer's when `accountId` is given; `dismissed` is counted when read).
 
-**Request**: `accountId` (optional, a UUID: one customer), `includeIneligible`, `includeDismissed`. Order:
-eligible first, then most often closed, then most recent. At most 100 members are listed per suggestion
-(`memberCount` is the true count).
+**Request**: `accountId` (optional, a UUID: one customer), `includeIneligible`, `includeDismissed`, applied
+over the stored rows. Order: eligible first, then most often closed, then most recent. At most 100 members
+are listed per suggestion (`memberCount` is the true count).
 
 **Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
 `POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
@@ -8695,12 +8727,9 @@ it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
 /standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
 for a machine caller).
 
-**Cost**: one read of the window's completed change requests (subject and implementation plan included)
-for the customer or for all, then the incidents, open proposals, templates and dismissals of the clusters
-found, each one query; the pairwise plan comparison is inside one subject group only.
-
-Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging, templates, the service over
-a fake repository), `standard_change_suggestion_integration_test.go` (real PostgreSQL,
+Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging, templates; the refresh's
+paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
+`standard_change_suggestion_integration_test.go` (real PostgreSQL, a full paged refresh twice,
 `STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s

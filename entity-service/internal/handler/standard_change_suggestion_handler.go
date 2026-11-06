@@ -18,10 +18,8 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
 )
@@ -38,42 +36,35 @@ func NewStandardChangeSuggestionHandler(svc service.StandardChangeSuggestionServ
 }
 
 // parseSuggestionsQuery reads GET /standard-change-suggestions' query. A flag
-// is true only for "true" (any case); a threshold that is not an integer is a
-// 400 (its range is the service's).
-func parseSuggestionsQuery(r *http.Request) (domain.StandardChangeSuggestionsRequest, error) {
+// is true only for "true" (any case). The criteria are configuration, applied
+// when the snapshot is computed, not parameters of a read.
+func parseSuggestionsQuery(r *http.Request) domain.StandardChangeSuggestionsRequest {
 	q := r.URL.Query()
-	req := domain.StandardChangeSuggestionsRequest{
+	return domain.StandardChangeSuggestionsRequest{
 		AccountID:         q.Get("accountId"),
 		IncludeIneligible: strings.EqualFold(strings.TrimSpace(q.Get("includeIneligible")), "true"),
 		IncludeDismissed:  strings.EqualFold(strings.TrimSpace(q.Get("includeDismissed")), "true"),
 	}
-	for name, dst := range map[string]**int{
-		"windowMonths":          &req.WindowMonths,
-		"minClosed":             &req.MinClosed,
-		"minSuccessPercent":     &req.MinSuccessPercent,
-		"planSimilarityPercent": &req.PlanSimilarityPercent,
-	} {
-		raw := strings.TrimSpace(q.Get(name))
-		if raw == "" {
-			continue
-		}
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return req, &apierror.ValidationError{Msg: name + " must be an integer"}
-		}
-		*dst = &n
-	}
-	return req, nil
 }
 
 // GetSuggestions handles GET /standard-change-suggestions.
 func (h *StandardChangeSuggestionHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
-	req, err := parseSuggestionsQuery(r)
+	resp, err := h.svc.GetSuggestions(r.Context(), parseSuggestionsQuery(r))
 	if err != nil {
 		writeServiceError(w, r, err)
 		return
 	}
-	resp, err := h.svc.GetSuggestions(r.Context(), req)
+	writeStandardChangeJSON(w, http.StatusOK, resp)
+}
+
+// Refresh handles POST /standard-change-suggestions/refresh: one page of a
+// snapshot run, for the scheduled refresh (a service credential, see routes.go).
+func (h *StandardChangeSuggestionHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req domain.RefreshStandardChangeSuggestionsRequest
+	if !decodeOptionalRequest(w, r, &req) {
+		return
+	}
+	resp, err := h.svc.Refresh(r.Context(), req)
 	if err != nil {
 		writeServiceError(w, r, err)
 		return

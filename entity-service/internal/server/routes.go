@@ -2356,6 +2356,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /standard-change-proposals/{id}/cancel", internalOnly(accessSvc, standardChangeHandler.CancelProposal))
 		mux.HandleFunc("DELETE /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.DeleteProposal))
 		mux.HandleFunc("GET /standard-change-suggestions", internalOnly(accessSvc, standardChangeSuggestionHandler.GetSuggestions))
+		// The scheduled refresh (operations/csm-scheduled-tasks'
+		// standard_change_suggestions_refresh): a service credential only, so a
+		// person's page view can never start the computation.
+		mux.HandleFunc("POST /standard-change-suggestions/refresh", serviceOnly(accessSvc, standardChangeSuggestionHandler.Refresh))
 		mux.HandleFunc("POST /standard-change-suggestions/dismissals", internalOnly(accessSvc, standardChangeSuggestionHandler.DismissSuggestion))
 		mux.HandleFunc("DELETE /standard-change-suggestions/dismissals/{id}", internalOnly(accessSvc, standardChangeSuggestionHandler.RestoreSuggestion))
 	}

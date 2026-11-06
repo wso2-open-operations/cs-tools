@@ -15628,21 +15628,18 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
   /standard-change-suggestions:
     get:
-      summary: What a customer's completed change requests suggest as standard changes.
+      summary: The last computed standard change suggestions.
       operationId: getStandardChangeSuggestions
       description: >
-        Forwarded to the entity service, which computes the clusters (see its
-        openapi.yaml for the response). Only these parameters are forwarded, each
-        checked for shape here (400 with no upstream call otherwise); the ranges of
-        the thresholds are the entity service's.
+        Forwarded to the entity service, which answers from the snapshot its
+        scheduled refresh last published (twice a day; computedOn says when, and it
+        is absent with an empty list before the first): a read never computes. See
+        its openapi.yaml for the response. Only these parameters are forwarded,
+        each checked for shape here (400 with no upstream call otherwise).
       parameters:
         - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
         - {name: includeIneligible, in: query, required: false, schema: {type: boolean}}
         - {name: includeDismissed, in: query, required: false, schema: {type: boolean}}
-        - {name: windowMonths, in: query, required: false, schema: {type: integer}}
-        - {name: minClosed, in: query, required: false, schema: {type: integer}}
-        - {name: minSuccessPercent, in: query, required: false, schema: {type: integer}}
-        - {name: planSimilarityPercent, in: query, required: false, schema: {type: integer}}
       responses:
         "200":
           description: Ok.

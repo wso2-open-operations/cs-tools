@@ -13789,31 +13789,23 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /standard-change-suggestions:
     get:
-      summary: What a customer's completed change requests suggest as standard changes.
+      summary: The last computed standard change suggestions.
       operationId: getStandardChangeSuggestions
       description: >-
-        Clusters of one customer's completed change requests (Closed or Rollback, not raised
-        from a template, completed within windowMonths) that look like the same change done
-        again: the same normalised subject (lower case; tags, ticket numbers, dates, times,
-        versions, digits and filler words removed), confirmed by the implementation plans
-        (two members whose plans are both present must be at least planSimilarityPercent
-        alike, word-set Jaccard), and joined directly by clone lineage. A cluster is eligible
-        when it was closed at least minClosed times, its success rate closed / (closed +
-        rolled back) is at least minSuccessPercent, no incident names a member as its cause
-        or its change request, and no member has a high risk or a high impact (an unknown
-        one is counted, not refused). Each is related to the customer's live templates
-        (covered by / close to / new). Defaults come from configuration
-        (STANDARD_CHANGE_SUGGESTION_*); the query may override four of them to measure what
-        they should be. Dismissed suggestions are hidden. Internal callers only. Computed on
-        every request; nothing is stored but the dismissals.
+        Reads the snapshot the scheduled refresh last published (POST
+        /standard-change-suggestions/refresh, twice a day); it never computes. A snapshot holds,
+        per customer, the clusters of completed change requests (Closed or Rollback, not raised
+        from a template, completed within the configured window) that look like the same change
+        done again: the same normalised subject, confirmed by the implementation plans, joined
+        directly by clone lineage, each judged by the configured criteria
+        (STANDARD_CHANGE_SUGGESTION_*, returned as criteria) and related to the customer's live
+        templates as they were then. The open proposals and the dismissals are read live.
+        computedOn is when the snapshot was published; with none yet the answer is an empty list
+        and no computedOn. Internal callers only.
       parameters:
         - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}, description: "One customer; every customer when absent."}
         - {name: includeIneligible, in: query, required: false, schema: {type: boolean}, description: "Also the clusters that miss a criterion (each names what it misses)."}
         - {name: includeDismissed, in: query, required: false, schema: {type: boolean}, description: "Also the dismissed suggestions, with their dismissal."}
-        - {name: windowMonths, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 60}}
-        - {name: minClosed, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000}}
-        - {name: minSuccessPercent, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 100}}
-        - {name: planSimilarityPercent, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100}}
       responses:
         "200":
           description: The suggestions, eligible first, then the most often closed, then the most recent.
@@ -13822,13 +13814,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/StandardChangeSuggestionsResponse'
         "400":
-          description: "Bad request: accountId is not a UUID, or a threshold is not an integer in its range."
+          description: "Bad request: accountId is not a UUID."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "403":
           description: The caller is not an internal caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /standard-change-suggestions/refresh:
+    post:
+      summary: Compute one page of a new standard change suggestion snapshot (the scheduled refresh).
+      operationId: refreshStandardChangeSuggestions
+      description: >-
+        Driven twice a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
+        The first call (no runId) starts a run; each call computes the next customers in id order
+        after the cursor, one at a time, at most limit of them and fewer when the call runs short
+        of time (after at least one), and stores their suggestions in the run. While more is true,
+        call again with runId and nextCursor. The call that answers more = false publishes the
+        run: in one transaction it becomes what GET /standard-change-suggestions reads and every
+        older run is deleted, so a reader never sees a half-written snapshot. Sending a page again
+        replaces that customer's rows (never counted twice). Service credentials only (an internal
+        client in M2M_CLIENT_IDS, no user token).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshStandardChangeSuggestionsRequest'
+      responses:
+        "200":
+          description: The page computed, and whether the run was published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshStandardChangeSuggestionsResponse'
+        "400":
+          description: '"Bad request: a cursor without its runId, a malformed id, or a limit outside 1-500."'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not an internal service credential.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: The run is no longer open (published, or replaced by another run); start a new one.
           content:
             application/json:
               schema:
@@ -34059,14 +34102,46 @@ components:
           items: {$ref: '#/components/schemas/StandardChangeSuggestion'}
         criteria:
           $ref: '#/components/schemas/StandardChangeSuggestionCriteria'
+        computedOn:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the snapshot was published; null when none has been computed yet.
         scanned:
           type: object
-          description: What the computation looked at (dismissed ones counted whether shown or not).
+          description: >-
+            What the snapshot looked at, for every customer or for the one asked for (dismissed
+            ones counted when read, whether shown or not).
           properties:
+            customers: {type: integer}
             changeRequests: {type: integer}
             clusters: {type: integer}
             eligible: {type: integer}
             dismissed: {type: integer}
+    RefreshStandardChangeSuggestionsRequest:
+      type: object
+      properties:
+        runId: {type: string, format: uuid, description: "The run to continue; absent starts one."}
+        cursor: {type: string, format: uuid, description: "The previous page's nextCursor (needs runId)."}
+        limit: {type: integer, minimum: 1, maximum: 500, description: "Most customers this call computes (default 50)."}
+    RefreshStandardChangeSuggestionsResponse:
+      type: object
+      properties:
+        runId: {type: string, format: uuid}
+        customers: {type: integer, description: "Customers this call computed."}
+        changeRequests: {type: integer}
+        suggestions: {type: integer}
+        more: {type: boolean}
+        nextCursor: {type: string, format: uuid}
+        computedOn: {type: string, format: date-time, description: "Set on the call that published the run."}
+        totals:
+          type: object
+          description: The whole run's counts, on the call that published it.
+          properties:
+            customers: {type: integer}
+            changeRequests: {type: integer}
+            clusters: {type: integer}
+            eligible: {type: integer}
     StandardChangeSuggestionCriteria:
       type: object
       properties:

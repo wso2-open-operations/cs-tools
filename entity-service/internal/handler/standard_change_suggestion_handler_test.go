@@ -17,28 +17,14 @@
 package handler
 
 import (
-	"errors"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 )
 
 func TestParseSuggestionsQuery(t *testing.T) {
-	req, err := parseSuggestionsQuery(httptest.NewRequest("GET",
-		"/standard-change-suggestions?accountId=a&includeIneligible=TRUE&includeDismissed=yes&minClosed=2&windowMonths=%206%20", nil))
-	if err != nil {
-		t.Fatal(err)
-	}
+	req := parseSuggestionsQuery(httptest.NewRequest("GET",
+		"/standard-change-suggestions?accountId=a&includeIneligible=TRUE&includeDismissed=yes&minClosed=2", nil))
 	if req.AccountID != "a" || !req.IncludeIneligible || req.IncludeDismissed {
-		t.Errorf("request = %+v (a flag is true only for true)", req)
-	}
-	if req.MinClosed == nil || *req.MinClosed != 2 || req.WindowMonths == nil || *req.WindowMonths != 6 || req.MinSuccessPercent != nil {
-		t.Errorf("overrides = %v %v %v", req.MinClosed, req.WindowMonths, req.MinSuccessPercent)
-	}
-	_, err = parseSuggestionsQuery(httptest.NewRequest("GET", "/standard-change-suggestions?planSimilarityPercent=half", nil))
-	var ve *apierror.ValidationError
-	if !errors.As(err, &ve) || ve.Msg != "planSimilarityPercent must be an integer" {
-		t.Errorf("err = %v, want a 400 naming planSimilarityPercent", err)
+		t.Errorf("request = %+v (a flag is true only for true; the criteria are not read)", req)
 	}
 }

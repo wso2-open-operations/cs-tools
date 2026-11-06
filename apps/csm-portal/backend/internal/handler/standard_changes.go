@@ -25,7 +25,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
@@ -148,14 +147,10 @@ func (h *StandardChangeHandler) DeleteProposal(w http.ResponseWriter, r *http.Re
 	h.noBody(w, r, http.MethodDelete, "/standard-change-proposals/{id}", "", "Failed to delete the draft.")
 }
 
-// suggestionQueryInts are GET /standard-change-suggestions' threshold overrides
-// (entity-service holds each to its range).
-var suggestionQueryInts = []string{"windowMonths", "minClosed", "minSuccessPercent", "planSimilarityPercent"}
-
-// GetSuggestions handles GET /standard-change-suggestions: what a customer's
-// completed change requests suggest as standard changes. Only the known
-// parameters are forwarded, each checked for shape (accountId a UUID, the flags
-// true or false, the thresholds whole numbers).
+// GetSuggestions handles GET /standard-change-suggestions: the snapshot of
+// standard changes suggested by completed change requests, which entity-service
+// computes on a schedule (a read never computes). Only the known parameters are
+// forwarded, each checked for shape (accountId a UUID, the flags true or false).
 func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserInfoFromContext(r.Context())
 	if user == nil {
@@ -178,15 +173,6 @@ func (h *StandardChangeHandler) GetSuggestions(w http.ResponseWriter, r *http.Re
 				return
 			}
 			out.Set(flag, v)
-		}
-	}
-	for _, name := range suggestionQueryInts {
-		if v := strings.TrimSpace(in.Get(name)); v != "" {
-			if _, err := strconv.Atoi(v); err != nil {
-				writeError(w, http.StatusBadRequest, name+" must be a whole number")
-				return
-			}
-			out.Set(name, v)
 		}
 	}
 	path := "/standard-change-suggestions"
