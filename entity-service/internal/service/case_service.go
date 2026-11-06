@@ -707,9 +707,13 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// The description's inline images were uploaded as drafts before this record
 	// existed. Checked BEFORE anything is created, so a bad request leaves nothing
 	// half-created. Nothing runs for a description with no image in it.
-	descImageEmail, err := validateDescriptionImages(ctx, s.imageLinker, req.ProjectID, req.Description)
-	if err != nil {
-		return domain.CreateCaseResponse{}, err
+	descImageEmail := ""
+	if descriptionImagesApply(ctx, req) {
+		var err error
+		descImageEmail, err = validateDescriptionImages(ctx, s.imageLinker, req.ProjectID, req.Description)
+		if err != nil {
+			return domain.CreateCaseResponse{}, err
+		}
 	}
 
 	if s.snMirror != nil {
@@ -4284,4 +4288,16 @@ func (s *caseService) SubmitCaseFeedback(ctx context.Context, id string, req dom
 			CreatedOn: created.CreatedOn,
 		},
 	}, nil
+}
+
+// descriptionImagesApply reports whether a create request's description images
+// are checked and linked. Everyone is checked, with one exception: an
+// announcement created with no user behind it (the scheduled auto-publish, which
+// copies an announcement request's description to one case per project). There is
+// no author to own a draft, so its image references could never pass, and refusing
+// them would stop the announcement from being published at all. They are left as
+// written (nothing is linked, as before description images existed). A caller with
+// a token, and every other case type, is always checked.
+func descriptionImagesApply(ctx context.Context, req domain.CreateCaseRequest) bool {
+	return !(req.Type == "announcement" && callerEmailBestEffort(ctx) == "")
 }

@@ -427,3 +427,29 @@ func TestCreateCase_DescriptionImages(t *testing.T) {
 		}
 	})
 }
+
+// Only a token-less announcement (the scheduled auto-publish) skips the
+// description image check; anything with a user behind it, and every other type,
+// is checked.
+func TestDescriptionImagesApply(t *testing.T) {
+	withUser := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	cases := []struct {
+		name string
+		ctx  context.Context
+		typ  string
+		want bool
+	}{
+		{"announcement without a user", context.Background(), "announcement", false},
+		{"announcement with a user", withUser, "announcement", true},
+		{"case without a user", context.Background(), "case", true},
+		{"service request without a user", context.Background(), "service_request", true},
+		{"case with a user", withUser, "case", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := descriptionImagesApply(c.ctx, domain.CreateCaseRequest{Type: c.typ}); got != c.want {
+				t.Errorf("descriptionImagesApply = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
