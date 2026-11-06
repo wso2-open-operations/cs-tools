@@ -67,6 +67,7 @@ Check the synced keys.
 
 ACME-42`
 
+// nestedHeadings is the shared templates' labels plus one custom field.
 func nestedHeadings() issueHeadings {
 	h := issueHeadings{}
 	for _, l := range append([]string{"Customer Reference"}, standardIssueHeadings...) {
@@ -75,6 +76,7 @@ func nestedHeadings() issueHeadings {
 	return h
 }
 
+// fieldKeys lists a field map's keys in order.
 func fieldKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -167,6 +169,19 @@ func TestGithubIssueTemplates_NoFormsMeansEveryHeading(t *testing.T) {
 	h, err := newGithubIssueTemplates(&fakeFileReader{}).get(context.Background(), "wso2", "choreo")
 	if err != nil || h != nil {
 		t.Errorf("headings = %v, err = %v, want nil and nil", h, err)
+	}
+}
+
+func TestGithubIssueTemplates_MalformedListingIsAnErrorNotCached(t *testing.T) {
+	files := &fakeFileReader{files: map[string]string{"wso2/choreo:.github/ISSUE_TEMPLATE": `{"type":"file"}`}}
+	c := newGithubIssueTemplates(files)
+	if _, err := c.get(context.Background(), "wso2", "choreo"); err == nil {
+		t.Fatal("want an error for a listing that is not an array")
+	}
+	files.files["wso2/choreo:.github/ISSUE_TEMPLATE"] = `[{"name":"sr-change.yml","path":".github/ISSUE_TEMPLATE/sr-change.yml","type":"file"}]`
+	files.files["wso2/choreo:.github/ISSUE_TEMPLATE/sr-change.yml"] = sampleIssueForm
+	if h, err := c.get(context.Background(), "wso2", "choreo"); err != nil || !h["customer reference"] {
+		t.Errorf("after a good listing headings = %v, err = %v; the bad one must not have been cached", h, err)
 	}
 }
 
