@@ -31,6 +31,9 @@ import {
 export const INLINE_IMAGE_MISSING_MESSAGE =
   "An image in the description could not be uploaded. Remove it and try again.";
 
+/** What the images belong to: the project of a record about to be created, or an existing record. */
+export type InlineImageScope = { projectId: string } | { parentId: string };
+
 /** The images of a draft that are waiting to be uploaded, and the ones that already were. */
 export interface InlineImageDraft {
   /** The file behind each local preview URL that has not been uploaded yet. */
@@ -56,7 +59,7 @@ export type InlineImageUploadResult =
  * HTML with no local image is returned as it is, with no request.
  *
  * @param authFetch - The authenticated fetch of the portal.
- * @param projectId - The project the record is being created in.
+ * @param scope - The project the record is being created in, or (for a comment on an existing record) that record's id.
  * @param html - The description HTML from the editor.
  * @param draft - The queued files and the ids already obtained.
  * @param onImageUploaded - Called with how many images are left: first all of them, then after each one finishes.
@@ -64,7 +67,7 @@ export type InlineImageUploadResult =
  */
 export async function uploadInlineImagesBeforeCreate(
   authFetch: AuthFetch,
-  projectId: string,
+  scope: InlineImageScope,
   html: string,
   draft: InlineImageDraft,
   onImageUploaded?: (remaining: number) => void,
@@ -80,7 +83,7 @@ export async function uploadInlineImagesBeforeCreate(
     const file = draft.queued.get(previewUrl) as File;
     const input = {
       type: "comment" as const,
-      projectId,
+      ...scope,
       file,
       name: file.name || "image",
     };

@@ -270,7 +270,7 @@ export default function CreateCasePage(): JSX.Element {
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
   // Images in the description stay local previews until submit, when they are
   // uploaded to the project before the case is created.
-  const inlineImages = useInlineImageUploads(projectId);
+  const inlineImages = useInlineImageUploads({ projectId });
   // Set synchronously when a submit starts, so a second click before the pending
   // state renders cannot create the case twice.
   const isSubmittingRef = useRef(false);
