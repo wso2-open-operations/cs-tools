@@ -193,9 +193,15 @@ export default function CsmFeatureVisibilityPage(): JSX.Element {
     // never flashes back to its old state in between.
     await queryClient.invalidateQueries({ queryKey: FEATURE_OVERRIDES_KEY });
     const failed = new Set(result.failed);
+    // Drop a write only when it landed and nobody has changed that page since.
+    // An edit made while the save was running, or a write that failed, stays.
     setEdits((current) => {
-      const next: FeatureMap = {};
-      for (const [id, state] of Object.entries(current)) if (failed.has(id)) next[id] = state;
+      const next: FeatureMap = { ...current };
+      for (const write of writes) {
+        if (!failed.has(write.navNodeId) && next[write.navNodeId] === write.state) {
+          delete next[write.navNodeId];
+        }
+      }
       return next;
     });
     setSelected(new Set());

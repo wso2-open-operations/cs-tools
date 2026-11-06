@@ -80,7 +80,7 @@ Conventions:
 - Routes are declared in `src/App.tsx`. Pages are imported eagerly (no per-route code splitting), so navigating never triggers a runtime chunk fetch.
 - Authenticated routes sit under `<AuthGuard>` (`src/layouts/AuthGuard.tsx`) and a `FeatureRouteGuard`; the unauthenticated error routes (`/401`, `/403`, `/404`) sit outside.
 - The sidebar, tab strips, quick-nav and Help topics are all driven by one navigation tree in `src/config/csmNavItems.ts`. Each node has a stable dotted id (`operations`, `operations.incidents`). These ids are a public contract: deployments use them as keys in `CSM_PORTAL_FEATURE_OVERRIDES` (see [Configuration](#configuration)) and the saved Feature visibility settings store one row per id, so renaming one is a breaking change: its saved row is orphaned and the renamed page starts as Available again.
-- `src/config/featureFlags.ts` resolves a node to `enabled`, `wip` (visible but greyed out, routes render a "coming soon" page) or `hidden` (no nav entry, routes redirect to the dashboard).
+- `src/config/featureFlags.ts` resolves a node to `enabled`, `preview` (an admin can open it with a Preview tag; everyone else sees it greyed out and its routes render a "coming soon" page) or `hidden` (no nav entry, routes redirect away; only from a missing role capability or a legacy `hidden` line in `config.js`). An older config line that says `wip` is read as `preview`.
 
 ### API client layer
 

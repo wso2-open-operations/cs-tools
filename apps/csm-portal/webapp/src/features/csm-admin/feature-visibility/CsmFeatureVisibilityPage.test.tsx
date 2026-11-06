@@ -27,6 +27,7 @@ const server = vi.hoisted(() => ({
   savedOnce: false,
   failIds: new Set<string>(),
   failLoad: false,
+  hold: null as Promise<void> | null,
   put: vi.fn(),
 }));
 
@@ -40,6 +41,7 @@ vi.mock("@api/backend/client", () => ({
       };
     },
     put: async (_path: string, body: { navNodeId: string; state: string; markSaved?: boolean }) => {
+      if (server.hold) await server.hold;
       server.put(body);
       if (server.failIds.has(body.navNodeId)) throw new Error("nope");
       server.rows[body.navNodeId] = { state: body.state, updatedBy: "admin@example.com", updatedOn: "2026-11-05T10:00:00Z" };
@@ -72,6 +74,7 @@ beforeEach(() => {
   server.savedOnce = false;
   server.failIds = new Set();
   server.failLoad = false;
+  server.hold = null;
   server.put.mockClear();
   setConfig(undefined);
 });
@@ -244,6 +247,27 @@ describe("Feature visibility page", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
       await waitFor(() => expect(screen.getByRole("checkbox", { name: "Select Support" })).not.toBeChecked());
       expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    });
+
+    it("keeps an edit made while a save is running", async () => {
+      server.savedOnce = true;
+      let release: () => void = () => undefined;
+      server.hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      renderPage();
+      await screen.findByText("Knowledge");
+      await choose("Support", "Preview");
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+      await choose("Customers", "Preview");
+      release();
+      server.hold = null;
+
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByText("Unsaved. Was not set.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
     });
 
     it("keeps a page that could not be saved marked as unsaved after the first save", async () => {
