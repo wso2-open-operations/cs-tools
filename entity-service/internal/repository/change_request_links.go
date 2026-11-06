@@ -680,7 +680,7 @@ func (r *changeRequestRepo) ValidateChangeRequestLinks(ctx context.Context, sel 
 		return domain.ChangeRequestLinkSet{}, err
 	}
 	// The clone source, checked again in the create transaction
-	// (recordChangeRequestCloneSource).
+	// (createChangeRequestWithScope).
 	if _, err := checkCloneSource(ctx, r.db, sel.CloneSourceID); err != nil {
 		return domain.ChangeRequestLinkSet{}, err
 	}

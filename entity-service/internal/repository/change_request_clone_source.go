@@ -30,8 +30,9 @@ import (
 
 // The change request a change request was cloned from
 // (change_request.cloned_from_change_request_id, migration 0282): written once,
-// in the create transaction, from POST /change-requests clonedFromChangeRequestId,
-// and never changed afterwards. Clone lineage is a fact of this database only:
+// by the create's own INSERT (after checkCloneSource, in the same transaction),
+// from POST /change-requests clonedFromChangeRequestId, and never changed
+// afterwards. Clone lineage is a fact of this database only:
 // the previous system has no field for it (the dual-write mirror leaves it out,
 // DATA_SOURCE=servicenow refuses it).
 
@@ -51,20 +52,6 @@ func NormalizeCloneSource(id *string) (*string, error) {
 		return nil, &apierror.ValidationError{Msg: "clonedFromChangeRequestId must be a UUID"}
 	}
 	return &v, nil
-}
-
-// recordChangeRequestCloneSource stores the clone source on a change request just
-// created in tx, after checkCloneSource.
-func recordChangeRequestCloneSource(ctx context.Context, tx pgx.Tx, id string, sourceID *string) error {
-	src, err := checkCloneSource(ctx, tx, sourceID)
-	if err != nil || src == nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx,
-		`UPDATE change_request SET cloned_from_change_request_id = $2::uuid WHERE id = $1`, id, *src); err != nil {
-		return fmt.Errorf("record clone source: %w", err)
-	}
-	return nil
 }
 
 // checkCloneSource normalises the clone source and refuses one that is not an

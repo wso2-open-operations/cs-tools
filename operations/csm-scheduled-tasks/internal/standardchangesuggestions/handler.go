@@ -50,7 +50,7 @@ func Run(client refresher) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		started := time.Now()
 		req := Request{Limit: PageSize}
-		customers, changeRequests, suggestions := 0, 0, 0
+		customers, changeRequests, suggestions, skipped := 0, 0, 0, 0
 		for page := 1; ; page++ {
 			if page > MaxPages {
 				return fmt.Errorf("standard change suggestions refresh: still more after %d pages; nothing was published", MaxPages)
@@ -65,15 +65,22 @@ func Run(client refresher) func(ctx context.Context) error {
 			customers += resp.Customers
 			changeRequests += resp.ChangeRequests
 			suggestions += resp.Suggestions
+			skipped += resp.Skipped
 			if !resp.More {
-				totals := Totals{Customers: customers, ChangeRequests: changeRequests}
+				totals := Totals{Customers: customers, ChangeRequests: changeRequests, Skipped: skipped}
 				if resp.Totals != nil {
 					totals = *resp.Totals
 				}
 				slog.InfoContext(ctx, "standard change suggestions refresh: published", "runId", resp.RunID,
 					"computedOn", resp.ComputedOn, "pages", page, "customers", totals.Customers,
 					"changeRequests", totals.ChangeRequests, "clusters", totals.Clusters, "eligible", totals.Eligible,
-					"suggestionsComputed", suggestions, "durationMs", time.Since(started).Milliseconds())
+					"skipped", totals.Skipped, "suggestionsComputed", suggestions, "durationMs", time.Since(started).Milliseconds())
+				if totals.Skipped > 0 {
+					// Published all the same: one customer must not cost every other one
+					// its suggestions. entity-service logged which, and why.
+					slog.WarnContext(ctx, "standard change suggestions refresh: some customers were too large to compute in time and have no suggestions in this snapshot",
+						"runId", resp.RunID, "skipped", totals.Skipped)
+				}
 				return nil
 			}
 			if resp.RunID == "" || resp.NextCursor == "" || resp.NextCursor == req.Cursor || (req.RunID != "" && resp.RunID != req.RunID) {

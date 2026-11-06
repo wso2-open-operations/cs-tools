@@ -17,8 +17,10 @@
 package standardchangesuggestions
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -87,5 +89,23 @@ func TestRun_StopsWhenCancelled(t *testing.T) {
 	f := &fakeRefresher{pages: []Response{{RunID: "r1"}}}
 	if err := Run(f)(ctx); err == nil || len(f.reqs) != 0 {
 		t.Fatalf("err = %v, requests = %d", err, len(f.reqs))
+	}
+}
+
+// A run with skipped customers is still published (nil), and says so.
+func TestRun_ReportsSkippedCustomers(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	f := &fakeRefresher{pages: []Response{
+		{RunID: "r1", Customers: 49, Skipped: 1, More: true, NextCursor: "a50"},
+		{RunID: "r1", Customers: 7, ComputedOn: "2026-11-06T14:00:05Z", Totals: &Totals{Customers: 56, Skipped: 1}},
+	}}
+	if err := Run(f)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); !strings.Contains(out, "skipped=1") || !strings.Contains(out, "level=WARN") {
+		t.Errorf("log = %s, want the skipped count and a warning", out)
 	}
 }

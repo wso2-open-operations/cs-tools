@@ -17,6 +17,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"regexp"
@@ -71,13 +72,17 @@ var (
 	suggestionHTMLTag     = regexp.MustCompile(`(?s)<[^>]*>`)
 	suggestionPlaceholder = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 	suggestionTagged      = regexp.MustCompile(`\[[^\]]*\]`)
-	suggestionTicket      = regexp.MustCompile(`\b(chg|inc|cs|prb|scp|std|sr|ritm|req|task|ctask)[- ]?\d+\b`)
-	suggestionDate        = regexp.MustCompile(`\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b`)
-	suggestionTime        = regexp.MustCompile(`\b\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?\b`)
-	suggestionVersion     = regexp.MustCompile(`\bv?\d+(\.\d+)+[a-z0-9-]*\b|\bv\d+\b`)
-	suggestionOrdinal     = regexp.MustCompile(`\b\d+(st|nd|rd|th)\b`)
-	suggestionDigits      = regexp.MustCompile(`\d+`)
-	suggestionNonWord     = regexp.MustCompile(`[^a-z]+`)
+	// suggestionNumbered is every pattern that removes more than its digits, in
+	// one pass (each alternative needs a digit, so text with none skips it):
+	// ticket numbers (CHG0012345), dates, times (with am / pm), versions (v1.2.3,
+	// with a suffix) and ordinals (3rd). Digits and every other non-letter are
+	// word separators afterwards (suggestionWords), so they need no pass of their own.
+	suggestionNumbered = regexp.MustCompile(
+		`\b(?:chg|inc|cs|prb|scp|std|sr|ritm|req|task|ctask)[- ]?\d+\b` +
+			`|\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b` +
+			`|\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b` +
+			`|\bv?\d+(?:\.\d+)+[a-z0-9-]*\b|\bv\d+\b` +
+			`|\b\d+(?:st|nd|rd|th)\b`)
 )
 
 // suggestionFillerWords carry no meaning for "is this the same change": articles,
@@ -94,19 +99,31 @@ func init() {
 	}
 }
 
-// suggestionWords reduces text (plain or HTML) to its meaningful words, in order.
+// suggestionWords reduces text (plain or HTML) to its meaningful words, in order:
+// markup, entities, {{placeholders}} and [tags] removed, lower case, ticket
+// numbers, dates, times, versions and ordinals removed, then the runs of letters
+// a-z, less one-letter and filler words. Each pass runs only when the text can
+// contain what it removes (a plan is read for every candidate, so this is hot).
 func suggestionWords(text string) []string {
-	s := suggestionHTMLTag.ReplaceAllString(text, " ")
-	s = html.UnescapeString(s)
-	s = suggestionPlaceholder.ReplaceAllString(s, " ")
-	s = strings.ToLower(s)
-	s = suggestionTagged.ReplaceAllString(s, " ")
-	for _, re := range []*regexp.Regexp{suggestionTicket, suggestionDate, suggestionTime, suggestionVersion, suggestionOrdinal, suggestionDigits} {
-		s = re.ReplaceAllString(s, " ")
+	s := text
+	if strings.IndexByte(s, '<') >= 0 {
+		s = suggestionHTMLTag.ReplaceAllString(s, " ")
 	}
-	s = suggestionNonWord.ReplaceAllString(s, " ")
+	if strings.IndexByte(s, '&') >= 0 {
+		s = html.UnescapeString(s)
+	}
+	if strings.Contains(s, "{{") {
+		s = suggestionPlaceholder.ReplaceAllString(s, " ")
+	}
+	s = strings.ToLower(s)
+	if strings.IndexByte(s, '[') >= 0 {
+		s = suggestionTagged.ReplaceAllString(s, " ")
+	}
+	if strings.IndexAny(s, "0123456789") >= 0 {
+		s = suggestionNumbered.ReplaceAllString(s, " ")
+	}
 	var out []string
-	for _, w := range strings.Fields(s) {
+	for _, w := range strings.FieldsFunc(s, func(r rune) bool { return r < 'a' || r > 'z' }) {
 		if len(w) < 2 || suggestionFillerWords[w] {
 			continue
 		}
@@ -190,38 +207,102 @@ func newer(a, b repository.SuggestionCandidate) bool {
 
 // suggestionCluster is one cluster before it is judged: its nodes (newest first),
 // and which of them are in the core (the subject-and-plan cluster the key names)
-// rather than joined by clone lineage.
+// rather than joined by clone lineage. compared / total are set when the key's
+// subject group had more than suggestionMaxCompared members: the cluster was
+// built from the newest compared of them.
 type suggestionCluster struct {
-	key   string
-	nodes []suggestionNode
-	core  map[int]bool // index into nodes
+	key             string
+	nodes           []suggestionNode
+	core            map[int]bool // index into nodes
+	compared, total int
+}
+
+// suggestionMaxCompared caps a subject group: only its newest this many change
+// requests are compared and clustered. The plan comparison is pairwise (about
+// 4 microseconds a pair), so 500 is at most 124,750 pairs (well under a second)
+// where 3,000 was 4.5 million (17 seconds) and 6,000 over a minute.
+const suggestionMaxCompared = 500
+
+// suggestionCtxCheckEvery: the pairwise comparison checks the context this often
+// (in pairs), so a customer's deadline stops it promptly.
+const suggestionCtxCheckEvery = 4096
+
+// similarAtLeast reports jaccard(a, b) >= threshold without always counting the
+// whole intersection: it loops over the smaller set and stops as soon as the
+// answer is known. J = I / (A + B - I) >= t  <=>  I * (1 + t) >= t * (A + B).
+func similarAtLeast(a, b wordSet, threshold float64) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	if len(b) == 0 {
+		return 0 >= threshold // jaccard of two empty sets is 0
+	}
+	need := threshold * float64(len(a)+len(b))
+	reached := func(inter int) bool { return float64(inter)*(1+threshold) >= need }
+	// The intersection is at most the smaller set.
+	if !reached(len(a)) {
+		return false
+	}
+	inter, left := 0, len(a)
+	for w := range a {
+		left--
+		if _, ok := b[w]; ok {
+			inter++
+			if reached(inter) {
+				return true
+			}
+		}
+		if !reached(inter + left) {
+			return false
+		}
+	}
+	return reached(inter)
 }
 
 // clusterSuggestionCandidates builds the clusters of ONE customer's candidates
-// (see the file comment). Clusters of one member are left out.
-func clusterSuggestionCandidates(cands []repository.SuggestionCandidate, planThreshold float64) []suggestionCluster {
+// (see the file comment). Clusters of one member are left out. A subject group
+// larger than suggestionMaxCompared is cut to its newest members first (the
+// older ones are in no cluster; the cluster records how many there were), and
+// only members of a subject group of two or more have their plan read. It
+// returns ctx's error when ctx ends during the comparison.
+func clusterSuggestionCandidates(ctx context.Context, cands []repository.SuggestionCandidate, planThreshold float64) ([]suggestionCluster, error) {
 	nodes := make([]suggestionNode, len(cands))
 	byID := make(map[string]int, len(cands))
 	for i, c := range cands {
 		nodes[i] = suggestionNode{c: c, key: suggestionKey(c.Subject)}
-		if words := suggestionWordSet(c.ImplementationPlan); len(words) >= suggestionMinPlanWords {
-			nodes[i].plan = words
-		}
 		byID[c.ID] = i
 	}
 
 	// Steps 1 and 2: per subject group, plans confirm.
 	core := newUnionFind(len(nodes))
+	excluded := make([]bool, len(nodes)) // older than its subject group's cap
 	groups := map[string][]int{}
 	for i, n := range nodes {
 		if n.key != "" {
 			groups[n.key] = append(groups[n.key], i)
 		}
 	}
-	for _, members := range groups {
+	groupTotal := map[string]int{} // keys whose group was cut, to its full size
+	pairs := 0
+	for key, members := range groups {
+		if len(members) < 2 {
+			continue // no plan to compare: a lone member joins only by clone lineage
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		sort.Slice(members, func(a, b int) bool { return newer(nodes[members[a]].c, nodes[members[b]].c) })
+		if len(members) > suggestionMaxCompared {
+			groupTotal[key] = len(members)
+			for _, i := range members[suggestionMaxCompared:] {
+				excluded[i] = true
+			}
+			members = members[:suggestionMaxCompared]
+		}
 		var planned, unplanned []int
 		for _, i := range members {
-			if nodes[i].hasPlan() {
+			if words := suggestionWordSet(nodes[i].c.ImplementationPlan); len(words) >= suggestionMinPlanWords {
+				nodes[i].plan = words
 				planned = append(planned, i)
 			} else {
 				unplanned = append(unplanned, i)
@@ -229,7 +310,12 @@ func clusterSuggestionCandidates(cands []repository.SuggestionCandidate, planThr
 		}
 		for a := 0; a < len(planned); a++ {
 			for b := a + 1; b < len(planned); b++ {
-				if jaccard(nodes[planned[a]].plan, nodes[planned[b]].plan) >= planThreshold {
+				if pairs++; pairs%suggestionCtxCheckEvery == 0 {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+				}
+				if similarAtLeast(nodes[planned[a]].plan, nodes[planned[b]].plan, planThreshold) {
 					core.union(planned[a], planned[b])
 				}
 			}
@@ -262,24 +348,30 @@ func clusterSuggestionCandidates(cands []repository.SuggestionCandidate, planThr
 			core.union(i, anchor)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
-	// Step 3: clone lineage joins directly.
+	// Step 3: clone lineage joins directly (never to or from a member left out
+	// by its group's cap).
 	all := newUnionFind(len(nodes))
 	for i := range nodes {
 		all.union(i, core.find(i))
 	}
 	for i, n := range nodes {
-		if n.c.ClonedFrom == nil {
+		if n.c.ClonedFrom == nil || excluded[i] {
 			continue
 		}
-		if j, ok := byID[strings.ToLower(*n.c.ClonedFrom)]; ok {
+		if j, ok := byID[strings.ToLower(*n.c.ClonedFrom)]; ok && !excluded[j] {
 			all.union(i, j)
 		}
 	}
 
 	byRoot := map[int][]int{}
 	for i := range nodes {
-		byRoot[all.find(i)] = append(byRoot[all.find(i)], i)
+		if !excluded[i] {
+			byRoot[all.find(i)] = append(byRoot[all.find(i)], i)
+		}
 	}
 	var out []suggestionCluster
 	for _, idx := range byRoot {
@@ -314,10 +406,13 @@ func clusterSuggestionCandidates(cands []repository.SuggestionCandidate, planThr
 			}
 			cl.nodes = append(cl.nodes, nodes[i])
 		}
+		if total, cut := groupTotal[cl.key]; cut {
+			cl.compared, cl.total = suggestionMaxCompared, total
+		}
 		out = append(out, cl)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].key < out[b].key })
-	return out
+	return out, nil
 }
 
 // countLevel adds a risk or impact level to a breakdown. MEDIUM (impact's
@@ -367,6 +462,9 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 		Unmet:         []string{},
 	}
 	seenIncident, seenProposal := map[string]bool{}, map[string]bool{}
+	if cl.total > 0 {
+		s.Sample = &domain.StandardChangeSuggestionSample{Compared: cl.compared, Total: cl.total}
+	}
 	s.LastCompletedOn = cl.nodes[0].c.CompletedOn
 	s.FirstCompletedOn = cl.nodes[len(cl.nodes)-1].c.CompletedOn
 	for i, n := range cl.nodes {

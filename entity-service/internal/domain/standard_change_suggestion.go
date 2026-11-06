@@ -57,6 +57,10 @@ type StandardChangeSuggestionsResponse struct {
 	// a template, of a customer, completed in the window) and the clusters they
 	// formed (two or more members); Dismissed is counted when read.
 	Scanned StandardChangeSuggestionScan `json:"scanned"`
+	// SkippedCustomers: customers (the one asked for, or all) whose suggestions
+	// this snapshot does not hold, because the refresh could not compute them in
+	// time: "not computed in the latest refresh", not "no suggestions".
+	SkippedCustomers []StandardChangeSuggestionSkipped `json:"skippedCustomers"`
 }
 
 // RefreshStandardChangeSuggestionsRequest is the body of
@@ -78,6 +82,8 @@ type RefreshStandardChangeSuggestionsResponse struct {
 	Customers      int `json:"customers"`
 	ChangeRequests int `json:"changeRequests"`
 	Suggestions    int `json:"suggestions"`
+	// Skipped: customers this call could not compute within their deadline.
+	Skipped int `json:"skipped"`
 	// More: call again with runId and nextCursor. When false the run was
 	// published (ComputedOn) and Totals are the whole run's.
 	More       bool                          `json:"more"`
@@ -93,6 +99,16 @@ type StandardChangeSuggestionScan struct {
 	Clusters       int `json:"clusters"`
 	Eligible       int `json:"eligible"`
 	Dismissed      int `json:"dismissed"`
+	// Skipped: customers the refresh could not compute in time (see
+	// StandardChangeSuggestionsResponse.SkippedCustomers).
+	Skipped int `json:"skipped"`
+}
+
+// StandardChangeSuggestionSkipped is a customer whose suggestions the snapshot
+// does not hold: the refresh could not compute them in time.
+type StandardChangeSuggestionSkipped struct {
+	Customer EntityRef `json:"customer"`
+	Reason   string    `json:"reason"`
 }
 
 // StandardChangeSuggestion is one cluster of a customer's completed change
@@ -126,9 +142,20 @@ type StandardChangeSuggestion struct {
 	// OpenProposals already started from, or citing, a member (draft or under
 	// review): proposing again would duplicate them.
 	OpenProposals []EntityRef `json:"openProposals"`
+	// Sample is set when this subject had more completed change requests than
+	// are compared: the cluster was built from the newest Compared of Total (the
+	// older ones are not in it, and not counted above).
+	Sample *StandardChangeSuggestionSample `json:"sample,omitempty"`
 	// Members, newest completion first.
 	Members   []StandardChangeSuggestionMember   `json:"members"`
 	Dismissal *StandardChangeSuggestionDismissal `json:"dismissal"`
+}
+
+// StandardChangeSuggestionSample says a suggestion was computed from the newest
+// Compared of the Total completed change requests with its subject.
+type StandardChangeSuggestionSample struct {
+	Compared int `json:"compared"`
+	Total    int `json:"total"`
 }
 
 // StandardChangeSuggestionBreakdown counts members by level; Unknown is a

@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -45,15 +46,25 @@ var DefaultStandardChangeSuggestionCriteria = domain.StandardChangeSuggestionCri
 const maxSuggestionDismissalReason = 1000
 
 // Refresh paging: how many customers one call computes unless it asks for
-// fewer, the most it may ask for, and how long a call keeps starting customers
-// before it hands back (it always finishes the customer it is on, and computes
-// at least one). The budget leaves room inside the 60s REQUEST_TIMEOUT.
+// fewer, the most it may ask for, how long a call keeps starting customers
+// before it hands back, and how long one customer may take. A call computes at
+// least one customer and finishes the one it is on, so a call takes at most the
+// budget plus one customer's deadline (20s + 30s), inside the 60s
+// REQUEST_TIMEOUT. A customer that overruns its deadline is recorded as skipped
+// and the run carries on: one customer can never fail the whole run.
 const (
 	defaultSuggestionRefreshLimit = 50
 	maxSuggestionRefreshLimit     = 500
 )
 
-var suggestionRefreshBudget = 40 * time.Second
+var (
+	suggestionRefreshBudget   = 20 * time.Second
+	suggestionCustomerTimeout = 30 * time.Second
+)
+
+// suggestionSkippedTooLarge is the reason a customer that overran its deadline
+// is recorded under.
+const suggestionSkippedTooLarge = "too large to compute within the refresh's per-customer deadline"
 
 type standardChangeSuggestionService struct {
 	repo     repository.StandardChangeSuggestionRepository
@@ -95,7 +106,7 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	if account != "" && !validate.IsUUID(account) {
 		return domain.StandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "accountId must be a UUID"}
 	}
-	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria}
+	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria, SkippedCustomers: []domain.StandardChangeSuggestionSkipped{}}
 	run, err := s.repo.LatestRun(ctx)
 	if err != nil || run == nil {
 		return resp, err // nothing computed yet: an empty list, no computedOn
@@ -107,6 +118,9 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 		if resp.Scanned, err = s.repo.CustomerCounts(ctx, run.ID, account); err != nil {
 			return resp, err
 		}
+	}
+	if resp.SkippedCustomers, err = s.repo.SkippedCustomers(ctx, run.ID, account); err != nil {
+		return resp, err
 	}
 
 	rows, err := s.repo.SnapshotRows(ctx, run.ID, account, req.IncludeIneligible)
@@ -198,7 +212,10 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	}
 	var run repository.SuggestionRun
 	if runID == "" {
-		started, err := s.repo.StartRun(ctx, s.criteria)
+		crit := s.criteria
+		started, err := s.repo.StartRun(ctx, crit, func(startedOn time.Time) time.Time {
+			return suggestionWindowStart(startedOn, crit.WindowMonths)
+		})
 		if err != nil {
 			return domain.RefreshStandardChangeSuggestionsResponse{}, err
 		}
@@ -223,7 +240,8 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	crit := run.Criteria
 	since := suggestionWindowStart(run.StartedOn, crit.WindowMonths)
 	pageStart := s.now()
-	accounts, err := s.repo.CandidateAccounts(ctx, since, cursor, limit+1)
+	// The customers were listed once, when the run started.
+	accounts, err := s.repo.NextCustomers(ctx, run.ID, cursor, limit+1)
 	if err != nil {
 		return domain.RefreshStandardChangeSuggestionsResponse{}, err
 	}
@@ -236,24 +254,40 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		if err := ctx.Err(); err != nil {
 			return resp, err
 		}
-		rows, candidates, err := s.computeCustomer(ctx, account, since, crit)
-		if err != nil {
+		customerStart := s.now()
+		customerCtx, cancel := context.WithTimeout(ctx, suggestionCustomerTimeout)
+		rows, candidates, err := s.computeCustomer(customerCtx, account, since, crit)
+		// Its own deadline, not the call's (a query cut short reports it in its own words).
+		overran := errors.Is(customerCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		switch {
+		case err != nil && overran:
+			// Record it and go on.
+			slog.WarnContext(ctx, "standard change suggestions: customer skipped, too large to compute in time",
+				"runId", run.ID, "accountId", account, "candidates", candidates,
+				"deadlineMs", suggestionCustomerTimeout.Milliseconds(), "elapsedMs", s.now().Sub(customerStart).Milliseconds())
+			if err := s.repo.SkipCustomer(ctx, run.ID, account, suggestionSkippedTooLarge); err != nil {
+				return resp, err
+			}
+			resp.Skipped++
+		case err != nil:
 			return resp, fmt.Errorf("standard change suggestions: customer %s: %w", account, err)
+		default:
+			if err := s.repo.SaveCustomer(ctx, run.ID, account, candidates, rows); err != nil {
+				return resp, err
+			}
+			resp.Customers++
+			resp.ChangeRequests += candidates
+			resp.Suggestions += len(rows)
 		}
-		if err := s.repo.SaveCustomer(ctx, run.ID, account, candidates, rows); err != nil {
-			return resp, err
-		}
-		resp.Customers++
-		resp.ChangeRequests += candidates
-		resp.Suggestions += len(rows)
 		resp.NextCursor = account
 	}
-	resp.More = resp.Customers < len(accounts)
+	resp.More = resp.Customers+resp.Skipped < len(accounts)
 	if !resp.More {
 		resp.NextCursor = ""
 	}
 	slog.InfoContext(ctx, "standard change suggestions: refresh page", "runId", run.ID,
-		"customers", resp.Customers, "changeRequests", resp.ChangeRequests, "suggestions", resp.Suggestions,
+		"customers", resp.Customers, "skipped", resp.Skipped, "changeRequests", resp.ChangeRequests, "suggestions", resp.Suggestions,
 		"more", resp.More, "pageMs", s.now().Sub(pageStart).Milliseconds())
 	if resp.More {
 		return resp, nil
@@ -267,19 +301,23 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	totals := published.Counts
 	resp.Totals = &totals
 	slog.InfoContext(ctx, "standard change suggestions: refresh published", "runId", run.ID,
-		"customers", totals.Customers, "changeRequests", totals.ChangeRequests, "clusters", totals.Clusters,
+		"customers", totals.Customers, "skipped", totals.Skipped, "changeRequests", totals.ChangeRequests, "clusters", totals.Clusters,
 		"eligible", totals.Eligible, "durationMs", published.CompletedOn.Sub(published.StartedOn).Milliseconds())
 	return resp, nil
 }
 
 // computeCustomer computes one customer's suggestions: its candidates and their
-// clusters, each judged. It also returns how many candidates there were.
+// clusters, each judged. It also returns how many candidates there were (also
+// with an error, once they were read). It stops with ctx's error when ctx ends.
 func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria) ([]repository.SuggestionSnapshotRow, int, error) {
 	cands, err := s.repo.Candidates(ctx, account, since)
 	if err != nil {
 		return nil, 0, err
 	}
-	clusters := clusterSuggestionCandidates(cands, float64(crit.PlanSimilarityPercent)/100)
+	clusters, err := clusterSuggestionCandidates(ctx, cands, float64(crit.PlanSimilarityPercent)/100)
+	if err != nil {
+		return nil, len(cands), err
+	}
 	if len(clusters) == 0 {
 		return nil, len(cands), nil
 	}
@@ -291,7 +329,7 @@ func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, a
 	}
 	incidents, err := s.repo.IncidentsOf(ctx, memberIDs)
 	if err != nil {
-		return nil, 0, err
+		return nil, len(cands), err
 	}
 	rows := make([]repository.SuggestionSnapshotRow, 0, len(clusters))
 	for _, cl := range clusters {

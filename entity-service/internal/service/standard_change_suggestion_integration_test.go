@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -300,6 +301,43 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 				t.Fatalf("after the restore: %+v", resp.Suggestions)
 			}
 			expectErr[*apierror.NotFoundError](t, svc.RestoreSuggestion(ctx, d.ID), "a second restore")
+
+			// The customers are listed once, when a run starts; one that overran its
+			// deadline is recorded as skipped and counted apart.
+			repo := repository.NewStandardChangeSuggestionRepository(e.s)
+			run, err := repo.StartRun(ctx, DefaultStandardChangeSuggestionCriteria, func(started time.Time) time.Time { return started.AddDate(-1, 0, 0) })
+			if err != nil {
+				t.Fatalf("start run: %v", err)
+			}
+			listed, err := repo.NextCustomers(ctx, run.ID, "", 100000)
+			if err != nil || !slices.Contains(listed, e.accounts["A"]) || !slices.Contains(listed, e.accounts["B"]) || !slices.IsSorted(listed) {
+				t.Fatalf("listed = %d customers (%v), want A and B, in id order", len(listed), err)
+			}
+			if after, _ := repo.NextCustomers(ctx, run.ID, e.accounts["A"], 100000); slices.Contains(after, e.accounts["A"]) {
+				t.Error("the cursor did not move past A")
+			}
+			if err := repo.SkipCustomer(ctx, run.ID, e.accounts["A"], "too large"); err != nil {
+				t.Fatalf("skip A: %v", err)
+			}
+			if err := repo.SaveCustomer(ctx, run.ID, e.accounts["B"], 5, nil); err != nil {
+				t.Fatalf("save B: %v", err)
+			}
+			published, err := repo.PublishRun(ctx, run.ID)
+			if err != nil || published.Counts.Customers != 1 || published.Counts.Skipped != 1 || published.Counts.ChangeRequests != 5 {
+				t.Fatalf("published = %+v, %v; want B computed, A skipped", published.Counts, err)
+			}
+			if counts, err := repo.CustomerCounts(ctx, run.ID, e.accounts["A"]); err != nil || counts != (domain.StandardChangeSuggestionScan{Skipped: 1}) {
+				t.Errorf("customer A's counts = %+v, %v", counts, err)
+			}
+			resp, err = svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{})
+			if err != nil || len(resp.SkippedCustomers) != 1 || resp.SkippedCustomers[0].Customer.ID != e.accounts["A"] ||
+				resp.SkippedCustomers[0].Customer.Name != sgsTag+" Customer A" || resp.SkippedCustomers[0].Reason != "too large" || resp.Scanned.Skipped != 1 {
+				t.Fatalf("skipped = %+v, scanned %+v, %v", resp.SkippedCustomers, resp.Scanned, err)
+			}
+			if resp, _ := svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{AccountID: e.accounts["B"]}); len(resp.SkippedCustomers) != 0 {
+				t.Errorf("customer B's skipped = %+v, want none", resp.SkippedCustomers)
+			}
+			expectErr[*apierror.ConflictError](t, repo.SkipCustomer(ctx, run.ID, e.accounts["B"], "late"), "a skip on a published run")
 		})
 	}
 }

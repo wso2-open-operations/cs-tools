@@ -734,7 +734,16 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     configuration). A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
     `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
     and the empty table, say suggestions are computed once a day and none have been yet
-    (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is shown.
+    (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is
+    shown, and kept for five minutes (`SUGGESTIONS_STALE_TIME_MS`; the snapshot changes once a day), so going
+    back to Suggested or between its filters reads the cache; a dismissal or restore still refreshes it (they
+    invalidate `STANDARD_CHANGES_KEY`, under which the key sits). A customer the refresh could not compute in
+    time (entity-service gives each 30 seconds) comes back in `skippedCustomers`: a warning `Alert` under the
+    status line names them (`suggestionSkippedText`: "<customer>'s suggestions were not computed in the latest
+    refresh: …", up to five names, then "and N more"), and with that one customer selected the empty table
+    says the same instead of "No change is done often enough". A suggestion built from only part of a large
+    subject (entity-service compares the newest 500) carries `sample`: a "Newest 500 of 3,000" chip on the
+    row (`suggestionSampleLabel`) and a "Based on" line in the details (`suggestionSampleText`).
     Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
     the last completion; and the actions (`suggestionActions`): **Propose** (`kind: "new"` from `proposeFrom`,
     then a PATCH citing `suggestionProposalEvidence`: the source and the other closed members, at most 100),

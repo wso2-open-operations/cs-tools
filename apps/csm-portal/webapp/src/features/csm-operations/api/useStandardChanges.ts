@@ -64,6 +64,7 @@ export const STANDARD_CHANGES_KEY = ["operations", "standard-changes"] as const;
 const TEMPLATES_KEY = [...STANDARD_CHANGES_KEY, "templates"] as const;
 const PROPOSALS_KEY = [...STANDARD_CHANGES_KEY, "proposals"] as const;
 const SUGGESTIONS_KEY = [...STANDARD_CHANGES_KEY, "suggestions"] as const;
+export const SUGGESTIONS_STALE_TIME_MS = 5 * 60_000;
 
 const TEMPLATES = "/standard-change-templates";
 const PROPOSALS = "/standard-change-proposals";
@@ -482,6 +483,10 @@ export function useStandardChangeSuggestions(
     },
     placeholderData: keepPreviousData,
     retry: false,
+    // The snapshot changes once a day: switching back to Suggested, or between
+    // its filters, reads the cache. A dismissal or restore still refreshes it
+    // (they invalidate STANDARD_CHANGES_KEY).
+    staleTime: SUGGESTIONS_STALE_TIME_MS,
   });
 }
 

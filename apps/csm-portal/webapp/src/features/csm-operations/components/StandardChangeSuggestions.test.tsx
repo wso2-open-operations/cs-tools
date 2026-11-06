@@ -18,7 +18,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { BeStandardChangeSuggestion } from "@api/backend/types";
+import type { BeStandardChangeSuggestion, BeStandardChangeSuggestionsResponse } from "@api/backend/types";
 
 vi.hoisted(() => {
   window.config = { ...window.config, CSM_PORTAL_BACKEND_BASE_URL: "http://localhost:9090" };
@@ -81,13 +81,18 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
   };
 }
 
-function serve(list: BeStandardChangeSuggestion[], computedOn: string | null = "2026-11-06T14:00:00Z"): void {
+function serve(
+  list: BeStandardChangeSuggestion[],
+  computedOn: string | null = "2026-11-06T14:00:00Z",
+  skippedCustomers: BeStandardChangeSuggestionsResponse["skippedCustomers"] = [],
+): void {
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
       criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
       computedOn,
       scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
+      skippedCustomers,
     },
     isLoading: false,
     isError: false,
@@ -139,6 +144,28 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Suggestions are computed once a day from completed change requests. None have been computed yet.");
     expect(within(screen.getByRole("table", { name: "Suggested standard changes" })).getByText(/None have been computed yet/)).toBeInTheDocument();
     expect(screen.queryByText(/No change is done often enough/)).not.toBeInTheDocument();
+  });
+
+  it("says which customers the latest refresh could not compute", () => {
+    serve([suggestion()], "2026-11-06T14:00:00Z", [{ customer: { id: "acct-9", name: "BigCo" }, reason: "too large" }]);
+    renderIt();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "BigCo's suggestions were not computed in the latest refresh: it has too many change requests to compute in time.",
+    );
+  });
+
+  it("no skipped notice when every customer was computed", () => {
+    serve([suggestion()]);
+    renderIt();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("marks a suggestion built from the newest of a large subject, and says so in the details", () => {
+    serve([suggestion({ sample: { compared: 500, total: 3000 } })]);
+    renderIt();
+    expect(within(row("Deploy CApps to Pekin prod")).getByText("Newest 500 of 3,000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
+    expect(screen.getByText(/Based on the newest 500 of 3,000 change requests with this subject/)).toBeInTheDocument();
   });
 
   it("asks for near misses and dismissed ones when ticked", () => {

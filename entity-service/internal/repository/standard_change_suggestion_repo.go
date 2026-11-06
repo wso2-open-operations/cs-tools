@@ -35,10 +35,9 @@ import (
 // dismissals. The clustering is the service's (standard_change_suggestion.go);
 // nothing here decides.
 type StandardChangeSuggestionRepository interface {
-	// CandidateAccounts lists, in id order after the cursor (exclusive; "" is
-	// the start), at most limit customers with at least one candidate (see
-	// Candidates) completed since the instant given.
-	CandidateAccounts(ctx context.Context, since time.Time, after string, limit int) ([]string, error)
+	// NextCustomers lists, in id order after the cursor (exclusive; "" is the
+	// start), at most limit of the customers a run listed when it started.
+	NextCustomers(ctx context.Context, runID, after string, limit int) ([]string, error)
 	// Candidates are one customer's change requests completed (Closed or
 	// Rollback) since the instant given and not raised from a template.
 	Candidates(ctx context.Context, accountID string, since time.Time) ([]SuggestionCandidate, error)
@@ -57,15 +56,24 @@ type StandardChangeSuggestionRepository interface {
 	// Restore deletes a dismissal (404 when there is none with that id).
 	Restore(ctx context.Context, id string) error
 
-	// StartRun opens a refresh run with the criteria it computes by, deleting
-	// runs left unpublished for over a day (a job that died).
-	StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria) (SuggestionRun, error)
+	// StartRun opens a refresh run with the criteria it computes by, and lists
+	// in it every customer with at least one candidate (see Candidates)
+	// completed since windowStart(the run's start), once, so no page scans for
+	// them again. It deletes runs left unpublished for over a day (a job that died).
+	StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria, windowStart func(time.Time) time.Time) (SuggestionRun, error)
 	// GetRun reads a run; nil when there is none with that id.
 	GetRun(ctx context.Context, id string) (*SuggestionRun, error)
 	// SaveCustomer replaces one customer's rows and change-request count in an
 	// unpublished run, in one transaction (409 when the run is gone or already
 	// published), so a call sent again never counts a customer twice.
 	SaveCustomer(ctx context.Context, runID, accountID string, changeRequests int, rows []SuggestionSnapshotRow) error
+	// SkipCustomer records that a customer could not be computed in this run
+	// (reason, e.g. too large for its deadline): no suggestions, and it is
+	// reported as skipped. 409 when the run is gone or published.
+	SkipCustomer(ctx context.Context, runID, accountID, reason string) error
+	// SkippedCustomers are the customers a run skipped (of one customer when
+	// accountID is set), with their reasons.
+	SkippedCustomers(ctx context.Context, runID, accountID string) ([]domain.StandardChangeSuggestionSkipped, error)
 	// PublishRun sums the run's totals, makes it the one readers see and deletes
 	// every other run with its rows, in one transaction (409 when it is gone or
 	// already published).
@@ -86,7 +94,7 @@ type SuggestionRun struct {
 	StartedOn   time.Time
 	CompletedOn *time.Time
 	Criteria    domain.StandardChangeSuggestionCriteria
-	// Counts: Customers, ChangeRequests, Clusters, Eligible, summed at publish.
+	// Counts: Customers, ChangeRequests, Clusters, Eligible, Skipped, summed at publish.
 	Counts domain.StandardChangeSuggestionScan
 }
 
@@ -137,15 +145,13 @@ const candidateFilter = `
 		   AND cr.standard_change_template_version_id IS NULL
 		   AND COALESCE(cr.closed_on, wi.updated_on, wi.created_on) >= $1`
 
-// CandidateAccounts implements StandardChangeSuggestionRepository.
-//
-// crvis: internal callers only: POST /standard-change-suggestions/refresh is wrapped by serviceOnly, and the service requires an internal caller
-func (r *standardChangeSuggestionRepo) CandidateAccounts(ctx context.Context, since time.Time, after string, limit int) ([]string, error) {
+// NextCustomers implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) NextCustomers(ctx context.Context, runID, after string, limit int) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT DISTINCT a.id::text`+candidateFilter+`
-		   AND ($2 = '' OR a.id > $2::uuid)
-		 ORDER BY 1
-		 LIMIT $3`, since, after, limit)
+		SELECT account_id::text FROM standard_change_suggestion_run_customer
+		 WHERE run_id = $1::uuid AND ($2 = '' OR account_id > $2::uuid)
+		 ORDER BY account_id
+		 LIMIT $3`, runID, after, limit)
 	if err != nil {
 		return nil, fmt.Errorf("standard change suggestions: customers: %w", err)
 	}
@@ -344,13 +350,13 @@ const runStaleAfter = 24 * time.Hour
 
 var errRunGone = &apierror.ConflictError{Msg: "this refresh run is no longer open (published, or replaced by another): start a new one"}
 
-const suggestionRunColumns = `id::text, started_on, completed_on, criteria, customers, change_requests, clusters, eligible`
+const suggestionRunColumns = `id::text, started_on, completed_on, criteria, customers, change_requests, clusters, eligible, skipped`
 
 func scanSuggestionRun(row pgx.Row) (SuggestionRun, error) {
 	var run SuggestionRun
 	var criteria []byte
 	err := row.Scan(&run.ID, &run.StartedOn, &run.CompletedOn, &criteria,
-		&run.Counts.Customers, &run.Counts.ChangeRequests, &run.Counts.Clusters, &run.Counts.Eligible)
+		&run.Counts.Customers, &run.Counts.ChangeRequests, &run.Counts.Clusters, &run.Counts.Eligible, &run.Counts.Skipped)
 	if err != nil {
 		return run, err
 	}
@@ -361,7 +367,9 @@ func scanSuggestionRun(row pgx.Row) (SuggestionRun, error) {
 }
 
 // StartRun implements StandardChangeSuggestionRepository.
-func (r *standardChangeSuggestionRepo) StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria) (SuggestionRun, error) {
+//
+// crvis: internal callers only: POST /standard-change-suggestions/refresh is wrapped by serviceOnly, and the service requires an internal caller
+func (r *standardChangeSuggestionRepo) StartRun(ctx context.Context, criteria domain.StandardChangeSuggestionCriteria, windowStart func(time.Time) time.Time) (SuggestionRun, error) {
 	raw, err := json.Marshal(criteria)
 	if err != nil {
 		return SuggestionRun{}, fmt.Errorf("start suggestion run: %w", err)
@@ -375,6 +383,12 @@ func (r *standardChangeSuggestionRepo) StartRun(ctx context.Context, criteria do
 			VALUES ($1::jsonb) RETURNING `+suggestionRunColumns, raw))
 		if err != nil {
 			return SuggestionRun{}, fmt.Errorf("start suggestion run: %w", err)
+		}
+		// The customers to compute, read once for the whole run.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO standard_change_suggestion_run_customer (run_id, account_id)
+			SELECT DISTINCT $2::uuid, a.id`+candidateFilter, windowStart(run.StartedOn), run.ID); err != nil {
+			return SuggestionRun{}, fmt.Errorf("start suggestion run: list the customers: %w", err)
 		}
 		return run, nil
 	})
@@ -430,7 +444,7 @@ func (r *standardChangeSuggestionRepo) SaveCustomer(ctx context.Context, runID, 
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests)
 			VALUES ($1::uuid, $2::uuid, $3)
-			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = EXCLUDED.change_requests`,
+			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = EXCLUDED.change_requests, skipped_reason = NULL`,
 			runID, accountID, changeRequests); err != nil {
 			return fmt.Errorf("save suggestions: %w", err)
 		}
@@ -449,6 +463,52 @@ func (r *standardChangeSuggestionRepo) SaveCustomer(ctx context.Context, runID, 
 	})
 }
 
+// SkipCustomer implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SkipCustomer(ctx context.Context, runID, accountID, reason string) error {
+	return r.db.InTx(ctx, func(tx pgx.Tx) error {
+		if err := lockOpenRun(ctx, tx, runID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid`, runID, accountID); err != nil {
+			return fmt.Errorf("skip customer: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests, skipped_reason)
+			VALUES ($1::uuid, $2::uuid, NULL, $3)
+			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = NULL, skipped_reason = EXCLUDED.skipped_reason`,
+			runID, accountID, reason); err != nil {
+			return fmt.Errorf("skip customer: %w", err)
+		}
+		return nil
+	})
+}
+
+// SkippedCustomers implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SkippedCustomers(ctx context.Context, runID, accountID string) ([]domain.StandardChangeSuggestionSkipped, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT c.account_id::text, COALESCE(a.name, ''), c.skipped_reason
+		  FROM standard_change_suggestion_run_customer c
+		  LEFT JOIN account a ON a.id = c.account_id
+		 WHERE c.run_id = $1::uuid AND c.skipped_reason IS NOT NULL
+		   AND ($2 = '' OR c.account_id = $2::uuid)
+		 ORDER BY 2, 1`, runID, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("read skipped customers: %w", err)
+	}
+	defer rows.Close()
+	out := []domain.StandardChangeSuggestionSkipped{}
+	for rows.Next() {
+		var sk domain.StandardChangeSuggestionSkipped
+		if err := rows.Scan(&sk.Customer.ID, &sk.Customer.Name, &sk.Reason); err != nil {
+			return nil, fmt.Errorf("read skipped customers: %w", err)
+		}
+		out = append(out, sk)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read skipped customers: %w", err)
+	}
+	return out, nil
+}
+
 // PublishRun implements StandardChangeSuggestionRepository.
 func (r *standardChangeSuggestionRepo) PublishRun(ctx context.Context, id string) (SuggestionRun, error) {
 	return InTxReturning(ctx, r.db, func(tx pgx.Tx) (SuggestionRun, error) {
@@ -456,7 +516,8 @@ func (r *standardChangeSuggestionRepo) PublishRun(ctx context.Context, id string
 			return SuggestionRun{}, err
 		}
 		run, err := scanSuggestionRun(tx.QueryRow(ctx, `UPDATE standard_change_suggestion_run r SET completed_on = NOW(),
-			    customers = (SELECT COUNT(*) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id),
+			    customers = (SELECT COUNT(*) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id AND c.change_requests IS NOT NULL),
+			    skipped = (SELECT COUNT(*) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id AND c.skipped_reason IS NOT NULL),
 			    change_requests = (SELECT COALESCE(SUM(change_requests), 0) FROM standard_change_suggestion_run_customer c WHERE c.run_id = r.id),
 			    clusters = (SELECT COUNT(*) FROM standard_change_suggestion_snapshot s WHERE s.run_id = r.id),
 			    eligible = (SELECT COUNT(*) FROM standard_change_suggestion_snapshot s WHERE s.run_id = r.id AND s.eligible)
@@ -508,11 +569,12 @@ func (r *standardChangeSuggestionRepo) SnapshotRows(ctx context.Context, runID, 
 func (r *standardChangeSuggestionRepo) CustomerCounts(ctx context.Context, runID, accountID string) (domain.StandardChangeSuggestionScan, error) {
 	var out domain.StandardChangeSuggestionScan
 	err := r.db.QueryRow(ctx, `
-		SELECT (SELECT COUNT(*) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid),
+		SELECT (SELECT COUNT(*) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid AND change_requests IS NOT NULL),
 		       (SELECT COALESCE(SUM(change_requests), 0) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid),
 		       (SELECT COUNT(*) FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid),
-		       (SELECT COUNT(*) FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid AND eligible)`,
-		runID, accountID).Scan(&out.Customers, &out.ChangeRequests, &out.Clusters, &out.Eligible)
+		       (SELECT COUNT(*) FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid AND eligible),
+		       (SELECT COUNT(*) FROM standard_change_suggestion_run_customer WHERE run_id = $1::uuid AND account_id = $2::uuid AND skipped_reason IS NOT NULL)`,
+		runID, accountID).Scan(&out.Customers, &out.ChangeRequests, &out.Clusters, &out.Eligible, &out.Skipped)
 	if err != nil {
 		return out, fmt.Errorf("read suggestion counts: %w", err)
 	}

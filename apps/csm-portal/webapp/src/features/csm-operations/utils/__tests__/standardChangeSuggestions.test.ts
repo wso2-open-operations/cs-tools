@@ -20,6 +20,9 @@ import {
   suggestionActions,
   suggestionCriteriaText,
   suggestionProposalEvidence,
+  suggestionSampleLabel,
+  suggestionSampleText,
+  suggestionSkippedText,
   suggestionUpdatedText,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import {
@@ -117,5 +120,36 @@ describe("the Suggested place in the URL", () => {
     expect(standardChangesSearch(new URLSearchParams("view=standard&show=suggested&crState=new"), "suggested").toString()).toBe(
       "view=standard&show=suggested&crState=new",
     );
+  });
+});
+
+describe("a suggestion built from part of its subject", () => {
+  it("names how many of how many were compared, and nothing when all were", () => {
+    expect(suggestionSampleLabel({ sample: { compared: 500, total: 3000 } })).toBe("Newest 500 of 3,000");
+    expect(suggestionSampleText({ sample: { compared: 500, total: 3000 } })).toBe(
+      "Based on the newest 500 of 3,000 change requests with this subject; the older ones were not compared.",
+    );
+    expect(suggestionSampleLabel({ sample: null })).toBeNull();
+    expect(suggestionSampleText({})).toBeNull();
+  });
+});
+
+describe("suggestionSkippedText", () => {
+  const skipped = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ customer: { id: `a${i}`, name: `Customer ${i + 1}` }, reason: "too large" }));
+  it("says the customer's suggestions were not computed, not that it has none", () => {
+    expect(suggestionSkippedText(skipped(1))).toBe(
+      "Customer 1's suggestions were not computed in the latest refresh: it has too many change requests to compute in time.",
+    );
+  });
+  it("names up to five customers, then how many more", () => {
+    expect(suggestionSkippedText(skipped(2))).toBe(
+      "The suggestions of 2 customers were not computed in the latest refresh (Customer 1, Customer 2): each has too many change requests to compute in time.",
+    );
+    expect(suggestionSkippedText(skipped(7))).toContain("(Customer 1, Customer 2, Customer 3, Customer 4, Customer 5 and 2 more)");
+  });
+  it("is nothing when none was skipped", () => {
+    expect(suggestionSkippedText([])).toBeNull();
+    expect(suggestionSkippedText(undefined)).toBeNull();
   });
 });
