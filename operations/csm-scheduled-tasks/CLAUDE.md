@@ -567,8 +567,9 @@ This task is a **trigger only**, like `incident_autoclose`. It calls `POST
   clusters, eligible, `durationMs`); entity-service logs each page and the run's own duration.
 - **By hand**: `--run-now=standard_change_suggestions_refresh` (no flags of its own). It only computes, so
   it is safe beside the scheduled run: whichever publishes last is what the page shows. The thresholds
-  are entity-service's `STANDARD_CHANGE_SUGGESTION_*`, not settings here; a change applies from the next
-  refresh.
+  are entity-service's `STANDARD_CHANGE_SUGGESTION_*` (min closes 5, 12 months, 90% success, 50% plan
+  similarity; its `.env.example`), not settings here; a change applies from the next refresh. The
+  schedule is this task's `SUB_CRON_SCHEDULES` entry, `{"standard_change_suggestions_refresh": "<cron>"}`.
 
 **Locally.** entity-service reads the caller's token from `x-jwt-assertion`, which Choreo's gateway sets
 from `Authorization: Bearer`; locally `scripts/csm-compose/gateway-shim` does that, so point this component

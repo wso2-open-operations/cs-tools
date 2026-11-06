@@ -55,13 +55,13 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
     key: "deploy capps pekin prod",
     customer: { id: "acct-1", name: "Acme" },
     subject: "Deploy CApps to Pekin prod",
-    memberCount: 3,
-    closedCount: 3,
+    memberCount: 5,
+    closedCount: 5,
     rollbackCount: 0,
     successRate: 1,
     incidents: [],
-    risk: { low: 3, moderate: 0, high: 0, unknown: 0 },
-    impact: { low: 2, moderate: 0, high: 0, unknown: 1 },
+    risk: { low: 5, moderate: 0, high: 0, unknown: 0 },
+    impact: { low: 4, moderate: 0, high: 0, unknown: 1 },
     firstCompletedOn: "2026-09-01T00:00:00Z",
     lastCompletedOn: "2026-10-30T00:00:00Z",
     eligible: true,
@@ -85,7 +85,7 @@ function serve(list: BeStandardChangeSuggestion[], computedOn: string | null = "
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
-      criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50 },
+      criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
       computedOn,
       scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
     },
@@ -119,7 +119,7 @@ describe("StandardChangeSuggestions", () => {
     serve([suggestion(), suggestion({ key: "k2", subject: "Rotate keys" })]);
     renderIt();
     expect(screen.getByRole("status")).toHaveTextContent("2 suggestions from 20 change requests completed in the last 12 months");
-    expect(within(row("Deploy CApps to Pekin prod")).getByText("3 closed")).toBeInTheDocument();
+    expect(within(row("Deploy CApps to Pekin prod")).getByText("5 closed")).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Templates" })).not.toBeInTheDocument();
     expect(screen.queryByText(/Covered by|Close to|^New$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^(Revise|Open) / })).not.toBeInTheDocument();
@@ -214,6 +214,6 @@ describe("StandardChangeSuggestions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
     expect(screen.getByRole("link", { name: "CHG0000009" })).toHaveAttribute("href", "/operations/change-requests/cr-9");
     expect(screen.getByText(/Promote to DR · closed .* · a clone/)).toBeInTheDocument();
-    expect(screen.getByText("2 low, 1 unknown")).toBeInTheDocument();
+    expect(screen.getByText("4 low, 1 unknown")).toBeInTheDocument();
   });
 });

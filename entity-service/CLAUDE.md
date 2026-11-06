@@ -99,7 +99,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
-| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` | no | `12` / `3` / `90` / `50` | Thresholds the scheduled refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. Unset, unparseable or not positive takes the default; percentages are capped at 100. Starting values, to be measured on production data |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` | no | `12` / `5` / `90` / `50` | Thresholds the daily refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. A value outside its range (1-60 months, 1-1000 closes, 1-100 percent) or not a whole number takes the default, with a warning. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -8709,9 +8709,22 @@ change request raised from a template is never a candidate, and a suggestion lis
 already started from or citing one of its change requests (`openProposals`). Whether a suggestion is
 already covered by a template is for the person reading it to judge.
 
-**Thresholds** (fixed configuration, applied when the snapshot is computed):
-`STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` (12), `_MIN_CLOSED` (3), `_MIN_SUCCESS_PERCENT` (90),
-`_PLAN_SIMILARITY_PERCENT` (50). Starting values, **not yet measured on production data**. They are no longer request parameters: to
+**Thresholds** (server settings, environment variables read at startup by `config.Load`, applied when the
+snapshot is computed; listed with their meaning in `.env.example`; the user chose server settings over a
+portal screen):
+
+| Variable | Default | Range | Meaning |
+|---|---|---|---|
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` | 12 | 1-60 | Months back a completed change request counts |
+| `STANDARD_CHANGE_SUGGESTION_MIN_CLOSED` | 5 | 1-1000 | Closes (not rollbacks) in the window before a repeated change is suggested |
+| `STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT` | 90 | 1-100 | Closed / (closed + rolled back), at least this |
+| `STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT` | 50 | 1-100 | Plan word-set similarity for two members with one subject to be one change |
+
+A value that is not a whole number in its range (zero, negative, a percent over 100, a typo) falls back to
+the default with a warning naming the key (`envIntInRange`); it never stops the service. The minimum was 3
+at first and raised to 5 (user decision 2026-11-06). How often the refresh runs is csm-scheduled-tasks'
+`SUB_CRON_SCHEDULES` (daily by default, `0 2 * * *`). The other criteria (no linked incident, no high risk
+or impact) are fixed. Starting values, **not yet measured on production data**. They are no longer request parameters: to
 measure them, read with `includeIneligible=true` (every cluster of two or more with its `unmet`), change
 the variables and refresh. The response carries the `criteria` the snapshot used and `scanned` counts
 (the run's, or the one customer's when `accountId` is given; `dismissed` is counted when read).

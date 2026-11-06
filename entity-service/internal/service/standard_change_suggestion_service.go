@@ -34,10 +34,10 @@ import (
 
 // DefaultStandardChangeSuggestionCriteria are the starting thresholds, to be
 // measured against production data and set through configuration
-// (STANDARD_CHANGE_SUGGESTION_*).
+// (STANDARD_CHANGE_SUGGESTION_*, read by config.Load with these same defaults).
 var DefaultStandardChangeSuggestionCriteria = domain.StandardChangeSuggestionCriteria{
 	WindowMonths:          12,
-	MinClosed:             3,
+	MinClosed:             5,
 	MinSuccessPercent:     90,
 	PlanSimilarityPercent: 50,
 }

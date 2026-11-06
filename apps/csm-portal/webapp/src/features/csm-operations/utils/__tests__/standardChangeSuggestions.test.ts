@@ -68,8 +68,8 @@ describe("suggestionActions", () => {
     expect(suggestionActions(d, true)).toEqual({ restore: true });
   });
   it("says why Propose cannot be used: a near miss, an open proposal, nothing clean to start from", () => {
-    expect(suggestionActions(suggestion({ eligible: false, unmet: ["closed 2 times in 12 months (needs 3)"] }), true).propose).toEqual({
-      blockedReason: "Not yet a candidate: closed 2 times in 12 months (needs 3).",
+    expect(suggestionActions(suggestion({ eligible: false, unmet: ["closed 2 times in 12 months (needs 5)"] }), true).propose).toEqual({
+      blockedReason: "Not yet a candidate: closed 2 times in 12 months (needs 5).",
     });
     expect(suggestionActions(suggestion({ openProposals: [{ id: "p1", name: "SCP0000004" }] }), true).propose).toEqual({
       blockedReason: "Already being proposed in SCP0000004.",
@@ -92,12 +92,12 @@ describe("suggestionCriteriaText", () => {
     expect(
       suggestionCriteriaText({
         suggestions: [suggestion()],
-        criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50 },
+        criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
         scanned: { changeRequests: 41, clusters: 5, eligible: 1, dismissed: 0 },
       }),
     ).toBe(
       "1 suggestion from 41 change requests completed in the last 12 months that were not raised from a template. " +
-        "A suggestion is the same change closed at least 3 times, at least 90% of them without a rollback, with no incident linked and no high risk or impact.",
+        "A suggestion is the same change closed at least 5 times, at least 90% of them without a rollback, with no incident linked and no high risk or impact.",
     );
   });
 });

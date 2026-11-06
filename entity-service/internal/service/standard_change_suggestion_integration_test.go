@@ -152,11 +152,13 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			const deploy = "zz sgs test deploy capps pekin prod"
 			const restart = "zz sgs test restart gateway"
 
-			// Customer A: three deployments, a clone of one under another subject, and
+			// Customer A: four deployments, a clone of one under another subject (five
+			// closed: the default minimum), and
 			// three that do not count: raised from a template, too old, canceled.
 			d1 := e.cr("A", "Deploy CApps to Pekin prod 2026-10-01", "CLOSED", sgsPlan, 10)
 			e.cr("A", "[ACME] Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 20)
 			e.cr("A", "Deploy CApps to Pekin prod v2.3", "CLOSED", sgsPlan, 30)
+			e.cr("A", "Deploy CApps to Pekin prod (CHG0011223)", "CLOSED", sgsPlan, 40)
 			clone := e.cr("A", "Promote the Pekin release to DR", "CLOSED", "<p>Different words were typed in this plan</p>", 5)
 			e.exec(`UPDATE change_request SET cloned_from_change_request_id = $2::uuid WHERE id = $1::uuid`, clone, d1)
 			e.cr("A", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 800) // outside the window
@@ -188,7 +190,7 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			e.exec(`INSERT INTO standard_change_proposal (id, kind, state, source_change_request_id, account_id) VALUES ($1::uuid, 'NEW', 'DRAFT', $2::uuid, $3::uuid)`, scp, r1, e.accounts["A"])
 
 			// Customer B: the same deployment, its own cluster, no template.
-			for _, d := range []int{4, 8, 12} {
+			for _, d := range []int{4, 8, 12, 16, 20} {
 				e.cr("B", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, d)
 			}
 
@@ -231,17 +233,17 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			if a == nil {
 				t.Fatalf("no deploy suggestion for customer A in %+v", resp.Suggestions)
 			}
-			if a.MemberCount != 4 || a.ClosedCount != 4 || !a.Eligible || a.ProposeFrom == nil {
+			if a.MemberCount != 5 || a.ClosedCount != 5 || !a.Eligible || a.ProposeFrom == nil {
 				t.Fatalf("customer A deploy = %d members, %d closed, eligible %v (%v), from %+v", a.MemberCount, a.ClosedCount, a.Eligible, a.Unmet, a.ProposeFrom)
 			}
 			if a.Members[0].ID != clone || a.Members[0].JoinedBy != "clone" || a.Members[1].JoinedBy != "subject" {
 				t.Errorf("members = %+v, want the clone first, joined by lineage", a.Members)
 			}
-			if a.ProposeFrom.ID != clone || len(a.Evidence) != 3 {
+			if a.ProposeFrom.ID != clone || len(a.Evidence) != 4 {
 				t.Errorf("proposeFrom = %+v, evidence = %v", a.ProposeFrom, a.Evidence)
 			}
 			b := sgsFind(resp, e.accounts["B"], deploy)
-			if b == nil || b.MemberCount != 3 || !b.Eligible {
+			if b == nil || b.MemberCount != 5 || !b.Eligible {
 				t.Fatalf("customer B deploy = %+v, want its own eligible cluster", b)
 			}
 			rs := sgsFind(resp, e.accounts["A"], restart)
@@ -259,8 +261,8 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			if len(resp.Suggestions) != 1 || len(resp.Suggestions[0].OpenProposals) != 1 || resp.Suggestions[0].OpenProposals[0].ID != scp2 {
 				t.Fatalf("a proposal started since the snapshot: %+v", resp.Suggestions)
 			}
-			if resp.Scanned.Customers != 1 || resp.Scanned.ChangeRequests != 7 || resp.Scanned.Clusters != 2 {
-				t.Errorf("customer A's counts = %+v, want 1 customer, 7 change requests (4 deploy + 3 restart), 2 clusters", resp.Scanned)
+			if resp.Scanned.Customers != 1 || resp.Scanned.ChangeRequests != 8 || resp.Scanned.Clusters != 2 {
+				t.Errorf("customer A's counts = %+v, want 1 customer, 8 change requests (5 deploy + 3 restart), 2 clusters", resp.Scanned)
 			}
 			e.exec(`DELETE FROM work_item WHERE id = $1::uuid`, scp2)
 

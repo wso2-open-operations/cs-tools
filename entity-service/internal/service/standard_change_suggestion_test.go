@@ -188,9 +188,10 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		a := sgCand(1, "Deploy CApps", "CLOSED", sgPlan)
 		a.HasDeviation = true // the newest deviated: not the source, still evidence
 		b, c, d := sgCand(2, "Deploy CApps", "CLOSED", sgPlan), sgCand(3, "Deploy CApps", "CLOSED", sgPlan), sgCand(4, "Deploy CApps", "CLOSED", sgPlan)
+		e := sgCand(5, "Deploy CApps", "CLOSED", sgPlan) // five closed: the default minimum
 		b.Risk, c.Risk = sp("LOW"), sp("MODERATE")
 		d.Impact = sp("MEDIUM")
-		s := judgeSuggestionCluster(mk(a, b, c, d), sgCriteria, nil, nil)
+		s := judgeSuggestionCluster(mk(a, b, c, d, e), sgCriteria, nil, nil)
 		if !s.Eligible || len(s.Unmet) != 0 {
 			t.Fatalf("eligible = %v, unmet = %v", s.Eligible, s.Unmet)
 		}
@@ -201,16 +202,16 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		for _, e := range s.Evidence {
 			ev = append(ev, e.Name)
 		}
-		if strings.Join(ev, ",") != "CHG0000001,CHG0000003,CHG0000004" {
+		if strings.Join(ev, ",") != "CHG0000001,CHG0000003,CHG0000004,CHG0000005" {
 			t.Errorf("evidence = %v", ev)
 		}
-		if s.Risk != (domain.StandardChangeSuggestionBreakdown{Low: 1, Moderate: 1, Unknown: 2}) {
+		if s.Risk != (domain.StandardChangeSuggestionBreakdown{Low: 1, Moderate: 1, Unknown: 3}) {
 			t.Errorf("risk = %+v (unknown is shown, not refused)", s.Risk)
 		}
 		if s.Impact.Moderate != 1 || s.Subject != "Deploy CApps" || s.SuccessRate != 1 {
 			t.Errorf("impact = %+v, subject = %q, success = %v", s.Impact, s.Subject, s.SuccessRate)
 		}
-		if !s.LastCompletedOn.Equal(a.CompletedOn) || !s.FirstCompletedOn.Equal(d.CompletedOn) {
+		if !s.LastCompletedOn.Equal(a.CompletedOn) || !s.FirstCompletedOn.Equal(e.CompletedOn) {
 			t.Errorf("completed between %v and %v", s.FirstCompletedOn, s.LastCompletedOn)
 		}
 	})
@@ -220,7 +221,7 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 		incidents := map[string][]domain.EntityRef{a.ID: {{ID: "i1", Name: "INC1"}}, b.ID: {{ID: "i1", Name: "INC1"}}}
 		s := judgeSuggestionCluster(mk(a, b), sgCriteria, incidents, nil)
 		want := []string{
-			"closed 1 time in 12 months (needs 3)",
+			"closed 1 time in 12 months (needs 5)",
 			"success rate 50% (needs 90%)",
 			"1 incident linked to a member",
 			"1 member has high risk",
@@ -433,15 +434,16 @@ func refreshAll(t *testing.T, svc *standardChangeSuggestionService, limit int) (
 func sgFixture() *fakeSuggestionRepo {
 	eligible := []repository.SuggestionCandidate{
 		sgCand(1, "Deploy CApps", "CLOSED", sgPlan), sgCand(2, "Deploy CApps", "CLOSED", sgPlan), sgCand(3, "Deploy CApps", "CLOSED", sgPlan),
+		sgCand(4, "Deploy CApps", "CLOSED", sgPlan), sgCand(5, "Deploy CApps", "CLOSED", sgPlan),
 	}
-	short := []repository.SuggestionCandidate{sgCand(4, "Restart gateway", "CLOSED", ""), sgCand(5, "Restart gateway", "CLOSED", "")}
+	short := []repository.SuggestionCandidate{sgCand(11, "Restart gateway", "CLOSED", ""), sgCand(12, "Restart gateway", "CLOSED", "")}
 	// The same subject at another customer never joins Acme's cluster.
-	other := []repository.SuggestionCandidate{sgCand(6, "Deploy CApps", "CLOSED", sgPlan), sgCand(7, "Deploy CApps", "CLOSED", sgPlan)}
+	other := []repository.SuggestionCandidate{sgCand(13, "Deploy CApps", "CLOSED", sgPlan), sgCand(14, "Deploy CApps", "CLOSED", sgPlan)}
 	for i := range other {
 		other[i].AccountID, other[i].AccountName = sgAccountB, "Beta"
 	}
 	// Outside the 12-month window: never read.
-	old := sgCand(8, "Deploy CApps", "CLOSED", sgPlan)
+	old := sgCand(15, "Deploy CApps", "CLOSED", sgPlan)
 	old.CompletedOn = sgNow.AddDate(-2, 0, 0)
 	return &fakeSuggestionRepo{cands: append(append(append(append([]repository.SuggestionCandidate{}, eligible...), short...), other...), old)}
 }
@@ -455,7 +457,7 @@ func TestStandardChangeSuggestionService_Refresh(t *testing.T) {
 			t.Fatalf("pages = %d, customers read = %v; want 2, A then B", pages, repo.loaded)
 		}
 		if last.ComputedOn == nil || last.Totals == nil ||
-			*last.Totals != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 7, Clusters: 3, Eligible: 1}) {
+			*last.Totals != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 9, Clusters: 3, Eligible: 1}) {
 			t.Fatalf("last page = %+v, totals %+v", last, last.Totals)
 		}
 		if !repo.sinces[0].Equal(sgNow.AddDate(-1, 0, 0)) {
@@ -487,7 +489,7 @@ func TestStandardChangeSuggestionService_Refresh(t *testing.T) {
 			t.Fatal(err)
 		}
 		last, err := svc.Refresh(context.Background(), domain.RefreshStandardChangeSuggestionsRequest{RunID: first.RunID, Cursor: first.NextCursor, Limit: 1})
-		if err != nil || last.More || last.Totals.Customers != 2 || last.Totals.ChangeRequests != 7 {
+		if err != nil || last.More || last.Totals.Customers != 2 || last.Totals.ChangeRequests != 9 {
 			t.Fatalf("last = %+v, %v", last, err)
 		}
 		// A published run takes no more pages.
@@ -530,10 +532,10 @@ func TestStandardChangeSuggestionService_GetSuggestions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(resp.Suggestions) != 1 || resp.Suggestions[0].Key != "deploy capps" || resp.Suggestions[0].MemberCount != 3 {
+		if len(resp.Suggestions) != 1 || resp.Suggestions[0].Key != "deploy capps" || resp.Suggestions[0].MemberCount != 5 {
 			t.Fatalf("suggestions = %+v", resp.Suggestions)
 		}
-		if resp.ComputedOn == nil || resp.Scanned != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 7, Clusters: 3, Eligible: 1}) {
+		if resp.ComputedOn == nil || resp.Scanned != (domain.StandardChangeSuggestionScan{Customers: 2, ChangeRequests: 9, Clusters: 3, Eligible: 1}) {
 			t.Errorf("computedOn = %v, scanned = %+v", resp.ComputedOn, resp.Scanned)
 		}
 		if len(repo.loaded) != 0 {
@@ -614,9 +616,9 @@ func TestStandardChangeSuggestionService_Dismiss(t *testing.T) {
 }
 
 func TestNewStandardChangeSuggestionService_Criteria(t *testing.T) {
-	svc := NewStandardChangeSuggestionService(&fakeSuggestionRepo{}, stubAccess{}, domain.StandardChangeSuggestionCriteria{MinClosed: 5, MinSuccessPercent: 150}).(*standardChangeSuggestionService)
+	svc := NewStandardChangeSuggestionService(&fakeSuggestionRepo{}, stubAccess{}, domain.StandardChangeSuggestionCriteria{MinClosed: 7, MinSuccessPercent: 150}).(*standardChangeSuggestionService)
 	want := DefaultStandardChangeSuggestionCriteria
-	want.MinClosed, want.MinSuccessPercent = 5, 100
+	want.MinClosed, want.MinSuccessPercent = 7, 100
 	if svc.criteria != want {
 		t.Errorf("criteria = %+v, want %+v (defaults for zero, capped at 100)", svc.criteria, want)
 	}
