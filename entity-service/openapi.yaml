@@ -28900,7 +28900,7 @@ components:
             The change request this one is a clone of (the portal's Clone), recorded as its
             clonedFrom and never changed afterwards. Must be an existing change request (400
             otherwise, refused before the previous system is called on dual-write).
-            PostgreSQL data sources only: DATA_SOURCE=servicenow refuses it (400).
+            Recorded on the PostgreSQL data sources only: DATA_SOURCE=servicenow ignores it.
 
     ChangeRequestLinkOptionsRequest:
       type: object

@@ -1274,7 +1274,9 @@ func main() {
 	// STANDARD_CHANGE_SUGGESTIONS_ENABLED=true, like every task that needs a
 	// route a deployed entity-service may not have yet (without it each run
 	// fails with a 404 and alerts). It only computes: a run-now is safe beside
-	// the scheduled run (whichever publishes last wins).
+	// the scheduled run. Of two runs at once the first to publish wins: that
+	// deletes the other, whose next page is a 409, which ends it quietly (no
+	// alert, nothing more to publish).
 	if envBool("STANDARD_CHANGE_SUGGESTIONS_ENABLED", false) {
 		tasks = append(tasks, standardChangeSuggestionsTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
 			entityServiceScopes, scheduleOverrides, recipientOverrides))

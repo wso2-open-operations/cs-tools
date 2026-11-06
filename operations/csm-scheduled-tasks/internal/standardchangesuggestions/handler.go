@@ -18,9 +18,13 @@ package standardchangesuggestions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
 )
 
 const (
@@ -43,7 +47,9 @@ type refresher interface {
 //
 // It returns an error when a call fails, when a page makes no progress (more is
 // set but the cursor did not move), or at MaxPages, so the engine alerts and
-// retries. A retry starts a new run; the one left unfinished is never read and
+// retries. A 409 on a continuation page is not one: the run was superseded by
+// another that published first (the first run to publish wins), so it stops
+// and returns nil. A retry starts a new run; the one left unfinished is never read and
 // is deleted when a later run is published. Readers keep the previous snapshot
 // until then, so a failed run costs freshness, never a half-written snapshot.
 func Run(client refresher) func(ctx context.Context) error {
@@ -59,6 +65,15 @@ func Run(client refresher) func(ctx context.Context) error {
 				return fmt.Errorf("standard change suggestions refresh: %w", err)
 			}
 			resp, err := client.Refresh(ctx, req)
+			var apiErr *apierror.Error
+			if err != nil && req.RunID != "" && errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusConflict {
+				// The run is no longer open: another run (a run-now beside the
+				// scheduled one) published first, and publishing deletes every other
+				// run. A fresh snapshot is out, so this is not a failure to alert on.
+				slog.InfoContext(ctx, "standard change suggestions refresh: superseded by another run that published first; stopping",
+					"runId", req.RunID, "pages", page-1, "durationMs", time.Since(started).Milliseconds())
+				return nil
+			}
 			if err != nil {
 				return fmt.Errorf("standard change suggestions refresh: page %d: %w; nothing was published", page, err)
 			}

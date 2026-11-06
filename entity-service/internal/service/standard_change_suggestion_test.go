@@ -273,10 +273,12 @@ type fakeSuggestionRepo struct {
 	dismissals  map[string]map[string]domain.StandardChangeSuggestionDismissal
 	dismissed   []string
 	runs        map[string]*repository.SuggestionRun
-	rows        map[string][]repository.SuggestionSnapshotRow // run id -> rows
-	runCustomer map[string]map[string]int                     // run id -> account -> change requests
-	listed      map[string][]string                           // run id -> the customers listed at its start
-	skipped     map[string]map[string]string                  // run id -> account -> reason
+	rows        map[string][]repository.SuggestionSnapshotRow            // run id -> rows
+	runCustomer map[string]map[string]int                                // run id -> account -> change requests
+	listed      map[string][]string                                      // run id -> the customers listed at its start
+	skipped     map[string]map[string]string                             // run id -> account -> reason
+	carried     map[string]map[string][]repository.SuggestionSnapshotRow // run id -> account -> keys a skip carried
+	beforeRows  func()                                                   // called before SnapshotRows reads (once set)
 	nextRun     int
 	loaded      []string        // accounts whose candidates were read, in order
 	slow        map[string]bool // accounts whose read waits until its context ends
@@ -322,12 +324,12 @@ func (f *fakeSuggestionRepo) Restore(context.Context, string) error { return nil
 func (f *fakeSuggestionRepo) StartRun(_ context.Context, crit domain.StandardChangeSuggestionCriteria, windowStart func(time.Time) time.Time) (repository.SuggestionRun, error) {
 	if f.runs == nil {
 		f.runs, f.rows, f.runCustomer = map[string]*repository.SuggestionRun{}, map[string][]repository.SuggestionSnapshotRow{}, map[string]map[string]int{}
-		f.listed, f.skipped = map[string][]string{}, map[string]map[string]string{}
+		f.listed, f.skipped, f.carried = map[string][]string{}, map[string]map[string]string{}, map[string]map[string][]repository.SuggestionSnapshotRow{}
 	}
 	f.nextRun++
 	run := repository.SuggestionRun{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextRun), StartedOn: sgNow, Criteria: crit}
 	f.runs[run.ID] = &run
-	f.runCustomer[run.ID], f.skipped[run.ID] = map[string]int{}, map[string]string{}
+	f.runCustomer[run.ID], f.skipped[run.ID], f.carried[run.ID] = map[string]int{}, map[string]string{}, map[string][]repository.SuggestionSnapshotRow{}
 	since := windowStart(run.StartedOn)
 	f.sinces = append(f.sinces, since)
 	set := map[string]bool{}
@@ -368,6 +370,7 @@ func (f *fakeSuggestionRepo) SaveCustomer(_ context.Context, runID, account stri
 	f.rows[runID] = append(kept, rows...)
 	f.runCustomer[runID][account] = crs
 	delete(f.skipped[runID], account)
+	delete(f.carried[runID], account)
 	return nil
 }
 func (f *fakeSuggestionRepo) SkipCustomer(_ context.Context, runID, account, reason string) error {
@@ -376,6 +379,11 @@ func (f *fakeSuggestionRepo) SkipCustomer(_ context.Context, runID, account, rea
 	}
 	delete(f.runCustomer[runID], account)
 	f.skipped[runID][account] = reason
+	// The keys of the latest published run come along (its rows, or its own carried ones).
+	if latest, _ := f.LatestRun(context.Background()); latest != nil {
+		keys, _ := f.SnapshotKeys(context.Background(), latest.ID, account)
+		f.carried[runID][account] = keys
+	}
 	return nil
 }
 func (f *fakeSuggestionRepo) SkippedCustomers(_ context.Context, runID, account string) ([]domain.StandardChangeSuggestionSkipped, error) {
@@ -408,6 +416,7 @@ func (f *fakeSuggestionRepo) PublishRun(_ context.Context, id string) (repositor
 		if other != id {
 			delete(f.runs, other)
 			delete(f.rows, other)
+			delete(f.carried, other)
 		}
 	}
 	return *run, nil
@@ -439,10 +448,19 @@ func (f *fakeSuggestionRepo) CustomerCounts(_ context.Context, runID, account st
 	}
 	return out, nil
 }
-func (f *fakeSuggestionRepo) SnapshotKeys(ctx context.Context, runID, account string) ([]repository.SuggestionSnapshotRow, error) {
-	return f.SnapshotRows(ctx, runID, account, true)
+func (f *fakeSuggestionRepo) SnapshotKeys(_ context.Context, runID, account string) ([]repository.SuggestionSnapshotRow, error) {
+	var out []repository.SuggestionSnapshotRow
+	for _, r := range f.rows[runID] {
+		if r.AccountID == account {
+			out = append(out, repository.SuggestionSnapshotRow{AccountID: account, Key: r.Key, MemberIDs: r.MemberIDs})
+		}
+	}
+	return append(out, f.carried[runID][account]...), nil
 }
 func (f *fakeSuggestionRepo) SnapshotRows(_ context.Context, runID, account string, includeIneligible bool) ([]repository.SuggestionSnapshotRow, error) {
+	if f.beforeRows != nil {
+		f.beforeRows()
+	}
 	var out []repository.SuggestionSnapshotRow
 	for _, r := range f.rows[runID] {
 		if (account == "" || r.AccountID == account) && (includeIneligible || r.Eligible) {

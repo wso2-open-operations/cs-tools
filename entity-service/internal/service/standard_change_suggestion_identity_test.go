@@ -20,6 +20,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -204,5 +205,86 @@ func TestValidSuggestionKey(t *testing.T) {
 		if got := validSuggestionKey(key); got != want {
 			t.Errorf("validSuggestionKey(%q) = %v, want %v", key, got, want)
 		}
+	}
+}
+
+// A customer skipped by one refresh keeps its keys in the next: the skip carried
+// them over. Without that the next run would mint them afresh, largest first,
+// and the WAF change (grown the larger) would take the bare key from the
+// security-group one, moving a dismissal with it.
+func TestSuggestionKeys_KeptAcrossASkippedRefresh(t *testing.T) {
+	repo := &fakeSuggestionRepo{cands: sgFirewallPair(1)}
+	svc := sgService(repo, true)
+	refreshAll(t, svc, 0)
+	first, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+	sgKey := sgPlanOf(t, first, sgSGPlan, repo.cands).Key
+	wafKey := sgPlanOf(t, first, sgWAFPlan, repo.cands).Key
+	if sgKey == wafKey {
+		t.Fatalf("one key for both: %q", sgKey)
+	}
+
+	old := suggestionCustomerTimeout
+	suggestionCustomerTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { suggestionCustomerTimeout = old })
+	repo.slow = map[string]bool{sgAccountA: true}
+	refreshAll(t, svc, 0) // skipped
+	repo.slow = nil
+	suggestionCustomerTimeout = old
+
+	// The WAF change was done twice more, so it is now the larger cluster.
+	repo.cands = append(repo.cands, sgCand(40, sgFirewall, "CLOSED", sgWAFPlan), sgCand(41, sgFirewall, "CLOSED", sgWAFPlan))
+	refreshAll(t, svc, 0)
+	third, _ := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+	if got := sgPlanOf(t, third, sgSGPlan, repo.cands).Key; got != sgKey {
+		t.Errorf("after a skipped refresh the security-group change's key is %q, want %q", got, sgKey)
+	}
+	if got := sgPlanOf(t, third, sgWAFPlan, repo.cands).Key; got != wafKey {
+		t.Errorf("after a skipped refresh the WAF change's key is %q, want %q", got, wafKey)
+	}
+}
+
+// A cluster whose largest subject group changed (members joined by clone
+// lineage outgrew the subject it was named by) keeps its key: previous keys are
+// matched on shared change requests alone, whatever the subject.
+func TestAssignSuggestionIdentities_KeyKeptWhenTheSubjectChanges(t *testing.T) {
+	cls := mustCluster(t, sgGroup(5, "Promote the Pekin release to DR"), 0.5)
+	if len(cls) != 1 {
+		t.Fatalf("clusters = %d", len(cls))
+	}
+	var ids []string
+	for _, n := range cls[0].nodes {
+		ids = append(ids, n.c.ID)
+	}
+	prev := []repository.SuggestionSnapshotRow{{Key: "deploy capps pekin prod#0a1b2c3d4e5f", MemberIDs: ids[:3]}}
+	assignSuggestionIdentities(cls, prev)
+	if cls[0].id != "deploy capps pekin prod#0a1b2c3d4e5f" || cls[0].key != "promote pekin release dr" {
+		t.Fatalf("id = %q, subject key = %q; want the previous key kept and the new subject reported", cls[0].id, cls[0].key)
+	}
+	if s := judgeSuggestionCluster(cls[0], sgCriteria, nil, nil); s.Key != cls[0].id || s.SubjectKey != "promote pekin release dr" {
+		t.Errorf("suggestion key %q, subjectKey %q", s.Key, s.SubjectKey)
+	}
+}
+
+// A refresh that publishes while GET reads deletes the run GET started on; GET
+// notices and reads again, so it never answers one run's totals with no rows.
+func TestStandardChangeSuggestionService_GetSuggestions_ReadsAgainWhenARefreshPublishes(t *testing.T) {
+	repo := sgFixture()
+	svc := sgService(repo, true)
+	refreshAll(t, svc, 0)
+	first, _ := repo.LatestRun(context.Background())
+	repo.beforeRows = func() {
+		repo.beforeRows = nil
+		refreshAll(t, svc, 0) // publishes a new run, deleting the first
+	}
+	resp, err := svc.GetSuggestions(context.Background(), domain.StandardChangeSuggestionsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, _ := repo.LatestRun(context.Background())
+	if latest.ID == first.ID {
+		t.Fatal("the refresh in between did not publish")
+	}
+	if len(resp.Suggestions) != 1 || resp.Scanned.Eligible != 1 {
+		t.Fatalf("suggestions = %d, scanned = %+v; want the new run's one eligible suggestion", len(resp.Suggestions), resp.Scanned)
 	}
 }

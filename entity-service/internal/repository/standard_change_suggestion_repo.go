@@ -69,7 +69,9 @@ type StandardChangeSuggestionRepository interface {
 	SaveCustomer(ctx context.Context, runID, accountID string, changeRequests int, rows []SuggestionSnapshotRow) error
 	// SkipCustomer records that a customer could not be computed in this run
 	// (reason, e.g. too large for its deadline): no suggestions, and it is
-	// reported as skipped. 409 when the run is gone or published.
+	// reported as skipped. The customer's cluster keys are carried over from the
+	// latest published run (carried_keys, migration 0286), so the next run keeps
+	// them (SnapshotKeys). 409 when the run is gone or published.
 	SkipCustomer(ctx context.Context, runID, accountID, reason string) error
 	// SkippedCustomers are the customers a run skipped (of one customer when
 	// accountID is set), with their reasons.
@@ -87,8 +89,8 @@ type StandardChangeSuggestionRepository interface {
 	// only the eligible ones unless includeIneligible.
 	SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error)
 	// SnapshotKeys is one customer's rows of a run with only their keys and
-	// member ids (no suggestion decoded): what the next refresh carries the
-	// clusters' keys over from.
+	// member ids (no suggestion decoded), and the keys a skip carried into the
+	// run: what the next refresh carries the clusters' keys over from.
 	SnapshotKeys(ctx context.Context, runID, accountID string) ([]SuggestionSnapshotRow, error)
 }
 
@@ -448,7 +450,7 @@ func (r *standardChangeSuggestionRepo) SaveCustomer(ctx context.Context, runID, 
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests)
 			VALUES ($1::uuid, $2::uuid, $3)
-			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = EXCLUDED.change_requests, skipped_reason = NULL`,
+			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = EXCLUDED.change_requests, skipped_reason = NULL, carried_keys = NULL`,
 			runID, accountID, changeRequests); err != nil {
 			return fmt.Errorf("save suggestions: %w", err)
 		}
@@ -476,9 +478,24 @@ func (r *standardChangeSuggestionRepo) SkipCustomer(ctx context.Context, runID, 
 		if _, err := tx.Exec(ctx, `DELETE FROM standard_change_suggestion_snapshot WHERE run_id = $1::uuid AND account_id = $2::uuid`, runID, accountID); err != nil {
 			return fmt.Errorf("skip customer: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests, skipped_reason)
-			VALUES ($1::uuid, $2::uuid, NULL, $3)
-			ON CONFLICT (run_id, account_id) DO UPDATE SET change_requests = NULL, skipped_reason = EXCLUDED.skipped_reason`,
+		// The keys of the latest published run: its rows, or what it carried
+		// itself when it skipped this customer too.
+		if _, err := tx.Exec(ctx, `
+			WITH latest AS (
+				SELECT id FROM standard_change_suggestion_run
+				 WHERE completed_on IS NOT NULL ORDER BY completed_on DESC LIMIT 1
+			), keys AS (
+				SELECT COALESCE(
+				  (SELECT jsonb_agg(jsonb_build_object('key', s.suggestion_key, 'memberIds', to_jsonb(s.member_ids)) ORDER BY s.id)
+				     FROM standard_change_suggestion_snapshot s
+				    WHERE s.run_id = (SELECT id FROM latest) AND s.account_id = $2::uuid),
+				  (SELECT c.carried_keys FROM standard_change_suggestion_run_customer c
+				    WHERE c.run_id = (SELECT id FROM latest) AND c.account_id = $2::uuid)) AS carried
+			)
+			INSERT INTO standard_change_suggestion_run_customer (run_id, account_id, change_requests, skipped_reason, carried_keys)
+			SELECT $1::uuid, $2::uuid, NULL, $3, carried FROM keys
+			ON CONFLICT (run_id, account_id) DO UPDATE
+			   SET change_requests = NULL, skipped_reason = EXCLUDED.skipped_reason, carried_keys = EXCLUDED.carried_keys`,
 			runID, accountID, reason); err != nil {
 			return fmt.Errorf("skip customer: %w", err)
 		}
@@ -572,10 +589,17 @@ func (r *standardChangeSuggestionRepo) SnapshotRows(ctx context.Context, runID, 
 // SnapshotKeys implements StandardChangeSuggestionRepository.
 func (r *standardChangeSuggestionRepo) SnapshotKeys(ctx context.Context, runID, accountID string) ([]SuggestionSnapshotRow, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT suggestion_key, member_ids::text[]
-		  FROM standard_change_suggestion_snapshot
-		 WHERE run_id = $1::uuid AND account_id = $2::uuid
-		 ORDER BY id`, runID, accountID)
+		SELECT key, member_ids FROM (
+			SELECT 0 AS src, s.id AS ord, s.suggestion_key AS key, s.member_ids::text[] AS member_ids
+			  FROM standard_change_suggestion_snapshot s
+			 WHERE s.run_id = $1::uuid AND s.account_id = $2::uuid
+			UNION ALL
+			SELECT 1, e.ord, e.value ->> 'key',
+			       ARRAY(SELECT jsonb_array_elements_text(e.value -> 'memberIds'))
+			  FROM standard_change_suggestion_run_customer c,
+			       jsonb_array_elements(COALESCE(c.carried_keys, '[]'::jsonb)) WITH ORDINALITY AS e(value, ord)
+			 WHERE c.run_id = $1::uuid AND c.account_id = $2::uuid
+		) k ORDER BY src, ord`, runID, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("read suggestion keys: %w", err)
 	}

@@ -106,26 +106,51 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	if account != "" && !validate.IsUUID(account) {
 		return domain.StandardChangeSuggestionsResponse{}, &apierror.ValidationError{Msg: "accountId must be a UUID"}
 	}
+	// The run, its counts and its rows are separate reads: a refresh publishing
+	// between them (which deletes the run read first) would answer one run's
+	// computedOn and totals with no rows. So the latest run is looked up again
+	// after the rows, and when it moved the whole read is done once more.
+	var resp domain.StandardChangeSuggestionsResponse
+	for attempt := 0; ; attempt++ {
+		var runID string
+		var err error
+		resp, runID, err = s.readSuggestions(ctx, account, req)
+		if err != nil || runID == "" || attempt == 1 {
+			return resp, err
+		}
+		latest, err := s.repo.LatestRun(ctx)
+		if err != nil {
+			return resp, err
+		}
+		if latest != nil && latest.ID == runID {
+			return resp, nil
+		}
+		slog.InfoContext(ctx, "standard change suggestions: a refresh published during the read; reading again", "runId", runID)
+	}
+}
+
+// readSuggestions is one read of GetSuggestions (see there), with the run it read.
+func (s *standardChangeSuggestionService) readSuggestions(ctx context.Context, account string, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, string, error) {
 	resp := domain.StandardChangeSuggestionsResponse{Suggestions: []domain.StandardChangeSuggestion{}, Criteria: s.criteria, SkippedCustomers: []domain.StandardChangeSuggestionSkipped{}}
 	run, err := s.repo.LatestRun(ctx)
 	if err != nil || run == nil {
-		return resp, err // nothing computed yet: an empty list, no computedOn
+		return resp, "", err // nothing computed yet: an empty list, no computedOn
 	}
 	resp.Criteria, resp.ComputedOn = run.Criteria, run.CompletedOn
 	resp.Scanned = run.Counts
 	if account != "" {
 		// The run's totals are every customer's: one customer's are its own.
 		if resp.Scanned, err = s.repo.CustomerCounts(ctx, run.ID, account); err != nil {
-			return resp, err
+			return resp, "", err
 		}
 	}
 	if resp.SkippedCustomers, err = s.repo.SkippedCustomers(ctx, run.ID, account); err != nil {
-		return resp, err
+		return resp, "", err
 	}
 
 	rows, err := s.repo.SnapshotRows(ctx, run.ID, account, req.IncludeIneligible)
 	if err != nil {
-		return resp, err
+		return resp, "", err
 	}
 	var accounts []string // nil: every customer's dismissals
 	if account != "" {
@@ -133,7 +158,7 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	}
 	dismissals, err := s.repo.Dismissals(ctx, accounts)
 	if err != nil {
-		return resp, err
+		return resp, "", err
 	}
 	var memberIDs []string
 	for _, row := range rows {
@@ -141,7 +166,7 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 	}
 	proposals, err := s.repo.OpenProposalsOf(ctx, memberIDs)
 	if err != nil {
-		return resp, err
+		return resp, "", err
 	}
 
 	for _, row := range rows {
@@ -167,7 +192,7 @@ func (s *standardChangeSuggestionService) GetSuggestions(ctx context.Context, re
 		resp.Suggestions = append(resp.Suggestions, sg)
 	}
 	sortSuggestions(resp.Suggestions)
-	return resp, nil
+	return resp, run.ID, nil
 }
 
 // sortSuggestions: eligible first, then the most often closed, then the most recent.
