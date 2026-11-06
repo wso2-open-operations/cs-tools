@@ -23,6 +23,11 @@ import {
   uploadImagesBeforeCreate,
 } from "@features/csm-cases/api/inlineImageUploads";
 
+/** The message to show when {@link PreCreateInlineImages.uploadImages} rejected. */
+export function preCreateImagesErrorMessage(err: unknown): string {
+  return err instanceof Error && err.message ? err.message : "An image could not be uploaded.";
+}
+
 export interface PreCreateInlineImages {
   /**
    * Give this to the description's editor as `onImageUpload`. Undefined while

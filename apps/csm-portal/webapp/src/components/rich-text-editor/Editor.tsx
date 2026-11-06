@@ -45,9 +45,11 @@ import {
 } from "@components/rich-text-editor/richTextEditor";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
 import {
+  imagePasteRefusalMessage,
   inlineImageRefusal,
   inlineImagesInEditor,
   rememberInlineImageSize,
+  type ImagePasteRefusal,
   type InlineImageRoom,
 } from "@components/rich-text-editor/inlineImageLimits";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
@@ -238,7 +240,7 @@ const ClipboardImagePlugin = ({
   onPasteError,
   onImageUpload,
 }: {
-  onPasteError?: (reason: "size" | "type" | "count" | "total") => void;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
   onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
@@ -575,7 +577,7 @@ const Editor = ({
    * draft already holds the most images, `"total"` when the draft's images would pass the
    * total size limit (both only with `onImageUpload`).
    */
-  onPasteError?: (reason: "size" | "type" | "count" | "total") => void;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
   /**
    * Stores a pasted or picked image instead of embedding it as base64; see
    * {@link ImageUploadHandler}. Leave unset to keep embedding.
@@ -584,6 +586,19 @@ const Editor = ({
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
+  // Without an `onPasteError` handler a refused pasted image is said right
+  // below the editor, for a few seconds.
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageNotice) return undefined;
+    const timer = setTimeout(() => setImageNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [imageNotice]);
+  const onImageRefused = useMemo(
+    () =>
+      onPasteError ?? ((reason: ImagePasteRefusal) => setImageNotice(imagePasteRefusalMessage(reason))),
+    [onPasteError],
+  );
 
   const memoizedEditorConfig = useMemo(
     () => ({
@@ -810,7 +825,7 @@ const Editor = ({
           <ListPlugin />
           <TablePlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
+          <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
           <PasteNormalizationPlugin />
           <LinkPlugin />
           <ClickableLinkPlugin />
@@ -819,6 +834,11 @@ const Editor = ({
           <ResetPlugin resetTrigger={resetTrigger} />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
+        {imageNotice && (
+          <Typography variant="caption" color="error" role="alert" sx={{ display: "block", mt: 0.5 }}>
+            {imageNotice}
+          </Typography>
+        )}
         {overlayElement && (
           <Box
             sx={{

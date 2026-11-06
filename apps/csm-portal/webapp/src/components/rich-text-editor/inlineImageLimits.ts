@@ -17,7 +17,11 @@
 import { $nodesOfType, type LexicalEditor } from "lexical";
 import { formatMegabytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
-import { MAX_COMMENT_IMAGES } from "@components/rich-text-editor/richTextConstants";
+import {
+  ALLOWED_IMAGE_TYPES_LABEL,
+  MAX_COMMENT_IMAGES,
+  MAX_COMMENT_IMAGES_MESSAGE,
+} from "@components/rich-text-editor/richTextConstants";
 
 /**
  * What one comment or description may hold in inline images: at most
@@ -71,4 +75,21 @@ export function inlineImageRefusal(room: InlineImageRoom, bytes: number): Inline
 
 export function inlineImagesTotalMessage(): string {
   return `Images in one comment or description can't exceed ${formatMegabytes(inlineImageMaxBytes())} in total.`;
+}
+
+/** Why a pasted image was refused. */
+export type ImagePasteRefusal = "size" | "type" | "count" | "total";
+
+/** The message for a refused pasted image. */
+export function imagePasteRefusalMessage(reason: ImagePasteRefusal): string {
+  switch (reason) {
+    case "count":
+      return MAX_COMMENT_IMAGES_MESSAGE;
+    case "total":
+      return inlineImagesTotalMessage();
+    case "type":
+      return `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`;
+    default:
+      return `Pasted image exceeds the maximum allowed size of ${formatMegabytes(inlineImageMaxBytes())}.`;
+  }
 }
