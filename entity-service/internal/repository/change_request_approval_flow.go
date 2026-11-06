@@ -403,23 +403,28 @@ func changeRequestCreatorUserIDsWith(ctx context.Context, q crQuerier, workItemI
 		ids[strings.ToLower(*requestedBy)] = true
 	}
 	if createdBy != nil && strings.TrimSpace(*createdBy) != "" {
-		rows, err := q.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, strings.TrimSpace(*createdBy))
-		if err != nil {
+		if err := addUserIDsForEmail(ctx, q, strings.TrimSpace(*createdBy), ids); err != nil {
 			return nil, fmt.Errorf("resolve change request creator: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				return nil, fmt.Errorf("scan change request creator: %w", err)
-			}
-			ids[strings.ToLower(id)] = true
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("change request creator rows: %w", err)
 		}
 	}
 	return ids, nil
+}
+
+// addUserIDsForEmail adds to into the (lower-cased) id of every "user" row with
+// email, ignoring case: one person can have several.
+func addUserIDsForEmail(ctx context.Context, q crQuerier, email string, into map[string]bool) error {
+	rows, err := q.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, email)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		into[strings.ToLower(id)] = true
+	}
+	return nil
 }
 
 // groupMemberIDs lists the distinct user ids in the "group" identified by
@@ -1801,7 +1806,7 @@ func provisionCustomerStage(ctx context.Context, tx pgx.Tx, workItemID, actorEma
 			"changeRequestId", workItemID, "stage", spec.label)
 		return false, nil
 	}
-	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, spec.label, approvalPool{members: members}, creatorIDs); err != nil {
+	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, spec.label, 1, approvalPool{members: members}, creatorIDs); err != nil {
 		return false, err
 	}
 	return true, nil

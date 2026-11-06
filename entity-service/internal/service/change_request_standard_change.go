@@ -142,10 +142,9 @@ func (s *changeRequestService) prepareStandardChange(ctx context.Context, req do
 		p := *v.Priority
 		req.Priority = &p
 	}
-	if types := tpl.CurrentVersion.DeploymentTypes; len(types) > 0 && len(req.DeploymentIDs) == 0 {
-		return req, &apierror.ValidationError{Code: apierror.CodeChangeRequestStandardTemplateField,
-			Msg: fmt.Sprintf("the standard change template %q is for %s deployments: choose at least one of the project's deployments of that type (deploymentIds)", tpl.Name, repository.DeploymentTypesText(types))}
-	}
+	// The deployment types it fixes are checked against the chosen deployments by
+	// the repository, on both create paths (repository.ValidateChangeRequestLinks
+	// before the previous system is called, the create transaction after).
 	versionID := tpl.CurrentVersion.ID
 	req.StandardChangeTemplateVersionID = &versionID
 	req.StandardChangeParameters = stored

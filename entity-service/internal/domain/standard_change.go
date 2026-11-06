@@ -73,9 +73,16 @@ const (
 	StandardChangeProposalStateCancelled StandardChangeProposalState = "cancelled"
 )
 
-// IsOpen reports whether a proposal in this state can still be approved.
+// IsOpen reports whether a proposal in this state can still be approved: a
+// draft, or one in review.
 func (s StandardChangeProposalState) IsOpen() bool {
-	return s == StandardChangeProposalStateDraft || s == StandardChangeProposalStateCABReview || s == StandardChangeProposalStateAuthorityReview
+	return s == StandardChangeProposalStateDraft || s.IsInReview()
+}
+
+// IsInReview reports whether a proposal in this state waits on a decision: of
+// the CAB, or of the Standard Change Authority.
+func (s StandardChangeProposalState) IsInReview() bool {
+	return s == StandardChangeProposalStateCABReview || s == StandardChangeProposalStateAuthorityReview
 }
 
 // StandardChangeParameterType is the input a parameter takes.

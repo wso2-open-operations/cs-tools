@@ -8467,10 +8467,11 @@ template itself is gated twice:
    unchanged) is `domain.StandardChangeAuthorityApprovals` = 2: the stage stays open until two
    different members approve, each once; the second approval applies the proposal. Any rejection (at
    either stage) ends it and needs a comment. **People, not user rows**: `"user".email` is not unique,
-   so the quorum counts distinct emails of APPROVED rows, an approval cancels the approver's other
-   REQUESTED rows on the stage, a second approval by the same email is a 403, the CAB approver is left
-   out by every user row of their email (as the proposer already is, `changeRequestCreatorUserIDs`),
-   and `resolveAuthorityPool` counts eligible members by distinct email.
+   so the quorum and the approvals a proposal's `stages` show both count distinct emails of APPROVED
+   rows (`stageApprovalsSQL`), an approval cancels the approver's other REQUESTED rows on the stage, a
+   second decision by an email that already approved is a 403, the CAB approver is left out by every
+   user row of their email (as the proposer already is, `changeRequestCreatorUserIDs`), and
+   `resolveAuthorityPool` counts eligible members by distinct email.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
 the stage it was meant for (`stageId`, which the webapp always sends): when the proposal has moved on
@@ -8518,11 +8519,11 @@ risk/impact analysis, category, impact, risk, rollback duration, planning visibi
 customer boxes. Sending any of those (or `implementationDeviation`) is a 400. What the template
 leaves open the caller chooses: when the version sets `priority` it is the change request's (another
 `priority` sent is a 400 `change_request_standard_template_field`), else the caller's; when it sets
-`deploymentTypes` the change request needs at least one deployment (400 in `prepareStandardChange`)
-and every deployment of those types (`checkStandardChangeDeployments`, in the create transaction once
-the deployments are written: 400 naming the others, an untyped deployment included; on dual-write the
-same check runs before the previous system is called, through `ValidateChangeRequestLinks` with the
-version id). The repository records
+`deploymentTypes` the change request needs at least one deployment and every deployment of those
+types (`checkStandardChangeDeployments`, in the create transaction once the deployments are written:
+400 naming the others by name, an untyped deployment included; on dual-write the same check runs
+before the previous system is called, through `ValidateChangeRequestLinks` with the version id; both
+judge through `templateDeploymentsRefusal`). The repository records
 the version and values in the create transaction under `FOR SHARE` on the template, refusing (409)
 a template suspended, retired or revised in between. On dual-write the previous system gets the
 rendered content and none of the template fields (`DATA_SOURCE=servicenow` refuses them: 400).
@@ -8533,10 +8534,11 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
   is accepted. `priority` is frozen only when the version fixes one. A PATCH that writes the
   deployments of a change whose version names deployment types (`deploymentIds`, or the single
   `deploymentId` an older client sends, which writes `work_item.deployment_id`) is checked again
-  (`checkStandardChangeDeployments`, after the rows are written, over both): at least one, all of
-  those types. The detail's `standardChange` carries the version's `priority` and `deploymentTypes`
-  so an edit form can keep them. The parameters cannot be edited either (decision: a typo in New is a cancel and
-  re-raise; editing them would need a re-render the dual-write mirror does not have).
+  (`checkStandardChangeDeployments`, after the rows are written, over both, only for a change raised
+  from a template): at least one, all of those types. The detail's `standardChange` carries the
+  version's `priority` and `deploymentTypes` so an edit form can keep them. The parameters cannot be
+  edited either (decision: a typo in New is a cancel and re-raise; editing them would need a re-render
+  the dual-write mirror does not have).
 - **Type**: a templated change stays standard; while the catalogue is wired no other change becomes
   standard by PATCH (`refuseBecomingStandard`, service level, so repository callers keep the old rule).
 - **Request Approval** needs the template still `ACTIVE` and still at the version raised from (409

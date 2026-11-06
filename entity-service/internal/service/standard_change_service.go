@@ -141,14 +141,30 @@ func (s *standardChangeService) GetTemplate(ctx context.Context, id string) (dom
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	t.CanSuspend = t.State == domain.StandardChangeTemplateStateActive && (roles.owner || roles.cab || roles.authority)
-	t.CanResume = t.State == domain.StandardChangeTemplateStateSuspended && roles.authority
-	t.CanClearReview = t.ReviewRequired && t.State != domain.StandardChangeTemplateStateRetired && roles.authority
-	return t, nil
+	return withTemplatePermissions(t, roles), nil
 }
 
 // templateRoles is who the caller is to a template.
 type templateRoles struct{ owner, cab, authority bool }
+
+// mayManage says whether the caller may act on a template: suspending it (a
+// brake) is open to its owner, the CAB and the Standard Change Authority;
+// releasing it (resume, clear the review flag), which puts it back in use with no
+// review, to the Standard Change Authority only.
+func (r templateRoles) mayManage(release bool) bool {
+	if release {
+		return r.authority
+	}
+	return r.owner || r.cab || r.authority
+}
+
+// withTemplatePermissions sets what the caller, of roles, may do to t now.
+func withTemplatePermissions(t domain.StandardChangeTemplate, roles templateRoles) domain.StandardChangeTemplate {
+	t.CanSuspend = t.State == domain.StandardChangeTemplateStateActive && roles.mayManage(false)
+	t.CanResume = t.State == domain.StandardChangeTemplateStateSuspended && roles.mayManage(true)
+	t.CanClearReview = t.ReviewRequired && t.State != domain.StandardChangeTemplateStateRetired && roles.mayManage(true)
+	return t
+}
 
 func (s *standardChangeService) rolesOf(ctx context.Context, actor string, t domain.StandardChangeTemplate) (templateRoles, error) {
 	var r templateRoles
@@ -195,29 +211,33 @@ func (s *standardChangeService) GetTemplateVersion(ctx context.Context, template
 	return *v, nil
 }
 
-// mayManageTemplate checks the caller may act on the template: suspending (a
-// brake) is open to its owner, the CAB and the Standard Change Authority;
-// releasing it (resume, clear the review flag), which puts it back in use with
-// no review, to the Standard Change Authority only.
-func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string, release bool) error {
+// mayManageTemplate checks the caller may act on the template
+// (templateRoles.mayManage) and returns who they are to it.
+func (s *standardChangeService) mayManageTemplate(ctx context.Context, actor, id string, release bool) (templateRoles, error) {
 	t, err := s.readTemplate(ctx, id)
 	if err != nil {
-		return err
+		return templateRoles{}, err
 	}
 	roles, err := s.rolesOf(ctx, actor, t)
 	if err != nil {
-		return err
+		return templateRoles{}, err
+	}
+	if roles.mayManage(release) {
+		return roles, nil
 	}
 	if release {
-		if !roles.authority {
-			return &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can put a template back in use (resume it, or clear its review flag)"}
-		}
-		return nil
+		return templateRoles{}, &apierror.ForbiddenError{Msg: "only a member of the Standard Change Authority can put a template back in use (resume it, or clear its review flag)"}
 	}
-	if !roles.owner && !roles.cab && !roles.authority {
-		return &apierror.ForbiddenError{Msg: "only the template's owner, a member of the CAB or a member of the Standard Change Authority can suspend it"}
+	return templateRoles{}, &apierror.ForbiddenError{Msg: "only the template's owner, a member of the CAB or a member of the Standard Change Authority can suspend it"}
+}
+
+// managedTemplate is the template a suspend, resume or clear-review wrote, as
+// GetTemplate answers it for the caller of roles.
+func managedTemplate(t *domain.StandardChangeTemplate, roles templateRoles) (domain.StandardChangeTemplate, error) {
+	if t == nil {
+		return domain.StandardChangeTemplate{}, &apierror.NotFoundError{Msg: "standard change template not found"}
 	}
-	return nil
+	return withTemplatePermissions(*t, roles), nil
 }
 
 func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error) {
@@ -229,58 +249,63 @@ func (s *standardChangeService) SuspendTemplate(ctx context.Context, id string, 
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if err := s.mayManageTemplate(ctx, actor, id, false); err != nil {
+	roles, err := s.mayManageTemplate(ctx, actor, id, false)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if _, err := s.repo.SetTemplateState(ctx, id, actor, []string{"ACTIVE"}, "SUSPENDED", r); err != nil {
+	t, err := s.repo.SetTemplateState(ctx, id, actor, []string{"ACTIVE"}, "SUSPENDED", r)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	return s.GetTemplate(ctx, id)
+	return managedTemplate(t, roles)
 }
 
 func (s *standardChangeService) ResumeTemplate(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
-	actor, note, err := s.releaseNote(ctx, id, req)
+	actor, note, roles, err := s.releaseNote(ctx, id, req)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if _, err := s.repo.SetTemplateState(ctx, id, actor, []string{"SUSPENDED"}, "ACTIVE", &note); err != nil {
+	t, err := s.repo.SetTemplateState(ctx, id, actor, []string{"SUSPENDED"}, "ACTIVE", &note)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	return s.GetTemplate(ctx, id)
+	return managedTemplate(t, roles)
 }
 
 func (s *standardChangeService) ClearTemplateReview(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (domain.StandardChangeTemplate, error) {
-	actor, note, err := s.releaseNote(ctx, id, req)
+	actor, note, roles, err := s.releaseNote(ctx, id, req)
 	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	if _, err := s.repo.ClearReviewRequired(ctx, id, actor, note); err != nil {
+	t, err := s.repo.ClearReviewRequired(ctx, id, actor, note)
+	if err != nil {
 		return domain.StandardChangeTemplate{}, err
 	}
-	return s.GetTemplate(ctx, id)
+	return managedTemplate(t, roles)
 }
 
 // releaseNote checks a resume or clear-review: a Standard Change Authority
 // member, with a note saying why the template may be used again.
-func (s *standardChangeService) releaseNote(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (string, string, error) {
+func (s *standardChangeService) releaseNote(ctx context.Context, id string, req domain.StandardChangeTemplateNoteRequest) (string, string, templateRoles, error) {
 	actor, err := s.actor(ctx)
 	if err != nil {
-		return "", "", err
+		return "", "", templateRoles{}, err
 	}
 	if err := checkUUIDFields(map[string]string{"id": id}); err != nil {
-		return "", "", err
+		return "", "", templateRoles{}, err
 	}
 	note, err := normalizeSuspendReason(req.Note)
 	if err != nil {
-		return "", "", &apierror.ValidationError{Msg: fmt.Sprintf("note must be at most %d characters", maxStandardChangeSuspendReason)}
+		return "", "", templateRoles{}, &apierror.ValidationError{Msg: fmt.Sprintf("note must be at most %d characters", maxStandardChangeSuspendReason)}
 	}
 	if note == nil {
-		return "", "", &apierror.ValidationError{Msg: "note is required: say why the template may be used again"}
+		return "", "", templateRoles{}, &apierror.ValidationError{Msg: "note is required: say why the template may be used again"}
 	}
-	if err := s.mayManageTemplate(ctx, actor, id, true); err != nil {
-		return "", "", err
+	roles, err := s.mayManageTemplate(ctx, actor, id, true)
+	if err != nil {
+		return "", "", templateRoles{}, err
 	}
-	return actor, *note, nil
+	return actor, *note, roles, nil
 }
 
 func (s *standardChangeService) CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error) {
@@ -371,10 +396,9 @@ func (s *standardChangeService) proposalFor(ctx context.Context, viewer, id stri
 		p.CanCancel = authority
 	}
 	// Only the stage the proposal waits on (its latest) has REQUESTED rows.
-	waiting := p.State == domain.StandardChangeProposalStateCABReview || p.State == domain.StandardChangeProposalStateAuthorityReview
 	for i := range p.Approvers {
 		a := &p.Approvers[i]
-		a.CanDecide = !mine && viewer != "" && waiting &&
+		a.CanDecide = !mine && viewer != "" && p.State.IsInReview() &&
 			a.State == "REQUESTED" && a.Approver != nil && strings.EqualFold(a.Approver.Email, viewer)
 	}
 	return *p, nil

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -122,42 +123,84 @@ func DeploymentTypesText(types []string) string {
 }
 
 // checkStandardChangeDeployments refuses (400, CodeChangeRequestStandardTemplateField)
-// a templated change request whose template version names deployment types
-// (migration 0277) when it has no deployment, or a deployment of another type
-// (an untyped one included). The deployments are the link rows and the single
-// work_item.deployment_id an older client still writes. Run in the writing
-// transaction, after its deployments are written, by create and by any PATCH
-// that writes them.
+// a change request raised from template version templateVersionID, when that
+// version names deployment types (migration 0277), if it has no deployment, or a
+// deployment of another type (an untyped one included). The deployments are the
+// link rows and the single work_item.deployment_id an older client still writes.
+// Run in the writing transaction, after its deployments are written, by create
+// and by any PATCH that writes them, of a templated change request only.
 //
 // crvis: reads one change request's own deployments by id inside a transaction that has just written them
-func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeRequestID string) error {
-	var types []string
-	var name string
-	err := tx.QueryRow(ctx, `
-		SELECT v.deployment_types, t.name
-		  FROM change_request cr
-		  JOIN standard_change_template_version v ON v.id = cr.standard_change_template_version_id
-		  JOIN standard_change_template t ON t.id = v.template_id
-		 WHERE cr.id = $1::uuid AND cardinality(v.deployment_types) > 0`, changeRequestID).Scan(&types, &name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
+func checkStandardChangeDeployments(ctx context.Context, tx pgx.Tx, changeRequestID, templateVersionID string) error {
+	name, types, err := standardChangeTemplateDeploymentTypes(ctx, tx, templateVersionID)
 	if err != nil {
 		return fmt.Errorf("check standard change deployments: %w", err)
 	}
-	var total int
-	var other []string
-	if err := tx.QueryRow(ctx, `
+	if len(types) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
 		WITH chosen AS (
 		    SELECT l.deployment_id AS id FROM change_request_deployment l WHERE l.change_request_id = $1::uuid
 		    UNION
 		    SELECT wi.deployment_id FROM work_item wi WHERE wi.id = $1::uuid AND wi.deployment_id IS NOT NULL)
-		SELECT COUNT(*), COALESCE(array_agg(d.name || ' (' || COALESCE(LOWER(d.type::text), 'no type') || ')' ORDER BY d.name)
-		                     FILTER (WHERE d.type IS NULL OR NOT (LOWER(d.type::text) = ANY($2::text[]))), '{}')
-		  FROM chosen c JOIN deployment d ON d.id = c.id`, changeRequestID, types).Scan(&total, &other); err != nil {
+		SELECT d.name, COALESCE(LOWER(d.type::text), '')
+		  FROM chosen c JOIN deployment d ON d.id = c.id`, changeRequestID)
+	if err != nil {
 		return fmt.Errorf("check standard change deployments: %w", err)
 	}
-	return standardChangeDeploymentsRefusal(name, types, total, other)
+	deps, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (templateDeployment, error) {
+		var d templateDeployment
+		err := row.Scan(&d.name, &d.typ)
+		return d, err
+	})
+	if err != nil {
+		return fmt.Errorf("check standard change deployments: %w", err)
+	}
+	return templateDeploymentsRefusal(name, types, deps)
+}
+
+// standardChangeTemplateDeploymentTypes reads the deployment types template
+// version versionID names, and its template's name. No types when the version
+// names none, or does not exist.
+func standardChangeTemplateDeploymentTypes(ctx context.Context, q rowQuerier, versionID string) (name string, types []string, err error) {
+	err = q.QueryRow(ctx, `SELECT t.name, v.deployment_types FROM standard_change_template_version v
+		JOIN standard_change_template t ON t.id = v.template_id WHERE v.id = $1::uuid`, versionID).Scan(&name, &types)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, nil
+	}
+	return name, types, err
+}
+
+// templateDeployment is a deployment chosen for a templated change request, as
+// the deployment-type rule judges it: its name and its lower-cased type ("" when
+// it has none).
+type templateDeployment struct{ name, typ string }
+
+// templateDeploymentsRefusal is the deployment-type rule, for the create's
+// pre-flight (ValidateChangeRequestLinks) and the writing transactions
+// (checkStandardChangeDeployments) alike: deps, chosen for a change of template
+// name, which is for deployments of types, are refused when there are none or
+// one is of another type (named "name (type)", "no type" when untyped, in name
+// order). nil when types is empty.
+func templateDeploymentsRefusal(name string, types []string, deps []templateDeployment) error {
+	if len(types) == 0 {
+		return nil
+	}
+	sorted := slices.Clone(deps)
+	slices.SortStableFunc(sorted, func(a, b templateDeployment) int { return strings.Compare(a.name, b.name) })
+	var other []string
+	for _, d := range sorted {
+		if slices.Contains(types, d.typ) {
+			continue
+		}
+		t := d.typ
+		if t == "" {
+			t = "no type"
+		}
+		other = append(other, d.name+" ("+t+")")
+	}
+	return standardChangeDeploymentsRefusal(name, types, len(deps), other)
 }
 
 // standardChangeDeploymentsRefusal is the 400 for a change of template name,

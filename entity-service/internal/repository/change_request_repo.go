@@ -2060,9 +2060,10 @@ func patchChangeRequestTx(ctx context.Context, tx pgx.Tx, id string, req domain.
 	}
 	// A change raised from a standard change template that names deployment
 	// types keeps at least one deployment, all of those types (the single
-	// deploymentId an older client sends included).
-	if (linkPlan != nil && linkPlan.writeDeployments) || req.DeploymentID != nil {
-		if err := checkStandardChangeDeployments(ctx, tx, id); err != nil {
+	// deploymentId an older client sends included). Either field makes the PATCH
+	// read the gates (changeRequestPatchNeedsGate), so templateVersionID is known.
+	if gates.templateVersionID != nil && ((linkPlan != nil && linkPlan.writeDeployments) || req.DeploymentID != nil) {
+		if err := checkStandardChangeDeployments(ctx, tx, id, *gates.templateVersionID); err != nil {
 			return "", err
 		}
 	}
@@ -2378,7 +2379,7 @@ func provisionApprovalStage(ctx context.Context, tx pgx.Tx, workItemID string, a
 	if err != nil {
 		return false, err
 	}
-	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, checkpoint.Label, pool, creatorIDs); err != nil {
+	if err := insertApprovalStage(ctx, tx, workItemID, actorEmail, checkpoint.Label, 1, pool, creatorIDs); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -2392,13 +2393,15 @@ func provisionApprovalStage(ctx context.Context, tx pgx.Tx, workItemID string, a
 //
 // checkpoint_label (migration 0179) records which checkpoint this is
 // explicitly; GetChangeRequestApprovals prefers it over the ordinal heuristic.
-func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail, label string, pool approvalPool, creatorIDs map[string]bool) error {
+// required is how many different people must approve the stage
+// (required_approvals, migration 0277): 1 for every change request stage.
+func insertApprovalStage(ctx context.Context, tx pgx.Tx, workItemID, actorEmail, label string, required int, pool approvalPool, creatorIDs map[string]bool) error {
 	var stageID string
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, checkpoint_label)
-		 VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, NULLIF($3::text, '')::uuid, $4)
+		`INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, checkpoint_label, required_approvals)
+		 VALUES (gen_random_uuid(), NOW(), NOW(), $1, $1, $2, NULLIF($3::text, '')::uuid, $4, $5)
 		 RETURNING id`,
-		actorEmail, workItemID, pool.groupID, label).Scan(&stageID); err != nil {
+		actorEmail, workItemID, pool.groupID, label, required).Scan(&stageID); err != nil {
 		return fmt.Errorf("patch change request: create approval stage: %w", err)
 	}
 
@@ -2562,7 +2565,7 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 			if err := recordChangeRequestTemplate(ctx, tx, row.id, *req.StandardChangeTemplateVersionID, projectID, req.StandardChangeParameters); err != nil {
 				return createdChangeRequestRow{}, err
 			}
-			if err := checkStandardChangeDeployments(ctx, tx, row.id); err != nil {
+			if err := checkStandardChangeDeployments(ctx, tx, row.id, *req.StandardChangeTemplateVersionID); err != nil {
 				return createdChangeRequestRow{}, err
 			}
 		}

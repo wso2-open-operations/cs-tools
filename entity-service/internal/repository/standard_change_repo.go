@@ -1227,7 +1227,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 		return nil, err
 	}
 	p.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
-	p.State = domain.StandardChangeProposalState(strings.ToLower(state))
+	p.State = proposalState(state)
 	p.Customer = accountRef(accID, accName)
 	if tplID != nil {
 		p.Template = &domain.EntityRef{ID: *tplID, Name: stringOrEmpty(tplName)}
@@ -1273,8 +1273,7 @@ func getProposal(ctx context.Context, q crQuerier, id string) (*domain.StandardC
 
 	p.Stages = []domain.StandardChangeProposalStage{}
 	rows, err = q.Query(ctx, `
-		SELECT s.id::text, COALESCE(s.checkpoint_label, ''), s.required_approvals,
-		       (SELECT COUNT(*) FROM approval_stage_approver a WHERE a.stage_id = s.id AND a.state = 'APPROVED'), s.raw_status
+		SELECT s.id::text, COALESCE(s.checkpoint_label, ''), s.required_approvals, `+stageApprovalsSQL("s.id")+`, s.raw_status
 		  FROM approval_stage s WHERE s.work_item_id = $1::uuid ORDER BY s.created_on, s.id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("get standard change proposal: stages: %w", err)
@@ -1365,7 +1364,7 @@ func (r *standardChangeRepo) SearchProposals(ctx context.Context, f StandardChan
 			return nil, 0, fmt.Errorf("search standard change proposals: scan: %w", err)
 		}
 		s.Kind = domain.StandardChangeProposalKind(strings.ToLower(kind))
-		s.State = domain.StandardChangeProposalState(strings.ToLower(state))
+		s.State = proposalState(state)
 		s.Customer = accountRef(accID, accName)
 		if tid != nil {
 			s.Template = &domain.EntityRef{ID: *tid, Name: stringOrEmpty(tname)}
@@ -1729,7 +1728,7 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 		if _, err := resolveAuthorityPool(ctx, tx, creators); err != nil {
 			return err
 		}
-		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeStageLabel, pool, creators); err != nil {
+		if err := insertApprovalStage(ctx, tx, id, actor, standardChangeStageLabel, 1, pool, creators); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'CAB_REVIEW', submitted_on = NOW(), customer_locked = true WHERE id = $1::uuid`, id)
@@ -1746,8 +1745,10 @@ func (r *standardChangeRepo) SubmitProposal(ctx context.Context, id, actor strin
 // userIDByEmailSQL is a user's id by email, for decided_by_user_id.
 const userIDByEmailSQL = `(SELECT u.id FROM "user" u WHERE LOWER(u.email) = LOWER($2) ORDER BY u.id LIMIT 1)`
 
-// openProposalStates are the states a proposal can still be approved from.
-var openProposalStates = map[string]bool{"DRAFT": true, "CAB_REVIEW": true, "AUTHORITY_REVIEW": true}
+// proposalState is a standard_change_proposal.state as the domain spells it.
+func proposalState(state string) domain.StandardChangeProposalState {
+	return domain.StandardChangeProposalState(strings.ToLower(state))
+}
 
 // crvis: internal callers only; cancels the approval rows of a standard change proposal, never a change request's
 func (r *standardChangeRepo) WithdrawProposal(ctx context.Context, id, actor string) error {
@@ -1759,7 +1760,7 @@ func (r *standardChangeRepo) WithdrawProposal(ctx context.Context, id, actor str
 		if !sameEmail(proposer, actor) {
 			return &apierror.ForbiddenError{Msg: "only the proposer can withdraw a standard change proposal"}
 		}
-		if !openProposalStates[state] {
+		if !proposalState(state).IsOpen() {
 			return &apierror.ConflictError{Msg: "this proposal is already " + strings.ToLower(state)}
 		}
 		return closeProposal(ctx, tx, id, actor, "WITHDRAWN", nil)
@@ -1776,7 +1777,7 @@ func (r *standardChangeRepo) CancelProposal(ctx context.Context, id, actor, reas
 		if sameEmail(proposer, actor) {
 			return &apierror.ConflictError{Msg: "this is your own proposal: withdraw it, or delete it while it is a draft"}
 		}
-		if !openProposalStates[state] {
+		if !proposalState(state).IsOpen() {
 			return &apierror.ConflictError{Msg: "this proposal is already " + strings.ToLower(state)}
 		}
 		return closeProposal(ctx, tx, id, actor, "CANCELLED", &reason)
@@ -1853,6 +1854,14 @@ func currentProposalStage(ctx context.Context, tx pgx.Tx, id string) (proposalSt
 	return st, nil
 }
 
+// stageApprovalsSQL counts the approvals of the approval stage stageExpr names,
+// by person: two "user" rows with one email are one approval. Both what a
+// proposal shows and the quorum DecideProposal waits for count this way.
+func stageApprovalsSQL(stageExpr string) string {
+	return `(SELECT COUNT(DISTINCT LOWER(u.email)) FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		WHERE a.stage_id = ` + stageExpr + ` AND a.state = 'APPROVED')`
+}
+
 // crvis: internal callers only; decides the approval rows of a standard change proposal, never a change request's
 func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor string, approve bool, comment, expectedStage *string) error {
 	return r.db.InTx(ctx, func(tx pgx.Tx) error {
@@ -1860,7 +1869,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		if err != nil {
 			return err
 		}
-		if state != "CAB_REVIEW" && state != "AUTHORITY_REVIEW" {
+		if !proposalState(state).IsInReview() {
 			return &apierror.ConflictError{Msg: "this proposal is not waiting for a decision: it is " + strings.ToLower(state)}
 		}
 		if sameEmail(proposer, actor) {
@@ -1877,32 +1886,9 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 			return &apierror.ConflictError{Msg: fmt.Sprintf("this proposal has moved on to the %s stage since the page was loaded, so nothing was recorded: reload it to see what you are now asked to decide", stage.label)}
 		}
 		authority := stage.label == standardChangeAuthorityStageLabel
-		var rowID, userID string
-		err = tx.QueryRow(ctx, `
-			SELECT a.id::text, a.approver_user_id::text
-			  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-			 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($2)
-			 ORDER BY a.created_on LIMIT 1 FOR UPDATE OF a`, stage.id, actor).Scan(&rowID, &userID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			if authority {
-				return &apierror.ForbiddenError{Msg: "only the members of the Standard Change Authority asked to authorise this proposal can approve or reject it; the proposer and the CAB member who approved it cannot, and each member decides once"}
-			}
-			return &apierror.ForbiddenError{Msg: "only the CAB members asked to decide this standard change proposal can approve or reject it"}
-		}
+		rowID, userID, err := requestedProposalApprover(ctx, tx, stage, authority, actor)
 		if err != nil {
-			return fmt.Errorf("decide standard change proposal: %w", err)
-		}
-		if authority {
-			// One person, one authorisation: a second "user" row of someone who
-			// already approved this stage is the same person.
-			var already bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-				WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED' AND LOWER(u.email) = LOWER($2))`, stage.id, actor).Scan(&already); err != nil {
-				return fmt.Errorf("decide standard change proposal: %w", err)
-			}
-			if already {
-				return &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another member of the Standard Change Authority must"}
-			}
+			return err
 		}
 		internal, err := internalApproverIDs(ctx, tx, []string{userID})
 		if err != nil {
@@ -1934,8 +1920,7 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 				return fmt.Errorf("decide standard change proposal: %w", err)
 			}
 			var approvals int
-			if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT LOWER(u.email)) FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
-				WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED'`, stage.id).Scan(&approvals); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT `+stageApprovalsSQL("$1::uuid"), stage.id).Scan(&approvals); err != nil {
 				return fmt.Errorf("decide standard change proposal: count approvals: %w", err)
 			}
 			if approvals < stage.required {
@@ -1952,56 +1937,8 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		}
 
 		if approve && !authority {
-			// The CAB approved: the Standard Change Authority is asked next, without
-			// the proposer or the CAB member who just approved. What the final
-			// approval re-checks is checked now too, so the authority is never asked
-			// about a proposal that could not be applied.
-			if err := checkTemplateStillCurrent(ctx, tx, id); err != nil {
+			if err := openAuthorityStage(ctx, tx, id, kind, actor, userID); err != nil {
 				return err
-			}
-			if kind != "RETIRE" {
-				var account *string
-				if err := tx.QueryRow(ctx, `SELECT account_id::text FROM standard_change_proposal WHERE id = $1::uuid`, id).Scan(&account); err != nil {
-					return fmt.Errorf("decide standard change proposal: %w", err)
-				}
-				if err := checkProposalCustomerAtDecision(ctx, tx, id, account); err != nil {
-					return err
-				}
-			}
-			excluded, err := changeRequestCreatorUserIDs(ctx, tx, id)
-			if err != nil {
-				return err
-			}
-			// The CAB member who approved, by every "user" row of theirs.
-			rows, err := tx.Query(ctx, `SELECT id::text FROM "user" WHERE LOWER(email) = LOWER($1)`, actor)
-			if err != nil {
-				return fmt.Errorf("decide standard change proposal: %w", err)
-			}
-			cabIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			if err != nil {
-				return fmt.Errorf("decide standard change proposal: %w", err)
-			}
-			for _, cid := range append(cabIDs, userID) {
-				excluded[strings.ToLower(cid)] = true
-			}
-			pool, err := resolveAuthorityPool(ctx, tx, excluded)
-			if err != nil {
-				var ve *apierror.ValidationError
-				if errors.As(err, &ve) {
-					return &apierror.ConflictError{Msg: "the CAB's approval cannot be recorded yet: " + ve.Msg}
-				}
-				return err
-			}
-			if err := insertApprovalStage(ctx, tx, id, actor, standardChangeAuthorityStageLabel, pool, excluded); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `UPDATE approval_stage SET required_approvals = $2
-				WHERE work_item_id = $1::uuid AND checkpoint_label = $3 AND raw_status IS NULL`,
-				id, domain.StandardChangeAuthorityApprovals, standardChangeAuthorityStageLabel); err != nil {
-				return fmt.Errorf("decide standard change proposal: authority stage: %w", err)
-			}
-			if _, err := tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'AUTHORITY_REVIEW' WHERE id = $1::uuid`, id); err != nil {
-				return fmt.Errorf("decide standard change proposal: %w", err)
 			}
 			return touch()
 		}
@@ -2023,6 +1960,84 @@ func (r *standardChangeRepo) DecideProposal(ctx context.Context, id, actor strin
 		}
 		return touch()
 	})
+}
+
+// requestedProposalApprover locks the actor's open (REQUESTED) row on the stage
+// and returns it with its user id; a 403 when they have none. On the authority's
+// stage, someone who already authorised (by any "user" row of their email) is
+// refused first, whether or not a row of theirs is still open: an approval
+// cancels the approver's other rows (DecideProposal), but a row whose email
+// came to match theirs later would otherwise let them decide again.
+func requestedProposalApprover(ctx context.Context, tx pgx.Tx, stage proposalStage, authority bool, actor string) (rowID, userID string, err error) {
+	if authority {
+		var already bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+			WHERE a.stage_id = $1::uuid AND a.state = 'APPROVED' AND LOWER(u.email) = LOWER($2))`, stage.id, actor).Scan(&already); err != nil {
+			return "", "", fmt.Errorf("decide standard change proposal: %w", err)
+		}
+		if already {
+			return "", "", &apierror.ForbiddenError{Msg: "you have already authorised this proposal: another member of the Standard Change Authority must"}
+		}
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT a.id::text, a.approver_user_id::text
+		  FROM approval_stage_approver a JOIN "user" u ON u.id = a.approver_user_id
+		 WHERE a.stage_id = $1::uuid AND a.state = 'REQUESTED' AND LOWER(u.email) = LOWER($2)
+		 ORDER BY a.created_on LIMIT 1 FOR UPDATE OF a`, stage.id, actor).Scan(&rowID, &userID)
+	if err == nil {
+		return rowID, userID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", fmt.Errorf("decide standard change proposal: %w", err)
+	}
+	if !authority {
+		return "", "", &apierror.ForbiddenError{Msg: "only the CAB members asked to decide this standard change proposal can approve or reject it"}
+	}
+	return "", "", &apierror.ForbiddenError{Msg: "only the members of the Standard Change Authority asked to authorise this proposal can approve or reject it; the proposer and the CAB member who approved it cannot, and each member decides once"}
+}
+
+// openAuthorityStage moves a proposal the CAB approved to the Standard Change
+// Authority: a stage of its members, without the proposer or the CAB member who
+// approved (actor, by every "user" row of theirs, and cabUserID), that
+// domain.StandardChangeAuthorityApprovals of them must approve. What the final
+// approval re-checks is checked now too, so the authority is never asked about a
+// proposal that could not be applied.
+func openAuthorityStage(ctx context.Context, tx pgx.Tx, id, kind, actor, cabUserID string) error {
+	if err := checkTemplateStillCurrent(ctx, tx, id); err != nil {
+		return err
+	}
+	if kind != "RETIRE" {
+		var account *string
+		if err := tx.QueryRow(ctx, `SELECT account_id::text FROM standard_change_proposal WHERE id = $1::uuid`, id).Scan(&account); err != nil {
+			return fmt.Errorf("decide standard change proposal: %w", err)
+		}
+		if err := checkProposalCustomerAtDecision(ctx, tx, id, account); err != nil {
+			return err
+		}
+	}
+	excluded, err := changeRequestCreatorUserIDs(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := addUserIDsForEmail(ctx, tx, actor, excluded); err != nil {
+		return fmt.Errorf("decide standard change proposal: %w", err)
+	}
+	excluded[strings.ToLower(cabUserID)] = true
+	pool, err := resolveAuthorityPool(ctx, tx, excluded)
+	if err != nil {
+		var ve *apierror.ValidationError
+		if errors.As(err, &ve) {
+			return &apierror.ConflictError{Msg: "the CAB's approval cannot be recorded yet: " + ve.Msg}
+		}
+		return err
+	}
+	if err := insertApprovalStage(ctx, tx, id, actor, standardChangeAuthorityStageLabel, domain.StandardChangeAuthorityApprovals, pool, excluded); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE standard_change_proposal SET state = 'AUTHORITY_REVIEW' WHERE id = $1::uuid`, id); err != nil {
+		return fmt.Errorf("decide standard change proposal: %w", err)
+	}
+	return nil
 }
 
 // applyApprovedProposal does what an approved proposal asks: a new template with
