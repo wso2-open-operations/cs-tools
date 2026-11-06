@@ -31,15 +31,31 @@ import (
 
 // storageKeyFor is the key an attachment's file has once it is stored: the
 // migrator's layout, so new files sit beside migrated ones.
+//
+// A draft description image has no work item yet, so a "drafts" folder stands in
+// for the work item number; the key stays as it is when the image is linked.
 func storageKeyFor(kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow, parent domain.StoredAttachmentParent) string {
+	workItem := workItemNumberFor(kind, parent)
+	if row.Draft {
+		workItem = draftFolder
+	}
 	return filestore.Key(filestore.KeyParts{
 		ProjectNumber:    parent.ProjectNumber,
-		WorkItemNumber:   workItemNumberFor(kind, parent),
+		WorkItemNumber:   workItem,
 		DeploymentNumber: deploymentNumberFor(kind, parent),
 		Inline:           kind == domain.StoredAttachmentComment,
 		AttachmentNumber: row.Number,
 		Name:             row.Name,
 	})
+}
+
+// parentOf reads what a row hangs from, as the caller: its work item or
+// deployment, or for a draft description image its project.
+func (s *storedAttachmentService) parentOf(ctx context.Context, kind domain.StoredAttachmentKind, row domain.StoredAttachmentRow) (domain.StoredAttachmentParent, error) {
+	if row.Draft {
+		return s.repo.GetProject(ctx, row.ParentID)
+	}
+	return s.repo.GetParent(ctx, kind, row.ParentID)
 }
 
 // AuthorizeUpload implements StoredAttachmentService.
@@ -77,7 +93,7 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: "this upload was rejected; start a new upload"}
 	}
 
-	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
+	parent, err := s.parentOf(ctx, req.Kind, row)
 	if err != nil {
 		return domain.AttachmentUploadTarget{}, err
 	}
@@ -108,7 +124,7 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 // limits, and marks the row COMPLETE. When it refuses, the row is recorded FAILED
 // and the backend removes the file it committed.
 func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req domain.ConfirmAttachmentUploadRequest, row domain.StoredAttachmentRow) (domain.ConfirmAttachmentUploadResponse, error) {
-	parent, err := s.repo.GetParent(ctx, req.Kind, row.ParentID)
+	parent, err := s.parentOf(ctx, req.Kind, row)
 	if err != nil {
 		return domain.ConfirmAttachmentUploadResponse{}, err
 	}

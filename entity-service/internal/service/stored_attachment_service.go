@@ -37,6 +37,22 @@ const (
 	// maxAttachmentLinkIDs bounds how many inline images of one comment are
 	// linked to it.
 	maxAttachmentLinkIDs = 20
+	// MaxInlineImagesPerContent is the most images one comment or one description
+	// may show. Beyond it the comment or record is refused (a 400).
+	MaxInlineImagesPerContent = 5
+	// DefaultInlineImageMaxBytes is the default size limit of one inline image
+	// (INLINE_IMAGE_MAX_BYTES), and DefaultInlineImagesTotalMaxBytes the default
+	// total of all images in one comment or description
+	// (INLINE_IMAGES_TOTAL_MAX_BYTES). Both 25 MiB.
+	DefaultInlineImageMaxBytes       int64 = 25 << 20
+	DefaultInlineImagesTotalMaxBytes int64 = 25 << 20
+	// maxInlineLookupIDs bounds how many referenced ids one validation looks up;
+	// a comment naming more distinct ids than this is far over the limit anyway.
+	maxInlineLookupIDs = 200
+	// draftFolder stands in for the work item number in the storage key of a
+	// draft description image: the record does not exist yet. The key stays valid
+	// after the image is linked.
+	draftFolder = "drafts"
 	// maxSharesPerCallerPerMinute is how many uploads and locates one caller may
 	// start per minute; beyond it the call is a 429.
 	maxSharesPerCallerPerMinute = 60
@@ -67,6 +83,17 @@ type StoredAttachmentLimits struct {
 	// MaxBytes caps one file; InlineMaxBytes caps one comment image.
 	MaxBytes       int64
 	InlineMaxBytes int64
+	// InlineTotalMaxBytes caps the images of ONE comment or description together
+	// (0 means DefaultInlineImagesTotalMaxBytes).
+	InlineTotalMaxBytes int64
+}
+
+// inlineTotalMax is the total-size limit in force.
+func (l StoredAttachmentLimits) inlineTotalMax() int64 {
+	if l.InlineTotalMaxBytes > 0 {
+		return l.InlineTotalMaxBytes
+	}
+	return DefaultInlineImagesTotalMaxBytes
 }
 
 // storedAttachmentService never touches a file: the portal backends hold the
@@ -160,7 +187,19 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
-	if !validate.IsUUID(req.ParentID) {
+	req.ParentID = strings.TrimSpace(req.ParentID)
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	draft := req.ProjectID != ""
+	switch {
+	case draft && req.Kind != domain.StoredAttachmentComment:
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId can only be used for a comment image"}
+	case draft && req.ParentID != "":
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "send either parentId or projectId, not both"}
+	case draft && !validate.IsUUID(req.ProjectID):
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "projectId must be a valid UUID"}
+	case !draft && req.Kind == domain.StoredAttachmentComment && req.ParentID == "":
+		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "parentId or projectId is required"}
+	case !draft && !validate.IsUUID(req.ParentID):
 		return domain.InitiateAttachmentUploadResponse{}, &apierror.ValidationError{Msg: "parentId must be a valid UUID"}
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -193,8 +232,16 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
 
-	// Run as the caller: a parent they cannot see is not found.
-	parent, err := s.repo.GetParent(ctx, req.Kind, req.ParentID)
+	// Run as the caller: a parent they cannot see is not found. A draft
+	// description image hangs from the project (the record does not exist yet).
+	parentID := req.ParentID
+	var parent domain.StoredAttachmentParent
+	if draft {
+		parentID = req.ProjectID
+		parent, err = s.repo.GetProject(ctx, req.ProjectID)
+	} else {
+		parent, err = s.repo.GetParent(ctx, req.Kind, req.ParentID)
+	}
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
@@ -207,8 +254,8 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		return domain.InitiateAttachmentUploadResponse{}, err
 	}
 	row, err := s.repo.InsertPending(ctx, req.Kind, domain.StoredAttachmentInsert{
-		ParentID: req.ParentID, Name: req.Name, ContentType: req.ContentType,
-		SizeBytes: req.SizeBytes, CreatedBy: email,
+		ParentID: parentID, Name: req.Name, ContentType: req.ContentType,
+		SizeBytes: req.SizeBytes, CreatedBy: email, Draft: draft,
 	})
 	if err != nil {
 		return domain.InitiateAttachmentUploadResponse{}, err
@@ -327,9 +374,9 @@ func (s *storedAttachmentService) findInlineImage(ctx context.Context, id string
 // comments migrated from the previous system use; the .iix suffix is tolerated).
 var inlineImageRef = regexp.MustCompile(`(?i)(?:attachments/inline/|\bsrc\s*=\s*["']/?)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/content|\.iix|["'])`)
 
-// inlineImageIDs returns the distinct attachment ids a comment's content refers
-// to, at most maxAttachmentLinkIDs.
-func inlineImageIDs(content string) []string {
+// distinctInlineImageIDs returns the distinct attachment ids content refers to,
+// at most limit of them.
+func distinctInlineImageIDs(content string, limit int) []string {
 	var ids []string
 	seen := map[string]bool{}
 	for _, m := range inlineImageRef.FindAllStringSubmatch(content, -1) {
@@ -339,11 +386,138 @@ func inlineImageIDs(content string) []string {
 		}
 		seen[id] = true
 		ids = append(ids, id)
-		if len(ids) == maxAttachmentLinkIDs {
+		if len(ids) == limit {
 			break
 		}
 	}
 	return ids
+}
+
+// inlineImageIDs returns the distinct attachment ids a comment's content refers
+// to, at most maxAttachmentLinkIDs.
+func inlineImageIDs(content string) []string {
+	return distinctInlineImageIDs(content, maxAttachmentLinkIDs)
+}
+
+// blobImageRef finds an image whose source is a browser-local blob: URL, which
+// only exists in the tab that made it and can never be shown to anyone else.
+var blobImageRef = regexp.MustCompile(`(?i)\bsrc\s*=\s*["']?\s*blob:`)
+
+// mayHaveInlineImages is the cheap check run before any lookup: false for the
+// ordinary description with no image reference and no blob: source, so an
+// ordinary create pays nothing.
+//
+// A "data:image" base64 image is NOT looked for and never refused: other callers
+// still send their images inline, and this service stores no file for them.
+func mayHaveInlineImages(html string) bool {
+	if html == "" {
+		return false
+	}
+	return inlineImageRef.MatchString(html) || blobImageRef.MatchString(html)
+}
+
+// ValidateDescriptionImages implements InlineImageLinker.
+//
+// It runs BEFORE a record is created, so a bad request leaves nothing behind. The
+// images the description shows must be COMPLETE drafts uploaded to this project by
+// authorEmail (not linked anywhere), at most MaxInlineImagesPerContent of them and
+// no more than the total limit in size, and no image may still be a blob: URL.
+// Images the HTML does not reference are ignored.
+func (s *storedAttachmentService) ValidateDescriptionImages(ctx context.Context, projectID, authorEmail, html string) error {
+	if !mayHaveInlineImages(html) {
+		return nil
+	}
+	if blobImageRef.MatchString(html) {
+		return &apierror.ValidationError{Msg: "An image in the description was not uploaded yet. Remove it and add it again."}
+	}
+	ids := distinctInlineImageIDs(html, MaxInlineImagesPerContent+1)
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) > MaxInlineImagesPerContent {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("A description can show at most %d images.", MaxInlineImagesPerContent)}
+	}
+	if authorEmail == "" || !validate.IsUUID(projectID) {
+		return &apierror.ValidationError{Msg: "An image in the description could not be used: it was not uploaded by you for this project."}
+	}
+	drafts, err := s.repo.ListDescriptionDrafts(repository.WithSystemIdentity(ctx), projectID, authorEmail, ids)
+	if err != nil {
+		return err
+	}
+	found := map[string]bool{}
+	var total int64
+	for _, d := range drafts {
+		found[strings.ToLower(d.ID)] = true
+		total += sizeOrZero(d.SizeBytes)
+	}
+	for _, id := range ids {
+		if !found[id] {
+			return &apierror.ValidationError{Msg: "An image in the description could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used elsewhere."}
+		}
+	}
+	if limit := s.limits.inlineTotalMax(); total > limit {
+		return &apierror.ValidationError{Msg: "The images in the description are larger than " + formatByteLimit(limit) + " together."}
+	}
+	return nil
+}
+
+// LinkDescriptionImages implements InlineImageLinker. Best effort, like
+// LinkFromContent: a failure is logged and the record is not affected (the image
+// then stays a draft, visible to its uploader only, and is removed by the upload
+// cleanup after 24 hours).
+func (s *storedAttachmentService) LinkDescriptionImages(ctx context.Context, workItemID, projectID, authorEmail, html string) {
+	if !mayHaveInlineImages(html) {
+		return
+	}
+	ids := distinctInlineImageIDs(html, MaxInlineImagesPerContent)
+	if len(ids) == 0 || authorEmail == "" {
+		return
+	}
+	linked, err := s.repo.LinkDescriptionImages(repository.WithSystemIdentity(ctx), workItemID, projectID, authorEmail, ids)
+	if err != nil {
+		slog.ErrorContext(ctx, "could not link description images", "workItemId", workItemID, "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "description images linked",
+		"audit", true, "action", "link", "callerId", auditCaller(ctx),
+		"correlationId", middleware.CorrelationIDFromContext(ctx),
+		"workItemId", workItemID, "referenced", len(ids), "linked", len(linked))
+}
+
+// ValidateCommentImages implements InlineImageLinker.
+//
+// A comment may show at most MaxInlineImagesPerContent of its author's own images
+// on its work item, of no more than the total limit together. Images that are not
+// the author's, or not on this work item, are not counted: they are never linked
+// to the comment (LinkFromContent), so they do not weigh on it.
+func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error {
+	if !mayHaveInlineImages(content) || authorEmail == "" {
+		return nil
+	}
+	ids := distinctInlineImageIDs(content, maxInlineLookupIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.repo.GetByIDs(ctx, domain.StoredAttachmentComment, ids)
+	if err != nil {
+		return err
+	}
+	var count int
+	var total int64
+	for _, r := range rows {
+		if r.Draft || !strings.EqualFold(r.CreatedBy, authorEmail) || !strings.EqualFold(r.ParentID, workItemID) {
+			continue
+		}
+		count++
+		total += sizeOrZero(r.SizeBytes)
+	}
+	if count > MaxInlineImagesPerContent {
+		return &apierror.ValidationError{Msg: fmt.Sprintf("A comment can show at most %d images.", MaxInlineImagesPerContent)}
+	}
+	if limit := s.limits.inlineTotalMax(); total > limit {
+		return &apierror.ValidationError{Msg: "The images in the comment are larger than " + formatByteLimit(limit) + " together."}
+	}
+	return nil
 }
 
 // LinkFromContent implements InlineImageLinker.

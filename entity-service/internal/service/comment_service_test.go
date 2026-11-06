@@ -377,6 +377,26 @@ func TestCommentRowToDomain_AuthorAndContentTable(t *testing.T) {
 
 type recordingLinker struct {
 	calls []struct{ comment, workItem, author, content string }
+
+	validateCommentErr error
+	commentChecks      []string // content of each ValidateCommentImages call
+	validateDescErr    error
+	descChecks         []struct{ project, author, html string }
+	descLinks          []struct{ workItem, project, author, html string }
+}
+
+func (r *recordingLinker) ValidateCommentImages(_ context.Context, _, _, content string) error {
+	r.commentChecks = append(r.commentChecks, content)
+	return r.validateCommentErr
+}
+
+func (r *recordingLinker) ValidateDescriptionImages(_ context.Context, projectID, author, html string) error {
+	r.descChecks = append(r.descChecks, struct{ project, author, html string }{projectID, author, html})
+	return r.validateDescErr
+}
+
+func (r *recordingLinker) LinkDescriptionImages(_ context.Context, workItemID, projectID, author, html string) {
+	r.descLinks = append(r.descLinks, struct{ workItem, project, author, html string }{workItemID, projectID, author, html})
 }
 
 func (r *recordingLinker) LinkFromContent(_ context.Context, commentID, workItemID, author, content string) {
@@ -404,5 +424,67 @@ func TestCommentService_CreateComment_LinksTheImagesItShows(t *testing.T) {
 	if len(linker.calls) != 1 || linker.calls[0].comment != "comment-1" || linker.calls[0].workItem != testUUID ||
 		linker.calls[0].author != "jane.doe@example.com" || linker.calls[0].content != html {
 		t.Errorf("linker calls = %+v, want one call for the saved comment, its work item and its author", linker.calls)
+	}
+}
+
+func TestCommentService_CreateComment_RefusesTooManyImagesBeforeSaving(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	html := `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+	saved := false
+	repo := &stubCommentRepo{
+		createComment: func(context.Context, string, domain.ReferenceType, string, string, string) (repository.CommentRow, error) {
+			saved = true
+			return repository.CommentRow{ID: "comment-1", WorkItemID: testUUID}, nil
+		},
+	}
+	linker := &recordingLinker{validateCommentErr: &apierror.ValidationError{Msg: "A comment can show at most 5 images."}}
+	svc := WithCommentInlineImageLinker(NewCommentService(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}), linker)
+
+	_, err := svc.CreateComment(ctx, domain.CreateCommentRequest{ReferenceID: testUUID, ReferenceType: domain.ReferenceTypeCase, Type: domain.CommentTypeComment, Content: html})
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want a ValidationError", err)
+	}
+	if saved || len(linker.calls) != 0 {
+		t.Error("a refused comment must not be saved or have images linked")
+	}
+
+	// A comment with no image never reaches the check.
+	linker.commentChecks = nil
+	if _, err := svc.CreateComment(ctx, domain.CreateCommentRequest{ReferenceID: testUUID, ReferenceType: domain.ReferenceTypeCase, Type: domain.CommentTypeComment, Content: "plain"}); err != nil {
+		t.Fatalf("CreateComment(plain): %v", err)
+	}
+	if len(linker.commentChecks) != 0 {
+		t.Error("a comment without images must pay for no image check")
+	}
+}
+
+func TestCommentService_UpdateComment_ChecksTheImageLimitsBeforeSaving(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	html := `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+	repo := &stubCommentRepo{
+		getCommentByID: func(context.Context, string) (repository.CommentRow, error) {
+			return repository.CommentRow{ID: testUUID, WorkItemID: testUUID, CreatedBy: "jane.doe@example.com"}, nil
+		},
+	}
+	linker := &recordingLinker{validateCommentErr: &apierror.ValidationError{Msg: "too large"}}
+	svc := WithCommentInlineImageLinker(NewCommentService(repo, stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}), linker)
+
+	// The stub's UpdateComment panics: the refusal must come first.
+	_, err := svc.UpdateComment(ctx, domain.UpdateCommentRequest{ID: testUUID, Content: html})
+	var verr *apierror.ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want a ValidationError before the edit is saved", err)
+	}
+	if len(linker.commentChecks) != 1 {
+		t.Errorf("checks = %d, want 1", len(linker.commentChecks))
 	}
 }
