@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
@@ -94,7 +96,11 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 	// then wrong) keeps the answer. With none valid, the last one's error.
 	var lastErr error
 	for i := len(res.Candidates) - 1; i >= 0; i-- {
-		d, err := dashboard.ParseGenerated(res.Candidates[i])
+		definition, note, err := splitGeneratedNote(res.Candidates[i])
+		var d dashboard.Dashboard
+		if err == nil {
+			d, err = dashboard.ParseGenerated(definition)
+		}
 		if err != nil {
 			if lastErr == nil {
 				lastErr = err
@@ -105,9 +111,51 @@ func (g *serviceDashboardGenerator) Generate(ctx context.Context, prompt string,
 			slog.InfoContext(ctx, "dashboard generate: reply held several JSON objects; using the last valid one",
 				"count", len(res.Candidates), "used", i+1)
 		}
-		return GeneratedDashboard{Dashboard: d, Reply: generatedReply(d)}, nil
+		reply := generatedReply(d)
+		if note != "" {
+			reply = note + " " + reply
+		}
+		return GeneratedDashboard{Dashboard: d, Reply: reply}, nil
 	}
 	return GeneratedDashboard{}, fmt.Errorf("%w: %w", errGenerateUnusable, lastErr)
+}
+
+// generatedNoteMaxChars caps the model's note: the catalogue asks for one
+// sentence.
+const generatedNoteMaxChars = 500
+
+// splitGeneratedNote takes the optional top-level "note" off a dashboard the
+// model wrote and returns the definition without it, for ParseGenerated. The
+// model writes a note when it built the closest dashboard it could instead of
+// the one asked for, saying what differs (catalogue section 1); the note goes
+// into the chat reply only, so the draft, and a dashboard saved from it, never
+// carries one. A definition without a note, or one that is not a JSON
+// object, is returned as it is (ParseGenerated rejects the latter). A note
+// that is not a string, or longer than generatedNoteMaxChars, makes the
+// definition invalid.
+func splitGeneratedNote(raw json.RawMessage) (json.RawMessage, string, error) {
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) != nil {
+		return raw, "", nil
+	}
+	rawNote, ok := top["note"]
+	if !ok {
+		return raw, "", nil
+	}
+	var note string
+	if err := json.Unmarshal(rawNote, &note); err != nil {
+		return nil, "", fmt.Errorf("%w: \"note\" must be a string", dashboard.ErrGeneratedInvalid)
+	}
+	note = strings.TrimSpace(note)
+	if utf8.RuneCountInString(note) > generatedNoteMaxChars {
+		return nil, "", fmt.Errorf("%w: \"note\" is longer than %d characters", dashboard.ErrGeneratedInvalid, generatedNoteMaxChars)
+	}
+	delete(top, "note")
+	definition, err := json.Marshal(top)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %v", dashboard.ErrGeneratedInvalid, err)
+	}
+	return definition, note, nil
 }
 
 // serviceGenerateError turns a csmai error into the generator errors

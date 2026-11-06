@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/dashboard"
 )
 
 // validGenerated is a dashboard as the model writes it (file format, no id).
@@ -141,5 +142,73 @@ func TestServiceGenerator_SendsOnlyTheTeamsADashboardCanFilterBy(t *testing.T) {
 	}
 	if len(ai.gotReq.Teams) != len(want) {
 		t.Errorf("sent %d teams, want %d (every team with a group)", len(ai.gotReq.Teams), len(want))
+	}
+}
+
+// TestServiceGenerator_PutsTheNoteInTheReplyOnly checks that a closest
+// dashboard's note starts the chat reply and is not part of the dashboard.
+func TestServiceGenerator_PutsTheNoteInTheReplyOnly(t *testing.T) {
+	withNote := strings.Replace(validGenerated, `{"displayName"`,
+		`{"note":"  Accounts can't be ranked by revenue, so this ranks them by open cases instead. ","displayName"`, 1)
+	got, err := NewServiceDashboardGenerator(&fakeAIClient{res: csmai.DashboardResult{
+		Candidates: []json.RawMessage{json.RawMessage(withNote)},
+	}}, nil).Generate(context.Background(), "p", nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	want := `Accounts can't be ranked by revenue, so this ranks them by open cases instead. Here's "Top Customers by Open Cases", 1 widget.`
+	if got.Reply != want {
+		t.Errorf("reply = %q, want %q", got.Reply, want)
+	}
+	if got.Dashboard.DisplayName != "Top Customers by Open Cases" || len(got.Dashboard.Widgets) != 1 {
+		t.Errorf("dashboard = %+v", got.Dashboard)
+	}
+}
+
+// TestServiceGenerator_NoNoteKeepsThePlainReply checks that a dashboard
+// built as asked (no note, or an empty one) has the usual reply.
+func TestServiceGenerator_NoNoteKeepsThePlainReply(t *testing.T) {
+	emptyNote := strings.Replace(validGenerated, `{"displayName"`, `{"note":" ","displayName"`, 1)
+	for _, def := range []string{validGenerated, emptyNote} {
+		got, err := NewServiceDashboardGenerator(&fakeAIClient{res: csmai.DashboardResult{
+			Candidates: []json.RawMessage{json.RawMessage(def)},
+		}}, nil).Generate(context.Background(), "p", nil)
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		if want := `Here's "Top Customers by Open Cases", 1 widget.`; got.Reply != want {
+			t.Errorf("reply = %q, want %q", got.Reply, want)
+		}
+	}
+}
+
+// TestSplitGeneratedNote_RejectsABadNote checks that a note that is not a
+// string, or too long, makes the definition invalid, and that a definition
+// that is not an object is passed on for ParseGenerated to reject.
+func TestSplitGeneratedNote_RejectsABadNote(t *testing.T) {
+	for _, note := range []string{`42`, `["a"]`, `"` + strings.Repeat("x", generatedNoteMaxChars+1) + `"`} {
+		_, _, err := splitGeneratedNote(json.RawMessage(`{"note":` + note + `,"displayName":"D"}`))
+		if !errors.Is(err, dashboard.ErrGeneratedInvalid) {
+			t.Errorf("note %.20s: err = %v, want ErrGeneratedInvalid", note, err)
+		}
+	}
+	if _, _, err := splitGeneratedNote(json.RawMessage(`{"note":"` + strings.Repeat("é", generatedNoteMaxChars) + `"}`)); err != nil {
+		t.Errorf("a note of exactly %d characters: %v", generatedNoteMaxChars, err)
+	}
+	def, note, err := splitGeneratedNote(json.RawMessage(`[1]`))
+	if err != nil || note != "" || string(def) != `[1]` {
+		t.Errorf("not an object: %s, %q, %v", def, note, err)
+	}
+}
+
+// TestServiceGenerator_ABadNoteFallsBackToAnEarlierCandidate checks that a
+// candidate with a bad note is skipped like any other invalid one.
+func TestServiceGenerator_ABadNoteFallsBackToAnEarlierCandidate(t *testing.T) {
+	badNote := strings.Replace(validGenerated, `{"displayName":"Top Customers by Open Cases"`, `{"note":7,"displayName":"Other"`, 1)
+	got, err := NewServiceDashboardGenerator(&fakeAIClient{res: csmai.DashboardResult{
+		Candidates: []json.RawMessage{json.RawMessage(validGenerated), json.RawMessage(badNote)},
+	}}, nil).Generate(context.Background(), "p", nil)
+	if err != nil || got.Dashboard.DisplayName != "Top Customers by Open Cases" {
+		t.Errorf("got %q, %v; want the first candidate", got.Dashboard.DisplayName, err)
 	}
 }
