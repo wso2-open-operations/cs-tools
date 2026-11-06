@@ -15,7 +15,6 @@
 // under the License.
 
 import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
-import DownloadProgressBar from "@components/download-progress/DownloadProgressBar";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import {
@@ -308,7 +307,6 @@ export default function AttachmentListItem({
             {formatDateTime(attachment.createdOn)}
           </Typography>
         </Stack>
-        {isDownloadLoading && <DownloadProgressBar progress={downloadProgress} />}
       </Paper>
 
       <ImageFullscreenModal

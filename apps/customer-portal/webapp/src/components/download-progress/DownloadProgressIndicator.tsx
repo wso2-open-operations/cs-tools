@@ -39,15 +39,26 @@ export default function DownloadProgressIndicator({
       aria-valuemax={100}
       aria-valuenow={known ? progress : undefined}
     >
-      <CircularProgress
-        color="inherit"
-        size={16}
-        variant={known ? "determinate" : "indeterminate"}
-        value={known ? progress : undefined}
-        aria-hidden
-      />
+      <Box sx={{ position: "relative", display: "inline-flex", width: 16, height: 16 }}>
+        {known && (
+          <CircularProgress
+            variant="determinate"
+            value={100}
+            size={16}
+            aria-hidden
+            sx={{ position: "absolute", inset: 0, color: "action.disabledBackground" }}
+          />
+        )}
+        <CircularProgress
+          color="warning"
+          size={16}
+          variant={known ? "determinate" : "indeterminate"}
+          value={known ? progress : undefined}
+          aria-hidden
+        />
+      </Box>
       {known && (
-        <Typography variant="caption" sx={{ minWidth: "3ch", lineHeight: 1 }}>
+        <Typography variant="caption" sx={{ minWidth: "3ch", lineHeight: 1, color: "warning.main" }}>
           {progress}%
         </Typography>
       )}

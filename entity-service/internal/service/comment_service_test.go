@@ -390,6 +390,8 @@ func (r *recordingLinker) ValidateCommentImages(_ context.Context, _, _, content
 	return r.validateCommentErr
 }
 
+func (r *recordingLinker) ValidateEmbeddedImages(_ context.Context, _, _ string) error { return nil }
+
 func (r *recordingLinker) ValidateDescriptionImages(_ context.Context, projectID, author, html string) error {
 	r.descChecks = append(r.descChecks, struct{ project, author, html string }{projectID, author, html})
 	return r.validateDescErr

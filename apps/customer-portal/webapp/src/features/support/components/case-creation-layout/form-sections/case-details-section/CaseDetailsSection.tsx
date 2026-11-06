@@ -32,6 +32,10 @@ import { type JSX } from "react";
 import { CaseSeverity, CaseSeverityLevel } from "@features/support/constants/supportConstants";
 import { isS0SeverityLabel, getSeverityLegendColor } from "@features/dashboard/utils/dashboard";
 import Editor from "@components/rich-text-editor/Editor";
+import {
+  entityAttachmentMaxBytes,
+  formatLimit,
+} from "@config/attachmentLimitsConfig";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
@@ -362,7 +366,8 @@ export function CaseDetailsSection({
                     color="text.secondary"
                     sx={{ mt: 1, display: "block" }}
                   >
-                    PDF, DOCX, TXT, CSV or other formats • Max 10MB per file
+                    PDF, DOCX, TXT, CSV or other formats • Max{" "}
+                    {formatLimit(entityAttachmentMaxBytes())} per file
                   </Typography>
                 </Box>
               </Box>
