@@ -233,8 +233,8 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
 /**
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
  * Inserts it via INSERT_IMAGE_COMMAND: with `onImageUpload` the image is handed to
- * that (it is stored, and a local preview is shown); without one it is read as a
- * data URL and embedded.
+ * that (it is stored, and a local preview is shown); without one the image is
+ * refused, never embedded as base64.
  */
 const ClipboardImagePlugin = ({
   onPasteError,
@@ -269,6 +269,13 @@ const ClipboardImagePlugin = ({
 
           event.preventDefault();
 
+          const upload = onImageUploadRef.current;
+          if (!upload) {
+            // No place to store the image: never embed it as base64.
+            onPasteErrorRef.current?.("disabled");
+            break;
+          }
+
           if (
             !ALLOWED_IMAGE_MIME_TYPES.includes(
               file.type as (typeof ALLOWED_IMAGE_MIME_TYPES)[number],
@@ -283,37 +290,21 @@ const ClipboardImagePlugin = ({
             break;
           }
 
-          const upload = onImageUploadRef.current;
-          if (upload) {
-            room ??= inlineImagesInEditor(editor);
-            const refusal = inlineImageRefusal(room, file.size);
-            if (refusal) {
-              onPasteErrorRef.current?.(refusal);
-              break;
-            }
-            const src = upload(file);
-            rememberInlineImageSize(src, file.size);
-            room = { count: room.count + 1, bytes: room.bytes + file.size };
-            editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-              src,
-              altText: "Pasted Image",
-            });
-            // Several images may be pasted at once: take as many as fit.
-            continue;
+          room ??= inlineImagesInEditor(editor);
+          const refusal = inlineImageRefusal(room, file.size);
+          if (refusal) {
+            onPasteErrorRef.current?.(refusal);
+            break;
           }
-
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const src = e.target?.result;
-            if (typeof src === "string") {
-              editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-                src,
-                altText: "Pasted Image",
-              });
-            }
-          };
-          reader.readAsDataURL(file);
-          break;
+          const src = upload(file);
+          rememberInlineImageSize(src, file.size);
+          room = { count: room.count + 1, bytes: room.bytes + file.size };
+          editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
+            src,
+            altText: "Pasted Image",
+          });
+          // Several images may be pasted at once: take as many as fit.
+          continue;
         }
       }
     };
@@ -579,8 +570,9 @@ const Editor = ({
    */
   onPasteError?: (reason: ImagePasteRefusal) => void;
   /**
-   * Stores a pasted or picked image instead of embedding it as base64; see
-   * {@link ImageUploadHandler}. Leave unset to keep embedding.
+   * Stores a pasted or picked image; see {@link ImageUploadHandler}. Leave
+   * unset where there is nowhere to store images: image insertion is then off
+   * (no toolbar button, a pasted image is refused). Nothing is embedded as base64.
    */
   onImageUpload?: ImageUploadHandler;
 }): JSX.Element => {
