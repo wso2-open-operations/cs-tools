@@ -3490,31 +3490,45 @@ type AggregateResponse struct {
 	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
-// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
-// day-bucketed count of cases opened and closed per day, for dashboard
-// widgets. Deliberately narrow (no bucket-unit/series config, unlike
-// AggregateCasesRequest's open-ended groupBy): this backs exactly one chart,
-// not a platform, so the two series (opened, closed) are fixed.
+// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a count
+// of cases opened and closed per day (or per week or month of a fixed
+// window), for dashboard widgets. Deliberately narrow (unlike
+// AggregateCasesRequest's open-ended groupBy): this backs one chart, not a
+// platform, so the two series (opened, closed) are fixed.
 type CaseVolumeTrendRequest struct {
 	Filters SearchCasesFilters `json:"filters"`
 	// Days is the size of the trailing window, ending today (UTC). Optional;
 	// the service applies a default (30) when omitted and rejects a value
-	// outside 1-90.
+	// outside 1-90. Not allowed together with StartDate/EndDate.
 	Days int `json:"days,omitempty"`
+	// StartDate and EndDate are a fixed window instead of the trailing one:
+	// both inclusive UTC calendar days, each a plain YYYY-MM-DD or a relative
+	// date placeholder (__today__, __startOfMonth:-1__, ...). Optional, but
+	// one needs the other.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+	// Bucket is how a fixed window's days are grouped into points: "day"
+	// (the default, at most 90 days), "week" (Monday to Sunday, at most 53
+	// weeks) or "month" (at most 24 months). Only with StartDate/EndDate.
+	Bucket string `json:"bucket,omitempty"`
 }
 
-// CaseVolumeTrendPoint is one day's count in a CaseVolumeTrendSeries. Date is
-// a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
-// date-only wire fields.
+// CaseVolumeTrendPoint is one point's count in a CaseVolumeTrendSeries. Date
+// is a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
+// date-only wire fields. For a "week" or "month" bucket, Date is the bucket's
+// first day and EndDate its last, both clipped to the requested window, so
+// the two are exactly the days the count covers; EndDate is absent for a
+// day point.
 type CaseVolumeTrendPoint struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
 }
 
 // CaseVolumeTrendSeries is one named line in a CaseVolumeTrendResponse
-// ("Opened" or "Closed"), with one point per day in the requested window,
-// in chronological order. A day with no matching cases is still present,
-// with Count 0 -- the chart draws a continuous line.
+// ("Opened" or "Closed"), with one point per day (or bucket) in the
+// requested window, in chronological order. A day with no matching cases is
+// still present, with Count 0 -- the chart draws a continuous line.
 type CaseVolumeTrendSeries struct {
 	Label  string                 `json:"label"`
 	Points []CaseVolumeTrendPoint `json:"points"`
@@ -3524,8 +3538,14 @@ type CaseVolumeTrendSeries struct {
 // exactly two series, "Opened" (by created date) and "Closed" (by closed
 // date, own-type only -- see caseLikeOwnClosedOnColumn's doc comment).
 type CaseVolumeTrendResponse struct {
-	Days   int                     `json:"days"`
-	Series []CaseVolumeTrendSeries `json:"series"`
+	// Days is the number of days the window covers.
+	Days int `json:"days"`
+	// StartDate, EndDate and Bucket echo a fixed window's resolved bounds
+	// and grouping; all absent for the trailing window.
+	StartDate string                  `json:"startDate,omitempty"`
+	EndDate   string                  `json:"endDate,omitempty"`
+	Bucket    string                  `json:"bucket,omitempty"`
+	Series    []CaseVolumeTrendSeries `json:"series"`
 }
 
 // CaseVolumeDayCount is the opened/closed count for one UTC calendar day --
