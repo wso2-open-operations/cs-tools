@@ -7392,7 +7392,8 @@ v5 can't scan a binary-format timestamptz into a `*string`
 Both approval methods (`GetChangeRequestApprovals`, `DecideChangeRequestApproval`)
 are not -- see below for why. (`CreateChangeRequest` used to be on this list
 too, blocked on the same `work_item.number` gap `CaseRepository.CreateCase`
-had; both are now implemented, via `next_portal_work_item_number()` -- see
+had; both are now implemented, via `next_work_item_number('CHANGE_REQUEST')` (originally
+`next_portal_work_item_number()`) -- see
 "CreateCase and case numbers" above and `ChangeRequestRepository.CreateChangeRequest`'s
 own doc comment. Unlike case, `change_request` is excluded from
 `work_item_wso2_id_required_by_type`, so no `wso2_id` generation is needed
@@ -8666,7 +8667,17 @@ counter starts at 0/1, so each database must run `scripts/cutover/seed_native_nu
 (dry run by default; `-v apply=1` to apply) right before this build is deployed to it, or a
 new case's `<key>-1` collides with an existing synced id and a `CS` number does once the
 sequence reaches a synced one. The dual-write create path takes ServiceNow's own number and
-is unaffected. Existing `CS-PORTAL-` records are not renamed.
+is unaffected. Existing `CS-PORTAL-` records are not renamed. (3) While the seed runs, stop every native
+allocator -- the entity-service API **and its background workers** (for example the incident report
+drainer, which creates `TASK`-numbered tasks) -- wait for in-flight work to finish, and keep them stopped
+until the seed has committed: `setval()` is not atomic with the maximum it was computed from, so an
+allocation in between can be overwritten and a number issued twice.
+
+> **Historical.** The rest of this section, down to the `CaseRepository.CreateCase` paragraph, describes
+> migration `0140`'s `CS-PORTAL-` / `<key>-PORTAL-<n>` generators as they were introduced. Everything it
+> says about *which functions the create queries use* is superseded by the update above (migration
+> `0180`'s generators); the portal generators now remain only for records already created and for the raw
+> SQL in `incident_task_cascade_integration_test.go`.
 
 **Resolved by migration `0140_portal_created_work_item_numbering.sql`**, which
 this section used to say was still an open product decision. `number` for
@@ -8698,7 +8709,8 @@ on `req.Type` to one of five `*PortalQuery` consts (`createCasePortalQuery`/
 each a near-identical CTE to its already-existing `*FromServiceNowQuery`
 sibling (used by the dual-write mirror path, `CreateCaseFromServiceNow`) --
 the only real difference is identity: `gen_random_uuid()`/
-`next_portal_work_item_number()`/`next_portal_wso2_id($N)` generate it here,
+`next_work_item_number('<TYPE>')`/`next_wso2_id($N)` generate it here (before the update above:
+`next_portal_work_item_number()`/`next_portal_wso2_id($N)`),
 rather than taking it from a prior ServiceNow response. Every initial state
 literal (`'OPEN'`) was confirmed against the live enum catalog for each of
 the five state enums, not assumed from case's own convention.
@@ -9347,8 +9359,8 @@ by the generic `work_item_id`. Unlike `SearchCaseActivities`, there is no
 have an `"attachment"` kind entry.
 
 **`UpdateConversation` and `CreateConversation` are both implemented.**
-`CreateConversation` takes its number from `next_portal_work_item_number()`
-(migration 0140), starts the conversation `ACTIVE`, and stores the first
+`CreateConversation` takes its number from `next_work_item_number('CONVERSATION')`
+(migration 0180; originally `next_portal_work_item_number()`, migration 0140), starts the conversation `ACTIVE`, and stores the first
 message the way csm-sync-service lands ServiceNow's `u_initial_message`:
 `work_item.subject` (first 100 runes) and `work_item.description` (in full).
 `InitialMessage` on reads is that description, falling back to the earliest
@@ -9377,7 +9389,9 @@ previous SQL as an oracle against a real RLS-forced database (internal caller, p
 stranger, every filter, both sorts, page by page) and `TestConversationSearchQueries` pins the shape.
 
 **`CreateProblem`/`CreateIncident` are now implemented on the plain-Postgres
-data source too**, via `next_portal_work_item_number()` (migration 0140 --
+data source too**, via `next_work_item_number('PROBLEM')` /
+`next_work_item_number('INCIDENT')` (migration 0180; originally
+`next_portal_work_item_number()`, migration 0140 --
 see "CreateCase and case numbers" above): `ProblemRepository.CreateProblem`/
 `IncidentRepository.CreateIncident`, called from `problemService`/
 `incidentService`'s own `CreateProblem`/`CreateIncident` when `s.snMirror ==
