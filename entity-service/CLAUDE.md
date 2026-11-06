@@ -8665,8 +8665,9 @@ rendered content and none of the template fields (`DATA_SOURCE=servicenow` refus
 Authority member. Resume and clear the review flag (both put the template back in use with no review):
 a Standard Change Authority member only, with a required note (`{note}`, at most 1000 characters);
 clearing is refused (409) on a retired template or one not flagged. `canSuspend` / `canResume` /
-`canClearReview` on the template say what the caller may do. Edit, submit, withdraw, delete a draft:
-its proposer. Cancel: a Standard Change Authority member, not on their own. Decide: two authority
+`canClearReview` on the template say what the caller may do. Propose a new template, a revision or a
+retirement: any internal user with write access, not only the template's owner (decided 2026-11-06:
+the two authority approvals are the check). Edit, submit, withdraw, delete a draft: its proposer. Cancel: a Standard Change Authority member, not on their own. Decide: two authority
 members; never the proposer, and no CAB member as such.
 
 **Suspension.** `POST .../suspend` takes an optional body `{reason}` (`decodeOptionalRequest`: an

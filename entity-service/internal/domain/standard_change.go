@@ -207,8 +207,8 @@ type StandardChangeTemplate struct {
 	CurrentVersion *StandardChangeTemplateVersion `json:"currentVersion"`
 	// ReviewRequired is raised when a change request raised from the template was
 	// rolled back or deviated from its implementation plan. It does not stop the
-	// template being used: the owner proposes a revision or a retirement, or a
-	// Standard Change Authority member clears the flag.
+	// template being used: anyone internal may propose a revision or a
+	// retirement, or a Standard Change Authority member clears the flag.
 	ReviewRequired              bool       `json:"reviewRequired"`
 	ReviewRequiredReason        *string    `json:"reviewRequiredReason"`
 	ReviewRequiredOn            *time.Time `json:"reviewRequiredOn"`
