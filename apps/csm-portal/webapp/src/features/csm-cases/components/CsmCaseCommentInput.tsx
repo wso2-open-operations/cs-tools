@@ -43,14 +43,10 @@ import {
   type JSX,
 } from "react";
 import Editor from "@components/rich-text-editor/Editor";
-import {
-  ALLOWED_IMAGE_TYPES_LABEL,
-  MAX_COMMENT_IMAGES_MESSAGE,
-} from "@components/rich-text-editor/richTextConstants";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
-import { inlineImagesTotalMessage } from "@components/rich-text-editor/inlineImageLimits";
-import { entityAttachmentMaxBytes, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
+import { entityAttachmentMaxBytes } from "@config/attachmentLimitsConfig";
 import {
   dropFailedImages,
   hasBlobSource,
@@ -288,16 +284,8 @@ export default function CsmCaseCommentInput({
   const onAttachmentRemove = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, [setAttachments]);
-  const onPasteError = useCallback((reason: "size" | "type" | "count" | "total") => {
-    setError(
-      reason === "count"
-        ? MAX_COMMENT_IMAGES_MESSAGE
-        : reason === "total"
-          ? inlineImagesTotalMessage()
-          : reason === "type"
-          ? `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`
-          : `Pasted image exceeds the maximum allowed size of ${formatBytes(inlineImageMaxBytes())}.`,
-    );
+  const onPasteError = useCallback((reason: ImagePasteRefusal) => {
+    setError(imagePasteRefusalMessage(reason));
   }, []);
 
   // Dropping files directly onto the composer, as an alternative to the
