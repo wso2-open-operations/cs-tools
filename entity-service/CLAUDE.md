@@ -4927,6 +4927,29 @@ the same `validChangeRequestSortField`/`validChangeRequestSortOrder` maps
 value is a 400 on both data sources instead of silently falling back to
 `created_on DESC` only on Postgres.
 
+### Completion: `closed_on` / `closed_by_user_id` (migration 0279)
+
+Both columns (0043) were written only by the previous system's sync, never by this service, so
+a change request completed in the CSM had no completion time (the `closedStartDate` /
+`closedEndDate` search filters matched nothing for it). Every writer that moves a change request
+INTO **Closed or Rollback** now stamps them, in the same UPDATE as the state
+(`changeRequestClosureSets`, `change_request_closure.go`, the CASE shape of `case_repo.go`'s
+`closed_on`): the PATCH path (`patchChangeRequestTx`, the actor's `"user"` by email), the
+customer stage's outcome (`applyCustomerStageOutcome`: the customer who answered the review
+closes or rolls back the change) and the GitHub sync (`SetState`: a time, no closer). Rollback
+counts because it is a completion too (a failed one), and both states are final, so nothing
+clears the stamp; a resend of the state keeps the first one; Canceled stamps nothing. An actor
+email with no `"user"` row records no closer.
+
+`0279_change_request_closed_on_backfill.sql` fills the rows completed before this from
+`event_outbox` (0051): the first outbox row whose `state` went from any other state to Closed /
+Rollback gives `closed_on` (its `occurred_on`, the writing transaction's `NOW()`); the closer is
+`work_item.updated_by` only while the work item still carries that exact `updated_on` (the PATCH
+stamps both in the same transaction; anything written since leaves no closer rather than a
+guess). Rows with `closed_on` already set, or with no recorded transition, are left alone;
+re-running it writes nothing. Tests: `change_request_closure_integration_test.go`
+(`CHANGE_REQUEST_TEST_DSN`, superuser and `csm_app`).
+
 ### Tags
 
 A change request's tags are the case's tags, on its own work item: the same
