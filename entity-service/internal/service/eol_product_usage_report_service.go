@@ -69,7 +69,7 @@ func (s *eolProductUsageReportService) BuildReport(ctx context.Context, req doma
 		return domain.EolProductUsageReport{}, err
 	}
 	report := GroupEolProductUsage(rows)
-	report.GeneratedAt = now
+	report.GeneratedOn = now
 	report.AsOf = asOf
 	return report, nil
 }
@@ -85,19 +85,21 @@ func GroupEolProductUsage(rows []domain.EolProductUsageRow) domain.EolProductUsa
 		}
 		return &domain.EolProductUsagePerson{Name: name, Email: email}
 	}
+	regionKey := "" // the current region group's spelling, as read
 	for _, r := range rows {
 		n := len(report.Regions)
 		// The rows are ordered by lower(region): regions that differ only in
 		// case are one group, shown with the first spelling met.
-		if n == 0 || !strings.EqualFold(report.Regions[n-1].Region, r.Region) {
-			report.Regions = append(report.Regions, domain.EolProductUsageRegion{Region: r.Region, Accounts: []domain.EolProductUsageAccount{}})
+		if n == 0 || !strings.EqualFold(regionKey, r.Region) {
+			regionKey = r.Region
+			report.Regions = append(report.Regions, domain.EolProductUsageRegion{Region: eolOptional(r.Region), Accounts: []domain.EolProductUsageAccount{}})
 			n++
 		}
 		region := &report.Regions[n-1]
 		a := len(region.Accounts)
 		if a == 0 || region.Accounts[a-1].AccountID != r.AccountID {
 			region.Accounts = append(region.Accounts, domain.EolProductUsageAccount{
-				AccountID: r.AccountID, AccountName: r.AccountName, CsAbt: r.CsAbt, Region: r.Region,
+				AccountID: r.AccountID, AccountName: r.AccountName, CsAbt: eolOptional(r.CsAbt), Region: eolOptional(r.Region),
 				AccountManager: person(r.AccountManagerName, r.AccountManagerEmail),
 				TechnicalOwner: person(r.TechnicalOwnerName, r.TechnicalOwnerEmail),
 				Projects:       []domain.EolProductUsageProject{},
@@ -109,7 +111,7 @@ func GroupEolProductUsage(rows []domain.EolProductUsageRow) domain.EolProductUsa
 		p := len(account.Projects)
 		if p == 0 || account.Projects[p-1].ProjectID != r.ProjectID {
 			account.Projects = append(account.Projects, domain.EolProductUsageProject{
-				ProjectID: r.ProjectID, ProjectName: r.ProjectName, ProjectKey: r.ProjectKey,
+				ProjectID: r.ProjectID, ProjectName: r.ProjectName, ProjectKey: eolOptional(r.ProjectKey),
 				Versions: []domain.EolProductUsageVersion{},
 			})
 			p++
@@ -122,4 +124,13 @@ func GroupEolProductUsage(rows []domain.EolProductUsageRow) domain.EolProductUsa
 		report.TotalVersions++
 	}
 	return report
+}
+
+// eolOptional is a report text field: nil when the row has none, so it
+// serialises as null rather than "".
+func eolOptional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

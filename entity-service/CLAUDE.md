@@ -12043,7 +12043,8 @@ product version past its EOL date in Primary Production. Internal callers only; 
 - **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
   `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
 - **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
-  met), then account, then project; versions oldest EOL first.
+  met), then account, then project; versions oldest EOL first. Text a row lacks (region, CS ABT, project key) is
+  `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is `generatedOn`.
 
 Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
 (`ENTITY_TEST_DATABASE_URL`).

@@ -32960,9 +32960,9 @@ components:
           nullable: true
     EolProductUsageReport:
       type: object
-      required: [generatedAt, asOf, totalVersions, totalAccounts, regions]
+      required: [generatedOn, asOf, totalVersions, totalAccounts, regions]
       properties:
-        generatedAt: {type: string, format: date-time}
+        generatedOn: {type: string, format: date-time}
         asOf: {type: string, format: date}
         totalVersions:
           type: integer
@@ -32978,7 +32978,8 @@ components:
       properties:
         region:
           type: string
-          description: The account's region; "" for accounts with no region (listed last).
+          nullable: true
+          description: The account's region; null for accounts with no region (listed last).
         accounts:
           type: array
           items:
@@ -32991,8 +32992,9 @@ components:
         accountName: {type: string}
         csAbt:
           type: string
-          description: The account's CRE (ABT) team name; "" when it has none.
-        region: {type: string}
+          nullable: true
+          description: The account's CRE (ABT) team name; null when it has none.
+        region: {type: string, nullable: true}
         accountManager:
           $ref: '#/components/schemas/EolProductUsagePerson'
         technicalOwner:
@@ -33004,7 +33006,7 @@ components:
     EolProductUsagePerson:
       type: object
       nullable: true
-      required: [name, email]
+      description: Null when the account has none; a name or email the user record lacks is left out.
       properties:
         name: {type: string}
         email: {type: string}
@@ -33016,7 +33018,8 @@ components:
         projectName: {type: string}
         projectKey:
           type: string
-          description: "\"\" when the project has none."
+          nullable: true
+          description: Null when the project has none.
         versions:
           type: array
           items:

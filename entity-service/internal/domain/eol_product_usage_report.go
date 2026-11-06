@@ -33,7 +33,7 @@ type EolProductUsageReportRequest struct {
 // EolProductUsageReport is the monthly EOL product usage report, grouped by
 // the account's region, then account, then project.
 type EolProductUsageReport struct {
-	GeneratedAt time.Time `json:"generatedAt"`
+	GeneratedOn time.Time `json:"generatedOn"`
 	// AsOf is the report date, "YYYY-MM-DD".
 	AsOf string `json:"asOf"`
 	// TotalVersions counts the (project, product version) entries listed;
@@ -43,10 +43,10 @@ type EolProductUsageReport struct {
 	Regions       []EolProductUsageRegion `json:"regions"`
 }
 
-// EolProductUsageRegion is one region's accounts. Region is "" for
+// EolProductUsageRegion is one region's accounts. Region is nil for
 // accounts with no region; that group is listed last.
 type EolProductUsageRegion struct {
-	Region   string                   `json:"region"`
+	Region   *string                  `json:"region"`
 	Accounts []EolProductUsageAccount `json:"accounts"`
 }
 
@@ -54,27 +54,29 @@ type EolProductUsageRegion struct {
 type EolProductUsageAccount struct {
 	AccountID   string `json:"accountId"`
 	AccountName string `json:"accountName"`
-	// CsAbt is the account's CRE (ABT) team name, "" when it has none.
-	CsAbt  string `json:"csAbt"`
-	Region string `json:"region"`
+	// CsAbt is the account's CRE (ABT) team name; Region its region. Each
+	// is nil when the account has none.
+	CsAbt  *string `json:"csAbt"`
+	Region *string `json:"region"`
 	// AccountManager and TechnicalOwner are nil when the account has none.
 	AccountManager *EolProductUsagePerson   `json:"accountManager"`
 	TechnicalOwner *EolProductUsagePerson   `json:"technicalOwner"`
 	Projects       []EolProductUsageProject `json:"projects"`
 }
 
-// EolProductUsagePerson is an account manager or technical owner.
+// EolProductUsagePerson is an account manager or technical owner. A name
+// or email the user record lacks is left out.
 type EolProductUsagePerson struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // EolProductUsageProject is one project and the EOL versions it runs.
 type EolProductUsageProject struct {
 	ProjectID   string `json:"projectId"`
 	ProjectName string `json:"projectName"`
-	// ProjectKey is "" when the project has none.
-	ProjectKey string                   `json:"projectKey"`
+	// ProjectKey is nil when the project has none.
+	ProjectKey *string                  `json:"projectKey"`
 	Versions   []EolProductUsageVersion `json:"versions"`
 }
 
@@ -91,7 +93,8 @@ type EolProductUsageVersion struct {
 }
 
 // EolProductUsageRow is one (project, product version) row as the
-// repository reads it, before grouping.
+// repository reads it, before grouping. Text it lacks is "" here; the
+// report turns that into null (GroupEolProductUsage).
 type EolProductUsageRow struct {
 	Region, AccountID, AccountName, CsAbt           string
 	AccountManagerName, AccountManagerEmail         string

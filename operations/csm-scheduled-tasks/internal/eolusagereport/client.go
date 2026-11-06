@@ -32,9 +32,11 @@ const maxResponseBytes = 8 << 20
 // Report is one EOL product usage report as entity-service returns it: the
 // customers running a product version past its EOL date in an active
 // Primary Production deployment, grouped by region, then account, then
-// project.
+// project. entity-service sends null for a text it lacks (region, CS ABT,
+// project key) and leaves out a person's missing name or email; both decode
+// to "" here.
 type Report struct {
-	GeneratedAt time.Time `json:"generatedAt"`
+	GeneratedOn time.Time `json:"generatedOn"`
 	// AsOf is the report date, "YYYY-MM-DD": a version is listed when its EOL
 	// date is before it.
 	AsOf string `json:"asOf"`
@@ -42,13 +44,14 @@ type Report struct {
 	TotalVersions int `json:"totalVersions"`
 	// TotalAccounts counts the accounts listed.
 	TotalAccounts int `json:"totalAccounts"`
-	// Regions are in name order; the accounts with no region ("") come last.
+	// Regions are in name order; the accounts with no region (null, "" here)
+	// come last.
 	Regions []Region `json:"regions"`
 }
 
 // Region is the accounts of one region.
 type Region struct {
-	// Region is the account's region, "" when it has none.
+	// Region is the account's region, "" when it has none (null).
 	Region   string    `json:"region"`
 	Accounts []Account `json:"accounts"`
 }
@@ -57,7 +60,7 @@ type Region struct {
 type Account struct {
 	AccountID   string `json:"accountId"`
 	AccountName string `json:"accountName"`
-	// CsAbt is the account's CS (CRE) team name, "" when none.
+	// CsAbt is the account's CS (CRE) team name, "" when none (null).
 	CsAbt  string `json:"csAbt"`
 	Region string `json:"region"`
 	// AccountManager and TechnicalOwner are nil when the account has none.
@@ -77,7 +80,7 @@ type Person struct {
 type Project struct {
 	ProjectID   string `json:"projectId"`
 	ProjectName string `json:"projectName"`
-	// ProjectKey is the project's key ("ACMEPROD"), "" when none.
+	// ProjectKey is the project's key ("ACMEPROD"), "" when none (null).
 	ProjectKey string    `json:"projectKey"`
 	Versions   []Version `json:"versions"`
 }

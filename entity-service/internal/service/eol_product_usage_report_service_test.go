@@ -18,7 +18,9 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,14 @@ type fakeEolUsageRepo struct {
 func (f *fakeEolUsageRepo) ListEolUsage(_ context.Context, asOf string) ([]domain.EolProductUsageRow, error) {
 	f.gotAsOf = asOf
 	return f.rows, nil
+}
+
+// deref is a report text field's value, "" for null.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func eolRow(region, account, project, version string) domain.EolProductUsageRow {
@@ -87,7 +97,7 @@ func TestGroupEolProductUsageNestsRegionAccountProject(t *testing.T) {
 		t.Fatalf("totals %d versions, %d accounts, %d regions; want 5, 3, 2", got.TotalVersions, got.TotalAccounts, len(got.Regions))
 	}
 	apac := got.Regions[0]
-	if apac.Region != "APAC" || len(apac.Accounts) != 2 || len(apac.Accounts[0].Projects) != 2 || len(apac.Accounts[0].Projects[0].Versions) != 2 {
+	if deref(apac.Region) != "APAC" || len(apac.Accounts) != 2 || len(apac.Accounts[0].Projects) != 2 || len(apac.Accounts[0].Projects[0].Versions) != 2 {
 		t.Fatalf("APAC grouping = %+v", apac)
 	}
 	if apac.Accounts[1].AccountManager != nil {
@@ -96,7 +106,7 @@ func TestGroupEolProductUsageNestsRegionAccountProject(t *testing.T) {
 	if apac.Accounts[0].AccountManager == nil || apac.Accounts[0].AccountManager.Email != "am@Acme" {
 		t.Errorf("account manager = %+v", apac.Accounts[0].AccountManager)
 	}
-	if got.Regions[1].Region != "" || got.Regions[1].Accounts[0].AccountName != "Gamma" {
+	if got.Regions[1].Region != nil || got.Regions[1].Accounts[0].AccountName != "Gamma" {
 		t.Errorf("no-region group = %+v, want Gamma last", got.Regions[1])
 	}
 }
@@ -109,7 +119,28 @@ func TestGroupEolProductUsageTreatsRegionsDifferingInCaseAsOne(t *testing.T) {
 		eolRow("EMEA", "Delta", "Delta Prod", "3.2.0"),
 	}
 	got := service.GroupEolProductUsage(rows)
-	if len(got.Regions) != 1 || got.Regions[0].Region != "EMEA" || len(got.Regions[0].Accounts) != 3 {
+	if len(got.Regions) != 1 || deref(got.Regions[0].Region) != "EMEA" || len(got.Regions[0].Accounts) != 3 {
 		t.Fatalf("regions = %+v, want one EMEA group with 3 accounts", got.Regions)
+	}
+}
+
+func TestEolProductUsageReportSendsNullNotEmptyStrings(t *testing.T) {
+	row := eolRow("", "Acme", "Acme Prod", "2.6.0")
+	row.CsAbt, row.ProjectKey, row.AccountManagerEmail = "", "", ""
+	row.AccountManagerName = "Person One"
+	got := service.GroupEolProductUsage([]domain.EolProductUsageRow{row})
+	got.AsOf = "2026-11-02" // set by BuildReport
+	out, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(out)
+	for _, want := range []string{`"region":null`, `"csAbt":null`, `"projectKey":null`, `"accountManager":{"name":"Person One"}`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("report JSON lacks %s:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `""`) {
+		t.Errorf("report JSON has an empty string:\n%s", body)
 	}
 }
