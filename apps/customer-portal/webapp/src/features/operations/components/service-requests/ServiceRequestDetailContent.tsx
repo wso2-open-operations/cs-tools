@@ -73,7 +73,7 @@ import {
   replaceInlineImageSources,
   INLINE_COMMENT_HTML_PURIFY,
   hasDisplayableContent,
-  ACTION_TO_CASE_STATE_LABEL,
+  resolveActionStateKey,
   getAvailableCaseActions,
   toPresentContinuousActionLabel,
   toPresentTenseActionLabel,
@@ -807,16 +807,7 @@ export default function ServiceRequestDetailContent({
                 </Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                   {displayableActions.map(({ label, Icon }) => {
-                    const stateLabel = ACTION_TO_CASE_STATE_LABEL[label];
-                    const stateKeyEntry = caseStates?.find(
-                      (s) =>
-                        s.label.toLowerCase() ===
-                        (stateLabel ?? "").toLowerCase(),
-                    );
-                    const stateKey =
-                      stateKeyEntry && !Number.isNaN(Number(stateKeyEntry.id))
-                        ? Number(stateKeyEntry.id)
-                        : undefined;
+                    const stateKey = resolveActionStateKey(label, caseStates);
                     const canPatch = stateKey != null && !!caseId;
                     const isThisPending =
                       patchCase.isPending && pendingActionLabel === label;
