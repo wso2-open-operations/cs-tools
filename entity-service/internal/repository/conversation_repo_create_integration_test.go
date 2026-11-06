@@ -102,8 +102,8 @@ func TestConversationCreateIntegration_MemberCreatesAndReadsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateConversation as a registered project member: %v", err)
 	}
-	if !strings.HasPrefix(created.Number, "CS-PORTAL-") {
-		t.Errorf("number = %q, want a next_portal_work_item_number() value", created.Number)
+	if !strings.HasPrefix(created.Number, "CHAT") {
+		t.Errorf("number = %q, want a next_work_item_number('CONVERSATION') value (CHAT...)", created.Number)
 	}
 
 	got, err := repo.GetConversation(ctx, created.ID)
