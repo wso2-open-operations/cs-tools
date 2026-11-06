@@ -5971,15 +5971,11 @@ export interface BeChangeRequestStandardChange {
 // entity-service computes them on a schedule and the read returns the last
 // snapshot (see its openapi.yaml).
 
-export type BeStandardChangeSuggestionMatch = "covered" | "close" | "new";
-
 export interface BeStandardChangeSuggestionCriteria {
   windowMonths: number;
   minClosed: number;
   minSuccessPercent: number;
   planSimilarityPercent: number;
-  coveredPercent: number;
-  closePercent: number;
 }
 
 export interface BeStandardChangeSuggestionBreakdown {
@@ -6029,9 +6025,6 @@ export interface BeStandardChangeSuggestion {
   eligible: boolean;
   /** Each criterion it misses, in words. */
   unmet: string[];
-  match: BeStandardChangeSuggestionMatch;
-  /** The nearest live template of the customer (null for "new"). */
-  template?: { id: string; number: string; name: string; state: string; score: number } | null;
   /** The newest closed member with no deviation: what a new proposal starts from. */
   proposeFrom?: BeEntityRef | null;
   /** Every other closed member, newest first, at most 99. */
@@ -6052,7 +6045,7 @@ export interface BeStandardChangeSuggestionsResponse {
   suggestions: BeStandardChangeSuggestion[];
   /** The thresholds the snapshot was computed by (configuration, not a request parameter). */
   criteria: BeStandardChangeSuggestionCriteria;
-  /** When the snapshot was published (a scheduled refresh, twice a day); null before the first. */
+  /** When the snapshot was published (a scheduled refresh, once a day); null before the first. */
   computedOn?: string | null;
   scanned: { customers?: number; changeRequests: number; clusters: number; eligible: number; dismissed: number };
 }

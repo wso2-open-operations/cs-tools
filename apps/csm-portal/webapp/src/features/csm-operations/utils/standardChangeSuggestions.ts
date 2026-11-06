@@ -19,7 +19,7 @@ import type { BeStandardChangeSuggestion, BeStandardChangeSuggestionsResponse } 
 
 // The Suggested section of Standard changes (StandardChangeSuggestions.tsx):
 // what each suggestion offers, and what a proposal started from one cites.
-// entity-service finds and judges the suggestions on a schedule (twice a day)
+// entity-service finds and judges the suggestions on a schedule (once a day)
 // and the page reads its last snapshot; these only read it.
 
 /** The dismissal reason's limit (entity-service refuses a longer one). */
@@ -28,13 +28,6 @@ export const MAX_SUGGESTION_DISMISS_REASON_LENGTH = 1000;
 /** A proposal cites at most this many change requests (entity-service's cap). */
 export const MAX_PROPOSAL_EVIDENCE = 100;
 
-/** How a suggestion relates to the customer's live templates, in words. */
-export function suggestionMatchLabel(s: Pick<BeStandardChangeSuggestion, "match" | "template">): string {
-  if (s.match === "covered" && s.template) return `Covered by ${s.template.number}`;
-  if (s.match === "close" && s.template) return `Close to ${s.template.number}: revise it`;
-  return "New";
-}
-
 export interface SuggestionAction {
   /** Why it cannot be done now (the button is shown disabled with it); null when it can. */
   blockedReason: string | null;
@@ -42,8 +35,6 @@ export interface SuggestionAction {
 
 export interface SuggestionActions {
   propose?: SuggestionAction;
-  revise?: SuggestionAction;
-  openTemplate?: true;
   dismiss?: true;
   restore?: true;
 }
@@ -53,38 +44,29 @@ function joinNumbers(refs: Array<{ name: string; id: string }>): string {
 }
 
 /**
- * What a suggestion offers the viewer. A new one is proposed, a close one is a
- * revision of the template it is close to, a covered one opens its template.
- * Only a person who can write starts a proposal or dismisses (the backend
- * refuses anyone else); a dismissed one can only be restored. A near miss shows
- * its action disabled with what it misses, and so does one already being
- * proposed (a second proposal would duplicate it) or one with no clean change
- * request to start from.
+ * What a suggestion offers the viewer: Propose (a new standard change from its
+ * newest clean change request) and Dismiss, or Restore for a dismissed one.
+ * Only a person who can write gets them (the backend refuses anyone else). A
+ * near miss shows Propose disabled with what it misses, and so does one already
+ * being proposed (a second proposal would duplicate it) or one with no clean
+ * change request to start from. A suggestion is deliberately not related to
+ * the customer's existing templates (entity-service CLAUDE.md, "Standard change
+ * suggestions"): whether one already covers it is for the reader to judge.
  */
 export function suggestionActions(s: BeStandardChangeSuggestion, canWrite: boolean): SuggestionActions {
-  const out: SuggestionActions = {};
-  if (s.template && (s.match === "covered" || s.match === "close")) out.openTemplate = true;
-  if (!canWrite) return out;
-  if (s.dismissal) {
-    out.restore = true;
-    return out;
-  }
-  out.dismiss = true;
+  if (!canWrite) return {};
+  if (s.dismissal) return { restore: true };
   const notYet = s.eligible ? null : `Not yet a candidate: ${s.unmet.join("; ")}.`;
   const alreadyProposed = s.openProposals.length > 0 ? `Already being proposed in ${joinNumbers(s.openProposals)}.` : null;
-  if (s.match === "new") {
-    out.propose = {
+  return {
+    propose: {
       blockedReason:
         notYet ??
         alreadyProposed ??
         (s.proposeFrom ? null : "No closed change request without a deviation from its implementation plan to start from."),
-    };
-  } else if (s.match === "close") {
-    out.revise = { blockedReason: notYet ?? alreadyProposed };
-    // A close template is revised, not opened: the revision opens it anyway.
-    delete out.openTemplate;
-  }
-  return out;
+    },
+    dismiss: true,
+  };
 }
 
 /**
@@ -95,12 +77,6 @@ export function suggestionActions(s: BeStandardChangeSuggestion, canWrite: boole
 export function suggestionProposalEvidence(s: Pick<BeStandardChangeSuggestion, "proposeFrom" | "evidence">): string[] {
   if (!s.proposeFrom) return [];
   return [s.proposeFrom.id, ...s.evidence.map((e) => e.id)].slice(0, MAX_PROPOSAL_EVIDENCE);
-}
-
-/** The evidence a revision of the close template cites: every closed member, newest first, within the cap. */
-export function suggestionRevisionEvidence(s: Pick<BeStandardChangeSuggestion, "proposeFrom" | "evidence">): string[] {
-  const ids = s.proposeFrom ? [s.proposeFrom.id] : [];
-  return [...ids, ...s.evidence.map((e) => e.id)].slice(0, MAX_PROPOSAL_EVIDENCE);
 }
 
 /** The line above the list: how many, from what, judged by which thresholds. */
@@ -116,7 +92,7 @@ export function suggestionCriteriaText(r: BeStandardChangeSuggestionsResponse): 
 
 /** What the page says before the first snapshot has been computed. */
 export const SUGGESTIONS_NOT_COMPUTED_YET =
-  "Suggestions are computed twice a day from completed change requests. None have been computed yet.";
+  "Suggestions are computed once a day from completed change requests. None have been computed yet.";
 
 /** "Updated Nov 6, 02:00 PM": when the snapshot was published, in the viewer's time zone; null before the first. */
 export function suggestionUpdatedText(computedOn?: string | null, timeZone?: string): string | null {

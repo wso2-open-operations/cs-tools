@@ -1381,8 +1381,8 @@ func main() {
 const standardChangeSuggestionsTaskName = "standard_change_suggestions_refresh"
 
 // standardChangeSuggestionsTask builds the standard change suggestions refresh.
-// Twice a day by default, at 02:00 and 14:00 (UTC with TZ=UTC): fresh each
-// working morning and afternoon. Called only when
+// Once a day by default, at 02:00 (UTC with TZ=UTC): standard changes are not
+// frequent, so the page needs nothing fresher. Called only when
 // STANDARD_CHANGE_SUGGESTIONS_ENABLED=true.
 func standardChangeSuggestionsTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
 	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
@@ -1400,7 +1400,7 @@ func standardChangeSuggestionsTask(entityServiceBaseURL, oauthTokenURL, oauthCli
 	to, cc := recipientsFor(recipientOverrides, standardChangeSuggestionsTaskName)
 	return registry.Task{
 		Name:     standardChangeSuggestionsTaskName,
-		Schedule: scheduleFor(scheduleOverrides, standardChangeSuggestionsTaskName, "0 2,14 * * *"),
+		Schedule: scheduleFor(scheduleOverrides, standardChangeSuggestionsTaskName, "0 2 * * *"),
 		Handler:  standardchangesuggestions.Run(client),
 		To:       to,
 		Cc:       cc,

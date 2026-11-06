@@ -32,7 +32,7 @@ import (
 // The standard change suggestions: one customer's completed change requests
 // that look like the same change done again and again, which a standard change
 // template could pre-authorise. This file is the pure part (normalising text,
-// clustering, judging a cluster, relating it to the customer's templates);
+// clustering, judging a cluster);
 // standard_change_suggestion_service.go reads the data and serves it.
 //
 // A cluster is built in three steps, per customer (a template belongs to one
@@ -48,6 +48,12 @@ import (
 //     that member's cluster whatever its subject or plan says.
 // No embeddings and no model are used: the rules are deterministic and
 // explainable, and only self-hosted models would be allowed anyway.
+//
+// A cluster is deliberately NOT related to the customer's existing templates
+// ("covered by STD…", "close to STD…"): deciding by word overlap whether two
+// changes are the same can be wildly off, so it was left out (see
+// entity-service CLAUDE.md, "Standard change suggestions"). Change requests
+// raised from a template are not candidates at all, which is exact.
 
 // suggestionMaxKey is the longest key stored (standard_change_suggestion_dismissal.suggestion_key).
 const suggestionMaxKey = 512
@@ -345,8 +351,8 @@ func plural(n int, one, many string) string {
 
 // judgeSuggestionCluster turns a cluster into a suggestion: its counts, the
 // criteria it misses, what a proposal would start from and cite. incidents and
-// openProposals are keyed by change request id. Match and Dismissal are left to
-// the caller.
+// openProposals are keyed by change request id. The dismissal is left to the
+// caller.
 func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSuggestionCriteria,
 	incidents, openProposals map[string][]domain.EntityRef) domain.StandardChangeSuggestion {
 	s := domain.StandardChangeSuggestion{
@@ -359,7 +365,6 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 		OpenProposals: []domain.EntityRef{},
 		Members:       []domain.StandardChangeSuggestionMember{},
 		Unmet:         []string{},
-		Match:         domain.StandardChangeSuggestionNew,
 	}
 	seenIncident, seenProposal := map[string]bool{}, map[string]bool{}
 	s.LastCompletedOn = cl.nodes[0].c.CompletedOn
@@ -430,59 +435,6 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 	}
 	s.Eligible = len(s.Unmet) == 0
 	return s
-}
-
-// overlap is |a ∩ b| / min(|a|, |b|), 0 when either is empty: how much of the
-// smaller set the larger one contains.
-func overlap(a, b wordSet) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	inter := 0
-	for w := range a {
-		if _, ok := b[w]; ok {
-			inter++
-		}
-	}
-	return float64(inter) / float64(min(len(a), len(b)))
-}
-
-// matchSuggestionTemplate relates a cluster to the customer's live templates,
-// against each template's current version with its {{placeholders}} removed.
-// The subject counts by overlap (a template's subject is the cluster's with the
-// varying words made placeholders, so it is a subset, which Jaccard would
-// penalise), the implementation plan by Jaccard, each half (the subject alone
-// when either side has no plan). The nearest template at or above
-// CoveredPercent covers the cluster; at or above ClosePercent it is close.
-func matchSuggestionTemplate(cl suggestionCluster, templates []repository.SuggestionTemplate, crit domain.StandardChangeSuggestionCriteria) (domain.StandardChangeSuggestionMatch, *domain.StandardChangeSuggestionTemplateRef) {
-	rep := cl.nodes[0]
-	for i, n := range cl.nodes {
-		if cl.core[i] && n.hasPlan() {
-			rep = n
-			break
-		}
-	}
-	subject := suggestionWordSet(cl.key)
-	var best *domain.StandardChangeSuggestionTemplateRef
-	for _, t := range templates {
-		score := overlap(subject, suggestionWordSet(t.Subject))
-		if tplPlan := suggestionWordSet(t.ImplementationPlan); rep.hasPlan() && len(tplPlan) >= suggestionMinPlanWords {
-			score = (score + jaccard(rep.plan, tplPlan)) / 2
-		}
-		if best == nil || score > best.Score {
-			best = &domain.StandardChangeSuggestionTemplateRef{
-				ID: t.ID, Number: t.Number, Name: t.Name, State: strings.ToLower(t.State), Score: score,
-			}
-		}
-	}
-	switch {
-	case best == nil || best.Score*100+1e-9 < float64(crit.ClosePercent):
-		return domain.StandardChangeSuggestionNew, nil
-	case best.Score*100+1e-9 >= float64(crit.CoveredPercent):
-		return domain.StandardChangeSuggestionCovered, best
-	default:
-		return domain.StandardChangeSuggestionClose, best
-	}
 }
 
 // suggestionWindowStart is the earliest completion the window counts.

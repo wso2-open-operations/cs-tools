@@ -39,7 +39,7 @@ import {
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ChevronDown, ChevronUp, FilePlus, Pencil, Undo2 } from "@wso2/oxygen-ui-icons-react";
+import { ChevronDown, ChevronUp, FilePlus, Undo2 } from "@wso2/oxygen-ui-icons-react";
 import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { Link as RouterLink, useLocation } from "react-router";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
@@ -60,16 +60,14 @@ import {
   MAX_SUGGESTION_DISMISS_REASON_LENGTH,
   suggestionActions,
   suggestionCriteriaText,
-  suggestionMatchLabel,
   suggestionProposalEvidence,
-  suggestionRevisionEvidence,
   suggestionUpdatedText,
   SUGGESTIONS_NOT_COMPUTED_YET,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
-import { standardChangeProposalPath, standardChangeTemplatePath } from "@features/csm-operations/utils/standardChanges";
+import { standardChangeProposalPath } from "@features/csm-operations/utils/standardChanges";
 import type { BeEntityRef, BeStandardChangeSuggestion } from "@api/backend/types";
 
-const COLUMNS = 7;
+const COLUMNS = 6;
 
 function formatDate(value?: string | null): string {
   return formatBackendTimestampForDisplay(value, { dateStyle: "medium" }) ?? "—";
@@ -224,12 +222,12 @@ function DismissDialog({
 /**
  * Suggested standard changes: clusters of one customer's completed change
  * requests that look like the same change done again. entity-service finds and
- * judges them twice a day and `GET /standard-change-suggestions` returns the
+ * judges them once a day and `GET /standard-change-suggestions` returns the
  * last snapshot (`computedOn`, shown as "Updated …"); nothing is computed or
- * decided here. Each row says how the cluster relates to the customer's live templates
- * and offers what follows: Propose a new standard change from its newest clean
- * change request, citing the others; Revise the template it is close to; open
- * the template that already covers it; or Dismiss it with a reason.
+ * decided here. Each row offers Propose (a new standard change from its newest
+ * clean change request, citing the others) and Dismiss with a reason. It is not
+ * related to the customer's existing templates, on purpose (see
+ * suggestionActions).
  */
 export default function StandardChangeSuggestions({ leading, trailing }: { leading: ReactNode; trailing: ReactNode }): JSX.Element {
   const { canWrite } = usePortalAccess();
@@ -350,7 +348,6 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                 <TableCell sx={{ width: 180 }}>Customer</TableCell>
                 <TableCell sx={{ width: 130 }}>Done</TableCell>
                 <TableCell sx={{ width: 120 }}>Last done</TableCell>
-                <TableCell sx={{ width: 220 }}>Templates</TableCell>
                 <TableCell sx={{ width: 260 }}>Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -422,21 +419,6 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                           </Typography>
                         </TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDate(s.lastCompletedOn)}</TableCell>
-                        <TableCell sx={{ maxWidth: 240, wordBreak: "break-word" }}>
-                          <Chip
-                            size="small"
-                            variant="outlined"
-                            color={s.match === "covered" ? "success" : s.match === "close" ? "warning" : "info"}
-                            label={suggestionMatchLabel(s)}
-                          />
-                          {s.template && (
-                            <Typography variant="caption" color="text.secondary" component="div">
-                              <Link component={RouterLink} to={standardChangeTemplatePath(s.template.id)} state={from} underline="hover">
-                                {`${s.template.number} — ${s.template.name}`}
-                              </Link>
-                            </Typography>
-                          )}
-                        </TableCell>
                         <TableCell>
                           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
                             {actions.propose && (
@@ -461,37 +443,6 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                                   </Button>
                                 </span>
                               </Tooltip>
-                            )}
-                            {actions.revise && s.template && (
-                              <Tooltip title={actions.revise.blockedReason ?? ""}>
-                                <span>
-                                  <Button
-                                    size="small"
-                                    variant="contained"
-                                    startIcon={<Pencil size={14} />}
-                                    disabled={!!actions.revise.blockedReason || busy}
-                                    onClick={() =>
-                                      startProposal(
-                                        s,
-                                        { kind: "modify", templateId: s.template!.id },
-                                        suggestionRevisionEvidence(s),
-                                        "revision",
-                                      )
-                                    }
-                                  >
-                                    {`Revise ${s.template.number}`}
-                                  </Button>
-                                </span>
-                              </Tooltip>
-                            )}
-                            {actions.openTemplate && s.template && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                onClick={() => navigate(standardChangeTemplatePath(s.template!.id), { state: from })}
-                              >
-                                {`Open ${s.template.number}`}
-                              </Button>
                             )}
                             {actions.dismiss && (
                               <Button size="small" variant="text" disabled={busy} onClick={() => setDismissing(s)}>

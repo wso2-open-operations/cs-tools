@@ -13793,13 +13793,14 @@ paths:
       operationId: getStandardChangeSuggestions
       description: >-
         Reads the snapshot the scheduled refresh last published (POST
-        /standard-change-suggestions/refresh, twice a day); it never computes. A snapshot holds,
+        /standard-change-suggestions/refresh, once a day); it never computes. A snapshot holds,
         per customer, the clusters of completed change requests (Closed or Rollback, not raised
         from a template, completed within the configured window) that look like the same change
         done again: the same normalised subject, confirmed by the implementation plans, joined
         directly by clone lineage, each judged by the configured criteria
-        (STANDARD_CHANGE_SUGGESTION_*, returned as criteria) and related to the customer's live
-        templates as they were then. The open proposals and the dismissals are read live.
+        (STANDARD_CHANGE_SUGGESTION_*, returned as criteria). A cluster is not related to the
+        customer's existing templates (by design). The open proposals and the dismissals are read
+        live.
         computedOn is when the snapshot was published; with none yet the answer is an empty list
         and no computedOn. Internal callers only.
       parameters:
@@ -13836,7 +13837,7 @@ paths:
       summary: Compute one page of a new standard change suggestion snapshot (the scheduled refresh).
       operationId: refreshStandardChangeSuggestions
       description: >-
-        Driven twice a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
+        Driven once a day by operations/csm-scheduled-tasks' standard_change_suggestions_refresh.
         The first call (no runId) starts a run; each call computes the next customers in id order
         after the cursor, one at a time, at most limit of them and fewer when the call runs short
         of time (after at least one), and stores their suggestions in the run. While more is true,
@@ -34149,8 +34150,6 @@ components:
         minClosed: {type: integer}
         minSuccessPercent: {type: integer}
         planSimilarityPercent: {type: integer}
-        coveredPercent: {type: integer, description: "A template at least this similar covers the cluster."}
-        closePercent: {type: integer, description: "A template at least this similar is close (revise it)."}
     StandardChangeSuggestion:
       type: object
       properties:
@@ -34168,17 +34167,6 @@ components:
         lastCompletedOn: {type: string, format: date-time}
         eligible: {type: boolean}
         unmet: {type: array, items: {type: string}, description: "Each criterion it misses, in words."}
-        match: {type: string, enum: [covered, close, new]}
-        template:
-          type: object
-          nullable: true
-          description: The nearest live template of the customer (null for new).
-          properties:
-            id: {type: string, format: uuid}
-            number: {type: string}
-            name: {type: string}
-            state: {type: string, enum: [active, suspended]}
-            score: {type: number}
         proposeFrom:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]
           nullable: true

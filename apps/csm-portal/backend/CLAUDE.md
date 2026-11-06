@@ -514,7 +514,7 @@ from a template for another customer's project (or none), or a PATCH moving it t
 
 **Suggestions** (entity-service CLAUDE.md, "Standard change suggestions"): `GET
 /standard-change-suggestions` (`PermViewOperations`) reads entity-service's snapshot, which its scheduled
-refresh computes twice a day (a read never computes; the refresh route is service-only and not proxied
+refresh computes once a day (a read never computes; the refresh route is service-only and not proxied
 here). It forwards only `accountId` (a UUID) and `includeIneligible` / `includeDismissed` (`true` or
 `false`), each shape-checked here (400 with no upstream call), anything else dropped (the threshold
 overrides it once forwarded are configuration now); `POST

@@ -99,7 +99,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
-| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` / `_COVERED_PERCENT` / `_CLOSE_PERCENT` | no | `12` / `3` / `90` / `50` / `80` / `50` | Thresholds the scheduled refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. Unset, unparseable or not positive takes the default; percentages are capped at 100 and the close threshold at the covered one. Starting values, to be measured on production data |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` | no | `12` / `3` / `90` / `50` | Thresholds the scheduled refresh computes the standard change suggestion snapshot by (see "Standard change suggestions"); a change applies from the next refresh. Unset, unparseable or not positive takes the default; percentages are capped at 100. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -8631,7 +8631,7 @@ without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
 
 Which of a customer's completed change requests look like the same change done again and again, so a
 standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
-normalising, clustering, judging, relating to templates), `standard_change_suggestion_service.go`,
+normalising, clustering, judging), `standard_change_suggestion_service.go`,
 `standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
 dismissals), `0283` (the snapshot) and `100029` / `100030` (their row-level security, internal only).
 PostgreSQL data sources only.
@@ -8641,7 +8641,7 @@ text and comparing the plans is too much to do whenever the page opens (there ca
 so `GET /standard-change-suggestions` (`internalOnly`) **never computes**: it reads the snapshot the
 scheduled refresh last published (`computedOn`; with none yet, an empty list and no `computedOn`, not an
 error). `POST /standard-change-suggestions/refresh` (`serviceOnly`: an internal client in
-`M2M_CLIENT_IDS` with no user token, so a page view can never start it) computes a new one, driven twice
+`M2M_CLIENT_IDS` with no user token, so a page view can never start it) computes a new one, driven once
 a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh` (its CLAUDE.md,
 "Standard change suggestions refresh"), the way `/incidents/autoclose` is driven by `incident_autoclose`.
 - **Paged by customer, published at the end.** The first call (`{}`) starts a run
@@ -8659,12 +8659,12 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
 - **The window and the criteria are the run's**: the window counts back from the run's start, and every
   page judges by the criteria stored with it.
 - **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
-  dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The template
-  relation (covered / close / new) and the incidents are as they were at the refresh.
+  dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
+  are as they were at the refresh.
 - **Logged**: each page (`refresh page`: customers, change requests, suggestions, `more`, `pageMs`) and the
   publish (`refresh published`: customers, change requests, clusters, eligible, `durationMs` of the run).
 - **Cost.** One page: the customer list (`CandidateAccounts`), then per customer one read of its window's
-  completed change requests with their plans, its clusters' incidents, its templates, and the writes.
+  completed change requests with their plans, its clusters' incidents, and the writes.
   The pairwise plan comparison is inside one subject group of one customer. A single customer with a very
   large group is still computed in one go (not split across pages).
 
@@ -8700,17 +8700,18 @@ from), `evidence` the other closed members newest first, at most 99, so the sour
 the 100 a proposal may cite. `openProposals` are the open proposals (draft, CAB or authority review)
 already started from or citing a member.
 
-**Templates** (`matchSuggestionTemplate`): against each of the customer's live templates (active or
-suspended), current version with its placeholders removed: subject words by **overlap** (a template's
-subject is the cluster's with the varying words turned into placeholders, a subset that Jaccard would
-penalise), implementation plan by Jaccard, half each (the subject alone when either side has no plan).
-The nearest scoring at least `coveredPercent` covers the cluster (`covered`: the change requests were
-raised by hand instead of from it), at least `closePercent` is `close` (revise it), else `new`.
+**Not related to the customer's templates, on purpose.** An earlier version labelled each cluster
+"covered by STD…", "close to STD…: revise it" or "new" by the word overlap of its subject and plan with the
+customer's live templates. That was removed, together with the similar-templates check on a proposal
+(user decision 2026-11-06): whether two changes are "the same" by word overlap can be wildly off, and the
+dynamics of defining similarity are too complicated to decide that way for now. What remains is exact: a
+change request raised from a template is never a candidate, and a suggestion lists the open proposals
+already started from or citing one of its change requests (`openProposals`). Whether a suggestion is
+already covered by a template is for the person reading it to judge.
 
 **Thresholds** (fixed configuration, applied when the snapshot is computed):
 `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` (12), `_MIN_CLOSED` (3), `_MIN_SUCCESS_PERCENT` (90),
-`_PLAN_SIMILARITY_PERCENT` (50), `_COVERED_PERCENT` (80), `_CLOSE_PERCENT` (50, never above covered).
-Starting values, **not yet measured on production data**. They are no longer request parameters: to
+`_PLAN_SIMILARITY_PERCENT` (50). Starting values, **not yet measured on production data**. They are no longer request parameters: to
 measure them, read with `includeIneligible=true` (every cluster of two or more with its `unmet`), change
 the variables and refresh. The response carries the `criteria` the snapshot used and `scanned` counts
 (the run's, or the one customer's when `accountId` is given; `dismissed` is counted when read).
@@ -8727,7 +8728,7 @@ it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
 /standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
 for a machine caller).
 
-Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging, templates; the refresh's
+Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; the refresh's
 paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
 `standard_change_suggestion_integration_test.go` (real PostgreSQL, a full paged refresh twice,
 `STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).

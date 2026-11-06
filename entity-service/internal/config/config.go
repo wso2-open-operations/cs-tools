@@ -607,17 +607,15 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
-	// StandardChangeSuggestion* are the thresholds of GET
-	// /standard-change-suggestions (STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS,
-	// _MIN_CLOSED, _MIN_SUCCESS_PERCENT, _PLAN_SIMILARITY_PERCENT,
-	// _COVERED_PERCENT, _CLOSE_PERCENT). Unset, unparseable or not positive is 0,
-	// which the service reads as its default (12, 3, 90, 50, 80, 50).
+	// StandardChangeSuggestion* are the thresholds the scheduled refresh of the
+	// standard change suggestions computes by (STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS,
+	// _MIN_CLOSED, _MIN_SUCCESS_PERCENT, _PLAN_SIMILARITY_PERCENT). Unset,
+	// unparseable or not positive is 0, which the service reads as its default
+	// (12, 3, 90, 50).
 	StandardChangeSuggestionWindowMonths          int
 	StandardChangeSuggestionMinClosed             int
 	StandardChangeSuggestionMinSuccessPercent     int
 	StandardChangeSuggestionPlanSimilarityPercent int
-	StandardChangeSuggestionCoveredPercent        int
-	StandardChangeSuggestionClosePercent          int
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -1062,8 +1060,6 @@ func Load() *Config {
 		StandardChangeSuggestionMinClosed:             envPositiveInt("STANDARD_CHANGE_SUGGESTION_MIN_CLOSED", 0),
 		StandardChangeSuggestionMinSuccessPercent:     envPositiveInt("STANDARD_CHANGE_SUGGESTION_MIN_SUCCESS_PERCENT", 0),
 		StandardChangeSuggestionPlanSimilarityPercent: envPositiveInt("STANDARD_CHANGE_SUGGESTION_PLAN_SIMILARITY_PERCENT", 0),
-		StandardChangeSuggestionCoveredPercent:        envPositiveInt("STANDARD_CHANGE_SUGGESTION_COVERED_PERCENT", 0),
-		StandardChangeSuggestionClosePercent:          envPositiveInt("STANDARD_CHANGE_SUGGESTION_CLOSE_PERCENT", 0),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),

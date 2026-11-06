@@ -252,35 +252,6 @@ func TestJudgeSuggestionCluster(t *testing.T) {
 	})
 }
 
-func TestMatchSuggestionTemplate(t *testing.T) {
-	cl := clusterSuggestionCandidates([]repository.SuggestionCandidate{
-		sgCand(1, "Deploy CApps to Pekin prod", "CLOSED", sgPlan),
-		sgCand(2, "Deploy CApps to Pekin prod", "CLOSED", sgPlan),
-	}, 0.5)[0]
-	tpl := func(subject, plan string) repository.SuggestionTemplate {
-		return repository.SuggestionTemplate{ID: "t1", Number: "STD0000001", Name: "Deploy CApps", State: "ACTIVE", AccountID: sgAccountA, Subject: subject, ImplementationPlan: plan}
-	}
-	for name, tc := range map[string]struct {
-		tpls []repository.SuggestionTemplate
-		want domain.StandardChangeSuggestionMatch
-	}{
-		"no template": {nil, domain.StandardChangeSuggestionNew},
-		"covered":     {[]repository.SuggestionTemplate{tpl("Deploy CApps to {{env}}", sgPlan)}, domain.StandardChangeSuggestionCovered},
-		"close":       {[]repository.SuggestionTemplate{tpl("Deploy CApps to {{env}}", "<p>Stop the gateway, copy the archive, start it</p>")}, domain.StandardChangeSuggestionClose},
-		"far":         {[]repository.SuggestionTemplate{tpl("Rotate the TLS certificate", "<p>Generate a CSR, have it signed, import the keystore</p>")}, domain.StandardChangeSuggestionNew},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, ref := matchSuggestionTemplate(cl, tc.tpls, sgCriteria)
-			if got != tc.want {
-				t.Fatalf("match = %s (template %+v), want %s", got, ref, tc.want)
-			}
-			if (ref == nil) != (got == domain.StandardChangeSuggestionNew) {
-				t.Errorf("template = %+v for %s", ref, got)
-			}
-		})
-	}
-}
-
 // fakeSuggestionRepo serves fixed candidates and keeps runs, rows and
 // dismissals in memory, as the real one does in the database.
 type fakeSuggestionRepo struct {
@@ -288,7 +259,6 @@ type fakeSuggestionRepo struct {
 	sinces      []time.Time
 	incidents   map[string][]domain.EntityRef
 	proposals   map[string][]domain.EntityRef
-	templates   []repository.SuggestionTemplate
 	dismissals  map[string]map[string]domain.StandardChangeSuggestionDismissal
 	dismissed   []string
 	runs        map[string]*repository.SuggestionRun
@@ -325,9 +295,6 @@ func (f *fakeSuggestionRepo) Candidates(_ context.Context, account string, since
 }
 func (f *fakeSuggestionRepo) IncidentsOf(context.Context, []string) (map[string][]domain.EntityRef, error) {
 	return f.incidents, nil
-}
-func (f *fakeSuggestionRepo) LiveTemplates(context.Context, []string) ([]repository.SuggestionTemplate, error) {
-	return f.templates, nil
 }
 func (f *fakeSuggestionRepo) OpenProposalsOf(context.Context, []string) (map[string][]domain.EntityRef, error) {
 	return f.proposals, nil
@@ -647,10 +614,10 @@ func TestStandardChangeSuggestionService_Dismiss(t *testing.T) {
 }
 
 func TestNewStandardChangeSuggestionService_Criteria(t *testing.T) {
-	svc := NewStandardChangeSuggestionService(&fakeSuggestionRepo{}, stubAccess{}, domain.StandardChangeSuggestionCriteria{MinClosed: 5, MinSuccessPercent: 150, CoveredPercent: 40}).(*standardChangeSuggestionService)
+	svc := NewStandardChangeSuggestionService(&fakeSuggestionRepo{}, stubAccess{}, domain.StandardChangeSuggestionCriteria{MinClosed: 5, MinSuccessPercent: 150}).(*standardChangeSuggestionService)
 	want := DefaultStandardChangeSuggestionCriteria
-	want.MinClosed, want.MinSuccessPercent, want.CoveredPercent, want.ClosePercent = 5, 100, 40, 40
+	want.MinClosed, want.MinSuccessPercent = 5, 100
 	if svc.criteria != want {
-		t.Errorf("criteria = %+v, want %+v (defaults for zero, capped at 100, close no wider than covered)", svc.criteria, want)
+		t.Errorf("criteria = %+v, want %+v (defaults for zero, capped at 100)", svc.criteria, want)
 	}
 }

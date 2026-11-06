@@ -1780,8 +1780,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				MinClosed:             cfg.StandardChangeSuggestionMinClosed,
 				MinSuccessPercent:     cfg.StandardChangeSuggestionMinSuccessPercent,
 				PlanSimilarityPercent: cfg.StandardChangeSuggestionPlanSimilarityPercent,
-				CoveredPercent:        cfg.StandardChangeSuggestionCoveredPercent,
-				ClosePercent:          cfg.StandardChangeSuggestionClosePercent,
 			}))
 		// From here on a standard change is raised from a template of this
 		// catalogue (the change request service is a pointer the handler shares; a

@@ -40,8 +40,6 @@ var DefaultStandardChangeSuggestionCriteria = domain.StandardChangeSuggestionCri
 	MinClosed:             3,
 	MinSuccessPercent:     90,
 	PlanSimilarityPercent: 50,
-	CoveredPercent:        80,
-	ClosePercent:          50,
 }
 
 const maxSuggestionDismissalReason = 1000
@@ -79,11 +77,6 @@ func NewStandardChangeSuggestionService(repo repository.StandardChangeSuggestion
 		MinClosed:             pick(criteria.MinClosed, d.MinClosed),
 		MinSuccessPercent:     min(pick(criteria.MinSuccessPercent, d.MinSuccessPercent), 100),
 		PlanSimilarityPercent: min(pick(criteria.PlanSimilarityPercent, d.PlanSimilarityPercent), 100),
-		CoveredPercent:        min(pick(criteria.CoveredPercent, d.CoveredPercent), 100),
-		ClosePercent:          min(pick(criteria.ClosePercent, d.ClosePercent), 100),
-	}
-	if criteria.ClosePercent > criteria.CoveredPercent {
-		criteria.ClosePercent = criteria.CoveredPercent
 	}
 	return &standardChangeSuggestionService{repo: repo, access: access, criteria: criteria, now: time.Now}
 }
@@ -279,9 +272,8 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 	return resp, nil
 }
 
-// computeCustomer computes one customer's suggestions: its candidates, their
-// clusters, each judged and related to the customer's live templates. It also
-// returns how many candidates there were.
+// computeCustomer computes one customer's suggestions: its candidates and their
+// clusters, each judged. It also returns how many candidates there were.
 func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria) ([]repository.SuggestionSnapshotRow, int, error) {
 	cands, err := s.repo.Candidates(ctx, account, since)
 	if err != nil {
@@ -301,14 +293,9 @@ func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, a
 	if err != nil {
 		return nil, 0, err
 	}
-	templates, err := s.repo.LiveTemplates(ctx, []string{account})
-	if err != nil {
-		return nil, 0, err
-	}
 	rows := make([]repository.SuggestionSnapshotRow, 0, len(clusters))
 	for _, cl := range clusters {
 		sg := judgeSuggestionCluster(cl, crit, incidents, nil)
-		sg.Match, sg.Template = matchSuggestionTemplate(cl, templates, crit)
 		ids := make([]string, len(cl.nodes))
 		for i, n := range cl.nodes {
 			ids[i] = n.c.ID

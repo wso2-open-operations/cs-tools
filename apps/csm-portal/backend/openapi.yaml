@@ -15632,7 +15632,7 @@ paths:
       operationId: getStandardChangeSuggestions
       description: >
         Forwarded to the entity service, which answers from the snapshot its
-        scheduled refresh last published (twice a day; computedOn says when, and it
+        scheduled refresh last published (once a day; computedOn says when, and it
         is absent with an empty list before the first): a read never computes. See
         its openapi.yaml for the response. Only these parameters are forwarded,
         each checked for shape here (400 with no upstream call otherwise).

@@ -234,7 +234,7 @@ describe("StandardChangesTab — catalogue", () => {
 
   it("shows the suggestions on show=suggested, and Suggested switches to them", () => {
     mocks.suggestions.mockReturnValue({
-      data: { suggestions: [], criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50, coveredPercent: 80, closePercent: 50 }, scanned: { changeRequests: 0, clusters: 0, eligible: 0, dismissed: 0 } },
+      data: { suggestions: [], criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50 }, scanned: { changeRequests: 0, clusters: 0, eligible: 0, dismissed: 0 } },
       isLoading: false,
       isError: false,
       isFetching: false,

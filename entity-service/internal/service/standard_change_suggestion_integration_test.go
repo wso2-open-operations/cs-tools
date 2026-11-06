@@ -161,7 +161,8 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			e.exec(`UPDATE change_request SET cloned_from_change_request_id = $2::uuid WHERE id = $1::uuid`, clone, d1)
 			e.cr("A", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, 800) // outside the window
 			e.cr("A", "Deploy CApps to Pekin prod", "CANCELED", sgsPlan, 3) // not completed
-			// The customer's live template of the same change.
+			// A template of the same change: the change request raised from it is
+			// not a candidate (it already is a standard change).
 			var tplID, verID string
 			if err := e.s.QueryRow(e.sys, `INSERT INTO standard_change_template (name, created_by, updated_by, account_id)
 				VALUES ($1, 't', 't', $2::uuid) RETURNING id::text`, sgsTag+" Deploy CApps", e.accounts["A"]).Scan(&tplID); err != nil {
@@ -239,12 +240,9 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			if a.ProposeFrom.ID != clone || len(a.Evidence) != 3 {
 				t.Errorf("proposeFrom = %+v, evidence = %v", a.ProposeFrom, a.Evidence)
 			}
-			if a.Match != domain.StandardChangeSuggestionCovered || a.Template == nil || a.Template.ID != tplID {
-				t.Errorf("match = %s, template = %+v, want covered by the customer's template", a.Match, a.Template)
-			}
 			b := sgsFind(resp, e.accounts["B"], deploy)
-			if b == nil || b.MemberCount != 3 || b.Match != domain.StandardChangeSuggestionNew || !b.Eligible {
-				t.Fatalf("customer B deploy = %+v, want its own eligible cluster, new (A's template is not B's)", b)
+			if b == nil || b.MemberCount != 3 || !b.Eligible {
+				t.Fatalf("customer B deploy = %+v, want its own eligible cluster", b)
 			}
 			rs := sgsFind(resp, e.accounts["A"], restart)
 			if rs == nil || rs.MemberCount != 3 || rs.Eligible || len(rs.Incidents) != 1 || rs.Incidents[0].ID != inc {

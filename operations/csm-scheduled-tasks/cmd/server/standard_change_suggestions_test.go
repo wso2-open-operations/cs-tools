@@ -22,12 +22,12 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 )
 
-// The refresh is registered with its twice-a-day default (or the
+// The refresh is registered with its once-a-day default (or the
 // SUB_CRON_SCHEDULES override), and --run-now finds it with no flags of its
 // own, which is how it is triggered by hand.
 func TestStandardChangeSuggestionsTask(t *testing.T) {
 	task := standardChangeSuggestionsTask("https://entity.example.com", "https://auth.example.com/token", "id", "secret", nil, nil, nil)
-	if task.Name != "standard_change_suggestions_refresh" || task.Schedule != "0 2,14 * * *" || task.Handler == nil {
+	if task.Name != "standard_change_suggestions_refresh" || task.Schedule != "0 2 * * *" || task.Handler == nil {
 		t.Fatalf("task = %+v", task)
 	}
 	over := standardChangeSuggestionsTask("https://entity.example.com", "https://auth.example.com/token", "id", "secret", nil,

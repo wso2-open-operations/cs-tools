@@ -30,8 +30,8 @@ import (
 )
 
 // StandardChangeSuggestionRepository reads what the standard change
-// suggestions are computed from (completed change requests, the customers'
-// live templates, open proposals), stores the computed snapshot, and keeps the
+// suggestions are computed from (completed change requests, their incidents,
+// open proposals), stores the computed snapshot, and keeps the
 // dismissals. The clustering is the service's (standard_change_suggestion.go);
 // nothing here decides.
 type StandardChangeSuggestionRepository interface {
@@ -45,9 +45,6 @@ type StandardChangeSuggestionRepository interface {
 	// IncidentsOf maps a change request id to the incidents that name it as
 	// their cause (caused_by_id) or their change request (change_request_id).
 	IncidentsOf(ctx context.Context, changeRequestIDs []string) (map[string][]domain.EntityRef, error)
-	// LiveTemplates are the active and suspended templates of the customers
-	// given, with their current version's subject and implementation plan.
-	LiveTemplates(ctx context.Context, accountIDs []string) ([]SuggestionTemplate, error)
 	// OpenProposalsOf maps a change request id to the open proposals (draft or
 	// under review) that started from it or cite it as evidence.
 	OpenProposalsOf(ctx context.Context, changeRequestIDs []string) (map[string][]domain.EntityRef, error)
@@ -115,12 +112,6 @@ type SuggestionCandidate struct {
 	HasDeviation       bool
 	AccountID          string
 	AccountName        string
-}
-
-// SuggestionTemplate is a live template as the labelling reads it.
-type SuggestionTemplate struct {
-	ID, Number, Name, State, AccountID string
-	Subject, ImplementationPlan        string
 }
 
 type standardChangeSuggestionRepo struct {
@@ -255,36 +246,6 @@ func (r *standardChangeSuggestionRepo) OpenProposalsOf(ctx context.Context, ids 
 		           AND p.state IN ('DRAFT', 'CAB_REVIEW', 'AUTHORITY_REVIEW')) l
 		  JOIN work_item wi ON wi.id = l.id
 		 ORDER BY 1, 3`, ids)
-}
-
-// LiveTemplates implements StandardChangeSuggestionRepository.
-func (r *standardChangeSuggestionRepo) LiveTemplates(ctx context.Context, accountIDs []string) ([]SuggestionTemplate, error) {
-	if len(accountIDs) == 0 {
-		return nil, nil
-	}
-	rows, err := r.db.Query(ctx, `
-		SELECT t.id::text, t.number, t.name, t.state::text, t.account_id::text,
-		       COALESCE(v.subject, ''), COALESCE(v.implementation_plan, '')
-		  FROM standard_change_template t
-		  JOIN standard_change_template_version v ON v.id = t.current_version_id
-		 WHERE t.state IN ('ACTIVE', 'SUSPENDED') AND t.account_id = ANY($1::uuid[])
-		 ORDER BY t.number`, accountIDs)
-	if err != nil {
-		return nil, fmt.Errorf("standard change suggestions: templates: %w", err)
-	}
-	defer rows.Close()
-	var out []SuggestionTemplate
-	for rows.Next() {
-		var t SuggestionTemplate
-		if err := rows.Scan(&t.ID, &t.Number, &t.Name, &t.State, &t.AccountID, &t.Subject, &t.ImplementationPlan); err != nil {
-			return nil, fmt.Errorf("standard change suggestions: templates: %w", err)
-		}
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("standard change suggestions: templates: %w", err)
-	}
-	return out, nil
 }
 
 const suggestionDismissalColumns = `d.id::text, d.account_id::text, d.suggestion_key, d.reason, d.dismissed_on,

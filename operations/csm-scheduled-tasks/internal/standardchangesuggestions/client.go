@@ -17,7 +17,7 @@
 // Package standardchangesuggestions refreshes entity-service's standard change
 // suggestion snapshot: the clusters of each customer's completed change
 // requests that look like the same change done again, which the Standard
-// changes page reads. Twice a day by default, so the page never computes them.
+// changes page reads. Once a day by default, so the page never computes them.
 //
 // *** A TRIGGER, NOT A DECIDER. *** The clustering, the criteria and the
 // snapshot all live in entity-service (POST /standard-change-suggestions/refresh,

@@ -541,7 +541,7 @@ entity-service's CLAUDE.md, "Incident auto-close".
 ## Standard change suggestions refresh
 
 `internal/standardchangesuggestions.Run`, registered as **`standard_change_suggestions_refresh`** (default
-schedule `0 2,14 * * *`: twice a day, 02:00 and 14:00; TZ=UTC caveat as above), recomputes entity-service's
+schedule `0 2 * * *`: once a day at 02:00; TZ=UTC caveat as above; standard changes are not frequent, so a daily view is fresh enough), recomputes entity-service's
 standard change suggestion snapshot: the clusters of each customer's completed change requests that look
 like the same change done again, which Operations > Change requests > Standard changes > Suggested reads.
 The page reads the snapshot only and never computes, because computing reads every completed change
@@ -1007,7 +1007,7 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
-| `STANDARD_CHANGE_SUGGESTIONS_ENABLED` | No (default `false`) | Registers the `standard_change_suggestions_refresh` sub-cron (twice a day) — see "Standard change suggestions refresh" above |
+| `STANDARD_CHANGE_SUGGESTIONS_ENABLED` | No (default `false`) | Registers the `standard_change_suggestions_refresh` sub-cron (once a day) — see "Standard change suggestions refresh" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

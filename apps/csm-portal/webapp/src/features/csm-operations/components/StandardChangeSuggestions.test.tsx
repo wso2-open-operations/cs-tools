@@ -50,8 +50,6 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
 
 import StandardChangeSuggestions from "@features/csm-operations/components/StandardChangeSuggestions";
 
-const TEMPLATE = { id: "tpl-1", number: "STD0000001", name: "Deploy CApps", state: "active", score: 0.6 };
-
 function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardChangeSuggestion {
   return {
     key: "deploy capps pekin prod",
@@ -68,8 +66,6 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
     lastCompletedOn: "2026-10-30T00:00:00Z",
     eligible: true,
     unmet: [],
-    match: "new",
-    template: null,
     proposeFrom: { id: "cr-1", name: "CHG0000001" },
     evidence: [
       { id: "cr-2", name: "CHG0000002" },
@@ -89,7 +85,7 @@ function serve(list: BeStandardChangeSuggestion[], computedOn: string | null = "
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
-      criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50, coveredPercent: 80, closePercent: 50 },
+      criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50 },
       computedOn,
       scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
     },
@@ -119,13 +115,15 @@ describe("StandardChangeSuggestions", () => {
     mocks.access = { canWrite: true };
   });
 
-  it("lists each suggestion with its counts, how it relates to the templates, and the thresholds", () => {
-    serve([suggestion(), suggestion({ key: "k2", subject: "Rotate keys", match: "covered", template: TEMPLATE })]);
+  it("lists each suggestion with its counts and the thresholds, and relates none to a template", () => {
+    serve([suggestion(), suggestion({ key: "k2", subject: "Rotate keys" })]);
     renderIt();
     expect(screen.getByRole("status")).toHaveTextContent("2 suggestions from 20 change requests completed in the last 12 months");
-    expect(within(row("Deploy CApps to Pekin prod")).getByText("New")).toBeInTheDocument();
     expect(within(row("Deploy CApps to Pekin prod")).getByText("3 closed")).toBeInTheDocument();
-    expect(within(row("Rotate keys")).getByText("Covered by STD0000001")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Templates" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Covered by|Close to|^New$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(Revise|Open) / })).not.toBeInTheDocument();
+    expect(within(row("Rotate keys")).getByRole("button", { name: "Propose" })).toBeEnabled();
     expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: false, includeDismissed: false });
   });
 
@@ -135,10 +133,10 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/^Updated Nov 6, \d\d:\d\d (AM|PM)\. 1 suggestion from 20/);
   });
 
-  it("says suggestions are computed twice a day when none have been yet", () => {
+  it("says suggestions are computed once a day when none have been yet", () => {
     serve([], null);
     renderIt();
-    expect(screen.getByRole("status")).toHaveTextContent("Suggestions are computed twice a day from completed change requests. None have been computed yet.");
+    expect(screen.getByRole("status")).toHaveTextContent("Suggestions are computed once a day from completed change requests. None have been computed yet.");
     expect(within(screen.getByRole("table", { name: "Suggested standard changes" })).getByText(/None have been computed yet/)).toBeInTheDocument();
     expect(screen.queryByText(/No change is done often enough/)).not.toBeInTheDocument();
   });
@@ -165,18 +163,15 @@ describe("StandardChangeSuggestions", () => {
     });
   });
 
-  it("Revise starts a modification of the close template with the closed change requests as evidence", () => {
-    serve([suggestion({ match: "close", template: TEMPLATE })]);
+  it("a proposal whose evidence cannot be cited still opens, saying why", () => {
+    serve([suggestion()]);
     mocks.create.mockImplementation((_body, opts) => opts.onSuccess({ id: "scp-2" }));
     mocks.update.mockImplementation((_vars, opts) => {
       opts.onError(new Error("CHG0000002 is another customer's"));
       opts.onSettled();
     });
     renderIt();
-    fireEvent.click(screen.getByRole("button", { name: "Revise STD0000001" }));
-    expect(mocks.create.mock.calls[0][0]).toEqual({ kind: "modify", templateId: "tpl-1" });
-    expect(mocks.update.mock.calls[0][0].patch.evidenceChangeRequestIds).toEqual(["cr-1", "cr-2", "cr-3"]);
-    // The revision still opens, and says why the evidence was not cited.
+    fireEvent.click(screen.getByRole("button", { name: "Propose" }));
     expect(mocks.showError).toHaveBeenCalledWith("CHG0000002 is another customer's", expect.any(Error));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-change-proposals/scp-2", expect.anything());
   });

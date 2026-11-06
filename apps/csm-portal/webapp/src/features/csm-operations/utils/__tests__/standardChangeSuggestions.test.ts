@@ -19,9 +19,7 @@ import type { BeStandardChangeSuggestion } from "@api/backend/types";
 import {
   suggestionActions,
   suggestionCriteriaText,
-  suggestionMatchLabel,
   suggestionProposalEvidence,
-  suggestionRevisionEvidence,
   suggestionUpdatedText,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import {
@@ -46,8 +44,6 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
     lastCompletedOn: "2026-10-30T00:00:00Z",
     eligible: true,
     unmet: [],
-    match: "new",
-    template: null,
     proposeFrom: { id: "cr-1", name: "CHG0000001" },
     evidence: [
       { id: "cr-2", name: "CHG0000002" },
@@ -60,32 +56,12 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
   };
 }
 
-const TEMPLATE = { id: "tpl-1", number: "STD0000001", name: "Deploy CApps", state: "active", score: 0.9 };
-
-describe("suggestionMatchLabel", () => {
-  it("names the template it relates to", () => {
-    expect(suggestionMatchLabel({ match: "covered", template: TEMPLATE })).toBe("Covered by STD0000001");
-    expect(suggestionMatchLabel({ match: "close", template: TEMPLATE })).toBe("Close to STD0000001: revise it");
-    expect(suggestionMatchLabel({ match: "new", template: null })).toBe("New");
-  });
-});
-
 describe("suggestionActions", () => {
-  it("a new one is proposed and dismissed", () => {
+  it("every suggestion is proposed or dismissed: none is related to a template", () => {
     expect(suggestionActions(suggestion(), true)).toEqual({ propose: { blockedReason: null }, dismiss: true });
   });
-  it("a close one is a revision of its template", () => {
-    expect(suggestionActions(suggestion({ match: "close", template: TEMPLATE }), true)).toEqual({
-      revise: { blockedReason: null },
-      dismiss: true,
-    });
-  });
-  it("a covered one opens its template", () => {
-    expect(suggestionActions(suggestion({ match: "covered", template: TEMPLATE }), true)).toEqual({ openTemplate: true, dismiss: true });
-  });
-  it("a reader only opens templates", () => {
+  it("a reader gets none: they cannot propose or dismiss", () => {
     expect(suggestionActions(suggestion(), false)).toEqual({});
-    expect(suggestionActions(suggestion({ match: "covered", template: TEMPLATE }), false)).toEqual({ openTemplate: true });
   });
   it("a dismissed one is only restored", () => {
     const d = suggestion({ dismissal: { id: "d1", reason: "one-off", dismissedOn: "2026-10-01T00:00:00Z" } });
@@ -109,10 +85,6 @@ describe("the evidence a proposal cites", () => {
     expect(suggestionProposalEvidence(suggestion({ evidence: many }))).toHaveLength(100);
     expect(suggestionProposalEvidence(suggestion({ proposeFrom: null }))).toEqual([]);
   });
-  it("a revision cites every closed member, a clean one or not", () => {
-    expect(suggestionRevisionEvidence(suggestion({ proposeFrom: null }))).toEqual(["cr-2", "cr-3"]);
-    expect(suggestionRevisionEvidence(suggestion())).toEqual(["cr-1", "cr-2", "cr-3"]);
-  });
 });
 
 describe("suggestionCriteriaText", () => {
@@ -120,7 +92,7 @@ describe("suggestionCriteriaText", () => {
     expect(
       suggestionCriteriaText({
         suggestions: [suggestion()],
-        criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50, coveredPercent: 80, closePercent: 50 },
+        criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50 },
         scanned: { changeRequests: 41, clusters: 5, eligible: 1, dismissed: 0 },
       }),
     ).toBe(

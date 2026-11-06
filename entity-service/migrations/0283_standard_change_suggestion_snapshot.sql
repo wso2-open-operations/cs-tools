@@ -15,7 +15,7 @@
 -- under the License.
 
 -- Standard change suggestions are computed on a schedule, not on every read
--- (POST /standard-change-suggestions/refresh, driven twice a day by
+-- (POST /standard-change-suggestions/refresh, driven once a day by
 -- operations/csm-scheduled-tasks' standard_change_suggestions_refresh): reading
 -- every completed change request with its plan text and comparing the plans is
 -- far too much to do whenever the page opens. GET /standard-change-suggestions

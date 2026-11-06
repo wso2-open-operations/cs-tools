@@ -727,26 +727,28 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   `standardChangesPath`, `standardChangesSearch`).
   - **Suggested** (`StandardChangeSuggestions`, `useStandardChangeSuggestions`, rules in
     `utils/standardChangeSuggestions.ts`): the clusters of a customer's completed change requests that
-    entity-service finds and judges **twice a day** (its CLAUDE.md, "Standard change suggestions"); the page
+    entity-service finds and judges **once a day** (its CLAUDE.md, "Standard change suggestions"); the page
     reads the last snapshot and nothing is computed or decided here, so opening it costs one cheap read. A
     Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
     (`includeDismissed`), not kept in the URL, are the only parameters (the thresholds are entity-service
     configuration). A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
     `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
-    and the empty table, say suggestions are computed twice a day and none have been yet
+    and the empty table, say suggestions are computed once a day and none have been yet
     (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is shown.
     Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
-    the template relation ("New", "Covered by STD…", "Close to STD…: revise it", with a link); and the actions
-    (`suggestionActions`): **Propose** for a new one (`kind: "new"` from `proposeFrom`, then a PATCH citing
-    `suggestionProposalEvidence`: the source and the other closed members, at most 100), **Revise STD…** for a
-    close one (`kind: "modify"`, citing `suggestionRevisionEvidence`), **Open STD…** for a covered one,
+    the last completion; and the actions (`suggestionActions`): **Propose** (`kind: "new"` from `proposeFrom`,
+    then a PATCH citing `suggestionProposalEvidence`: the source and the other closed members, at most 100),
     **Dismiss** with a required reason (at most 1000 characters) and **Restore** for a dismissed one. The
-    proposal opens whatever happens to the evidence PATCH (its refusal goes to the error banner). Propose and
-    Revise are shown disabled with the reason as the button's name for a near miss ("Not yet a candidate: …"), one
-    already being proposed ("Already being proposed in SCP…") and, for Propose, one with no clean change request
-    to start from. Only `canWrite` gets Propose, Revise, Dismiss and Restore. The chevron opens the details: what
-    it misses, risk and impact counts (unknown included), incidents, open proposals, the dismissal, and the change
-    requests (newest 100), each marked when it joined as a clone or deviated from its plan.
+    proposal opens whatever happens to the evidence PATCH (its refusal goes to the error banner). Propose is
+    shown disabled with the reason as the button's name for a near miss ("Not yet a candidate: …"), one already
+    being proposed ("Already being proposed in SCP…", an exact link: a member is that proposal's source or
+    evidence) and one with no clean change request to start from. Only `canWrite` gets the actions. **A
+    suggestion is not related to the customer's existing templates** (no "covered by" / "close to" label, no
+    Revise or Open template action): that relation came from word overlap, which can be wildly off, and was
+    left out on purpose with the similar-templates check (2026-11-06); whether a template already covers a
+    suggestion is for the reader to judge. The chevron opens the details: what it misses, risk and impact
+    counts (unknown included), incidents, open proposals, the dismissal, and the change requests (newest 100),
+    each marked when it joined as a clone or deviated from its plan.
   - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
     customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
     leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their

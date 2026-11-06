@@ -32,25 +32,7 @@ type StandardChangeSuggestionCriteria struct {
 	// same change only when their implementation plans are at least this similar
 	// (word-set Jaccard, percent).
 	PlanSimilarityPercent int `json:"planSimilarityPercent"`
-	// CoveredPercent / ClosePercent: a cluster this similar to one of the
-	// customer's live templates is "covered by" it, or "close to" it.
-	CoveredPercent int `json:"coveredPercent"`
-	ClosePercent   int `json:"closePercent"`
 }
-
-// StandardChangeSuggestionMatch says how a cluster relates to the customer's
-// live standard change templates.
-type StandardChangeSuggestionMatch string
-
-const (
-	// StandardChangeSuggestionCovered: a live template already does this change;
-	// the change requests were raised by hand instead of from it.
-	StandardChangeSuggestionCovered StandardChangeSuggestionMatch = "covered"
-	// StandardChangeSuggestionClose: a live template is near: revise it.
-	StandardChangeSuggestionClose StandardChangeSuggestionMatch = "close"
-	// StandardChangeSuggestionNew: no live template is near: propose one.
-	StandardChangeSuggestionNew StandardChangeSuggestionMatch = "new"
-)
 
 // StandardChangeSuggestionsRequest is GET /standard-change-suggestions' query,
 // applied over the stored snapshot.
@@ -135,10 +117,6 @@ type StandardChangeSuggestion struct {
 	// Eligible: every criterion is met; Unmet names those that are not.
 	Eligible bool     `json:"eligible"`
 	Unmet    []string `json:"unmet"`
-	// Match relates the cluster to the customer's live templates; Template is
-	// the nearest one (nil for "new").
-	Match    StandardChangeSuggestionMatch        `json:"match"`
-	Template *StandardChangeSuggestionTemplateRef `json:"template"`
 	// ProposeFrom is the newest clean member (closed, no deviation from its
 	// implementation plan): what a proposal starts from. Evidence is every other
 	// closed member, newest first, so that ProposeFrom plus Evidence is at most
@@ -151,16 +129,6 @@ type StandardChangeSuggestion struct {
 	// Members, newest completion first.
 	Members   []StandardChangeSuggestionMember   `json:"members"`
 	Dismissal *StandardChangeSuggestionDismissal `json:"dismissal"`
-}
-
-// StandardChangeSuggestionTemplateRef names the nearest live template.
-type StandardChangeSuggestionTemplateRef struct {
-	ID     string `json:"id"`
-	Number string `json:"number"`
-	Name   string `json:"name"`
-	State  string `json:"state"`
-	// Score is how similar it is (0 to 1).
-	Score float64 `json:"score"`
 }
 
 // StandardChangeSuggestionBreakdown counts members by level; Unknown is a
