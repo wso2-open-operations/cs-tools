@@ -1432,7 +1432,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/StoredAttachmentUploadResponse'
         "400":
-          description: BadRequest
+          description: >-
+            BadRequest. For a comment image, also when both or neither of parentId
+            and projectId is given, or projectId is not a valid UUID.
           content:
             application/json:
               schema:
@@ -6319,12 +6321,23 @@ components:
       description: Which kind of attachment the request is about.
     StoredAttachmentUploadRequest:
       type: object
-      required: [type, parentId, name, sizeBytes]
+      required: [type, name, sizeBytes]
       additionalProperties: false
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentType'
-        parentId: {type: string, format: uuid}
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            The work item (work_item, comment) or deployment the file belongs to. Required for work_item
+            and deployment. For a comment image give exactly one of parentId and projectId.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            Comment images only: the project of a draft description image that is uploaded before the case
+            exists and linked to it when it is created. Give exactly one of parentId and projectId.
         name: {type: string, maxLength: 255}
         contentType:
           type: string
