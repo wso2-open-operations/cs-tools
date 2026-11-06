@@ -53,7 +53,11 @@ type InitiateAttachmentUploadRequest struct {
 	// ParentID is the work item the file belongs to (kinds work_item and
 	// comment: a comment image is uploaded against the work item before its
 	// comment exists) or the deployment (kind deployment).
-	ParentID    string `json:"parentId"`
+	ParentID string `json:"parentId,omitempty"`
+	// ProjectID is for type "comment" only, INSTEAD of ParentID (exactly one of
+	// the two): the image is a draft for the description of a record that does not
+	// exist yet, uploaded to that project and linked when the record is created.
+	ProjectID   string `json:"projectId,omitempty"`
 	Name        string `json:"name"`
 	ContentType string `json:"contentType"`
 	SizeBytes   int64  `json:"sizeBytes"`
@@ -173,8 +177,12 @@ type StoredAttachmentRow struct {
 	Status     string
 	StorageKey *string
 	CreatedBy  string
-	// ParentID is the work item (kinds work_item and comment) or deployment.
+	// ParentID is the work item (kinds work_item and comment) or deployment; for
+	// a draft description image it is the project.
 	ParentID string
+	// Draft is true for a comment image uploaded to a project before the record
+	// whose description shows it exists (no work item and no comment yet).
+	Draft bool
 }
 
 // StoredAttachmentInsert is a new, not yet stored, attachment.
@@ -184,6 +192,8 @@ type StoredAttachmentInsert struct {
 	ContentType string
 	SizeBytes   int64
 	CreatedBy   string
+	// Draft: ParentID is a project, and the row is a draft description image.
+	Draft bool
 }
 
 // AbandonedUpload is an upload that was started and never confirmed.
