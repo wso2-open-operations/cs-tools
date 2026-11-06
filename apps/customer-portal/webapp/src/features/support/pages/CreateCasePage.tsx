@@ -1538,15 +1538,13 @@ export default function CreateCasePage(): JSX.Element {
                     isFormBlockedByMissingOptions
                   }
                 >
-                  {inlineImages.isUploadingImages
-                    ? "Uploading images..."
-                    : isPreparingAttachments
-                    ? "Uploading attachments..."
-                    : isCreatePending
-                      ? isSecurityReport
-                        ? "Submitting..."
-                        : "Creating..."
-                      : isNavigatingAfterCreate
+                  {inlineImages.isUploadingImages ||
+                  isPreparingAttachments ||
+                  isCreatePending
+                    ? isSecurityReport
+                      ? "Submitting..."
+                      : "Creating..."
+                    : isNavigatingAfterCreate
                         ? "Opening case..."
                         : isSecurityReport
                           ? "Submit Security Report"

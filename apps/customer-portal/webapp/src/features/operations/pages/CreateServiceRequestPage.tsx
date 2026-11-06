@@ -872,9 +872,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit || isInitialLoading || deploymentProductsLoading}
           >
-            {inlineImages.isUploadingImages
-              ? "Uploading images..."
-              : isCreatePending
+            {inlineImages.isUploadingImages || isCreatePending
               ? "Creating..."
               : isNavigatingAfterCreate
                 ? "Opening request..."
