@@ -31,18 +31,18 @@ func TestFeatureOverrideRoutePermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reg := regexp.MustCompile(`(?m)^\s*route\("([A-Z]+) (/feature-overrides)",\s*(handler\.Perm\w+),`)
+	reg := regexp.MustCompile(`(?m)^\s*route\("([A-Z]+) (/features)",\s*(handler\.Perm\w+),`)
 	got := map[string]string{}
 	for _, m := range reg.FindAllStringSubmatch(string(src), -1) {
 		got[m[1]] = m[3]
 	}
 	if got["GET"] != "handler.PermView" {
-		t.Errorf("GET /feature-overrides is registered with %q, want handler.PermView", got["GET"])
+		t.Errorf("GET /features is registered with %q, want handler.PermView", got["GET"])
 	}
 	if got["PUT"] != "handler.PermAdmin" {
-		t.Errorf("PUT /feature-overrides is registered with %q, want handler.PermAdmin", got["PUT"])
+		t.Errorf("PUT /features is registered with %q, want handler.PermAdmin", got["PUT"])
 	}
 	if len(got) != 2 {
-		t.Errorf("expected exactly GET and PUT /feature-overrides, found %v", got)
+		t.Errorf("expected exactly GET and PUT /features, found %v", got)
 	}
 }

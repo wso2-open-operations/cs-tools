@@ -21,14 +21,14 @@ import (
 	"net/http"
 )
 
-// ListFeatureOverrides calls GET /feature-overrides. Entity-service returns
+// ListFeatureOverrides calls GET /features. Entity-service returns
 // every saved row, enabled ones included, and whether a first save has happened.
 func (c *CustomerEntityClient) ListFeatureOverrides(ctx context.Context) ([]byte, error) {
-	return c.do(ctx, http.MethodGet, "/feature-overrides", nil)
+	return c.do(ctx, http.MethodGet, "/features", nil)
 }
 
-// PutFeatureOverride calls PUT /feature-overrides. Entity-service upserts one
+// PutFeatureOverride calls PUT /features. Entity-service upserts one
 // row and never deletes. It accepts the call only from this backend.
 func (c *CustomerEntityClient) PutFeatureOverride(ctx context.Context, body []byte) ([]byte, error) {
-	return c.do(ctx, http.MethodPut, "/feature-overrides", body)
+	return c.do(ctx, http.MethodPut, "/features", body)
 }

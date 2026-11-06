@@ -44,7 +44,7 @@ func (f *fakeFeatureOverrideClient) PutFeatureOverride(_ context.Context, body [
 }
 
 func putFeatureOverride(h *FeatureOverrideHandler, body string, signedIn bool) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPut, "/feature-overrides", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/features", strings.NewReader(body))
 	if signedIn {
 		req = withUser(req)
 	}
@@ -57,7 +57,7 @@ func TestListFeatureOverridesPassesTheBodyThrough(t *testing.T) {
 	const body = `{"overrides":[{"navNodeId":"operations","state":"preview","updatedOn":"2026-11-05T10:00:00Z","updatedBy":"admin@example.com"}],"savedOnce":true}`
 	h := NewFeatureOverrideHandler(&fakeFeatureOverrideClient{listBody: []byte(body)})
 	w := httptest.NewRecorder()
-	h.ListFeatureOverrides(w, withUser(httptest.NewRequest(http.MethodGet, "/feature-overrides", nil)))
+	h.ListFeatureOverrides(w, withUser(httptest.NewRequest(http.MethodGet, "/features", nil)))
 	if w.Code != http.StatusOK || w.Body.String() != body {
 		t.Fatalf("status %d body %s", w.Code, w.Body.String())
 	}
@@ -69,7 +69,7 @@ func TestListFeatureOverridesPassesTheBodyThrough(t *testing.T) {
 func TestListFeatureOverridesRequiresASignedInUser(t *testing.T) {
 	h := NewFeatureOverrideHandler(&fakeFeatureOverrideClient{})
 	w := httptest.NewRecorder()
-	h.ListFeatureOverrides(w, httptest.NewRequest(http.MethodGet, "/feature-overrides", nil))
+	h.ListFeatureOverrides(w, httptest.NewRequest(http.MethodGet, "/features", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status %d", w.Code)
 	}
@@ -149,7 +149,7 @@ func TestFeatureOverrideUpstreamErrorsAreMapped(t *testing.T) {
 		t.Run("list "+tc.name, func(t *testing.T) {
 			h := NewFeatureOverrideHandler(&fakeFeatureOverrideClient{listErr: tc.err})
 			w := httptest.NewRecorder()
-			h.ListFeatureOverrides(w, withUser(httptest.NewRequest(http.MethodGet, "/feature-overrides", nil)))
+			h.ListFeatureOverrides(w, withUser(httptest.NewRequest(http.MethodGet, "/features", nil)))
 			if w.Code != tc.wantCode {
 				t.Fatalf("status %d, want %d", w.Code, tc.wantCode)
 			}

@@ -61,12 +61,12 @@ type featureOverrideSave struct {
 	MarkSaved bool   `json:"markSaved"`
 }
 
-// ListFeatureOverrides handles GET /feature-overrides.
+// ListFeatureOverrides handles GET /features.
 func (h *FeatureOverrideHandler) ListFeatureOverrides(w http.ResponseWriter, r *http.Request) {
 	h.forward(w, r, "ListFeatureOverrides", "Failed to load feature visibility.", h.entity.ListFeatureOverrides)
 }
 
-// PutFeatureOverride handles PUT /feature-overrides.
+// PutFeatureOverride handles PUT /features.
 func (h *FeatureOverrideHandler) PutFeatureOverride(w http.ResponseWriter, r *http.Request) {
 	body, ok := readFeatureOverrideSave(w, r)
 	if !ok {
