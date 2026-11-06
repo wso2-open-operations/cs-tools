@@ -47,6 +47,7 @@ import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import {
   insertImageWithUpload,
+  remainingImageBytes,
   remainingImageSlots,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
@@ -239,9 +240,11 @@ const ClipboardImagePlugin = ({
 
       const ALLOWED_PASTE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
       const maxPasteImageSize = inlineImageMaxBytes();
-      // Only the upload-on-paste flow is capped; base64 images have a server cap.
+      // Only the upload-on-paste flow is capped here; base64 images have a server cap.
+      // Read once: an image added in this loop may not be in the editor yet.
       let slots = handlers.onImageUpload ? remainingImageSlots(editor) : Infinity;
-      let countReported = false;
+      let bytesLeft = handlers.onImageUpload ? remainingImageBytes(editor) : Infinity;
+      let refusalReported = false;
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/") && !ALLOWED_PASTE_IMAGE_TYPES.has(item.type)) {
           event.preventDefault();
@@ -260,12 +263,14 @@ const ClipboardImagePlugin = ({
           }
 
           if (handlers.onImageUpload) {
-            if (slots <= 0) {
-              if (!countReported) handlers.onPasteError?.("count");
-              countReported = true;
+            const refusal = slots <= 0 ? "count" : file.size > bytesLeft ? "size" : null;
+            if (refusal) {
+              if (!refusalReported) handlers.onPasteError?.(refusal);
+              refusalReported = true;
               continue;
             }
             slots -= 1;
+            bytesLeft -= file.size;
             insertImageWithUpload(editor, file, "Pasted Image", handlers.onImageUpload);
             continue;
           }
