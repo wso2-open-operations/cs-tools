@@ -48,13 +48,13 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Port != "9090" || cfg.DB.Port != "3306" || cfg.DB.TLS != store.TLSOff || cfg.ReadTimeout != 15*time.Second || cfg.WriteTimeout != 45*time.Second {
 		t.Fatalf("defaults = %+v", cfg)
 	}
-	if cfg.Entity != nil || cfg.Novera != nil || len(cfg.CORSOrigins) != 0 {
+	if cfg.Novera != nil || len(cfg.CORSOrigins) != 0 {
 		t.Fatalf("optional features should be off: %+v", cfg)
 	}
 	if cfg.WhatMaxLength != 500 {
 		t.Fatalf("WhatMaxLength = %d, want the default 500", cfg.WhatMaxLength)
 	}
-	if len(warnings) != 4 {
+	if len(warnings) != 3 {
 		t.Fatalf("warnings = %q", warnings)
 	}
 }
@@ -62,25 +62,20 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadReadsEverything(t *testing.T) {
 	v := minimal()
 	for k, val := range map[string]string{
-		"PORT":                         "9000",
-		"DB_TLS":                       "true",
-		"REST_READ_TIMEOUT":            "5s",
-		"REST_WRITE_TIMEOUT":           "1m",
-		"CORS_ALLOWED_ORIGINS":         "https://one.example, https://two.example ,",
-		"AUTH_AUDIENCE":                "webapp",
-		"AUTH_MODERATOR_GROUPS":        "til-moderators,admins",
-		"ONE_WSO2_WEBAPP_CLIENT_ID":    "webapp",
-		"ONE_WSO2_BASE_URL":            "https://one.example/",
-		"ENTRY_TEXT_MAX_LENGTH":        "800",
-		"ENTITY_SERVICE_BASE_URL":      "https://entity.example",
-		"ENTITY_SERVICE_TOKEN_URL":     "https://idp.example.com/oauth2/token",
-		"ENTITY_SERVICE_CLIENT_ID":     "til",
-		"ENTITY_SERVICE_CLIENT_SECRET": "s",
-		"ENTITY_SERVICE_SCOPES":        "accounts:read",
-		"NOVERA_NOTIFY_URL":            "https://gateway.example/novera/internal/notifications",
-		"NOVERA_TOKEN_URL":             "https://gateway.example/token",
-		"NOVERA_CLIENT_ID":             "til",
-		"NOVERA_CLIENT_SECRET":         "s",
+		"PORT":                      "9000",
+		"DB_TLS":                    "true",
+		"REST_READ_TIMEOUT":         "5s",
+		"REST_WRITE_TIMEOUT":        "1m",
+		"CORS_ALLOWED_ORIGINS":      "https://one.example, https://two.example ,",
+		"AUTH_AUDIENCE":             "webapp",
+		"AUTH_MODERATOR_GROUPS":     "til-moderators,admins",
+		"ONE_WSO2_WEBAPP_CLIENT_ID": "webapp",
+		"ONE_WSO2_BASE_URL":         "https://one.example/",
+		"ENTRY_TEXT_MAX_LENGTH":     "800",
+		"NOVERA_NOTIFY_URL":         "https://gateway.example/novera/internal/notifications",
+		"NOVERA_TOKEN_URL":          "https://gateway.example/token",
+		"NOVERA_CLIENT_ID":          "til",
+		"NOVERA_CLIENT_SECRET":      "s",
 	} {
 		v[k] = val
 	}
@@ -99,9 +94,8 @@ func TestLoadReadsEverything(t *testing.T) {
 		cfg.WebappBaseURL != "https://one.example" || cfg.WhatMaxLength != 800 {
 		t.Fatalf("lists = %+v", cfg)
 	}
-	if cfg.Entity == nil || cfg.Entity.Scopes[0] != "accounts:read" || cfg.Novera == nil || cfg.Novera.NotifyURL != v["NOVERA_NOTIFY_URL"] ||
-		cfg.Novera.IconURL != "https://one.example/til-logo.png" {
-		t.Fatalf("clients = %+v %+v", cfg.Entity, cfg.Novera)
+	if cfg.Novera == nil || cfg.Novera.NotifyURL != v["NOVERA_NOTIFY_URL"] || cfg.Novera.IconURL != "https://one.example/til-logo.png" {
+		t.Fatalf("novera = %+v", cfg.Novera)
 	}
 }
 
@@ -125,14 +119,13 @@ func TestLoadDBTLS(t *testing.T) {
 
 func TestLoadReportsEveryProblem(t *testing.T) {
 	_, _, err := Load(env(map[string]string{
-		"PORT":                    "http",
-		"REST_READ_TIMEOUT":       "soon",
-		"DB_TLS":                  "1",
-		"AUTH_JWKS_ENDPOINT":      "idp.example.com/jwks",
-		"ONE_WSO2_BASE_URL":       "one.example",
-		"ENTRY_TEXT_MAX_LENGTH":   "5001",
-		"ENTITY_SERVICE_BASE_URL": "https://entity.example", // the rest of its settings missing
-		"NOVERA_NOTIFY_URL":       "https://gateway.example/notify",
+		"PORT":                  "http",
+		"REST_READ_TIMEOUT":     "soon",
+		"DB_TLS":                "1",
+		"AUTH_JWKS_ENDPOINT":    "idp.example.com/jwks",
+		"ONE_WSO2_BASE_URL":     "one.example",
+		"ENTRY_TEXT_MAX_LENGTH": "5001",
+		"NOVERA_NOTIFY_URL":     "https://gateway.example/notify",
 	}))
 	if err == nil {
 		t.Fatal("want an error")
@@ -146,7 +139,6 @@ func TestLoadReportsEveryProblem(t *testing.T) {
 		"AUTH_ISSUER is required",
 		"ONE_WSO2_BASE_URL must be an absolute http(s) URL",
 		"ENTRY_TEXT_MAX_LENGTH must be a whole number from 1 to 5000",
-		"ENTITY_SERVICE_TOKEN_URL is required", "ENTITY_SERVICE_CLIENT_SECRET is required",
 		"NOVERA_TOKEN_URL is required", "NOVERA_CLIENT_ID is required",
 	} {
 		if !strings.Contains(err.Error(), want) {

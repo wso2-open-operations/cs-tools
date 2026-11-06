@@ -27,14 +27,19 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/middleware"
 )
 
-func TestCreateUsesTheTokensEmail(t *testing.T) {
+func TestCreateTakesTheAuthorFromTheToken(t *testing.T) {
 	api := newTestAPI(t)
-	e := api.create(t, jane, `{"title":" T ","who":"Jane Doe, CSM","where":"Customer","whereDetail":" Acme Corp ","what":"<p>Learned X.</p>"}`)
-	if e.SubmittedByEmail != "jane@example.com" || e.Who != "Jane Doe, CSM" || e.Title != "T" || *e.WhereDetail != "Acme Corp" {
+	e := api.create(t, jane, `{"title":" T ","who":"Someone Else","where":"Customer","whereDetail":" Acme Corp ","what":"<p>Learned X.</p>"}`)
+	if e.SubmittedByEmail != "jane@example.com" || e.Who != "Jane Doe" || e.Title != "T" || *e.WhereDetail != "Acme Corp" {
 		t.Fatalf("created = %+v", e)
 	}
 	if e.UpdatedAt != nil {
 		t.Fatal("a new entry must not be marked edited")
+	}
+
+	e = api.create(t, jane, `{"title":"T","where":"Internal","what":"<p>Learned Y.</p>"}`)
+	if e.Who != "Jane Doe" {
+		t.Fatalf("without who: byline = %q", e.Who)
 	}
 }
 
@@ -84,7 +89,6 @@ func TestCreateValidates(t *testing.T) {
 	api := newTestAPI(t)
 	tests := []struct{ body, want string }{
 		{`{"title":"","who":"Jane","where":"Internal","what":"x"}`, "Title is required."},
-		{`{"title":"T","who":" ","where":"Internal","what":"x"}`, "Author name is required."},
 		{`{"title":"T","who":"Jane","where":"Customer","what":"x"}`, "Customer name is required."},
 		{`{"title":"T","who":"Jane","where":"Elsewhere","what":"x"}`, "Choose a source: Customer, Partner, Internal or Other."},
 		{`{"title":"T","who":"Jane","where":"Internal","what":"<p><br></p>"}`, "Add what you learned."},
@@ -311,29 +315,10 @@ func TestUserInfo(t *testing.T) {
 	}
 }
 
-func TestSearchCustomers(t *testing.T) {
-	api := newTestAPI(t)
-	w := api.do(t, jane, http.MethodGet, "/customers/search?q=acme", "")
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
-		t.Fatalf("unconfigured: %d %s", w.Code, w.Body)
-	}
-
-	customers := &fakeCustomers{}
-	api = newTestAPI(t, func(c *Config) { c.Customers = customers })
-	w = api.do(t, jane, http.MethodGet, "/customers/search?q=+acme+", "")
-	if w.Code != http.StatusOK || customers.got != "acme" || !strings.Contains(w.Body.String(), "Acme Corp") {
-		t.Fatalf("configured: %d %s (query %q)", w.Code, w.Body, customers.got)
-	}
-
-	customers.err = errors.New("entity-service down")
-	assertError(t, api.do(t, jane, http.MethodGet, "/customers/search?q=acme", ""), http.StatusBadGateway, msgNoCustomers)
-}
-
 func TestEveryRouteNeedsASignedInUser(t *testing.T) {
 	api := newTestAPI(t)
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/user-info"},
-		{http.MethodGet, "/customers/search"},
 		{http.MethodGet, "/submissions"},
 		{http.MethodPost, "/submissions"},
 		{http.MethodGet, "/submissions/00000000-0000-4000-8000-000000000001"},

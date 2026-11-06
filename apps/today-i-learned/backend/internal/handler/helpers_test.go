@@ -28,7 +28,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/entry"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/today-i-learned/backend/internal/store"
@@ -179,16 +178,6 @@ func (n *fakeNotifier) Notify(_ context.Context, e entry.Entry, entryURL string)
 	return n.fail
 }
 
-type fakeCustomers struct {
-	got string
-	err error
-}
-
-func (c *fakeCustomers) SearchCustomers(_ context.Context, q string) ([]entity.Customer, error) {
-	c.got = q
-	return []entity.Customer{{ID: "a1", Name: "Acme Corp"}}, c.err
-}
-
 type testAPI struct {
 	store    *fakeStore
 	notifier *fakeNotifier
@@ -206,7 +195,6 @@ func newTestAPI(t *testing.T, change ...func(*Config)) *testAPI {
 	api.mux = http.NewServeMux()
 	api.mux.HandleFunc("GET /user-info", h.UserInfo)
 	api.mux.HandleFunc("GET /settings", h.Settings)
-	api.mux.HandleFunc("GET /customers/search", h.SearchCustomers)
 	api.mux.HandleFunc("GET /submissions", h.ListEntries)
 	api.mux.HandleFunc("POST /submissions", h.CreateEntry)
 	api.mux.HandleFunc("GET /submissions/{id}", h.GetEntry)
