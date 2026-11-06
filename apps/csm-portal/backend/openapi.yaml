@@ -19412,8 +19412,9 @@ paths:
       summary: The shared per-page feature state.
       description: >
         Every saved row, enabled ones included, and whether an admin has saved once.
-        Until then the shell reads its config file instead. Any signed-in caller with
-        view permission, because every staff member's menu depends on it. A page with
+        Until then the shell reads its config file instead. Any signed-in caller,
+        because every menu depends on it, including a role that does not hold view
+        permission. A page with
         no row was never saved. Responses are Cache-Control no-store.
       operationId: listFeatureOverrides
       responses:

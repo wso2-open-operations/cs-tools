@@ -37,9 +37,9 @@ type entityFeatureOverrideClient interface {
 }
 
 // FeatureOverrideHandler proxies the shared per-page feature state. Reading is
-// PermView (every signed-in staff member's shell needs it). Writing is
-// PermAdmin, checked by the route; entity-service only accepts the write from
-// this backend and records who made it.
+// PermAuthenticated: every signed-in shell needs the map, including a role
+// that does not hold PermView. Writing is PermAdmin, checked by the route;
+// entity-service only accepts the write from this backend and records who made it.
 type FeatureOverrideHandler struct {
 	entity entityFeatureOverrideClient
 }

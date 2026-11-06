@@ -23,9 +23,10 @@ import (
 )
 
 // TestFeatureOverrideRoutePermissions pins who reaches the shared feature state.
-// Every staff member's shell reads it, so GET is PermView. Changing it is a
-// Settings action for an admin, so PUT is PermAdmin. Entity-service does not
-// re-check the role, so this registration is the only admin gate.
+// Every signed-in shell reads it, including a role that does not hold PermView,
+// so GET is PermAuthenticated. Changing it is a Settings action for an admin,
+// so PUT is PermAdmin. Entity-service does not re-check the role, so this
+// registration is the only admin gate.
 func TestFeatureOverrideRoutePermissions(t *testing.T) {
 	src, err := os.ReadFile("main.go")
 	if err != nil {
@@ -36,8 +37,8 @@ func TestFeatureOverrideRoutePermissions(t *testing.T) {
 	for _, m := range reg.FindAllStringSubmatch(string(src), -1) {
 		got[m[1]] = m[3]
 	}
-	if got["GET"] != "handler.PermView" {
-		t.Errorf("GET /features is registered with %q, want handler.PermView", got["GET"])
+	if got["GET"] != "handler.PermAuthenticated" {
+		t.Errorf("GET /features is registered with %q, want handler.PermAuthenticated", got["GET"])
 	}
 	if got["PUT"] != "handler.PermAdmin" {
 		t.Errorf("PUT /features is registered with %q, want handler.PermAdmin", got["PUT"])

@@ -860,10 +860,11 @@ func main() {
 	route("POST /portal-banners", handler.PermAdmin, bannerHandler.CreateBanner)
 	route("PUT /portal-banners/{id}", handler.PermAdmin, bannerHandler.UpdateBanner)
 
-	// Shared per-page feature state (Settings > Feature visibility). Every staff
-	// member's shell reads it. Only an admin writes it.
+	// Shared per-page feature state (Settings > Feature visibility). Every
+	// signed-in shell reads it, including a role that does not hold PermView
+	// (worknote_creator). Only an admin writes it.
 	featureOverrideHandler := handler.NewFeatureOverrideHandler(customerEntityClient)
-	route("GET /features", handler.PermView, featureOverrideHandler.ListFeatureOverrides)
+	route("GET /features", handler.PermAuthenticated, featureOverrideHandler.ListFeatureOverrides)
 	route("PUT /features", handler.PermAdmin, featureOverrideHandler.PutFeatureOverride)
 
 	slaEngineHandler := handler.NewSLAEngineHandler(customerEntityClient)

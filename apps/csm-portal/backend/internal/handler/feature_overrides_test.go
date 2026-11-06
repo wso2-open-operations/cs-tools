@@ -157,12 +157,12 @@ func TestFeatureOverrideUpstreamErrorsAreMapped(t *testing.T) {
 	}
 }
 
-// A non-admin staff member's shell must be able to read the shared state, and
-// only an admin may change it.
+// Every signed-in shell must be able to read the shared state, including a
+// role that does not hold PermView, and only an admin may change it.
 func TestFeatureOverridePermissions(t *testing.T) {
 	g := NewAccessGuard(testAccessConfig())
-	for _, roles := range [][]string{{"test-viewer"}, {"test-cs-engineer"}} {
-		if status, reached := serveWithRoles(g, PermView, roles); status != http.StatusNoContent || !reached {
+	for _, roles := range [][]string{{"test-viewer"}, {"test-cs-engineer"}, {"test-worknote-creator"}} {
+		if status, reached := serveWithRoles(g, PermAuthenticated, roles); status != http.StatusNoContent || !reached {
 			t.Errorf("%v: read denied (%d)", roles, status)
 		}
 		if status, reached := serveWithRoles(g, PermAdmin, roles); status != http.StatusForbidden || reached {
