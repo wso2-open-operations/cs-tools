@@ -415,7 +415,7 @@ func (t incidentReportTx) insertIncidentTask(ctx context.Context, incidentID, su
 // CreateProblem implements IncidentReportTx.
 //
 // Same shape as createProblemPortalQuery (problem_repo.go): number from
-// next_portal_work_item_number(), state NEW because problem.state has no
+// next_work_item_number('PROBLEM'), state NEW because problem.state has no
 // column default. active TRUE is ServiceNow's default for a new problem. The
 // assignment group is looked up for the reason insertIncidentTask gives.
 func (t incidentReportTx) CreateProblem(ctx context.Context, p NewIncidentProblem) (string, string, error) {
@@ -428,7 +428,7 @@ func (t incidentReportTx) CreateProblem(ctx context.Context, p NewIncidentProble
 			)
 			VALUES (
 				gen_random_uuid(), NOW(), NOW(), $1, $1,
-				next_portal_work_item_number(), $2, 'PROBLEM'::work_item_type_enum,
+				next_work_item_number('PROBLEM'::work_item_type_enum), $2, 'PROBLEM'::work_item_type_enum,
 				(SELECT g.id FROM "group" g WHERE g.id = $3::uuid)
 			)
 			RETURNING id, number
