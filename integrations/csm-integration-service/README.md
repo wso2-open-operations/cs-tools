@@ -229,6 +229,7 @@ starting point.
 | `ENTITY_CLIENT_SECRET` | Yes | none | OAuth2 client secret. Treat as a secret. | `<client-secret>` |
 | `ENTITY_SCOPES` | No | none (no scopes requested) | Comma-separated OAuth2 scopes; blanks are ignored. | `scope-a,scope-b` |
 | `UMT_INTEGRATION_ACTOR_EMAIL` | No at startup; needed for case writes | empty | Email of this service's trusted M2M actor, asserted as the author on `POST /cases/{id}/comments` and `POST /cases/{id}/tags`. Must be in the entity service's trusted-actor allowlist, otherwise those calls return 403. | `integration-bot@example.com` |
+| `MARK_FIX_ISSUED_ACTOR_EMAILS` | No | empty (no attribution) | Maps a third-party consumer's own client id (decoded from the `x-jwt-assertion` header the gateway forwards) to its display email, so a `markFixIssued` `PATCH /cases/{id}` call is attributed to the real caller in entity-service's activity feed instead of this service's own shared client id. A JSON object of client id to email; an unmapped or missing client id, or an unparseable value, just skips attribution (logged at WARN), never blocks the call. | `{"client-a":"team-a@example.com","client-b":"team-b@example.com"}` |
 | `PORT` | No | `8080` | TCP listen port. | `8080` |
 
 Notes:

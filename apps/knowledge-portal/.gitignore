@@ -1,0 +1,19 @@
+# dependencies
+**/node_modules/
+
+# build output
+webapp/dist/
+backend/server
+
+# env files (never commit secrets)
+**/.env
+**/.env.local
+**/*.env.bak
+**/.env.bak*
+
+# editor / OS
+.DS_Store
+*.log
+
+# Go
+backend/vendor/

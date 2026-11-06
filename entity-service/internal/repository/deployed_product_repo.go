@@ -244,14 +244,18 @@ func (r *deployedProductRepo) SearchDeployedProductMetrics(ctx context.Context, 
 	//   - Where snapshots overlap on a day, the one first reported later wins (it
 	//     replaced the other). If that one carries no core count the node has no
 	//     reading that day, rather than falling back to an older value.
+	// A node-day with both a live (API_CALL) and an uploaded (FILE_UPLOAD) CORES row
+	// counts once, the live one -- see dailyUsageSourcePreference.
 	rows, err := r.db.Query(ctx, `
 		WITH daily AS (
-			SELECT dus.summary_date AS day, dus.deployment_node_id AS node_id, SUM(dus.value)::int AS cores
+			SELECT DISTINCT ON (dus.deployment_node_id, dus.summary_date)
+			       dus.summary_date AS day, dus.deployment_node_id AS node_id, dus.value AS cores
 			FROM daily_usage_summary dus
 			WHERE dus.deployment_node_id = ANY($1::uuid[])
 			AND dus.count_type = 'CORES'
+			AND dus.value IS NOT NULL
 			AND dus.summary_date BETWEEN $2::date AND $3::date
-			GROUP BY dus.summary_date, dus.deployment_node_id
+			ORDER BY dus.deployment_node_id, dus.summary_date, `+dailyUsageSourcePreference+`
 		), snapshot AS (
 			SELECT day, node_id, cores FROM (
 				SELECT DISTINCT ON (dn.id, g.day)
@@ -383,13 +387,19 @@ func (r *deployedProductRepo) SearchDeployedProductUsageCounts(ctx context.Conte
 		nodeNameByID[n.ID] = n.Name
 	}
 
+	// One row per node, count type and day, the live one when there is both a live
+	// and an uploaded row (dailyUsageSourcePreference).
 	rows, err := r.db.Query(ctx, `
-		SELECT dus.summary_date, dus.count_type, dus.deployment_node_id, SUM(dus.value)::int
-		FROM daily_usage_summary dus
-		WHERE dus.deployment_node_id = ANY($1::uuid[])
-		AND dus.summary_date BETWEEN $2::date AND $3::date
-		GROUP BY dus.summary_date, dus.count_type, dus.deployment_node_id
-		ORDER BY dus.summary_date, dus.count_type`,
+		SELECT summary_date, count_type, deployment_node_id, value FROM (
+			SELECT DISTINCT ON (dus.deployment_node_id, dus.count_type, dus.summary_date)
+			       dus.summary_date, dus.count_type, dus.deployment_node_id, dus.value
+			FROM daily_usage_summary dus
+			WHERE dus.deployment_node_id = ANY($1::uuid[])
+			AND dus.value IS NOT NULL
+			AND dus.summary_date BETWEEN $2::date AND $3::date
+			ORDER BY dus.deployment_node_id, dus.count_type, dus.summary_date, `+dailyUsageSourcePreference+`
+		) picked
+		ORDER BY summary_date, count_type`,
 		nodeIDs, startDate, endDate,
 	)
 	if err != nil {
@@ -555,7 +565,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		        dp.description, dp.update_level_info, pr.sf_id, COALESCE(dp.active, TRUE),
 		        d.id, d.name, d.type::TEXT,
 		        p.id, p.name, p.code,
-		        pv.id, pv.version, pv.release_date, pv.support_eol_date
+		        pv.id, pv.version, pv.release_date, pv.support_eol_date, pv.deployment_profile
 		 FROM deployed_product dp
 		 JOIN deployment d ON dp.deployment_id = d.id
 		 JOIN product p ON dp.product_id = p.id
@@ -591,7 +601,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		for rows.Next() {
 			var dp domain.DeployedProductView
 			// Version fields are nullable (LEFT JOIN).
-			var pvID, pvName *string
+			var pvID, pvName, pvProfile *string
 			var pvReleaseDate, pvEoLDate *time.Time
 			// update_level_info is nullable JSONB; decoded below into
 			// dp.Updates once the row is scanned.
@@ -604,7 +614,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 				&dp.Description, &updateLevelInfo, &dp.ProjectSfID, &dp.Active,
 				&dp.Deployment.ID, &dp.Deployment.Name, &deploymentType,
 				&dp.Product.ID, &dp.Product.Name, &dp.Product.Abbreviation,
-				&pvID, &pvName, &pvReleaseDate, &pvEoLDate,
+				&pvID, &pvName, &pvReleaseDate, &pvEoLDate, &pvProfile,
 			); err != nil {
 				return fmt.Errorf("scan deployed product: %w", err)
 			}
@@ -615,10 +625,11 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 			}
 			if pvID != nil {
 				dp.Version = &domain.DeployedProductVersionRef{
-					ID:             *pvID,
-					Name:           *pvName,
-					ReleasedDate:   pvReleaseDate,
-					SupportEoLDate: pvEoLDate,
+					ID:                *pvID,
+					Name:              *pvName,
+					ReleasedDate:      pvReleaseDate,
+					SupportEoLDate:    pvEoLDate,
+					DeploymentProfile: pvProfile,
 				}
 			}
 			dp.Category = lowercaseCategory(dp.Category)

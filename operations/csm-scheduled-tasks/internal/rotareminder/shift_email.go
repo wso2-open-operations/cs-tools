@@ -18,6 +18,7 @@ package rotareminder
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,7 +90,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 	if w.day.Equal(today.AddDate(0, 0, 1)) {
 		notice = fmt.Sprintf("This is a reminder that you are rostered for the %s tomorrow, %s, %s.", inSentence, date, when)
 	}
-	if cfg.Invites {
+	if cfg.invitesFor(w.base) {
 		notice += " The calendar invitation is attached; everybody on this rotation is a guest, and no reply is needed."
 	}
 
@@ -102,7 +103,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 	for _, a := range w.people {
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
-	return finish(cfg, to, fmt.Sprintf("[%s Rota] %s – %s (%s)", cfg.Family, title, date, when), data), true
+	return finish(cfg, to, fmt.Sprintf("[%s] %s – %s (%s)", cfg.Family, title, date, when), data), true
 }
 
 // buildWeekendEmail writes the weekend's summary: to everybody on the windows
@@ -110,7 +111,7 @@ func buildEmail(cfg Config, w *window, today time.Time) (shiftEmail, bool) {
 // each rotation once (its hours on its own clock and in UTC, and its role).
 // gaps, when any, are listed too (Friday's reminder goes out with them). ok is
 // false when nobody on them has an address.
-func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.Assignment, today time.Time, gaps []gap) (shiftEmail, bool) {
+func buildWeekendEmail(cfg Config, pending []*window, rostered, support []teamschedule.Assignment, today time.Time, gaps []gap) (shiftEmail, bool) {
 	var people []teamschedule.Assignment
 	var days []time.Time
 	for _, w := range pending {
@@ -119,6 +120,12 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 			days = append(days, w.day)
 		}
 	}
+	// The support turns are listed for the days the email covers, and their
+	// people get it too.
+	support = slices.DeleteFunc(slices.Clone(support), func(a teamschedule.Assignment) bool {
+		return !slices.ContainsFunc(days, func(d time.Time) bool { return d.Format(dateLayout) == a.RotaDate })
+	})
+	people = append(people, support...)
 	to, _ := recipients(people)
 	if len(to) == 0 {
 		return shiftEmail{}, false
@@ -149,6 +156,25 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 		}
 		data.Days = append(data.Days, day)
 	}
+	if len(support) > 0 {
+		data.SupportTitle = cfg.Support.Title
+		for _, d := range days {
+			day := notify.WeekendRotaDay{Title: d.Format("Monday")}
+			for _, a := range support {
+				if a.RotaDate != d.Format(dateLayout) {
+					continue
+				}
+				line := a.Engineer.Name + " (" + shortName(cfg.Support.Rotations[a.ShiftCode])
+				if a.Tier != "" {
+					line += ", " + a.Tier
+				}
+				day.People = append(day.People, line+")")
+			}
+			if len(day.People) > 0 {
+				data.SupportDays = append(data.SupportDays, day)
+			}
+		}
+	}
 
 	// Each rotation once, in rota order, described from its first turn.
 	var codes []string
@@ -171,9 +197,9 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 		a := first[code]
 		clock := clockOf(cfg, code)
 		s, e := a.StartsAt.In(clock), a.EndsAt.In(clock)
-		role := zoneName(s) + " General support"
+		role, note := zoneName(s)+" General support", splitNote(days, perDay[code], a.EndsAt.Sub(a.StartsAt))
 		if a.IsOnCall || strings.HasSuffix(code, "_OC") {
-			role = "On-call"
+			role, note = "On-call", ""
 		}
 		data.Definitions = append(data.Definitions, notify.RotationDefinition{
 			Rotation:  cfg.Rotations[code],
@@ -181,10 +207,18 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 			LocalTime: s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s),
 			UTCWindow: a.StartsAt.UTC().Format("15:04") + " – " + a.EndsAt.UTC().Format("15:04"),
 			Role:      role,
+			RoleNote:  note,
 		})
 		if _, ok := zones[clock.String()]; !ok {
 			zones[clock.String()] = clock
 			zoneOrder = append(zoneOrder, clock.String())
+		}
+	}
+	if defs := supportDefinitions(cfg, days, support); len(defs) > 0 {
+		data.Definitions = append(data.Definitions, defs...)
+		if _, ok := zones[cfg.Zone.String()]; !ok {
+			zones[cfg.Zone.String()] = cfg.Zone
+			zoneOrder = append(zoneOrder, cfg.Zone.String())
 		}
 	}
 	var legend []string
@@ -206,16 +240,73 @@ func buildWeekendEmail(cfg Config, pending []*window, rostered []teamschedule.As
 	if len(gaps) > 0 {
 		data.AfterTable = append(data.AfterTable, "Not yet fully marked: "+gapList(cfg, gaps)+".")
 	}
-	if cfg.Invites {
+	if slices.ContainsFunc(pending, func(w *window) bool { return cfg.invitesFor(w.base) }) {
 		data.AfterTable = append(data.AfterTable, "A calendar invitation for your team's rotation follows in a separate email, "+
 			"with everybody on that rotation as a guest.")
 	}
-	email := shiftEmail{to: to, cc: without(cfg.Copy, to), subject: fmt.Sprintf("[%s Rota] Weekend Rotation – %s", cfg.Family, dayList(days))}
+	if len(support) > 0 {
+		data.AfterTable = append(data.AfterTable, "The "+cfg.Support.Family+" turns are listed for information; "+
+			"they get no calendar invitation from this email.")
+	}
+	// The summary is the one email the weekend-only copies get.
+	cc := without(append(append([]string{}, cfg.Copy...), cfg.WeekendCopy...), to)
+	email := shiftEmail{to: to, cc: cc, subject: fmt.Sprintf("[%s] Weekend Rotation – %s", cfg.Family, dayList(days))}
 	if len(cfg.RedirectTo) > 0 {
 		data.IntendedFor = append(append([]string{}, email.to...), email.cc...)
 	}
 	email.body = notify.RenderWeekendRota(data)
 	return email, true
+}
+
+// supportDefinitions defines each support rotation once, in the order its
+// turns come: its hours on the rota's clock and in UTC, and its tiers ("SRE
+// support (L1 → L2)").
+func supportDefinitions(cfg Config, days []time.Time, support []teamschedule.Assignment) []notify.RotationDefinition {
+	var codes []string
+	first := map[string]teamschedule.Assignment{}
+	perDay := map[string]map[string]map[string]bool{} // code -> date -> person
+	tiers := map[string][]string{}
+	for _, a := range support {
+		if _, ok := first[a.ShiftCode]; !ok {
+			first[a.ShiftCode] = a
+			codes = append(codes, a.ShiftCode)
+			perDay[a.ShiftCode] = map[string]map[string]bool{}
+		}
+		if perDay[a.ShiftCode][a.RotaDate] == nil {
+			perDay[a.ShiftCode][a.RotaDate] = map[string]bool{}
+		}
+		perDay[a.ShiftCode][a.RotaDate][strings.ToLower(a.Engineer.UserID+"|"+a.Engineer.Email+"|"+a.Engineer.Name)] = true
+		if a.Tier != "" && !slices.Contains(tiers[a.ShiftCode], a.Tier) {
+			tiers[a.ShiftCode] = append(tiers[a.ShiftCode], a.Tier)
+		}
+	}
+	var defs []notify.RotationDefinition
+	for _, code := range codes {
+		a := first[code]
+		s, e := a.StartsAt.In(cfg.Zone), a.EndsAt.In(cfg.Zone)
+		role := cfg.Support.Family + " support"
+		if t := tiers[code]; len(t) > 0 {
+			slices.Sort(t)
+			role += " (" + strings.Join(t, " → ") + ")"
+		}
+		defs = append(defs, notify.RotationDefinition{
+			Rotation:  cfg.Support.Rotations[code],
+			Members:   memberCount(days, perDay[code]),
+			LocalTime: s.Format("03:04 PM") + " – " + e.Format("03:04 PM") + " " + zoneName(s),
+			UTCWindow: a.StartsAt.UTC().Format("15:04") + " – " + a.EndsAt.UTC().Format("15:04"),
+			Role:      role,
+		})
+	}
+	return defs
+}
+
+// shortName is a rotation's name up to its bracket: "SRE Night (TZ3)" ->
+// "SRE Night".
+func shortName(name string) string {
+	if i := strings.Index(name, " ("); i > 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // memberCount says how many people a rotation has: "3 members", or, when the
@@ -240,6 +331,46 @@ func memberCount(days []time.Time, byDay map[string]map[string]bool) string {
 		parts = append(parts, fmt.Sprintf("%s %d", d.Format("Monday"), counts[i]))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// splitNote asks a general-support team to share a long window as morning
+// and evening shifts: only when it is longer than a working day and every
+// day has more than one person on it. Empty otherwise.
+func splitNote(days []time.Time, byDay map[string]map[string]bool, window time.Duration) string {
+	if window <= 10*time.Hour {
+		return ""
+	}
+	n := -1
+	for _, d := range days {
+		c := len(byDay[d.Format(dateLayout)])
+		if c < 2 {
+			return ""
+		}
+		if n == -1 || c == n {
+			n = c
+		} else {
+			n = 0 // differs by day
+		}
+	}
+	who := "the members"
+	if n > 0 {
+		who = fmt.Sprintf("the %d members", n)
+	}
+	return fmt.Sprintf("The %s window is shared: %s can divide the %s into morning and evening shifts, "+
+		"so support is covered from start to end.", hoursOf(window), who, hoursPlural(window))
+}
+
+// hoursPlural writes a window's length as a quantity: "15 hours", "7.5 hours".
+func hoursPlural(d time.Duration) string {
+	return strings.TrimSuffix(hoursOf(d), "-hour") + " hours"
+}
+
+// hoursOf writes a window's length: "15-hour", "7.5-hour".
+func hoursOf(d time.Duration) string {
+	if d%time.Hour == 0 {
+		return fmt.Sprintf("%d-hour", int(d.Hours()))
+	}
+	return fmt.Sprintf("%.1f-hour", d.Hours())
 }
 
 // utcOffset writes t's offset as "+5:30" or "−7".
@@ -306,7 +437,7 @@ func buildInviteEmail(cfg Config, w *window, stamp time.Time) (shiftEmail, Invit
 		data.Rows = append(data.Rows, []string{a.Engineer.Name, cfg.Rotations[a.ShiftCode]})
 	}
 	inv := windowInvite(cfg, w, stamp)
-	email := finish(cfg, to, fmt.Sprintf("[%s Rota] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
+	email := finish(cfg, to, fmt.Sprintf("[%s] Calendar invitation: %s – %s (%s)", cfg.Family, title, date, when), data)
 	email.attachments = []notify.Attachment{inviteAttachment(inv)}
 	return email, inv, true
 }
@@ -329,7 +460,7 @@ func buildCancelEmail(cfg Config, inv Invite, emails []string, stamp time.Time) 
 		ScheduleURL: cfg.ScheduleURL,
 		Closing:     "If you believe this is a mistake, please contact your team lead.",
 	}
-	email := finish(cfg, emails, fmt.Sprintf("[%s Rota] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
+	email := finish(cfg, emails, fmt.Sprintf("[%s] Cancelled: %s – %s", cfg.Family, inv.Summary, date), data)
 	email.attachments = []notify.Attachment{inviteAttachment(cancel)}
 	return email
 }
@@ -372,7 +503,7 @@ func buildAdminEmail(cfg Config, admins []teamschedule.RotaAdmin, days []time.Ti
 	for _, g := range gaps {
 		data.Rows = append(data.Rows, []string{g.day.Format("Monday, 2 January"), windowTitle(cfg, g.base), fmt.Sprint(g.have), fmt.Sprint(g.need)})
 	}
-	subject := fmt.Sprintf("[%s Rota] Action needed: the weekend rota for %s is not complete", cfg.Family, when)
+	subject := fmt.Sprintf("[%s] Action needed: the weekend rota for %s is not complete", cfg.Family, when)
 	return finish(cfg, to, subject, data), true
 }
 

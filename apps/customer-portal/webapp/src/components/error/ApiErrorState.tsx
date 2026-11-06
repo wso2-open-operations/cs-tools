@@ -16,6 +16,7 @@
 
 import { Stack, type SxProps, type Theme } from "@wso2/oxygen-ui";
 import type { JSX } from "react";
+import ErrorRecoveryAction from "@components/error/ErrorRecoveryAction";
 import Error400Page from "@components/error/Error400Page";
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
@@ -32,6 +33,13 @@ export interface ApiErrorStateProps {
   error?: unknown;
   fallbackMessage?: string;
   containerSx?: SxProps<Theme>;
+  /** Adds a button off the page for 403/404 (see {@link ErrorRecoveryAction}).
+   *  Opt in for full-page errors only; leave off for errors embedded in a
+   *  panel or tab, where the surrounding page already offers navigation. */
+  showRecoveryAction?: boolean;
+  /** Caller-chosen copy for 403 and 404, which otherwise show the page's own
+   *  default (403) or `fallbackMessage` (404). */
+  accessMessage?: string;
 }
 
 /**
@@ -46,13 +54,15 @@ export interface ApiErrorStateProps {
  * "Tracking ID" copy affordance can render when the error carries a
  * correlation ID.
  *
- * @param {ApiErrorStateProps} props - Error payload and optional fallback copy.
+ * @param {ApiErrorStateProps} props - Error payload, optional fallback copy, and recovery opt-in.
  * @returns {JSX.Element} Error400/401/403/404/500 UI based on {@link ApiError} status.
  */
 export default function ApiErrorState({
   error,
   fallbackMessage = "Something went wrong while loading data.",
   containerSx,
+  showRecoveryAction = false,
+  accessMessage,
 }: ApiErrorStateProps): JSX.Element {
   const baseContainerSx: SxProps<Theme> = {
     py: 4,
@@ -62,6 +72,8 @@ export default function ApiErrorState({
   const mergedContainerSx = (
     containerSx ? [baseContainerSx, containerSx] : baseContainerSx
   ) as SxProps<Theme>;
+
+  const recoveryAction = showRecoveryAction ? <ErrorRecoveryAction /> : undefined;
 
   if (isUnauthorizedError(error)) {
     return (
@@ -74,7 +86,11 @@ export default function ApiErrorState({
   if (isForbiddenError(error)) {
     return (
       <Stack spacing={2} sx={mergedContainerSx}>
-        <Error403Page error={error} />
+        <Error403Page
+          message={accessMessage}
+          error={error}
+          actions={recoveryAction}
+        />
       </Stack>
     );
   }
@@ -82,7 +98,11 @@ export default function ApiErrorState({
   if (isNotFoundError(error)) {
     return (
       <Stack spacing={2} sx={mergedContainerSx}>
-        <Error404Page message={fallbackMessage} error={error} />
+        <Error404Page
+          message={accessMessage ?? fallbackMessage}
+          error={error}
+          actions={recoveryAction}
+        />
       </Stack>
     );
   }

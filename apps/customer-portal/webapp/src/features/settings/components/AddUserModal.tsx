@@ -38,6 +38,9 @@ import { Code, Crown, Monitor, Shield, Star, X } from "@wso2/oxygen-ui-icons-rea
 import { useValidateProjectContact } from "@features/settings/api/useValidateProjectContact";
 import {
   ADD_USER_DETAILS_INTRO,
+  ADD_USER_SYSTEM_USER_DETAILS_INTRO,
+  ADD_USER_MODAL_ADDING,
+  ADD_USER_MODAL_ADD_USER,
   ADD_USER_EMAIL_INVALID_CONTACT_ERROR,
   ADD_USER_EMAIL_INVALID_ERROR,
   ADD_USER_EMAIL_LABEL,
@@ -373,7 +376,7 @@ export default function AddUserModal({
         <>
           <DialogContent>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              {ADD_USER_DETAILS_INTRO}
+              {isWebUser ? ADD_USER_SYSTEM_USER_DETAILS_INTRO : ADD_USER_DETAILS_INTRO}
             </Typography>
 
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
@@ -529,7 +532,13 @@ export default function AddUserModal({
               onClick={handleSubmit}
               disabled={!isDetailsValid || isSubmitting}
             >
-              {isSubmitting ? ADD_USER_MODAL_SENDING : ADD_USER_MODAL_SEND_INVITATION}
+              {isWebUser
+                ? isSubmitting
+                  ? ADD_USER_MODAL_ADDING
+                  : ADD_USER_MODAL_ADD_USER
+                : isSubmitting
+                  ? ADD_USER_MODAL_SENDING
+                  : ADD_USER_MODAL_SEND_INVITATION}
             </Button>
           </DialogActions>
         </>

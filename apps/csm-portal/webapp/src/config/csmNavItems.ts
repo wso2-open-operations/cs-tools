@@ -17,6 +17,7 @@
 import {
   AlertOctagon,
   AlertTriangle,
+  Award,
   BarChart3,
   Briefcase,
   BookOpen,
@@ -34,14 +35,15 @@ import {
   Headset,
   HeartPulse,
   KeyRound,
+  LayoutDashboard,
   LifeBuoy,
   Megaphone,
   RefreshCw,
   ScrollText,
   Settings,
   Shield,
+  UserCheck,
   UserCog,
-  UserSearch,
   Users,
   UsersRound,
 } from "@wso2/oxygen-ui-icons-react";
@@ -55,6 +57,7 @@ import type { PortalAccess } from "@context/current-user/portalAccess";
  * visibility state.
  */
 import { PLG_NAV_SECTION } from "@features/plg/config/plgNavItems";
+import { PRODUCTS_NAV_SECTION } from "@features/csm-products/config/productsNavItems";
 
 export interface CsmNavNode {
   /**
@@ -105,8 +108,47 @@ export interface CsmNavNode {
    * overrides) and its owner's.
    */
   shortcutTo?: string;
+  /**
+   * Named places inside this node's page that a query parameter selects, as
+   * opposed to filters of it: the parameter, and each value's label. "Pin this
+   * page" and Recent name such a URL after the place ("Standard changes"), not
+   * as a filtered view of the node ("Change requests: 1 filter"). A value not
+   * listed here is read as an ordinary filter. Not nav entries: they are never
+   * in the sidebar, Quick-nav or a tab strip.
+   */
+  views?: CsmNavViews;
   icon?: ComponentType<{ size?: number | string }>;
   children?: CsmNavNode[];
+}
+
+/** See {@link CsmNavNode.views}. */
+export interface CsmNavViews {
+  param: string;
+  labels: Readonly<Record<string, string>>;
+  /**
+   * A narrower place inside one of these: under a value of `param`, another
+   * parameter names it (Standard changes' proposals, `view=standard&show=proposals`).
+   * Without that parameter, or with a value it does not name, the place is the
+   * outer one.
+   */
+  within?: Readonly<Record<string, CsmNavViews>>;
+  /**
+   * Parameters starting with this belong to the page's default place (the
+   * change request list's `cr*` filters) and are kept in the URL, unread, while
+   * one of these places is shown. They are not filters of the place, so "Pin
+   * this page" and Recent ignore them there (and leave them out of its href).
+   * Read on the outermost level only.
+   */
+  ignoreParamPrefix?: string;
+}
+
+/** One of a node's {@link CsmNavNode.views}, as a URL selects it. */
+export interface CsmNavView {
+  /** The parameters that select the place, outermost first, with their values. */
+  params: ReadonlyArray<readonly [string, string]>;
+  label: string;
+  /** The node's {@link CsmNavViews.ignoreParamPrefix}, when it has one. */
+  ignoreParamPrefix?: string;
 }
 
 /** A top-level sidebar section. Always carries an icon. */
@@ -127,10 +169,39 @@ export interface CsmNavSection extends CsmNavNode {
  */
 export const CSM_NAV_ITEMS: CsmNavSection[] = [
   {
+    // Route-backed tabs (the Customers shape): CsmDashboardsLayout draws them.
+    // System Dashboards shares the section's own path, so it is the landing
+    // tab and owns every /dashboard/:dashboardId(/:teamId) page. My
+    // Dashboards (generating and saving) is for CS engineers and admins
+    // (canWrite is exactly that group); Shared Dashboards is for every portal
+    // role, like System, since anyone a dashboard is shared with must be able
+    // to open it. Their static paths outrank /dashboard/:dashboardId in React
+    // Router.
     id: "dashboard",
-    label: "Dashboard",
+    label: "Dashboards",
     href: "/dashboard",
     icon: ChartColumn,
+    children: [
+      {
+        id: "dashboard.system",
+        label: "System Dashboards",
+        href: "/dashboard",
+        icon: ChartColumn,
+      },
+      {
+        id: "dashboard.my",
+        label: "My Dashboards",
+        href: "/dashboard/my",
+        requires: "canWrite",
+        icon: LayoutDashboard,
+      },
+      {
+        id: "dashboard.shared",
+        label: "Shared Dashboards",
+        href: "/dashboard/shared",
+        icon: UsersRound,
+      },
+    ],
   },
   {
     id: "support",
@@ -158,7 +229,39 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Change requests",
         href: "/operations?tab=change_requests",
         tab: "change_requests",
-        routes: ["/operations/change-requests"],
+        // Standard changes are templated change requests: they are a sub-view
+        // of this tab (`?view=standard`, the proposals `&show=proposals`, see
+        // csm-operations/utils/standardChanges.ts), and a template's or a
+        // proposal's own page belongs to it too. `/operations/change-requests`
+        // must stay first: it is the tab's own destination (`navNodeHref`).
+        routes: [
+          "/operations/change-requests",
+          "/operations/standard-changes",
+          "/operations/standard-change-proposals",
+        ],
+        // Standard changes and its proposals are places, not filters of the
+        // list. Same parameters and labels as `CHANGE_REQUESTS_VIEW_PARAM` /
+        // `STANDARD_CHANGES_SHOW_PARAM` / `STANDARD_CHANGES_LABELS` (a test
+        // keeps them equal; this module stays free of feature imports). The
+        // old `catalogue` / `proposals` values are still named, as links to
+        // them still land there. The list's own `cr*` filters stay in the URL
+        // on Standard changes (so the list comes back as it was left) but are
+        // not its filters: `CHANGE_REQUEST_LIST_PARAM_PREFIX`.
+        views: {
+          param: "view",
+          ignoreParamPrefix: "cr",
+          labels: {
+            standard: "Standard changes",
+            catalogue: "Standard changes",
+            proposals: "Standard change proposals",
+          },
+          within: {
+            standard: {
+              param: "show",
+              labels: { proposals: "Standard change proposals" },
+            },
+          },
+        },
         icon: GitPullRequest,
       },
       {
@@ -199,6 +302,12 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     label: "Engagements",
     href: "/engagements",
     icon: Briefcase,
+  },
+  {
+    id: "allocations",
+    label: "Allocations",
+    href: "/allocations",
+    icon: UserCheck,
   },
   {
     id: "announcements",
@@ -297,6 +406,10 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
       },
     ],
   },
+  // The product catalogue behind the public Support Matrix and Release
+  // Matrix. Declared in features/csm-products/config/productsNavItems, like
+  // PLG below.
+  PRODUCTS_NAV_SECTION,
   // PLG Customer Success Portal. Declared in
   // features/plg/config/plgNavItems so a change to PLG's pages does not
   // touch this file. Hide the whole section with
@@ -306,7 +419,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     id: "updates",
     label: "Updates",
     href: "/updates",
-    requires: "canUseTimeCardsAndUpdates",
+    requires: "canViewUpdates",
     icon: RefreshCw,
   },
   {
@@ -328,13 +441,24 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     icon: CalendarDays,
   },
   {
+    id: "skills",
+    label: "Skills",
+    href: "/skills",
+    // Everyone who can write keeps a skills profile (the backend puts the
+    // skills routes' changes under the write permission). Its tabs are not
+    // nav-tree children: the Skill Manager tab depends on a per-user probe
+    // (see CsmSkillsPage), not on a role.
+    requires: "canWrite",
+    icon: Award,
+  },
+  {
     id: "customer-health",
     label: "Customer Health",
     href: "/customer-health",
     // Ex-Support Portal Lite section with no modern/entity-service-backed
     // equivalent. Its audience is the viewer role plus cs_engineer and admin
     // (PermViewCustomerHealth server-side) -- see canViewCustomerHealth's own
-    // doc comment. Like Usage Metrics below, it sits just above User Scan and
+    // doc comment. Like Usage Metrics below, it sits just above Settings and
     // Help at the end of the sidebar -- except for a viewer, who gets it under
     // Customers instead (the "customers.customer-health" shortcut). This node
     // still owns the page and its routes for every role.
@@ -351,13 +475,6 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
     // doc comment.
     requires: "canViewUsageMetrics",
     icon: BarChart3,
-  },
-  {
-    id: "user-scan",
-    label: "User Scan",
-    href: "/user-scan",
-    requires: "isSplAudience",
-    icon: UserSearch,
   },
   {
     id: "admin",
@@ -422,6 +539,26 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         label: "Dashboards",
         href: "/admin/dashboards",
       },
+      // Settings is also open to a CS engineer. This tab is admin only, so
+      // the sidebar and Quick-nav hide it the same way the Settings tabs do.
+      {
+        id: "admin.banners",
+        label: "Banners",
+        href: "/admin/banners",
+        icon: Megaphone,
+        requires: "isAdmin",
+      },
+      // Admin only, same reasoning as Banners above: recalculating SLA
+      // tracking is a real backend action (POST /sla-engine/recalculate,
+      // PermAdmin on both this backend and entity-service — see
+      // apps/csm-portal/backend's own CLAUDE.md), not a display-only page.
+      {
+        id: "admin.sla-engine",
+        label: "SLA Engine",
+        href: "/admin/sla-engine",
+        icon: RefreshCw,
+        requires: "isAdmin",
+      },
     ],
   },
   {
@@ -459,7 +596,7 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         id: "help.updates",
         label: "Updates",
         href: "/help#updates",
-        requires: "canUseTimeCardsAndUpdates",
+        requires: "canViewUpdates",
       },
       {
         id: "help.time-cards",
@@ -473,6 +610,12 @@ export const CSM_NAV_ITEMS: CsmNavSection[] = [
         href: "/help#announcements",
       },
       { id: "help.customers", label: "Customers", href: "/help#customers" },
+      {
+        id: "help.products",
+        label: "Products",
+        href: "/help#products",
+        requires: "canViewStaffSections",
+      },
       {
         id: "help.people-access",
         label: "People & project access",
@@ -614,6 +757,38 @@ export function navTabForSearch(
   const tab = new URLSearchParams(search).get("tab");
   if (!tab) return undefined;
   return node.children?.find((child) => child.tab === tab);
+}
+
+/**
+ * The named place inside `node`'s page that `search` selects (see
+ * {@link CsmNavNode.views}), or `undefined` when the node has none or the
+ * parameter is absent or holds a value it does not name.
+ */
+export function navViewForSearch(
+  node: CsmNavNode,
+  search: string,
+): CsmNavView | undefined {
+  if (!node.views) return undefined;
+  const view = viewForParams(node.views, new URLSearchParams(search));
+  const prefix = node.views.ignoreParamPrefix;
+  return view && prefix ? { ...view, ignoreParamPrefix: prefix } : view;
+}
+
+function viewForParams(
+  views: CsmNavViews,
+  params: URLSearchParams,
+): CsmNavView | undefined {
+  const { param, labels, within } = views;
+  const value = params.get(param);
+  if (!value || !Object.hasOwn(labels, value)) return undefined;
+  const inner =
+    within && Object.hasOwn(within, value)
+      ? viewForParams(within[value], params)
+      : undefined;
+  return {
+    params: [[param, value], ...(inner?.params ?? [])],
+    label: inner?.label ?? labels[value],
+  };
 }
 
 /** The top-level section owning `pathname`, ignoring its tabs. */

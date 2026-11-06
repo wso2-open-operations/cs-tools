@@ -17,11 +17,12 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { IdleStateContext } from "@providers/IdleStateContext";
 import { useCaseActivityStream } from "@features/support/api/useCaseActivityStream";
 
-type Listener = () => void;
+type Listener = (event?: { data?: string }) => void;
 
 const { MockEventSource } = vi.hoisted(() => {
   class MockEventSource {
@@ -40,8 +41,8 @@ const { MockEventSource } = vi.hoisted(() => {
       this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
     }
 
-    emit(type: string): void {
-      (this.listeners.get(type) ?? []).forEach((fn) => fn());
+    emit(type: string, data?: string): void {
+      (this.listeners.get(type) ?? []).forEach((fn) => fn({ data }));
     }
   }
   return { MockEventSource };
@@ -54,6 +55,14 @@ vi.mock("@asgardeo/react", () => ({
   useAsgardeo: () => ({ getIdToken: mockGetIdToken }),
 }));
 
+const mockAuthFetch = vi.fn();
+vi.mock("@/hooks/useAuthApiClient", () => ({ useAuthApiClient: () => mockAuthFetch }));
+
+const mockRefreshCaseComments = vi.hoisted(() => vi.fn());
+vi.mock("@features/support/api/caseCommentsRefresh", () => ({
+  refreshCaseComments: mockRefreshCaseComments,
+}));
+
 vi.mock("@hooks/useLogger", () => ({
   useLogger: () => ({ debug: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() }),
 }));
@@ -64,31 +73,38 @@ const mockApiConfig = vi.hoisted(() => ({
 }));
 vi.mock("@config/apiConfig", () => ({ apiConfig: mockApiConfig }));
 
-const INVALIDATED_KEYS = [
-  ApiQueryKeys.CASE_COMMENTS,
-  ApiQueryKeys.CASE_DETAILS,
-  ApiQueryKeys.PROJECT_CASES,
-  ApiQueryKeys.CASES_STATS,
-  ApiQueryKeys.SUPPORT_STATS,
-  ApiQueryKeys.PROJECT_STATS,
-];
+const idleRef = { current: false };
 
-function setup(caseId: string | undefined) {
+function setup(caseId: string | undefined, idle = false) {
   const queryClient = new QueryClient();
   const spy = vi.spyOn(queryClient, "invalidateQueries");
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <IdleStateContext.Provider value={idleRef.current}>{children}</IdleStateContext.Provider>
+    </QueryClientProvider>
   );
+  idleRef.current = idle;
   const hook = renderHook(() => useCaseActivityStream(caseId), { wrapper });
   return { spy, ...hook };
 }
 
-const invalidatedPrefixes = (spy: ReturnType<typeof setup>["spy"]) =>
-  spy.mock.calls.map(([filters]) => (filters?.queryKey as unknown[])[0]);
+type Filters = { queryKey?: unknown[]; predicate?: (q: { queryKey: unknown[] }) => boolean };
+const callFilters = (spy: ReturnType<typeof setup>["spy"]) =>
+  spy.mock.calls.map(([filters]) => (filters ?? {}) as Filters);
+
+/** Whether any recorded invalidation would match a query with this key. */
+const invalidates = (spy: ReturnType<typeof setup>["spy"], queryKey: unknown[]): boolean =>
+  callFilters(spy).some((f) => {
+    if (f.queryKey && !f.queryKey.every((part, i) => queryKey[i] === part)) return false;
+    return f.predicate ? f.predicate({ queryKey }) : true;
+  });
+
+const caseEvent = (type: string) => JSON.stringify({ caseId: "case-1", type });
 
 describe("useCaseActivityStream", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRefreshCaseComments.mockResolvedValue(undefined);
     MockEventSource.instances = [];
     mockGetIdToken.mockResolvedValue("id-token");
     mockApiConfig.streamEnabled = true;
@@ -106,32 +122,229 @@ describe("useCaseActivityStream", () => {
     });
   });
 
-  it("invalidates comments, details, case lists and derived stats on case_updated", async () => {
+  it("refreshes only the newest comments on a comment_added event", async () => {
     const { spy } = setup("case-1");
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
-    MockEventSource.instances[0].emit("case_updated");
+    MockEventSource.instances[0].emit("case_updated", caseEvent("case.comment_added"));
 
-    expect(invalidatedPrefixes(spy)).toEqual(INVALIDATED_KEYS);
+    expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+    expect(mockRefreshCaseComments.mock.calls[0][2]).toBe("case-1");
+    expect(spy).not.toHaveBeenCalled();
   });
 
-  it("invalidates the same set on every connection open", async () => {
+  it.each([
+    ["status_changed", caseEvent("case.status_changed")],
+    ["an unknown type", caseEvent("case.something_new")],
+    ["unparseable data", "not json{"],
+    ["no data", undefined],
+    ["a non-object payload", "42"],
+  ])("refreshes details, case lists, stats and comments on %s", async (_label, data) => {
     const { spy } = setup("case-1");
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
-    MockEventSource.instances[0].emit("open");
+    MockEventSource.instances[0].emit("case_updated", data);
 
-    expect(invalidatedPrefixes(spy)).toEqual(INVALIDATED_KEYS);
+    expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+    expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+    expect(invalidates(spy, [ApiQueryKeys.PROJECT_CASES, "project-1", {}, 10])).toBe(true);
+    expect(invalidates(spy, [ApiQueryKeys.PROJECT_CASES, "page", "project-1", {}, 0, 10])).toBe(true);
+    expect(invalidates(spy, [ApiQueryKeys.CASES_STATS, "project-1"])).toBe(true);
+    expect(invalidates(spy, [ApiQueryKeys.SUPPORT_STATS, "project-1"])).toBe(true);
+    expect(invalidates(spy, [ApiQueryKeys.PROJECT_STATS, "project-1"])).toBe(true);
+  });
+
+  it("never invalidates the project filters query", async () => {
+    const { spy } = setup("case-1");
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    MockEventSource.instances[0].emit("case_updated", caseEvent("case.status_changed"));
+    MockEventSource.instances[0].emit("case_updated", "garbage");
+
+    expect(invalidates(spy, [ApiQueryKeys.PROJECT_CASES, "filters", "project-1"])).toBe(false);
+  });
+
+  it("only refetches details of the streamed case and leaves comments to the incremental refresh", async () => {
+    const { spy } = setup("case-1");
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    MockEventSource.instances[0].emit("case_updated", caseEvent("case.status_changed"));
+
+    expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "other-case"])).toBe(false);
+    expect(invalidates(spy, [ApiQueryKeys.CASE_COMMENTS, "project-1", "case-1", "infinite"])).toBe(false);
   });
 
   it("does not invalidate unrelated keys", async () => {
     const { spy } = setup("case-1");
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
-    MockEventSource.instances[0].emit("case_updated");
+    MockEventSource.instances[0].emit("case_updated", caseEvent("case.status_changed"));
 
-    expect(invalidatedPrefixes(spy)).not.toContain(ApiQueryKeys.PROJECTS);
-    expect(invalidatedPrefixes(spy)).not.toContain(ApiQueryKeys.DEPLOYMENTS);
+    expect(invalidates(spy, [ApiQueryKeys.PROJECTS])).toBe(false);
+    expect(invalidates(spy, [ApiQueryKeys.DEPLOYMENTS])).toBe(false);
+  });
+
+  describe("connection catch-up and backoff", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it("first open makes no comments refresh and no case details invalidation", async () => {
+      const { spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+      MockEventSource.instances[0].emit("open");
+
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("a routine reconnect refetches case details only, with no comments refresh", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      const { spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+      MockEventSource.instances[0].emit("error");
+
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+      expect(invalidates(spy, [ApiQueryKeys.PROJECT_CASES, "project-1"])).toBe(false);
+      expect(invalidates(spy, [ApiQueryKeys.CASES_STATS])).toBe(false);
+    });
+
+    it("rate-limits the routine reconnect details invalidation to once per 60 seconds", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.01);
+      const { spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+      MockEventSource.instances[0].emit("error");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+      MockEventSource.instances[1].emit("open");
+      expect(spy).not.toHaveBeenCalled();
+
+      MockEventSource.instances[1].emit("error");
+      await vi.advanceTimersByTimeAsync(61_000);
+      MockEventSource.instances[2].emit("open");
+      expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+    });
+
+    it("keeps backing off when the connection opens and is cut straight away", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+      setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+      MockEventSource.instances[0].emit("open");
+      MockEventSource.instances[0].emit("error");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+
+      MockEventSource.instances[1].emit("open");
+      MockEventSource.instances[1].emit("error");
+      // The second delay is drawn from [0, 6s), not [0, 3s) again.
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
+
+    it("resets the backoff once a connection has stayed open for 30 seconds", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+      setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+      MockEventSource.instances[0].emit("error");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+
+      MockEventSource.instances[1].emit("open");
+      await vi.advanceTimersByTimeAsync(30_000);
+      MockEventSource.instances[1].emit("error");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
+
+    it("resets the backoff after a received event", async () => {
+      vi.spyOn(Math, "random").mockReturnValue(0.99);
+      setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("error");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(2);
+
+      MockEventSource.instances[1].emit("open");
+      MockEventSource.instances[1].emit("case_updated", caseEvent("case.comment_added"));
+      MockEventSource.instances[1].emit("error");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(MockEventSource.instances).toHaveLength(3);
+    });
+
+    it("resume after idle catches up once: comments refresh plus case details", async () => {
+      const { rerender, spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+
+      idleRef.current = true;
+      rerender();
+      await vi.advanceTimersByTimeAsync(61_000);
+      idleRef.current = false;
+      rerender();
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(mockRefreshCaseComments.mock.calls[0][2]).toBe("case-1");
+      expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+
+      // The flag is consumed: a following routine reconnect does not refresh comments.
+      MockEventSource.instances[1].emit("error");
+      await vi.advanceTimersByTimeAsync(61_000);
+      MockEventSource.instances[2].emit("open");
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+    });
+
+    it("idle resume catch-up is not swallowed by the rate limit", async () => {
+      const { rerender, spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("open");
+
+      // Resume well within 60 s of the first open.
+      idleRef.current = true;
+      rerender();
+      idleRef.current = false;
+      rerender();
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).toHaveBeenCalledTimes(1);
+      expect(invalidates(spy, [ApiQueryKeys.CASE_DETAILS, "project-1", "case-1"])).toBe(true);
+    });
+
+    it("starting idle before the stream ever opened does not trigger a resume catch-up", async () => {
+      const { rerender, spy } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+      idleRef.current = true;
+      rerender();
+      idleRef.current = false;
+      rerender();
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].emit("open");
+
+      expect(mockRefreshCaseComments).not.toHaveBeenCalled();
+      expect(spy).not.toHaveBeenCalled();
+    });
   });
 
   it("does not connect when streaming is disabled or the URL is unset", async () => {
@@ -155,5 +368,44 @@ describe("useCaseActivityStream", () => {
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     unmount();
     expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+  });
+
+  it("does not connect while idle", async () => {
+    setup("case-1", true);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(MockEventSource.instances).toHaveLength(0);
+    expect(mockGetIdToken).not.toHaveBeenCalled();
+  });
+
+  it("closes the open stream when idle starts and reconnects fresh when it clears", async () => {
+    const { rerender } = setup("case-1");
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const first = MockEventSource.instances[0];
+
+    idleRef.current = true;
+    rerender();
+    expect(first.close).toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    idleRef.current = false;
+    rerender();
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+  });
+
+  it("cancels a pending reconnect when idle starts", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { rerender } = setup("case-1");
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+      MockEventSource.instances[0].emit("error");
+
+      idleRef.current = true;
+      rerender();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(MockEventSource.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

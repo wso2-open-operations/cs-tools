@@ -114,10 +114,28 @@ describe("buildProblemSearchFilters", () => {
     });
   });
 
-  it("includes states when set", () => {
-    expect(
-      buildProblemSearchFilters({ ...DEFAULT_PROBLEM_FILTERS, states: ["NEW", "ASSESS"] }, ""),
-    ).toEqual({ states: ["NEW", "ASSESS"] });
+  it("sends selected states as a state/in generic filter entry, never a top-level states field", () => {
+    const out = buildProblemSearchFilters(
+      { ...DEFAULT_PROBLEM_FILTERS, states: ["NEW", "ASSESS"] },
+      "",
+    );
+    expect(out).toEqual({ filters: [{ field: "state", op: "in", values: ["NEW", "ASSESS"] }] });
+    expect(out).not.toHaveProperty("states");
+  });
+
+  it("merges state and SRE team into one filters array alongside searchQuery", () => {
+    const out = buildProblemSearchFilters(
+      { search: "", states: ["NEW", "ASSESS"], sreTeamIds: ["team-apollo"] },
+      "disk",
+    );
+    expect(out).toEqual({
+      searchQuery: "disk",
+      filters: [
+        { field: "state", op: "in", values: ["NEW", "ASSESS"] },
+        { field: "assignmentGroupId", op: "in", values: ["team-apollo"] },
+      ],
+    });
+    expect(out).not.toHaveProperty("states");
   });
 
   it("sends selected SRE teams as an assignmentGroupId/in generic filter entry", () => {

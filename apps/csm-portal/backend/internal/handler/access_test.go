@@ -33,20 +33,21 @@ import (
 // never depend on real role names.
 func testAccessConfig() AccessConfig {
 	return AccessConfig{
-		Viewer:               []string{"test-viewer"},
-		Escalator:            []string{"test-escalator"},
-		AttachmentDownloader: []string{"test-attachment-downloader"},
-		UsageMetricsViewer:   []string{"test-usage-metrics-viewer"},
-		CsEngineer:           []string{"test-cs-engineer"},
-		Admin:                []string{"test-admin"},
-		TimecardApprover:     []string{"test-timecard-approver"},
-		DashboardDesigner:    []string{"test-dashboard-designer"},
-		SalesSolutions:       []string{"test-sales-solutions"},
-		WorknoteCreator:      []string{"test-worknote-creator"},
-		AnnouncementCreator:  []string{"test-announcement-creator"},
-		CommentUpdater:       []string{"test-comment-updater"},
-		OnboardingLead:       []string{"test-onboarding-lead"},
-		SecurityTeam:         []string{"test-security-team"},
+		Viewer:                []string{"test-viewer"},
+		Escalator:             []string{"test-escalator"},
+		AttachmentDownloader:  []string{"test-attachment-downloader"},
+		UsageMetricsViewer:    []string{"test-usage-metrics-viewer"},
+		CsEngineer:            []string{"test-cs-engineer"},
+		Admin:                 []string{"test-admin"},
+		TimecardApprover:      []string{"test-timecard-approver"},
+		DashboardDesigner:     []string{"test-dashboard-designer"},
+		SalesSolutions:        []string{"test-sales-solutions"},
+		WorknoteCreator:       []string{"test-worknote-creator"},
+		AnnouncementCreator:   []string{"test-announcement-creator"},
+		CommentUpdater:        []string{"test-comment-updater"},
+		OnboardingLead:        []string{"test-onboarding-lead"},
+		ProductCatalogManager: []string{"test-product-catalog-manager"},
+		SecurityTeam:          []string{"test-security-team"},
 	}
 }
 
@@ -71,14 +72,14 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 	// PermAdmin and PermApproveTimeCard are deliberately excluded and tested
 	// separately below -- approving a time card is a dedicated responsibility
 	// cs_engineer does not share, the same way PermAdmin isn't.
-	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth}
+	csEngineerPerms := []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermViewSecurityCenter, PermUsePlg, PermViewCustomerHealth}
 	all := append(append([]Permission{}, csEngineerPerms...), PermAdmin, PermApproveTimeCard, PermManagePlaybooks, PermCreateAnnouncement)
 	tests := []struct {
 		name  string
 		roles []string
 		allow []Permission
 	}{
-		{"viewer reads, plus the Customer Health dashboard", []string{"test-viewer"}, []Permission{PermView, PermViewCustomerHealth}},
+		{"viewer reads, plus the Customer Health dashboard", []string{"test-viewer"}, []Permission{PermView, PermViewUpdates, PermViewCustomerHealth}},
 		{"escalator can view and escalate", []string{"test-escalator"}, []Permission{PermView, PermEscalate}},
 		{"downloader can view and download", []string{"test-attachment-downloader"}, []Permission{PermView, PermDownloadAttachment}},
 		{"CS engineer can do every route permission except admin-only and approve-time-card ones", []string{"test-cs-engineer"}, csEngineerPerms},
@@ -86,11 +87,11 @@ func TestAccessGuard_PermissionMatrix(t *testing.T) {
 		{"announcement creator alone holds only PermCreateAnnouncement -- not even view", []string{"test-announcement-creator"}, []Permission{PermCreateAnnouncement}},
 		{"CS engineer with announcement creator adds PermCreateAnnouncement and nothing else", []string{"test-cs-engineer", "test-announcement-creator"}, append(append([]Permission{}, csEngineerPerms...), PermCreateAnnouncement)},
 		{"usage metrics viewer can view only", []string{"test-usage-metrics-viewer"}, []Permission{PermView}},
-		{"timecard approver can view, use time cards and updates, and approve", []string{"test-timecard-approver"}, []Permission{PermView, PermTimeCardsAndUpdates, PermApproveTimeCard}},
+		{"timecard approver can view, use time cards and updates, and approve", []string{"test-timecard-approver"}, []Permission{PermView, PermTimeCardsAndUpdates, PermViewUpdates, PermApproveTimeCard}},
 		{"dashboard designer can view only", []string{"test-dashboard-designer"}, []Permission{PermView}},
 		{"sales solutions role alone grants none of these -- it holds PermViewSharedEntity/PermViewerAccess instead, tested separately", []string{"test-sales-solutions"}, nil},
 		{"security team can view, view operations, and view security center -- but no write/escalate/approve permission of any kind", []string{"test-security-team"}, []Permission{PermView, PermViewOperations, PermViewSecurityCenter}},
-		{"roles combine", []string{"test-viewer", "test-escalator", "test-attachment-downloader"}, []Permission{PermView, PermEscalate, PermDownloadAttachment, PermViewCustomerHealth}},
+		{"roles combine", []string{"test-viewer", "test-escalator", "test-attachment-downloader"}, []Permission{PermView, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermViewCustomerHealth}},
 		{"unrelated roles grant nothing", []string{"wso2-everyone", "admin", "agent", "customer"}, nil},
 		{"no roles", nil, nil},
 		{"role names are case sensitive", []string{"TEST-ADMIN"}, nil},
@@ -595,7 +596,7 @@ func TestAccessGuard_SecurityReportCasesAlsoAllowsViewer(t *testing.T) {
 
 func TestAccessGuard_UnconfiguredRolesAreHeldByNobody(t *testing.T) {
 	g := NewAccessGuard(AccessConfig{})
-	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject} {
+	for _, perm := range []Permission{PermView, PermViewOperations, PermTimeCardsAndUpdates, PermViewUpdates, PermEscalate, PermDownloadAttachment, PermWrite, PermAdmin, PermViewSecurityCenter, PermViewSecurityReportCases, PermApproveTimeCard, PermUsePlg, PermManagePlaybooks, PermCreateWorkNote, PermCreateAnnouncement, PermUpdateDeleteComment, PermManageOnboarding, PermUpdateProject, PermManageProductCatalog} {
 		if status, _ := serveWithRoles(g, perm, []string{"test-admin", "test-viewer", ""}); status != http.StatusForbidden {
 			t.Errorf("permission %d with no roles configured: status = %d, want 403", perm, status)
 		}
@@ -625,6 +626,27 @@ func TestAccessGuard_TimeCardsAndUpdatesAreForCsEngineersAdminsAndApprovers(t *t
 	}
 	if status, _ := serveWithRoles(g, PermTimeCardsAndUpdates, nil); status != http.StatusForbidden {
 		t.Errorf("no roles: status = %d, want 403", status)
+	}
+}
+
+func TestAccessGuard_ViewUpdatesIncludesViewerButNotTimeCards(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for _, role := range []string{"test-viewer", "test-cs-engineer", "test-admin", "test-timecard-approver"} {
+		if status, _ := serveWithRoles(g, PermViewUpdates, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s on PermViewUpdates: status = %d, want 204", role, status)
+		}
+	}
+	for _, role := range []string{"test-cs-engineer", "test-admin", "test-timecard-approver"} {
+		if status, _ := serveWithRoles(g, PermTimeCardsAndUpdates, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s on PermTimeCardsAndUpdates: status = %d, want 204", role, status)
+		}
+	}
+	// Viewer reads updates but must not gain time cards.
+	if status, _ := serveWithRoles(g, PermTimeCardsAndUpdates, []string{"test-viewer"}); status != http.StatusForbidden {
+		t.Errorf("viewer on PermTimeCardsAndUpdates: status = %d, want 403", status)
+	}
+	if status, _ := serveWithRoles(g, PermViewUpdates, nil); status != http.StatusForbidden {
+		t.Errorf("no roles on PermViewUpdates: status = %d, want 403", status)
 	}
 }
 
@@ -710,7 +732,7 @@ func rolesOutsideCustomerHealthAudience() []string {
 
 // TestAccessGuard_CustomerHealthDoesNotWidenTheRestOfViewerAccess guards the
 // other direction: giving cs_engineer/admin the Customer Health dashboard must
-// not hand them the rest of the viewer-audience routes (User Scan, the Time
+// not hand them the rest of the viewer-audience routes (the Time
 // report, the account escalation list, Drive files), which stay Viewer-only.
 func TestAccessGuard_CustomerHealthDoesNotWidenTheRestOfViewerAccess(t *testing.T) {
 	g := NewAccessGuard(testAccessConfig())
@@ -859,6 +881,37 @@ func TestAccessGuard_OnboardingPermissions(t *testing.T) {
 	}
 	if got := g.RolesFor([]string{"test-onboarding-lead"}); len(got) != 1 || got[0] != "onboarding_lead" {
 		t.Errorf("RolesFor = %v, want [onboarding_lead]", got)
+	}
+}
+
+// TestAccessGuard_ProductCatalogPermissions pins who holds
+// PermManageProductCatalog (product_catalog_manager and admin only -- never
+// cs_engineer), and that product_catalog_manager grants neither read nor
+// write access of its own.
+func TestAccessGuard_ProductCatalogPermissions(t *testing.T) {
+	g := NewAccessGuard(testAccessConfig())
+	for _, role := range []string{"test-product-catalog-manager", "test-admin"} {
+		if status, _ := serveWithRoles(g, PermManageProductCatalog, []string{role}); status != http.StatusNoContent {
+			t.Errorf("%s PermManageProductCatalog: status = %d, want 204", role, status)
+		}
+	}
+	for _, role := range []string{
+		"test-cs-engineer", "test-viewer", "test-escalator", "test-attachment-downloader",
+		"test-usage-metrics-viewer", "test-timecard-approver", "test-dashboard-designer",
+		"test-comment-updater", "test-announcement-creator", "test-security-team",
+		"test-onboarding-lead", "test-worknote-creator", "test-sales-solutions",
+	} {
+		if status, _ := serveWithRoles(g, PermManageProductCatalog, []string{role}); status != http.StatusForbidden {
+			t.Errorf("%s must not hold PermManageProductCatalog: status = %d, want 403", role, status)
+		}
+	}
+	for _, perm := range []Permission{PermView, PermViewSharedEntity, PermWrite, PermAdmin, PermManageOnboarding} {
+		if status, _ := serveWithRoles(g, perm, []string{"test-product-catalog-manager"}); status != http.StatusForbidden {
+			t.Errorf("product_catalog_manager must not hold permission %d: status = %d, want 403", perm, status)
+		}
+	}
+	if got := g.RolesFor([]string{"test-product-catalog-manager"}); len(got) != 1 || got[0] != "product_catalog_manager" {
+		t.Errorf("RolesFor = %v, want [product_catalog_manager]", got)
 	}
 }
 

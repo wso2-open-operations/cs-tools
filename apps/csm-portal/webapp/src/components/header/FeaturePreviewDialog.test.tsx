@@ -21,7 +21,7 @@ import FeaturePreviewDialog from "@components/header/FeaturePreviewDialog";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
 
 // "admin" + "viewer", not "admin" alone: isSplAudience (which gates Customer
-// Health/User Scan) is keyed on actually holding the viewer role, not on full
+// Health) is keyed on actually holding the viewer role, not on full
 // access -- an admin-only role set would already show those two as
 // capability-hidden candidates regardless of any config override, making the
 // "exactly these ids" assertions below noisy. Holding viewer alongside admin

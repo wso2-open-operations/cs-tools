@@ -18,16 +18,20 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
 // knowledgeBaseColumns matches the real "knowledge_base" table -- title/
 // active (not name/is_active), no product_id column at all (a knowledge
 // base is no longer tied to a specific product in the real schema).
-const knowledgeBaseColumns = "id, title, active, created_on, updated_on"
+const knowledgeBaseColumns = "id, title, COALESCE(active, false) AS active, is_public, created_on, updated_on"
 
 // KnowledgeBaseRepository defines the persistence operations for the real
 // knowledge_base table. NOTE: the request structs below (Create/Update...)
@@ -41,7 +45,7 @@ type KnowledgeBaseRepository interface {
 	// Includes deactivated ones -- the Admin screen needs to see and
 	// reactivate them; article-creation pickers filter active themselves
 	// on the frontend/consumer side.
-	ListKnowledgeBases(ctx context.Context) ([]domain.KnowledgeBase, error)
+	ListKnowledgeBases(ctx context.Context, publicOnly bool) ([]domain.KnowledgeBase, error)
 
 	// CreateKnowledgeBase creates a new, active knowledge base.
 	CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
@@ -66,8 +70,13 @@ func NewKnowledgeBaseRepository(db *pgxpool.Pool) KnowledgeBaseRepository {
 }
 
 // ListKnowledgeBases implements KnowledgeBaseRepository.
-func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.KnowledgeBase, error) {
-	rows, err := r.db.Query(ctx, "SELECT "+knowledgeBaseColumns+" FROM knowledge_base ORDER BY title")
+func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context, publicOnly bool) ([]domain.KnowledgeBase, error) {
+	query := "SELECT " + knowledgeBaseColumns + " FROM knowledge_base"
+	if publicOnly {
+		query += " WHERE active = true AND is_public = true"
+	}
+	query += " ORDER BY title"
+	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list knowledge bases: %w", err)
 	}
@@ -76,7 +85,7 @@ func (r *knowledgeBaseRepo) ListKnowledgeBases(ctx context.Context) ([]domain.Kn
 	kbs := make([]domain.KnowledgeBase, 0)
 	for rows.Next() {
 		var kb domain.KnowledgeBase
-		if err := rows.Scan(&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
+		if err := rows.Scan(&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn); err != nil {
 			return nil, fmt.Errorf("scan knowledge base: %w", err)
 		}
 		kbs = append(kbs, kb)
@@ -101,7 +110,7 @@ func (r *knowledgeBaseRepo) CreateKnowledgeBase(ctx context.Context, req domain.
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, req.Name).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
 		return domain.KnowledgeBase{}, fmt.Errorf("create knowledge base: %w", err)
@@ -118,10 +127,10 @@ func (r *knowledgeBaseRepo) UpdateKnowledgeBaseName(ctx context.Context, id stri
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.Name).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
-		return domain.KnowledgeBase{}, fmt.Errorf("update knowledge base name: %w", err)
+		return domain.KnowledgeBase{}, mapKnowledgeBaseByIDError("update knowledge base name", err)
 	}
 	return kb, nil
 }
@@ -135,10 +144,24 @@ func (r *knowledgeBaseRepo) SetKnowledgeBaseActive(ctx context.Context, id strin
 
 	var kb domain.KnowledgeBase
 	err := r.db.QueryRow(ctx, query, id, req.IsActive).Scan(
-		&kb.ID, &kb.Title, &kb.Active, &kb.CreatedOn, &kb.UpdatedOn,
+		&kb.ID, &kb.Title, &kb.Active, &kb.IsPublic, &kb.CreatedOn, &kb.UpdatedOn,
 	)
 	if err != nil {
-		return domain.KnowledgeBase{}, fmt.Errorf("set knowledge base active: %w", err)
+		return domain.KnowledgeBase{}, mapKnowledgeBaseByIDError("set knowledge base active", err)
 	}
 	return kb, nil
+}
+
+// mapKnowledgeBaseByIDError maps the driver errors a by-id UPDATE ... RETURNING
+// raises for a caller-supplied id: no row is a NotFoundError (404), Postgres
+// 22P02 (the id is not a UUID) is a ValidationError (400). Anything else is
+// wrapped with op.
+func mapKnowledgeBaseByIDError(op string, err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &apierror.NotFoundError{Msg: "knowledge base not found"}
+	}
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return &apierror.ValidationError{Msg: "id is not a valid UUID"}
+	}
+	return fmt.Errorf("%s: %w", op, err)
 }

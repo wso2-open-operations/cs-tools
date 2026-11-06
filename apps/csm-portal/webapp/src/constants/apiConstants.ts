@@ -133,6 +133,12 @@ export const ApiQueryKeys = {
   CSM_DASHBOARD_DETAIL: "csm-dashboard-detail",
   CSM_DASHBOARD_FILTER_PRESETS: "csm-dashboard-filter-presets",
   CSM_DASHBOARD_SECTIONS: "csm-dashboard-sections",
+  CSM_CUSTOM_DASHBOARD_LIST: "csm-custom-dashboard-list",
+  CSM_CUSTOM_DASHBOARD_DETAIL: "csm-custom-dashboard-detail",
+  CSM_CUSTOM_DASHBOARD_SHARES: "csm-custom-dashboard-shares",
+  CSM_CUSTOM_DASHBOARD_TEAM_SHARES: "csm-custom-dashboard-team-shares",
+  CSM_SHARED_DASHBOARD_LIST: "csm-shared-dashboard-list",
+  CSM_SHARED_DASHBOARD_DETAIL: "csm-shared-dashboard-detail",
   CSM_TEAMS: "csm-teams",
   CSM_CASE_DETAIL: "csm-case-detail",
   CSM_CASE_COMMENTS: "csm-case-comments",
@@ -167,6 +173,13 @@ export const ApiQueryKeys = {
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
+  // Product catalogue (Products section). Each hook's key is
+  // [PRODUCT_CATALOG, <one of the keys below>, ...], so a saved change can refresh
+  // them all by the shared first segment.
+  PRODUCT_CATALOG: "product-catalog",
+  PRODUCT_CATALOG_PRODUCTS: "product-catalog-products",
+  PRODUCT_CATALOG_VERSIONS: "product-catalog-versions",
+  PRODUCT_CATALOG_RELEASE_LINES: "product-catalog-release-lines",
 } as const;
 
 // Constants for API-related mutation keys.

@@ -120,6 +120,17 @@ describe("WallboardDashboard", () => {
     expect(screen.getByText("Last updated: —")).toBeInTheDocument();
   });
 
+  it("shows the 'Customer Success Monitor' page title as the page's heading", () => {
+    useDashboardMock.mockReturnValue({
+      data: dashboardResult([]),
+      isLoading: false,
+      isError: false,
+      dataUpdatedAt: 0,
+    });
+    render(<WallboardDashboard dashboardId="cs-overview" />);
+    expect(screen.getByRole("heading", { level: 1, name: "Customer Success Monitor" })).toBeInTheDocument();
+  });
+
   // The actual regression this covers: React Query's default structural
   // sharing keeps the same `data` reference across a refetch that returns
   // identical values, so tracking "did `data`'s reference change" would

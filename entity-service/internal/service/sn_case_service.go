@@ -1101,22 +1101,31 @@ func (s *snCaseService) CreateCase(ctx context.Context, req domain.CreateCaseReq
 			State:      stateLabel,
 		},
 	}
-	s.publishCaseCreated(ctx, req, resp.Case.ID)
-	// SLA-clock registration is scoped to req.Type == "case" only (plain
-	// support cases) -- service_request/engagement/security_report_analysis/
-	// announcement have no sla_policy naming convention this engine's
-	// resolver understands (see sla_policy_resolver.go's own doc comment on
-	// scope), and are out of scope for this change. Runs after
-	// publishCaseCreated, sharing its own s.slaEngine==nil guard implicitly
-	// (RegisterCaseClocks is itself a no-op-safe best-effort call), and
-	// deliberately does its own GetCaseByID fetch rather than reusing
-	// publishCaseCreated's internal one (which isn't exposed to this call
-	// site) -- same "independent re-fetch" pattern every other best-effort
-	// hook in this file already uses (applyResponseSLAOnComment,
-	// applyCustomerReplyStateTransition).
-	if req.Type == "case" {
+	// SLA-clock registration runs BEFORE publishCaseCreated, not after --
+	// this order is load-bearing. csm-notification-service's own
+	// RegisterClocks handler reacts to the published case.created event by
+	// reading this clock's state straight back from entity-service
+	// (GetClockState), with only a short, bounded retry for "not found yet"
+	// -- if the event goes out first, that read can race ahead of this
+	// registration actually committing, especially under load, and the
+	// notification-service clock either never gets scheduled or has to
+	// wait for Reconcile on that process's next restart. Registering first
+	// guarantees the row already exists by the time any consumer of this
+	// event asks about it. Scoped to slaClockEligibleCreateTypes (see that
+	// var's own doc comment, sla_engine_service.go, for which types are
+	// covered and why) -- engagement/announcement have no confirmed,
+	// non-duplicated sla_policy coverage and are out of scope for this
+	// change. Shares s.slaEngine==nil
+	// guard implicitly (RegisterCaseClocks is itself a no-op-safe
+	// best-effort call), and deliberately does its own GetCaseByID fetch
+	// rather than reusing publishCaseCreated's internal one (which isn't
+	// exposed to this call site) -- same "independent re-fetch" pattern
+	// every other best-effort hook in this file already uses
+	// (applyResponseSLAOnComment, applyCustomerReplyStateTransition).
+	if slaClockEligibleCreateTypes[req.Type] {
 		s.registerCaseSLAClocks(ctx, resp.Case.ID)
 	}
+	s.publishCaseCreated(ctx, req, resp.Case.ID)
 	return resp, nil
 }
 
@@ -1713,24 +1722,40 @@ func (s *snCaseService) reviseCaseSLAClocks(ctx context.Context, caseID string, 
 // role. Skips entirely, rather than guessing, when s.customerRoles is empty
 // (unconfigured — see config.Config.CustomerRoles' own doc comment).
 func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, req domain.CreateCaseCommentRequest, commentID string) {
-	if req.Type != domain.CommentTypeComment || len(s.customerRoles) == 0 {
+	if req.Type != domain.CommentTypeComment {
+		return
+	}
+	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, req.CaseID, "customer reply", func(ctx context.Context) *domain.UserReference {
+		return s.resolveCommentAuthor(ctx, req.CaseID, commentID)
+	})
+}
+
+// moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
+// comment and a customer's attachment: when the case is Awaiting Info or
+// Solution Proposed and the activity's author holds one of s.customerRoles,
+// the case moves to Waiting on WSO2. activity ("customer reply" or "customer attachment") is
+// only used to label log lines. resolveAuthor is called only after the cheap
+// state check passes, so a case in any other state costs one GetCaseByID.
+// Skips entirely, rather than guessing, when s.customerRoles is empty.
+func (s *snCaseService) moveToWaitingOnWSO2OnCustomerActivity(ctx context.Context, caseID, activity string, resolveAuthor func(context.Context) *domain.UserReference) {
+	if len(s.customerRoles) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, applyCustomerReplyTimeout)
 	defer cancel()
 
-	cv, err := s.GetCaseByID(ctx, req.CaseID)
+	cv, err := s.GetCaseByID(ctx, caseID)
 	if err != nil {
-		slog.ErrorContext(ctx, "sn create comment: customer reply state transition not evaluated, get case failed", "caseId", req.CaseID)
+		slog.ErrorContext(ctx, "sn "+activity+" state transition not evaluated, get case failed", "caseId", caseID)
 		return
 	}
 	if derefState(cv.State) != domain.CaseStateAwaitingInfo && derefState(cv.State) != domain.CaseStateSolutionProposed {
 		return
 	}
 
-	author := s.resolveCommentAuthor(ctx, req.CaseID, commentID)
+	author := resolveAuthor(ctx)
 	if author == nil || author.Email == "" {
-		slog.InfoContext(ctx, "sn create comment: customer reply state transition not evaluated, could not resolve comment author's email", "caseId", req.CaseID)
+		slog.InfoContext(ctx, "sn "+activity+" state transition not evaluated, could not resolve author's email", "caseId", caseID)
 		return
 	}
 
@@ -1739,7 +1764,7 @@ func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, r
 		Filters:    domain.SearchUsersFilters{Emails: []string{author.Email}},
 	})
 	if err != nil {
-		slog.ErrorContext(ctx, "sn create comment: customer reply state transition not evaluated, user role lookup failed", "caseId", req.CaseID)
+		slog.ErrorContext(ctx, "sn "+activity+" state transition not evaluated, user role lookup failed", "caseId", caseID)
 		return
 	}
 
@@ -1755,9 +1780,32 @@ func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, r
 	}
 
 	waitingOnWSO2 := domain.CaseStateWaitingOnWSO2
-	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: req.CaseID, State: &waitingOnWSO2}); err != nil {
-		slog.ErrorContext(ctx, "sn create comment: move case to waiting on wso2 after customer reply failed", "caseId", req.CaseID)
+	if _, err := s.UpdateCase(ctx, domain.UpdateCaseRequest{ID: caseID, State: &waitingOnWSO2}); err != nil {
+		slog.ErrorContext(ctx, "sn move case to waiting on wso2 after "+activity+" failed", "caseId", caseID)
 	}
+}
+
+// resolveAttachmentAuthor looks up attachmentID's resolved uploader on the
+// case via SearchCaseAttachments, the attachment twin of resolveCommentAuthor
+// (the create response carries only a raw, unresolved CreatedBy string, and
+// the same bounded-window reasoning applies). Returns nil when the
+// attachment isn't found in the first resolveCommentAuthorSearchLimit results
+// or the search fails.
+func (s *snCaseService) resolveAttachmentAuthor(ctx context.Context, caseID, attachmentID string) *domain.UserReference {
+	resp, err := s.SearchCaseAttachments(ctx, domain.SearchAttachmentsRequest{
+		ReferenceID:   caseID,
+		ReferenceType: domain.ReferenceTypeCase,
+		Pagination:    domain.Pagination{Limit: resolveCommentAuthorSearchLimit},
+	})
+	if err != nil {
+		return nil
+	}
+	for _, a := range resp.Attachments {
+		if a.ID == attachmentID && a.CreatedBy != nil {
+			return a.CreatedBy
+		}
+	}
+	return nil
 }
 
 // publishStatusChanged best-effort publishes a case.status_changed event
@@ -3139,6 +3187,24 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "product and publicTicket are only allowed when addPublicComment is also provided"}
 	}
 
+	// A service request's severity is internal and exists in Postgres only: the
+	// backing data source has no field for it, so on this data source the
+	// request is refused (like markFixIssued above) rather than sent on as a
+	// case severity or accepted and dropped. Only a severity sent on its own
+	// needs the check; with a type it is the companion of a transfer, which
+	// validateCaseTypeTransfer judges.
+	if req.Severity != nil && req.Type == nil {
+		// A failed lookup fails the request: the PATCH below would send the
+		// severity on as a case severity for a record whose type is unknown.
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity of a service request is only supported for the Postgres data source"}
+		}
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snUpdateCasePayload{}
@@ -3647,9 +3713,22 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		resp.Case.WorstCaseFixEta = snResp.Case.WorstCaseFixEta
 	}
 
-	if publishStatusChange && snResp.Case.State != nil {
-		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
-	}
+	// applyCaseStateSLAEffects runs BEFORE publishStatusChanged, not after --
+	// this order is load-bearing. csm-notification-service's own
+	// ApplyStateEffects handler reacts to the published case.status_changed
+	// event by reading this clock's pause status straight back from
+	// entity-service (GetClockState) to decide whether to pause/resume its
+	// own Redis-held copy -- if the event goes out first, that read can see
+	// the clock's PRE-transition pause state instead of the one this PATCH
+	// is in the middle of applying, since GetClockState's own retry only
+	// covers "not found yet," not "found but stale." A resume read as a
+	// pause (or vice versa) there either suppresses a real breach alert
+	// (processDueMember returns early for a clock Redis still thinks is
+	// paused) or fires tiers early during what entity-service has already
+	// recorded as a genuine pause. Applying the SLA effects first guarantees
+	// the row already reflects the new state by the time any consumer of
+	// this event asks about it.
+	//
 	// Deliberately independent of publishStatusChange (which is also gated
 	// on s.publisher != nil) — see SLAEngineService.ApplyCaseStateEffects'
 	// own doc comment for why pause/resume/completion must not depend on
@@ -3669,15 +3748,40 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	if s.slaEngine != nil && req.State != nil && resp.Case.State != nil {
 		s.applyCaseStateSLAEffects(ctx, req.ID, derefState(resp.Case.State))
 	}
+	if publishStatusChange && snResp.Case.State != nil {
+		s.publishStatusChanged(ctx, req.ID, snResp.Case.State.Label, caseBeforeUpdate)
+	}
 	// Deliberately independent of s.publisher, same reasoning as the state
-	// effects call just above. WorkaroundProvided is the one genuine
-	// "workaround was provided" signal anywhere in the domain model --
-	// applyCaseStateSLAEffects only ever pauses/resumes this clock, never
-	// completes it. false (a recall) is deliberately not handled the
-	// opposite way -- see SLAEngineService.CompleteWorkaroundClock's own
-	// doc comment.
-	if s.slaEngine != nil && req.WorkaroundProvided != nil && *req.WorkaroundProvided {
-		s.slaEngine.CompleteWorkaroundClock(ctx, req.ID)
+	// effects call just above. Re-checks every active clock's own
+	// pause/resume/stop/cancel condition text against the case's current
+	// (dual-write) Postgres facts whenever this PATCH touches a field those
+	// conditions can reference -- WorkaroundProvided and the three fix-ETA
+	// values. See SLAEngineService.ApplyCaseFieldEffects' own doc comment
+	// for why this replaced two hardcoded CompleteClock hooks (one of them
+	// keyed on GetCaseEtaSharedOn/eta_shared_on, which is the wrong signal
+	// for this -- see repository.CaseFacts.FixEtaShared's own doc comment).
+	//
+	// Both overrides are REQUIRED on this data source, unlike caseService's
+	// own identical call site -- a CodeRabbit-caught gap: this PATCH just
+	// wrote to the previous system, not to this service's own Postgres
+	// mirror, which a separate, continuously-running sync job catches up on
+	// its own schedule rather than synchronously within this request. A
+	// fresh repository.CaseFacts read right here can still see the OLD
+	// value, which would silently decide the wrong effect (a newly-provided
+	// workaround not pausing its clock, a newly-shared fix ETA not stopping
+	// it, a recall leaving a clock paused). fixEtaSharedOverride is TRUE
+	// whenever any of the three fields is set in this very request -- that
+	// alone makes FixEtaShared true regardless of the mirror's current
+	// value or either of the other two fields' own state -- and left nil
+	// (fall back to the fresh read, already correct for a field this PATCH
+	// didn't touch) otherwise.
+	if s.slaEngine != nil && (req.WorkaroundProvided != nil || req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil) {
+		var fixEtaSharedOverride *bool
+		if req.BestCaseFixEta != nil || req.MostLikelyFixEta != nil || req.WorstCaseFixEta != nil {
+			fixEtaShared := true
+			fixEtaSharedOverride = &fixEtaShared
+		}
+		s.slaEngine.ApplyCaseFieldEffects(ctx, req.ID, req.WorkaroundProvided, fixEtaSharedOverride)
 	}
 	// Deliberately independent of s.slaEngine above and of s.publisher's
 	// usual EVENT_PUBLISHING_ENABLED gate (publishWorkaroundProvidedEvent
@@ -3688,31 +3792,6 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// published this before.
 	if req.WorkaroundProvided != nil && *req.WorkaroundProvided {
 		publishWorkaroundProvidedEvent(ctx, s.publisher, req.ID)
-	}
-	// Independent of the WorkaroundProvided check above, same "no Event Hub
-	// dependency" reasoning -- a caller can set workaroundProvided and
-	// addPublicComment together (CompleteWorkaroundClock would then simply
-	// be redundant for that one clock, see CompleteFixEtaSharedClocks' own
-	// doc comment).
-	//
-	// Checked via GetCaseEtaSharedOn, not req.AddPublicComment directly:
-	// eta_shared_on (work_item.eta_shared_on) is the actual record of a
-	// shared fix ETA, and it has no guaranteed connection to this specific
-	// PATCH -- it has no ServiceNow equivalent field at all (see
-	// domain.CaseView.EtaSharedOn's own doc comment), so nothing about
-	// *when* ServiceNow's own "Share Fix ETA" action actually lands in
-	// Postgres is guaranteed to line up with this request's own
-	// AddPublicComment flag. Checking the persisted fact on every UpdateCase
-	// call instead (cheap, idempotent, same CompleteClock safety net as
-	// every other completion path) means a case's clocks still get
-	// completed the next time anything about it changes, even if this
-	// specific PATCH wasn't the one that shared the ETA.
-	if s.slaEngine != nil {
-		if etaSharedOn, err := s.GetCaseEtaSharedOn(ctx, req.ID); err != nil {
-			slog.WarnContext(ctx, "sn update case: eta shared on lookup failed", "caseId", req.ID, "error", err)
-		} else if etaSharedOn != nil {
-			s.slaEngine.CompleteFixEtaSharedClocks(ctx, req.ID)
-		}
 	}
 	if publishCaseAssign {
 		assigneeName := assigneeEmail
@@ -3738,16 +3817,19 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 	// policy the case was never actually moved to, with identical old/new
 	// values.
 	severityGenuinelyChanged := severityChanged && resp.Case.Severity != nil && derefSeverity(resp.Case.Severity) != derefSeverity(caseBeforeSeverity.Severity)
-	if severityGenuinelyChanged && s.publisher != nil {
-		s.publishSeverityChanged(ctx, req.ID, string(derefSeverity(caseBeforeSeverity.Severity)), string(derefSeverity(resp.Case.Severity)), caseBeforeSeverity)
-	}
-	// Deliberately a separate guard from the publish above (s.slaEngine != nil,
-	// not s.publisher != nil) -- see severityChanged's own doc comment above
-	// for why revising SLA clocks must not depend on Event Hub being
-	// configured. projectID mirrors registerCaseSLAClocks' own
-	// cv.ProjectDetails-derived lookup, sourced from caseBeforeSeverity (the
-	// same pre-PATCH GetCaseByID this block already fetched) since UpdateCase
-	// has no other project id in scope for an existing case.
+	// Clocks are revised BEFORE the publish below, not after -- this order
+	// is load-bearing, same reasoning registerCaseSLAClocks/publishCaseCreated's
+	// own ordering gives (see CreateCase's own doc comment): a publish that
+	// goes out before reviseCaseSLAClocks commits can have
+	// csm-notification-service's own reaction read the clock's OLD,
+	// pre-revision state back from entity-service. Deliberately a separate
+	// guard from the publish below (s.slaEngine != nil, not s.publisher !=
+	// nil) -- see severityChanged's own doc comment above for why revising
+	// SLA clocks must not depend on Event Hub being configured. projectID
+	// mirrors registerCaseSLAClocks' own cv.ProjectDetails-derived lookup,
+	// sourced from caseBeforeSeverity (the same pre-PATCH GetCaseByID this
+	// block already fetched) since UpdateCase has no other project id in
+	// scope for an existing case.
 	if severityGenuinelyChanged && s.slaEngine != nil {
 		projectID := ""
 		if caseBeforeSeverity.ProjectDetails != nil {
@@ -3768,6 +3850,9 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		if caseBeforeSeverity.State != nil {
 			s.applyCaseStateSLAEffects(ctx, req.ID, *caseBeforeSeverity.State)
 		}
+	}
+	if severityGenuinelyChanged && s.publisher != nil {
+		s.publishSeverityChanged(ctx, req.ID, string(derefSeverity(caseBeforeSeverity.Severity)), string(derefSeverity(resp.Case.Severity)), caseBeforeSeverity)
 	}
 
 	return resp, nil

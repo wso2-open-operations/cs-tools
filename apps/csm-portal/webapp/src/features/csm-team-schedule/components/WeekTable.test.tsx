@@ -16,10 +16,10 @@
  * under the License.
  */
 
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import WeekTable from "./WeekTable";
+import WeekTable, { type WeekEditControls } from "./WeekTable";
 import type { EngagementAllocation } from "../types";
 import {
   ANNUAL_LEAVE,
@@ -55,6 +55,26 @@ function renderWeek(over: Partial<React.ComponentProps<typeof WeekTable>> = {}) 
 }
 
 describe("WeekTable", () => {
+  it("lists people on AEST regular hours on the Morning row, untagged, not a row of their own", () => {
+    const morning = shift({ code: "CRE_MORNING", shortCode: "6-9am", label: "Morning 6-9am", startMinute: 360, endMinute: 540, sortOrder: 10 });
+    const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", colourToken: "AEST", isRotation: false, startMinute: 360, endMinute: 540 });
+    const { container } = renderWeek({
+      shifts: shiftMap(REGULAR, EVENING, morning, aest),
+      assignments: [
+        assignment({ name: "Ben", rotaDate: "2026-09-21", shiftCode: morning.code }),
+        assignment({ name: "Ava", rotaDate: "2026-09-21", shiftCode: aest.code, teamKey: "australia" }),
+        assignment({ name: "Ava", rotaDate: "2026-09-22", shiftCode: aest.code, teamKey: "australia" }),
+      ],
+    });
+    expect(screen.queryByText("AEST regular hours")).not.toBeInTheDocument();
+    const row = [...container.querySelectorAll("tbody tr")].find((r) => r.textContent?.includes("Morning 6-9am"))!;
+    expect(row).toHaveTextContent("Ben");
+    const ava = [...row.querySelectorAll(".nm")].filter((n) => n.textContent?.includes("Ava"));
+    expect(ava).toHaveLength(2);
+    expect(ava[0].querySelector(".tier-t")).toBeNull();
+    expect(row).not.toHaveTextContent(/AEST/);
+  });
+
   it("holds regular hours and the India region shift in one row", () => {
     // Both are 09:00-18:00 in the same zone on the same days: the code says
     // which team works it, not a different working day. The row lists teams,
@@ -275,5 +295,121 @@ describe("WeekTable: customer engagements", () => {
     });
     expect(bars(container)).toHaveLength(3);
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+});
+
+describe("WeekTable: a rota admin editing the week", () => {
+  const PEOPLE = [
+    { userId: "u-jane", name: "Jane Doe", teamKey: "alpha" },
+    { userId: "u-john", name: "John Roe", teamKey: "bravo" },
+  ];
+
+  /** The value of the option named `name`, as a user picking it would send. */
+  function optionValue(select: HTMLElement, name: RegExp): string {
+    return (within(select).getByRole("option", { name }) as HTMLOptionElement).value;
+  }
+
+  function editControls(over: Partial<WeekEditControls> = {}): WeekEditControls {
+    return { people: PEOPLE, onAdd: vi.fn(), onRemove: vi.fn(), busy: false, ...over };
+  }
+
+  const WEEK = [
+    assignment({ name: "Asela", rotaDate: "2026-09-21", shiftCode: REGULAR.code, teamKey: "alpha" }),
+    assignment({ name: "Jane Doe", userId: "u-jane", rotaDate: "2026-09-21", shiftCode: EVENING.code, teamKey: "alpha" }),
+  ];
+
+  it("offers nothing to change while not editing", () => {
+    renderWeek({ assignments: WEEK });
+    expect(screen.queryByRole("combobox", { name: /Add someone/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Take .* off/ })).not.toBeInTheDocument();
+  });
+
+  it("adds someone to a rotation on a day, offering only people not already on it", () => {
+    const edit = editControls();
+    renderWeek({ assignments: WEEK, edit });
+    const monday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Mon 21" });
+    // Jane is already on Monday's evening turn: only John is offered.
+    expect(within(monday).queryByRole("option", { name: /Jane Doe/ })).not.toBeInTheDocument();
+    fireEvent.change(monday, { target: { value: optionValue(monday, /John Roe/) } });
+    expect(edit.onAdd).toHaveBeenCalledWith(
+      { shiftCode: EVENING.code, tier: undefined, label: "Evening 6-9pm" },
+      "2026-09-21",
+      PEOPLE[1],
+    );
+    // Tuesday is empty, so both are offered there.
+    const tuesday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" });
+    expect(within(tuesday).getAllByRole("option")).toHaveLength(3);
+  });
+
+  it("adds someone who is in two teams with the team of the option picked", () => {
+    const bothTeams = [
+      { userId: "u-jane", name: "Jane Doe", teamKey: "alpha" },
+      { userId: "u-jane", name: "Jane Doe", teamKey: "bravo" },
+    ];
+    const edit = editControls({ people: bothTeams });
+    renderWeek({ assignments: WEEK, edit });
+    const tuesday = screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" });
+    const [first, second] = within(tuesday)
+      .getAllByRole("option", { name: /Jane Doe/ })
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(first).not.toBe(second);
+    fireEvent.change(tuesday, { target: { value: second } });
+    expect(edit.onAdd).toHaveBeenCalledTimes(1);
+    expect(edit.onAdd).toHaveBeenCalledWith(expect.anything(), "2026-09-22", bothTeams[1]);
+  });
+
+  it("takes someone off the turn they hold in that cell", () => {
+    const edit = editControls();
+    renderWeek({ assignments: WEEK, edit });
+    fireEvent.click(screen.getByRole("button", { name: "Take Jane Doe off Evening 6-9pm on Mon 21" }));
+    expect(edit.onRemove).toHaveBeenCalledWith(expect.objectContaining({ shiftCode: EVENING.code, rotaDate: "2026-09-21" }));
+  });
+
+  it("keeps the AEST person on the Morning cell while editing, with no way to take them off it", () => {
+    const morning = shift({ code: "CRE_MORNING", shortCode: "6-9am", label: "Morning 6-9am", startMinute: 360, endMinute: 540, sortOrder: 10 });
+    const aest = shift({ code: "CRE_REGULAR_AEST", shortCode: "AEST", label: "AEST regular hours", isRotation: false, startMinute: 360, endMinute: 540 });
+    const edit = editControls();
+    renderWeek({
+      shifts: shiftMap(REGULAR, EVENING, morning, aest),
+      assignments: [
+        assignment({ name: "Ben", userId: "u-ben", rotaDate: "2026-09-21", shiftCode: morning.code }),
+        assignment({ name: "Ava", userId: "u-ava", rotaDate: "2026-09-21", shiftCode: aest.code, teamKey: "australia" }),
+      ],
+      edit,
+    });
+    const add = screen.getByRole("combobox", { name: "Add someone to Morning 6-9am on Mon 21" });
+    const cell = add.closest("td")!;
+    expect(cell).toHaveTextContent("Ava");
+    expect(within(cell).getByRole("button", { name: "Take Ben off Morning 6-9am on Mon 21" })).toBeInTheDocument();
+    expect(within(cell).queryByRole("button", { name: /Take Ava off/ })).not.toBeInTheDocument();
+  });
+
+  it("leaves regular hours and a weekday rotation's weekend alone", () => {
+    renderWeek({ assignments: WEEK, edit: editControls() });
+    expect(screen.queryByRole("combobox", { name: /Regular hours/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Take Asela off/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Evening 6-9pm on (Sat|Sun)/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("combobox", { name: /Add someone to Evening 6-9pm/ })).toHaveLength(5);
+  });
+
+  it("holds the controls while a change is saving", () => {
+    renderWeek({ assignments: WEEK, edit: editControls({ busy: true }) });
+    expect(screen.getByRole("combobox", { name: "Add someone to Evening 6-9pm on Tue 22" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Take Jane Doe off Evening 6-9pm on Mon 21" })).toBeDisabled();
+  });
+
+  it("adds to an SRE tier row with that tier, on the tier's own window", () => {
+    const edit = editControls();
+    renderWeek({
+      shifts: shiftMap(TZ1_L1),
+      ...scopeControls(),
+      family: "SRE",
+      assignments: [assignment({ name: "Kasun", rotaDate: "2026-09-21", shiftCode: TZ1_L1.code, zoneCode: "TZ1", tier: "L1" })],
+      edit,
+    });
+    const tue = screen.getByRole("combobox", { name: /Add someone to .* on Tue 22/ });
+    fireEvent.change(tue, { target: { value: optionValue(tue, /Jane Doe/) } });
+    // The window carries its own tier, so none is sent with it.
+    expect(edit.onAdd).toHaveBeenCalledWith(expect.objectContaining({ shiftCode: TZ1_L1.code, tier: undefined }), "2026-09-22", PEOPLE[0]);
   });
 });

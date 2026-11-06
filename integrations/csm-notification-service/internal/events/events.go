@@ -111,6 +111,17 @@ const (
 	// full design.
 	TypeSLATierReached Type = "sla.tier_reached"
 
+	// TypeSLARecalculationRequested is the CSM portal's "Recalculate SLA"
+	// admin action — published once per click by entity-service
+	// (SLAStatusService.RequestRecalculation), consumed by
+	// internal/slaengine.Dispatcher.handleSLARecalculationRequested, which
+	// kicks off Engine.RecalculateFromEntity in its own detached goroutine
+	// (never on this consumer's own goroutine — see that method's own doc
+	// comment for why). Like TypeSLATierReached, not an email/Chat trigger,
+	// so dispatch.Handle's main switch still has no reaction for it beyond
+	// handing it to the SLA engine.
+	TypeSLARecalculationRequested Type = "sla.recalculation_requested"
+
 	// TypeCRApprovalRequested is published by csm-flow-service's
 	// cr_approval_notice flow when a change request enters an approval state.
 	// Unlike the case.* types, its recipients and subject arrive already
@@ -139,6 +150,18 @@ const (
 	// TypeProjectContactRegistered is published by entity-service when a
 	// membership moves into REGISTERED; dispatch sends the Welcome email.
 	TypeProjectContactRegistered Type = "project_contact.registered"
+
+	// TypeMailAlertReceived is published by csm-mail-paging-service for each
+	// email that matches one of its rules. internal/mailpaging calls the
+	// rule's escalation levels by phone. The envelope's entityId is the Gmail
+	// message id.
+	TypeMailAlertReceived Type = "mail.alert.received"
+
+	// TypeProjectReactivated is published by entity-service's ACP reopen
+	// check when a project the Account Closure Process suspended is back to
+	// Open (renewed, or its overdue invoice paid); dispatch sends the "Back to
+	// Open state" email. On PROJECT_EVENT_HUB_TOPIC, keyed by the project id.
+	TypeProjectReactivated Type = "project.reactivated"
 )
 
 // KnownTypes lists every Type this service accepts, in the order they're
@@ -150,11 +173,13 @@ var KnownTypes = []Type{
 	TypeIncidentSpecialOpsAlert,
 	TypePagingTestCallRequested,
 	TypeSLATierReached,
+	TypeSLARecalculationRequested,
 	TypeCRApprovalRequested, TypeCRPlanDateNotice,
 	TypeOutageNotificationDue, TypeOutageCommunicationDue, TypeOutageStatusPageDue,
-	TypeProjectContactInvited, TypeProjectContactRegistered,
+	TypeProjectContactInvited, TypeProjectContactRegistered, TypeProjectReactivated,
 	TypeSRCreated, TypeSRAcknowledged, TypeSRCommentAdded,
 	TypeCaseEscalated,
+	TypeMailAlertReceived,
 }
 
 // Envelope is the wire shape of every record on the event bus: Payload's
@@ -642,6 +667,20 @@ type PagingTestCallRequestedPayload struct {
 	RequestedAt string `json:"requestedAt"`
 }
 
+// MailAlertReceivedPayload is TypeMailAlertReceived's payload, mirroring
+// csm-mail-paging-service's poller.Payload field for field (kept in sync by
+// hand).
+type MailAlertReceivedPayload struct {
+	// RuleName is the mail rule that matched; it selects the escalation ladder.
+	RuleName  string `json:"ruleName"`
+	MessageID string `json:"messageId"`
+	// DedupeKey is stable across redeliveries and distinct per rule.
+	DedupeKey  string `json:"dedupeKey"`
+	Subject    string `json:"subject"`
+	From       string `json:"from"`
+	ReceivedAt string `json:"receivedAt,omitempty"`
+}
+
 // SLATierReachedPayload is TypeSLATierReached's payload — published by
 // internal/slaengine.Engine.Tick when its own Redis wake-index shows a
 // clock has newly crossed a tier (50, 75, or 100 percent elapsed) since it
@@ -653,6 +692,17 @@ type SLATierReachedPayload struct {
 	CaseID    string `json:"caseId"`
 	ClockType string `json:"clockType"`
 	Tier      string `json:"tier"`
+}
+
+// SLARecalculationRequestedPayload is the Payload shape for
+// TypeSLARecalculationRequested — mirrors entity-service's own
+// SLARecalculationRequestedPayload. Both fields are purely for this
+// service's own log line (who asked, and when); nothing about the
+// recalculation itself is scoped by them — it always rebuilds every
+// currently-active clock, not just ones touched by this particular request.
+type SLARecalculationRequestedPayload struct {
+	RequestedByEmail string `json:"requestedByEmail"`
+	RequestedAt      string `json:"requestedAt"`
 }
 
 // IncidentAcknowledgedPayload is the Payload shape for
@@ -823,4 +873,32 @@ type ProjectContactRegisteredPayload struct {
 	ProjectKey        string `json:"projectKey"`
 	IsIntegrationUser bool   `json:"isIntegrationUser,omitempty"`
 	EventModifiedOn   string `json:"eventModifiedOn,omitempty"`
+}
+
+// Reasons in ProjectReactivatedPayload.Reasons.
+const (
+	// ProjectReactivatedReasonRenewal: the project's end date is in the
+	// future again.
+	ProjectReactivatedReasonRenewal = "renewal"
+	// ProjectReactivatedReasonInvoicePaid: no invoice is overdue any more.
+	ProjectReactivatedReasonInvoicePaid = "invoice_paid"
+)
+
+// ProjectReactivatedPayload is TypeProjectReactivated's payload. Mirrors
+// entity-service's copy exactly (decoded with DisallowUnknownFields). Dates
+// are "2006-01-02"; ReactivatedOn is RFC 3339.
+type ProjectReactivatedPayload struct {
+	ProjectID         string   `json:"projectId"`
+	ProjectSfID       string   `json:"projectSfId"`
+	ProjectName       string   `json:"projectName"`
+	ProjectKey        string   `json:"projectKey"`
+	AccountOwnerName  string   `json:"accountOwnerName,omitempty"`
+	AccountOwnerEmail string   `json:"accountOwnerEmail,omitempty"`
+	StartDate         string   `json:"startDate,omitempty"`
+	EndDate           string   `json:"endDate,omitempty"`
+	Reasons           []string `json:"reasons"`
+	// Recipients are the To addresses (account owner, renewal account
+	// manager, technical owner); the CC list is ACP_REACTIVATION_CC.
+	Recipients    []string `json:"recipients"`
+	ReactivatedOn string   `json:"reactivatedOn"`
 }

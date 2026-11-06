@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -105,15 +104,6 @@ type ReferenceDataRepository interface {
 	// drift" section -- so check the live schema before assuming its shape,
 	// not this file.
 	ListTimeZones(ctx context.Context) ([]TimeZoneRow, error)
-	// ListSLADurationPolicy returns every row of sla_duration_policy
-	// (migration 0192), ordered by severity then clock_type -- backs
-	// GET /sla-duration-policy. Severity is already translated from the raw
-	// case_severity_enum label ("S0") to the uppercase English word every
-	// case.* event's own Priority field carries ("CATASTROPHIC"), via this
-	// same package's caseSeverityFromEnum (case_repo.go) -- the one place
-	// that mapping is defined, so this method stays the only repository
-	// read anywhere that needs to apply it for this table.
-	ListSLADurationPolicy(ctx context.Context) ([]SLADurationPolicyRow, error)
 	// ListFeedbackEmojis returns the five case-feedback emoji choices (the
 	// "<rating> - Reasons" rows of work_item_feedback_metric, migration
 	// 0127), each with its own reason chips -- backs GET /metadata's
@@ -139,18 +129,6 @@ type FeedbackEmojiRow struct {
 	UnselectedImage string
 	SelectedImage   string
 	Chips           []FeedbackEmojiChipRow
-}
-
-// SLADurationPolicyRow is one row of the sla_duration_policy table, already
-// severity-translated -- see ListSLADurationPolicy's own doc comment.
-// DurationSeconds is duration's whole-second EXTRACT(EPOCH FROM ...) -- an
-// INTERVAL has no direct Go scan target in this connection's type map, same
-// reasoning project_repo.go's own EXTRACT(EPOCH FROM ...) columns already
-// document.
-type SLADurationPolicyRow struct {
-	Severity        string
-	ClockType       string
-	DurationSeconds int64
 }
 
 // TimeZoneRow is one row of the timezone reference table. utc_offset/dst
@@ -207,36 +185,6 @@ func (r *referenceDataRepo) ListTimeZones(ctx context.Context) ([]TimeZoneRow, e
 			return nil, fmt.Errorf("scan time zone: %w", err)
 		}
 		out = append(out, tz)
-	}
-	return out, rows.Err()
-}
-
-// ListSLADurationPolicy implements ReferenceDataRepository.
-func (r *referenceDataRepo) ListSLADurationPolicy(ctx context.Context) ([]SLADurationPolicyRow, error) {
-	rows, err := r.db.Query(ctx,
-		`SELECT severity::TEXT, clock_type, EXTRACT(EPOCH FROM duration)::BIGINT
-		 FROM sla_duration_policy ORDER BY severity, clock_type`)
-	if err != nil {
-		return nil, fmt.Errorf("list sla duration policy: %w", err)
-	}
-	defer rows.Close()
-
-	var out []SLADurationPolicyRow
-	for rows.Next() {
-		var rawSeverity, clockType string
-		var durationSeconds int64
-		if err := rows.Scan(&rawSeverity, &clockType, &durationSeconds); err != nil {
-			return nil, fmt.Errorf("scan sla duration policy: %w", err)
-		}
-		severity, ok := caseSeverityFromEnum[rawSeverity]
-		if !ok {
-			return nil, fmt.Errorf("list sla duration policy: unrecognized severity %q", rawSeverity)
-		}
-		out = append(out, SLADurationPolicyRow{
-			Severity:        strings.ToUpper(string(severity)),
-			ClockType:       clockType,
-			DurationSeconds: durationSeconds,
-		})
 	}
 	return out, rows.Err()
 }

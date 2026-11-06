@@ -27,7 +27,7 @@ import (
 
 // wso2LogoURL points at WSO2's own public CDN copy of the logo (circular
 // pulse icon + wordmark) used in real received notice examples — confirmed
-// pixel-identical to the file Chamara provided directly. A hosted URL, not
+// pixel-identical to the file the product owner provided directly. A hosted URL, not
 // an embedded data: URI, deliberately: most email clients (confirmed
 // against a real Gmail inbox — the data: URI approach rendered as a broken
 // image icon there) refuse to render inline base64 images in received
@@ -62,8 +62,8 @@ const emailHTMLTemplate = `<div style="background-color:#fdece2;padding:32px 16p
 // shell — no peach background, no logo header, a simple light-bordered
 // white card instead, framed by a light ash-gray page background (the
 // same #f2f2f2 tone as the detail box below, matching the real reference).
-// Confirmed against a real received internal notice example ("Dear Nisha
-// Farook..."): the greeting and intro sentence render in blue and larger
+// Confirmed against a real received internal notice example (an internal
+// day-0 notice): the greeting and intro sentence render in blue and larger
 // than the body text, the five project/account fields sit in their own
 // bordered detail box, and the closing sentence plus sign-off are plain
 // black text. Five placeholders in order: greeting (HTML), intro sentence
@@ -197,8 +197,8 @@ type EmailNotifier struct {
 	Logger *slog.Logger
 	// AllowNonWSO2Recipients, when false (the safe default), filters out
 	// any recipient whose address doesn't end in "@wso2.com" before
-	// sending. This is a hard requirement from Rashmika's team (owners of
-	// the email service): a staging/testing environment must never
+	// sending. This is a hard requirement from the email service's
+	// owners: a staging/testing environment must never
 	// actually email a real customer contact. Only set true in a genuine
 	// production environment, once that's a deliberate decision — not
 	// something to flip casually to "make a test work".
@@ -208,7 +208,7 @@ type EmailNotifier struct {
 	// legacy distribution lists customer-lifecycle-notification@wso2.com and
 	// billing@wso2.com, which this port never sent to until this field was
 	// added — a real gap, not a documented simplification. Where they go
-	// matches the ServiceNow system (confirmed by the user from real legacy
+	// matches the legacy system (confirmed by the user from real legacy
 	// emails, 2026-09-29): on internal notices and the no-business-contact
 	// nudge they're in "to" with the internal people; on customer-facing
 	// notices they're in both "to" (with the customers) and "cc" (with the

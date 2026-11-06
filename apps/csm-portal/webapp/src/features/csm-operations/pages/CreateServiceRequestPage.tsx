@@ -29,14 +29,18 @@ import {
   Typography,
 } from "@wso2/oxygen-ui";
 import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { BackendApiError } from "@api/backend/client";
+import { priorityFromSeverity } from "@api/backend/mappers";
 import type { BeProject } from "@api/backend/types";
+import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
+import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useNewServiceRequestDraft } from "@context/new-service-request-draft/NewServiceRequestDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
@@ -61,6 +65,10 @@ import {
 } from "@features/csm-operations/utils/catalogVariables";
 import { canRaiseServiceRequests } from "@features/csm-projects/utils/subscriptionType";
 import type { CreateServiceRequestFromCaseNavState } from "@features/csm-cases/types/csmCases";
+
+// A service request never carries S0, so the picker offers S1-S4 only.
+type ServiceRequestSeverity = Exclude<Severity, "S0">;
+const SERVICE_REQUEST_SEVERITIES: ServiceRequestSeverity[] = ["S1", "S2", "S3", "S4"];
 
 // Managed-cloud and Cloud Support projects are offered in the project picker
 // (see `canRaiseServiceRequests`). Per-project eligibility is still decided
@@ -108,15 +116,38 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const relatedCaseId = relatedCaseState?.relatedCaseId;
   const relatedCaseNumber = relatedCaseState?.relatedCaseNumber;
 
-  const [projectId, setProjectId] = useState(lockedProjectId);
-  const [deploymentId, setDeploymentId] = useState(relatedCaseState?.deploymentId ?? "");
-  const [deployedProductId, setDeployedProductId] = useState(
-    relatedCaseState?.deployedProductId ?? "",
+  // The draft outlives this page (it lives above the routes), so switching to
+  // an open case tab and back does not lose what was entered. It is restored
+  // only into a form opened the same way it was started (same locked project
+  // and related case); a different entry starts fresh rather than inheriting a
+  // stale draft. Cleared on a successful submit and on Cancel.
+  const draftStore = useNewServiceRequestDraft();
+  const entryKey = `${lockedProjectId}|${relatedCaseId ?? ""}`;
+  const [restored] = useState(() => {
+    const draft = draftStore.get();
+    return draft?.entryKey === entryKey ? draft : undefined;
+  });
+  // The entry this form was started from. What is entered belongs to it: if the
+  // same route is reached again with another entry while the form stays mounted,
+  // the initialisers below do not run again, so the values on screen must not be
+  // saved under the new entry's key.
+  const [startedFrom] = useState(entryKey);
+
+  const [projectId, setProjectId] = useState(restored?.projectId ?? lockedProjectId);
+  const [deploymentId, setDeploymentId] = useState(
+    restored?.deploymentId ?? relatedCaseState?.deploymentId ?? "",
   );
-  const [catalogId, setCatalogId] = useState("");
-  const [catalogItemId, setCatalogItemId] = useState("");
+  const [deployedProductId, setDeployedProductId] = useState(
+    restored?.deployedProductId ?? relatedCaseState?.deployedProductId ?? "",
+  );
+  const [catalogId, setCatalogId] = useState(restored?.catalogId ?? "");
+  const [catalogItemId, setCatalogItemId] = useState(restored?.catalogItemId ?? "");
+  // "" means untouched: the field is left out of the payload and the server
+  // applies its configured default. It is deliberately not preset to a value.
+  const [severity, setSeverity] = useState<ServiceRequestSeverity | "">(restored?.severity ?? "");
   // Variable answers, keyed by variable id.
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string>>(restored?.answers ?? {});
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
@@ -180,6 +211,39 @@ export default function CreateServiceRequestPage(): JSX.Element {
   // Spans the whole submit (create + post-create attachment uploads).
   const [submitting, setSubmitting] = useState(false);
 
+  // Mirror the form into the draft store on every change. `submitted` stops it
+  // writing the draft back after a successful create (or a Cancel) has cleared
+  // it, and `submitting` holds it off while a create is in flight: submit
+  // clears the draft up front, so a form reopened mid-create starts empty
+  // instead of offering a complete, enabled copy that could be sent twice. A
+  // failed create flips `submitting` back and the draft is saved again.
+  const submitted = useRef(false);
+  useEffect(() => {
+    if (submitted.current || submitting || entryKey !== startedFrom) return;
+    draftStore.set({
+      entryKey,
+      projectId,
+      deploymentId,
+      deployedProductId,
+      catalogId,
+      catalogItemId,
+      severity,
+      answers,
+    });
+  }, [
+    draftStore,
+    entryKey,
+    startedFrom,
+    projectId,
+    deploymentId,
+    deployedProductId,
+    catalogId,
+    catalogItemId,
+    severity,
+    answers,
+    submitting,
+  ]);
+
   const catalogItems = useMemo(
     () => catalogs.data?.find((c) => c.id === catalogId)?.catalogItems ?? [],
     [catalogs.data, catalogId],
@@ -212,6 +276,20 @@ export default function CreateServiceRequestPage(): JSX.Element {
         : getFirstFieldFailingValidation(allVariables, answers),
     [allVariables, answers, firstEmptyRequired, firstExceedingMaxLength],
   );
+  // Send user-editable, non-attachment variables, encoded by type, omitting
+  // empties. Context/hidden fields are excluded by getUserEditableVariables.
+  const variablePayload = useMemo(
+    () =>
+      getUserEditableVariables(allVariables)
+        .filter((v) => !isAttachmentField(v))
+        .map((v) => ({ id: v.id, value: encodeVariableValue(v, answers[v.id] ?? "") }))
+        .filter((v) => v.value !== ""),
+    [allVariables, answers],
+  );
+  // The backend refuses a service request that carries no answers at all
+  // ("variables are required for service_request"): a catalog item whose
+  // questions are all optional and left blank, or one with no questions.
+  const noVariableAnswered = variables.isSuccess && variablePayload.length === 0;
 
 
   // A deployed product with no catalogs is the common non-ServiceNow case;
@@ -278,6 +356,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired === null &&
       firstExceedingMaxLength === null &&
       firstFailingValidation === null &&
+      !noVariableAnswered &&
       !isIneligibleForSr &&
       !hasNoSrReadAccess &&
       // Fail closed while a selected project's eligibility is still loading
@@ -294,6 +373,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       firstEmptyRequired,
       firstExceedingMaxLength,
       firstFailingValidation,
+      noVariableAnswered,
       isIneligibleForSr,
       hasNoSrReadAccess,
       selectedProject.isLoading,
@@ -304,13 +384,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return;
-    // Send user-editable, non-attachment variables, encoded by type, omitting
-    // empties. Context/hidden fields are excluded by getUserEditableVariables.
-    const variablePayload = getUserEditableVariables(allVariables)
-      .filter((v) => !isAttachmentField(v))
-      .map((v) => ({ id: v.id, value: encodeVariableValue(v, answers[v.id] ?? "") }))
-      .filter((v) => v.value !== "");
-
+    draftStore.clear();
     setSubmitting(true);
     try {
       const created = await postCase.mutateAsync({
@@ -321,8 +395,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
         catalogId,
         catalogItemId,
         variables: variablePayload,
+        // Only sent when the engineer picked one; otherwise the server default applies.
+        ...(severity ? { severity: priorityFromSeverity(severity) } : {}),
         relatedCaseId,
       });
+      // The draft was cleared when this create started and nothing has saved one
+      // since (the mirroring effect holds off while `submitting`), so none of this
+      // submission is left to clear. Clearing again here would discard a draft
+      // that a form reopened mid-create has started since.
+      submitted.current = true;
       // Files are uploaded to the new case afterwards. A partial failure still
       // lands the case.
       const failed = await uploadAttachmentsToCase(
@@ -555,6 +636,34 @@ export default function CreateServiceRequestPage(): JSX.Element {
             </FormControl>
           </Grid>
 
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="sr-severity-label" shrink sx={{ top: "0px !important" }}>
+                Severity
+              </InputLabel>
+              <Select
+                labelId="sr-severity-label"
+                label="Severity"
+                value={severity}
+                displayEmpty
+                notched
+                onChange={(e) => setSeverity(e.target.value as ServiceRequestSeverity | "")}
+                disabled={submitting}
+              >
+                <MenuItem value="">Default</MenuItem>
+                {SERVICE_REQUEST_SEVERITIES.map((s) => (
+                  <MenuItem key={s} value={s}>
+                    {s} · {SEVERITY_LABEL[s]}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                Internal only, never shown to the customer. Leave as Default to use the standard
+                severity.
+              </FormHelperText>
+            </FormControl>
+          </Grid>
+
           {/* Dynamic variable form for the chosen catalog item. */}
           {catalogItemId && (
             <Grid size={{ xs: 12 }}>
@@ -614,7 +723,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             mt: 2.5,
           }}
         >
-          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation) && (
+          {!variables.isLoading && (firstEmptyRequired || firstExceedingMaxLength || firstFailingValidation || (!!catalogItemId && noVariableAnswered)) && (
             <Typography variant="caption" color="text.secondary" sx={{ mr: "auto" }}>
               {firstEmptyRequired
                 ? `Required field: ${firstEmptyRequired}`
@@ -622,10 +731,22 @@ export default function CreateServiceRequestPage(): JSX.Element {
                   ? `${firstExceedingMaxLength.label} exceeds ${firstExceedingMaxLength.maxLength} characters`
                   : firstFailingValidation
                     ? `${firstFailingValidation.label}: ${firstFailingValidation.message}`
-                    : null}
+                    : renderableVars.length === 0
+                      ? "A service request needs at least one answer, and this catalog item has no questions to answer."
+                      : "Answer at least one question."}
             </Typography>
           )}
-          <Button variant="outlined" onClick={() => navigate(backTarget)}>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              // An explicit discard: drop the draft too (flag first, so the
+              // mirroring effect cannot write it back) or it would reappear
+              // the next time the form opens.
+              submitted.current = true;
+              draftStore.clear();
+              navigate(backTarget);
+            }}
+          >
             Cancel
           </Button>
           <Button

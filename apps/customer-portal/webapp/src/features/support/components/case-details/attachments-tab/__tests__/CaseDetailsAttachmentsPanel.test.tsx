@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
@@ -116,8 +116,23 @@ function renderPanel(caseId = "case-1") {
   );
 }
 
+// The panel shows a skeleton for at least this long even when data is ready
+// (SKELETON_MIN_DISPLAY_MS in the component).
+const SKELETON_MIN_DISPLAY_MS = 4000;
+
+/** Renders the panel and lets the minimum skeleton display time elapse. */
+function renderPanelPastSkeleton(caseId = "case-1") {
+  vi.useFakeTimers();
+  const result = renderPanel(caseId);
+  act(() => {
+    vi.advanceTimersByTime(SKELETON_MIN_DISPLAY_MS);
+  });
+  return result;
+}
+
 describe("CaseDetailsAttachmentsPanel", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -142,7 +157,7 @@ describe("CaseDetailsAttachmentsPanel", () => {
   });
 
   it("should render attachment list from API with names and download buttons", () => {
-    renderPanel();
+    renderPanelPastSkeleton();
     expect(screen.getByText("screenshot-error.png")).toBeInTheDocument();
     expect(screen.getByText("logs-debug.txt")).toBeInTheDocument();
     expect(screen.getByText("config-backup.zip")).toBeInTheDocument();
@@ -153,7 +168,7 @@ describe("CaseDetailsAttachmentsPanel", () => {
   });
 
   it("should show uploaded-by and size for attachments", () => {
-    renderPanel();
+    renderPanelPastSkeleton();
     expect(screen.getByText(/240 KB/)).toBeInTheDocument();
     expect(
       screen.getAllByText(/Uploaded by admin@test.com/).length,
@@ -168,7 +183,9 @@ describe("CaseDetailsAttachmentsPanel", () => {
   it("should show EmptyIcon and no attachments found when attachments list is empty", async () => {
     const { useGetCaseAttachments } =
       await import("@features/support/api/useGetCaseAttachments");
-    vi.mocked(useGetCaseAttachments).mockReturnValueOnce({
+    // mockReturnValue (not Once): the panel re-renders when the skeleton timer
+    // fires. This is the last test in the file, so the override can persist.
+    vi.mocked(useGetCaseAttachments).mockReturnValue({
       data: {
         pages: [
           {
@@ -187,7 +204,7 @@ describe("CaseDetailsAttachmentsPanel", () => {
       fetchNextPage: vi.fn(),
       isFetchNextPageError: false,
     } as any);
-    renderPanel("case-1");
+    renderPanelPastSkeleton("case-1");
     expect(screen.getByText("No attachments found.")).toBeInTheDocument();
     expect(
       document.querySelector("svg[aria-hidden='true']"),

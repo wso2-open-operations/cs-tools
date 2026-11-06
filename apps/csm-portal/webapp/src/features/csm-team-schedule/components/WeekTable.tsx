@@ -35,6 +35,7 @@ import {
   isTierlessEscalation,
   shortDayName,
   standingWindowKey,
+  rotationHostOf,
   toIsoDate, rotaZoneName, zoneAbbreviation } from "../utils/rota";
 import {
   ENGAGEMENTS_FAILED_NOTE,
@@ -77,6 +78,41 @@ interface WeekTableProps {
   /** The allocations could not be read: the week is drawn without them, with a
    *  quiet note saying so. */
   engagementsFailed?: boolean;
+  /** Set while a rota admin edits their own family's week; absent, the week
+   *  is read only. */
+  edit?: WeekEditControls;
+}
+
+/** One person who may be put on a turn from This week. */
+export interface WeekPerson {
+  userId: string;
+  name: string;
+  teamKey: string;
+}
+
+/** The turn a week row stands for: the window, and the tier on a tier row. */
+export interface WeekTurn {
+  shiftCode: string;
+  tier?: ScheduleTier;
+  label: string;
+}
+
+/** What a rota admin may do to the rotation cells of the week. */
+export interface WeekEditControls {
+  /** Who the "+ Add" list offers: the family's people on screen. */
+  people: readonly WeekPerson[];
+  /** Put one person on the row's turn for that day. */
+  onAdd: (turn: WeekTurn, rotaDate: string, person: WeekPerson) => void;
+  /** Take one person off the turn they hold in that cell. */
+  onRemove: (assignment: ScheduleAssignment) => void;
+  /** A change is being saved: the controls wait for it. */
+  busy: boolean;
+}
+
+/** Whether a window is worked on that day: a weekday rotation has no
+ *  weekend cell to add to, and the other way round. */
+function worksOn(shift: ScheduleShift, weekend: boolean): boolean {
+  return shift.dayScope === "ANY" || shift.dayScope === (weekend ? "WEEKEND" : "WEEKDAY");
 }
 
 /**
@@ -141,6 +177,85 @@ function TeamCell({ rows }: { rows: ScheduleAssignment[] }): JSX.Element {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * A rotation cell while a rota admin edits the week: every name with an "×"
+ * that takes them off this turn, and a "+ Add" list of the family's people who
+ * are not on it yet. Names are listed rather than grouped by team, so each one
+ * can be taken off. A change saves when it is picked, as on the roster.
+ */
+function WeekEditCell({
+  cell,
+  standing,
+  turn,
+  rotaDate,
+  dayName,
+  tiered,
+  people,
+  busy,
+  onAdd,
+  onRemove,
+}: {
+  cell: ScheduleAssignment[];
+  /** People listed from a standing window on this row's hours: shown, but not
+   *  turns of this row, so not offered for removal. */
+  standing?: Set<string>;
+  turn: WeekTurn;
+  rotaDate: string;
+  dayName: string;
+  tiered: boolean;
+  people: readonly WeekPerson[];
+  busy: boolean;
+  onAdd: WeekEditControls["onAdd"];
+  onRemove: WeekEditControls["onRemove"];
+}): JSX.Element {
+  const teamColourOf = useTeamColour();
+  const teamNameOf = useTeamName();
+  const sorted = [...people].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div className="wk-edit">
+      {cell.map((a) => (
+        <div className="nm" key={a.id} title={`${a.engineer.name} · ${teamNameOf(a.teamKey)}`}>
+          <span className="av" style={{ background: teamColourOf(a.teamKey) }}>
+            {initialsOf(a.engineer.name)}
+          </span>
+          <span className="who">{a.engineer.name}</span>
+          {a.tier && !tiered ? <span className="tier-t">{a.tier}</span> : null}
+          {standing?.has(a.id) ? null : (
+            <button
+              type="button"
+              className="rm"
+              aria-label={`Take ${a.engineer.name} off ${turn.label} on ${dayName}`}
+              disabled={busy}
+              onClick={() => onRemove(a)}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+      <select
+        className="assign"
+        aria-label={`Add someone to ${turn.label} on ${dayName}`}
+        value=""
+        disabled={busy || sorted.length === 0}
+        onChange={(e) => {
+          // Keyed by team as well as person: someone in two of the family's
+          // teams is offered once per team, and the option picked says which.
+          const person = sorted.find((p) => `${p.teamKey}|${p.userId}` === e.target.value);
+          if (person) onAdd(turn, rotaDate, person);
+        }}
+      >
+        <option value="">+ Add</option>
+        {sorted.map((p) => (
+          <option key={`${p.teamKey}|${p.userId}`} value={`${p.teamKey}|${p.userId}`}>
+            {p.name} · {teamNameOf(p.teamKey)}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -212,6 +327,7 @@ export default function WeekTable({
   engagementAllocations = [],
   engagementPeople,
   engagementsFailed = false,
+  edit,
 }: WeekTableProps): JSX.Element {
   const teamColourOf = useTeamColour();
   const teamNameOf = useTeamName();
@@ -228,6 +344,12 @@ export default function WeekTable({
       token?: string;
       sort: number;
       tiered?: boolean;
+      /** An escalation turn stored with no tier: no turn to add anyone to. */
+      untiered?: boolean;
+      /** People listed on a rotation's row from a standing window on its hours
+       *  (AEST on the Morning row), by assignment id: shown as the row's
+       *  members, but not turns, so not offered for removal. */
+      standing?: Set<string>;
     };
     const TIERS: ScheduleTier[] = ["L1", "L2", "L3"];
     const out: Row[] = [];
@@ -317,7 +439,20 @@ export default function WeekTable({
     // already lists regular hours by team, so the India region shift arrives
     // as one more team rather than as a row of its own saying the same
     // nine-to-five over again.
-    const byWindow = groupBy(rest, (a) => standingWindowKey(shifts.get(a.shiftCode), a.shiftCode));
+    // People on a standing window stored on a rotation's hours (AEST regular
+    // hours on the Morning rotation's 06:00-09:00) are listed on that
+    // rotation's row, untagged, as on the day view's card: the zone is the
+    // Roster's to show.
+    const standing = new Set<string>();
+    const placed = rest.map((a) => {
+      const own = shifts.get(a.shiftCode);
+      const dow = new Date(`${a.rotaDate}T00:00:00`).getDay();
+      const host = rotationHostOf(own, familyShifts, dow === 0 || dow === 6);
+      if (!host || !own) return a;
+      standing.add(a.id);
+      return { ...a, shiftCode: host.code };
+    });
+    const byWindow = groupBy(placed, (a) => standingWindowKey(shifts.get(a.shiftCode), a.shiftCode));
     for (const [, list] of byWindow.entries()) {
       // The window most of these people are on names the row, so it keeps the
       // label and colour a reader already knows it by.
@@ -334,6 +469,8 @@ export default function WeekTable({
         list,
         label: untiered ? `${shift.label} · tier not set` : undefined,
         sort: untiered ? 199 : (shift?.sortOrder ?? 999),
+        untiered: Boolean(untiered),
+        ...(list.some((a) => standing.has(a.id)) ? { standing } : {}),
       });
     }
 
@@ -481,9 +618,20 @@ export default function WeekTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ code, shift, list, label, token: rowToken, tiered }) => {
+          {rows.map(({ code, shift, list, label, token: rowToken, tiered, untiered, standing }) => {
             const byDay = groupBy(list, (a) => a.rotaDate);
             const token = rowToken ?? shift?.colourToken ?? "";
+            // A rotation or escalation turn can be edited here; regular hours
+            // and a turn with no tier stay on the roster.
+            const turn: WeekTurn | undefined =
+              edit && shift && (shift.isRotation || shift.isEscalation) && !untiered
+                ? {
+                    shiftCode: shift.code,
+                    // A tier row's window may leave the tier to the person.
+                    tier: tiered && !shift.tier ? (rowToken as ScheduleTier | undefined) : undefined,
+                    label: label ?? shift.label,
+                  }
+                : undefined;
             // The rotation running right now, found by its stored instants --
             // so a night crew rostered yesterday still lights up after
             // midnight -- and marked on both its row and its cell.
@@ -505,14 +653,30 @@ export default function WeekTable({
                   const iso = toIsoDate(d);
                   const cell = byDay.get(iso) ?? [];
                   const weekend = d.getDay() === 0 || d.getDay() === 6;
+                  const editable = Boolean(turn && shift && worksOn(shift, weekend));
+                  const dayName = `${shortDayName(d)} ${d.getDate()}`;
+                  const onCell = new Set(cell.map((a) => a.engineer.userId));
                   return (
                     <td
                       key={iso}
                       className={`${weekend ? "wknd" : ""} ${iso === todayIso ? "today" : ""}${
                         iso === liveIso ? " nowcell" : ""
-                      }`}
+                      }${editable ? " editable" : ""}`}
                     >
-                      {cell.length === 0 ? (
+                      {edit && turn && editable ? (
+                        <WeekEditCell
+                          cell={cell}
+                          standing={standing}
+                          turn={turn}
+                          rotaDate={iso}
+                          dayName={dayName}
+                          tiered={Boolean(tiered)}
+                          people={edit.people.filter((p) => !onCell.has(p.userId))}
+                          busy={edit.busy}
+                          onAdd={edit.onAdd}
+                          onRemove={edit.onRemove}
+                        />
+                      ) : cell.length === 0 ? (
                         <span className="none">—</span>
                       ) : groupsUsefully(cell) ? (
                         /* Regular hours: most of the team, spread across every

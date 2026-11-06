@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package aws transforms an inbound AWS SNS notification (wrapping a CloudWatch alarm) into the canonical alert, a Go port of ServiceNow's AWSAlertUtilsV2.
+// Package aws transforms an inbound AWS SNS notification (a CloudWatch alarm or an AWS Budgets alert) into the canonical alert; the alarm mapping is a Go port of ServiceNow's AWSAlertUtilsV2.
 package aws
 
 import (
@@ -64,8 +64,8 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
-// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying operator overrides.
-func Transform(raw []byte, cfg Config) (Alert, error) {
+// Transform parses a raw inbound SNS notification and produces the canonical Alert, cfg supplying operator overrides and tagger (optional) the tags of a budget alert's budget.
+func Transform(raw []byte, cfg Config, tagger BudgetTagFetcher) (Alert, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return Alert{}, ErrMissingBody
 	}
@@ -94,6 +94,9 @@ func Transform(raw []byte, cfg Config) (Alert, error) {
 	messageRaw := utils.Str(envelope, "Message")
 	var messageObj map[string]any
 	if err := jsonnum.Unmarshal([]byte(messageRaw), &messageObj); err != nil {
+		if subject := utils.Str(envelope, "Subject"); isBudget(subject, messageRaw) {
+			return fromBudget(subject, messageRaw, base, tagger), nil
+		}
 		// SNS Message isn't valid JSON; still produces a real alert, matching the reference script's own fallback.
 		base.MetricName = "SNS Message Parse Error"
 		// A non-JSON SNS Message is the human-readable text itself; the raw body is kept in raw_alerts.

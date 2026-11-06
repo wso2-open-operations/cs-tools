@@ -60,7 +60,7 @@ func attrValue(t *testing.T, r slog.Record, key string) (string, bool) {
 
 // TestLoggingNotifier_Send_LogsProjectAndSubjectFields verifies the core
 // project-identity and subject-line attributes land in the log record — the
-// fields Chamara asked to have visible directly in the logs (project id,
+// fields the product owner asked to have visible directly in the logs (project id,
 // project name, start date, end date), plus the new Subject that replaces
 // the old internal/customer/am_nudge Kind label entirely.
 func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
@@ -72,12 +72,12 @@ func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
 
 	_, err := n.Send(context.Background(), Notice{
 		ProjectID:   "p1",
-		ProjectName: "TICKETNETWORK - Subscription",
-		ProjectKey:  "TICKETNET",
+		ProjectName: "EXAMPLETIX - Subscription",
+		ProjectKey:  "EXAMPLETIX",
 		StartDate:   startDate,
 		EndDate:     endDate,
 		Window:      90,
-		Subject:     "[ACP] 90 Days Reminder of Project for TICKETNETWORK - Subscription of TicketNetwork",
+		Subject:     "[ACP] 90 Days Reminder of Project for EXAMPLETIX - Subscription of ExampleTix",
 	})
 	if err != nil {
 		t.Fatalf("Send() error = %v, want nil", err)
@@ -88,9 +88,9 @@ func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
 
 	wantAttrs := map[string]string{
 		"projectID":   "p1",
-		"projectName": "TICKETNETWORK - Subscription",
-		"projectKey":  "TICKETNET",
-		"subject":     "[ACP] 90 Days Reminder of Project for TICKETNETWORK - Subscription of TicketNetwork",
+		"projectName": "EXAMPLETIX - Subscription",
+		"projectKey":  "EXAMPLETIX",
+		"subject":     "[ACP] 90 Days Reminder of Project for EXAMPLETIX - Subscription of ExampleTix",
 	}
 	for key, want := range wantAttrs {
 		got, found := attrValue(t, h.records[0], key)
@@ -106,7 +106,7 @@ func TestLoggingNotifier_Send_LogsProjectAndSubjectFields(t *testing.T) {
 
 // TestLoggingNotifier_Send_LogsNoPersonalData: the log line must carry no
 // email address, no person's name (staff or customer) and no email body,
-// masked or not — logs must hold no personal data in any mode (Rashmika's
+// masked or not — logs must hold no personal data in any mode (the
 // review of PR #2134). Every attribute value is checked, not just the ones
 // that used to hold recipients, so a new attribute can't reintroduce it.
 func TestLoggingNotifier_Send_LogsNoPersonalData(t *testing.T) {

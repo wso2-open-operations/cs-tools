@@ -175,7 +175,7 @@ func TestResolveCustomerContacts_NudgesAccountManagerWhenNoContactsAtAll(t *test
 }
 
 // TestResolveCustomerContacts_ReturnsEveryBusinessContact: the customer
-// notice goes to every business contact on the project, as the ServiceNow
+// notice goes to every business contact on the project, as the legacy
 // system does (confirmed by the user from real legacy emails with several
 // customer addresses), not just the first one found. Contacts without an
 // email, or without the role, are left out; order is kept.
@@ -250,7 +250,7 @@ func TestResolveCustomerContacts_ListsEachEmailOnce(t *testing.T) {
 // role value to what the API actually returns. csm-integration-service v1.1
 // (CSM Postgres) puts project roles in "roles" as upper-case enum labels
 // (BUSINESS_CONTACT, PORTAL_USER, SECURITY_CONTACT, LEAD_USER, ADMIN),
-// confirmed against a live response on 2026-10-01. ServiceNow access roles
+// confirmed against a live response on 2026-10-01. legacy access roles
 // such as sn_customerservice.customer, which is all v1.0 returns, never
 // count as a business contact.
 func TestResolveCustomerContacts_MatchesTheRealBusinessContactRole(t *testing.T) {

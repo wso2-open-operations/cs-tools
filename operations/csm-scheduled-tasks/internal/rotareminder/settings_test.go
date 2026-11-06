@@ -102,8 +102,9 @@ func TestSettings_ReplaceTheConfiguration(t *testing.T) {
 	}
 }
 
-// A failed read fails the run before anything is sent; nothing saved keeps
-// the configuration.
+// A failed read fails the run before anything is sent. With nothing saved
+// for the family the automatic reminders stay off: only the switches on the
+// Rota Access tab turn them on.
 func TestSettings_ReadFailureAndNothingSaved(t *testing.T) {
 	mail := &fakeEmail{}
 	cfg := weekendConfig("2026-10-18 20:00", "rota_weekend_notice")
@@ -112,8 +113,35 @@ func TestSettings_ReadFailureAndNothingSaved(t *testing.T) {
 		t.Errorf("err %v, sent %d", err, len(mail.sent))
 	}
 	cfg.Settings = fakeSettings{}
-	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, mail, cfg)(context.Background()); err != nil || len(mail.sent) != 5 {
-		t.Errorf("nothing saved: err %v, sent %d, want the summary and four invitations", err, len(mail.sent))
+	store := &fakeStore{}
+	if err := WeekendNotice(&fakeRota{assignments: fullWeekend()}, store, mail, cfg)(context.Background()); err != nil || len(mail.sent) != 0 || len(store.recorded) != 0 {
+		t.Errorf("nothing saved: err %v, sent %d, recorded %d; want nothing", err, len(mail.sent), len(store.recorded))
+	}
+	weekday := config("2026-10-19 10:00", weekdayRotations)
+	weekday.EmailsEnabled, weekday.Settings = true, fakeSettings{}
+	rota := &fakeRota{assignments: []teamschedule.Assignment{
+		assignment("Ann", "ann@example.com", "vega", "CRE_MORNING", "2026-10-20", "2026-10-20 06:00", "2026-10-20 09:00"),
+	}}
+	if err := WeekdayReminder(rota, mail, weekday)(context.Background()); err != nil || len(mail.sent) != 0 {
+		t.Errorf("weekday, nothing saved: err %v, sent %d; want nothing", err, len(mail.sent))
+	}
+}
+
+// Send now is asked for by hand, so it goes out although nothing is saved for
+// the family, with the configured values.
+func TestSettings_SendNowWorksWithNothingSaved(t *testing.T) {
+	weekday, weekend := manualConfigs("2026-10-19 10:00")
+	weekday.Settings, weekend.Settings = fakeSettings{}, fakeSettings{}
+	queue := &fakeQueue{waiting: []teamschedule.ReminderRequest{
+		{ID: "r1", Kind: "weekend"},
+		{ID: "t1", Kind: "weekend", Test: true, RequestedBy: "zoe@example.com"},
+	}}
+	mail := &fakeEmail{}
+	if err := ManualReminder(&fakeRota{assignments: fullWeekend()}, &fakeStore{}, queue, mail, weekday, weekend)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.reports) != 2 || queue.reports[0] != "r1 SENT Sent 5 emails." || queue.reports[1] != "t1 SENT Sent 5 emails to zoe@example.com (test)." {
+		t.Fatalf("reports %v", queue.reports)
 	}
 }
 
@@ -169,5 +197,27 @@ func TestSettings_OverrideCodeByCodeAndNeverTurnInvitesOn(t *testing.T) {
 	}
 	if cfg.Required["CRE_WEEKEND"] != 3 {
 		t.Error("the configured minimums were changed in place")
+	}
+}
+
+// A rotation switched off on the card loses its invitations; one switched on,
+// or not named, keeps them.
+func TestSettings_InviteRotations(t *testing.T) {
+	cfg := config("2026-10-16 15:00", weekdayRotations)
+	cfg.Invites = true
+	saved := savedSettings()
+	saved.InviteRotations = map[string]bool{"CRE_MORNING": false, "CRE_EVENING": true}
+	saved.WeekendCopyTo = []string{"head@example.com"}
+	cfg.Settings = fakeSettings{s: saved}
+	got, on, err := withSettings(context.Background(), cfg, false)
+	if err != nil || !on {
+		t.Fatalf("on %v, err %v", on, err)
+	}
+	if strings.Join(got.WeekendCopy, ",") != "head@example.com" {
+		t.Errorf("weekend copy %v, want the saved one", got.WeekendCopy)
+	}
+	if got.invitesFor("CRE_MORNING") || !got.invitesFor("CRE_EVENING") || !got.invitesFor("CRE_WEEKEND") {
+		t.Errorf("invitations: Morning %v, Evening %v, LK Weekend %v; want off, on, on",
+			got.invitesFor("CRE_MORNING"), got.invitesFor("CRE_EVENING"), got.invitesFor("CRE_WEEKEND"))
 	}
 }

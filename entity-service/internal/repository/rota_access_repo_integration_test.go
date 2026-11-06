@@ -77,7 +77,7 @@ func TestScheduleIntegration_RotaMarkerCountsWhileOnTheTeam(t *testing.T) {
 	if teams, _ := schedule.RotaMarkerTeamsFor(ctx, schedMemberEmail); len(teams) != 0 {
 		t.Fatalf("a marker who left the team still marks %v", teams)
 	}
-	markers, err := access.ListRotaMarkers(ctx, []string{"CRE"})
+	markers, err := access.ListRotaMarkers(ctx, []string{"CRE"}, nil)
 	if err != nil {
 		t.Fatalf("ListRotaMarkers: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestScheduleIntegration_RotaMarkerCountsWhileOnTheTeam(t *testing.T) {
 	if !found {
 		t.Fatal("the grant was not listed")
 	}
-	if sre, _ := access.ListRotaMarkers(ctx, []string{"SRE"}); slices.ContainsFunc(sre, func(m domain.RotaMarkerGrant) bool { return m.UserID == schedMemberID }) {
+	if sre, _ := access.ListRotaMarkers(ctx, []string{"SRE"}, nil); slices.ContainsFunc(sre, func(m domain.RotaMarkerGrant) bool { return m.UserID == schedMemberID }) {
 		t.Fatal("a CRE team's marker was listed under SRE")
 	}
 
@@ -273,5 +273,230 @@ func TestScheduleIntegration_TeamMemberAddAndRemove(t *testing.T) {
 	}
 	if n := members(schedLeadID); n == 0 {
 		t.Fatal("the lead was removed")
+	}
+}
+
+// membershipOf reads a person's rows on a team straight from the table:
+// the role and tier of each.
+func membershipOf(t *testing.T, ctx context.Context, pool *pgxpool.Pool, teamKey, userID string) [][2]string {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT m.role, COALESCE(m.alert_tier, '') FROM team_member m JOIN team t ON t.id = m.team_id
+		WHERE t.key = $1 AND m.user_id = $2 ORDER BY m.id`, teamKey, userID)
+	if err != nil {
+		t.Fatalf("read membership: %v", err)
+	}
+	defer rows.Close()
+	var out [][2]string
+	for rows.Next() {
+		var r [2]string
+		if err := rows.Scan(&r[0], &r[1]); err != nil {
+			t.Fatalf("scan membership: %v", err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func str(s string) *string { return &s }
+
+// Changing a membership writes the row and says so in the audit trail; a
+// tier another member holds, a lead, and somebody not on the team are all
+// left alone.
+func TestScheduleIntegration_TeamMemberRoleAndTier(t *testing.T) {
+	_, pool := newScheduleIntegrationRepo(t)
+	access := NewRotaAccessRepository(pool)
+	ctx := context.Background()
+	since := auditSince(t, ctx, pool)
+	t.Cleanup(func() { mustExec(t, pool, `DELETE FROM team_member WHERE user_id = $1`, schedOutsiderID) })
+
+	res, err := access.UpdateTeamMember(ctx, schedMemberID, schedTeamKey, schedMarkerActor,
+		domain.TeamMemberPatch{Role: str("sub_lead"), AlertTierSet: true, AlertTier: str("T1")})
+	if err != nil || !res.Updated || res.Membership.Role != "sub_lead" || res.Membership.AlertTier == nil || *res.Membership.AlertTier != "T1" {
+		t.Fatalf("update = %+v, %v; want sub_lead T1", res, err)
+	}
+	if got := membershipOf(t, ctx, pool, schedTeamKey, schedMemberID); len(got) != 1 || got[0] != [2]string{"sub_lead", "T1"} {
+		t.Fatalf("row after update = %v, want [[sub_lead T1]]", got)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_audit
+		WHERE table_name = 'team_member' AND action = 'UPDATE' AND actor = $1 AND changed_at >= $2`, schedMarkerActor, since); n != 1 {
+		t.Fatalf("audit rows for the update = %d, want 1", n)
+	}
+
+	// The same again changes nothing, and writes nothing.
+	res, err = access.UpdateTeamMember(ctx, schedMemberID, schedTeamKey, schedMarkerActor,
+		domain.TeamMemberPatch{Role: str("sub_lead"), AlertTierSet: true, AlertTier: str("T1")})
+	if err != nil || res.Updated || !res.Member {
+		t.Fatalf("repeat = %+v, %v; want no change", res, err)
+	}
+
+	// T1 has one holder: the second person is refused, row untouched.
+	if _, err := access.AddTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	res, err = access.UpdateTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor,
+		domain.TeamMemberPatch{AlertTierSet: true, AlertTier: str("T1")})
+	if err != nil || res.Updated || res.TierHolder != schedMemberID {
+		t.Fatalf("a taken tier = %+v, %v; want refused naming the holder", res, err)
+	}
+	if got := membershipOf(t, ctx, pool, schedTeamKey, schedOutsiderID); len(got) != 1 || got[0] != [2]string{"engineer", ""} {
+		t.Fatalf("row after a refused tier = %v, want [[engineer ]]", got)
+	}
+
+	// Role alone leaves the tier; null clears it.
+	res, err = access.UpdateTeamMember(ctx, schedMemberID, schedTeamKey, schedMarkerActor, domain.TeamMemberPatch{Role: str("engineer")})
+	if err != nil || !res.Updated || res.Membership.AlertTier == nil || *res.Membership.AlertTier != "T1" {
+		t.Fatalf("role only = %+v, %v; want engineer, tier kept", res, err)
+	}
+	res, err = access.UpdateTeamMember(ctx, schedMemberID, schedTeamKey, schedMarkerActor, domain.TeamMemberPatch{AlertTierSet: true})
+	if err != nil || !res.Updated || res.Membership.AlertTier != nil {
+		t.Fatalf("clear = %+v, %v; want no tier", res, err)
+	}
+	if got := membershipOf(t, ctx, pool, schedTeamKey, schedMemberID); len(got) != 1 || got[0] != [2]string{"engineer", ""} {
+		t.Fatalf("row after clearing = %v, want [[engineer ]]", got)
+	}
+
+	// A lead is not changed, and neither is somebody who is not on the team.
+	res, err = access.UpdateTeamMember(ctx, schedLeadID, schedTeamKey, schedMarkerActor, domain.TeamMemberPatch{Role: str("engineer")})
+	if err != nil || !res.Lead || res.Updated {
+		t.Fatalf("a lead = %+v, %v; want kept as lead", res, err)
+	}
+	if got := membershipOf(t, ctx, pool, schedTeamKey, schedLeadID); len(got) != 1 || got[0][0] != "lead" {
+		t.Fatalf("the lead's row = %v, want lead", got)
+	}
+	if res, err := access.UpdateTeamMember(ctx, schedOtherID, schedTeamKey, schedMarkerActor, domain.TeamMemberPatch{Role: str("sub_lead")}); err != nil || res.Member {
+		t.Fatalf("a non-member = %+v, %v; want not a member", res, err)
+	}
+	if _, err := access.UpdateTeamMember(ctx, schedMemberID, "no-such-team", schedMarkerActor, domain.TeamMemberPatch{Role: str("sub_lead")}); err == nil {
+		t.Fatal("updating on a team that does not exist succeeded")
+	}
+}
+
+// A move is one transaction: the person is on the target as the same
+// non-lead role without a tier and off the source without their marker, with
+// both writes audited; whatever keeps them on the source keeps everything as
+// it was; and a failure of the delete takes the insert back with it.
+func TestScheduleIntegration_TeamMemberMove(t *testing.T) {
+	_, pool := newScheduleIntegrationRepo(t)
+	access := NewRotaAccessRepository(pool)
+	ctx := context.Background()
+	since := auditSince(t, ctx, pool)
+	t.Cleanup(func() {
+		mustExec(t, pool, `DROP TRIGGER IF EXISTS move_fixture_fail ON team_member`)
+		mustExec(t, pool, `DROP FUNCTION IF EXISTS move_fixture_fail()`)
+		mustExec(t, pool, `DELETE FROM team_schedule_assignment WHERE created_by = 'move-fixture'`)
+		mustExec(t, pool, `DELETE FROM team_member WHERE user_id = $1`, schedOutsiderID)
+		mustExec(t, pool, `DELETE FROM team_schedule_rota_marker WHERE user_id = $1`, schedOutsiderID)
+	})
+	move := func() domain.TeamMemberMove {
+		t.Helper()
+		res, err := access.MoveTeamMember(ctx, schedOutsiderID, schedTeamKey, schedOtherTeam, schedMarkerActor)
+		if err != nil {
+			t.Fatalf("move: %v", err)
+		}
+		return res
+	}
+	onSource := func() [][2]string { return membershipOf(t, ctx, pool, schedTeamKey, schedOutsiderID) }
+	onTarget := func() [][2]string { return membershipOf(t, ctx, pool, schedOtherTeam, schedOutsiderID) }
+
+	// Not on the source: nothing to move.
+	if res := move(); res.OnSource || res.Moved {
+		t.Fatalf("move of a non-member = %+v", res)
+	}
+	if _, err := access.AddTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if _, err := access.UpdateTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor, domain.TeamMemberPatch{Role: str("sub_lead")}); err != nil {
+		t.Fatalf("make sub_lead: %v", err)
+	}
+	mustExec(t, pool, `INSERT INTO team_schedule_rota_marker (created_by, updated_by, user_id, team_key)
+		VALUES ('move-fixture', 'move-fixture', $1, $2)`, schedOutsiderID, schedTeamKey)
+
+	// An upcoming turn keeps them where they are.
+	mustExec(t, pool, `
+		INSERT INTO team_schedule_assignment
+		  (user_id, team_id, team_key, shift_id, rota_date, starts_at, ends_at, created_by, updated_by)
+		SELECT $1::uuid, $2::uuid, $3, s.id, (NOW() + interval '2 days')::date,
+		       NOW() + interval '2 days', NOW() + interval '2 days 4 hours', 'move-fixture', 'move-fixture'
+		  FROM team_schedule_shift s ORDER BY s.code LIMIT 1`, schedOutsiderID, schedTeamID, schedTeamKey)
+	if res := move(); res.Moved || res.UpcomingTurns != 1 || len(onTarget()) != 0 || len(onSource()) != 1 {
+		t.Fatalf("move with a turn = %+v, source %v, target %v; want refused, nothing written", res, onSource(), onTarget())
+	}
+	mustExec(t, pool, `DELETE FROM team_schedule_assignment WHERE created_by = 'move-fixture'`)
+
+	// A tier on the source keeps them.
+	mustExec(t, pool, `UPDATE team_member m SET alert_tier = 'T2' FROM team t
+		WHERE t.id = m.team_id AND t.key = $1 AND m.user_id = $2`, schedTeamKey, schedOutsiderID)
+	if res := move(); res.Moved || res.AlertTier != "T2" || len(onTarget()) != 0 || len(onSource()) != 1 {
+		t.Fatalf("move with a tier = %+v; want refused, nothing written", res)
+	}
+	mustExec(t, pool, `UPDATE team_member m SET alert_tier = NULL FROM team t
+		WHERE t.id = m.team_id AND t.key = $1 AND m.user_id = $2`, schedTeamKey, schedOutsiderID)
+
+	// The second half failing takes the first back with it.
+	mustExec(t, pool, `
+		CREATE FUNCTION move_fixture_fail() RETURNS trigger AS $$
+		BEGIN
+		  IF OLD.user_id = '`+schedOutsiderID+`'::uuid THEN RAISE EXCEPTION 'move fixture: delete refused'; END IF;
+		  RETURN OLD;
+		END $$ LANGUAGE plpgsql`)
+	mustExec(t, pool, `CREATE TRIGGER move_fixture_fail BEFORE DELETE ON team_member
+		FOR EACH ROW EXECUTE FUNCTION move_fixture_fail()`)
+	if _, err := access.MoveTeamMember(ctx, schedOutsiderID, schedTeamKey, schedOtherTeam, schedMarkerActor); err == nil {
+		t.Fatal("a move whose delete fails reported success")
+	}
+	if len(onTarget()) != 0 || len(onSource()) != 1 {
+		t.Fatalf("after a failed move: source %v, target %v; want the insert rolled back", onSource(), onTarget())
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_rota_marker WHERE user_id = $1 AND team_key = $2`, schedOutsiderID, schedTeamKey); n != 1 {
+		t.Fatalf("marker rows after a failed move = %d, want 1", n)
+	}
+	mustExec(t, pool, `DROP TRIGGER move_fixture_fail ON team_member`)
+
+	// Nothing keeps them: they arrive as sub_lead with no tier, and leave.
+	res := move()
+	if !res.Moved || res.Membership.Role != "sub_lead" || res.Membership.TeamKey != schedOtherTeam || res.Membership.AlertTier != nil {
+		t.Fatalf("move = %+v; want moved as sub_lead", res)
+	}
+	if got := onTarget(); len(got) != 1 || got[0] != [2]string{"sub_lead", ""} {
+		t.Fatalf("target rows = %v, want [[sub_lead ]]", got)
+	}
+	if got := onSource(); len(got) != 0 {
+		t.Fatalf("source rows = %v, want none", got)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_rota_marker WHERE user_id = $1 AND team_key = $2`, schedOutsiderID, schedTeamKey); n != 0 {
+		t.Fatalf("the source marker outlived the move (%d rows)", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_audit
+		WHERE table_name = 'team_member' AND action = 'INSERT' AND actor = $1 AND changed_at >= $2
+		  AND new_row->>'user_id' = $3 AND new_row->>'role' = 'sub_lead'`, schedMarkerActor, since, schedOutsiderID); n < 1 {
+		t.Fatalf("the insert on the target was not audited (%d)", n)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM team_schedule_audit
+		WHERE table_name = 'team_member' AND action = 'DELETE' AND actor = $1 AND changed_at >= $2
+		  AND old_row->>'user_id' = $3`, schedMarkerActor, since, schedOutsiderID); n != 1 {
+		t.Fatalf("the delete on the source was audited %d times, want 1", n)
+	}
+
+	// Again: already there, nothing written. On both: reported, nothing written.
+	if res := move(); res.Moved || !res.OnTarget || res.OnSource || res.Membership.Role != "sub_lead" {
+		t.Fatalf("repeat move = %+v; want already moved", res)
+	}
+	if _, err := access.AddTeamMember(ctx, schedOutsiderID, schedTeamKey, schedMarkerActor); err != nil {
+		t.Fatalf("add back: %v", err)
+	}
+	if res := move(); res.Moved || !res.OnSource || !res.OnTarget || len(onSource()) != 1 || len(onTarget()) != 1 {
+		t.Fatalf("move when on both = %+v; want refused, both rows kept", res)
+	}
+
+	// A lead is not moved.
+	lead, err := access.MoveTeamMember(ctx, schedLeadID, schedTeamKey, schedOtherTeam, schedMarkerActor)
+	if err != nil || lead.Moved || !lead.Lead {
+		t.Fatalf("move of a lead = %+v, %v; want kept as lead", lead, err)
+	}
+	if n := len(membershipOf(t, ctx, pool, schedTeamKey, schedLeadID)); n != 1 {
+		t.Fatalf("the lead's source rows = %d, want 1", n)
+	}
+	if _, err := access.MoveTeamMember(ctx, schedOutsiderID, schedTeamKey, "no-such-team", schedMarkerActor); err == nil {
+		t.Fatal("moving to a team that does not exist succeeded")
 	}
 }

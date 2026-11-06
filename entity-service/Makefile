@@ -38,7 +38,7 @@ lint:
 #      each 1NNNNN file's own doc comment for why its specific dependencies are
 #      satisfied by that ordering alone, with no interleaving needed.
 #   3. The legacy 6-digit 0NNNNN_*.up.sql stragglers (numbered below 100000:
-#      000020-000105) that predate this whole scheme and still depend on
+#      000086-000105) that predate this whole scheme and still depend on
 #      tables the 4-digit files create (e.g. 000087 triggers on `outage`,
 #      created by 0083). *.down.sql files are rollbacks and never run here.
 # A plain `migrations/*.sql` glob sorts every 6-digit file *before* 0001

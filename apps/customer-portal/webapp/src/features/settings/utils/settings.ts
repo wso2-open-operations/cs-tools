@@ -127,7 +127,7 @@ export function getRoleLabel(roles: string[] | undefined): string {
 export function getRoleBadges(contact: ProjectContact): SettingsRoleBadge[] {
   const badges: SettingsRoleBadge[] = [];
 
-  if (contact.isCsAdmin) {
+  if (contact.isCsAdmin || contact.isAccountAdmin) {
     badges.push({ label: "Admin", Icon: Crown, chipColor: "primary" });
   }
 

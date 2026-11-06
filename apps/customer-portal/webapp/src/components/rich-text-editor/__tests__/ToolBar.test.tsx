@@ -20,6 +20,7 @@ import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import Toolbar from "@components/rich-text-editor/ToolBar";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import { LinkNode } from "@lexical/link";
@@ -37,14 +38,16 @@ const initialConfig = {
 function renderToolbar(props: { onAttachmentClick?: () => void; disabled?: boolean } = {}) {
   return render(
     <ThemeProvider theme={createTheme()}>
-      <LexicalComposer initialConfig={initialConfig}>
-        <RichTextPlugin
-          contentEditable={<ContentEditable data-testid="editable" />}
-          placeholder={null}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <Toolbar {...props} />
-      </LexicalComposer>
+      <ErrorBannerProvider>
+        <LexicalComposer initialConfig={initialConfig}>
+          <RichTextPlugin
+            contentEditable={<ContentEditable data-testid="editable" />}
+            placeholder={null}
+            ErrorBoundary={LexicalErrorBoundary}
+          />
+          <Toolbar {...props} />
+        </LexicalComposer>
+      </ErrorBannerProvider>
     </ThemeProvider>,
   );
 }

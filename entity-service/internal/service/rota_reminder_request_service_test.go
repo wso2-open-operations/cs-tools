@@ -19,6 +19,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,6 +90,14 @@ func TestRotaReminderRequest_WhoMayAsk(t *testing.T) {
 	var invalid *apierror.ValidationError
 	if _, err := newReminderRequests(repo, "CRE").Create(callerWithRoles("ann@example.com"), "CRE", domain.CreateRotaReminderRequest{Kind: "monthly"}); !errors.As(err, &invalid) || repo.created != "" {
 		t.Errorf("bad kind: %v, created %q", err, repo.created)
+	}
+	// Send now offers the Morning and the Evening apart; weekday (both) stays
+	// accepted for a portal not yet updated.
+	for _, kind := range []string{"morning", "Evening", "weekday", "weekend"} {
+		repo := &fakeReminderRequestRepo{}
+		if _, err := newReminderRequests(repo, "CRE").Create(callerWithRoles("ann@example.com"), "CRE", domain.CreateRotaReminderRequest{Kind: kind}); err != nil || repo.created != "ann@example.com CRE "+strings.ToLower(kind) {
+			t.Errorf("kind %q: err %v, created %q", kind, err, repo.created)
+		}
 	}
 }
 

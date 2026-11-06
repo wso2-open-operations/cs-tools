@@ -149,6 +149,10 @@ func (a Attachment) MarshalJSON() ([]byte, error) {
 	}{a.ContentName, a.ContentType, values})
 }
 
+// maxSendEmailResponse caps how much of a send-email response is read:
+// 1 MiB, far above the acknowledgement the service returns.
+const maxSendEmailResponse = 1 << 20
+
 // SendEmail sends a plain HTML email via the notification service. The
 // sender address is always the client's configured FromAddress. A request
 // with no recipients is a silent no-op — see registry.Task.To's own doc
@@ -192,9 +196,14 @@ func (c *Client) SendEmailWithAttachments(ctx context.Context, to, cc []string, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// The answer is a small acknowledgement; anything larger is not read
+	// into memory.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxSendEmailResponse+1))
 	if err != nil {
 		return fmt.Errorf("notify: read send-email response: %w", err)
+	}
+	if len(respBody) > maxSendEmailResponse {
+		return fmt.Errorf("notify: send-email response larger than %d bytes", maxSendEmailResponse)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		const maxErrBody = 256

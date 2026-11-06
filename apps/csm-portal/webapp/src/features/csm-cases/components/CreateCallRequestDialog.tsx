@@ -28,6 +28,7 @@ import {
 } from "@wso2/oxygen-ui";
 import { Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import type {
   CaseState,
   SeverityOrUnset,
@@ -300,8 +301,10 @@ export function CreateCallRequestDialog({
             }}
           />
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {/* At least one slot is needed (Submit stays disabled until then);
+                the pickers have no label of their own, so the caption carries the mark. */}
             <Typography variant="caption" color="text.secondary">
-              Preferred times — enter in your timezone ({timeZone}); stored as
+              Preferred times<RequiredMark /> — enter in your timezone ({timeZone}); stored as
               UTC. Each must be at least {formatLeadTime(leadMinutes)} from now.
               Add up to {MAX_TIME_SLOTS} options.
             </Typography>

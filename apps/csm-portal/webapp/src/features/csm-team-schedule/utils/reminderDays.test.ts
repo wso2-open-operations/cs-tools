@@ -28,6 +28,15 @@ const FRI = new Date("2026-10-23T06:30:00Z");
 const SAT = new Date("2026-10-24T06:30:00Z");
 const SUN = new Date("2026-10-25T06:30:00Z");
 
+describe("reminderDays: morning and evening", () => {
+  it("are the next working day, like weekday", () => {
+    for (const now of [MON, THU, FRI, SAT, SUN]) {
+      expect(reminderDays("morning", now)).toEqual(reminderDays("weekday", now));
+      expect(reminderDays("evening", now)).toEqual(reminderDays("weekday", now));
+    }
+  });
+});
+
 describe("reminderDays: weekday", () => {
   it("is the next day from Monday to Thursday", () => {
     expect(reminderDays("weekday", MON)).toEqual(["2026-10-20"]);

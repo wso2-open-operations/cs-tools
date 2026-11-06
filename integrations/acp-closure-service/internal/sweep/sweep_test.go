@@ -342,8 +342,8 @@ func TestProcessProject_CustomerAudienceWindowSendsNoBusinessContactNoticeWhenNo
 	startDate := now.AddDate(-1, 0, 0)
 	proj := project{
 		ID:         "p1",
-		Name:       "HFC Subscription - Subscription",
-		ProjectKey: "HFCSUBS",
+		Name:       "Example Finance Subscription - Subscription",
+		ProjectKey: "EXFINSUBS",
 		Account:    &projectAccountRef{ID: "a1"},
 		StartDate:  &startDate,
 		EndDate:    &endDate,
@@ -367,7 +367,7 @@ func TestProcessProject_CustomerAudienceWindowSendsNoBusinessContactNoticeWhenNo
 		t.Errorf("internal Recipients.AccountOwner.Email = %q, want %q", internal.Recipients.AccountOwner.Email, "jordan.perera@wso2.example")
 	}
 
-	const wantSubject = "[Urgent] [ACP] No Business Contacts Specified for Project HFC Subscription - Subscription"
+	const wantSubject = "[Urgent] [ACP] No Business Contacts Specified for Project Example Finance Subscription - Subscription"
 	if nudge.Subject != wantSubject {
 		t.Errorf("nudge Subject = %q, want %q", nudge.Subject, wantSubject)
 	}
@@ -387,8 +387,8 @@ func TestProcessProject_CustomerAudienceWindowSendsNoBusinessContactNoticeWhenNo
 		t.Error("nudge Body is empty, want the no-business-contact template populated")
 	}
 	wantBodyContains := []string{
-		"Project Name: HFC Subscription - Subscription",
-		"Project Key: HFCSUBS",
+		"Project Name: Example Finance Subscription - Subscription",
+		"Project Key: EXFINSUBS",
 		"Account Owner: Jordan Perera",
 	}
 	for _, want := range wantBodyContains {
@@ -433,7 +433,7 @@ func TestProcessProject_CustomerAudienceWindowSkipsAccountContactLookupWhenNoAcc
 }
 
 // TestProcessProject_CustomerAudienceWindowFetchContactsFailureSendsNothing
-// is a regression test (Sajith Ekanayake): a transient
+// is a regression test from a review: a transient
 // fetchContacts failure must not leave the internal notice already sent
 // with no corresponding suspensionProcessState record — that combination
 // causes a duplicate internal-notice resend on the next sweep, since the
@@ -681,8 +681,8 @@ func TestProcessProject_SuspendGuardSkipsAlreadySuspendedProject(t *testing.T) {
 
 // TestProcessProject_SuspendGuardSkipsWhenEndDateClosureStateIsClosed
 // verifies the guard treats "Closed" as already-handled: it is what suspend()
-// writes now, and what legacy-suspended projects hold (Postman, project
-// acac149b-eba1-4714-fcf5-f5dabad0cdb1, closureState="Suspended",
+// writes now, and what legacy-suspended projects hold (seen in Postman on a
+// real project: closureState="Suspended",
 // endDateClosureState="Closed"). Without it every run would suspend again.
 func TestProcessProject_SuspendGuardSkipsWhenEndDateClosureStateIsClosed(t *testing.T) {
 	reader := &mockEntityReader{}
@@ -767,7 +767,7 @@ func TestProcessProject_NothingDueIsNoOp(t *testing.T) {
 // called with the project's account ID.
 func TestProcessProject_ReminderUsesRealAccountContacts(t *testing.T) {
 	const realGetAccountResponse = `{
-		"id": "f213fdd1-1b4b-a650-a002-c9d3604bcbac",
+		"id": "00000000-0000-4000-8000-000000000002",
 		"name": "ACP Test Partner Account",
 		"technicalOwner": {
 			"id": "tech-1",
@@ -800,7 +800,7 @@ func TestProcessProject_ReminderUsesRealAccountContacts(t *testing.T) {
 	endDate := now.AddDate(0, 0, 89) // fires the 90-day (internal-only) window
 	proj := project{
 		ID:      "p1",
-		Account: &projectAccountRef{ID: "f213fdd1-1b4b-a650-a002-c9d3604bcbac"},
+		Account: &projectAccountRef{ID: "00000000-0000-4000-8000-000000000002"},
 		EndDate: &endDate,
 	}
 
@@ -809,7 +809,7 @@ func TestProcessProject_ReminderUsesRealAccountContacts(t *testing.T) {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 
-	if gotAccountID != "f213fdd1-1b4b-a650-a002-c9d3604bcbac" {
+	if gotAccountID != "00000000-0000-4000-8000-000000000002" {
 		t.Errorf("GetAccount called with id = %q, want the project's account ID", gotAccountID)
 	}
 	if len(ntf.sent) != 1 {
@@ -862,7 +862,7 @@ func TestProcessProject_ReminderHasEmptyAccountOwnerEmailWhenNoAccountManager(t 
 // render the "Project Name" field as a Salesforce link (see
 // notify.EmailNotifier.Send / projectNameFieldRowHTML).
 func TestBaseNotice_IncludesProjectSfID(t *testing.T) {
-	sfID := "a0d4U00000aUJURQA4"
+	sfID := "a0d000000000002AAA"
 	proj := project{ID: "p1", Name: "Test Project", SfID: &sfID}
 
 	notice := baseNotice(proj, closure.NoticeWindow0)
@@ -886,7 +886,7 @@ func TestBaseNotice_ProjectSfIDEmptyWhenAbsent(t *testing.T) {
 }
 
 // TestInternalNoticeSubject covers the always-[ACP]-prefixed internal
-// subject template directly, confirmed against real examples from Chamara:
+// subject template directly, confirmed against real examples from the product owner:
 // every window (90 through 0) gets the prefix — it marks "internal
 // audience," not "90/60/30 window" specifically (an earlier version of this
 // logic had that backwards). Day-0 uses distinct "Project Suspension
@@ -902,9 +902,9 @@ func TestInternalNoticeSubject(t *testing.T) {
 		{
 			name:        "90-day window",
 			window:      90,
-			projectName: "TICKETNETWORK - Subscription",
-			accountName: "TicketNetwork",
-			want:        "[ACP] 90 Days Reminder of Project for TICKETNETWORK - Subscription of TicketNetwork",
+			projectName: "EXAMPLETIX - Subscription",
+			accountName: "ExampleTix",
+			want:        "[ACP] 90 Days Reminder of Project for EXAMPLETIX - Subscription of ExampleTix",
 		},
 		{
 			name:        "60-day window",
@@ -923,26 +923,26 @@ func TestInternalNoticeSubject(t *testing.T) {
 		{
 			name:        "15-day window is still [ACP]-prefixed",
 			window:      15,
-			projectName: "SSC ICT - Subscription",
-			accountName: "SSC-ICT",
-			want:        "[ACP] 15 Days Reminder of Project for SSC ICT - Subscription of SSC-ICT",
+			projectName: "Example ICT - Subscription",
+			accountName: "Example-ICT",
+			want:        "[ACP] 15 Days Reminder of Project for Example ICT - Subscription of Example-ICT",
 		},
 		{
 			name:        "7-day window is still [ACP]-prefixed",
 			window:      7,
 			projectName: "APIM & Integration - Subscription",
-			accountName: "Department of Science & Technology (DOST)",
-			want:        "[ACP] 7 Days Reminder of Project for APIM & Integration - Subscription of Department of Science & Technology (DOST)",
+			accountName: "Example Department of Science & Technology",
+			want:        "[ACP] 7 Days Reminder of Project for APIM & Integration - Subscription of Example Department of Science & Technology",
 		},
 		{
 			name:        "day-0 uses suspension wording, not days-remaining",
 			window:      0,
-			projectName: "Kotak Insurance - Subscription",
-			accountName: "Kotak Life Insurance company Ltd",
-			want:        "[ACP] Project Suspension Notice of Kotak Insurance - Subscription of Kotak Life Insurance company Ltd",
+			projectName: "Example Insurance - Subscription",
+			accountName: "Example Insurance Ltd",
+			want:        "[ACP] Project Suspension Notice of Example Insurance - Subscription of Example Insurance Ltd",
 		},
 		{
-			// Regression test (Sajith Ekanayake): a
+			// Regression test from a review: a
 			// project with no linked account previously produced a
 			// dangling "...of " with a trailing space and nothing after
 			// it, in a real outbound email subject.
@@ -983,20 +983,20 @@ func TestCustomerNoticeSubject(t *testing.T) {
 		{
 			name:        "15-day window",
 			window:      15,
-			projectName: "SSC ICT - Subscription",
-			want:        "Upcoming Project Suspension Notice - SSC ICT - Subscription",
+			projectName: "Example ICT - Subscription",
+			want:        "Upcoming Project Suspension Notice - Example ICT - Subscription",
 		},
 		{
 			name:        "7-day window",
 			window:      7,
-			projectName: "SSC ICT - Subscription",
-			want:        "Upcoming Project Suspension Notice - SSC ICT - Subscription",
+			projectName: "Example ICT - Subscription",
+			want:        "Upcoming Project Suspension Notice - Example ICT - Subscription",
 		},
 		{
 			name:        "day-0 uses past tense, no \"Upcoming\"",
 			window:      0,
-			projectName: "Kotak Insurance - Subscription",
-			want:        "Project Suspension Notice - Kotak Insurance - Subscription",
+			projectName: "Example Insurance - Subscription",
+			want:        "Project Suspension Notice - Example Insurance - Subscription",
 		},
 	}
 
@@ -1018,20 +1018,20 @@ func TestInternalNoticeBody(t *testing.T) {
 	startDate := time.Date(2024, 11, 10, 0, 0, 0, 0, time.UTC)
 	endDate := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
 	proj := project{
-		Name:       "TICKETNETWORK - Subscription",
-		ProjectKey: "TICKETNETWORKPROD",
+		Name:       "EXAMPLETIX - Subscription",
+		ProjectKey: "EXAMPLETIXPROD",
 		StartDate:  &startDate,
 		EndDate:    &endDate,
 	}
 
 	t.Run("day-count window", func(t *testing.T) {
-		got := internalNoticeBody(90, proj, "Lochana De Alwis")
+		got := internalNoticeBody(90, proj, "Lee Example")
 		wantContains := []string{
-			"Dear Lochana De Alwis",
+			"Dear Lee Example",
 			"non renewed contract",
-			"Project Name: TICKETNETWORK - Subscription",
-			"Project Key: TICKETNETWORKPROD",
-			"Account Owner: Lochana De Alwis",
+			"Project Name: EXAMPLETIX - Subscription",
+			"Project Key: EXAMPLETIXPROD",
+			"Account Owner: Lee Example",
 			"Start Date: 2024-11-10",
 			"End Date: 2026-11-09",
 			"Best Regards,\nWSO2 Team",
@@ -1044,12 +1044,12 @@ func TestInternalNoticeBody(t *testing.T) {
 	})
 
 	t.Run("day-0 window uses suspension wording", func(t *testing.T) {
-		got := internalNoticeBody(0, proj, "Rajat Mehta")
+		got := internalNoticeBody(0, proj, "Riley Example")
 		wantContains := []string{
-			"Dear Rajat Mehta",
+			"Dear Riley Example",
 			"has been suspended",
 			"reinitiate the suspended support account",
-			"Account Owner: Rajat Mehta",
+			"Account Owner: Riley Example",
 		}
 		for _, want := range wantContains {
 			if !strings.Contains(got, want) {
@@ -1067,7 +1067,7 @@ func TestInternalNoticeBody(t *testing.T) {
 // tense at day-0, and no greeting in either case.
 func TestCustomerNoticeBody(t *testing.T) {
 	endDate := time.Date(2026, 8, 24, 0, 0, 0, 0, time.UTC)
-	proj := project{Name: "SSC ICT - Subscription", EndDate: &endDate}
+	proj := project{Name: "Example ICT - Subscription", EndDate: &endDate}
 
 	t.Run("day-count window uses future tense and US date format", func(t *testing.T) {
 		got := customerNoticeBody(15, proj)

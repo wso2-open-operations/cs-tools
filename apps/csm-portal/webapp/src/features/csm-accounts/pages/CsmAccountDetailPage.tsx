@@ -29,7 +29,7 @@ import {
   TableRow,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, Pencil } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, GitCompare, Pencil } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, type ReactNode, useState } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import { BackendApiError } from "@api/backend/client";
@@ -44,6 +44,7 @@ import {
 } from "@features/csm-accounts/types/csmAccounts";
 import DirectoryEntityChip from "@features/csm-admin/components/DirectoryEntityChip";
 import QueryErrorState from "@components/QueryErrorState";
+import SalesforceResyncDialog from "@features/csm-admin/salesforce-resync/SalesforceResyncDialog";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 // Unused while EscalationsSection below is commented out — see that
@@ -357,7 +358,8 @@ export default function CsmAccountDetailPage(): JSX.Element {
   // action that would 403 for everyone else.
   const { data: me } = useGetUsersMe();
   const isAdmin = (me?.roles ?? []).some((r) => r.toLowerCase() === "admin");
-  const { isSplAudience } = usePortalAccess();
+  const { isSplAudience, isAdmin: canCompareWithSalesforce } = usePortalAccess();
+  const [compareOpen, setCompareOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -411,6 +413,20 @@ export default function CsmAccountDetailPage(): JSX.Element {
         )}
         {deactivationState === "past" && (
           <Chip size="small" label="Deactivated" color="default" variant="outlined" />
+        )}
+        {/* UX nicety only: the backend enforces the admin gate and a 403 is
+            shown inside the dialog. */}
+        {canCompareWithSalesforce && (
+          <Button
+            variant="outlined"
+            size="small"
+            className="csm-print-hide"
+            startIcon={<GitCompare size={16} />}
+            onClick={() => setCompareOpen(true)}
+            sx={{ ml: "auto" }}
+          >
+            Compare with Salesforce
+          </Button>
         )}
       </Box>
 
@@ -530,6 +546,10 @@ export default function CsmAccountDetailPage(): JSX.Element {
       {/* {isSplAudience && <EscalationsSection accountId={a.id} />} */}
       {isSplAudience && a.driveLocation && (
         <ArtifactsSection driveLocation={a.driveLocation} />
+      )}
+
+      {compareOpen && (
+        <SalesforceResyncDialog open scope="account" id={a.id} onClose={() => setCompareOpen(false)} />
       )}
 
       {editTeamsOpen && (

@@ -14,7 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { BeProblemSearchFilters, BeProblemState } from "@api/backend/types";
+import type {
+  BeProblemFieldFilter,
+  BeProblemSearchFilters,
+  BeProblemState,
+} from "@api/backend/types";
 
 type ChipColor = "default" | "info" | "warning" | "success" | "error";
 
@@ -112,15 +116,14 @@ export function getNextProblemTransition(
 
 /**
  * Filters for the problems list. Deliberately just search + state + SRE
- * team — see the caveat on `BeProblemSearchFilters.states` in
- * `api/backend/types.ts` (not yet confirmed live against the backend).
+ * team; state and SRE team are both sent as generic `filters` entries.
  */
 export interface ProblemFilters {
   search: string;
   states: BeProblemState[];
-  /** Selected SRE team `sreGroupId`s — sent as a generic
+  /** Selected SRE team `sreGroupId`s, sent as a generic
    * `{ field: "assignmentGroupId", op: "in" }` filter entry (see
-   * `buildProblemSearchFilters`), not a named payload field. */
+   * `buildProblemSearchFilters`). */
   sreTeamIds: string[];
 }
 
@@ -146,13 +149,16 @@ export function buildProblemSearchFilters(
   filters: ProblemFilters,
   debouncedSearch: string,
 ): BeProblemSearchFilters {
+  const predicates: BeProblemFieldFilter[] = [
+    ...(filters.states.length > 0
+      ? [{ field: "state" as const, op: "in" as const, values: [...filters.states] }]
+      : []),
+    ...(filters.sreTeamIds.length > 0
+      ? [{ field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds }]
+      : []),
+  ];
   return {
     ...(debouncedSearch.length > 0 && { searchQuery: debouncedSearch }),
-    ...(filters.states.length > 0 && { states: filters.states }),
-    ...(filters.sreTeamIds.length > 0 && {
-      filters: [
-        { field: "assignmentGroupId" as const, op: "in" as const, values: filters.sreTeamIds },
-      ],
-    }),
+    ...(predicates.length > 0 && { filters: predicates }),
   };
 }

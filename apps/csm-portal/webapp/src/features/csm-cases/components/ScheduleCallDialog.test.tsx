@@ -81,6 +81,20 @@ describe("ScheduleCallDialog", () => {
     );
   });
 
+  it("marks the preferred-time choice required: an asterisk on its heading and aria-required on the radio list", () => {
+    renderWithTarget(makeCallRequest(["12/31/2027 08:45:00"]));
+    const group = screen.getByRole("radiogroup", { name: /^choose a time$/i });
+    expect(group).toHaveAttribute("aria-required", "true");
+    const heading = screen.getByText("Choose a time");
+    expect(heading.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+  });
+
+  it("shows no time choice when the request has no preferred times", () => {
+    renderWithTarget(makeCallRequest([]));
+    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(screen.queryByText("Choose a time")).not.toBeInTheDocument();
+  });
+
   it("blocks a preferred time in the past and does not submit", () => {
     const { onSubmit } = renderWithTarget(
       makeCallRequest(["01/01/2020 08:45:00"]),

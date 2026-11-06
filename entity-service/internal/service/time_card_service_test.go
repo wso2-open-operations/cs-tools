@@ -19,7 +19,10 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -542,6 +545,117 @@ func TestTimeCardService_UpdateTimeCard_RejectsSelfApprover(t *testing.T) {
 	}
 }
 
+// TestTimeCardService_CreateTimeCard_PerCardLimit: the limit is 480 minutes
+// per card (sum of the five duration fields). 481 is rejected before the
+// repository is called, 480 is accepted, and a second card on the same
+// case/day is judged on its own, not against a cumulative total.
+func TestTimeCardService_CreateTimeCard_PerCardLimit(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+
+	t.Run("481 minutes in one field is rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing = 481
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("481 minutes summed across fields is rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing, req.TimeSettingUp, req.TimeReproducingDebugging, req.TimeProvidingSolution, req.TimePatching = 100, 100, 100, 100, 81
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("values whose sum would overflow are rejected", func(t *testing.T) {
+		req := validCreateTimeCardRequest()
+		req.TimeAnalyzing, req.TimeSettingUp = math.MaxInt64, 1
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				t.Fatal("repository.CreateTimeCard must not be called for an over-limit card")
+				return domain.TimeCardView{}, nil
+			},
+		}
+		_, err := NewTimeCardService(repo, userRepo).CreateTimeCard(ctx, req)
+		if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+			t.Fatalf("error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+		}
+	})
+
+	t.Run("480 then 30 on the same case and day are both accepted", func(t *testing.T) {
+		calls := 0
+		repo := &stubTimeCardRepo{
+			createTimeCard: func(context.Context, domain.CreateTimeCardRequest, string) (domain.TimeCardView, error) {
+				calls++
+				return domain.TimeCardView{ID: testUUID}, nil
+			},
+		}
+		svc := NewTimeCardService(repo, userRepo)
+		for _, minutes := range []int{480, 30} {
+			req := validCreateTimeCardRequest()
+			req.TimeAnalyzing = minutes
+			if _, err := svc.CreateTimeCard(ctx, req); err != nil {
+				t.Fatalf("CreateTimeCard(%d) error = %v, want success", minutes, err)
+			}
+		}
+		if calls != 2 {
+			t.Errorf("repository.CreateTimeCard calls = %d, want 2", calls)
+		}
+	})
+}
+
+// TestTimeCardService_UpdateTimeCard_PerCardLimit: an edit supplying
+// over-limit minutes is rejected before the repository is called; the
+// merged-total check against stored values is the repository's own (see its
+// integration tests).
+func TestTimeCardService_UpdateTimeCard_PerCardLimit(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	userRepo := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+	over, ok := 481, 480
+
+	repo := &stubTimeCardRepo{
+		updateTimeCardFields: func(_ context.Context, req domain.UpdateTimeCardRequest, _ string) (domain.TimeCardView, error) {
+			if req.TimeAnalyzing != nil && *req.TimeAnalyzing > domain.MaxTimeCardMinutes {
+				t.Fatal("repository.UpdateTimeCardFields must not be called for an over-limit card")
+			}
+			return domain.TimeCardView{ID: testUUID}, nil
+		},
+	}
+	svc := NewTimeCardService(repo, userRepo)
+
+	_, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, TimeAnalyzing: &over})
+	if err == nil || err.Error() != domain.MaxTimeCardMinutesMessage {
+		t.Fatalf("UpdateTimeCard(481) error = %v, want %q", err, domain.MaxTimeCardMinutesMessage)
+	}
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, TimeAnalyzing: &ok}); err != nil {
+		t.Fatalf("UpdateTimeCard(480) error = %v, want success", err)
+	}
+}
+
 // TestValidateApproverIDsExcludeSubmitter pins the helper's own contract
 // directly, including the case-insensitive comparison (ids can arrive with
 // different casing from different callers).
@@ -568,3 +682,168 @@ func TestValidateApproverIDsExcludeSubmitter(t *testing.T) {
 }
 
 func strPtrTC(s string) *string { return &s }
+
+// recordingProjectHours records which projects were asked to recompute.
+type recordingProjectHours struct {
+	mu       sync.Mutex
+	ids      []string
+	err      error
+	siblings []string
+	sibErr   error
+	// failFor makes the recompute of these projects fail, others succeed.
+	failFor map[string]bool
+}
+
+func (r *recordingProjectHours) SiblingProjectIDs(context.Context, string) ([]string, error) {
+	return r.siblings, r.sibErr
+}
+
+func (r *recordingProjectHours) RecomputeProjectHours(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ids = append(r.ids, id)
+	if r.failFor[id] {
+		return errors.New("recompute failed")
+	}
+	return r.err
+}
+
+func (r *recordingProjectHours) calls() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.ids...)
+}
+
+const testHoursProjectUUID = "99999999-0000-4000-8000-000000000009"
+
+func projectHoursTestService(t *testing.T, hours ProjectHoursRecomputer, mirror TimeCardService, dispatcher *SNWritebackDispatcher) (TimeCardService, *stubTimeCardRepo) {
+	t.Helper()
+	repo := &stubTimeCardRepo{
+		transitionTimeCardState: func(_ context.Context, id string, _ domain.TimeCardState, _ *string, _ string) (domain.TimeCardView, error) {
+			return domain.TimeCardView{ID: id, Project: &domain.TimeCardRef{ID: testHoursProjectUUID, Name: "Project"}}, nil
+		},
+		updateTimeCardFields: func(context.Context, domain.UpdateTimeCardRequest, string) (domain.TimeCardView, error) {
+			return domain.TimeCardView{ID: testUUID, Project: &domain.TimeCardRef{ID: testHoursProjectUUID}}, nil
+		},
+	}
+	users := stubUserRepo{
+		getUserByEmail: func(context.Context, string) (domain.User, error) {
+			return domain.User{ID: testUUID, Email: "jane.doe@example.com"}, nil
+		},
+	}
+	var svc TimeCardService
+	if dispatcher != nil {
+		svc = NewTimeCardServiceWithSNWriteback(repo, users, dispatcher, mirror)
+	} else {
+		svc = NewTimeCardService(repo, users)
+	}
+	return WithTimeCardProjectHours(svc, hours), repo
+}
+
+// A state transition refreshes the card's project exactly once; a plain field
+// edit does not.
+func TestTimeCardService_UpdateTimeCard_RefreshesProjectHoursOnStateChange(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved, rejected := domain.TimeCardStateApproved, domain.TimeCardStateRejected
+
+	for _, tc := range []struct {
+		name string
+		req  domain.UpdateTimeCardRequest
+		want []string
+	}{
+		{"approve", domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}, []string{testHoursProjectUUID}},
+		{"reject", domain.UpdateTimeCardRequest{ID: testUUID, State: &rejected, LeadComment: strPtrTC("not billable")}, []string{testHoursProjectUUID}},
+		{"field edit", domain.UpdateTimeCardRequest{ID: testUUID, WorkLogComment: strPtrTC("updated")}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hours := &recordingProjectHours{}
+			svc, _ := projectHoursTestService(t, hours, nil, nil)
+			if _, err := svc.UpdateTimeCard(ctx, tc.req); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := hours.calls(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("recomputed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The hook is best-effort: its failure neither fails the approval nor keeps
+// the mirror from being dispatched.
+func TestTimeCardService_UpdateTimeCard_ProjectHoursFailureKeepsApprovalAndMirror(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+
+	storedSysID := uuidToSysid(testSNSysID2)
+	called := make(chan domain.UpdateTimeCardRequest, 1)
+	mirror := &stubMirrorTimeCardService{
+		updateTimeCard: func(_ context.Context, mirrorReq domain.UpdateTimeCardRequest) (domain.TimeCardMutationResponse, error) {
+			called <- mirrorReq
+			return domain.TimeCardMutationResponse{}, nil
+		},
+	}
+	hours := &recordingProjectHours{err: errors.New("database unavailable")}
+	svc, repo := projectHoursTestService(t, hours, mirror, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}))
+	repo.getTimeCardSNSysID = func(context.Context, string) (*string, error) { return &storedSysID, nil }
+
+	resp, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved})
+	if err != nil {
+		t.Fatalf("approval must succeed when the project hours recompute fails: %v", err)
+	}
+	if resp.TimeCard == nil {
+		t.Error("response carries no time card")
+	}
+	if got := hours.calls(); len(got) != 1 {
+		t.Errorf("recompute calls = %v, want exactly one", got)
+	}
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mirror.UpdateTimeCard was never dispatched")
+	}
+}
+
+// An approval also refreshes every sibling project (one sharing an opportunity
+// with the card's project), once each even when listed twice or when the list
+// repeats the card's own project, and one failing project does not stop the
+// others or the approval.
+func TestTimeCardService_UpdateTimeCard_RefreshesSiblingProjects(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	hours := &recordingProjectHours{
+		siblings: []string{"sib-b", testHoursProjectUUID, "sib-a", "sib-b", ""},
+		failFor:  map[string]bool{"sib-b": true},
+	}
+	svc, _ := projectHoursTestService(t, hours, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("approval must succeed: %v", err)
+	}
+	want := []string{testHoursProjectUUID, "sib-b", "sib-a"}
+	if got := hours.calls(); !reflect.DeepEqual(got, want) {
+		t.Errorf("recomputed = %v, want %v", got, want)
+	}
+}
+
+// A failed sibling lookup still refreshes the card's own project.
+func TestTimeCardService_UpdateTimeCard_SiblingLookupFailureStillRefreshesOwnProject(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	hours := &recordingProjectHours{sibErr: errors.New("lookup failed")}
+	svc, _ := projectHoursTestService(t, hours, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("approval must succeed: %v", err)
+	}
+	if got := hours.calls(); !reflect.DeepEqual(got, []string{testHoursProjectUUID}) {
+		t.Errorf("recomputed = %v", got)
+	}
+}
+
+// Without the optional dependency the service behaves as before.
+func TestTimeCardService_UpdateTimeCard_NoProjectHoursRecomputer(t *testing.T) {
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	approved := domain.TimeCardStateApproved
+	svc, _ := projectHoursTestService(t, nil, nil, nil)
+	if _, err := svc.UpdateTimeCard(ctx, domain.UpdateTimeCardRequest{ID: testUUID, State: &approved}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

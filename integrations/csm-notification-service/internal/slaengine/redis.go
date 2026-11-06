@@ -18,7 +18,10 @@ package slaengine
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -101,8 +104,22 @@ type ClockMeta struct {
 	// entity-service's freshly-reported total against this baseline on
 	// every resume, so a clock paused and resumed several times is only
 	// ever shifted by each new segment, never the whole running total
-	// again. See Store.SetShiftedPauseSeconds/ShiftWake.
+	// again. See Store.SetShiftedPauseSeconds/ShiftWake. For a
+	// 'WSO2 Business days' clock (see Schedule below) this instead holds
+	// the business-hours-aware pause total last baked into the wake
+	// schedule — resumeShift recomputes absolute wake times from scratch
+	// for those, rather than diffing and incrementing, so this field means
+	// "the total already reflected," not "the amount already shifted by,"
+	// for that schedule; see resumeShift's own doc comment.
 	ShiftedPauseSeconds int64
+	// Schedule mirrors entity-service's own domain.SLAClockState.Schedule
+	// (e.g. "WSO2 Business days", "24 x 7", or "") — set once at
+	// RegisterClocks time and never refreshed (a clock's schedule is a
+	// property of its bound policy, which never changes without the whole
+	// clock being replaced by a new incarnation). Engine.resumeShift reads
+	// this to decide whether a resume needs flat wall-clock math or
+	// business-day-aware recomputation.
+	Schedule string
 }
 
 // Store wraps every Redis operation this engine needs — first Redis
@@ -198,7 +215,7 @@ end
 redis.call('HSET', KEYS[1],
 	'caseNumber', ARGV[1], 'wso2CaseId', ARGV[2], 'caseTitle', ARGV[3],
 	'caseType', ARGV[4], 'product', ARGV[5], 'team', ARGV[6], 'priority', ARGV[7],
-	'startedAt', ARGV[8])
+	'startedAt', ARGV[8], 'schedule', ARGV[11])
 redis.call('HSETNX', KEYS[1], 'state', ARGV[9])
 redis.call('HSETNX', KEYS[1], 'paused', '0')
 redis.call('HSETNX', KEYS[1], 'alertedTier', '0')
@@ -228,7 +245,7 @@ func (s *Store) SetClock(ctx context.Context, caseID, clockType string, meta Clo
 	return setClockScript.Run(ctx, s.rdb, []string{key},
 		meta.CaseNumber, meta.WSO2CaseID, meta.CaseTitle, meta.CaseType,
 		meta.Product, meta.Team, meta.Priority, meta.StartedAt.UnixNano(),
-		meta.State, int(clockTTL.Seconds()),
+		meta.State, int(clockTTL.Seconds()), meta.Schedule,
 	).Err()
 }
 
@@ -255,6 +272,7 @@ func (s *Store) GetClock(ctx context.Context, caseID, clockType string) (meta Cl
 		Priority:   res["priority"],
 		State:      res["state"],
 		Paused:     res["paused"] == "1",
+		Schedule:   res["schedule"],
 	}
 	if v, err := strconv.ParseInt(res["startedAt"], 10, 64); err == nil {
 		meta.StartedAt = time.Unix(0, v)
@@ -299,53 +317,145 @@ func (s *Store) SetShiftedPauseSeconds(ctx context.Context, caseID, clockType st
 	return s.rdb.Expire(ctx, key, clockTTL).Err()
 }
 
-// shiftWakeScript pushes a clock's own tier members forward by deltaSeconds
-// — but only members that currently EXIST in the wake-index ZSET. A bare
+// claimBaselineScript moves a clock's shifted-pause baseline from the value
+// the caller diffed against to the new one, and reports whether it did. It
+// touches only the clock hash, so it is a single-key script.
+//
+// Wake-index shifts must never use a script that names both sla:wake and a
+// clock hash: those keys hash to different slots, and a Redis that shards
+// keys (a cluster, or a managed Redis under an OSS clustering policy)
+// refuses the call with CROSSSLOT. So a shift is two single-key steps,
+// ordered baseline first: a crash or error between them leaves the baseline
+// advanced and the entries unshifted (a tier alerts slightly early, the
+// same posture resumeShift already takes when it cannot read the pause), and
+// never the reverse (entries shifted but the baseline stale, which made the
+// next resume shift them a second time and delay every remaining tier).
+// Comparing against the expected old value also makes a redelivered or
+// racing resume a no-op: only the call that moves the baseline goes on to
+// shift the entries.
+var claimBaselineScript = redis.NewScript(`
+local current = redis.call('HGET', KEYS[1], 'shiftedPauseSeconds')
+if (current or '0') ~= ARGV[1] then
+	return 0
+end
+redis.call('HSET', KEYS[1], 'shiftedPauseSeconds', ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return 1
+`)
+
+// claimBaseline runs claimBaselineScript: true when the baseline was
+// oldSeconds and is now newSeconds.
+func (s *Store) claimBaseline(ctx context.Context, key string, oldSeconds, newSeconds int64) (bool, error) {
+	res, err := claimBaselineScript.Run(ctx, s.rdb, []string{key},
+		strconv.FormatInt(oldSeconds, 10), strconv.FormatInt(newSeconds, 10), int64(clockTTL.Seconds())).Int()
+	if err != nil {
+		return false, err
+	}
+	return res == 1, nil
+}
+
+// shiftWakeScript pushes the given wake members forward by delta seconds --
+// but only members that currently EXIST in the wake-index ZSET. A bare
 // ZINCRBY on a sorted set creates the member (at score = the increment) if
 // it's absent, which would wrongly resurrect a tier whose wake entry was
 // already removed after it was alerted on (see processDueMember); checking
-// ZSCORE first is what keeps an already-handled tier untouched. The new
-// shifted-pause baseline is recorded on the same clock hash in the same
-// script (KEYS[2]/ARGV[2]) — a CodeRabbit-caught gap in an earlier version
-// did these as two separate Redis calls, which left a real failure window: a
-// crash or error between them left the wake entries already shifted but the
-// baseline still stale, so the very next resume would see the same old
-// baseline, recompute the identical delta, and shift the same entries a
-// second time — silently delaying every remaining tier by one extra pause
-// segment's length, with no later reconciliation pass to catch it (Reconcile
-// only runs once, at process startup).
+// ZSCORE first is what keeps an already-handled tier untouched. It names
+// only sla:wake, so it is safe on a sharded Redis (see claimBaselineScript).
 var shiftWakeScript = redis.NewScript(`
 local delta = tonumber(ARGV[1])
-local baseline = ARGV[2]
-local ttl = ARGV[3]
-for i = 4, #ARGV do
+for i = 2, #ARGV do
 	local member = ARGV[i]
 	if redis.call('ZSCORE', KEYS[1], member) then
 		redis.call('ZINCRBY', KEYS[1], delta, member)
 	end
 end
-redis.call('HSET', KEYS[2], 'shiftedPauseSeconds', baseline)
-redis.call('EXPIRE', KEYS[2], ttl)
 return 1
 `)
 
 // ShiftWake pushes every still-pending wake-index entry of one
-// (caseID, clockType) clock forward by deltaSeconds, and atomically records
-// newBaselineSeconds as the clock's new ClockMeta.ShiftedPauseSeconds in the
-// same Redis operation — called once a just-completed pause segment's true
-// length is known (Engine.resumeShift), so a tier whose original due time
-// fell during the pause is rescheduled for sometime after it resumes, rather
-// than firing immediately (an un-shifted due time already in the past) the
-// moment the next tick runs. See shiftWakeScript's own doc comment for why
-// the baseline write can't be a separate call.
-func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, newBaselineSeconds int64) error {
+// (caseID, clockType) clock forward by deltaSeconds and records
+// newBaselineSeconds as the clock's new ClockMeta.ShiftedPauseSeconds --
+// called once a just-completed pause segment's true length is known
+// (Engine.resumeShift), so a tier whose original due time fell during the
+// pause is rescheduled for sometime after it resumes, rather than firing
+// immediately (an un-shifted due time already in the past) the moment the
+// next tick runs. oldBaselineSeconds is the baseline the caller diffed
+// against; when the stored baseline has already moved, another resume got
+// there first and nothing is shifted. See claimBaselineScript for the
+// ordering and why the two writes are separate calls.
+func (s *Store) ShiftWake(ctx context.Context, caseID, clockType string, deltaSeconds, oldBaselineSeconds, newBaselineSeconds int64) error {
 	key := clockKey(caseID, clockType)
-	args := make([]any, 0, 3+len(tierSequence))
-	args = append(args, deltaSeconds, strconv.FormatInt(newBaselineSeconds, 10), int64(clockTTL.Seconds()))
+	claimed, err := s.claimBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+	if err != nil || !claimed {
+		return err
+	}
+	args := make([]any, 0, 1+len(tierSequence))
+	args = append(args, deltaSeconds)
 	for _, tier := range tierSequence {
 		args = append(args, wakeMember(caseID, clockType, tier))
 	}
-	return shiftWakeScript.Run(ctx, s.rdb, []string{wakeKey, key}, args...).Err()
+	if err := shiftWakeScript.Run(ctx, s.rdb, []string{wakeKey}, args...).Err(); err != nil {
+		s.releaseBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+		return err
+	}
+	return nil
+}
+
+// releaseBaseline puts a claimed baseline back after the wake-index write
+// that followed it failed, so a retry of the same resume can shift again.
+// Best effort: if it fails too, the entries stay unshifted (see
+// claimBaselineScript).
+func (s *Store) releaseBaseline(ctx context.Context, key string, oldSeconds, newSeconds int64) {
+	if _, err := s.claimBaseline(context.WithoutCancel(ctx), key, newSeconds, oldSeconds); err != nil {
+		slog.ErrorContext(ctx, "slaengine: failed to restore shifted-pause baseline after a failed wake shift", "key", key, "err", err)
+	}
+}
+
+// setWakeAbsoluteScript writes an absolute score for each given wake member
+// -- but, like shiftWakeScript, only for a member that currently EXISTS in
+// the index. A bare ZADD on an absent member creates it (at the given
+// score), which would wrongly resurrect a tier processDueMember already
+// alerted on and removed; checking ZSCORE first is what keeps an
+// already-handled tier untouched. It names only sla:wake (see
+// claimBaselineScript).
+var setWakeAbsoluteScript = redis.NewScript(`
+for i = 1, #ARGV, 2 do
+	local member = ARGV[i]
+	local score = ARGV[i + 1]
+	if redis.call('ZSCORE', KEYS[1], member) then
+		redis.call('ZADD', KEYS[1], score, member)
+	end
+end
+return 1
+`)
+
+// SetWakeAbsolute overwrites the due-at score of every (tier, at) pair in
+// wakes for one (caseID, clockType) clock to an absolute instant, for tiers
+// that still have a pending wake entry -- used by Engine.resumeShift's
+// business-day branch, which recomputes each remaining tier's true due
+// instant from scratch (via businessdays.AddBusinessDuration) rather than
+// incrementing a flat delta the way ShiftWake does for a 24x7 clock.
+// newBaselineSeconds is recorded as the clock's new
+// ClockMeta.ShiftedPauseSeconds, claimed against oldBaselineSeconds first,
+// same as ShiftWake.
+func (s *Store) SetWakeAbsolute(ctx context.Context, caseID, clockType string, wakes map[int]time.Time, oldBaselineSeconds, newBaselineSeconds int64) error {
+	if len(wakes) == 0 {
+		return nil
+	}
+	key := clockKey(caseID, clockType)
+	claimed, err := s.claimBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+	if err != nil || !claimed {
+		return err
+	}
+	args := make([]any, 0, 2*len(wakes))
+	for tier, at := range wakes {
+		args = append(args, wakeMember(caseID, clockType, tier), float64(at.Unix()))
+	}
+	if err := setWakeAbsoluteScript.Run(ctx, s.rdb, []string{wakeKey}, args...).Err(); err != nil {
+		s.releaseBaseline(ctx, key, oldBaselineSeconds, newBaselineSeconds)
+		return err
+	}
+	return nil
 }
 
 // SetState refreshes one clock's own display State field — called from
@@ -451,6 +561,110 @@ func (s *Store) ClaimTier(ctx context.Context, caseID, clockType string, tier in
 // call used, or this deletes nothing (a different key).
 func (s *Store) ReleaseTier(ctx context.Context, caseID, clockType string, tier int, startedAt time.Time) error {
 	return s.rdb.Del(ctx, tierClaimKey(caseID, clockType, tier, startedAt)).Err()
+}
+
+// wipeScanCount is the COUNT hint passed to every SCAN call WipeAll makes —
+// a rough batch size, not an exact one (Redis's SCAN contract only promises
+// "around" this many keys per call). Small enough that one call never
+// blocks this Redis instance for long, large enough that wiping a realistic
+// keyspace doesn't take an excessive number of round trips.
+const wipeScanCount = 500
+
+// WipeAll deletes every key this engine owns in Redis: the whole wake
+// index, every clock hash, and every tier claim. No longer called by
+// Engine.RecalculateFromEntity (which used to use this for a clean,
+// from-scratch rebuild -- see that method's own doc comment for the real
+// gap a blanket wipe-then-rebuild had, and ListClockKeys/DeleteClock for
+// what replaced it: writing in place, then removing only the genuinely
+// stale leftovers). Kept as a standalone utility for a genuine full reset.
+//
+// Walks clockKeyPrefix/tierClaimKeyPrefix with SCAN, never KEYS: KEYS
+// blocks this Redis instance for the whole scan, and this same instance
+// also serves Tick/RegisterClocks/etc. concurrently with this call — SCAN
+// instead walks the keyspace in small, cursor-bounded batches, so a large
+// keyspace never turns into a multi-second stall for every other caller.
+func (s *Store) WipeAll(ctx context.Context) error {
+	if err := s.rdb.Del(ctx, wakeKey).Err(); err != nil {
+		return fmt.Errorf("slaengine: wipe: delete %s: %w", wakeKey, err)
+	}
+	for _, pattern := range []string{clockKeyPrefix + "*", tierClaimKeyPrefix + "*"} {
+		if err := s.deleteByScan(ctx, pattern); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteByScan deletes every key matching pattern, walking the keyspace
+// with SCAN in wipeScanCount-sized batches rather than loading it all into
+// memory with KEYS.
+func (s *Store) deleteByScan(ctx context.Context, pattern string) error {
+	var cursor uint64
+	for {
+		keys, next, err := s.rdb.Scan(ctx, cursor, pattern, wipeScanCount).Result()
+		if err != nil {
+			return fmt.Errorf("slaengine: wipe: scan %s: %w", pattern, err)
+		}
+		if len(keys) > 0 {
+			if err := s.rdb.Del(ctx, keys...).Err(); err != nil {
+				return fmt.Errorf("slaengine: wipe: delete %d keys matching %s: %w", len(keys), pattern, err)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
+}
+
+// ListClockKeys returns every (caseID, clockType) pair this engine currently
+// holds a clock hash for, as "<caseID>|<clockType>" identifiers (clockKey's
+// own suffix, with the prefix stripped) -- used by
+// Engine.RecalculateFromEntity's own stale-clock cleanup, which replaced an
+// up-front WipeAll with "write every currently-active clock in place, then
+// remove whatever's left over that entity-service no longer reports active"
+// (see that method's own doc comment for why). Walks the keyspace with SCAN,
+// never KEYS -- same "don't block this Redis instance for other concurrent
+// callers" reasoning deleteByScan already gives.
+func (s *Store) ListClockKeys(ctx context.Context) ([]string, error) {
+	var ids []string
+	var cursor uint64
+	for {
+		keys, next, err := s.rdb.Scan(ctx, cursor, clockKeyPrefix+"*", wipeScanCount).Result()
+		if err != nil {
+			return nil, fmt.Errorf("slaengine: list clock keys: scan: %w", err)
+		}
+		for _, k := range keys {
+			ids = append(ids, strings.TrimPrefix(k, clockKeyPrefix))
+		}
+		cursor = next
+		if cursor == 0 {
+			return ids, nil
+		}
+	}
+}
+
+// DeleteClock removes one (caseID, clockType) clock entirely: its hash,
+// every tier's wake entry (RemoveWake on an absent member is a harmless
+// no-op, so this doesn't need to know which tiers, if any, are still
+// pending), and every tier-claim key under it (walked with SCAN, since a
+// claim key's own suffix embeds the clock's startedAt, which isn't known
+// here -- see tierClaimKey's own doc comment). Used by
+// Engine.RecalculateFromEntity's own cleanup pass, once a fresh rebuild has
+// confirmed entity-service no longer reports this clock active at all.
+func (s *Store) DeleteClock(ctx context.Context, caseID, clockType string) error {
+	if err := s.rdb.Del(ctx, clockKey(caseID, clockType)).Err(); err != nil {
+		return fmt.Errorf("slaengine: delete clock %s|%s: delete hash: %w", caseID, clockType, err)
+	}
+	for _, tier := range tierSequence {
+		if err := s.RemoveWake(ctx, wakeMember(caseID, clockType, tier)); err != nil {
+			return fmt.Errorf("slaengine: delete clock %s|%s: remove wake tier %d: %w", caseID, clockType, tier, err)
+		}
+	}
+	if err := s.deleteByScan(ctx, tierClaimKeyPrefix+caseID+"|"+clockType+"|*"); err != nil {
+		return fmt.Errorf("slaengine: delete clock %s|%s: %w", caseID, clockType, err)
+	}
+	return nil
 }
 
 func boolString(b bool) string {

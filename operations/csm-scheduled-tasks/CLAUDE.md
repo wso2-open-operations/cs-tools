@@ -88,6 +88,12 @@ sub-cron added here. `scheduleFor`/`recipientsFor` look up each task's override 
 when zero — there is no point backing off shorter than how often this process even runs. Set it
 explicitly only if a specific task needs to back off harder than "every tick."
 
+`registry.Task.MaxAttempts` (0, the default, is no cap) limits how many times one period is
+attempted, the first run included. A failed attempt that reaches it gets no retry: the ledger has
+no "give up" state, so the engine gives it a retry time ten years out, the next period's claim
+supersedes the row as usual, and the failure alert says no retry is coming. Only for a task whose
+retry repeats something outward (today `acp_closure`, 2: see "ACP closure").
+
 ## Housekeeping
 
 `internal/housekeeping.CleanupResolvedRuns`, registered as `"housekeeping_cleanup"`, is this
@@ -117,26 +123,41 @@ entity-service; there is no automatic cleanup for this case.
 ## Stale cases report
 
 `internal/stalecases.SendReport`, registered as `"stale_cases_report"`, is this component's first
-sub-cron that sends an email on success rather than only on failure — see "Per-task report emails"
-below for why that's not a generic engine feature. Queries entity-service's `POST /cases/search`
-(via `internal/entitycases.Client.SearchOpenCasesOlderThan`) for every case whose `state` isn't
-`closed` and whose `createdOn` is at least 30 days in the past — a fixed threshold, not an env var;
-there's no operational need to tune it per deployment today (unlike
-`HOUSEKEEPING_RETENTION_DAYS` — see `cmd/server/main.go`'s `staleCaseThreshold` constant if that
-changes) — then emails a report table of them (oldest first) via `notify.RenderStaleCasesReport`.
+sub-cron that sends an email on success rather than only on failure; see "Per-task report emails"
+below for why that's not a generic engine feature. It mails entity-service's long-open cases report:
+`internal/longopenreport.Client` calls `GET /reports/long-open-cases?olderThanDays=30` (same base URL
+and OAuth client credentials as the other entity-service clients, no extra env vars) and
+`notify.RenderLongOpenCasesReport` renders the result as two tables, in this order: "Ongoing cases"
+(the report's `cases`, projects that are not being onboarded) and "Ongoing cases on onboarding
+projects" (`onboardingCases`). Columns: Case, WSO2 Case ID, Integration CS Team, Assignee, State,
+Severity (S0-S4), Last updated, Created. Which cases count as ongoing, the split between the tables, the
+oldest-first order and the per-table row cap all live in entity-service; this task only fetches,
+renders and sends. The 30-day window is a fixed constant (`staleCaseOlderThanDays` in
+`cmd/server/main.go`), not an env var, and the subject is
+`[Action-Required][Report] Cases open for more than 30 days`.
+
+This depends on the entity-service long-open cases endpoint: deploy entity-service first. Against an
+entity-service without it the task fails (404) and the engine alerts.
+
+A table that entity-service cut at its cap carries a "Showing only the oldest N of TOTAL" note, and an
+empty table shows "No cases." If both tables are empty the report omits itself: nothing is sent, a
+count-only line is logged, and the run succeeds. Both case columns link to `<CSM_PORTAL_WEB_BASE_URL>/cases/<internal id>` (plain text when it is unset).
+
 Default schedule `0 7 * * *` (daily at 07:00, same `TZ=UTC` caveat as "Housekeeping" above);
 override via `SUB_CRON_SCHEDULES`.
 
-Recipients are **not** `ALERT_RECIPIENTS` — that standing audience is about failure alerting, not
+Recipients are **not** `ALERT_RECIPIENTS`: that standing audience is about failure alerting, not
 report distribution. This task's report goes only to its own `SUB_CRON_RECIPIENTS` entry (`"to"`/
-`"cc"`, the same config surface every task's failure-alert recipients use — see "Alerting" below);
+`"cc"`, the same config surface every task's failure-alert recipients use; see "Alerting" below);
 a deployment that wants the same people getting both configures the same addresses in both places.
-If this task isn't mentioned in `SUB_CRON_RECIPIENTS` at all (`to` is empty), the handler skips the
-entity-service query entirely and just succeeds — no report to send means no reason to run the
-query on every tick.
+If this task isn't mentioned in `SUB_CRON_RECIPIENTS` at all (`to` is empty), or `ALERTS_ENABLED` is
+false, the handler skips the entity-service call entirely and just succeeds. A fetch or send failure
+returns an error. `--run-now=stale_cases_report --recipients=... [--cc=...]` works through
+`reportRunNow` like every report: it mails the override list only, even for a task with no `to` of its
+own.
 
-`internal/entitycases.Client` is a second entity-service client, separate from `internal/ledger`,
-even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials — see that
+`internal/entitycases.Client` remains a separate entity-service client, used by `open_cases_report`,
+even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials; see that
 package's own doc comment for why case search isn't just another method on `ledger.Client`.
 
 ## Open cases report
@@ -152,7 +173,7 @@ before the start of yesterday, then emails a report table of them (oldest first)
 
 "Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
 time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
-rolling duration such as `SearchOpenCasesOlderThan`'s: a case created at 23:59 yesterday (UTC) is
+rolling duration: a case created at 23:59 yesterday (UTC) is
 excluded, one created at 00:01 the day before is included, regardless of what time of day the task
 itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
 *cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and
@@ -173,15 +194,19 @@ emails" below.
 `internal/rotareminder`, registered as **`rota_weekday_reminder`**, **`rota_weekend_notice`**,
 **`rota_weekend_reminder`** and **`rota_manual_reminder`** (the Rota Access card's "Send now" and
 "Send a test to me"), emails the people rostered on a rotation shift in the Team Schedule, with a
-calendar invitation for their window. **Registered only when `ROTA_REMINDERS_ENABLED=true`**
-(default false): they email real staff from the real rota.
+calendar invitation for their window. **Turned on and off only on the Rota Access tab** (the
+"CRE rota reminders" card): nothing in this component's configuration switches them on. The tasks
+are registered whenever `EMAIL_BASE_URL` is set, so Send now and "Send a test to me" work without
+a redeploy; a family that has never saved the card gets no scheduled reminder
+(`rotareminder.withSettings`), and the card's weekday and weekend switches apply from the next run.
+`ROTA_REMINDERS_ENABLED` is no longer read.
 
 | Task | Default schedule | Announces |
 |---|---|---|
 | `rota_weekday_reminder` | `30 9 * * 1-5` (15:00 Colombo, Mon–Fri) | the next working day's weekday rotations (`CRE_MORNING`, `CRE_MORNING_OC`, `CRE_EVENING`): tomorrow from Monday to Thursday, **Monday from Friday** |
 | `rota_weekend_notice` | `30 14 * * 0-4` (20:00 Colombo, Sun–Thu) | the coming weekend (`CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`, `CRE_WEEKEND_NIGHT_OC`), **once it is fully marked**: the summary and the invitations, sent once; until then the rota admins are asked every evening |
 | `rota_weekend_reminder` | `30 9 * * 5` (15:00 Colombo, Fri) | this weekend again: the summary, the invitations as updates, cancellations, gaps listed |
-| `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a weekday or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
+| `rota_manual_reminder` | `*/5 * * * *` (finer than the driver, so due at every run) | whatever was asked for on the Rota Access card since the last run: a Morning, Evening or weekend "Send now", or a test sent only to the person who asked (see "Send now" below) |
 
 The schedule decides only *when* a task runs. Which days it announces comes from the day it runs
 (`NextWorkingDay`, `ComingWeekend`), counted in `ROTA_REMINDER_TIME_ZONE` (default
@@ -202,7 +227,9 @@ schedules assume `TZ=UTC` like every other here.
   to everybody on the weekend, LK and Americas (with the LK on-call person) alike, in the layout the
   CRE weekend emails already had: "Hello team,", a Saturday Team and a Sunday Team list
   ("Name (Rotation)"), a Rotation Definitions table (Rotation with its member count | Local time on
-  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call"), the zone
+  the rotation's own clock | UTC window | Role: "IST/PDT General support" or "On-call", with a note under a general-support
+  window longer than 10 hours that has 2+ people every day asking them to split it into morning
+  and evening shifts), the zone
   legend and a daylight saving note, then the Handover paragraphs (`notify.RenderWeekendRota`).
   The Americas Weekend's hours, and the LK On-call's that cover it, are 08:00-18:00
   America/Los_Angeles (`ROTA_REMINDER_WINDOWS`), not the Team Schedule's 21:00-06:00 IST; the
@@ -210,26 +237,47 @@ schedules assume `TZ=UTC` like every other here.
   Saturday, Americas Saturday, LK Sunday, Americas Sunday) gets its own email to its own people,
   carrying its invitation with all of them as guests, so they can start a group chat from the
   event. One recipient is greeted by full name, several with "Dear all,".
+- **The CRE weekend summary also lists the SRE weekend people** (`Config.Support`,
+  `rotareminder.SREWeekendSupport`, set in `main.go` when `ROTA_REMINDER_FAMILY` is CRE): a
+  second `POST /team-schedule/assignments/search` with `family: "SRE"` reads `SRE_WE_TZ1`
+  ("SRE Weekend (TZ1 + TZ2)") and `SRE_TZ3` ("SRE Night (TZ3)") for the same two days. They
+  appear in an "SRE Weekend Support" block after the day teams ("Name (SRE Weekend, L1)", the
+  turn's `tier`), get one Rotation Definitions row per rotation (IST hours, "SRE support (L1 →
+  L2)" from the tiers seen), and are added to the summary's To. That is all: they never count
+  toward the weekend minimums, get no invitation or cancellation, and are not in the weekend
+  record; IaaS and PaaS turns are not listed. The SRE read happens only when the summary is
+  being sent, and a failed read is logged and the summary goes without the block.
 - **Settings saved on the Rota Access tab win.** Every run first reads
   `GET /team-schedule/reminder-settings/{family}` (entity-service, migration 0242; the
   "CRE rota reminders" card, editable by a CSM admin or the CRE rota admin). When something
   is saved: `weekdayEnabled` / `weekendEnabled` turn that task off (the run succeeds and
   sends nothing), `invitesEnabled` can turn invitations off but never on where the deployment
-  has them off (`ROTA_REMINDER_INVITES_ENABLED`, or no organizer), `weekendRequired` and
+  has them off (`ROTA_REMINDER_INVITES_ENABLED`, or no organizer), `inviteRotations`
+  (migration 0271) turns them off for one rotation at a time, by its window's code
+  (`CRE_MORNING`, `CRE_EVENING`, `CRE_WEEKEND`, `CRE_WEEKEND_NIGHT`; a code not named keeps
+  them, `Config.invitesFor`): that rotation's reminder goes out without its invitation, the
+  weekend summary mentions invitations only while one still follows, and an invitation already
+  sent is neither updated nor withdrawn (it stays in the weekend record, so it is not cancelled
+  as a window gone from the rota), `weekendRequired` and
   `windows` override `ROTA_REMINDER_WEEKEND_REQUIRED` / `ROTA_REMINDER_WINDOWS` code by code
   (a code the saved settings do not name keeps the configured value; the card saves a code
   only once somebody changes it there), and `copyTo` is copied on top of the configured copy
-  list. So saving one field never replaces a deployment setting nobody changed. Nothing saved (a 404, also from an entity-service without the
-  route) keeps the environment's values. A failed read fails the run, so it is retried
+  list, `weekendCopyTo` (migration 0271) on the weekend summary only (`Config.WeekendCopy`: never on
+  a weekday reminder, an invitation email or a cancellation). So saving one field never replaces a deployment setting nobody changed. **Nothing
+  saved (a 404, also from an entity-service without the route) sends no scheduled reminder**:
+  only the card's switches turn them on. Send now still goes out, with the environment's values.
+  A failed read fails the run, so it is retried
   rather than sent with settings somebody turned off. Not on the card, on purpose: the
   send times, `ROTA_REMINDER_REDIRECT_TO`, the family, the shift codes and names, and the
   email service settings.
 - **"Send now" (`rota_manual_reminder`, every run).** The card's Send now button queues a
   request in entity-service (`team_schedule_reminder_request`, migration 0242; asked for by a
-  CSM admin or the family's rota admin, refused while one of the same kind is waiting and within
-  10 minutes of the last that did not fail). This task has no address to call, so at every run it claims the
+  CSM admin or the family's rota admin, refused while one that sends any of the same emails is waiting
+  and within 10 minutes of the last that did not fail: `weekday` overlaps `morning` and `evening`). This task has no address to call, so at every run it claims the
   waiting requests (`POST .../reminder-requests/{family}/claim`, up to 5 a run) and sends each
-  with the code above: `weekday` is the next working day's windows, `weekend` the coming weekend
+  with the code above: `morning` is the next working day's Morning with its on-call, `evening` its
+  Evening (each found by its code ending `_MORNING` / `_EVENING` in `ROTA_REMINDER_WEEKDAY_SHIFTS`;
+  `windowRotations`), `weekday` both (what the card sent before it offered them apart), `weekend` the coming weekend
   (this one from a Saturday or a Sunday), sent even when not fully marked, as on Friday, and
   recorded like Friday's, so invitations update and cancellations follow. The saved on/off
   switches do not stop it; the saved minimums, hours, invitations switch and copy list apply.
@@ -272,9 +320,12 @@ schedules assume `TZ=UTC` like every other here.
   Nothing from the rota or the configuration can add a line to an invitation: names and notes
   are escaped and stripped of control characters, an attendee whose address is not a plain
   address is left out (`ValidInviteAddress`), and the event's URL is written only when it is
-  http(s) (`ValidScheduleURL`). At startup an `EMAIL_FROM_ADDRESS` that is not a plain address
-  turns invitations off, and a `ROTA_REMINDER_SCHEDULE_URL` that is not http(s) is dropped from
-  every email, both with a warning.
+  http(s) (`ValidScheduleURL`). The organizer is `EMAIL_FROM_ADDRESS`'s address
+  (`InviteOrganizer`): a plain `no-reply@example.com` as it is, or the address inside
+  `Customer Service <no-reply@example.com>`, whose display name the emails keep. At startup an
+  `EMAIL_FROM_ADDRESS` that is unset or holds no address turns invitations off, and a
+  `ROTA_REMINDER_SCHEDULE_URL` that is not http(s) is dropped from every email, both with a
+  warning.
 - **The task's `SUB_CRON_RECIPIENTS` are not copied** unless
   `ROTA_REMINDER_COPY_TASK_RECIPIENTS=true`; they still get its failure alerts, as everywhere
   here. Nobody is ever both a recipient and copied, or copied twice (case-insensitive).
@@ -285,7 +336,8 @@ schedules assume `TZ=UTC` like every other here.
   swap instruction with the Team Schedule link written out, and a sign-off. The weekend summary
   (`notify.RenderWeekendRota`, described above): "Hello team,", the day team lists, the Rotation
   Definitions table, the zone note and the handover paragraphs. Rotation names come from config
-  (`CODE=Name`). Names are escaped.
+  (`CODE=Name`). Names are escaped. Every subject starts `[<family>]`
+  (`[CRE] Weekend Rotation – …`; a test adds `[Test] ` in front).
 - **A retry announces what its scheduled run would have.** The engine retries a failed run every
   tick until the next period, which for `rota_weekend_notice` is days later. So the rota days are
   counted from the run's period key (`Config.Anchor`, from `schedule.PeriodKey`), not the clock:
@@ -304,7 +356,8 @@ schedules assume `TZ=UTC` like every other here.
 - **`ROTA_REMINDER_REDIRECT_TO`** sends every reminder to a test inbox instead, naming the intended
   recipients in its first line. Use it in any environment that holds the real rota but must not mail
   people. `ALERTS_ENABLED=false` silences these like every other email here.
-- Turning the tasks on with `EMAIL_BASE_URL` unset refuses to start.
+- With `EMAIL_BASE_URL` unset the rota tasks are not registered (logged at startup): nothing
+  could be sent.
 - **Not built**: a "your shift changed" email when a lead edits the rota after the reminder went
   out (Friday's reminder is the only re-send; it needs entity-service to announce rota changes,
   see "Future: events"), SRE and SME rotas (set
@@ -373,6 +426,378 @@ subject's rows.
 Timeout is five minutes, not the sixty seconds the neighbouring sweeps use.
 Volume is the normal case here, and cutting a healthy run off partway leaves
 some subjects updated and the rest stale.
+
+## Case auto-closure
+
+`internal/autoclosure.Run`, registered as **`case_autoclosure`** (default schedule `30 2 * * *`: 02:30 UTC =
+08:00 IST, daily including weekends, the slot of the legacy job it replaces; TZ=UTC caveat as above, and the real
+firing is the first driver start after the slot), reminds and closes tickets that sit in Awaiting Info / Solution Proposed with no activity.
+**Off unless `AUTOCLOSURE_ENABLED=true`**: it comments on and closes customers' tickets, so it is never on by
+accident. This component's client id must be in entity-service's `M2M_CLIENT_IDS`. entity-service's `AUTOCLOSURE_SYSTEM_USER_EMAIL` is optional: empty acts as "System user" (no user row, no `closed_by`).
+
+This task is a **trigger only**. Everything that decides anything (eligibility, whether a ticket is still due,
+the comment text, how it is closed, the daily limit) is in entity-service; see its CLAUDE.md, "Case
+auto-closure". Each run works through four stages in order -- `release_hold`, `close`, `second_reminder`,
+`first_reminder` -- asking `POST /autoclosure/candidates` for what is due and `POST
+/autoclosure/cases/{id}/advance` for each ticket. A ticket moves at most one stage per run.
+
+- A failure on one ticket never stops the others; a failed listing does not stop the other stages.
+- The run **returns an error if anything failed**, so the engine alerts and retries on the next tick. That is
+  safe: tickets already advanced are no longer due, and entity-service takes what today has already done off the
+  daily limit, so the limit holds across retries.
+- The alert lists at most 10 failures and counts the rest.
+- **Paging.** A listing returns at most one page, so each stage asks again until nothing new comes back (at most 20 passes of 500 new tickets, but entity-service never returns more than 5,000 in one listing, so at most 5,000 tickets are attempted per stage per run; the request limit grows with the tickets already attempted so ones that stay due -- skipped or failed -- do not hide those behind them). One known edge: entity-service also clamps a listing to the day's remaining budget, so when the budget is almost spent and the tickets at the front of the list are skipped or failed, the loop can stop early with later due tickets left; harmless because the budget is nearly gone. A ticket is attempted once per run. With a non-zero daily limit that limit bounds a day's work; with `AUTOCLOSURE_DAILY_LIMIT=0` (no cap) only the 20-pass page cap per stage and the schedule do, so a large backlog is then worked through at that pace.
+- The summary log line carries evaluated / reminded / closed / holdsReleased / wouldAdvance / skipped / failed / **quarantined**. Quarantined is how many due tickets entity-service left out because they failed the stage 3 times in 7 days; when it is above zero the run also logs a WARN saying nobody will be reminded or closed for them until someone looks (`case_autoclosure_event`, outcome `FAILED`). It deliberately does **not** fail the run: a failed run alerts, and is retried and alerted again every tick, so a permanent quarantine would become the permanent alert noise the cap exists to remove. Getting this in front of a person by email needs the per-task report email that does not exist yet (see "Future: per-task report emails"); until then watch the log or alert on the WARN.
+- **A dry run is not sign-off on closures.** It claims nothing, so it can only preview what is due *now*: first reminders for tickets still at `DEFAULT`, plus whatever second reminders and closes already-advanced tickets (for example from the old flow's steps) are due for. Tickets reach the second reminder and the close only after a real first reminder has moved them, so a clean dry run on a fresh backlog says nothing about the close stage. Validate the close rules on a small real batch first (`AUTOCLOSURE_STATES=solution_proposed`, a low `AUTOCLOSURE_DAILY_LIMIT`).
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `AUTOCLOSURE_ENABLED` | `false` | Register the task |
+| `AUTOCLOSURE_SCHEDULED` | `true` | `false` keeps the task configured but off the schedule: the normal tick never fires it, and it runs only on demand with `--run-now=case_autoclosure` (see "Running a task now"). Affects only this task. Needs `AUTOCLOSURE_ENABLED=true` to matter; anything but a boolean refuses to start |
+| `AUTOCLOSURE_INTERVAL_DAYS` | `7` | Days each stage waits (calendar days); above 365 refuses to start |
+| `AUTOCLOSURE_DAILY_LIMIT` | `500` | Reminders + closures per UTC day, across all stages; `0` = no cap |
+| `AUTOCLOSURE_DRY_RUN` | `false` | Decide and log only (entity-service records `DRY_RUN` audit rows, not counted against the budget; this task spends the daily limit itself, so the totals are what a real run would do). **A `TRYOUT_TASK=case_autoclosure` is always forced to a dry run**: a tryout skips the ledger but still talks to the real entity-service, and would otherwise comment on and close real tickets |
+| `AUTOCLOSURE_STATES` | both | Comma list of `awaiting_info`, `solution_proposed`. Run `solution_proposed` alone first, add `awaiting_info` after watching it; an unknown value refuses to start |
+| `AUTOCLOSURE_TEMPLATES` | built-in | JSON `{"<state>.<kind>": "text"}` overriding comment wording; kinds `first_reminder`, `second_reminder`, `closure`; a malformed value refuses to start (it would otherwise silently post the built-in wording) |
+
+First run: expect a large backlog (thousands of eligible tickets); the daily limit spreads the notifications over
+days. Set a hold on tickets that customers asked to keep open **before** enabling.
+
+## Incident auto-close
+
+`internal/incidentautoclose.Run`, registered as **`incident_autoclose`** (default schedule `0 * * * *`, hourly;
+TZ=UTC caveat as above), closes incidents that have been Resolved for `INCIDENT_AUTOCLOSE_DAYS` (default 14, the
+threshold measured in the previous system: 399 of 400 of its auto-closes came 14 days after resolution), with no
+comment and no work note. It follows the decisions made for "Case auto-closure" above rather than new ones:
+
+- **Off unless `INCIDENT_AUTOCLOSE_ENABLED=true`.** It closes incidents, so it is never on by accident. Run it once
+  per environment with `INCIDENT_AUTOCLOSE_DRY_RUN=true`, review the count (including the incidents with no
+  `resolved_on`, measured from their last update), then enable it. Deploy entity-service with migration 0273 first.
+- **The close is entity-service's own incident update**, as the system user `AUTOCLOSURE_SYSTEM_USER_EMAIL`
+  (optional; empty acts as "System user" with no user row, so `closed_by` stays empty), the same user case
+  auto-closure closes as. In dual-write the close is therefore mirrored to the backing data source like any other
+  incident update. The previous system's own auto-close job still closes its copy until it is retired; while both
+  run, a mirrored close of an incident that job already closed may be refused there, which is recorded in
+  `sn_writeback_failures` and never undoes the close in Postgres (not verified against the backing data source).
+  Switching that job off before enabling this under dual-write is a decision for the team, as it is for case
+  auto-closure. Once it is retired, this task is what closes both copies.
+- **Config is checked at startup**, as `autoclosure.RunConfig.Validate` is: a day count outside 1-3650 (what
+  entity-service accepts) refuses to start rather than failing and alerting every hour. So does a daily limit
+  that is negative, above 100000 or not a whole number, and a non-boolean `INCIDENT_AUTOCLOSE_SCHEDULED`.
+- **Daily limit.** `INCIDENT_AUTOCLOSE_DAILY_LIMIT` is sent as `dailyLimit` on every request. entity-service
+  subtracts the incidents closed since 00:00 UTC today from it and recomputes that from its database on every
+  call, so no state is carried between pages or runs. **Manual closes count toward the limit**, so a busy day of
+  hand-closing leaves the job less (or nothing). When the response says `dailyLimitReached` the run stops: it is
+  logged at Info, is not an error and does not alert, and the run succeeds; the rest waits for the next run or the
+  next UTC day. `0` or unset is no cap.
+- **Staged rollout**, as for case auto-closure: `INCIDENT_AUTOCLOSE_SCHEDULED=false` keeps the task registered
+  (so `--run-now` and `TRYOUT_TASK` find it) but off the engine tick, the same mechanism as
+  `AUTOCLOSURE_SCHEDULED=false`. Then, from a Choreo Manual Task component, reading the logs between steps:
+  1. `--run-now=incident_autoclose --dry-run` : review how many are due (a dry run asks one page only).
+  2. `--run-now=incident_autoclose --limit=20` : a small real batch.
+  3. Raise `--limit`, as far as `INCIDENT_AUTOCLOSE_DAILY_LIMIT` allows.
+
+  Then set `INCIDENT_AUTOCLOSE_SCHEDULED=true` (or remove it) so the hourly run takes over. The task's run-now
+  flags are `--dry-run` and `--limit` only (`--states` is refused: there are no states). They narrow and never
+  loosen: `--dry-run` cannot turn off a configured `INCIDENT_AUTOCLOSE_DRY_RUN=true`, and `--limit=N` lowers the
+  daily limit for that run and is refused when it exceeds a configured `INCIDENT_AUTOCLOSE_DAILY_LIMIT` (when that
+  is `0` or unset, it sets a limit for the run, at most 100000). A run-now writes no ledger row; it is safe beside
+  the scheduled run because entity-service re-checks each incident under its row lock and recomputes the daily
+  budget on every call.
+
+This component's client id must be in entity-service's `M2M_CLIENT_IDS`, and entity-service must run on Postgres:
+under `DATA_SOURCE=servicenow` the endpoint answers 503 and every run fails and alerts, so leave the task off there.
+
+This task is a **trigger only**. entity-service's `POST /incidents/autoclose` picks what is due (oldest resolved
+first), closes each incident through its incident service (which re-checks it under the row lock and closes its
+open tasks as a manual close would), and reports `closed`, `failed`, `more` (the page was full) and
+`dailyLimitReached`. See
+entity-service's CLAUDE.md, "Incident auto-close".
+
+- **Paging.** Each call asks for 200 new incidents (`PageSize`); the handler asks again while `more` is true, at
+  most 20 pages (`MaxPages`, 4,000 incidents) a run. Reaching the cap with `more` still true logs a WARN and the
+  run succeeds; the next hourly run continues. entity-service lists the oldest due first with no offset, and an
+  incident that fails stays Resolved and due, so it comes back at the head of every later page. The request limit
+  therefore grows with the failures already seen (200 + failures, at most entity-service's 1,000), so failing
+  incidents do not hide the ones behind them. If a full page still holds only incidents that already failed (more
+  than 800 failing), the run stops and its error says that later due incidents were not reached.
+- **Timeout.** A page must finish inside entity-service's `REQUEST_TIMEOUT` (60s by default); the client waits
+  the same 60s. A page cut short comes back as an error with no `closed`/`failed` lists, so the run fails and
+  alerts, but no work is lost: each incident commits on its own, and the rest are still due next run.
+- **Failures fail the run.** A failed call, or any `failed` entry, returns an error naming the incidents (at most
+  10, then a count; each message cut to 200 characters), so the engine alerts and retries on the next tick.
+  Retrying is safe: closed incidents are no longer due. One incident failing does not stop the others on its page
+  or later pages; it is named once per run even when later pages report it again.
+- **A dry run asks once.** Nothing is closed, so a second call would return the same page; the run logs each
+  incident it would close and, when `more` is true, that more are due. A response that says it was not a dry run
+  when one was asked for fails the run.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `INCIDENT_AUTOCLOSE_ENABLED` | `false` | Register the task |
+| `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value outside 1-3650 or not a whole number refuses to start |
+| `INCIDENT_AUTOCLOSE_DRY_RUN` | `false` | List what is due, close nothing. A malformed value refuses to start rather than falling back to a real run. **A `TRYOUT_TASK=incident_autoclose` is always forced to a dry run**, as for `case_autoclosure` |
+
+## ACP closure
+
+`internal/acp.Run`, registered as **`acp_closure`** (default `0 4 * * 1-5`, 09:30 Colombo on
+weekdays; TZ=UTC caveat as above), is the Account Closure Process, moved here from
+`integrations/acp-closure-service` (still in the repo until this task runs in production; it now
+refuses to start unless it is a log-only dry run, so the two can never both run for real, and its
+rules are frozen: change them here). **Off
+unless `ACP_ENABLED=true`**: it emails customers and suspends their projects, so it is never on by
+accident, and while it is off no `ACP_*` setting is read, so a deployment without them still starts.
+When it is on, a missing `ACP_SALES_ENTITY_*` setting stops startup.
+
+The rules came over unchanged in `internal/acp/...` (`closure`, `sweep`, `suspensionstate`,
+`recipients`, `notify` for the notice templates, `entity`, `salesentity`, and ACP's own `httpsec`
+and `apierror`, which differ in shape from this component's). The service's own `CLAUDE.md` and
+`README.md` describe the windows, recipients and invoice rules. entity-service's automatic reopen
+keeps a copy of the invoice rules (`internal/service/acp_reopen_rules.go`); a rule change goes in
+both places.
+
+- **Reads and writes.** CSM (entity-service, `CUSTOMER_ENTITY_SERVICE_BASE_URL` with the shared
+  `OAUTH2_*` client) gives the open-project list, closure states and notices sent, and takes the
+  notice and suspension writes (`PATCH /projects/{id}`): **this component's client id must be in
+  entity-service's `M2M_CLIENT_IDS`**. Salesforce, through sales-entity-service
+  (`ACP_SALES_ENTITY_*`, its own credentials), gives the dates, people, opportunities and invoices,
+  and takes `State__c=Suspended`. The standalone service reached the same entity-service endpoints
+  through csm-integration-service, which forwards them unchanged.
+- **Reopening is not here.** Until entity-service's ACP reopen (PR #3124) is deployed with
+  `CSM_ACP_REOPEN_ENABLED=true`, a renewed or paid project stays suspended until someone reopens
+  it by hand. Once it is, entity-service reopens an ACP-suspended project when a Salesforce
+  event shows it renewed or paid, and once a day over every ACP-suspended project (the
+  `acp_reopen_check` task below drives that); csm-notification-service sends the "Back to Open
+  state" email (each one's CLAUDE.md, "ACP reopen"). entity-service keeps a copy of the invoice and
+  date rules; `closure/rules_parity_test.go` and `sweep/rules_parity_test.go` run ACP's rules over
+  the cases in `entity-service/internal/service/testdata/acp_rules_parity.json`, which entity-service
+  runs over its copy too (skipped when that file is absent; `ACP_RULES_PARITY_FILE` points at
+  another path). A rule changed here and not there makes ACP suspend a project every day and the
+  reopen check reopen it, so change both and the file together.
+- **Salesforce first, then one CSM update.** A suspension sets Salesforce `State__c` to Suspended
+  (`suspendInSalesforce`), then writes the closure state **and** the suspension's record
+  (`"event_type": "suspend"` with `"suspended_on": "YYYY-MM-DD"`, Colombo date) to CSM in one
+  `PATCH` (`writeSuspension`). The day-0 notice before it is recorded as `"suspend_notice"`, which
+  reads as window 0, so a retry sends no second notice and only retries the suspension.
+  `"suspend"` is never written on its own: an Open project with a `"suspend"` record is what
+  entity-service's reopen reads as "a person set it back to Open", and it would set Salesforce Open
+  and email "Back to Open" for a project that was never suspended (PR #3124/#3126 review). So a
+  Salesforce failure leaves the project Open in CSM with `"suspend_notice"` only, and the next run
+  tries again (CSM first used to leave it for someone to fix by hand); and a reopen running between
+  the two writes, after an event or the Salesforce echo of ACP's own write, finds nothing to reopen
+  or finish. `suspended_on` is what entity-service checks before emailing for a project set back to
+  Open by hand (only for a suspension in the last 7 days).
+- **Dry run by default** (`ACP_DRY_RUN`, unset or malformed is true): decide and log, write
+  nothing to CSM or Salesforce. Notices are only logged unless `ACP_EMAIL_SEND_ENABLED=true`
+  (which needs `EMAIL_BASE_URL` and `EMAIL_FROM_ADDRESS`). Addresses outside `@wso2.com` are
+  dropped unless `ACP_ALLOW_NON_WSO2_RECIPIENTS=true` (production only).
+  `ACP_STANDING_CC_RECIPIENTS` adds the distribution lists to every notice; leave it empty
+  outside production.
+- **Startup refuses the unsafe combinations** (`acpConfig`, `cmd/server/acp_config.go`, table
+  tests beside it), because each one either suspends customers who were never told or sends
+  them the same notice on every run (PR #3126 review):
+  - `ACP_DRY_RUN=false` without `ACP_EMAIL_SEND_ENABLED=true`. A real run records each notice and
+    suspends on day 0 whatever the notifier did, so with emails off it would record notices nobody
+    received and suspend customers who never got one. `acp.Run` refuses it again as a last guard.
+  - `ACP_DRY_RUN=true` with `ACP_EMAIL_SEND_ENABLED=true` and no `debug` list. A dry run records
+    nothing and windows are thresholds, so every run would send every due notice again (a project
+    90 days out would get the 90-day notice on about 30 weekdays). With a debug list the
+    repetition reaches only testers, which is the point.
+  - A `debug` list with `ACP_DRY_RUN=false` and no `ACP_TEST_PROJECT_ID`. Notices would reach only
+    the debug list while every project is recorded as notified and suspended on day 0.
+
+  **`ALERTS_ENABLED=false` (this component's switch for all email) turns `acp_closure` into a dry
+  run without emails** (logged at startup) instead of refusing: refusing would stop every other
+  task too, and a real run with emails silenced is the first case above. Nothing is written, so no
+  notice is recorded as sent; once alerts are back, the next real run sends the notice due then.
+  **Notices are not caught up**: only the narrowest window reached is sent (`closure.dueWindow`),
+  so after a pause longer than a window a project that crossed the 15- and 7-day windows meanwhile
+  gets neither, and one whose end date passed gets the day-0 notice and is suspended in the same
+  run. Keep a pause short, or check which projects crossed a window during it.
+- **Testing.** A `debug` list for `acp_closure` in `SUB_CRON_RECIPIENTS` sends every notice there
+  instead (`notify.ForReport`, `[Test copy]` subject), as for a report task. `ACP_TEST_PROJECT_ID`
+  scopes a run to one CSM project. A `TRYOUT_TASK=acp_closure` is forced to a dry run unless
+  `ACP_TEST_PROJECT_ID` is set, since a tryout talks to the real CSM and Salesforce, and it runs
+  on weekends too (it emails only its debug list). A `--run-now=acp_closure` is a real run with
+  the configured settings, the same as a scheduled one.
+- **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
+  (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
+  `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
+  (this component calls entity-service directly, not through csm-integration-service as the
+  standalone service did, so its write path is new).
+- **Weekends.** The schedule is weekdays only, and the handler also succeeds without doing anything
+  on a Colombo Saturday or Sunday, for a retry that lands there, logging a WARN that says the run
+  did nothing. Monday's run catches up: windows and suspension are thresholds. A tryout runs
+  anyway.
+- **Fresh read.** The open projects are all listed first, then each one is read again from CSM
+  (`GetProject`) right before it is decided: by the last project the listing is as old as the
+  run, and every record write sends the whole `suspensionProcessState` rebuilt from what was read,
+  so deciding from the listing could undo a change made since (entity-service's reopen, say). CSM
+  reads its own database, so the re-read sees every committed write. The write itself is not
+  conditional: entity-service has no version check on `PATCH /projects/{id}`.
+- **Failures.** A failed project never stops the others, with one exception: a CSM write failure
+  every project would hit (401/403, 429, 5xx, or no response; `writesFailingError` in
+  `sweep/writer.go`) stops the run. Notices go out before they are recorded, so carrying on would
+  send every remaining due notice unrecorded and the next run would send them all again. A project
+  whose own record is unusable (no Salesforce id, one Salesforce does not have, a date that does
+  not parse; `dataError`) is **skipped** with a WARN and does not fail the run: no retry can fix
+  it, and failing would retry and alert every weekday until someone fixed the record. Any other
+  failure makes the run return an error, so the engine alerts and retries. The error names the
+  run id and at most 20 failed project ids, never their errors (they can carry customer data); the
+  log has each one. `RetryBackoff` is **4 hours** and **`MaxAttempts` is 2** (one retry a day,
+  `registry.Task.MaxAttempts`): a retry repeats nothing already recorded in CSM, except a notice
+  whose email went out while its CSM record failed, which is sent again, so the rest waits for the
+  next weekday's run.
+- **A write is tried before every notice** (`probeRecordWrite`, `CheckRecordWritable`): the project's
+  `suspensionProcessState` is written back unchanged (`{}` when it has none). If CSM refuses it for
+  the project's own reason (400, 404, 409, 422), nothing is sent and the project is skipped as a
+  `dataError`, on every run until its record is fixed. Without it, a project whose record CSM
+  refuses would get the same notice every weekday, sent and never recorded (PR #3126 review). A
+  refusal every project would get stops the run before the first notice. The cost is one extra CSM
+  write per notice.
+
+## ACP reopen check
+
+`acp.RunReopenCheck`, registered as **`acp_reopen_check`** (default `30 3 * * *`, 09:00 Colombo every
+day, half an hour before `acp_closure`; TZ=UTC caveat as above), drives entity-service's daily safety
+net for ACP suspensions: `POST /acp/reopen-check`, `{cursor, limit: 5}`, page after page while
+the answer says `more` (a page short of time stops early, after at least one project, with `more`
+set). entity-service checks every project ACP's record still shows suspended,
+reopens the ones whose renewal or payment an event missed, and finishes a project a person set back
+to Open (Salesforce Open, the "Back to Open state" email); see its CLAUDE.md, "ACP reopen". This task
+decides nothing itself. **Off unless `ACP_REOPEN_CHECK_ENABLED=true`**, and it needs entity-service
+with `CSM_ACP_REOPEN_ENABLED=true` (the route is not registered otherwise: the run fails with a 404
+and alerts). Whether anything is written is entity-service's `CSM_ACP_REOPEN_DRY_RUN`, so after that
+is switched off the next run reopens everything that was only logged as "would reopen" during the
+dry run. Independent of `ACP_ENABLED`.
+
+**Turn it on together with entity-service's live reopen.** `ACP_REOPEN_CHECK_ENABLED=true` here and
+`CSM_ACP_REOPEN_ENABLED=true` with `CSM_ACP_REOPEN_DRY_RUN=false` in entity-service are a pair. With
+entity-service's reopen live and this off, a reopen that fails past Service Bus's redeliveries is never
+retried, and a project set back to Open by hand is never finished. With this on and entity-service's
+reopen off, every run fails with a 404 (or a 403 if this client is not in `M2M_CLIENT_IDS`).
+
+- **Runs before `acp_closure`**: registered first, so a tick that covers both (the driver late, or a
+  restart after 04:00 UTC) still reopens a project before `acp_closure` could send it a reminder.
+- Calls entity-service with the shared `OAUTH2_*` client (its id in entity-service's
+  `M2M_CLIENT_IDS`, as for ACP), with a 2-minute timeout per page.
+- A run in which a project failed returns an error naming at most 20 project ids (the errors are in
+  entity-service's log); retried after 4 hours, like `acp_closure`, and at most once a day
+  (`MaxAttempts` 2), so a failure that lasts (entity-service's reopen not on yet) alerts twice a day,
+  not five times; the next day's run catches up. A page error, a page that makes no progress, or more
+  than 2,000 pages stops the run with an error.
+
+## Running a task now (`--run-now`)
+
+`--run-now=<task name>` runs that task's handler once, right now, then exits (0 on success, 1 on failure), so an
+operator does not have to edit an env var and remember to revert it. Any task registered in this process can be
+named (`cmd/server/runnow.go`). It is **real**: unlike `TRYOUT_TASK` it is not forced to a dry run and not forced
+to a debug audience. At start it logs one WARN with the task name and its effective settings, so it is visible
+in Choreo logs.
+
+Refusals (non-zero exit, a message, never a fall-through to the schedule): an unknown flag, a stray positional
+argument, an empty or malformed value, `--run-now` together with `TRYOUT_TASK`, and a name that is not a
+registered task. A task is registered only when its own enable flag and config allow it (for example
+`case_autoclosure` only with `AUTOCLOSURE_ENABLED=true`), so a disabled task is refused as "not a registered
+task", and the message lists the registered names.
+
+| Argument | Meaning |
+|---|---|
+| `--run-now=<task>` | Run that registered task once now |
+| `--dry-run` | Force a dry run. Only for tasks with a narrowing hook (today `case_autoclosure` and `incident_autoclose`) |
+| `--limit=N` | Daily limit for this run, `N` > 0; at most the configured limit when that is non-zero. Same tasks as `--dry-run` |
+| `--states=a,b` | Work only these states, each among the configured ones. `case_autoclosure` only |
+| `--from-date=YYYY-MM-DD` `--to-date=YYYY-MM-DD` | Report an explicit inclusive window, plain dates in Asia/Colombo. Only `cs_worklogs_weekly_report` and `cs_worklogs_daily_report`. Both are required together, `--to-date` not before `--from-date`, at most 92 days (the entity-service cap), else a startup error. Weekly uses the range as is (any length up to 92 days); daily needs `--from-date` equal to `--to-date` |
+| `--recipients=a@x,b@y` `[--cc=c@x]` | **Replace** the report's whole audience for this one run (To and Cc both; see "Recipient override" below). Every report task takes it. Plain comma list, no spaces or display names; an empty entry, whitespace, or a malformed or dotless-domain address is a startup error. `--cc` needs `--recipients` |
+
+`--dry-run`, `--limit` and `--states` are valid only together with `--run-now`, and only for a task that
+implements the optional `registry.Task.RunNowNarrow` hook; any other task exits non-zero with `<flag> is not
+supported by task <name>`. The hook can only tighten the task's configured values, never loosen them. Do not add
+per-task flags to a task that does not need them.
+
+The window flags are valid only with `--run-now` and only for the two CS Worklogs report tasks, and the recipient
+flags only for report tasks (each lists them in `registry.Task.RunNowFlags`; any other task exits non-zero with
+`<flag> is not supported by task <name>`, and the report tasks refuse `--dry-run`, `--limit` and `--states` the same way). They are
+refused together with `TRYOUT_TASK`, like every run-now, so they cannot weaken the tryout's debug-recipients rule.
+`--recipients` wins over a `debug` list in `SUB_CRON_RECIPIENTS`. The subject of a window run is prefixed
+`[Manual range]`, and `[Test copy]` when recipients are replaced; a scheduled run's subject is unchanged.
+
+Example (test a custom week to one inbox, nothing reaches the real audience):
+
+```
+csm-scheduled-tasks --run-now=cs_worklogs_weekly_report --from-date=2030-01-07 --to-date=2030-01-15 \
+  --recipients=jane.doe@example.com --cc=john.roe@example.com
+```
+
+**Recipient override (`--recipients`, `--cc`).** Valid for every report task: the two CS Worklogs reports,
+`migration_case_report`, `open_cases_report`, `stale_cases_report`, `unresolved_products_digest`, the three
+`product_regression_report_*` and the two `query_hours_*` tasks (`reportTaskNames` in `cmd/server/runnow.go`; startup
+refuses to run if one of them is registered without the hook, `tasksMissingReportRunNow`). One mechanism: each task's
+`RunNowNarrow` is `reportRunNow(normal, raw, build)` (the CS Worklogs ones `worklogsRunNow`, which also takes the window
+flags), and `build` is the task's own handler constructor, so the scheduled `Handler` is untouched. With
+`--recipients`, `build` gets `notify.ForRunNow(raw, recipients, cc)`: the mail goes to the given addresses only, the
+Cc is the `--cc` list or empty, the subject is prefixed `[Test copy]`, and a notice at the top of the body names the
+real To and Cc, which are never addressed. The To passed to the handler is the task's real To, or the override list
+when it has none (`orRecipients`), so a task that skips or errors on an empty audience still sends. The explicit list
+wins over the task's `debug` list (the override sender wraps the raw client, not the debug-mode one); without
+`--recipients` a run-now still honours the debug list. Failure alerts to `ALERT_RECIPIENTS` are not affected. The
+rota reminders send to the rota's people, not a report audience, and are not covered. Refused with `TRYOUT_TASK` and
+without `--run-now`; `--cc` needs `--recipients`; `ALERTS_ENABLED=false` still silences the mail. The log carries
+counts of replaced recipients, never the addresses. A report that sends nothing when it has nothing to report stays
+silent, and a query-hour notification whose account has no internal owner is still skipped (that task also
+recomputes and stores thresholds, as every run of it does, so a `--recipients` run of it consumes the crossings it
+finds: the real owners never get those notices later, and the run-now WARN carries a `warning` key saying so).
+
+Example: `csm-scheduled-tasks --run-now=migration_case_report --recipients=jane.doe@example.com`. It needs the normal
+env (entity-service, email service, `ALERTS_ENABLED=true`) but no recipient config.
+
+**Ledger.** An override run writes **no ledger row**, like every run-now: `runOnDemand` runs the handler and exits
+without the engine, so `ledger.Attempt`, `Complete` and `Fail` are never called (`cmd/server/main.go`, the run-now
+branch returns before `engine.New`). It therefore cannot mark a scheduled period done or take its claim, and the
+next scheduled run is unaffected. The flip side is the one stated below: the report mails are not idempotent.
+
+**Email.** A run-now of a task that sends email sends to its real recipients, or to its `debug` list in
+`SUB_CRON_RECIPIENTS` if it has one, exactly as a scheduled run does. `ALERTS_ENABLED=false` still silences the
+report emails. Use `TRYOUT_TASK` to see a report land in a debug inbox without touching the real audience.
+
+**It writes no ledger row.** A row would either mark the period done (suppressing the scheduled run) or compete
+with it for the claim. The consequence is plain: the scheduled run for the same period still fires, so a task
+that is **not idempotent** sends or does its work again. Safe to run now are the idempotent tasks only. From
+reading the handlers' code and doc comments (a judgement, not a test):
+
+- **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
+  daily limit); `incident_autoclose` (entity-service's row-locked re-check and per-call daily budget); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
+  them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
+  `acp_reopen_check` (entity-service records each reopen); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
+  `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
+  `rota_manual_reminder` (claims waiting requests, each reported once).
+- **Not idempotent (will send again):** the report and digest emails, whose handlers send a mail on every run:
+  `stale_cases_report`, `open_cases_report`, `migration_case_report`, `cs_worklogs_daily_report`,
+  `cs_worklogs_weekly_report`, `query_hours_weekly_report`, the `product_regression_report_<key>` monthly reports.
+  `unresolved_products_digest` also mails every run it finds anything.
+- **Not verified (handler not read for this):** `availability_recalculation` (a recompute sweep, likely safe, not
+  confirmed), `query_hours_usage_notifications` (mails crossings it derives in process; whether a repeat re-sends
+  depends on stored state), `rota_weekday_reminder`, `rota_weekend_notice`, `rota_weekend_reminder` (the weekend
+  notice records its send in entity-service, the weekday reminder was not checked for a repeat guard).
+
+When unsure, treat it as not idempotent.
+
+**Example: staged rollout of case auto-closure.** Set `AUTOCLOSURE_ENABLED=true` and `AUTOCLOSURE_SCHEDULED=false`
+(the task stays configured but the normal tick never fires it; anything but a boolean refuses to start), then,
+from a Choreo Manual Task component (or the scheduled task, if it accepts per-run arguments), run in order,
+reading the logs between steps:
+
+1. `--run-now=case_autoclosure --dry-run` : see what is due, change nothing.
+2. `--run-now=case_autoclosure --states=solution_proposed --limit=20` : a small real batch of one state.
+3. Raise `--limit`, then drop `--states` (or add `awaiting_info`), as far as `AUTOCLOSURE_DAILY_LIMIT` and
+   `AUTOCLOSURE_STATES` allow.
+
+When satisfied, set `AUTOCLOSURE_SCHEDULED=true` (or remove it) so the daily 02:30 UTC run takes over. For this task
+the run-now is safe beside the scheduled run for the reason above: entity-service decides everything. Its
+`--limit` may not exceed `AUTOCLOSURE_DAILY_LIMIT` unless that is `0`, and `--states` must be within
+`AUTOCLOSURE_STATES` (both when unset). The price of no ledger row: a run-now is not in the run history, only in
+the logs (`run-now: ...`).
 
 ## Usage rollups
 
@@ -508,16 +933,20 @@ report emails" below for why that's not a generic engine feature.
 | `DRIVER_INTERVAL` | No (default `1h`) | This component's own expected invocation cadence — must match the cron trigger configured on the Choreo Scheduled Task component itself |
 | `SUB_CRON_SCHEDULES` | No | JSON object `{"<task.Name>": "<cron expression>"}` overriding any registered task's schedule by name — see "Adding a sub-cron" above. A task not mentioned keeps its own hardcoded default |
 | `SUB_CRON_RECIPIENTS` | No | JSON object `{"<task.Name>": {"to": [...], "cc": [...], "debug": [...]}}` giving a registered task its own extra failure-alert audience, on top of `ALERT_RECIPIENTS` — or, for a report-style task, its report's actual recipients (see "Alerting" above for which tasks work which way). `debug` on a report task is debug mail mode for that report alone (`notify.ForReport`): it goes to that list only, `[Test copy]`-prefixed, with the intended To/Cc named in the body; startup warns naming every such task. A task not mentioned gets no per-task recipients |
-| `ROTA_REMINDERS_ENABLED` | No (default `false`) | Registers the two rota reminder tasks — see "Rota reminders" above |
 | `ROTA_REMINDER_REDIRECT_TO` | No | Comma-separated test inbox(es) that receive every rota reminder instead of the people on the shift |
 | `ROTA_REMINDER_SCHEDULE_URL` | No | Link to the CSM portal's Team Schedule page, shown in every reminder |
 | `ROTA_REMINDER_COPY_TASK_RECIPIENTS` | No (default `false`) | Also copies each task's `SUB_CRON_RECIPIENTS` on every reminder |
-| `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset |
+| `ROTA_REMINDER_INVITES_ENABLED` | No (default `true`) | Attaches each window's calendar invitation; off when `EMAIL_FROM_ADDRESS` is unset or holds no address (`Name <address>` is fine) |
 | `ROTA_REMINDER_WEEKEND_REQUIRED` | No (default `CRE_WEEKEND=3,CRE_WEEKEND_NIGHT=1`) | `CODE=N` pairs: how many people each weekend shift needs on each day before the weekend is announced |
 | `ROTA_REMINDER_FAMILY` / `ROTA_REMINDER_WEEKDAY_SHIFTS` / `ROTA_REMINDER_WEEKEND_SHIFTS` | No (defaults `CRE` and the codes in "Rota reminders") | Which rota, and which shifts each task announces as `CODE=Name` pairs (the name the email shows) |
 | `ROTA_REMINDER_WINDOWS` | No (default `CRE_WEEKEND_NIGHT=08:00-18:00 America/Los_Angeles,CRE_WEEKEND_NIGHT_OC=08:00-18:00 America/Los_Angeles`) | A rotation's hours on its own clock, used in the emails and invitations instead of the Team Schedule's (`CODE=HH:MM-HH:MM Zone`, comma-separated). The Americas Weekend and the LK On-call that covers it are 08:00-18:00 Pacific time, so it moves an hour in UTC and IST when US daylight saving changes; the weekend summary says so when a change is within five weeks. A malformed value stops startup |
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
+| `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
+| `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
+| `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |
+| `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
+| `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

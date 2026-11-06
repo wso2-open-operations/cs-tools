@@ -20,14 +20,14 @@ import CaseDetailsBackButton from "@case-details/CaseDetailsBackButton";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 
 describe("CaseDetailsBackButton", () => {
-  it("should render Back to Support Center button", () => {
+  it("should render the Back button", () => {
     const onClick = vi.fn();
     render(
       <ThemeProvider theme={createTheme()}>
         <CaseDetailsBackButton onClick={onClick} />
       </ThemeProvider>,
     );
-    expect(screen.getByText("Back to Support Center")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
   });
 
   it("should call onClick when clicked", () => {
@@ -37,7 +37,7 @@ describe("CaseDetailsBackButton", () => {
         <CaseDetailsBackButton onClick={onClick} />
       </ThemeProvider>,
     );
-    fireEvent.click(screen.getByText("Back to Support Center"));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

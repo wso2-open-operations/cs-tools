@@ -26,6 +26,7 @@ import type {
   BePatchIncidentResponse,
   BeUpdateIncidentPayload,
 } from "@api/backend/types";
+import { CHILD_INCIDENTS_QUERY_KEY } from "@features/csm-operations/api/useSearchChildIncidents";
 
 /**
  * entity-service's incident flows (the report task on In Progress; the report,
@@ -43,9 +44,9 @@ export interface PatchIncidentInput {
 }
 
 /**
- * Update an incident via `PATCH /incidents/{id}` (ServiceNow data source
- * only). The BE requires at least one field in `patch`. On success the
- * detail and any cached list/search are invalidated so the new values show.
+ * Update an incident via `PATCH /incidents/{id}`. The BE requires at least
+ * one field in `patch`. On success the detail and any cached list/search are
+ * invalidated so the new values show (see `refreshIncidentRecords`).
  */
 export function usePatchIncident(): UseMutationResult<
   BePatchIncidentResponse,
@@ -65,7 +66,7 @@ export function usePatchIncident(): UseMutationResult<
       void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.INCIDENTS],
       });
-      refreshIncidentRecord(queryClient, variables.id, variables.patch);
+      refreshIncidentRecords(queryClient, [variables]);
     },
   });
 }
@@ -76,20 +77,53 @@ export function usePatchIncident(): UseMutationResult<
  * its notes (the update's own, and the flows'), and once more after the
  * background flows of In Progress / Resolved have had time to run. Shared by
  * the single-record edit and the list's bulk edit, so both refresh the same.
+ *
+ * A move to Resolved also resolves the incident's open child incidents (and
+ * theirs) in the same update, each with notes and activity of its own. Their
+ * ids are not known here, so every incident's detail, activity and notes are
+ * refreshed, and the child lists with them. A bulk run passes all its updates
+ * at once: those prefix-wide refreshes then happen once for the run (and once
+ * more after the flows, on one timer), not once per incident, since each one
+ * refetches every incident page in the cache.
  */
-export function refreshIncidentRecord(queryClient: QueryClient, id: string, patch: BeUpdateIncidentPayload): void {
-  void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENT_DETAILS, id] });
-  void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_INCIDENT_TASKS, id] });
+export function refreshIncidentRecords(
+  queryClient: QueryClient,
+  updates: ReadonlyArray<{ id: string; patch: BeUpdateIncidentPayload }>,
+): void {
+  if (updates.length === 0) return;
+  const resolvesChildren = updates.some((u) => u.patch.state === "RESOLVED");
+  const withFlows = updates.filter((u) => u.patch.state && STATES_WITH_FLOWS.has(u.patch.state));
+  const invalidate = (queryKey: readonly unknown[]): void => {
+    void queryClient.invalidateQueries({ queryKey });
+  };
+  // Detail and notes: every incident's when a child may have been resolved, else each one's own.
+  const refreshDetailAndNotes = (ids: string[]): void => {
+    if (resolvesChildren) {
+      invalidate([ApiQueryKeys.INCIDENT_DETAILS]);
+      invalidate([ApiQueryKeys.INCIDENT_COMMENTS]);
+      return;
+    }
+    for (const id of ids) {
+      invalidate([ApiQueryKeys.INCIDENT_DETAILS, id]);
+      invalidate([ApiQueryKeys.INCIDENT_COMMENTS, id]);
+    }
+  };
+  const ids = updates.map((u) => u.id);
+  refreshDetailAndNotes(ids);
+  for (const id of ids) invalidate([ApiQueryKeys.CSM_INCIDENT_TASKS, id]);
   // The update writes a field-change entry to the activity feed.
-  void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENT_ACTIVITIES, id] });
-  // Notes sent with the update (work notes, close notes) land in the comments lane.
-  void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENT_COMMENTS, id] });
-  if (patch.state && STATES_WITH_FLOWS.has(patch.state)) {
-    setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENT_DETAILS, id] });
-      void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.CSM_INCIDENT_TASKS, id] });
-      // The flows add work notes of their own.
-      void queryClient.invalidateQueries({ queryKey: [ApiQueryKeys.INCIDENT_COMMENTS, id] });
-    }, INCIDENT_FLOW_SETTLE_MS);
-  }
+  if (resolvesChildren) invalidate([ApiQueryKeys.INCIDENT_ACTIVITIES]);
+  else for (const id of ids) invalidate([ApiQueryKeys.INCIDENT_ACTIVITIES, id]);
+  if (withFlows.length === 0) return;
+  setTimeout(() => {
+    // The flows add tasks and work notes of their own.
+    const flowIds = withFlows.map((u) => u.id);
+    refreshDetailAndNotes(flowIds);
+    for (const id of flowIds) invalidate([ApiQueryKeys.CSM_INCIDENT_TASKS, id]);
+    if (resolvesChildren) {
+      // The children's activity rows are written after the commit.
+      invalidate([ApiQueryKeys.INCIDENT_ACTIVITIES]);
+      invalidate(CHILD_INCIDENTS_QUERY_KEY);
+    }
+  }, INCIDENT_FLOW_SETTLE_MS);
 }

@@ -147,6 +147,9 @@ export const CALL_REQUEST_STATE_PENDING_ON_WSO2 = 2;
 /** API stateKey value for cancelling a call request (PATCH). */
 export const CALL_REQUEST_STATE_CANCELLED = 6;
 
+/** API stateKey of a call request that has taken place (state "concluded"). */
+export const CALL_REQUEST_STATE_CONCLUDED = 8;
+
 /**
  * Every call-request stateKey (PATCH / search filter), by entity-service's own
  * string enum id (GET /projects/{id}/filters' callRequestStates[].id) -- the
@@ -164,7 +167,31 @@ export const CALL_REQUEST_STATE_KEY_BY_ID: Readonly<Record<string, number>> = {
   wso2_rejected: 5,
   canceled: CALL_REQUEST_STATE_CANCELLED,
   notes_pending: 7,
-  concluded: 8,
+  concluded: CALL_REQUEST_STATE_CONCLUDED,
+};
+
+/**
+ * The Calls tab's status dropdown. Pending is every state that is neither
+ * Canceled nor Concluded (the call has not finished), so a state added to
+ * CALL_REQUEST_STATE_KEY_BY_ID later is picked up under Pending.
+ */
+export const CALL_REQUEST_STATUS_FILTER_OPTIONS = [
+  { value: "pending", label: "Pending" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+] as const;
+
+/** The search stateKeys behind each CALL_REQUEST_STATUS_FILTER_OPTIONS value. */
+export const CALL_REQUEST_STATE_KEYS_BY_STATUS_FILTER: Readonly<
+  Record<string, number[]>
+> = {
+  pending: Object.values(CALL_REQUEST_STATE_KEY_BY_ID).filter(
+    (key) =>
+      key !== CALL_REQUEST_STATE_CANCELLED &&
+      key !== CALL_REQUEST_STATE_CONCLUDED,
+  ),
+  completed: [CALL_REQUEST_STATE_CONCLUDED],
+  cancelled: [CALL_REQUEST_STATE_CANCELLED],
 };
 
 // Case severity types matching API labels.

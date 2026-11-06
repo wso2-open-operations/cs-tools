@@ -254,6 +254,7 @@ func TestSyncDerivedAdminRole(t *testing.T) {
 			memberships: []fixtureMembership{{userID: user, state: "INVITED", admin: true}},
 			adminRole:   "",
 			wantAdmin:   false,
+			wantRevoke:  []string{globalRoleCustomerAdminName, globalRolePartnerAdminName},
 		},
 	}
 

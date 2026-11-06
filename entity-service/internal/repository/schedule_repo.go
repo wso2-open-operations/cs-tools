@@ -338,6 +338,36 @@ func (r *scheduleRepository) Catalogue(ctx context.Context) (domain.ScheduleCata
 		return cat, fmt.Errorf("query schedule team members: %w", err)
 	}
 
+	// Each team's heads: the americas_team_lead holders notManagement leaves
+	// out of Members above. Read only to name them; nothing about the rota
+	// changes. team_member can repeat a person on a team, hence DISTINCT ON.
+	headRows, err := r.db.Query(ctx, `
+		SELECT DISTINCT ON (t.key, u.id) t.key, u.id::text, `+engineerName+`, COALESCE(u.email, ''), tm.role
+		  FROM team_member tm
+		  JOIN team t ON t.id = tm.team_id
+		  JOIN "user" u ON u.id = tm.user_id
+		 WHERE t.key IS NOT NULL
+		   AND tm.role = 'americas_team_lead'
+		 ORDER BY t.key, u.id`)
+	if err != nil {
+		return cat, fmt.Errorf("query schedule team heads: %w", err)
+	}
+	defer headRows.Close()
+	for headRows.Next() {
+		var key string
+		var m domain.ScheduleTeamMember
+		if err := headRows.Scan(&key, &m.UserID, &m.Name, &m.Email, &m.Role); err != nil {
+			return cat, fmt.Errorf("scan schedule team head: %w", err)
+		}
+		m.IsLead = true
+		if i, ok := byKey[key]; ok {
+			cat.Teams[i].Heads = append(cat.Teams[i].Heads, m)
+		}
+	}
+	if err := headRows.Err(); err != nil {
+		return cat, fmt.Errorf("query schedule team heads: %w", err)
+	}
+
 	zoneRows, err := r.db.Query(ctx, `
 		SELECT z.id, z.code, z.label, w.code, z.sort_order, ro.code
 		FROM team_schedule_zone z
@@ -1323,7 +1353,11 @@ func (r *scheduleRepository) LeadTeamsFor(ctx context.Context, userEmail string)
 // The service refuses a non-internal caller before it asks this at all; this
 // holds the same line here so the answer can never be used without it.
 //
-// The CRE head and the CS head count as CRE rota admins (see headsCRE).
+// The CRE head and the CS head count as CRE rota admins (see headsCRE). A
+// portal admin -- the global admin role, on an internal holder -- counts for
+// every rostered team of every family: whoever administers the portal can
+// correct any rota. A CSM admin (the admin role on the sign-in token, which
+// is not stored here) is the service's to add.
 func (r *scheduleRepository) RotaAdminTeamsFor(ctx context.Context, userEmail string) ([]string, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT t.key
@@ -1343,6 +1377,15 @@ func (r *scheduleRepository) RotaAdminTeamsFor(ctx context.Context, userEmail st
 		 WHERE lower(u.email) = lower($1)
 		   AND u.user_type = 'INTERNAL'::user_type_enum
 		   AND `+headsCRE+`
+		UNION
+		SELECT t.key
+		  FROM "user" u
+		  JOIN user_role ur ON ur.user_id = u.id
+		  JOIN role ro      ON ro.id = ur.role_id
+		  JOIN team t       ON `+rosteredTeamWhere+`
+		 WHERE lower(u.email) = lower($1)
+		   AND u.user_type = 'INTERNAL'::user_type_enum
+		   AND ro.name = 'admin'
 		 ORDER BY 1`, userEmail)
 	if err != nil {
 		return nil, fmt.Errorf("query rota admin teams: %w", err)

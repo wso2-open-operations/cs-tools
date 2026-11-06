@@ -37,6 +37,20 @@ import { CREATE_CASE } from "../../utils/selectors";
 
 withSession(test);
 
+/**
+ * Whether the form opened with a deployment already chosen. The Deployment
+ * select is located by its placeholder, so it matches nothing once a value is
+ * set; the caller has already waited for the form to load.
+ *
+ * @param form - The open create-case form.
+ * @returns True when no deployment needs choosing.
+ */
+async function deploymentPreselected(form: CaseCreatePage): Promise<boolean> {
+  const preselected = (await form.deploymentSelect().count()) === 0;
+  if (preselected) console.log("Deployment arrived pre-selected; no gate to check.");
+  return preselected;
+}
+
 test.describe("Create Case — validation", () => {
   // Each test loads the form, which waits on project details, features and
   // filters; the 30s default is not enough for a cold navigation.
@@ -158,6 +172,17 @@ test.describe("Create Case — validation", () => {
           const form = new CaseCreatePage(page);
           await form.openViaGetHelp(project.id);
 
+          // Staging's Managed Cloud form now opens with its deployment
+          // ("Production") already chosen (live 2026-10-27), so there is no gate
+          // to observe — the product field must then be open straight away.
+          if (await deploymentPreselected(form)) {
+            // Either the placeholder or an auto-selected single product — the
+            // placeholder alone is absent when the deployment has one product.
+            await expect(form.productReadySignal()).toBeEnabled();
+            await expect(form.productGateMessage()).toHaveCount(0);
+            return;
+          }
+
           // Product options are fetched per deployment, so the field reads
           // "Select deployment first" and stays disabled until one is picked.
           await expect(form.productVersionSelect()).toBeDisabled();
@@ -179,6 +204,13 @@ test.describe("Create Case — validation", () => {
           skipWhenUnconfigured(project);
           const form = new CaseCreatePage(page);
           await form.openViaGetHelp(project.id);
+
+          // A pre-selected deployment (see the gate test above) leaves nothing
+          // to wait for, so submit must already be available.
+          if (await deploymentPreselected(form)) {
+            await expect(form.submitButton()).toBeEnabled();
+            return;
+          }
 
           await expect(form.submitButton()).toBeDisabled();
           await form.selectDeployment(project.deployment);
