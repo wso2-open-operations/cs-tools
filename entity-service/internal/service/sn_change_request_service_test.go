@@ -1468,3 +1468,18 @@ func TestSNChangeRequestService_RefusesTheDeviation(t *testing.T) {
 		t.Errorf("PATCH with a deviation: err = %v, want that data source's refusal", err)
 	}
 }
+
+// Clone lineage is the CSM database's alone: the data source that talks to the
+// previous system directly refuses it before anything is sent; blank is none.
+func TestSNChangeRequestService_RefusesTheCloneSource(t *testing.T) {
+	svc := NewServiceNowChangeRequestService(nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	create := validCreateChangeRequestRequest()
+	source := testUUID
+	create.ClonedFromChangeRequestID = &source
+	_, err := svc.CreateChangeRequest(ctx, create)
+	var ve *apierror.ValidationError
+	if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "clonedFromChangeRequestId") {
+		t.Errorf("create with a clone source: err = %v, want that data source's refusal", err)
+	}
+}

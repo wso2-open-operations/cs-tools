@@ -810,6 +810,11 @@ func (s *snChangeRequestService) CreateChangeRequest(ctx context.Context, req do
 	if req.StandardChangeTemplateID != nil || req.StandardChangeTemplateVersionID != nil || len(req.StandardChangeParameters) > 0 {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "standard change templates are only supported on the PostgreSQL data source"}
 	}
+	// Nor which change request this one was cloned from (the dual-write service
+	// strips it before it mirrors).
+	if req.ClonedFromChangeRequestID != nil && strings.TrimSpace(*req.ClonedFromChangeRequestID) != "" {
+		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "clonedFromChangeRequestId is only supported on the PostgreSQL data source"}
+	}
 	if req.Subject == "" {
 		return domain.CreateChangeRequestResponse{}, &apierror.ValidationError{Msg: "subject is required"}
 	}

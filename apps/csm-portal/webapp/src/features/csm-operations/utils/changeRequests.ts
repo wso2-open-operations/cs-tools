@@ -1806,6 +1806,9 @@ export function buildChangeRequestSearchFilters(
 export interface CloneChangeRequestNavState {
   /** For the banner shown on the create form — never sent to the backend. */
   sourceNumber?: string;
+  /** The source's id, sent on create as `clonedFromChangeRequestId` so the new
+   * change request records what it was cloned from. */
+  sourceId?: string;
   subject?: string;
   description?: string;
   justification?: string;
@@ -1878,6 +1881,7 @@ export function buildCloneChangeRequestNavState(
     for (const p of std.parameters ?? []) if (p.value) values[p.key] = p.value;
     return {
       sourceNumber: cr.number,
+      sourceId: cr.id || undefined,
       type: "standard",
       standardChangeTemplateId: std.template.id,
       standardChangeTemplateLabel: [std.templateNumber, std.template.name].filter(Boolean).join(" — ") || undefined,
@@ -1890,6 +1894,7 @@ export function buildCloneChangeRequestNavState(
   }
   return {
     sourceNumber: cr.number,
+    sourceId: cr.id || undefined,
     subject: cr.subject ?? undefined,
     description: cloneableHtml(cr.description),
     justification: cloneableHtml(cr.justification),

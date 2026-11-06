@@ -4802,6 +4802,13 @@ type CreateChangeRequestRequest struct {
 	StandardChangeTemplateID        *string           `json:"standardChangeTemplateId,omitempty"`
 	StandardChangeTemplateVersionID *string           `json:"standardChangeTemplateVersionId,omitempty"`
 	StandardChangeParameters        map[string]string `json:"standardChangeParameters,omitempty"`
+
+	// ClonedFromChangeRequestID is the change request this one is a clone of
+	// (the portal's Clone), recorded as change_request.cloned_from_change_request_id
+	// and never changed afterwards. Optional; must be an existing change request
+	// (400). PostgreSQL data sources only: the previous system has no field for
+	// it (DATA_SOURCE=servicenow refuses it; the dual-write mirror leaves it out).
+	ClonedFromChangeRequestID *string `json:"clonedFromChangeRequestId,omitempty"`
 }
 
 // CreateChangeRequestResponse is the output for POST /change-requests.
@@ -5436,6 +5443,9 @@ type ChangeRequestLinkSelection struct {
 	// version the change is raised from: its deployment types (if it names any)
 	// are checked against the chosen deployments too.
 	StandardChangeTemplateVersionID *string
+	// CloneSourceID, when set, is the change request the new one is cloned from:
+	// it must be an existing change request.
+	CloneSourceID *string
 }
 
 // ChangeRequestLinkSet is a validated, derived ChangeRequestLinkSelection --
@@ -5777,6 +5787,12 @@ type ChangeRequest struct {
 	// template specifies are read-only (errorCode
 	// change_request_standard_template_field).
 	StandardChange *ChangeRequestStandardChange `json:"standardChange,omitempty"`
+
+	// ClonedFrom is the change request this one was cloned from ({id, name: its
+	// number}), when one was recorded on create (migration 0280). Staff only,
+	// PostgreSQL data sources only; omitted otherwise, and once the source is
+	// deleted.
+	ClonedFrom *EntityRef `json:"clonedFrom,omitempty"`
 
 	// Group C2 -- carried for parity, read-through only; no write path is
 	// exposed for any of these seven.

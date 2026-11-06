@@ -27629,6 +27629,12 @@ components:
                 with the values of its parameters. Staff only; omitted otherwise. While it is
                 set, what the template specifies is read-only (errorCode
                 change_request_standard_template_field).
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name), when
+                one was recorded on create. Staff only; omitted otherwise, and once the source is
+                deleted.
             justification:
               type: string
               nullable: true
@@ -28695,6 +28701,14 @@ components:
           type: object
           additionalProperties: {type: string}
           description: The values of the template version's parameters, by key (400 for a missing required value, an undeclared key or a value of the wrong kind).
+        clonedFromChangeRequestId:
+          type: string
+          format: uuid
+          description: >-
+            The change request this one is a clone of (the portal's Clone), recorded as its
+            clonedFrom and never changed afterwards. Must be an existing change request (400
+            otherwise, refused before the previous system is called on dual-write).
+            PostgreSQL data sources only: DATA_SOURCE=servicenow refuses it (400).
 
     ChangeRequestLinkOptionsRequest:
       type: object

@@ -1055,6 +1055,12 @@ func (r *changeRequestRepo) GetChangeRequestByID(ctx context.Context, id string)
 		} else {
 			cr.StandardChange = sc
 		}
+		// The change request it was cloned from: staff only, best-effort too.
+		if src, err := readChangeRequestClonedFrom(ctx, r.db, id); err != nil {
+			slog.WarnContext(ctx, "get change request: clone source lookup failed", "changeRequestId", id, "error", err)
+		} else {
+			cr.ClonedFrom = src
+		}
 	}
 
 	// While the customer group's review request is pending (a live "Customer
@@ -2559,6 +2565,9 @@ func (r *changeRequestRepo) createChangeRequestWithScope(
 			if err := insertChangeRequestJournalEntry(ctx, tx, row.id, "WORK_NOTE", createdBy, *req.WorkNote); err != nil {
 				return createdChangeRequestRow{}, err
 			}
+		}
+		if err := recordChangeRequestCloneSource(ctx, tx, row.id, req.ClonedFromChangeRequestID); err != nil {
+			return createdChangeRequestRow{}, err
 		}
 		// Raised from a standard change template: the service rendered the
 		// template into req; record which version and the values, refused (409)

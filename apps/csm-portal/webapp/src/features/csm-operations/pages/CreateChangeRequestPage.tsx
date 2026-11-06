@@ -775,6 +775,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
     if (!isStandard && isChangeRequestCategory(category)) payload.category = category as BeChangeRequestCategory;
     if (comment.trim()) payload.comment = comment.trim();
     if (workNote.trim()) payload.workNote = workNote.trim();
+    // A clone records what it was cloned from (the standard change suggestions
+    // read the lineage).
+    if (cloneState?.sourceId) payload.clonedFromChangeRequestId = cloneState.sourceId;
 
     postChangeRequest.mutate(payload, {
       onSuccess: (created) => {

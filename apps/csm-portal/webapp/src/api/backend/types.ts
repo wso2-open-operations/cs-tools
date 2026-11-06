@@ -2978,6 +2978,9 @@ export interface BeChangeRequestDetail extends BeChangeRequestSearchView {
    * What the template specifies cannot be edited (400
    * `change_request_standard_template_field`). */
   standardChange?: BeChangeRequestStandardChange | null;
+  /** The change request this one was cloned from ({id, name: its number}), when
+   * one was recorded on create (staff only; absent otherwise). */
+  clonedFrom?: { id: string; name: string } | null;
 }
 
 /**
@@ -3232,6 +3235,9 @@ export interface BeCreateChangeRequestPayload {
   standardChangeTemplateVersionId?: string;
   /** The values of the version's parameters, by key. */
   standardChangeParameters?: Record<string, string>;
+  /** The change request this one is a clone of (the detail page's Clone):
+   * recorded once, read back as `clonedFrom`. */
+  clonedFromChangeRequestId?: string;
 }
 
 /**

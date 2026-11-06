@@ -533,6 +533,11 @@ the previous system (see entity-service's `CLAUDE.md`, "Change requests: Tags").
 to the entity service as-is (no field allow-list), with two checks on top:
 
 * `POST` requires `type` of `standard`, `normal` or `emergency` (`validateChangeRequestCreateType`).
+* `POST`'s `clonedFromChangeRequestId` (the change request a clone is made from, sent by the webapp's
+  Clone) must be a UUID string in every spelling of the key (`validateChangeRequestCloneSource`, 400
+  `clonedFromChangeRequestId must be a UUID string`, no upstream call); whether it names an existing
+  change request is entity-service's 400, echoed. The detail's `clonedFrom` passes through.
+  `TestCreateChangeRequest_CloneSource`.
 * **An Emergency change takes no customer step** (the previous system has no Emergency CAB and acts on an Emergency
   change without the customer's consent): a `POST` with `type: emergency` and either box true, a `PATCH` that
   turns a box on of an Emergency change, and a `PATCH {type: emergency}` that leaves a box ticked are refused by

@@ -4950,6 +4950,27 @@ guess). Rows with `closed_on` already set, or with no recorded transition, are l
 re-running it writes nothing. Tests: `change_request_closure_integration_test.go`
 (`CHANGE_REQUEST_TEST_DSN`, superuser and `csm_app`).
 
+### Clone lineage: `cloned_from_change_request_id` (migration 0280)
+
+The portal's Clone used to leave no trace: a clone could not be told apart from a change request
+typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
+change_request(id) ON DELETE SET NULL`, partial index) records the source.
+- **Write**: `POST /change-requests` `clonedFromChangeRequestId` (`change_request_clone_source.go`):
+  trimmed and lower-cased, blank is none, not a UUID or not an existing change request (a work item
+  of another type included, read under the caller's identity) is a 400 naming the field that
+  creates nothing. Checked in the create transaction (`recordChangeRequestCloneSource`, both create
+  paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
+  called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
+  leaves it out; `DATA_SOURCE=servicenow` refuses it (400), like `projectId`, which a clone carries
+  anyway. Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
+  is a 400).
+- **Read**: `clonedFrom` {id, name: the source's number} on the detail, staff only and best-effort
+  like the tags; omitted when none was recorded or the source was deleted.
+- No backfill: clones made before this are not recognisable. The standard change suggestions
+  (below) join a clone to its source's cluster directly.
+
+Tests: `change_request_clone_source_integration_test.go`, `TestSNChangeRequestService_RefusesTheCloneSource`.
+
 ### Tags
 
 A change request's tags are the case's tags, on its own work item: the same

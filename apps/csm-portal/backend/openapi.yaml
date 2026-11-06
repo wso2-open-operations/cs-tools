@@ -7416,6 +7416,14 @@ paths:
                   description: >-
                     The "Implementation Plan visible to customers" checkbox, stored and
                     returned as sent.
+                clonedFromChangeRequestId:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The change request this one is a clone of (the portal's Clone),
+                    read back as `clonedFrom` on the detail and never changed afterwards.
+                    A value that is not a UUID string is a 400 here; one that is not an
+                    existing change request is the entity service's 400, echoed.
                 projectId:
                   type: string
                   format: uuid
@@ -26894,6 +26902,11 @@ components:
             requestedBy:
               $ref: '#/components/schemas/EntityRef'
               nullable: true
+            clonedFrom:
+              allOf: [{$ref: '#/components/schemas/EntityRef'}]
+              description: >-
+                The change request this one was cloned from (id, and its number as name),
+                when one was recorded on create. Omitted otherwise.
             justification:
               type: string
               nullable: true
