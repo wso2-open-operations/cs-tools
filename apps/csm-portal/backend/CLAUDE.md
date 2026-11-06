@@ -872,6 +872,20 @@ carry it (`widgetViews` / `widgetTemplates`), so a rename or an edit keeps it:
 catalogue (sections 4, 8 and 9) teaches the model when to set it. Deploy this backend before the catalogue
 mounts that teach it: an older backend refuses `series` as an unknown field, so those prompts would fail.
 
+**Line widgets: a fixed window.** Instead of `days` (the trailing window ending today), a `line` widget may
+set `startDate` / `endDate` (both inclusive) and `bucket` (`day`, the default, `week` or `month`), so a past
+period such as "cases per day in December 2025" or "per month in 2025" can be a line; the frontend passes
+them to `POST /cases/volume-trend`, which this backend forwards as is (entity-service's `CLAUDE.md` has the
+endpoint's side). `validateLineWindow` (`internal/dashboard/registry.go`) refuses them on any other shape,
+`days` with them, one date without the other, a `bucket` without dates or unknown, and a window over the
+bucket's limit (90 days / 53 weeks / 24 months, mirroring entity-service's). The dates are two plain
+`YYYY-MM-DD` dates or two relative dates, never one of each (that window grows daily); two relative dates
+must stay within the limit on every day of 2024-2027, as `checkDayWindow` does for a time card, because a
+saved dashboard is checked again on every read (`__startOfYear:0__` to `__today__` by day is refused,
+by month it passes). Every line widget saved before these fields has none, so none of them changes. The view
+and the draft carry them: `TestDraftToDefinition_KeepsLineWindow`. Deploy order: entity-service (which
+must accept the fields first), then this backend, then the webapp, then the catalogue mounts.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same

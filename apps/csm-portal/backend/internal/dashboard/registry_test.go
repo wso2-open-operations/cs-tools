@@ -890,6 +890,85 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			want: `widget "w": "series" is only meaningful for shape "line", got "bar"`,
 		},
 		{
+			name: "line window dates on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "startDate": "2025-12-01", "endDate": "2025-12-31"}`,
+			want: `widget "w": "startDate", "endDate" and "bucket" are only meaningful for shape "line", got "bar"`,
+		},
+		{
+			name: "line widget with a bucket but no dates",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "bucket": "week"}`,
+			want: `widget "w": "bucket" needs "startDate" and "endDate"`,
+		},
+		{
+			name: "line widget with days and dates",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "days": 30, "startDate": "2025-12-01", "endDate": "2025-12-31"}`,
+			want: `widget "w": "days" cannot be combined with "startDate" and "endDate"`,
+		},
+		{
+			name: "line widget with only a start date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-01"}`,
+			want: `widget "w": "startDate" and "endDate" are both needed`,
+		},
+		{
+			name: "line widget with an unknown bucket",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2025-12-31", "bucket": "quarter"}`,
+			want: `widget "w": unknown "bucket" "quarter" (want "day", "week" or "month")`,
+		},
+		{
+			name: "line widget with a timestamp for a date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-01T00:00:00Z", "endDate": "2025-12-31"}`,
+			want: `widget "w": "startDate" and "endDate" must be plain dates (YYYY-MM-DD) or relative dates`,
+		},
+		{
+			name: "line widget with the dates out of order",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-12-31", "endDate": "2025-12-01"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with 91 days by day",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2026-01-01", "endDate": "2026-04-01"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with 54 weeks by week",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2026-01-05", "bucket": "week"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 53 weeks`,
+		},
+		{
+			name: "line widget with 25 months by month",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2027-01-01", "bucket": "month"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 24 months`,
+		},
+		{
+			name: "line widget with one plain and one relative date",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "2026-01-01", "endDate": "__today__", "bucket": "month"}`,
+			want: `widget "w": "startDate" and "endDate" must be two plain dates or two relative dates, not one of each`,
+		},
+		{
+			name: "line widget with a relative window too long on some days",
+			// This year so far by day: within 90 days until the end of March.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfYear:0__", "endDate": "__today__"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with a relative date the dashboard cannot resolve",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfMonth__", "endDate": "__today__"}`,
+			want: `widget "w": "startDate" or "endDate" is not a relative date the dashboard can resolve`,
+		},
+		{
 			name: "groupBy with an unknown linkResourceType",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
 			 "query": {}, "groupBy": {"field": "account", "linkResourceType": "bogus"}}`,
@@ -1024,6 +1103,53 @@ func TestLoadDir_AcceptsLineWidgetSeries(t *testing.T) {
 			}
 			if got := dashboards[0].Widgets[0].Series; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("series = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A "line" widget may take a fixed window instead of days: plain dates for a
+// named period, relative dates for one counted from today, by day, week or
+// month, up to each bucket's limit.
+func TestLoadDir_AcceptsLineWidgetWindow(t *testing.T) {
+	for _, tc := range []struct {
+		name, window string
+		want         WidgetTemplate
+	}{
+		{"December 2025 by day", `"startDate": "2025-12-01", "endDate": "2025-12-31"`,
+			WidgetTemplate{StartDate: "2025-12-01", EndDate: "2025-12-31"}},
+		{"90 days by day", `"startDate": "2026-01-01", "endDate": "2026-03-31", "bucket": "day"`,
+			WidgetTemplate{StartDate: "2026-01-01", EndDate: "2026-03-31", Bucket: LineBucketDay}},
+		// 2026 runs from the week of Monday 29 December 2025 to the week of
+		// Monday 28 December 2026: 53 weeks.
+		{"2026 by week", `"startDate": "2026-01-01", "endDate": "2026-12-31", "bucket": "week"`,
+			WidgetTemplate{StartDate: "2026-01-01", EndDate: "2026-12-31", Bucket: LineBucketWeek}},
+		{"24 months by month", `"startDate": "2025-01-01", "endDate": "2026-12-31", "bucket": "month"`,
+			WidgetTemplate{StartDate: "2025-01-01", EndDate: "2026-12-31", Bucket: LineBucketMonth}},
+		{"last month by day", `"startDate": "__startOfMonth:-1__", "endDate": "__endOfMonth:-1__"`,
+			WidgetTemplate{StartDate: "__startOfMonth:-1__", EndDate: "__endOfMonth:-1__"}},
+		{"this year by week", `"startDate": "__startOfYear:0__", "endDate": "__endOfYear:0__", "bucket": "week"`,
+			WidgetTemplate{StartDate: "__startOfYear:0__", EndDate: "__endOfYear:0__", Bucket: LineBucketWeek}},
+		{"this year so far by month", `"startDate": "__startOfYear:0__", "endDate": "__today__", "bucket": "month"`,
+			WidgetTemplate{StartDate: "__startOfYear:0__", EndDate: "__today__", Bucket: LineBucketMonth}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, `+tc.window+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			w := dashboards[0].Widgets[0]
+			if w.StartDate != tc.want.StartDate || w.EndDate != tc.want.EndDate || w.Bucket != tc.want.Bucket || w.Days != 0 {
+				t.Errorf("window = %q to %q by %q (days %d), want %q to %q by %q", w.StartDate, w.EndDate, w.Bucket, w.Days,
+					tc.want.StartDate, tc.want.EndDate, tc.want.Bucket)
 			}
 		})
 	}

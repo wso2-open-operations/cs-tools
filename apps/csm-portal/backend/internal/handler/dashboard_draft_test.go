@@ -168,6 +168,38 @@ func TestDraftToDefinition_KeepsLineSeries(t *testing.T) {
 	}
 }
 
+// A line widget keeps its fixed window through the draft: without it, a
+// follow-up edit would turn "per month in 2025" back into the last 30 days.
+func TestDraftToDefinition_KeepsLineWindow(t *testing.T) {
+	const authored = `{"id": "ai-window", "displayName": "Window", "type": "cs", "isDefault": false, "targetTeam": "",
+  "isTeamBased": false, "widgets": [
+  {"id": "per-month", "displayName": "Cases per month in 2025", "resourceType": "case", "shape": "line", "gridWidth": 12,
+   "query": {}, "startDate": "2025-01-01", "endDate": "2025-12-31", "bucket": "month"},
+  {"id": "trailing", "displayName": "Opened vs closed", "resourceType": "case", "shape": "line", "gridWidth": 12,
+   "query": {}, "days": 30}]}`
+	loaded, served := servedDraft(t, authored)
+	if !strings.Contains(string(served), `"startDate":"2025-01-01","endDate":"2025-12-31","bucket":"month"`) {
+		t.Fatalf("served form lacks the window, so the test proves nothing: %s", served)
+	}
+	if strings.Count(string(served), `"startDate"`) != 1 {
+		t.Errorf("served form gives a window to the widget without one: %s", served)
+	}
+	def, err := draftToDefinition(served)
+	if err != nil {
+		t.Fatalf("draftToDefinition: %v", err)
+	}
+	if got, want := asJSONValue(t, def), asJSONValue(t, []byte(authored)); !reflect.DeepEqual(got, want) {
+		t.Errorf("definition lost or changed the window\n got: %s\nwant: %s", def, authored)
+	}
+	reloaded, err := dashboard.ParseDashboardsConfig("[" + string(def) + "]")
+	if err != nil {
+		t.Fatalf("load the definition: %v", err)
+	}
+	if !reflect.DeepEqual(reloaded[0], loaded) {
+		t.Errorf("reloaded dashboard differs from the one served\n got: %+v\nwant: %+v", reloaded[0], loaded)
+	}
+}
+
 // A time card totals widget keeps its groupBy measure through the draft:
 // without it, a rename would turn "hours per user" into a card count.
 func TestDraftToDefinition_KeepsTimeCardMeasure(t *testing.T) {

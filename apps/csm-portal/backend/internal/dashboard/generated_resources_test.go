@@ -43,6 +43,35 @@ func TestParseGenerated_AcceptsWeekAndYearDates(t *testing.T) {
 	}
 }
 
+// TestParseGenerated_AcceptsLineWindows: a generated case line may draw a
+// named past period (plain dates) or one counted from today (relative
+// dates), by day, week or month; the loader's own checks still refuse a
+// window over its bucket's limit.
+func TestParseGenerated_AcceptsLineWindows(t *testing.T) {
+	raw := opsDashboard(
+		`{"id":"dec-2025-per-day","displayName":"Cases Created per Day in December 2025","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"series":["opened"],"startDate":"2025-12-01","endDate":"2025-12-31"}`,
+		`{"id":"2025-per-month","displayName":"Cases Opened vs Closed per Month in 2025","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"startDate":"2025-01-01","endDate":"2025-12-31","bucket":"month"}`,
+		`{"id":"this-year-per-week","displayName":"Cases Created per Week This Year","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"series":["opened"],"startDate":"__startOfYear:0__","endDate":"__endOfYear:0__","bucket":"week"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if w := d.Widgets[1]; w.StartDate != "2025-01-01" || w.EndDate != "2025-12-31" || w.Bucket != LineBucketMonth {
+		t.Errorf("2025 per month = %q to %q by %q, want 2025-01-01 to 2025-12-31 by month", w.StartDate, w.EndDate, w.Bucket)
+	}
+
+	tooLong := opsDashboard(`{"id":"2025-per-day","displayName":"Cases per Day in 2025","resourceType":"case","shape":"line","gridWidth":12,
+	  "query":{},"startDate":"2025-01-01","endDate":"2025-12-31"}`)
+	_, err = ParseGenerated([]byte(tooLong))
+	if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), "cover at most 90 days") {
+		t.Errorf("a year by day: err = %v, want ErrGeneratedInvalid naming the 90 day limit", err)
+	}
+}
+
 func TestParseGenerated_AcceptsOperationsWidgets(t *testing.T) {
 	raw := opsDashboard(
 		`{"id":"p1-open","displayName":"Critical Open Incidents","resourceType":"incident","shape":"count","gridWidth":3,

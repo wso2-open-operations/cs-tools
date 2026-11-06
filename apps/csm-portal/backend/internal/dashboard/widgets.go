@@ -89,9 +89,19 @@ const (
 	// Summary dashboard's case-volume trend, not a platform. Only meaningful
 	// for ResourceCase; the frontend resolves it with one call to
 	// POST /cases/volume-trend (Query as the base filters, Days as the
-	// window size), not the generic per-ResourceType /search endpoint every
-	// other shape uses.
+	// window size, or StartDate/EndDate/Bucket for a fixed window), not the
+	// generic per-ResourceType /search endpoint every other shape uses.
 	ShapeLine Shape = "line"
+)
+
+// LineBucket is how a Shape line widget's fixed window (WidgetTemplate.
+// StartDate/EndDate) groups its days into points.
+type LineBucket string
+
+const (
+	LineBucketDay   LineBucket = "day"   // one point per day, at most 90 days
+	LineBucketWeek  LineBucket = "week"  // Monday to Sunday, at most 53 weeks
+	LineBucketMonth LineBucket = "month" // at most 24 months
 )
 
 // LineSeries is one of a Shape line widget's two lines (WidgetTemplate.Series).
@@ -359,6 +369,16 @@ type WidgetTemplate struct {
 	// field on any other shape. The endpoint still returns both counts; the
 	// frontend only leaves the other line out.
 	Series []LineSeries `json:"series,omitempty"`
+	// StartDate, EndDate and Bucket are only meaningful for Shape line: a
+	// fixed window instead of Days's trailing one, for a past period such as
+	// "December 2025". Both dates inclusive, both plain YYYY-MM-DD or both
+	// relative date tokens; Bucket groups the days ("day" when omitted). All
+	// omitted keeps the trailing window, so no saved or served dashboard
+	// changes. The registry checks them (validateLineWindow); the frontend
+	// passes them to POST /cases/volume-trend.
+	StartDate string     `json:"startDate,omitempty"`
+	EndDate   string     `json:"endDate,omitempty"`
+	Bucket    LineBucket `json:"bucket,omitempty"`
 
 	// legacyFilters holds a pre-rename config's "filters" key so
 	// migrateLegacyWidgetKeys can move it into Query. Unexported so it can
