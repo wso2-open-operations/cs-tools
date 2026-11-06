@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { ImageUploadHandler } from "@components/rich-text-editor/localImageUpload";
 import type { ReactNode, RefObject } from "react";
 import type { SxProps, Theme } from "@wso2/oxygen-ui";
 import type { ProjectCasesStats } from "@features/support/types/cases";
@@ -105,6 +106,8 @@ export type CaseDetailsSectionProps = {
   isSecurityReport?: boolean;
   excludeS0?: boolean;
   isSeverityDisabled?: boolean;
+  /** Keeps description images as local previews, uploaded when the form is submitted. */
+  onImageUpload?: ImageUploadHandler;
   isIssueTypeAutoDetected?: boolean;
   isSeverityAutoDetected?: boolean;
   isTitleFromChat?: boolean;
