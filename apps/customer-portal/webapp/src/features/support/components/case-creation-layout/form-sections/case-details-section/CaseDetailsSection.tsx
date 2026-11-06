@@ -35,6 +35,7 @@ import Editor from "@components/rich-text-editor/Editor";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
+  imageCountExceededMessage,
   imageSizeExceededMessage,
   EMPTY_DROPDOWN_PLACEHOLDER,
 } from "@constants/common";
@@ -67,6 +68,7 @@ export function CaseDetailsSection({
   isSecurityReport = false,
   excludeS0 = false,
   isSeverityDisabled = false,
+  onImageUpload,
   isIssueTypeAutoDetected = false,
   isSeverityAutoDetected = false,
   isTitleFromChat = false,
@@ -260,11 +262,14 @@ export function CaseDetailsSection({
             value={description}
             onChange={setDescription}
             maxHeight="210px"
+            onImageUpload={onImageUpload}
             onPasteError={(reason) =>
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : imageSizeExceededMessage(),
+                  : reason === "count"
+                    ? imageCountExceededMessage()
+                    : imageSizeExceededMessage(),
               )
             }
           />
