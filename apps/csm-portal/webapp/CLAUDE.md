@@ -716,14 +716,32 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   Change requests tab has a two-entry strip (`ChangeRequestsArea`): **Change requests** (no `view`: the list, exactly as
   before, with its own `cr*` URL filters) | **Standard changes** (`?view=standard`, `StandardChangesTab`). Standard
   changes opens on the catalogue (server-side search, state filter, "Review needed" chip, each template's summary
-  under its name, "Propose a standard change"); the proposals are a secondary view of the same tab, a **Templates | Proposals** toggle beside the
-  search (`&show=proposals`), with their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
+  under its name, "Propose a standard change"); the proposals and the suggestions are secondary views of the same tab, a
+  **Templates | Proposals | Suggested** toggle beside the search (`&show=proposals`, `&show=suggested`); the proposals keep their filters in the URL too (`&scope=mine|awaiting`; **all proposals when
   absent**, `DEFAULT_PROPOSAL_SCOPE`, so the plain proposals URL, the proposal page's "Proposals" crumb and its Back
   fallback, and an old `?view=proposals` link all open on every proposal; `&state=<proposal state>`). "Proposed by
   me" and "Awaiting my decision" are filters the user picks from the "Show" select (options: All proposals, Proposed
-  by me, Awaiting my decision). The Templates | Proposals toggle is a group named "Templates or proposals", so it
+  by me, Awaiting my decision). The toggle is a group named "Templates, proposals or suggestions", so it
   does not share the select's accessible name. All URL helpers are in `utils/standardChanges.ts`
-  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `standardChangesPath`, `standardChangesSearch`).
+  (`STANDARD_CHANGES_PATH`, `STANDARD_CHANGE_PROPOSALS_PATH`, `STANDARD_CHANGE_SUGGESTIONS_PATH`,
+  `standardChangesPath`, `standardChangesSearch`).
+  - **Suggested** (`StandardChangeSuggestions`, `useStandardChangeSuggestions`, rules in
+    `utils/standardChangeSuggestions.ts`): the clusters of a customer's completed change requests that
+    entity-service finds and judges (its CLAUDE.md, "Standard change suggestions"; nothing is decided here). A
+    Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
+    (`includeDismissed`), not kept in the URL; a line above the table states the thresholds the backend used.
+    Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
+    the template relation ("New", "Covered by STD…", "Close to STD…: revise it", with a link); and the actions
+    (`suggestionActions`): **Propose** for a new one (`kind: "new"` from `proposeFrom`, then a PATCH citing
+    `suggestionProposalEvidence`: the source and the other closed members, at most 100), **Revise STD…** for a
+    close one (`kind: "modify"`, citing `suggestionRevisionEvidence`), **Open STD…** for a covered one,
+    **Dismiss** with a required reason (at most 1000 characters) and **Restore** for a dismissed one. The
+    proposal opens whatever happens to the evidence PATCH (its refusal goes to the error banner). Propose and
+    Revise are shown disabled with the reason as the button's name for a near miss ("Not yet a candidate: …"), one
+    already being proposed ("Already being proposed in SCP…") and, for Propose, one with no clean change request
+    to start from. Only `canWrite` gets Propose, Revise, Dismiss and Restore. The chevron opens the details: what
+    it misses, risk and impact counts (unknown included), incidents, open proposals, the dismissal, and the change
+    requests (newest 100), each marked when it joined as a clone or deviated from its plan.
   - **"Propose a standard change"** opens `ProposeStandardChangeDialog` (mounted only while open): the name and the
     customer, both required, and only then "Start the draft" creates it (`kind: "new"`, `name`, `accountId`), so
     leaving creates nothing: no empty "Untitled standard change" drafts. Once the customer is chosen it lists their

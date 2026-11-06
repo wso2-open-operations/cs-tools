@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   proposalCount: vi.fn(),
   createProposal: vi.fn(),
   customerSearch: vi.fn(),
+  suggestions: vi.fn(),
 }));
 
 vi.mock("@context/current-user/usePortalAccess", () => ({ usePortalAccess: () => mocks.access }));
@@ -44,7 +45,12 @@ vi.mock("@features/csm-operations/api/useStandardChanges", () => ({
   useCreateStandardChangeProposal: () => ({ mutate: mocks.createProposal, isPending: false, isError: false, reset: vi.fn() }),
   // The customer filter's type-ahead (POST /accounts/search), as the real AsyncEntitySelect calls it.
   useSearchStandardChangeCustomersForSelect: (query: string, enabled: boolean) => mocks.customerSearch(query, enabled),
+  useStandardChangeSuggestions: (query: unknown) => mocks.suggestions(query),
+  useUpdateStandardChangeProposal: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissStandardChangeSuggestion: () => ({ mutate: vi.fn(), isPending: false }),
+  useRestoreStandardChangeSuggestion: () => ({ mutate: vi.fn(), isPending: false }),
 }));
+vi.mock("@context/error-banner/ErrorBannerContext", () => ({ useErrorBanner: () => ({ showError: vi.fn() }) }));
 
 import StandardChangesTab from "@features/csm-operations/components/StandardChangesTab";
 import { standardChangesShow } from "@features/csm-operations/utils/standardChanges";
@@ -214,16 +220,31 @@ describe("StandardChangesTab — catalogue", () => {
     });
   });
 
-  it("has Templates | Proposals beside the search, on Templates, and nothing else in a strip of its own", () => {
+  it("has Templates | Proposals | Suggested beside the search, on Templates, and nothing else in a strip of its own", () => {
     renderTab();
-    const show = screen.getByRole("group", { name: "Templates or proposals" });
-    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Templates", "Proposals"]);
+    const show = screen.getByRole("group", { name: "Templates, proposals or suggestions" });
+    expect(within(show).getAllByRole("button").map((b) => b.textContent)).toEqual(["Templates", "Proposals", "Suggested"]);
     expect(within(show).getByRole("button", { name: "Templates" })).toHaveAttribute("aria-pressed", "true");
     expect(within(show).getByRole("button", { name: "Proposals" })).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "Standard change proposals" })).not.toBeInTheDocument();
     // The proposals' scope select keeps "Show"; the toggle has a name of its own.
     expect(screen.queryByRole("group", { name: "Show" })).not.toBeInTheDocument();
+  });
+
+  it("shows the suggestions on show=suggested, and Suggested switches to them", () => {
+    mocks.suggestions.mockReturnValue({
+      data: { suggestions: [], criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50, coveredPercent: 80, closePercent: 50 }, scanned: { changeRequests: 0, clusters: 0, eligible: 0, dismissed: 0 } },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    renderTab();
+    fireEvent.click(screen.getByRole("button", { name: "Suggested" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/operations/change-requests?view=standard&show=suggested");
+    expect(screen.getByRole("table", { name: "Suggested standard changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Standard change templates" })).not.toBeInTheDocument();
   });
 
   it("opens the old ?view=catalogue link on the catalogue", () => {

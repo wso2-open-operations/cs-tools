@@ -5964,3 +5964,97 @@ export interface BeChangeRequestStandardChange {
   /** The version's parameters with the values the change request was raised with. */
   parameters: Array<BeStandardChangeParameter & { value: string | null }> | null;
 }
+
+// ---------------------------------------------------------------------------
+// Standard change suggestions (GET /standard-change-suggestions): clusters of one
+// customer's completed change requests that look like the same change done again
+// (entity-service computes them; see its openapi.yaml).
+
+export type BeStandardChangeSuggestionMatch = "covered" | "close" | "new";
+
+export interface BeStandardChangeSuggestionCriteria {
+  windowMonths: number;
+  minClosed: number;
+  minSuccessPercent: number;
+  planSimilarityPercent: number;
+  coveredPercent: number;
+  closePercent: number;
+}
+
+export interface BeStandardChangeSuggestionBreakdown {
+  low: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface BeStandardChangeSuggestionMember {
+  id: string;
+  number: string;
+  subject: string;
+  state: "closed" | "rollback";
+  completedOn: string;
+  risk?: string | null;
+  impact?: string | null;
+  clonedFromId?: string | null;
+  hasDeviation: boolean;
+  /** "subject": same normalised subject and a similar (or no) plan; "clone": cloned from a member. */
+  joinedBy: "subject" | "clone";
+}
+
+export interface BeStandardChangeSuggestionDismissal {
+  id: string;
+  reason: string;
+  dismissedBy?: BeEntityRef | null;
+  dismissedOn: string;
+}
+
+export interface BeStandardChangeSuggestion {
+  /** The normalised subject the cluster is known (and dismissed) by. */
+  key: string;
+  customer: BeEntityRef;
+  /** The newest member's subject, as written. */
+  subject: string;
+  memberCount: number;
+  closedCount: number;
+  rollbackCount: number;
+  /** closed / (closed + rolled back), 0 to 1. */
+  successRate: number;
+  incidents: BeEntityRef[];
+  risk: BeStandardChangeSuggestionBreakdown;
+  impact: BeStandardChangeSuggestionBreakdown;
+  firstCompletedOn: string;
+  lastCompletedOn: string;
+  eligible: boolean;
+  /** Each criterion it misses, in words. */
+  unmet: string[];
+  match: BeStandardChangeSuggestionMatch;
+  /** The nearest live template of the customer (null for "new"). */
+  template?: { id: string; number: string; name: string; state: string; score: number } | null;
+  /** The newest closed member with no deviation: what a new proposal starts from. */
+  proposeFrom?: BeEntityRef | null;
+  /** Every other closed member, newest first, at most 99. */
+  evidence: BeEntityRef[];
+  /** Open proposals already started from or citing a member. */
+  openProposals: BeEntityRef[];
+  members: BeStandardChangeSuggestionMember[];
+  dismissal?: BeStandardChangeSuggestionDismissal | null;
+}
+
+export interface BeStandardChangeSuggestionsQuery {
+  accountId?: string;
+  includeIneligible?: boolean;
+  includeDismissed?: boolean;
+}
+
+export interface BeStandardChangeSuggestionsResponse {
+  suggestions: BeStandardChangeSuggestion[];
+  criteria: BeStandardChangeSuggestionCriteria;
+  scanned: { changeRequests: number; clusters: number; eligible: number; dismissed: number };
+}
+
+export interface BeDismissStandardChangeSuggestionPayload {
+  accountId: string;
+  key: string;
+  reason: string;
+}

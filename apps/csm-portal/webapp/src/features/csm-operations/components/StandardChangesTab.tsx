@@ -49,6 +49,7 @@ import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import ProposeStandardChangeDialog from "@features/csm-operations/components/ProposeStandardChangeDialog";
+import StandardChangeSuggestions from "@features/csm-operations/components/StandardChangeSuggestions";
 import {
   useCountStandardChangeProposals,
   useSearchStandardChangeProposals,
@@ -606,7 +607,9 @@ function AttentionLine(): JSX.Element | null {
  * line saying what needs the viewer's attention, if anything does. The
  * proposals that create, revise or retire templates are a secondary view of the
  * same tab (`&show=proposals`, the Templates | Proposals switch beside the
- * search), with their filters in the URL too. A row opens with `state.from` set
+ * search), with their filters in the URL too; so are the suggested standard
+ * changes mined from completed change requests (`&show=suggested`,
+ * StandardChangeSuggestions). A row opens with `state.from` set
  * to this URL, so Back from a template or proposal returns to the view it was
  * opened from.
  */
@@ -623,7 +626,7 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
       exclusive
       size="small"
       value={show}
-      aria-label="Templates or proposals"
+      aria-label="Templates, proposals or suggestions"
       onChange={(_, next: StandardChangesShow | null) => {
         if (next && next !== show) setSearchParams((prev) => standardChangesSearch(prev, next));
       }}
@@ -633,6 +636,9 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
       </ToggleButton>
       <ToggleButton value="proposals" sx={{ textTransform: "none", px: 1.5 }}>
         Proposals
+      </ToggleButton>
+      <ToggleButton value="suggested" sx={{ textTransform: "none", px: 1.5 }}>
+        Suggested
       </ToggleButton>
     </ToggleButtonGroup>
   );
@@ -665,6 +671,8 @@ export default function StandardChangesTab({ show }: { show: StandardChangesShow
 
       {show === "templates" ? (
         <TemplateCatalogue leading={toggle} trailing={proposeButton} />
+      ) : show === "suggested" ? (
+        <StandardChangeSuggestions leading={toggle} trailing={proposeButton} />
       ) : (
         <ProposalList leading={toggle} trailing={proposeButton} />
       )}
