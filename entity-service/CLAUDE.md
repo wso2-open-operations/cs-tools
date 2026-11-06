@@ -2767,6 +2767,30 @@ touched, since each of them is reachable by more than just csm-portal-backend
 (or is reasoned about independently) and a blanket switch away from
 `AUTH_ADMIN_ROLES` was never the ask.
 
+## Features: the portal's shared per-page state (migration 0277)
+
+`features` holds one row per nav-node id (`operations`, `operations.incidents`) with a
+`state` of `enabled` or `preview`; `feature_saved` holds at most one row, written by the first
+successful save. Both are entity-service-only tables (no sync-service mirror, no row-level security).
+`GET /features` returns every row, including `enabled` ones, plus `savedOnce`; `PUT
+/features` upserts `{ navNodeId, state, markSaved }`. There is no delete route and none should be
+added: setting a page back to available writes `enabled`, so an explicit `enabled` row under a `preview`
+section (the "Incidents stays open" case) is a real setting, not an absence. A page with no row was never
+saved: a section is available and a page follows its section. This service does not apply inheritance, the
+menu promotion or the admin lift; those are the webapp's `featureFlags.ts`.
+
+`preview` is what the portal used to call work in progress. `wip` and `hidden` are rejected here (the
+webapp reads an old `wip` or `hidden` line in `config.js` itself and writes it as `preview` on the first save).
+
+`markSaved` is sent on the last write of an admin's first save, after the config file's lines were written as
+rows, so a save that stops partway leaves no mark and the portal keeps reading `config.js`. The mark insert is
+`ON CONFLICT DO NOTHING` in the same transaction as the row.
+
+Writes are gated like banner changes (`requireCSMPortalBackendCaller` in `feature_override_service.go`): an
+internal caller, a signed-in person's email, and `CSM_PORTAL_BACKEND_CLIENT_ID`. The admin role is checked once,
+in csm-portal-backend's `PermAdmin`; do not add an `AUTH_ADMIN_ROLES` check here (see the banners section above
+for why two role lists disagreeing was a live failure). Reads need only an internal caller.
+
 ## Real, condition-driven SLA clock engine
 
 `internal/service/sla_engine_service.go`/`sla_policy_resolver.go` were
