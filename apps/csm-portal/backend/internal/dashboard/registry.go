@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Type classifies a dashboard by the audience it is built for. It is the
@@ -783,6 +784,113 @@ var validWidgetShapes = map[Shape]bool{
 // validGroupByBuckets below for its own endpoint's enum.
 const maxWidgetLineDays = 90
 
+// maxWidgetLinePoints is each LineBucket's upper bound on a fixed window,
+// mirroring entity-service's maxCaseVolumeTrendDays / Weeks / Months.
+var maxWidgetLinePoints = map[LineBucket]int{
+	LineBucketDay:   maxWidgetLineDays,
+	LineBucketWeek:  53,
+	LineBucketMonth: 24,
+}
+
+// validateLineWindow checks a line widget's fixed window: none of StartDate,
+// EndDate and Bucket (the trailing Days window), or both dates, not with
+// Days, and a known Bucket. Two plain dates must be in order and within the
+// bucket's limit. Two relative dates must be so on every day, because a
+// saved dashboard is checked again each time it is read: __startOfYear:0__
+// to __today__ by day passes in January and fails in April. A plain date
+// with a relative one grows day by day, so that pair is refused outright.
+func validateLineWindow(w WidgetTemplate) error {
+	if w.StartDate == "" && w.EndDate == "" {
+		if w.Bucket != "" {
+			return fmt.Errorf("\"bucket\" needs \"startDate\" and \"endDate\"")
+		}
+		return nil
+	}
+	if w.Days != 0 {
+		return fmt.Errorf("\"days\" cannot be combined with \"startDate\" and \"endDate\"")
+	}
+	if w.StartDate == "" || w.EndDate == "" {
+		return fmt.Errorf("\"startDate\" and \"endDate\" are both needed")
+	}
+	bucket := w.Bucket
+	if bucket == "" {
+		bucket = LineBucketDay
+	}
+	max, ok := maxWidgetLinePoints[bucket]
+	if !ok {
+		return fmt.Errorf("unknown \"bucket\" %q (want %q, %q or %q)", w.Bucket, LineBucketDay, LineBucketWeek, LineBucketMonth)
+	}
+	tooLong := fmt.Errorf("\"startDate\" to \"endDate\" must be in order and cover at most %d %ss", max, bucket)
+	startRel, endRel := generatedRelativeDate.MatchString(w.StartDate), generatedRelativeDate.MatchString(w.EndDate)
+	if startRel != endRel {
+		return fmt.Errorf("\"startDate\" and \"endDate\" must be two plain dates or two relative dates, not one of each")
+	}
+	if !startRel {
+		s, errS := time.Parse("2006-01-02", w.StartDate)
+		e, errE := time.Parse("2006-01-02", w.EndDate)
+		if errS != nil || errE != nil {
+			return fmt.Errorf("\"startDate\" and \"endDate\" must be plain dates (YYYY-MM-DD) or relative dates")
+		}
+		if n := linePoints(s, e, bucket); n < 1 || n > max {
+			return tooLong
+		}
+		return nil
+	}
+	// Every day of 2024-2027, for the reason checkDayWindow gives.
+	for day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2028; day = day.AddDate(0, 0, 1) {
+		s, okS := relativeDate(w.StartDate, day)
+		e, okE := relativeDate(w.EndDate, day)
+		if !okS || !okE {
+			return fmt.Errorf("\"startDate\" or \"endDate\" is not a relative date the dashboard can resolve")
+		}
+		if n := linePoints(s, e, bucket); n < 1 || n > max {
+			return tooLong
+		}
+	}
+	return nil
+}
+
+// linePoints is how many points start..end makes by bucket (both days
+// counted); 0 or less when end is before start.
+func linePoints(start, end time.Time, bucket LineBucket) int {
+	if end.Before(start) {
+		return 0
+	}
+	switch bucket {
+	case LineBucketWeek:
+		// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+		monday := func(t time.Time) time.Time { return t.AddDate(0, 0, -((int(t.Weekday()) + 6) % 7)) }
+		return windowDays(monday(start), monday(end))/7 + 1
+	case LineBucketMonth:
+		return (end.Year()-start.Year())*12 + int(end.Month()) - int(start.Month()) + 1
+	}
+	return windowDays(start, end)
+}
+
+// validateLineSeries checks a line widget's Series: absent (nil) draws both
+// lines; present, it names at least one of them, each once. An empty list is
+// refused rather than read as "both", so a definition that means both says so
+// by leaving the field out.
+func validateLineSeries(series []LineSeries) error {
+	if series == nil {
+		return nil
+	}
+	if len(series) == 0 {
+		return fmt.Errorf("\"series\" is empty; leave it out to draw both lines")
+	}
+	seen := make(map[LineSeries]bool, len(series))
+	for _, s := range series {
+		if s != LineSeriesOpened && s != LineSeriesClosed {
+			return fmt.Errorf("unknown \"series\" value %q (want %q or %q)", s, LineSeriesOpened, LineSeriesClosed)
+		}
+		if seen[s] {
+			return fmt.Errorf("\"series\" lists %q twice", s)
+		}
+		seen[s] = true
+	}
+	return nil
+}
+
 // validGroupByBuckets are the legal values of GroupByConfig.Bucket -- the
 // same enum POST /cases/feedback/aggregate documents on the entity-service
 // side (see AggregateFeedbackRequest.bucket in openapi.yaml). Kept here
@@ -934,6 +1042,18 @@ func validateWidgets(d Dashboard, source string) error {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"days\" is %d; it must be between 1 and %d (or omitted for the default)",
 					source, d.ID, w.ID, w.Days, maxWidgetLineDays)
 			}
+			if err := validateLineSeries(w.Series); err != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: %w", source, d.ID, w.ID, err)
+			}
+			if err := validateLineWindow(w); err != nil {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: %w", source, d.ID, w.ID, err)
+			}
+		} else if w.Series != nil {
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"series\" is only meaningful for shape %q, got %q",
+				source, d.ID, w.ID, ShapeLine, w.Shape)
+		} else if w.StartDate != "" || w.EndDate != "" || w.Bucket != "" {
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"startDate\", \"endDate\" and \"bucket\" are only meaningful for shape %q, got %q",
+				source, d.ID, w.ID, ShapeLine, w.Shape)
 		}
 	}
 

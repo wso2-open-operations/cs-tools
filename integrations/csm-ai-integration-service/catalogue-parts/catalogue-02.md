@@ -19,15 +19,45 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `taskSLABusinessElapsedPercent` | `gte`, `lte` | one number as a string, e.g. `["80"]` |
 | `tag` | `in`, `notIn` | tag names, **only if the request gives them** |
 | `product` | `in` | exact product names, **only if the request gives them** |
-| `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date token (below) |
+| `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
 | `creTeam`, `sreTeam` | `in` | team **keys** from the Teams section (the last section), each in its team's field: e.g. `creTeam in ["rigel"]`, `creTeam in ["sirius", "draco"]`, `sreTeam in ["apollo"]` |
 | `creTeam`, `sreTeam` | `in` | `["__current_team__"]` ("my team"), **only on a `"cre"` dashboard**, never together with a team key |
 
-**Date tokens** (always relative, never a literal date): `__today__`, `__daysAgo:N__`,
-`__startOfMonth:N__`, `__endOfMonth:N__`, `__startOfQuarter:N__`, `__endOfQuarter:N__`
-(N = 0 this period, -1 the previous one). Example, "last 30 days":
-`{"field": "createdOn", "op": "gte", "values": ["__daysAgo:30__"]}`.
-"This month": `gte __startOfMonth:0__`.
+**Dates.** Every date filter in this file (`gte` from, `lte` to, both inclusive: `lte` covers the whole
+day) takes one value, of one of two kinds:
+
+- a **date token** for a period counted from today, so a saved dashboard moves with the date:
+  `__today__`, `__daysAgo:N__` (N >= 0), `__startOfWeek:N__`, `__endOfWeek:N__` (weeks run Monday to
+  Sunday), `__startOfMonth:N__`, `__endOfMonth:N__`, `__startOfQuarter:N__`, `__endOfQuarter:N__`,
+  `__startOfYear:N__`, `__endOfYear:N__` (N = 0 this period, -1 the previous one, -2 the one before);
+- a **plain date** `YYYY-MM-DD`, only for a period the request names by its calendar date, so it never
+  moves.
+
+| Request | `gte` | `lte` |
+|---|---|---|
+| "today" | `__today__` | |
+| "this week" / "this month" / "this quarter" / "this year" | `__startOfWeek:0__` / `__startOfMonth:0__` / `__startOfQuarter:0__` / `__startOfYear:0__` | |
+| "last week" / "last quarter" / "last year" (the previous calendar one) | `__startOfWeek:-1__` / `__startOfQuarter:-1__` / `__startOfYear:-1__` | `__endOfWeek:-1__` / `__endOfQuarter:-1__` / `__endOfYear:-1__` |
+| a named month: "December 2025", "2025 December", "Dec 2025" | `2025-12-01` | `2025-12-31` (the month's last day) |
+| a named quarter: "Q1 2026" | `2026-01-01` | `2026-03-31` |
+| a named year: "2025", "in 2025" | `2025-01-01` | `2025-12-31` |
+| a named day: "on 3 March 2026" | `2026-03-03` | `2026-03-03` |
+| a range: "1 to 15 March 2026", "between 2026-03-01 and 2026-03-15" | `2026-03-01` | `2026-03-15` |
+| "since 1 March 2026", "from March 2026" | `2026-03-01` | |
+| "until 31 March 2026" / "before 1 March 2026" | | `2026-03-31` / `2026-02-28` (the day before) |
+
+A month or quarter named **without a year** ("December", "in March", "Q2") is the most recent one that has
+begun on today's date: this year's if it has begun, otherwise last year's (in November 2026, "December"
+is December 2025 and "October" is October 2026). Today's date is given after the request
+(`Today's date: YYYY-MM-DD`). Never use a plain date for a period counted from today ("this month",
+"last 30 days"), and never a token for a named one ("December 2025").
+
+```json
+{ "id": "cases-dec-2025", "displayName": "Cases Created in December 2025", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "createdOn", "op": "gte", "values": ["2025-12-01"] },
+                          { "field": "createdOn", "op": "lte", "values": ["2025-12-31"] } ] } }
+```
 
 **OR across fields** (use sparingly): add `"anyOf": [{"filters": [...]}, {"filters": [...]}]`
 beside `filters`. Each branch is ANDed inside; branches are ORed; the result is ANDed with
@@ -54,11 +84,8 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 |---|---|
 | `states` | a non-empty list of `pending`, `submitted`, `approved`, `rejected`, `processed`, `recalled` |
 | `userIds` | **only** `["__current_user__"]`: the viewer's own time cards ("my time cards") |
-| `startDate` | the work date from (inclusive): a relative date token (below) |
-| `endDate` | the work date to (inclusive): a relative date token (below) |
-
-Date tokens: `__today__`, `__daysAgo:N__`, `__startOfMonth:N__`, `__endOfMonth:N__`,
-`__startOfQuarter:N__`, `__endOfQuarter:N__` (`N` = 0 this month/quarter, -1 the previous one).
+| `startDate` | the work date from (inclusive): one date (section 5) |
+| `endDate` | the work date to (inclusive): one date (section 5) |
 
 ```json
 { "resourceType": "time_card", "shape": "count",
@@ -82,14 +109,17 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 `"count"` (or leaving `measure` out) counts the cards ("number of time cards", "how many"). With
 `maxGroups` the top groups are kept by that measure.
 
-**A `day` grouping needs a window**: both `startDate` and `endDate`, **two date tokens**, at most
-**31 days** long on every day. Use exactly one of these:
+**A `day` grouping needs a window**: both `startDate` and `endDate`, **two date tokens or two plain
+dates** (never one of each), at most **31 days** long on every day. Use exactly one of these:
 
 | Request | `startDate` | `endDate` |
 |---|---|---|
 | "last N days" per day, N = 1 to 31 (e.g. 7, 14, 30) | `__daysAgo:<N-1>__` (last 7 days: `__daysAgo:6__`) | `__today__` |
+| "this week" per day | `__startOfWeek:0__` | `__today__` |
+| "last week" per day | `__startOfWeek:-1__` | `__endOfWeek:-1__` |
 | "this month" per day | `__startOfMonth:0__` | `__today__` |
 | "last month", "previous month" per day | `__startOfMonth:-1__` | `__endOfMonth:-1__` |
+| a named month or range of at most 31 days per day ("October 2026", "1 to 15 March 2026") | its first day | its last day |
 
 Anything longer per day ("this quarter", "this year", "last 60 days", "since <date>") is not expressible
 per day: reply with `{"error": ...}` suggesting the last 31 days per day, or the longer period per user or
@@ -142,7 +172,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 |---|---|---|---|
 | flat | `priorities` | (list) | `CRITICAL` (P1), `HIGH` (P2), `MODERATE` (P3), `LOW` (P4), `PLANNING` (P5) |
 | `filters` | `state` | `in` | `NEW`, `IN_PROGRESS`, `ON_HOLD`, `RESOLVED`, `CLOSED`, `CANCELLED` |
-| `filters` | `createdOn` | `gte`, `lte` | one date token (section 5) |
+| `filters` | `createdOn` | `gte`, `lte` | one date (section 5) |
 | `filters` | `slaViolated`, `madeSla` | `eq` | `["true"]` or `["false"]` |
 | `filters` | `assignedUserId` | `in` | `["__current_user__"]` only ("my incidents") |
 
@@ -159,7 +189,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 | flat | `states` | (list) | `new`, `assess`, `authorize`, `customer_approval`, `scheduled`, `implement`, `review`, `customer_review`, `closed`, `canceled`, `rollback` |
 | flat | `impacts` | (list) | `high`, `medium`, `low` |
 | `filters` | `approval` | `eq` | exactly one of `not requested`, `requested`, `approved`, `rejected` |
-| `filters` | `createdOn` | `gte`, `lte` | one date token |
+| `filters` | `createdOn` | `gte`, `lte` | one date (section 5) |
 | `filters` | `assignedUserId` | `in` | `["__current_user__"]` only |
 
 **`problem`.** Only a `filters` list:
@@ -202,7 +232,7 @@ values are case-sensitive exactly as written.
 | `onboardingStatus` | a list of `Not-Started`, `In-Progress`, `Completed`, `Not-Applicable` |
 | `closureStatus` | one of `"Open"`, `"Suspended"`, `"Restricted"` |
 | `excludeClosureStates` | a list of `Open`, `Suspended`, `Restricted` to leave out |
-| `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date token (section 5a) |
+| `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
 
 ```json
 { "resourceType": "account", "shape": "count", "query": { "abtTeam": "rigel", "healthStatus": "at_risk" } }
@@ -259,45 +289,5 @@ Fields: `createdOn`, `updatedOn`, `severity`, `state`, `assignee`. For `time_car
 problem list has no `sortBy`); an `account` list has no `sortBy`; a `project` list sorts by `endDate` only; a `case_feedback`
 list has no `sortBy`.
 "Recent" means `{"field": "createdOn", "order": "desc"}`; "recently updated" means `updatedOn`.
-
----
-
-## 7. Grouping (pie and bar)
-
-**Fixed slices**: use when the groups are a short known list (severity, state, issue type, work
-state, engagement type, ABT teams). One slice per value, in a sensible order:
-
-```json
-"slices": [
-  { "label": "Critical", "color": "error",
-    "query": { "filters": [ { "field": "severity", "op": "in", "values": ["critical"] } ] } }
-]
-```
-
-Each slice's `query.filters` is added to the widget's own `query.filters`. `color` is optional, one
-of `primary`, `secondary`, `success`, `error`, `info`, `warning`; use `error` for the most severe
-or breached group, `warning` next, otherwise leave it out.
-
-**Server-side grouping**: use when the groups are open-ended:
-
-```json
-"groupBy": { "field": "account", "maxGroups": 10 }
-```
-
-`groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
-`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
-`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
-section 5d). `measure` is for `time_card` only. Prefer `slices` for
-`state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
-add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
-that account:
-
-```json
-"groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
-```
-
-`maxGroups` 5 to 12.
-
-Never set both `slices` and `groupBy`.
 
 ---

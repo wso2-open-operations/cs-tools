@@ -329,14 +329,25 @@ other success; `SearchUsers` and `GetUsersByIDs` are not cached. The client is
 a plain `redis.NewClient`, so the target must not use the "OSS Cluster"
 clustering policy.
 
-## POST /cases/volume-trend: day-bucketed opened/closed counts for a dashboard chart
+## POST /cases/volume-trend: opened/closed counts for a dashboard chart
 
-Backs the CSM portal's "Case Summary" dashboard trend widget (`apps/csm-portal/webapp`'s
-new `"line"` shape): exactly two fixed series, "Opened" (by `work_item.created_on`) and
-"Closed" (by `caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per
-UTC calendar day over a trailing window (`days`, default 30, 1-90). Deliberately narrow,
-unlike `AggregateCasesRequest`'s open-ended `groupBy` -- this backs exactly one chart, not
-a platform, so there's no generic series/bucket-unit config.
+Backs the CSM portal's dashboard `"line"` widget (`apps/csm-portal/webapp`): exactly two
+fixed series, "Opened" (by `work_item.created_on`) and "Closed" (by
+`caseLikeOwnClosedOnColumn`, the per-type closure timestamp), one point per UTC calendar day
+over a trailing window (`days`, default 30, 1-90). Deliberately narrow, unlike
+`AggregateCasesRequest`'s open-ended `groupBy` -- this backs one chart, not a platform, so
+there's no generic series config.
+
+**A fixed window: `startDate`/`endDate` + `bucket`.** Instead of `days` (never both), a
+request can name a fixed window -- plain `YYYY-MM-DD` dates or the relative placeholders
+`resolveRelativeDate` knows, both inclusive UTC days -- for a past period such as "December
+2025" that a trailing window can't reach. `bucket` groups its points: `day` (default, at
+most 90 days), `week` (Monday to Sunday, at most 53 weeks) or `month` (at most 24 months);
+a week or month point carries `date` and `endDate`, the bucket's first and last day clipped
+to the window. Counting doesn't change: every day is still computed and cached on its own
+(below), and a week or month point is the sum of its days. A day after today counts 0 and is
+never queried or cached -- caching it would pin a 0 under the stable TTL. A request without
+these fields gets exactly the trailing-window response it always did.
 
 **A naive `to_char(timestamp, 'YYYY-MM-DD') = ANY(days)` predicate is non-sargable --
 confirmed against a real staging database (505k `work_item` rows), not assumed.** Wrapping

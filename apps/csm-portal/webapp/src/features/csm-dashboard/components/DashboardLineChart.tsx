@@ -19,6 +19,7 @@ import { Inbox } from "@wso2/oxygen-ui-icons-react";
 import { LineChart } from "@wso2/oxygen-ui-charts-react";
 import type { JSX } from "react";
 import type { CaseVolumeTrendChartPoint } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
+import type { BeLineBucket, BeLineSeries } from "@api/backend/types";
 import { useDarkMode } from "@utils/useDarkMode";
 
 const CHART_HEIGHT_PX = 220;
@@ -27,42 +28,94 @@ interface DashboardLineChartProps {
   points: CaseVolumeTrendChartPoint[];
   isLoading: boolean;
   isError: boolean;
+  /** The lines to draw (`BeDashboardWidget.series`); `undefined` or empty
+   * draws both. Drawn in the fixed order Opened, Closed whatever the order
+   * given. */
+  series?: BeLineSeries[];
+  /** How the points are grouped (`BeDashboardWidget.bucket`), which decides
+   * the x-axis labels; `undefined` is one point per day. */
+  bucket?: BeLineBucket;
+  /** Makes each point clickable: called with the point's day (`YYYY-MM-DD`,
+   * a UTC calendar day), its line, and for a week or month point its last
+   * day. Absent, the points are not clickable, as on a system dashboard. */
+  onPointClick?: (date: string, series: BeLineSeries, endDate?: string) => void;
 }
 
-/** Formats a `YYYY-MM-DD` point date for the x-axis — "Sep 1" (no year: this
- * chart's own window is capped at 90 days, see `maxWidgetLineDays` on the
+/** What recharts hands a function `activeDot` for the hovered point. */
+interface ActiveDotProps {
+  cx?: number;
+  cy?: number;
+  index?: number;
+}
+
+const ACTIVE_DOT_RADIUS_PX = 5;
+
+const ALL_SERIES: readonly BeLineSeries[] = ["opened", "closed"];
+
+/** Formats a `YYYY-MM-DD` point date for the x-axis — "Sep 1" (no year: a
+ * day point's window is capped at 90 days, see `maxWidgetLineDays` on the
  * backend, so a label never needs to disambiguate across years). Pinned to
  * `timeZone: "UTC"` for the same reason `useCaseFeedbackTrendData`'s own
  * `formatBucketLabel` is — the date string is already a UTC calendar day, and
  * reading it back in a negative-UTC-offset timezone without pinning the
  * formatter would roll the label back a day. */
-function formatDateLabel(date: string): string {
+function formatDateLabel(
+  date: string,
+  options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" },
+): string {
   const parsed = new Date(date);
   if (Number.isNaN(parsed.getTime())) return date;
-  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(
-    parsed,
-  );
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...options }).format(parsed);
+}
+
+/** A point's x-axis label: "Sep 1" for a day, the days a week point covers
+ * for a week ("Dec 1-7", "Dec 29-Jan 4", "Dec 29-31" when the window cuts
+ * it short), and "Jan 2025" for a month (with the year: a month window can
+ * span two). */
+function formatPointLabel(
+  point: CaseVolumeTrendChartPoint,
+  bucket: BeLineBucket | undefined,
+): string {
+  if (bucket === "month") return formatDateLabel(point.date, { month: "short", year: "numeric" });
+  if (bucket !== "week" || !point.endDate || point.endDate === point.date) {
+    return formatDateLabel(point.date);
+  }
+  const start = formatDateLabel(point.date);
+  const sameMonth = point.endDate.slice(0, 7) === point.date.slice(0, 7);
+  const end = sameMonth
+    ? formatDateLabel(point.endDate, { day: "numeric" })
+    : formatDateLabel(point.endDate);
+  return `${start}-${end}`;
 }
 
 /**
  * Two-line (Opened/Closed) trend chart for a `shape: "line"` dashboard
  * widget — the one resourceType/shape combination not resolved via a
- * per-slice/per-bucket fan-out (see `useCaseVolumeTrendData`), so unlike
- * `DashboardPieChart`/`DashboardBarChart` there is no per-point
- * click-through: a day's Opened/Closed counts aren't a single filterable
- * selector the case list's own search can scope to the way a pie slice's
- * `query` is. Colors are this app's own semantic palette (`info` for Opened,
+ * per-slice/per-bucket fan-out (see `useCaseVolumeTrendData`). A point is one
+ * day (or week or month, `bucket`) and one line, which the tile turns into that day's cases query
+ * (`linePointQuery`) when the page allows it. Colors are this app's own semantic palette (`info` for Opened,
  * `success` for Closed) rather than an arbitrary chart-library rotation —
  * matching how severity/status colors are already assigned by meaning
- * elsewhere in this app, not by picking hues.
+ * elsewhere in this app, not by picking hues. `series` leaves one of the two
+ * lines out (its legend entry too); the empty state then counts only the
+ * lines drawn. `onPointClick` makes the hovered point's dot clickable (the
+ * dashboard page decides whether to pass it).
  */
 export default function DashboardLineChart({
   points,
   isLoading,
   isError,
+  series,
+  bucket,
+  onPointClick,
 }: DashboardLineChartProps): JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
+  const shown = ALL_SERIES.filter((s) => !series?.length || series.includes(s));
+  const lineStyles = {
+    opened: { label: "Opened", color: theme.palette.info.main },
+    closed: { label: "Closed", color: theme.palette.success.main },
+  } as const;
 
   if (isLoading) {
     return <Skeleton variant="rounded" height={CHART_HEIGHT_PX} />;
@@ -76,7 +129,7 @@ export default function DashboardLineChart({
     );
   }
 
-  const total = points.reduce((sum, p) => sum + p.opened + p.closed, 0);
+  const total = points.reduce((sum, p) => sum + shown.reduce((s, key) => s + p[key], 0), 0);
 
   if (points.length === 0 || total === 0) {
     return (
@@ -117,7 +170,7 @@ export default function DashboardLineChart({
   }
 
   const chartData = points.map((p) => ({
-    label: formatDateLabel(p.date),
+    label: formatPointLabel(p, bucket),
     opened: p.opened,
     closed: p.closed,
   }));
@@ -134,24 +187,19 @@ export default function DashboardLineChart({
           already follows in this codebase — this gives this chart tight,
           predictable spacing instead. */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 1 }}>
-        {(
-          [
-            { key: "opened", label: "Opened", color: theme.palette.info.main },
-            { key: "closed", label: "Closed", color: theme.palette.success.main },
-          ] as const
-        ).map((series) => (
-          <Box key={series.key} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+        {shown.map((key) => (
+          <Box key={key} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
             <Box
               sx={{
                 width: 10,
                 height: 10,
                 borderRadius: "50%",
-                bgcolor: series.color,
+                bgcolor: lineStyles[key].color,
                 flexShrink: 0,
               }}
             />
             <Typography variant="caption" color="text.secondary">
-              {series.label}
+              {lineStyles[key].label}
             </Typography>
           </Box>
         ))}
@@ -174,24 +222,40 @@ export default function DashboardLineChart({
           // widget instead of spanning the full 12-column width.
           xAxis={{ show: true, interval: "preserveStartEnd" }}
           yAxis={{ show: true }}
-          lines={[
-            {
-              dataKey: "opened",
-              name: "Opened",
-              stroke: theme.palette.info.main,
-              strokeWidth: 2,
-              dot: false,
-              isAnimationActive: false,
-            },
-            {
-              dataKey: "closed",
-              name: "Closed",
-              stroke: theme.palette.success.main,
-              strokeWidth: 2,
-              dot: false,
-              isAnimationActive: false,
-            },
-          ]}
+          lines={shown.map((key) => ({
+            dataKey: key,
+            name: lineStyles[key].label,
+            stroke: lineStyles[key].color,
+            strokeWidth: 2,
+            dot: false,
+            isAnimationActive: false,
+            // The hovered point's dot, drawn by this function so a click on
+            // it knows both the day (recharts' row `index`) and the line
+            // (`key`); the library's object form gets the event only.
+            ...(onPointClick && {
+              activeDot: ({ cx, cy, index }: ActiveDotProps) => {
+                const point = index === undefined ? undefined : points[index];
+                if (cx === undefined || cy === undefined || !point) return <g />;
+                return (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={ACTIVE_DOT_RADIUS_PX}
+                    fill={lineStyles[key].color}
+                    stroke={theme.palette.background.paper}
+                    strokeWidth={2}
+                    style={{ cursor: "pointer" }}
+                    data-testid={`line-point-${key}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (point.endDate) onPointClick(point.date, key, point.endDate);
+                      else onPointClick(point.date, key);
+                    }}
+                  />
+                );
+              },
+            }),
+          }))}
         />
       </Box>
     </Box>

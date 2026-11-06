@@ -122,7 +122,7 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 		// request may come before this breakpoint; the prompt and the draft
 		// are in the user message after it.
 		System:   []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft)))},
+		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(userMessage(req.Prompt, req.Draft, now())))},
 	})
 	took := time.Since(start)
 	if err != nil {
@@ -197,14 +197,22 @@ func messageText(msg *anthropic.Message) string {
 	return text.String()
 }
 
+// now is the clock userMessage reads today's date from; a test sets it.
+var now = time.Now
+
 // userMessage is the prompt alone on a first message, or the draft followed
-// by the prompt as the change to make.
-func userMessage(prompt string, draft json.RawMessage) string {
+// by the prompt as the change to make, and then today's date (UTC). The
+// catalogue resolves a month or quarter named without a year against it
+// ("December" is the most recent December that has begun). It is in the user
+// message, after the cached system prompt, so the cache still hits on every
+// day.
+func userMessage(prompt string, draft json.RawMessage, today time.Time) string {
+	date := "\n\nToday's date: " + today.UTC().Format("2006-01-02")
 	if draft == nil {
-		return prompt
+		return prompt + date
 	}
 	return "This is the dashboard I am editing:\n\n```json\n" + string(draft) +
-		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt
+		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\n" + prompt + date
 }
 
 // jsonObjects returns the top-level JSON objects in text, in order. A reply

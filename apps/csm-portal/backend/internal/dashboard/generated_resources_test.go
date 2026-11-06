@@ -17,12 +17,105 @@ package dashboard
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
 
 func opsDashboard(widgets ...string) string {
 	return `{"displayName":"Operations","type":"cs","isDefault":false,"targetTeam":"","isTeamBased":false,"widgets":[` + strings.Join(widgets, ",") + `]}`
+}
+
+// TestParseGenerated_AcceptsWeekAndYearDates: an operations widget's created
+// date may be this or last week, or this or last year.
+func TestParseGenerated_AcceptsWeekAndYearDates(t *testing.T) {
+	raw := opsDashboard(
+		`{"id":"incidents-this-week","displayName":"Incidents This Week","resourceType":"incident","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfWeek:0__"]}]}}`,
+		`{"id":"incidents-last-week","displayName":"Incidents Last Week","resourceType":"incident","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfWeek:-1__"]},{"field":"createdOn","op":"lte","values":["__endOfWeek:-1__"]}]}}`,
+		`{"id":"crs-this-year","displayName":"Change Requests This Year","resourceType":"change_request","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfYear:0__"]}]}}`,
+		`{"id":"crs-last-year","displayName":"Change Requests Last Year","resourceType":"change_request","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfYear:-1__"]},{"field":"createdOn","op":"lte","values":["__endOfYear:-1__"]}]}}`,
+	)
+	if _, err := ParseGenerated([]byte(raw)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+}
+
+// TestParseGenerated_AcceptsLineWindows: a generated case line may draw a
+// named past period (plain dates) or one counted from today (relative
+// dates), by day, week or month; the loader's own checks still refuse a
+// window over its bucket's limit.
+func TestParseGenerated_AcceptsLineWindows(t *testing.T) {
+	raw := opsDashboard(
+		`{"id":"dec-2025-per-day","displayName":"Cases Created per Day in December 2025","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"series":["opened"],"startDate":"2025-12-01","endDate":"2025-12-31"}`,
+		`{"id":"2025-per-month","displayName":"Cases Opened vs Closed per Month in 2025","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"startDate":"2025-01-01","endDate":"2025-12-31","bucket":"month"}`,
+		`{"id":"this-year-per-week","displayName":"Cases Created per Week This Year","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"series":["opened"],"startDate":"__startOfYear:0__","endDate":"__endOfYear:0__","bucket":"week"}`,
+	)
+	d, err := ParseGenerated([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+	if w := d.Widgets[1]; w.StartDate != "2025-01-01" || w.EndDate != "2025-12-31" || w.Bucket != LineBucketMonth {
+		t.Errorf("2025 per month = %q to %q by %q, want 2025-01-01 to 2025-12-31 by month", w.StartDate, w.EndDate, w.Bucket)
+	}
+
+	tooLong := opsDashboard(`{"id":"2025-per-day","displayName":"Cases per Day in 2025","resourceType":"case","shape":"line","gridWidth":12,
+	  "query":{},"startDate":"2025-01-01","endDate":"2025-12-31"}`)
+	_, err = ParseGenerated([]byte(tooLong))
+	if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), "cover at most 90 days") {
+		t.Errorf("a year by day: err = %v, want ErrGeneratedInvalid naming the 90 day limit", err)
+	}
+}
+
+// TestParseGenerated_TheCatalogueLineExampleIsValid: the line widget the
+// catalogue shows the model (section 4, a fixed window) passes this
+// backend's own check, so the catalogue cannot teach a line the save would
+// refuse.
+func TestParseGenerated_TheCatalogueLineExampleIsValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "## 4. Shapes")
+	if !ok {
+		t.Fatal("catalogue has no section 4")
+	}
+	section, _, _ = strings.Cut(section, "## 5.")
+	var lines []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		if strings.Contains(block, `"shape": "line"`) {
+			lines = append(lines, block)
+		}
+		rest = next
+	}
+	if len(lines) == 0 {
+		t.Fatal("found no line example in section 4")
+	}
+	for i, w := range lines {
+		d, err := ParseGenerated([]byte(opsDashboard(w)))
+		if err != nil {
+			t.Errorf("section 4 line example %d is rejected: %v\n%s", i+1, err, w)
+			continue
+		}
+		if got := d.Widgets[0]; got.StartDate == "" || got.EndDate == "" {
+			t.Errorf("section 4 line example %d has no fixed window: %+v", i+1, got)
+		}
+	}
 }
 
 func TestParseGenerated_AcceptsOperationsWidgets(t *testing.T) {

@@ -14,7 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import type { JSX } from "react";
 import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
@@ -29,12 +30,19 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
     lines,
   }: {
     data: Record<string, unknown>[];
-    lines: { dataKey: string; name?: string; stroke?: string }[];
+    lines: {
+      dataKey: string;
+      name?: string;
+      stroke?: string;
+      activeDot?: boolean | ((props: { cx?: number; cy?: number; index?: number }) => JSX.Element);
+    }[];
   }) => (
     <div>
       {lines.map((line) => (
         <div key={line.dataKey} data-testid={`line-${line.dataKey}`} data-stroke={line.stroke}>
           {line.name}: {data.map((row) => `${row.label}=${row[line.dataKey]}`).join(", ")}
+          {/* The hovered point's dot, as recharts would draw it for row 1. */}
+          {typeof line.activeDot === "function" && <svg>{line.activeDot({ cx: 10, cy: 20, index: 1 })}</svg>}
         </div>
       ))}
     </div>
@@ -90,5 +98,121 @@ describe("DashboardLineChart", () => {
     expect(screen.getByTestId("line-closed")).toHaveTextContent(
       "Closed: Sep 1=1, Sep 2=4",
     );
+    expect(screen.getAllByText(/^(Opened|Closed)$/)).toHaveLength(2);
+  });
+
+  it.each([
+    ["opened", "Opened", "closed", "Closed"],
+    ["closed", "Closed", "opened", "Opened"],
+  ] as const)("draws only the %s line, and only its legend entry, when series names it", (key, label, otherKey, otherLabel) => {
+    render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} series={[key]} />);
+
+    expect(screen.getByTestId(`line-${key}`)).toBeInTheDocument();
+    expect(screen.queryByTestId(`line-${otherKey}`)).not.toBeInTheDocument();
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(otherLabel)).not.toBeInTheDocument();
+  });
+
+  it("draws both lines, Opened first, when series names both in any order", () => {
+    render(
+      <DashboardLineChart points={POINTS} isLoading={false} isError={false} series={["closed", "opened"]} />,
+    );
+    const lines = screen.getAllByTestId(/^line-/).map((el) => el.getAttribute("data-testid"));
+    expect(lines).toEqual(["line-opened", "line-closed"]);
+  });
+
+  it("reports the clicked point's day and line when points are clickable", () => {
+    const onPointClick = vi.fn();
+    render(
+      <DashboardLineChart points={POINTS} isLoading={false} isError={false} onPointClick={onPointClick} />,
+    );
+
+    fireEvent.click(screen.getByTestId("line-point-closed"));
+    expect(onPointClick).toHaveBeenCalledWith("2026-09-02", "closed");
+    fireEvent.click(screen.getByTestId("line-point-opened"));
+    expect(onPointClick).toHaveBeenLastCalledWith("2026-09-02", "opened");
+  });
+
+  it("labels week points by the days they cover and month points by month and year", () => {
+    const weeks: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+      { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+    ];
+    const { unmount } = render(
+      <DashboardLineChart points={weeks} isLoading={false} isError={false} bucket="week" />,
+    );
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Dec 1-7=2, Dec 29-31=1");
+    unmount();
+
+    const acrossMonths: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-29", endDate: "2026-01-04", opened: 4, closed: 0 },
+    ];
+    const { unmount: unmountAcross } = render(
+      <DashboardLineChart points={acrossMonths} isLoading={false} isError={false} bucket="week" />,
+    );
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Dec 29-Jan 4=4");
+    unmountAcross();
+
+    const months: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-11-01", endDate: "2025-11-30", opened: 2, closed: 0 },
+      { date: "2025-12-01", endDate: "2025-12-31", opened: 7, closed: 1 },
+    ];
+    render(<DashboardLineChart points={months} isLoading={false} isError={false} bucket="month" />);
+    expect(screen.getByTestId("line-opened")).toHaveTextContent("Opened: Nov 2025=2, Dec 2025=7");
+  });
+
+  it("reports a week or month point's last day too", () => {
+    const onPointClick = vi.fn();
+    const weeks: CaseVolumeTrendChartPoint[] = [
+      { date: "2025-12-01", endDate: "2025-12-07", opened: 2, closed: 0 },
+      { date: "2025-12-29", endDate: "2025-12-31", opened: 1, closed: 3 },
+    ];
+    render(
+      <DashboardLineChart
+        points={weeks}
+        isLoading={false}
+        isError={false}
+        bucket="week"
+        onPointClick={onPointClick}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("line-point-closed"));
+    expect(onPointClick).toHaveBeenCalledWith("2025-12-29", "closed", "2025-12-31");
+  });
+
+  it("makes only the drawn line's points clickable", () => {
+    const onPointClick = vi.fn();
+    render(
+      <DashboardLineChart
+        points={POINTS}
+        isLoading={false}
+        isError={false}
+        series={["opened"]}
+        onPointClick={onPointClick}
+      />,
+    );
+    expect(screen.getByTestId("line-point-opened")).toBeInTheDocument();
+    expect(screen.queryByTestId("line-point-closed")).not.toBeInTheDocument();
+  });
+
+  it("has no clickable points without onPointClick", () => {
+    render(<DashboardLineChart points={POINTS} isLoading={false} isError={false} />);
+    expect(screen.queryByTestId(/^line-point-/)).not.toBeInTheDocument();
+  });
+
+  it("counts only the drawn line for the empty state", () => {
+    const onlyClosed = [
+      { date: "2026-09-01", opened: 0, closed: 2 },
+      { date: "2026-09-02", opened: 0, closed: 1 },
+    ];
+    const { unmount } = render(
+      <DashboardLineChart points={onlyClosed} isLoading={false} isError={false} series={["opened"]} />,
+    );
+    expect(screen.getByText("Nothing to show here right now")).toBeInTheDocument();
+    unmount();
+
+    render(<DashboardLineChart points={onlyClosed} isLoading={false} isError={false} series={["closed"]} />);
+    expect(screen.getByTestId("line-closed")).toBeInTheDocument();
   });
 });

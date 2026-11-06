@@ -124,10 +124,26 @@ func newTestGenerator(t *testing.T, gw *fakeGateway, cat Catalogue, timeout time
 	return NewGenerator(client, "claude-sonnet-5-5", timeout, cat)
 }
 
+// fixedToday is the date every test's user message carries (see useFixedToday).
+const fixedToday = "2026-11-06"
+
+// useFixedToday sets the clock userMessage reads to fixedToday for one test.
+func useFixedToday(t *testing.T) {
+	t.Helper()
+	day, err := time.Parse("2006-01-02", fixedToday)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := now
+	now = func() time.Time { return day.Add(15 * time.Hour) }
+	t.Cleanup(func() { now = prev })
+}
+
 // TestGenerateSendsTheCatalogueWithTeamsAndThePrompt: the system prompt is the
 // catalogue with the Teams section, the user message is the prompt, and the
 // result carries the candidate and all four token counts.
 func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
+	useFixedToday(t)
 	gw := &fakeGateway{text: validGenerated}
 	team := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}
 	res, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
@@ -145,7 +161,7 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	if system != teams.WithTeams("CATALOGUE\n", team) || !strings.Contains(system, "| Rigel | `rigel` | CRE ABT | `creTeam` |") {
 		t.Errorf("system = %q, want the catalogue with the Teams section", system)
 	}
-	if user != "Top 10 customers by open cases." || maxTok != maxTokens || model != "claude-sonnet-5-5" {
+	if user != "Top 10 customers by open cases.\n\nToday's date: "+fixedToday || maxTok != maxTokens || model != "claude-sonnet-5-5" {
 		t.Errorf("user, max_tokens, model = %q, %d, %q", user, maxTok, model)
 	}
 }
@@ -197,6 +213,7 @@ func TestGenerateWithNoTeamsSendsTheCatalogueAsIs(t *testing.T) {
 }
 
 func TestGenerateFollowUpSendsTheDraftBeforeThePrompt(t *testing.T) {
+	useFixedToday(t)
 	gw := &fakeGateway{text: validGenerated}
 	draft := json.RawMessage(`{"displayName":"Old","widgets":[]}`)
 	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
@@ -205,9 +222,46 @@ func TestGenerateFollowUpSendsTheDraftBeforeThePrompt(t *testing.T) {
 	}
 	_, user, _, _ := gw.request(t)
 	want := "This is the dashboard I am editing:\n\n```json\n" + string(draft) +
-		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\nAdd a pie."
+		"\n```\n\nChange it as follows, and reply with the whole updated dashboard:\n\nAdd a pie." +
+		"\n\nToday's date: " + fixedToday
 	if user != want {
 		t.Errorf("user message =\n%q\nwant\n%q", user, want)
+	}
+}
+
+// Today's date is in the user message, never the system prompt: the system
+// prompt is the same on two different days, so the cache still hits, and the
+// date the model sees is the UTC day, also late in a Colombo evening.
+func TestGenerateSendsTodaysDateInTheUserMessageOnly(t *testing.T) {
+	gw := &fakeGateway{text: validGenerated}
+	gen := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second)
+	prev := now
+	t.Cleanup(func() { now = prev })
+
+	var systems []string
+	for _, c := range []struct{ at, date string }{
+		{"2026-11-06T23:30:00+05:30", "2026-11-06"}, // 23:30 in Colombo is still 6 November in UTC
+		{"2026-11-07T09:00:00Z", "2026-11-07"},
+	} {
+		at, err := time.Parse(time.RFC3339, c.at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now = func() time.Time { return at }
+		if _, err := gen.Generate(context.Background(), Request{Prompt: "Cases created in December."}); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		system, user, _, _ := gw.request(t)
+		systems = append(systems, system)
+		if want := "Cases created in December.\n\nToday's date: " + c.date; user != want {
+			t.Errorf("at %s, user message = %q, want %q", c.at, user, want)
+		}
+		if strings.Contains(system, "Today's date") {
+			t.Errorf("at %s, the system prompt carries the date: %q", c.at, system)
+		}
+	}
+	if systems[0] != systems[1] {
+		t.Errorf("the system prompt changed between days:\n%q\n%q", systems[0], systems[1])
 	}
 }
 

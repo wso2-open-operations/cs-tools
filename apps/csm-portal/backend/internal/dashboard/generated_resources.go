@@ -206,7 +206,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 
 // generatedRelativeDate is a relative date placeholder the webapp turns into
 // a date before the request (resolveRelativeDateFilters).
-var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter)(:-?\d+)?__$`)
+var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfWeek|endOfWeek|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter|startOfYear|endOfYear)(:-?\d+)?__$`)
 
 // checkGeneratedResourceWidget checks a generated widget whose resourceType
 // is in generatedResourceRules: its shape, groupBy, query, every slice's
@@ -500,10 +500,11 @@ func windowDays(start, end time.Time) int {
 
 // relativeDate resolves a relative date token on the given day, as the
 // webapp's resolveRelativeDatePlaceholderToDate does: __today__ (no
-// argument), __daysAgo:N__ (N >= 0), and __startOfMonth:N__, __endOfMonth:N__,
-// __startOfQuarter:N__, __endOfQuarter:N__ (N months / quarters from the
-// current one; the argument is required). false for a token the webapp
-// leaves unresolved.
+// argument), __daysAgo:N__ (N >= 0), and __startOfWeek:N__, __endOfWeek:N__,
+// __startOfMonth:N__, __endOfMonth:N__, __startOfQuarter:N__,
+// __endOfQuarter:N__, __startOfYear:N__, __endOfYear:N__ (N weeks / months /
+// quarters / years from the current one; the argument is required). A week
+// runs Monday to Sunday. false for a token the webapp leaves unresolved.
 func relativeDate(token string, today time.Time) (time.Time, bool) {
 	m := relativeDateParts.FindStringSubmatch(token)
 	if m == nil {
@@ -519,6 +520,9 @@ func relativeDate(token string, today time.Time) (time.Time, bool) {
 	}
 	monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
 	quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
+	// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+	weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
+	yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
 	switch {
 	case name == "today" && !hasArg:
 		return today, true
@@ -532,6 +536,14 @@ func relativeDate(token string, today time.Time) (time.Time, bool) {
 		return quarterStart.AddDate(0, 3*arg, 0), true
 	case name == "endOfQuarter" && hasArg:
 		return quarterStart.AddDate(0, 3*(arg+1), -1), true
+	case name == "startOfWeek" && hasArg:
+		return weekStart.AddDate(0, 0, 7*arg), true
+	case name == "endOfWeek" && hasArg:
+		return weekStart.AddDate(0, 0, 7*arg+6), true
+	case name == "startOfYear" && hasArg:
+		return yearStart.AddDate(arg, 0, 0), true
+	case name == "endOfYear" && hasArg:
+		return yearStart.AddDate(arg+1, 0, -1), true
 	}
 	return time.Time{}, false
 }
