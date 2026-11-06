@@ -187,8 +187,17 @@ func (p *ProfilePhoneResolver) fill(ctx context.Context, recipients []Recipient)
 		}
 		// No valid profile number: a number they already carry (the phone
 		// book, paging-alert.yaml, the roster) comes next.
-		if strings.TrimSpace(out[i].Phone) != "" {
-			continue
+		// Only a dialable one ends the search: an invalid carried number is
+		// dropped (and remembered as rejected) so a later source can still
+		// supply a valid one, and the note says INVALID_PHONE_FORMAT.
+		if carried := strings.TrimSpace(out[i].Phone); carried != "" {
+			if e164.MatchString(carried) {
+				continue
+			}
+			slog.WarnContext(ctx, "incident escalation: recipient's carried number is not E.164; not dialling it",
+				"recipientId", out[i].LogID())
+			out[i].Phone = ""
+			rejected[i] = true
 		}
 		if a.Source != "" && a.Source != DialSourceProfile {
 			if e164.MatchString(a.Number) {

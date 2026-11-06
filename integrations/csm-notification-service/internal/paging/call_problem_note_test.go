@@ -181,3 +181,48 @@ func TestProfilePhoneResolver_RemembersDroppedInvalidNumber(t *testing.T) {
 		t.Errorf("a missing number is NO_NUMBER, not invalid: %+v", r)
 	}
 }
+
+func TestWorkNote_ChatOnlyRecipientWithoutNumberIsNotACallProblem(t *testing.T) {
+	plan := callNotePlan(Recipient{Email: "no.phone@example.com"})
+	plan.Channel = ChannelChat
+	note := plan.WorkNote([]bool{true, true}, nil, nil, "")
+	t.Logf("note:\n%s", note)
+	if strings.Contains(note, "Call problems") || strings.Contains(note, "[ERROR]") || strings.Contains(note, "NO_NUMBER") {
+		t.Errorf("a delivered chat card was reported as a call problem:\n%s", note)
+	}
+	if strings.Contains(note, "[OK][Call][no.phone@example.com]") {
+		t.Errorf("nothing was dialled, yet a call line was printed:\n%s", note)
+	}
+}
+
+func TestWorkNote_HeldCallWithoutNumberIsNotACallProblem(t *testing.T) {
+	plan := callNotePlan(Recipient{Email: "no.phone@example.com"})
+	plan.Channel = ChannelBoth
+	plan.Calls[1].HoldCall = true
+	note := plan.WorkNote([]bool{true, true}, nil, nil, "")
+	if strings.Contains(note, "Call problems") || strings.Contains(note, "[ERROR]") {
+		t.Errorf("a deliberately held call was reported as a problem:\n%s", note)
+	}
+	// The same entry not held is still a genuine problem.
+	plan.Calls[1].HoldCall = false
+	note = plan.WorkNote([]bool{true, true}, nil, nil, "")
+	if !strings.Contains(note, callProblemsHeadline) || !strings.Contains(note, "[ERROR][NO_NUMBER][no.phone@example.com]") {
+		t.Errorf("unheld empty-number call must stay a problem:\n%s", note)
+	}
+}
+
+func TestWorkNote_HeadlineCountsRecipientsWithoutEmail(t *testing.T) {
+	plan := Plan{
+		Trigger: testTrigger("P1", ShiftLKMorning),
+		Channel: ChannelCall,
+		Calls: []PlannedCall{
+			{Level: Level1, Ordinal: 1, At: triggerAt, Recipient: Recipient{UserID: "00000000-0000-0000-0000-000000000001"}},
+			{Level: Level1, Ordinal: 1, At: triggerAt, Recipient: Recipient{UserID: "00000000-0000-0000-0000-000000000002"}},
+			{Level: Level1, Ordinal: 1, At: triggerAt, Recipient: Recipient{}},
+		},
+	}
+	note := plan.WorkNote([]bool{true, true, true}, nil, nil, "")
+	if !strings.Contains(note, "Call problems: 3 recipient(s) could not be called") {
+		t.Errorf("recipients without an email collapsed in the headline:\n%s", note)
+	}
+}

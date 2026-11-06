@@ -160,6 +160,26 @@ type PlannedCall struct {
 	index int
 }
 
+// intendsCall reports whether the entry was meant to place a phone call: the
+// plan's channel dials and the call is not held. A chat-only entry, or one
+// whose call is deliberately held, is delivered by its card and owes no number.
+func (p Plan) intendsCall(c PlannedCall) bool {
+	return !c.HoldCall && (p.Channel == "" || p.Channel.Uses(ChannelCall))
+}
+
+// problemKey names a recipient for the call-problems headline: their lower-cased
+// email, else their user id, else the fallback (unique per entry), so two
+// recipients without an email never collapse into one.
+func problemKey(r Recipient, fallback string) string {
+	if e := strings.ToLower(strings.TrimSpace(r.Email)); e != "" {
+		return e
+	}
+	if id := strings.TrimSpace(r.UserID); id != "" {
+		return "id:" + id
+	}
+	return fallback
+}
+
 // PlanIssue records something the plan could not do but which must not abort
 // it — the specification's execution summary logs these and carries on.
 type PlanIssue struct {
@@ -177,6 +197,9 @@ type Plan struct {
 	Trigger Trigger
 	Calls   []PlannedCall
 	Issues  []PlanIssue
+	// Channel is the channel the plan was built for; empty on a plan stored
+	// before it was recorded, which the note treats as call-capable.
+	Channel Channel `json:",omitempty"`
 	// InitialWait is the priority's own pre-ladder delay (section 7.0's
 	// "Initial waiting time"), kept so ExecutionSummary can report it the way
 	// section 11.0's work note does.
@@ -258,7 +281,7 @@ func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolic
 		attemptsByLevel[a.Level] = append(attemptsByLevel[a.Level], a)
 	}
 
-	plan := Plan{Trigger: t, InitialWait: policy.InitialWait}
+	plan := Plan{Trigger: t, Channel: channel, InitialWait: policy.InitialWait}
 	for _, level := range order {
 		attempts := attemptsByLevel[level]
 		opensAt := t.At.Add(attempts[0].After)
@@ -641,11 +664,11 @@ func (p Plan) executionSummary(placed []bool, failed []string, cancelledAt *time
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("[%s][%s][OK][Start : Escalation Step]", b.opensA.Format(stamp), b.level))
-		for _, is := range b.issues {
+		for ii, is := range b.issues {
 			lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][%s][%s]",
 				is.At.Format(stamp), is.Level, is.Reason, is.Detail))
 			if isPhoneProblem(is.Reason) {
-				problems[strings.ToLower(is.Detail)] = true
+				problems[problemKey(Recipient{Email: is.Detail}, fmt.Sprintf("issue:%s:%d", is.Level, ii))] = true
 			}
 		}
 
@@ -674,7 +697,7 @@ func (p Plan) executionSummary(placed []bool, failed []string, cancelledAt *time
 				due.Format(stamp), b.level))
 			for _, c := range attempted {
 				if why := failureOf(failed, c); why != "" {
-					problems[strings.ToLower(c.Recipient.Email)] = true
+					problems[problemKey(c.Recipient, fmt.Sprintf("call:%d", c.index))] = true
 					// No number to dial is the recipient's problem, not the
 					// provider's: same shape as the plan issue's NO_NUMBER line.
 					if isPhoneProblem(why) {
@@ -686,11 +709,17 @@ func (p Plan) executionSummary(placed []bool, failed []string, cancelledAt *time
 						c.At.Format(stamp), c.Level, c.Recipient.Email, why))
 					continue
 				}
-				if c.Recipient.Phone == "" {
+				if c.Recipient.Phone == "" && p.intendsCall(c) {
 					// Never "[OK][Call]" with nothing dialled.
-					problems[strings.ToLower(c.Recipient.Email)] = true
+					problems[problemKey(c.Recipient, fmt.Sprintf("call:%d", c.index))] = true
 					lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][%s][%s]",
 						c.At.Format(stamp), c.Level, c.Recipient.phoneProblem(), c.Recipient.Email))
+					continue
+				}
+				if c.Recipient.Phone == "" {
+					// Reached by the rung's card, not a call: nothing was dialled.
+					lines = append(lines, fmt.Sprintf("[%s][%s][OK][Notified][%s]",
+						c.At.Format(stamp), c.Level, c.Recipient.Email))
 					continue
 				}
 				lines = append(lines, fmt.Sprintf("[%s][%s][OK][Call][%s][%s]",
