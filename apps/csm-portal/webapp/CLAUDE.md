@@ -727,9 +727,14 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   `standardChangesPath`, `standardChangesSearch`).
   - **Suggested** (`StandardChangeSuggestions`, `useStandardChangeSuggestions`, rules in
     `utils/standardChangeSuggestions.ts`): the clusters of a customer's completed change requests that
-    entity-service finds and judges (its CLAUDE.md, "Standard change suggestions"; nothing is decided here). A
+    entity-service finds and judges **twice a day** (its CLAUDE.md, "Standard change suggestions"); the page
+    reads the last snapshot and nothing is computed or decided here, so opening it costs one cheap read. A
     Customer filter (`accountId`), "Show near misses" (`includeIneligible`) and "Show dismissed"
-    (`includeDismissed`), not kept in the URL; a line above the table states the thresholds the backend used.
+    (`includeDismissed`), not kept in the URL, are the only parameters (the thresholds are entity-service
+    configuration). A line above the table says when the snapshot was computed ("Updated Nov 6, 02:00 PM",
+    `suggestionUpdatedText`, the viewer's time zone) and the thresholds it used; before the first snapshot it,
+    and the empty table, say suggestions are computed twice a day and none have been yet
+    (`SUGGESTIONS_NOT_COMPUTED_YET`). Nothing else calls the endpoint: it is fetched only while Suggested is shown.
     Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
     the template relation ("New", "Covered by STD…", "Close to STD…: revise it", with a link); and the actions
     (`suggestionActions`): **Propose** for a new one (`kind: "new"` from `proposeFrom`, then a PATCH citing

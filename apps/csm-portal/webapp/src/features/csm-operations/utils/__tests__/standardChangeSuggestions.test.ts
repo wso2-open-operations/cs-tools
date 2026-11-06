@@ -22,6 +22,7 @@ import {
   suggestionMatchLabel,
   suggestionProposalEvidence,
   suggestionRevisionEvidence,
+  suggestionUpdatedText,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import {
   standardChangesPath,
@@ -126,6 +127,14 @@ describe("suggestionCriteriaText", () => {
       "1 suggestion from 41 change requests completed in the last 12 months that were not raised from a template. " +
         "A suggestion is the same change closed at least 3 times, at least 90% of them without a rollback, with no incident linked and no high risk or impact.",
     );
+  });
+});
+
+describe("suggestionUpdatedText", () => {
+  it("says when the snapshot was published, in the time zone given", () => {
+    expect(suggestionUpdatedText("2026-11-06T08:30:00Z", "Asia/Colombo")).toBe("Updated Nov 6, 02:00 PM");
+    expect(suggestionUpdatedText(null)).toBeNull();
+    expect(suggestionUpdatedText(undefined)).toBeNull();
   });
 });
 

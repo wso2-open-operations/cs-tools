@@ -14,11 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { formatBackendTimestampForDisplay } from "@utils/dateTime";
 import type { BeStandardChangeSuggestion, BeStandardChangeSuggestionsResponse } from "@api/backend/types";
 
 // The Suggested section of Standard changes (StandardChangeSuggestions.tsx):
 // what each suggestion offers, and what a proposal started from one cites.
-// entity-service finds and judges the suggestions; these only read them.
+// entity-service finds and judges the suggestions on a schedule (twice a day)
+// and the page reads its last snapshot; these only read it.
 
 /** The dismissal reason's limit (entity-service refuses a longer one). */
 export const MAX_SUGGESTION_DISMISS_REASON_LENGTH = 1000;
@@ -110,4 +112,18 @@ export function suggestionCriteriaText(r: BeStandardChangeSuggestionsResponse): 
     ` that were not raised from a template. A suggestion is the same change closed at least ${c.minClosed} times,` +
     ` at least ${c.minSuccessPercent}% of them without a rollback, with no incident linked and no high risk or impact.`
   );
+}
+
+/** What the page says before the first snapshot has been computed. */
+export const SUGGESTIONS_NOT_COMPUTED_YET =
+  "Suggestions are computed twice a day from completed change requests. None have been computed yet.";
+
+/** "Updated Nov 6, 02:00 PM": when the snapshot was published, in the viewer's time zone; null before the first. */
+export function suggestionUpdatedText(computedOn?: string | null, timeZone?: string): string | null {
+  const when = formatBackendTimestampForDisplay(
+    computedOn,
+    { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" },
+    timeZone,
+  );
+  return when ? `Updated ${when}` : null;
 }

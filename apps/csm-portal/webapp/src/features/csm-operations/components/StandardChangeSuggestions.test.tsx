@@ -85,12 +85,13 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
   };
 }
 
-function serve(list: BeStandardChangeSuggestion[]): void {
+function serve(list: BeStandardChangeSuggestion[], computedOn: string | null = "2026-11-06T14:00:00Z"): void {
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
       criteria: { windowMonths: 12, minClosed: 3, minSuccessPercent: 90, planSimilarityPercent: 50, coveredPercent: 80, closePercent: 50 },
-      scanned: { changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
+      computedOn,
+      scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
     },
     isLoading: false,
     isError: false,
@@ -126,6 +127,20 @@ describe("StandardChangeSuggestions", () => {
     expect(within(row("Deploy CApps to Pekin prod")).getByText("3 closed")).toBeInTheDocument();
     expect(within(row("Rotate keys")).getByText("Covered by STD0000001")).toBeInTheDocument();
     expect(mocks.suggestions).toHaveBeenLastCalledWith({ accountId: undefined, includeIneligible: false, includeDismissed: false });
+  });
+
+  it("says when the snapshot was computed", () => {
+    serve([suggestion()]);
+    renderIt();
+    expect(screen.getByRole("status")).toHaveTextContent(/^Updated Nov 6, \d\d:\d\d (AM|PM)\. 1 suggestion from 20/);
+  });
+
+  it("says suggestions are computed twice a day when none have been yet", () => {
+    serve([], null);
+    renderIt();
+    expect(screen.getByRole("status")).toHaveTextContent("Suggestions are computed twice a day from completed change requests. None have been computed yet.");
+    expect(within(screen.getByRole("table", { name: "Suggested standard changes" })).getByText(/None have been computed yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/No change is done often enough/)).not.toBeInTheDocument();
   });
 
   it("asks for near misses and dismissed ones when ticked", () => {

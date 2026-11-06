@@ -5967,8 +5967,9 @@ export interface BeChangeRequestStandardChange {
 
 // ---------------------------------------------------------------------------
 // Standard change suggestions (GET /standard-change-suggestions): clusters of one
-// customer's completed change requests that look like the same change done again
-// (entity-service computes them; see its openapi.yaml).
+// customer's completed change requests that look like the same change done again.
+// entity-service computes them on a schedule and the read returns the last
+// snapshot (see its openapi.yaml).
 
 export type BeStandardChangeSuggestionMatch = "covered" | "close" | "new";
 
@@ -6049,8 +6050,11 @@ export interface BeStandardChangeSuggestionsQuery {
 
 export interface BeStandardChangeSuggestionsResponse {
   suggestions: BeStandardChangeSuggestion[];
+  /** The thresholds the snapshot was computed by (configuration, not a request parameter). */
   criteria: BeStandardChangeSuggestionCriteria;
-  scanned: { changeRequests: number; clusters: number; eligible: number; dismissed: number };
+  /** When the snapshot was published (a scheduled refresh, twice a day); null before the first. */
+  computedOn?: string | null;
+  scanned: { customers?: number; changeRequests: number; clusters: number; eligible: number; dismissed: number };
 }
 
 export interface BeDismissStandardChangeSuggestionPayload {

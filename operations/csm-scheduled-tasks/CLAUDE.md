@@ -538,6 +538,65 @@ entity-service's CLAUDE.md, "Incident auto-close".
 | `INCIDENT_AUTOCLOSE_DAYS` | `14` | Days an incident stays Resolved (from `resolved_on`) before it is closed; a value outside 1-3650 or not a whole number refuses to start |
 | `INCIDENT_AUTOCLOSE_DRY_RUN` | `false` | List what is due, close nothing. A malformed value refuses to start rather than falling back to a real run. **A `TRYOUT_TASK=incident_autoclose` is always forced to a dry run**, as for `case_autoclosure` |
 
+## Standard change suggestions refresh
+
+`internal/standardchangesuggestions.Run`, registered as **`standard_change_suggestions_refresh`** (default
+schedule `0 2,14 * * *`: twice a day, 02:00 and 14:00; TZ=UTC caveat as above), recomputes entity-service's
+standard change suggestion snapshot: the clusters of each customer's completed change requests that look
+like the same change done again, which Operations > Change requests > Standard changes > Suggested reads.
+The page reads the snapshot only and never computes, because computing reads every completed change
+request in the window with its plan text (tens of thousands); see entity-service's CLAUDE.md, "Standard
+change suggestions". **Off unless `STANDARD_CHANGE_SUGGESTIONS_ENABLED=true`**, like every task here that
+calls a route a deployed entity-service may not have yet: deploy entity-service (migrations 0283 and
+100030) first, then turn it on. Until the first run publishes, the page says no suggestions have been
+computed yet.
+
+This task is a **trigger only**, like `incident_autoclose`. It calls `POST
+/standard-change-suggestions/refresh` with the shared `OAUTH2_*` client, which must be in entity-service's
+`M2M_CLIENT_IDS` (the route is service-only: a user token is a 403).
+- **Paging.** The first call (`{"limit": 50}`) starts a run; entity-service computes up to 50 customers,
+  one at a time, stopping early after 40 seconds, and answers `more` with a `nextCursor`. The handler asks
+  again with `{runId, cursor}` while `more` is true, at most 2,000 pages. The page that answers
+  `more: false` publishes the run in one transaction. Each call waits 60s (entity-service's
+  `REQUEST_TIMEOUT`).
+- **Failures fail the run and publish nothing.** A failed call, a page that makes no progress (`more`
+  set but the run or cursor did not move on) or the page cap returns an error, so the engine alerts and
+  retries on the next tick. Readers keep the previous snapshot meanwhile; the retry starts a new run, and
+  the unfinished one is never read (entity-service deletes it at the next publish).
+- **Logged**: one line when published (`runId`, `computedOn`, pages, customers, change requests,
+  clusters, eligible, `durationMs`); entity-service logs each page and the run's own duration.
+- **By hand**: `--run-now=standard_change_suggestions_refresh` (no flags of its own). It only computes, so
+  it is safe beside the scheduled run: whichever publishes last is what the page shows. The thresholds
+  are entity-service's `STANDARD_CHANGE_SUGGESTION_*`, not settings here; a change applies from the next
+  refresh.
+
+**Locally.** entity-service reads the caller's token from `x-jwt-assertion`, which Choreo's gateway sets
+from `Authorization: Bearer`; locally `scripts/csm-compose/gateway-shim` does that, so point this component
+at a shim in front of entity-service, not at entity-service itself (direct, every call is a 401). With
+entity-service on `localhost:8080` (its `M2M_CLIENT_IDS` naming this component's `OAUTH2_CLIENT_ID`,
+`AUTH_ISSUER` / `AUTH_JWKS_URL` the local mock-oidc), checked end to end on 2026-11-06:
+
+```bash
+# from scripts/csm-compose/gateway-shim: Bearer -> x-jwt-assertion, in front of entity-service
+PORT=18888 UPSTREAM_URL=http://localhost:8080 go run .
+```
+
+```bash
+# from operations/csm-scheduled-tasks
+STANDARD_CHANGE_SUGGESTIONS_ENABLED=true ALERTS_ENABLED=false \
+  OAUTH2_CLIENT_ID=csm-scheduled-tasks-local OAUTH2_CLIENT_SECRET=x \
+  OAUTH2_TOKEN_URL=http://localhost:9100/oauth2/token \
+  CUSTOMER_ENTITY_SERVICE_BASE_URL=http://localhost:18888 \
+  go run ./cmd/server --run-now=standard_change_suggestions_refresh
+```
+
+It logs `standard change suggestions refresh: published` with the counts; the page shows the new
+"Updated …" time on its next load.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `STANDARD_CHANGE_SUGGESTIONS_ENABLED` | `false` | Register the task |
+
 ## ACP closure
 
 `internal/acp.Run`, registered as **`acp_closure`** (default `0 4 * * 1-5`, 09:30 Colombo on
@@ -768,7 +827,8 @@ reading the handlers' code and doc comments (a judgement, not a test):
 - **Idempotent (safe):** `case_autoclosure` (entity-service's per-ticket compare-and-set claim and its audit-table
   daily limit); `incident_autoclose` (entity-service's row-locked re-check and per-call daily budget); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
   them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
-  `acp_reopen_check` (entity-service records each reopen); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  `acp_reopen_check` (entity-service records each reopen); `standard_change_suggestions_refresh` (only
+  computes a new snapshot; whichever run publishes last wins); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
   `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
   `rota_manual_reminder` (claims waiting requests, each reported once).
@@ -947,6 +1007,7 @@ report emails" below for why that's not a generic engine feature.
 | `ACP_REOPEN_CHECK_ENABLED` | No (default `false`) | Registers `acp_reopen_check`, entity-service's daily ACP reopen check — see "ACP reopen check" above |
 | `HOUSEKEEPING_RETENTION_DAYS` | No (default `30`) | Plain integer number of days of resolved history the `housekeeping_cleanup` sub-cron keeps — see "Housekeeping" above |
 | `INCIDENT_AUTOCLOSE_ENABLED` / `INCIDENT_AUTOCLOSE_DAYS` / `INCIDENT_AUTOCLOSE_DRY_RUN` / `INCIDENT_AUTOCLOSE_DAILY_LIMIT` / `INCIDENT_AUTOCLOSE_SCHEDULED` | No (defaults `false` / `14` / `false` / `0` / `true`) | Registers and tunes the `incident_autoclose` sub-cron — see "Incident auto-close" above |
+| `STANDARD_CHANGE_SUGGESTIONS_ENABLED` | No (default `false`) | Registers the `standard_change_suggestions_refresh` sub-cron (twice a day) — see "Standard change suggestions refresh" above |
 | `USAGE_ROLLUP_ENABLED` | No (default `false`) | Registers the `usage_rollup_daily` and `usage_rollup_monthly` sub-crons — see "Usage rollups" above |
 | `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` | No (default `2`) | Plain integer number of days before today the daily rollup rebuilds each run |
 | `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS` | No (default `180`) | Plain integer number of days a migration must have been open before the `migration_case_report` sub-cron lists it — see "Per-task report emails" below |

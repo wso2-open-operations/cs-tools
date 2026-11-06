@@ -461,7 +461,8 @@ export function useProjectCustomer(projectId: string | undefined): UseQueryResul
 /**
  * `GET /standard-change-suggestions`: clusters of a customer's completed change
  * requests that look like the same change done again (every customer when no
- * accountId). Computed by entity-service on every request, so it is not retried.
+ * accountId), from the snapshot entity-service's scheduled refresh last
+ * published (`computedOn`; none before the first). A read never computes.
  */
 export function useStandardChangeSuggestions(
   query: BeStandardChangeSuggestionsQuery,

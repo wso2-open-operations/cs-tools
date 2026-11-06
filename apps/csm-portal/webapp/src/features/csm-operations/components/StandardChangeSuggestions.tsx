@@ -63,6 +63,8 @@ import {
   suggestionMatchLabel,
   suggestionProposalEvidence,
   suggestionRevisionEvidence,
+  suggestionUpdatedText,
+  SUGGESTIONS_NOT_COMPUTED_YET,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import { standardChangeProposalPath, standardChangeTemplatePath } from "@features/csm-operations/utils/standardChanges";
 import type { BeEntityRef, BeStandardChangeSuggestion } from "@api/backend/types";
@@ -221,9 +223,10 @@ function DismissDialog({
 
 /**
  * Suggested standard changes: clusters of one customer's completed change
- * requests that look like the same change done again (entity-service's
- * `GET /standard-change-suggestions` finds and judges them; nothing is decided
- * here). Each row says how the cluster relates to the customer's live templates
+ * requests that look like the same change done again. entity-service finds and
+ * judges them twice a day and `GET /standard-change-suggestions` returns the
+ * last snapshot (`computedOn`, shown as "Updated …"); nothing is computed or
+ * decided here. Each row says how the cluster relates to the customer's live templates
  * and offers what follows: Propose a new standard change from its newest clean
  * change request, citing the others; Revise the template it is close to; open
  * the template that already covers it; or Dismiss it with a reason.
@@ -331,7 +334,9 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
 
       {data && (
         <Typography variant="body2" color="text.secondary" role="status">
-          {suggestionCriteriaText(data)}
+          {data.computedOn
+            ? `${suggestionUpdatedText(data.computedOn)}. ${suggestionCriteriaText(data)}`
+            : SUGGESTIONS_NOT_COMPUTED_YET}
         </Typography>
       )}
 
@@ -374,7 +379,9 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                 <TableRow>
                   <TableCell colSpan={COLUMNS} align="center" sx={{ py: 4 }}>
                     <Typography variant="body2" color="text.secondary">
-                      No change is done often enough, and reliably enough, to suggest a standard change.
+                      {data && !data.computedOn
+                        ? SUGGESTIONS_NOT_COMPUTED_YET
+                        : "No change is done often enough, and reliably enough, to suggest a standard change."}
                     </Typography>
                   </TableCell>
                 </TableRow>
