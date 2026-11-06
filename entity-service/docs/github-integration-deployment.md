@@ -159,6 +159,20 @@ delivery (cached five minutes); a repository without the file falls back to
    - Secret: the `GITHUB_WEBHOOK_SECRET` value
    - Events: **Issues** and **Issue comments** only
 5. Set `account.cre_team_id` if these records should carry an ABT team (§9).
+6. Optional, organisation repositories only: severity sync. Install
+   `csm_severity_sync.yml` to keep the issue's **Priority** issue field and the
+   service request's internal **severity** in step (Urgent S1, High S2,
+   Medium S3, Low S4). It needs:
+   - the organisation's issue fields enabled, with a single-select field named
+     `Priority` (personal-account repositories have no issue fields);
+   - secrets `CSM_CLIENT_ID` and `CSM_CLIENT_SECRET`: an M2M client listed in
+     `M2M_CLIENT_IDS`;
+   - variables `CSM_TOKEN_URL` and `CSM_API_URL` (entity-service base URL), and
+     optionally `CSM_PRIORITY_FIELD_ID` when the workflow token cannot list
+     the organisation's issue fields.
+
+   The severity is internal: anyone who can read the repository sees it on the
+   issue. Install it only where that is acceptable.
 
 The gateway must forward the body **byte for byte**. The signature covers the raw
 bytes, so any re-serialisation invalidates it and every delivery 401s.
@@ -256,6 +270,12 @@ Against a real repository and database, with GitHub delivering over a webhook:
 ## Change log
 
 Keep this list current — it is how the next deploy knows what changed.
+
+- **2026-11-06** - Severity sync with the issue's Priority field: migration 0277
+  dispatches `csm-severity-update` when a service request's severity is set or
+  changes, `PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity`
+  takes the field's changes, and a new service request starts from the
+  template's Priority dropdown instead of S4.
 
 - **2026-10-12** — ServiceNow-first SRs under dual-write
   (`GITHUB_SR_SERVICENOW_FIRST`): an issue's SR is created through the integration

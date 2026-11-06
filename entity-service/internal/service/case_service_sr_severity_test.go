@@ -345,3 +345,44 @@ func TestSNCaseService_UpdateCase_SeverityFailsClosedWhenTheTypeLookupFails(t *t
 		t.Error("a write was sent to the backing data source after the lookup failed")
 	}
 }
+
+func TestCaseService_SetServiceRequestSeverity(t *testing.T) {
+	high := domain.CaseSeverityHigh
+	t.Run("a service request is set through the internal path", func(t *testing.T) {
+		f := newSRUpdateFixture(t, srsInternalScope)
+		resp, err := f.svc.(githubSeveritySetter).SetServiceRequestSeverity(context.Background(), testDeploymentUUID, high)
+		if err != nil {
+			t.Fatalf("SetServiceRequestSeverity: %v", err)
+		}
+		if f.repoCalls != 1 || resp.Case.Severity == nil || *resp.Case.Severity != high {
+			t.Errorf("repo calls = %d, response severity = %v, want 1 and high", f.repoCalls, resp.Case.Severity)
+		}
+	})
+	t.Run("an external caller is refused", func(t *testing.T) {
+		f := newSRUpdateFixture(t, srsExternalScope)
+		_, err := f.svc.(githubSeveritySetter).SetServiceRequestSeverity(context.Background(), testDeploymentUUID, high)
+		var fe *apierror.ForbiddenError
+		if !errors.As(err, &fe) || f.repoCalls != 0 {
+			t.Fatalf("err = %v, repo calls = %d, want a ForbiddenError and 0", err, f.repoCalls)
+		}
+	})
+	t.Run("a case is refused, never given a severity", func(t *testing.T) {
+		caseType := "case"
+		repoCalls := 0
+		repo := &stubCaseRepo{
+			getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+				return domain.CaseView{ID: testDeploymentUUID, Type: &caseType}, nil
+			},
+			updateCasePrev: func(context.Context, domain.UpdateCaseRequest) (domain.Case, *domain.CaseSeverity, *domain.CaseState, error) {
+				repoCalls++
+				return domain.Case{}, nil, nil, nil
+			},
+		}
+		svc := NewCaseServiceWithSNWriteback(repo, stubUserRepo{}, &mockEventPublisher{}, stubAccessServiceWithScope{srsInternalScope}, nil, NewSNWritebackDispatcher(&recordingSNWritebackFailures{}), &stubMirrorCaseService{}, &fakeSLAEngineService{}, "")
+		_, err := svc.(githubSeveritySetter).SetServiceRequestSeverity(context.Background(), testDeploymentUUID, high)
+		var ce *apierror.ConflictError
+		if !errors.As(err, &ce) || repoCalls != 0 {
+			t.Fatalf("err = %v, repo calls = %d, want a ConflictError and 0", err, repoCalls)
+		}
+	})
+}

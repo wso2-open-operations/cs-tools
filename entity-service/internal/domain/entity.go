@@ -10252,6 +10252,18 @@ type CreateServiceRequestFromIssueResponse struct {
 	Created bool `json:"created"`
 }
 
+// SetIssueSeverityRequest is the body of PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity.
+type SetIssueSeverityRequest struct {
+	Severity CaseSeverity `json:"severity"`
+}
+
+// SetIssueSeverityResponse names the service request whose severity was set.
+type SetIssueSeverityResponse struct {
+	Message  string       `json:"message"`
+	ID       string       `json:"id"`
+	Severity CaseSeverity `json:"severity"`
+}
+
 // TeamMember is one member of a team's roster (GET /teams/{id}/members).
 // Mirrors team_member joined to "user" (migrations 000028/000029). Role is
 // team_member.role -- "member" or "lead" only (a fixed two-value check

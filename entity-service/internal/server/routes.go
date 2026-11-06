@@ -1311,6 +1311,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	}
 	if githubSync != nil {
 		service.WithGithubCaseStates(githubSync, activeCaseSvc)
+		service.WithGithubSeverity(githubSync, activeCaseSvc)
 	}
 	caseHandler := handler.NewCaseHandler(activeCaseSvc, cfg.M2MClientIDs)
 	// activitiesHandler backs POST /cases/{id}/activities/search
@@ -2213,6 +2214,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if githubDeliveryHandler != nil {
 		mux.HandleFunc("POST /github/deliveries", githubDeliveryHandler.Handle)
 		mux.HandleFunc("POST /github/service-requests", githubServiceRequestHandler.Create)
+		mux.HandleFunc("PUT /github/service-requests/{owner}/{repository}/{issueNumber}/severity", githubServiceRequestHandler.SetSeverity)
 	}
 
 	if worklogReportHandler != nil {
