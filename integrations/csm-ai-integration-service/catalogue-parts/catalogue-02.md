@@ -92,8 +92,7 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 | "last month", "previous month" per day | `__startOfMonth:-1__` | `__endOfMonth:-1__` |
 
 Anything longer per day ("this quarter", "this year", "last 60 days", "since <date>") is not expressible
-per day: reply with `{"error": ...}` suggesting the last 31 days per day, or the longer period per user or
-per project. A `user`, `project` or `state` grouping may use any date window (or none).
+per day (section 1). A `user`, `project` or `state` grouping may use any date window (or none).
 
 **"Last N days" on any time card widget** (count, list, slices or any grouping) is `__daysAgo:<N-1>__` to
 `__today__`, exactly N work dates as in the table above ("last 30 days": `__daysAgo:29__`). This differs
@@ -120,12 +119,10 @@ from the cases' `__daysAgo:N__` (section 8) on purpose: a time card window must 
   "groupBy": { "field": "project", "measure": "count", "maxGroups": 10 } }
 ```
 
-**Not expressible for time cards** (reply with `{"error": ...}` naming what can be shown instead, e.g.
-"my hours per day for the last 14 days" or "hours per user this month"):
+**Not expressible for time cards** (section 1):
 - another named person's time cards (only "my" time cards, or everyone's);
 - per account, per case or per approver, or a team's (Rigel's, my team's) time cards;
-- one total as a single number ("my total hours this month"): a `count` counts cards; offer the hours per
-  day, per user or per project instead;
+- one total as a single number ("my total hours this month"): a `count` counts cards, not hours;
 - billable hours (billable and non-billable are not told apart);
 - per day over more than 31 days (above).
 
@@ -173,8 +170,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 `openedOn`; change request `createdOn` or `updatedOn`; **a problem list sets no `sortBy`**; `pie`/`bar`
 with `slices` (each slice's `query` in the same shape) or `"groupBy": {"field": "state", "maxGroups": 8}`.
 
-**Not expressible** for these (reply with `{"error": ...}` naming what can be shown instead, e.g. "open
-incidents by state" or "change requests waiting for approval"): grouping or filtering by assignment group,
+**Not expressible** for these (section 1): grouping or filtering by assignment group,
 team, service or business service; a named team's or another person's records; dates other than when
 created (closed or resolved dates); `line` charts; an `anyOf`.
 
@@ -212,7 +208,7 @@ values are case-sensitive exactly as written.
 sort only by `endDate` ("ending soonest" is `asc`); `pie`/`bar` with `slices` only (each slice's `query`
 flat too), e.g. one slice per risk or per onboarding status.
 
-**Not expressible** (reply with `{"error": ...}` naming what can be shown instead): "my accounts" or a
+**Not expressible** (section 1): "my accounts" or a
 named account manager's / owner's accounts; a region or sub-region; a product; ARR or revenue; a named
 account's projects; grouping on the server (`groupBy`).
 
@@ -229,8 +225,7 @@ for that rating. "CSAT" is the average rating.
 | `rating` | a whole **number** 1 to 5 (not a string), e.g. `"rating": 1` |
 
 **No date filters for now** (no `dateFrom` / `dateTo`): every widget covers all feedback. A request
-for a period ("this quarter", "last 30 days") is not expressible yet: reply with `{"error": ...}` and
-suggest the same view over all feedback.
+for a period ("this quarter", "last 30 days") is not expressible yet (section 1).
 
 Grouping is on the server with `"groupBy": {"bucket": "<bucket>"}` on a `pie` or `bar`:
 

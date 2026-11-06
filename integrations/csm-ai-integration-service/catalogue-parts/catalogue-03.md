@@ -15,7 +15,7 @@
 | "why customers were dissatisfied / very dissatisfied / satisfied", "reasons for low ratings" | a `bar` with `groupBy.bucket` `reasons_dissatisfied` / `reasons_very_dissatisfied` / `reasons_satisfied` (for "low ratings", one widget each for very dissatisfied and dissatisfied) |
 | "very dissatisfied feedback", "1-star ratings", "unhappy customers' comments" | a `list` with `rating 1` (or `1` and `2` as two widgets); "5-star" is `rating 5` |
 | "number of feedback responses", "how many ratings" | a `count` with `{}` |
-| CSAT for a period ("this quarter", "last 30 days"), by account, team or engineer | not expressible yet: `{"error": ...}` suggesting the same view over all feedback |
+| CSAT for a period ("this quarter", "last 30 days"), by account, team or engineer | not expressible yet (section 1) |
 | "accounts", "customers" (as organisations), "clients" | `resourceType: "account"` (section 5c); "customers" adds `lifeCycle "Customer"` |
 | "partners" / "prospects" / "lost customers" (accounts) | `lifeCycle` `"Partner"` / `"Prospect"` / `"Lost Customer"` |
 | "Rigel's accounts", "accounts of team Apollo" | `abtTeam` with that team's key |
@@ -27,7 +27,7 @@
 | "projects by onboarding status" | a `pie` with one slice each for Not started, In progress, Completed |
 | "active projects" | `excludeClosureStates ["Suspended", "Restricted"]`; "suspended" / "restricted" projects: `closureStatus` |
 | "projects ending this month / this quarter", "expiring", "renewals due" | `endDateFrom` / `endDateTo` with the month or quarter tokens; a list sorted by `endDate` `asc` |
-| "my accounts", accounts by region, product, owner or ARR | not expressible: `{"error": ...}` as in section 5c |
+| "my accounts", accounts by region, product, owner or ARR | not expressible (section 5c) |
 | "incidents", "outages" (as incidents), "faults" | `resourceType: "incident"` (section 5b) |
 | "open", "active", "ongoing", "unresolved" incidents | `state in ["NEW", "IN_PROGRESS", "ON_HOLD"]` |
 | "new" / "on hold" / "resolved" / "closed" incidents | `state in` `["NEW"]` / `["ON_HOLD"]` / `["RESOLVED"]` / `["CLOSED"]` |
@@ -42,7 +42,7 @@
 | "open", "active" problems | `state in ["NEW", "ASSESS", "ROOT_CAUSE_ANALYSIS", "FIX_IN_PROGRESS"]` |
 | "my incidents", "my changes", "my problems" | `assignedUserId in ["__current_user__"]` |
 | "by state" (incidents, change requests, problems) | `pie`/`bar` with `"groupBy": {"field": "state", "maxGroups": 8}` |
-| operations "by assignment group / team / service", a named team's, or another person's | not expressible: `{"error": ...}` as in section 5b |
+| operations "by assignment group / team / service", a named team's, or another person's | not expressible (section 5b) |
 | "time cards", "time logs", "timesheets", "logged time" | `resourceType: "time_card"` (section 5a) |
 | "my time cards", "time I logged" | `time_card` with `userIds ["__current_user__"]` |
 | "waiting for approval", "awaiting approval", "to approve", "submitted" (time cards) | `states ["submitted"]` |
@@ -56,14 +56,14 @@
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
 | time cards or hours "per day", "daily", "each day" | a `bar` with `groupBy` `day` and one of the windows of section 5a (31 days at most) |
 | "hours by state" (time cards) | a `pie` with `groupBy` `state`, `measure` `hours` |
-| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible: `{"error": ...}` as in section 5a |
+| time cards per account, per case, per approver, a team's or a named person's; one total hours number; billable hours; per day over more than 31 days | not expressible (section 5a) |
 | "my open", "open ... assigned to me", "my open cases" (open together with "my") | `state notIn ["closed"]`: "my open" means my active cases, every state except Closed (plain "open" without "my" stays the Open state) |
 | other wording about a case's state | pick by meaning: a word for one stage of a case ("just raised", "reopened", "awaiting the customer") is `state in` the matching state(s) from the `state` row of section 5; a word for "everything still being worked on" ("pending", "live", "still going") is `state notIn ["closed"]` |
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
 | "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn gte <token>` |
-| "unassigned", "no assignee" | not expressible: reply with `{"error": ...}` saying unassigned filtering is not supported |
+| "unassigned", "no assignee" | not expressible: there is no unassigned filter (section 1) |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
 | "about to breach", "near SLA" | `taskSLABusinessElapsedPercent gte ["80"]` plus `slaBreached eq ["false"]` |
@@ -125,6 +125,8 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.
 13. The output is a single JSON object.
+14. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
+    nothing close answers the request (section 1).
 
 ---
 
