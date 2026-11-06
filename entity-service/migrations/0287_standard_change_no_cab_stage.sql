@@ -20,18 +20,19 @@
 -- AUTHORITY_REVIEW) and CAB_REVIEW is no longer a state.
 --
 -- A proposal still in CAB_REVIEW goes back to DRAFT, for its proposer to submit
--- again (it then goes to the authority):
---   - the REQUESTED rows of its stage are CANCELLED, as a withdrawal cancels
---     them; the stage itself stays, with what was decided on it, and the
---     proposal keeps showing it;
---   - submitted_on is cleared: a draft has not been submitted. The stage it
---     keeps is what stops it being deleted (a proposal that was once before
---     anyone stays as the record); customer_locked stays set, as at submit.
--- Proposals in AUTHORITY_REVIEW (the CAB approved them under the old flow) and
--- decided ones are left as they are, with their CAB Approval stage. A decided
--- proposal is APPROVED, REJECTED, WITHDRAWN or CANCELLED, never CAB_REVIEW, so
--- once the UPDATE has run no row holds it, and standard_change_proposal_state_check
--- is recreated without it. The one-open-per-template index (0277) still names
+-- again (it then goes to the authority); submitted_on is cleared, since a draft
+-- has not been submitted, and customer_locked stays set, as at submit.
+--
+-- No proposal that is still open keeps a CAB stage: every approval stage other
+-- than the Standard Change Authority's is deleted (its approver rows go with it,
+-- ON DELETE CASCADE) from each proposal in DRAFT or AUTHORITY_REVIEW. So a
+-- returned draft is a clean draft again (it can be deleted), and a proposal the
+-- CAB approved under the old flow, already in AUTHORITY_REVIEW, shows only the
+-- authority's stage and carries on there. Decided proposals (APPROVED, REJECTED,
+-- WITHDRAWN, CANCELLED) keep their stages: that is the record of who approved
+-- the template in force. A decided proposal is never CAB_REVIEW, so once the
+-- UPDATE has run no row holds it, and standard_change_proposal_state_check is
+-- recreated without it. The one-open-per-template index (0277) still names
 -- CAB_REVIEW in its predicate; with no row able to hold it, it is left as it is.
 --
 -- Rollout: run 0287 IMMEDIATELY BEFORE the entity-service build without the CAB
@@ -70,28 +71,30 @@ SELECT set_config('app.is_internal', 'true', false);
 
 SELECT w.id
   FROM work_item w
- WHERE w.id IN (SELECT p.id FROM standard_change_proposal p WHERE p.state = 'CAB_REVIEW')
+ WHERE w.id IN (SELECT p.id FROM standard_change_proposal p
+                 WHERE p.state IN ('CAB_REVIEW', 'DRAFT', 'AUTHORITY_REVIEW')
+                   AND EXISTS (SELECT 1 FROM approval_stage s
+                                WHERE s.work_item_id = p.id AND s.checkpoint_label IS DISTINCT FROM 'Standard Change Authority'))
  ORDER BY w.id
    FOR NO KEY UPDATE OF w;
 
 ALTER TABLE standard_change_proposal DROP CONSTRAINT IF EXISTS standard_change_proposal_state_check;
 
-WITH returned AS (
-    UPDATE standard_change_proposal
-       SET state = 'DRAFT', submitted_on = NULL
-     WHERE state = 'CAB_REVIEW'
-    RETURNING id
-), cancelled AS (
-    UPDATE approval_stage_approver a
-       SET state = 'CANCELLED', updated_on = NOW(), updated_by = 'migration:0287_standard_change_no_cab_stage'
-      FROM returned r
-     WHERE a.work_item_id = r.id AND a.state = 'REQUESTED'
-    RETURNING a.id
+UPDATE standard_change_proposal
+   SET state = 'DRAFT', submitted_on = NULL
+ WHERE state = 'CAB_REVIEW';
+
+WITH dropped AS (
+    DELETE FROM approval_stage s
+     USING standard_change_proposal p
+     WHERE s.work_item_id = p.id
+       AND p.state IN ('DRAFT', 'AUTHORITY_REVIEW')
+       AND s.checkpoint_label IS DISTINCT FROM 'Standard Change Authority'
+    RETURNING s.work_item_id
 )
 UPDATE work_item w
    SET updated_on = NOW(), updated_by = 'migration:0287_standard_change_no_cab_stage'
-  FROM returned r
- WHERE w.id = r.id;
+ WHERE w.id IN (SELECT work_item_id FROM dropped);
 
 ALTER TABLE standard_change_proposal ADD CONSTRAINT standard_change_proposal_state_check
     CHECK (state IN ('DRAFT', 'AUTHORITY_REVIEW', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'CANCELLED'));

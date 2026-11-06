@@ -880,14 +880,14 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
   otherwise, with an **Approval** section: the rule (`STANDARD_CHANGE_APPROVAL_RULE`: two different members, never the
   proposer) and one table per stage (`proposal.stages`, approver rows by `stageId`), **rendered generically**: each
   stage by its own `label` and count ("1 of 2 approvals"), numbered only when there is more than one, with no
-  CAB-specific code. A proposal has one stage, the authority's; one from before migration 0287 (decided, still in
-  authority review, or returned to draft and possibly resubmitted) may also hold an earlier "CAB Approval" stage,
+  CAB-specific code. A proposal has one stage, the authority's; one decided before migration 0287 may also hold an earlier "CAB Approval" stage (0287 removed it
+  from every open proposal),
   shown as "1. CAB Approval" above "2. Standard Change Authority". **Authorise** / Reject on the
   viewer's own `canDecide` row (there is no Approve); the dialog says whether a second member must still approve or
   this one applies it (`STANDARD_CHANGE_AUTHORITY_APPROVALS` when the answer has no stage); the decision sends the
   `stageId` of the row it was offered on, so one from a page loaded before that stage was settled or closed is refused
   (409, the page reloads). Only the latest stage can read as open, "Withdrawn" or "Cancelled"; an earlier stage left
-  undecided (a cancelled CAB stage on a proposal 0287 returned to draft) reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
+  undecided reads "Not decided", never as waiting. The read-only view shows the Summary above what the template specifies. A rejection needs a comment.
   `canCancel` (an authority member, someone else's open proposal) offers **Cancel proposal** with a required reason.
   The decision banner names the stage that ended it (`decisionHeadline`: "Approved by" / "Rejected by the Standard
   Change Authority"; an older proposal settled at another stage, "Approved at the CAB Approval stage"; withdrawn,

@@ -5758,13 +5758,12 @@ export interface BeStandardChangeEvidence {
 
 /**
  * One approval stage of a proposal: the Standard Change Authority's, the only one
- * now. A proposal from before migration 0287 (decided, still in authority review,
- * or returned to draft and possibly resubmitted) may also hold an earlier
- * "CAB Approval" stage.
+ * now. A proposal decided before migration 0287 may also hold an earlier
+ * "CAB Approval" stage (0287 removed it from every open proposal).
  */
 export interface BeStandardChangeProposalStage {
   id: string;
-  /** "Standard Change Authority" (or, on a proposal from before 0287, "CAB Approval"). */
+  /** "Standard Change Authority" (or, on a proposal decided before 0287, "CAB Approval"). */
   label: string;
   /** How many different approvers must approve (2 for the authority). */
   requiredApprovals: number;

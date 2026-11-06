@@ -313,13 +313,13 @@ type StandardChangeEvidence struct {
 }
 
 // StandardChangeProposalStage is one approval stage of a proposal: the Standard
-// Change Authority's. A proposal from before migration 0287 removed the CAB
-// stage (decided, still in authority review, or returned to draft and possibly
-// resubmitted) may also show its "CAB Approval" stage, first.
+// Change Authority's. A proposal decided before migration 0287 removed the CAB
+// stage may also show its "CAB Approval" stage, first (0287 removed it from every
+// open proposal).
 type StandardChangeProposalStage struct {
 	ID string `json:"id"`
 	// Label is the stage's name ("Standard Change Authority"; "CAB Approval" on
-	// a proposal from before 0287).
+	// a proposal decided before 0287).
 	Label string `json:"label"`
 	// RequiredApprovals is how many different approvers must approve it;
 	// Approvals is how many have.

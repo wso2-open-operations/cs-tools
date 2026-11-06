@@ -8537,7 +8537,7 @@ counts eligible members by distinct email.
 
 `DecideProposal` decides on the **latest** stage only (`currentProposalStage`). The decision may name
 the stage it was meant for (`stageId`, which the webapp always sends): when that is not the stage the
-proposal waits on (it was returned to draft by 0287 and submitted again while the page was open), it
+proposal waits on (its old CAB stage, on a page loaded before 0287), it
 is a 409 with nothing written. Submit refuses (400) when the authority group has fewer than two
 eligible members besides the proposer (`resolveAuthorityPool`), so a proposal never waits on a group
 that could not authorise it. **Approved**: `NEW`
@@ -8550,17 +8550,20 @@ version and is refused (409) when the template moved on since; at most one is op
 `CAB_REVIEW`, which no row can hold). The approval stage writes `approval_stage.raw_status` in the
 enum's own spelling (`APPROVED` / `REJECTED`). The proposal reads `stages` (label, required and
 received approvals, decision, generically: a proposal decided before 0287 may show a "CAB Approval"
-stage, required 1, before its authority stage) and each approver row's `stageId`;
+stage, required 1, before its authority stage; an open proposal never does) and each approver row's `stageId`;
 `awaitingMyDecision` covers `AUTHORITY_REVIEW` only.
 
-**0287** returned every proposal still in `CAB_REVIEW` to `DRAFT`: its REQUESTED rows `CANCELLED`
-(as a withdrawal does; the stage stays, so the draft shows it and cannot be deleted), `submitted_on`
-cleared, `customer_locked` kept; then recreated `standard_change_proposal_state_check` without
-`CAB_REVIEW`. Proposals already in `AUTHORITY_REVIEW` (CAB-approved under the old flow) carry on.
+**0287** returned every proposal still in `CAB_REVIEW` to `DRAFT` (`submitted_on` cleared,
+`customer_locked` kept), then deleted every stage other than the authority's (its approver rows go
+with it) from every open proposal, `DRAFT` or `AUTHORITY_REVIEW`: a returned draft is a clean draft
+again (it can be deleted), and a proposal the CAB approved under the old flow carries on in
+`AUTHORITY_REVIEW` with only the authority's stage. Decided proposals keep their stages, the record of
+who approved the template in force. Then it recreated `standard_change_proposal_state_check` without
+`CAB_REVIEW`.
 **Run 0287 immediately before rolling out the entity-service build without the CAB stage**: a new pod
 before 0287 does not know `CAB_REVIEW`, so the proposals still in it are stranded until 0287 runs; an
 old pod after 0287 fails only on submit (its `CAB_REVIEW` write breaks the new check, nothing
-written) until it is replaced. 0287 locks the CAB-review proposals' `work_item` rows before taking
+written) until it is replaced. 0287 locks the `work_item` rows of the open proposals it changes before taking
 `standard_change_proposal`'s ACCESS EXCLUSIVE lock, the order `lockProposal` takes, so a concurrent
 proposal write waits instead of deadlocking. `SearchProposals` still accepts `states: ["cab_review"]`
 (it matches nothing) for a webapp deployed before this release; remove that

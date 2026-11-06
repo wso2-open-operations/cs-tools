@@ -1708,11 +1708,13 @@ func stdOldTwoStageProposal(t *testing.T, env *stdEnv) {
 }
 
 // Migration 0287 removes the CAB stage. A proposal still in CAB review goes back
-// to draft: the REQUESTED rows of its stage cancelled, the stage kept and shown,
-// submitted_on cleared; submitted again it goes to the authority, and a decision
-// sent for its old stage is refused. A proposal in authority review, and a
-// decided one, are left as they are; the state check no longer admits
-// CAB_REVIEW. Running it twice changes nothing more.
+// to draft, submitted_on cleared, and loses its CAB stage: a clean draft again,
+// which can be deleted; submitted again it goes to the authority, and a decision
+// sent for its old stage is refused. A proposal the CAB approved under the old
+// flow, already in authority review, loses its CAB stage too and carries on with
+// the authority's. A decided one keeps every stage, the record of who approved
+// the template in force. The state check no longer admits CAB_REVIEW. Running it
+// twice changes nothing more.
 //
 // The tables belong to STANDARD_CHANGE_TEST_DSN's role, the only one here that
 // may alter them, so the whole file runs there. Its UPDATEs also run as
@@ -1776,10 +1778,28 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 		}
 		return got
 	}
+	// A settled "CAB Approval" stage, an hour older than the authority's, as the
+	// old flow left a proposal the CAB had approved.
+	addCABStage := func(id string) {
+		t.Helper()
+		var stage string
+		if err := env.scoped.QueryRow(sys, `INSERT INTO approval_stage (id, created_on, updated_on, created_by, updated_by, work_item_id, assignment_group_id, raw_status, checkpoint_label, required_approvals)
+			VALUES (gen_random_uuid(), NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 't', 't', $1::uuid, $2::uuid, 'APPROVED', 'CAB Approval', 1)
+			RETURNING id::text`, id, cabGroupID).Scan(&stage); err != nil {
+			t.Fatalf("seed the CAB stage: %v", err)
+		}
+		exec("seed the CAB approval", `INSERT INTO approval_stage_approver (id, created_on, updated_on, created_by, updated_by, work_item_id, stage_id, approver_user_id, state)
+			SELECT gen_random_uuid(), NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 't', 't', $1::uuid, $2::uuid, u.id, 'APPROVED' FROM "user" u WHERE u.email = $3`,
+			id, stage, stdCAB2)
+	}
 	cab := inCAB(stdTag + " Waiting on the CAB")
 	waiting := readyDraft(t, env, stdTag+" Waiting on the authority")
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), waiting.ID); err != nil {
 		t.Fatal(err)
+	}
+	addCABStage(waiting.ID)
+	if got, err := env.svc.GetProposal(stdCtx(stdProposer), waiting.ID); err != nil || len(got.Stages) != 2 {
+		t.Fatalf("authority review fixture = %+v, %v", got.Stages, err)
 	}
 	if _, err := env.svc.DecideProposal(stdCtx(stdAuth1), waiting.ID, domain.DecideStandardChangeProposalRequest{Decision: "approved"}); err != nil {
 		t.Fatal(err)
@@ -1788,22 +1808,18 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), decided.ID); err != nil {
 		t.Fatal(err)
 	}
+	addCABStage(decided.ID)
 	authorise(t, env, decided.ID)
 
 	checkReturned := func(what string, before domain.StandardChangeProposal) domain.StandardChangeProposal {
 		t.Helper()
 		got, err := env.svc.GetProposal(stdCtx(stdProposer), before.ID)
-		if err != nil || got.State != domain.StandardChangeProposalStateDraft || got.SubmittedOn != nil || !got.CanEdit || !got.CanSubmit || got.CanDelete {
+		if err != nil || got.State != domain.StandardChangeProposalStateDraft || got.SubmittedOn != nil || !got.CanEdit || !got.CanSubmit || !got.CanDelete {
 			t.Fatalf("%s: returned = %s submittedOn %v canEdit %v canSubmit %v canDelete %v, %v",
 				what, got.State, got.SubmittedOn, got.CanEdit, got.CanSubmit, got.CanDelete, err)
 		}
-		if len(got.Stages) != 1 || got.Stages[0].ID != before.Stages[0].ID || got.Stages[0].Label != "CAB Approval" || got.Stages[0].Decision != nil {
-			t.Fatalf("%s: the CAB stage is kept as it was: %+v", what, got.Stages)
-		}
-		for _, a := range got.Approvers {
-			if a.State != "CANCELLED" || a.CanDecide {
-				t.Fatalf("%s: an approver row left open: %+v", what, a)
-			}
+		if len(got.Stages) != 0 || len(got.Approvers) != 0 {
+			t.Fatalf("%s: the CAB stage is still there: %+v %+v", what, got.Stages, got.Approvers)
 		}
 		return got
 	}
@@ -1811,10 +1827,12 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 		run(env.pool, fmt.Sprintf("run %d of 0287", run1), string(migration))
 		checkReturned(fmt.Sprintf("run %d", run1), cab)
 		if got, _ := env.svc.GetProposal(stdCtx(stdProposer), waiting.ID); got.State != domain.StandardChangeProposalStateAuthorityReview ||
-			got.Stages[0].Approvals != 1 || approverStates(got)[stdAuth2] != "REQUESTED" {
-			t.Fatalf("run %d: a proposal in authority review was touched: %s %v", run1, got.State, approverStates(got))
+			len(got.Stages) != 1 || got.Stages[0].Label != domain.StandardChangeAuthorityGroupName ||
+			got.Stages[0].Approvals != 1 || approverStates(got)[stdAuth2] != "REQUESTED" || approverStates(got)[stdCAB2] != "" {
+			t.Fatalf("run %d: a proposal in authority review = %s %+v %v, want only the authority's stage", run1, got.State, got.Stages, approverStates(got))
 		}
-		if got, _ := env.svc.GetProposal(stdCtx(stdProposer), decided.ID); got.State != domain.StandardChangeProposalStateApproved || got.Stages[0].Approvals != 2 {
+		if got, _ := env.svc.GetProposal(stdCtx(stdProposer), decided.ID); got.State != domain.StandardChangeProposalStateApproved ||
+			len(got.Stages) != 2 || got.Stages[0].Label != "CAB Approval" || got.Stages[1].Approvals != 2 {
 			t.Fatalf("run %d: a decided proposal was touched: %s %+v", run1, got.State, got.Stages)
 		}
 	}
@@ -1822,12 +1840,11 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 		t.Fatal("the state check still admits CAB_REVIEW")
 	}
 
-	// Submitted again, the returned draft goes to the authority: the CAB stage
-	// stays first, and a decision sent for it (a page loaded before) is refused.
+	// Submitted again, the returned draft goes to the authority, with its one
+	// stage; a decision sent for the old CAB stage (a page loaded before) is refused.
 	resubmitted, err := env.svc.SubmitProposal(stdCtx(stdProposer), cab.ID)
-	if err != nil || resubmitted.State != domain.StandardChangeProposalStateAuthorityReview || len(resubmitted.Stages) != 2 ||
-		resubmitted.Stages[0].Label != "CAB Approval" || resubmitted.Stages[1].Label != domain.StandardChangeAuthorityGroupName ||
-		resubmitted.Stages[1].RequiredApprovals != 2 {
+	if err != nil || resubmitted.State != domain.StandardChangeProposalStateAuthorityReview || len(resubmitted.Stages) != 1 ||
+		resubmitted.Stages[0].Label != domain.StandardChangeAuthorityGroupName || resubmitted.Stages[0].RequiredApprovals != 2 {
 		t.Fatalf("submitted again = %s %+v, %v", resubmitted.State, resubmitted.Stages, err)
 	}
 	oldStage := cab.Stages[0].ID
@@ -1836,7 +1853,7 @@ func TestStandardChangeIntegration_NoCABStageMigration(t *testing.T) {
 	if !strings.Contains(err.Error(), "the stage you decided on is not the one this proposal now waits on") {
 		t.Fatalf("stale-stage refusal = %v", err)
 	}
-	if got, _ := env.svc.GetProposal(stdCtx(stdProposer), cab.ID); got.Stages[1].Approvals != 0 {
+	if got, _ := env.svc.GetProposal(stdCtx(stdProposer), cab.ID); got.Stages[0].Approvals != 0 {
 		t.Fatalf("a stale decision was recorded: %+v", got.Stages)
 	}
 	if got := authorise(t, env, cab.ID); got.Template == nil {
