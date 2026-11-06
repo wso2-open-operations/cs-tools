@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,9 +134,44 @@ type EmailAttachment struct {
 	ContentName string `json:"contentName"`
 	// ContentType is the attachment's MIME type (e.g. "application/pdf").
 	ContentType string `json:"contentType"`
-	// Attachment is the raw file content; encoding/json base64-encodes it
-	// automatically since the field type is []byte.
+	// Attachment is the raw file content. It goes on the wire as a JSON
+	// array of numbers, one per byte, not encoding/json's default base64
+	// string -- see MarshalJSON.
 	Attachment []byte `json:"attachment"`
+}
+
+// MarshalJSON writes Attachment as a JSON array of numbers (one per byte).
+// email-service is a Ballerina service whose EmailAttachment.attachment is
+// byte[], and its data binding accepts only that shape: a base64 string, which
+// is what encoding/json produces for []byte by default, is rejected with
+// HTTP 400 "should be of type 'byte[]'". An empty Attachment is sent as []
+// rather than null for the same reason. sendEmailRequest.Template is a
+// different case: the service takes that one as a base64 string, so it is
+// left alone. Decoding needs no counterpart, since encoding/json reads a
+// number array into a []byte as well.
+func (a EmailAttachment) MarshalJSON() ([]byte, error) {
+	type plain EmailAttachment // same fields, without this method
+	return json.Marshal(struct {
+		plain
+		Attachment byteArray `json:"attachment"`
+	}{plain(a), byteArray(a.Attachment)})
+}
+
+// byteArray marshals as a JSON array of numbers instead of a base64 string.
+type byteArray []byte
+
+// MarshalJSON writes b as [n,n,...] with each byte in decimal, and [] when b
+// is empty or nil.
+func (b byteArray) MarshalJSON() ([]byte, error) {
+	out := make([]byte, 0, 2+4*len(b))
+	out = append(out, '[')
+	for i, v := range b {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = strconv.AppendUint(out, uint64(v), 10)
+	}
+	return append(out, ']'), nil
 }
 
 // sendEmailRequest is the wire shape expected by POST /send-email.
