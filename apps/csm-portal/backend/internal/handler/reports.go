@@ -21,6 +21,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/viewer"
@@ -29,7 +30,7 @@ import (
 // reportsClient abstracts the report operations used by ReportsHandler.
 type reportsClient interface {
 	GetProjectReportDetails(ctx context.Context, projectID, from, to string) (viewer.CSReportDetails, error)
-	GetTimeLogBreakdown(ctx context.Context, projectID string) (viewer.TimeLogBreakdownDetails, error)
+	GetTimeLogBreakdown(ctx context.Context, projectID string, period TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error)
 }
 
 // ReportsHandler handles HTTP requests for the project reports, delegating
@@ -100,7 +101,27 @@ func (h *ReportsHandler) GenerateTimelogsBreakdownReport(w http.ResponseWriter, 
 		return
 	}
 
-	report, err := h.reports.GetTimeLogBreakdown(r.Context(), projectID)
+	q := r.URL.Query()
+	period := TimeLogPeriod{From: q.Get("from"), To: q.Get("to"), AllTime: q.Get("allTime") == "true"}
+	if q.Has("allTime") && q.Get("allTime") != "true" && q.Get("allTime") != "false" {
+		writeError(w, http.StatusBadRequest, "allTime must be true or false.")
+		return
+	}
+	for _, d := range []string{period.From, period.To} {
+		if d == "" {
+			continue
+		}
+		if _, err := time.Parse(dateLayout, d); err != nil {
+			writeError(w, http.StatusBadRequest, "from and to must be valid dates in YYYY-MM-DD format.")
+			return
+		}
+	}
+	if period.From != "" && period.To != "" && period.From > period.To {
+		writeError(w, http.StatusBadRequest, "from must not be after to.")
+		return
+	}
+
+	report, err := h.reports.GetTimeLogBreakdown(r.Context(), projectID, period)
 	if err != nil {
 		if errors.Is(err, viewer.ErrProjectNotFound) {
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)

@@ -32,10 +32,12 @@ type mockReportsClient struct {
 	csReport     viewer.CSReportDetails
 	csErr        error
 	gotProjectID string
+	gotPeriod    TimeLogPeriod
 }
 
-func (m *mockReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string) (viewer.TimeLogBreakdownDetails, error) {
+func (m *mockReportsClient) GetTimeLogBreakdown(ctx context.Context, projectID string, period TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error) {
 	m.gotProjectID = projectID
+	m.gotPeriod = period
 	return m.timelogs, m.timelogsErr
 }
 

@@ -11972,6 +11972,12 @@ paths:
   /generate-timelogs-breakdown-report:
     get:
       summary: Generate a project's time-log breakdown report.
+      description: >-
+        Time card durations are summed in minutes and shown as "1h 30m". By
+        default the report covers the project's subscription period (start
+        and end date); cases listed are those with a time card whose work date
+        falls in the period or that were created in it, and per-case totals
+        count only in-period time cards.
       operationId: generateTimelogsBreakdownReport
       parameters:
         - name: projectId
@@ -11979,6 +11985,26 @@ paths:
           required: true
           schema:
             type: string
+        - name: from
+          in: query
+          required: false
+          description: Inclusive period start (YYYY-MM-DD). Defaults to the project's start date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Inclusive period end (YYYY-MM-DD). Defaults to the project's end date, or unbounded when it has none.
+          schema:
+            type: string
+            format: date
+        - name: allTime
+          in: query
+          required: false
+          description: When true, an absent from/to is left unbounded instead of defaulting to the project's dates.
+          schema:
+            type: boolean
       responses:
         "200":
           description: Ok
@@ -29377,8 +29403,16 @@ components:
           type: string
         remainingQueryHours:
           type: string
+          description: Remaining query hours as "1h 30m"; empty when unknown.
         totalQueryHours:
           type: string
+          description: Total query hours as "1h 30m"; empty when unknown.
+        periodStart:
+          type: string
+          description: Inclusive start (YYYY-MM-DD) of the period used; empty when unbounded.
+        periodEnd:
+          type: string
+          description: Inclusive end (YYYY-MM-DD) of the period used; empty when unbounded.
         cases:
           type: array
           items:
