@@ -30,6 +30,7 @@ vi.mock("@api/backend/client", () => ({
 
 import {
   STANDARD_CHANGES_KEY,
+  SUGGESTIONS_STALE_TIME_MS,
   useClearStandardChangeTemplateReview,
   useCreateStandardChangeProposal,
   useDecideStandardChangeProposal,
@@ -43,6 +44,7 @@ import {
   useSearchStandardChangeCustomersForSelect,
   useSearchStandardChangeProposals,
   useSearchStandardChangeTemplates,
+  useStandardChangeSuggestions,
   useSubmitStandardChangeProposal,
   useSuspendStandardChangeTemplate,
   useUpdateStandardChangeProposal,
@@ -213,6 +215,25 @@ describe("standard change reads", () => {
     expect(result.current.none.data).toBeNull();
     expect(result.current.nothing.fetchStatus).toBe("idle");
     expect(getMock.mock.calls.map((c) => c[0]).sort()).toEqual(["/projects/proj-1", "/projects/proj-2"]);
+  });
+
+  it("keeps the suggestions for five minutes, under the standard changes key", async () => {
+    expect(SUGGESTIONS_STALE_TIME_MS).toBe(5 * 60_000);
+    getMock.mockResolvedValue({ suggestions: [], criteria: {}, scanned: {} });
+    const client = newClient();
+    const first = renderHook(() => useStandardChangeSuggestions({ accountId: "acct-1" }), { wrapper: wrapper(client) });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    first.unmount();
+    // Coming back to Suggested reads the cache.
+    const again = renderHook(() => useStandardChangeSuggestions({ accountId: "acct-1" }), { wrapper: wrapper(client) });
+    await waitFor(() => expect(again.result.current.isSuccess).toBe(true));
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(getMock).toHaveBeenCalledWith("/standard-change-suggestions?accountId=acct-1");
+    const cached = client.getQueryCache().findAll({ queryKey: STANDARD_CHANGES_KEY });
+    expect(cached.some((q) => q.queryKey.includes("suggestions"))).toBe(true);
+    // A write's invalidation of the standard changes key still refreshes it.
+    await act(() => client.invalidateQueries({ queryKey: STANDARD_CHANGES_KEY }));
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2));
   });
 });
 

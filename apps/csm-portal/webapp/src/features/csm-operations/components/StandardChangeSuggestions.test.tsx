@@ -18,7 +18,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import type { BeStandardChangeSuggestion } from "@api/backend/types";
+import type { BeStandardChangeSuggestion, BeStandardChangeSuggestionsResponse } from "@api/backend/types";
 
 vi.hoisted(() => {
   window.config = { ...window.config, CSM_PORTAL_BACKEND_BASE_URL: "http://localhost:9090" };
@@ -81,13 +81,18 @@ function suggestion(over: Partial<BeStandardChangeSuggestion> = {}): BeStandardC
   };
 }
 
-function serve(list: BeStandardChangeSuggestion[], computedOn: string | null = "2026-11-06T14:00:00Z"): void {
+function serve(
+  list: BeStandardChangeSuggestion[],
+  computedOn: string | null = "2026-11-06T14:00:00Z",
+  skippedCustomers: BeStandardChangeSuggestionsResponse["skippedCustomers"] = [],
+): void {
   mocks.suggestions.mockReturnValue({
     data: {
       suggestions: list,
       criteria: { windowMonths: 12, minClosed: 5, minSuccessPercent: 90, planSimilarityPercent: 50 },
       computedOn,
       scanned: { customers: 2, changeRequests: 20, clusters: 3, eligible: list.length, dismissed: 0 },
+      skippedCustomers,
     },
     isLoading: false,
     isError: false,
@@ -139,6 +144,76 @@ describe("StandardChangeSuggestions", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Suggestions are computed once a day from completed change requests. None have been computed yet.");
     expect(within(screen.getByRole("table", { name: "Suggested standard changes" })).getByText(/None have been computed yet/)).toBeInTheDocument();
     expect(screen.queryByText(/No change is done often enough/)).not.toBeInTheDocument();
+  });
+
+  it("says which customers the latest refresh could not compute", () => {
+    serve([suggestion()], "2026-11-06T14:00:00Z", [{ customer: { id: "acct-9", name: "BigCo" }, reason: "too large" }]);
+    renderIt();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "BigCo's suggestions were not computed in the latest refresh: it has too many change requests to compute in time.",
+    );
+  });
+
+  it("no skipped notice when every customer was computed", () => {
+    serve([suggestion()]);
+    renderIt();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("marks a suggestion built from the newest of a large subject, and says so in the details", () => {
+    serve([suggestion({ sample: { compared: 500, total: 3000 } })]);
+    renderIt();
+    expect(within(row("Deploy CApps to Pekin prod")).getByText("Newest 500 of 3,000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show the details of Deploy CApps to Pekin prod" }));
+    expect(screen.getByText(/Based on the newest 500 of 3,000 change requests with this subject/)).toBeInTheDocument();
+  });
+
+  it("tells apart two suggestions of one customer that share a subject", () => {
+    const subject = "Update the firewall rules for partner integrations";
+    const sg = suggestion({
+      key: "update firewall rules partner integrations",
+      subjectKey: "update firewall rules partner integrations",
+      subject,
+      members: [{ id: "cr-sg", number: "CHG0000101", subject, state: "closed", completedOn: "2026-10-30T00:00:00Z", hasDeviation: false, joinedBy: "subject" }],
+    });
+    const waf = suggestion({
+      key: "update firewall rules partner integrations#0a1b2c3d4e5f",
+      subjectKey: "update firewall rules partner integrations",
+      subject,
+      members: [{ id: "cr-waf", number: "CHG0000201", subject, state: "closed", completedOn: "2026-10-29T00:00:00Z", hasDeviation: false, joinedBy: "subject" }],
+    });
+    serve([sg, waf]);
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/operations/change-requests?view=standard&show=suggested"]}>
+        <StandardChangeSuggestions leading={null} trailing={null} />
+      </MemoryRouter>,
+    );
+    const table = screen.getByRole("table", { name: "Suggested standard changes" });
+    expect(within(table).getAllByText(subject)).toHaveLength(2);
+
+    // Opening one opens only that one.
+    const [first, second] = screen.getAllByRole("button", { name: `Show the details of ${subject}` });
+    fireEvent.click(first);
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    expect(second).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("link", { name: "CHG0000101" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "CHG0000201" })).not.toBeInTheDocument();
+
+    // Dismissing the second sends its own key.
+    fireEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[1]);
+    const dialog = screen.getByRole("dialog", { name: "Dismiss this suggestion" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Why is this not a standard change/ }), { target: { value: "WAF is one-off" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Dismiss" }));
+    expect(mocks.dismiss.mock.calls[0][0]).toEqual({ accountId: "acct-1", key: "update firewall rules partner integrations#0a1b2c3d4e5f", reason: "WAF is one-off" });
+
+    // A narrower list leaves no row behind.
+    serve([waf]);
+    rerender(
+      <MemoryRouter initialEntries={["/operations/change-requests?view=standard&show=suggested"]}>
+        <StandardChangeSuggestions leading={null} trailing={null} />
+      </MemoryRouter>,
+    );
+    expect(within(table).getAllByText(subject)).toHaveLength(1);
   });
 
   it("asks for near misses and dismissed ones when ticked", () => {

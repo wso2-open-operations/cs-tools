@@ -49,10 +49,11 @@ import (
 var tokenFetchTimeout = 10 * time.Second
 
 // callTimeout bounds one page. entity-service stops starting customers after
-// 40 seconds of a page and its REQUEST_TIMEOUT (60s by default) cancels the
-// request, so waiting longer gains nothing. A page cut short fails the run but
-// publishes nothing: the snapshot readers see is the previous one until a run
-// finishes.
+// 20 seconds of a page and gives each customer at most 30 (one that overruns
+// is skipped, not failed), so a page ends within about 50; its REQUEST_TIMEOUT
+// (60s by default) cancels the request anyway, so waiting longer gains nothing.
+// A page cut short fails the run but publishes nothing: the snapshot readers
+// see is the previous one until a run finishes.
 var callTimeout = 60 * time.Second
 
 // ClientConfig holds this client's configuration.
@@ -105,6 +106,9 @@ type Totals struct {
 	ChangeRequests int `json:"changeRequests"`
 	Clusters       int `json:"clusters"`
 	Eligible       int `json:"eligible"`
+	// Skipped: customers entity-service could not compute within their
+	// deadline; the snapshot holds nothing for them.
+	Skipped int `json:"skipped"`
 }
 
 // Response is one page's answer. More: call again with RunID and NextCursor.
@@ -114,6 +118,7 @@ type Response struct {
 	Customers      int     `json:"customers"`
 	ChangeRequests int     `json:"changeRequests"`
 	Suggestions    int     `json:"suggestions"`
+	Skipped        int     `json:"skipped"`
 	More           bool    `json:"more"`
 	NextCursor     string  `json:"nextCursor"`
 	ComputedOn     string  `json:"computedOn"`

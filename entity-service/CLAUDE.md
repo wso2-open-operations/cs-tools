@@ -4955,12 +4955,17 @@ re-running it writes nothing. Tests: `change_request_closure_integration_test.go
 
 The portal's Clone used to leave no trace: a clone could not be told apart from a change request
 typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
-change_request(id) ON DELETE SET NULL`, partial index) records the source.
+change_request(id) ON DELETE SET NULL`) records the source. 0282 adds the column under
+`lock_timeout = '5s'` (it takes an ACCESS EXCLUSIVE lock on `change_request`, so it fails fast
+rather than queueing every reader behind a long transaction; re-run it if it times out), and its
+partial index is built by 0284 with `CREATE INDEX CONCURRENTLY`, alone in its file as 0152/0226/0263
+are (an interrupted build leaves an INVALID index that `IF NOT EXISTS` skips: find it with
+`SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it and re-run).
 - **Write**: `POST /change-requests` `clonedFromChangeRequestId` (`change_request_clone_source.go`):
   trimmed and lower-cased, blank is none, not a UUID or not an existing change request (a work item
   of another type included, read under the caller's identity) is a 400 naming the field that
-  creates nothing. Checked in the create transaction (`recordChangeRequestCloneSource`, both create
-  paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
+  creates nothing. Checked in the create transaction and written by the create's own INSERT
+  (`checkCloneSource`, both create paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
   called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
   leaves it out; `DATA_SOURCE=servicenow` refuses it (400), like `projectId`, which a clone carries
   anyway. Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
@@ -8635,7 +8640,8 @@ Which of a customer's completed change requests look like the same change done a
 standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
 normalising, clustering, judging), `standard_change_suggestion_service.go`,
 `standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
-dismissals), `0283` (the snapshot) and `100029` / `100030` (their row-level security, internal only).
+dismissals), `0283` (the snapshot), `0285` (skipped customers) and `100029` / `100030` (their row-level
+security, internal only).
 PostgreSQL data sources only.
 
 **Computed on a schedule, read from a snapshot.** Reading every completed change request with its plan
@@ -8647,10 +8653,22 @@ error). `POST /standard-change-suggestions/refresh` (`serviceOnly`: an internal 
 a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh` (its CLAUDE.md,
 "Standard change suggestions refresh"), the way `/incidents/autoclose` is driven by `incident_autoclose`.
 - **Paged by customer, published at the end.** The first call (`{}`) starts a run
-  (`standard_change_suggestion_run`, carrying the criteria it computes by); each call computes the next
-  customers in id order after `cursor`, **one customer at a time** (only that customer's change requests
-  and plans are held), at most `limit` (default 50, at most 500), and stops starting new ones after 40
-  seconds (`suggestionRefreshBudget`, inside the 60s `REQUEST_TIMEOUT`; it always computes at least one).
+  (`standard_change_suggestion_run`, carrying the criteria it computes by) and **lists its customers once**
+  (`StartRun`: every customer with a candidate in the window, one `standard_change_suggestion_run_customer`
+  row each; a customer whose first candidate completes later waits for the next run). Each call then walks
+  that list (`NextCustomers`) in id order after `cursor`, **one customer at a time** (only that customer's
+  change requests and plans are held), at most `limit` (default 50, at most 500), and starts no new one
+  after 20 seconds (`suggestionRefreshBudget`; it always computes at least one).
+- **One customer can never fail the run.** Each customer gets its own 30-second deadline
+  (`suggestionCustomerTimeout`), so a call ends within about 50 seconds, inside the 60s `REQUEST_TIMEOUT`.
+  A customer that overruns it (its own deadline, not the call's: a cancelled call is still an error) is
+  logged at WARN with its account id and candidate count, recorded as skipped (`SkipCustomer`:
+  `run_customer.skipped_reason`, its `change_requests` NULL, no rows), counted in the page's `skipped`
+  and the run's `totals.skipped` (column `standard_change_suggestion_run.skipped`), and the page carries on
+  with the next customer. `GET` returns `skippedCustomers` (`[{customer, reason}]`, of the one customer
+  asked for or all) and `scanned.skipped`, so the page can say that customer's suggestions were not
+  computed rather than that it has none. A later page that computes it after all (a page sent again)
+  clears the skip.
   While `more` is true the caller sends `{runId, cursor: nextCursor}`. The call that answers
   `more: false` **publishes**: in one transaction the run gets `completed_on` and its totals (summed from
   `standard_change_suggestion_run_customer` and the rows), and every other run is deleted with its rows
@@ -8663,12 +8681,21 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
 - **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
   dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
   are as they were at the refresh.
-- **Logged**: each page (`refresh page`: customers, change requests, suggestions, `more`, `pageMs`) and the
-  publish (`refresh published`: customers, change requests, clusters, eligible, `durationMs` of the run).
-- **Cost.** One page: the customer list (`CandidateAccounts`), then per customer one read of its window's
-  completed change requests with their plans, its clusters' incidents, and the writes.
-  The pairwise plan comparison is inside one subject group of one customer. A single customer with a very
-  large group is still computed in one go (not split across pages).
+- **Logged**: each page (`refresh page`: customers, skipped, change requests, suggestions, `more`,
+  `pageMs`), each skipped customer (WARN) and the publish (`refresh published`: customers, skipped, change
+  requests, clusters, eligible, `durationMs` of the run).
+- **Cost.** The customer list once per run (it used to be re-read on every page: 8.5 s a page on the
+  200,000-change-request benchmark), then per customer one read of its window's completed change
+  requests with their plans, its clusters' incidents, and the writes. The pairwise plan comparison is
+  inside one subject group of one customer, capped (below), and checks the deadline every 4,096 pairs
+  (`suggestionCtxCheckEvery`) and before each group.
+- **Benchmark** (2026-11-06, a generated 200,038-change-request database, one customer with 20,031
+  candidates and a single 3,000-member "Monthly OS patching" subject; scratch scripts, never committed):
+  before the cap, the one-pass tokenizer and the per-run customer list, that customer took 44 s alone,
+  its page 41.7 s (close to the 60 s timeout) and the whole run 86 s, with 8.5 s of every page spent
+  re-listing the customers; after, 1.2 s, 6.0 s and 8.4 s (the list once, 2.6 s, then 3 ms a page), and one
+  subject group clusters in about 0.34 s at 500, 1,000, 3,000 or 6,000 members (17 s at 3,000 before).
+  Same totals (3,955 clusters, 23 eligible).
 
 **What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
 `closed_on`, which 0279 made reliable; a row with none falls back to the work item's last update), **not**
@@ -8680,15 +8707,54 @@ whose project has a customer. Clusters never mix customers: a template belongs t
 1. Same normalised subject (`suggestionKey`): HTML and `{{placeholders}}` removed, lower case, `[tags]`,
    ticket numbers (`CHG…`, `INC…`, `SCP…`, …), dates, times, versions, ordinals and digits removed, then
    filler words (articles, prepositions, "please", "change", month and day names) and one-letter words
-   dropped. The key is the cluster's name and what a dismissal is stored under.
+   dropped. The subject key (`subjectKey`) groups the candidates; it is not the cluster's key (below).
 2. Confirmed by the implementation plans: inside one subject group, two members whose plans both have at
    least three meaningful words are the same change only when the plans' word sets are at least
    `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
    the subject, so it joins the group's largest confirmed cluster (it never bridges two).
+   - **Capped at the newest 500 of a subject group** (`suggestionMaxCompared`). The comparison is pairwise
+     (500 members are 124,750 pairs, well under a second; 3,000 were 4.5 million, 17 s; 6,000 over a
+     minute). The older members of a larger group are in no cluster (nor pulled in by a clone of one), and
+     the cluster carries `sample: {compared, total}`, which the page shows as "Newest 500 of 3,000". Its
+     counts (`memberCount`, closed, success rate) are of the compared ones, which already pass any sane
+     `minClosed`.
+   - `similarAtLeast` decides `jaccard >= threshold` without the whole intersection: it loops over the
+     smaller set and stops as soon as the answer is known (`I*(1+t) >= t*(A+B)`); `TestSimilarAtLeast_SameAsJaccard`
+     checks it against `jaccard` on 2,000 random pairs and every threshold.
+   - Plans are tokenised only for members of a subject group of two or more (a lone subject has nothing
+     to compare), in one pass (`suggestionWords`: a combined ticket/date/time/version/ordinal regexp only
+     when the text has a digit, the HTML / entity / placeholder / tag passes only when their marker is
+     present, then one `FieldsFunc`); `TestSuggestionWords_SameAsTheRegexPasses` pins it to the old
+     ten-pass version (about 4x faster on plain text).
 3. Clone lineage (`cloned_from_change_request_id`, 0282) joins a member to its source's cluster directly,
    whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
 Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
 self-hosted models would be allowed anyway.
+
+**A cluster's key** (`key`; `assignSuggestionIdentities`). One subject can split into several clusters
+(step 2: "Update the firewall rules for partner integrations" done five times with a security-group plan
+and five with a WAF plan), so the subject key does not tell a customer's clusters apart. Keyed by subject,
+the two came back as two suggestions with one key, so the page expanded both on one click, left ghost rows
+(a duplicate React key), marked both busy on Propose, and one dismissal hid both. So every cluster has a key
+of its own, unique within its customer: the snapshot's `suggestion_key`, what a dismissal is stored under
+and matched by, the API's `key` and the page's row identity. It must also **stay the same from one daily
+refresh to the next**, or a dismissal stops applying:
+- Nothing about a cluster alone is that stable. Its members change daily (new completions, the oldest
+  leaving the window and the newest-500 cap), so a key taken from, say, its oldest member would move every
+  time that member left: monthly for a monthly change. So the key is **carried over**: a cluster takes the
+  key of the previous published snapshot's cluster of the same customer and subject that it shares the most
+  change requests with (each key to one cluster, largest overlaps first). Consecutive runs share nearly
+  every member, so a cluster keeps its key as long as it exists, and when a subject splits the part with the
+  larger overlap keeps it. One extra read per customer (`SnapshotKeys` of the previous run: keys and member ids only).
+- A cluster with no predecessor (new, the first refresh, or a customer the previous refresh skipped) is
+  **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
+  else the subject key, `#` and 12 hex digits of a SHA-256 of its oldest core member's id (the next
+  oldest's on a clash). So most suggestions, a subject with one cluster, keep the bare subject key, and the
+  dismissals made before this (bare subject keys, local stacks only) **keep matching** the cluster that holds
+  it; none were dropped. After a skipped run the keys are minted again by the same rule, so a split
+  cluster's key comes back unless its oldest core member left the window meanwhile.
+- `subjectKey` is the subject key, returned beside it. A subject key is capped at 499 bytes so a key
+  (512, the column) always fits the suffix.
 
 **Eligible** (`judgeSuggestionCluster`, every threshold configurable): closed at least `minClosed` times in
 the window; success rate closed / (closed + rolled back) at least `minSuccessPercent`; no incident names a
@@ -8737,7 +8803,8 @@ are listed per suggestion (`memberCount` is the true count).
 
 **Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
 `POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
-suggestion key, i.e. `suggestionKey(key) == key`; a reason of at most 1000 characters is required; a
+cluster key as minted, `validSuggestionKey`: a normalised subject key, optionally `#` and 12 lower-case
+hex digits; a reason of at most 1000 characters is required; a
 second one is a 409, no such customer a 400) hides the suggestion for that customer however many members
 it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
 /standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
@@ -8745,7 +8812,14 @@ for a machine caller).
 
 Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; the refresh's
 paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
-`standard_change_suggestion_integration_test.go` (real PostgreSQL, a full paged refresh twice,
+`standard_change_suggestion_scale_test.go` (the cap and its sample, `similarAtLeast` against `jaccard`,
+the context checks, a customer that overruns its deadline skipped while the call's own deadline is an
+error, the customer list read once per run), `standard_change_suggestion_identity_test.go` (two clusters of
+one subject get keys of their own and are dismissed apart; keys kept across a refresh whose oldest members
+left; a split, minting, one key per cluster; key validation), `standard_change_suggestion_words_test.go` (the tokenizer
+against the old passes, and its benchmark), `standard_change_suggestion_integration_test.go` (real
+PostgreSQL, a full paged refresh twice, a split subject dismissed by its suffixed key and still dismissed
+after the next refresh, then the listed customers, a skip and its totals and names,
 `STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s

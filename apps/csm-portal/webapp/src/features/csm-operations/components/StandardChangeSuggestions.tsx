@@ -62,6 +62,9 @@ import {
   suggestionCriteriaText,
   suggestionProposalEvidence,
   suggestionUpdatedText,
+  suggestionSampleLabel,
+  suggestionSampleText,
+  suggestionSkippedText,
   SUGGESTIONS_NOT_COMPUTED_YET,
 } from "@features/csm-operations/utils/standardChangeSuggestions";
 import { standardChangeProposalPath } from "@features/csm-operations/utils/standardChanges";
@@ -147,6 +150,11 @@ function SuggestionDetails({ s }: { s: BeStandardChangeSuggestion }): JSX.Elemen
           <Typography variant="body2">
             {`${s.dismissal.reason} (${s.dismissal.dismissedBy?.name || "someone"}, ${formatDate(s.dismissal.dismissedOn)})`}
           </Typography>
+        </DetailLine>
+      )}
+      {suggestionSampleText(s) && (
+        <DetailLine label="Based on">
+          <Typography variant="body2">{suggestionSampleText(s)}</Typography>
         </DetailLine>
       )}
       <DetailLine label={`Change requests (${s.memberCount})`}>
@@ -252,6 +260,7 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
   const dismiss = useDismissStandardChangeSuggestion();
   const restore = useRestoreStandardChangeSuggestion();
   const suggestions = data?.suggestions ?? [];
+  const skippedText = data?.computedOn ? suggestionSkippedText(data.skippedCustomers) : null;
   const from = { from: `${location.pathname}${location.search}` };
   const rowKey = (s: BeStandardChangeSuggestion): string => `${s.customer.id}|${s.key}`;
 
@@ -337,6 +346,7 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
             : SUGGESTIONS_NOT_COMPUTED_YET}
         </Typography>
       )}
+      {skippedText && <Alert severity="warning">{skippedText}</Alert>}
 
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden", opacity: isFetching && !isLoading ? 0.7 : 1 }}>
         <TableContainer>
@@ -378,7 +388,9 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                     <Typography variant="body2" color="text.secondary">
                       {data && !data.computedOn
                         ? SUGGESTIONS_NOT_COMPUTED_YET
-                        : "No change is done often enough, and reliably enough, to suggest a standard change."}
+                        : customer.id && skippedText
+                          ? "None to show: this customer's suggestions were not computed in the latest refresh."
+                          : "No change is done often enough, and reliably enough, to suggest a standard change."}
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -406,6 +418,9 @@ export default function StandardChangeSuggestions({ leading, trailing }: { leadi
                           <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
                             {!s.eligible && <Chip size="small" variant="outlined" color="default" label="Near miss" />}
                             {s.dismissal && <Chip size="small" variant="outlined" color="default" label="Dismissed" />}
+                            {suggestionSampleLabel(s) && (
+                              <Chip size="small" variant="outlined" color="default" label={suggestionSampleLabel(s)} />
+                            )}
                             {s.incidents.length > 0 && (
                               <Chip size="small" variant="outlined" color="error" label={`${s.incidents.length} incident${s.incidents.length === 1 ? "" : "s"}`} />
                             )}

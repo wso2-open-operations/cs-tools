@@ -104,9 +104,19 @@ func clusterKeys(cls []suggestionCluster) map[string][]string {
 	return out
 }
 
+// mustCluster clusters with no deadline, failing the test on an error.
+func mustCluster(t *testing.T, cands []repository.SuggestionCandidate, threshold float64) []suggestionCluster {
+	t.Helper()
+	cls, err := clusterSuggestionCandidates(context.Background(), cands, threshold)
+	if err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	return cls
+}
+
 func TestClusterSuggestionCandidates(t *testing.T) {
 	t.Run("same subject and similar plans make one cluster, newest first", func(t *testing.T) {
-		got := clusterKeys(clusterSuggestionCandidates([]repository.SuggestionCandidate{
+		got := clusterKeys(mustCluster(t, []repository.SuggestionCandidate{
 			sgCand(3, "Deploy CApps to Pekin prod 2026-01-03", "CLOSED", sgPlan),
 			sgCand(1, "[ACME] Deploy CApps to Pekin prod", "CLOSED", sgPlan+" and notify the customer"),
 			sgCand(2, "Deploy capps to pekin PROD v2.1", "ROLLBACK", sgPlan),
@@ -117,7 +127,7 @@ func TestClusterSuggestionCandidates(t *testing.T) {
 		}
 	})
 	t.Run("a dissimilar plan splits the subject; a lone member is no cluster", func(t *testing.T) {
-		got := clusterKeys(clusterSuggestionCandidates([]repository.SuggestionCandidate{
+		got := clusterKeys(mustCluster(t, []repository.SuggestionCandidate{
 			sgCand(1, "Restart the gateway", "CLOSED", sgPlan),
 			sgCand(2, "Restart the gateway", "CLOSED", sgPlan),
 			sgCand(3, "Restart the gateway", "CLOSED", "<p>Drain the Kubernetes node, cordon it, reboot the virtual machine, uncordon</p>"),
@@ -128,7 +138,7 @@ func TestClusterSuggestionCandidates(t *testing.T) {
 	})
 	t.Run("a member with no plan joins the largest confirmed cluster, never bridging", func(t *testing.T) {
 		other := "<p>Drain the Kubernetes node, cordon it, reboot the virtual machine, uncordon</p>"
-		cls := clusterSuggestionCandidates([]repository.SuggestionCandidate{
+		cls := mustCluster(t, []repository.SuggestionCandidate{
 			sgCand(1, "Restart the gateway", "CLOSED", sgPlan),
 			sgCand(2, "Restart the gateway", "CLOSED", sgPlan),
 			sgCand(3, "Restart the gateway", "CLOSED", ""),
@@ -151,7 +161,7 @@ func TestClusterSuggestionCandidates(t *testing.T) {
 		}
 	})
 	t.Run("members with no plans at all cluster by subject", func(t *testing.T) {
-		got := clusterKeys(clusterSuggestionCandidates([]repository.SuggestionCandidate{
+		got := clusterKeys(mustCluster(t, []repository.SuggestionCandidate{
 			sgCand(1, "Renew the certificate", "CLOSED", ""),
 			sgCand(2, "Renew certificate", "CLOSED", "<p>&nbsp;</p>"),
 		}, 0.5))
@@ -164,7 +174,7 @@ func TestClusterSuggestionCandidates(t *testing.T) {
 		other := sgCand(9, "Deploy CApps to Pekin prod", "CLOSED", sgPlan)
 		clone := sgCand(1, "Promote the Pekin release to DR", "CLOSED", "<p>Something entirely different was typed here today</p>")
 		clone.ClonedFrom = sp(strings.ToUpper(src.ID))
-		cls := clusterSuggestionCandidates([]repository.SuggestionCandidate{clone, src, other}, 0.5)
+		cls := mustCluster(t, []repository.SuggestionCandidate{clone, src, other}, 0.5)
 		if len(cls) != 1 || len(cls[0].nodes) != 3 || cls[0].key != "deploy capps pekin prod" {
 			t.Fatalf("clusters = %v, want the clone in the source's cluster", clusterKeys(cls))
 		}
@@ -178,7 +188,7 @@ var sgCriteria = DefaultStandardChangeSuggestionCriteria
 
 func TestJudgeSuggestionCluster(t *testing.T) {
 	mk := func(cands ...repository.SuggestionCandidate) suggestionCluster {
-		cls := clusterSuggestionCandidates(cands, 0.5)
+		cls := mustCluster(t, cands, 0.5)
 		if len(cls) != 1 {
 			t.Fatalf("want one cluster, got %v", clusterKeys(cls))
 		}
@@ -265,27 +275,28 @@ type fakeSuggestionRepo struct {
 	runs        map[string]*repository.SuggestionRun
 	rows        map[string][]repository.SuggestionSnapshotRow // run id -> rows
 	runCustomer map[string]map[string]int                     // run id -> account -> change requests
+	listed      map[string][]string                           // run id -> the customers listed at its start
+	skipped     map[string]map[string]string                  // run id -> account -> reason
 	nextRun     int
-	loaded      []string // accounts whose candidates were read, in order
+	loaded      []string        // accounts whose candidates were read, in order
+	slow        map[string]bool // accounts whose read waits until its context ends
 }
 
-func (f *fakeSuggestionRepo) CandidateAccounts(_ context.Context, since time.Time, after string, limit int) ([]string, error) {
-	f.sinces = append(f.sinces, since)
-	set := map[string]bool{}
-	for _, c := range f.cands {
-		if !c.CompletedOn.Before(since) && c.AccountID > after {
-			set[c.AccountID] = true
+func (f *fakeSuggestionRepo) NextCustomers(_ context.Context, runID, after string, limit int) ([]string, error) {
+	var out []string
+	for _, a := range f.listed[runID] {
+		if a > after && len(out) < limit {
+			out = append(out, a)
 		}
 	}
-	var out []string
-	for a := range set {
-		out = append(out, a)
-	}
-	sort.Strings(out)
-	return out[:min(limit, len(out))], nil
+	return out, nil
 }
-func (f *fakeSuggestionRepo) Candidates(_ context.Context, account string, since time.Time) ([]repository.SuggestionCandidate, error) {
+func (f *fakeSuggestionRepo) Candidates(ctx context.Context, account string, since time.Time) ([]repository.SuggestionCandidate, error) {
 	f.loaded = append(f.loaded, account)
+	if f.slow[account] {
+		<-ctx.Done()
+		return nil, fmt.Errorf("read candidates: %w", ctx.Err())
+	}
 	var out []repository.SuggestionCandidate
 	for _, c := range f.cands {
 		if c.AccountID == account && !c.CompletedOn.Before(since) {
@@ -308,14 +319,27 @@ func (f *fakeSuggestionRepo) Dismiss(_ context.Context, account, key, reason, ac
 	return domain.StandardChangeSuggestionDismissal{ID: "d1", Reason: reason}, nil
 }
 func (f *fakeSuggestionRepo) Restore(context.Context, string) error { return nil }
-func (f *fakeSuggestionRepo) StartRun(_ context.Context, crit domain.StandardChangeSuggestionCriteria) (repository.SuggestionRun, error) {
+func (f *fakeSuggestionRepo) StartRun(_ context.Context, crit domain.StandardChangeSuggestionCriteria, windowStart func(time.Time) time.Time) (repository.SuggestionRun, error) {
 	if f.runs == nil {
 		f.runs, f.rows, f.runCustomer = map[string]*repository.SuggestionRun{}, map[string][]repository.SuggestionSnapshotRow{}, map[string]map[string]int{}
+		f.listed, f.skipped = map[string][]string{}, map[string]map[string]string{}
 	}
 	f.nextRun++
 	run := repository.SuggestionRun{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextRun), StartedOn: sgNow, Criteria: crit}
 	f.runs[run.ID] = &run
-	f.runCustomer[run.ID] = map[string]int{}
+	f.runCustomer[run.ID], f.skipped[run.ID] = map[string]int{}, map[string]string{}
+	since := windowStart(run.StartedOn)
+	f.sinces = append(f.sinces, since)
+	set := map[string]bool{}
+	for _, c := range f.cands {
+		if !c.CompletedOn.Before(since) {
+			set[c.AccountID] = true
+		}
+	}
+	for a := range set {
+		f.listed[run.ID] = append(f.listed[run.ID], a)
+	}
+	sort.Strings(f.listed[run.ID])
 	return run, nil
 }
 func (f *fakeSuggestionRepo) GetRun(_ context.Context, id string) (*repository.SuggestionRun, error) {
@@ -343,7 +367,26 @@ func (f *fakeSuggestionRepo) SaveCustomer(_ context.Context, runID, account stri
 	}
 	f.rows[runID] = append(kept, rows...)
 	f.runCustomer[runID][account] = crs
+	delete(f.skipped[runID], account)
 	return nil
+}
+func (f *fakeSuggestionRepo) SkipCustomer(_ context.Context, runID, account, reason string) error {
+	if err := f.open(runID); err != nil {
+		return err
+	}
+	delete(f.runCustomer[runID], account)
+	f.skipped[runID][account] = reason
+	return nil
+}
+func (f *fakeSuggestionRepo) SkippedCustomers(_ context.Context, runID, account string) ([]domain.StandardChangeSuggestionSkipped, error) {
+	out := []domain.StandardChangeSuggestionSkipped{}
+	for a, reason := range f.skipped[runID] {
+		if account == "" || a == account {
+			out = append(out, domain.StandardChangeSuggestionSkipped{Customer: domain.EntityRef{ID: a}, Reason: reason})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Customer.ID < out[j].Customer.ID })
+	return out, nil
 }
 func (f *fakeSuggestionRepo) PublishRun(_ context.Context, id string) (repository.SuggestionRun, error) {
 	if err := f.open(id); err != nil {
@@ -352,7 +395,7 @@ func (f *fakeSuggestionRepo) PublishRun(_ context.Context, id string) (repositor
 	run := f.runs[id]
 	done := sgNow.Add(time.Minute)
 	run.CompletedOn = &done
-	run.Counts = domain.StandardChangeSuggestionScan{Customers: len(f.runCustomer[id]), Clusters: len(f.rows[id])}
+	run.Counts = domain.StandardChangeSuggestionScan{Customers: len(f.runCustomer[id]), Clusters: len(f.rows[id]), Skipped: len(f.skipped[id])}
 	for _, n := range f.runCustomer[id] {
 		run.Counts.ChangeRequests += n
 	}
@@ -383,6 +426,9 @@ func (f *fakeSuggestionRepo) CustomerCounts(_ context.Context, runID, account st
 	if n, ok := f.runCustomer[runID][account]; ok {
 		out.Customers, out.ChangeRequests = 1, n
 	}
+	if _, ok := f.skipped[runID][account]; ok {
+		out.Skipped = 1
+	}
 	for _, r := range f.rows[runID] {
 		if r.AccountID == account {
 			out.Clusters++
@@ -392,6 +438,9 @@ func (f *fakeSuggestionRepo) CustomerCounts(_ context.Context, runID, account st
 		}
 	}
 	return out, nil
+}
+func (f *fakeSuggestionRepo) SnapshotKeys(ctx context.Context, runID, account string) ([]repository.SuggestionSnapshotRow, error) {
+	return f.SnapshotRows(ctx, runID, account, true)
 }
 func (f *fakeSuggestionRepo) SnapshotRows(_ context.Context, runID, account string, includeIneligible bool) ([]repository.SuggestionSnapshotRow, error) {
 	var out []repository.SuggestionSnapshotRow

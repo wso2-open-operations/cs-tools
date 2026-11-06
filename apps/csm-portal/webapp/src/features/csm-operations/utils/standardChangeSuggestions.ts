@@ -15,7 +15,11 @@
 // under the License.
 
 import { formatBackendTimestampForDisplay } from "@utils/dateTime";
-import type { BeStandardChangeSuggestion, BeStandardChangeSuggestionsResponse } from "@api/backend/types";
+import type {
+  BeStandardChangeSuggestion,
+  BeStandardChangeSuggestionSkipped,
+  BeStandardChangeSuggestionsResponse,
+} from "@api/backend/types";
 
 // The Suggested section of Standard changes (StandardChangeSuggestions.tsx):
 // what each suggestion offers, and what a proposal started from one cites.
@@ -88,6 +92,42 @@ export function suggestionCriteriaText(r: BeStandardChangeSuggestionsResponse): 
     ` that were not raised from a template. A suggestion is the same change closed at least ${c.minClosed} times,` +
     ` at least ${c.minSuccessPercent}% of them without a rollback, with no incident linked and no high risk or impact.`
   );
+}
+
+const count = (n: number): string => n.toLocaleString("en-US");
+
+/**
+ * The short label of a suggestion built from part of its subject group
+ * (entity-service compares the newest 500): "Newest 500 of 3,000"; null when
+ * the whole group was compared.
+ */
+export function suggestionSampleLabel(s: Pick<BeStandardChangeSuggestion, "sample">): string | null {
+  return s.sample ? `Newest ${count(s.sample.compared)} of ${count(s.sample.total)}` : null;
+}
+
+/** The same in a sentence, for the details. */
+export function suggestionSampleText(s: Pick<BeStandardChangeSuggestion, "sample">): string | null {
+  return s.sample
+    ? `Based on the newest ${count(s.sample.compared)} of ${count(s.sample.total)} change requests with this subject; the older ones were not compared.`
+    : null;
+}
+
+/** How many skipped customers the notice names before "and N more". */
+const SKIPPED_NAMED = 5;
+
+/**
+ * The notice for customers the latest refresh could not compute in time (too
+ * many change requests): their suggestions are missing from the snapshot, which
+ * is not the same as having none. null when there are none.
+ */
+export function suggestionSkippedText(skipped?: BeStandardChangeSuggestionSkipped[] | null): string | null {
+  if (!skipped?.length) return null;
+  const names = skipped.map((s) => s.customer.name || s.customer.id);
+  const why = "it has too many change requests to compute in time";
+  if (names.length === 1) return `${names[0]}'s suggestions were not computed in the latest refresh: ${why}.`;
+  const shown = names.slice(0, SKIPPED_NAMED).join(", ");
+  const more = names.length > SKIPPED_NAMED ? ` and ${names.length - SKIPPED_NAMED} more` : "";
+  return `The suggestions of ${names.length} customers were not computed in the latest refresh (${shown}${more}): each has too many change requests to compute in time.`;
 }
 
 /** What the page says before the first snapshot has been computed. */

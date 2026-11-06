@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +153,7 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			ctx := stdCtx(sgsStaff)
 			const deploy = "zz sgs test deploy capps pekin prod"
 			const restart = "zz sgs test restart gateway"
+			const firewallSubject = "zz sgs test update firewall rules partner integrations"
 
 			// Customer A: four deployments, a clone of one under another subject (five
 			// closed: the default minimum), and
@@ -192,6 +195,11 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			// Customer B: the same deployment, its own cluster, no template.
 			for _, d := range []int{4, 8, 12, 16, 20} {
 				e.cr("B", "Deploy CApps to Pekin prod", "CLOSED", sgsPlan, d)
+			}
+			// Customer B: one subject, two changes (plans less than half alike).
+			for _, d := range []int{2, 6, 10, 14, 18} {
+				e.cr("B", "Update the firewall rules for partner integrations", "CLOSED", "<p>Edit the security group, add the partner CIDR ranges to the inbound rules, save and verify the connection</p>", d)
+				e.cr("B", "Update the firewall rules for partner integrations", "CLOSED", "<p>Open the WAF console, create an allow rule for the partner user agents, deploy the rule set to production</p>", d+1)
 			}
 
 			// Nothing is computed by a read: before a refresh there is no snapshot
@@ -245,6 +253,24 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			b := sgsFind(resp, e.accounts["B"], deploy)
 			if b == nil || b.MemberCount != 5 || !b.Eligible {
 				t.Fatalf("customer B deploy = %+v, want its own eligible cluster", b)
+			}
+			var firewall []domain.StandardChangeSuggestion
+			for _, s := range resp.Suggestions {
+				if s.Customer.ID == e.accounts["B"] && s.SubjectKey == firewallSubject {
+					firewall = append(firewall, s)
+				}
+			}
+			if len(firewall) != 2 || firewall[0].Key == firewall[1].Key || !firewall[0].Eligible || !firewall[1].Eligible {
+				t.Fatalf("customer B firewall = %+v, want two eligible clusters with keys of their own", firewall)
+			}
+			var split domain.StandardChangeSuggestion // the one whose key has a suffix
+			for _, f := range firewall {
+				if f.Key != firewallSubject {
+					split = f
+				}
+			}
+			if !strings.HasPrefix(split.Key, firewallSubject+"#") {
+				t.Fatalf("firewall keys %q / %q: want the subject key and one with a suffix", firewall[0].Key, firewall[1].Key)
 			}
 			rs := sgsFind(resp, e.accounts["A"], restart)
 			if rs == nil || rs.MemberCount != 3 || rs.Eligible || len(rs.Incidents) != 1 || rs.Incidents[0].ID != inc {
@@ -300,6 +326,75 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 				t.Fatalf("after the restore: %+v", resp.Suggestions)
 			}
 			expectErr[*apierror.NotFoundError](t, svc.RestoreSuggestion(ctx, d.ID), "a second restore")
+
+			// The suffixed key is dismissed on its own, and stays dismissed after
+			// the next refresh (the key is carried over).
+			if _, err := svc.DismissSuggestion(ctx, domain.DismissStandardChangeSuggestionRequest{AccountID: e.accounts["B"], Key: split.Key, Reason: "the WAF one is not standard"}); err != nil {
+				t.Fatalf("dismiss %q: %v", split.Key, err)
+			}
+			for req := (domain.RefreshStandardChangeSuggestionsRequest{}); ; {
+				r, err := svc.Refresh(ctx, req)
+				if err != nil {
+					t.Fatalf("refresh: %v", err)
+				}
+				if !r.More {
+					break
+				}
+				req = domain.RefreshStandardChangeSuggestionsRequest{RunID: r.RunID, Cursor: r.NextCursor}
+			}
+			resp, _ = svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{AccountID: e.accounts["B"], IncludeDismissed: true})
+			var shown, dismissed int
+			for _, s := range resp.Suggestions {
+				if s.SubjectKey == firewallSubject {
+					shown++
+					if s.Dismissal != nil {
+						dismissed++
+						if s.Key != split.Key {
+							t.Errorf("the dismissal applies to %q, want %q", s.Key, split.Key)
+						}
+					}
+				}
+			}
+			if shown != 2 || dismissed != 1 {
+				t.Fatalf("after the next refresh: %d firewall suggestions, %d dismissed; want 2 and 1", shown, dismissed)
+			}
+
+			// The customers are listed once, when a run starts; one that overran its
+			// deadline is recorded as skipped and counted apart.
+			repo := repository.NewStandardChangeSuggestionRepository(e.s)
+			run, err := repo.StartRun(ctx, DefaultStandardChangeSuggestionCriteria, func(started time.Time) time.Time { return started.AddDate(-1, 0, 0) })
+			if err != nil {
+				t.Fatalf("start run: %v", err)
+			}
+			listed, err := repo.NextCustomers(ctx, run.ID, "", 100000)
+			if err != nil || !slices.Contains(listed, e.accounts["A"]) || !slices.Contains(listed, e.accounts["B"]) || !slices.IsSorted(listed) {
+				t.Fatalf("listed = %d customers (%v), want A and B, in id order", len(listed), err)
+			}
+			if after, _ := repo.NextCustomers(ctx, run.ID, e.accounts["A"], 100000); slices.Contains(after, e.accounts["A"]) {
+				t.Error("the cursor did not move past A")
+			}
+			if err := repo.SkipCustomer(ctx, run.ID, e.accounts["A"], "too large"); err != nil {
+				t.Fatalf("skip A: %v", err)
+			}
+			if err := repo.SaveCustomer(ctx, run.ID, e.accounts["B"], 5, nil); err != nil {
+				t.Fatalf("save B: %v", err)
+			}
+			published, err := repo.PublishRun(ctx, run.ID)
+			if err != nil || published.Counts.Customers != 1 || published.Counts.Skipped != 1 || published.Counts.ChangeRequests != 5 {
+				t.Fatalf("published = %+v, %v; want B computed, A skipped", published.Counts, err)
+			}
+			if counts, err := repo.CustomerCounts(ctx, run.ID, e.accounts["A"]); err != nil || counts != (domain.StandardChangeSuggestionScan{Skipped: 1}) {
+				t.Errorf("customer A's counts = %+v, %v", counts, err)
+			}
+			resp, err = svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{})
+			if err != nil || len(resp.SkippedCustomers) != 1 || resp.SkippedCustomers[0].Customer.ID != e.accounts["A"] ||
+				resp.SkippedCustomers[0].Customer.Name != sgsTag+" Customer A" || resp.SkippedCustomers[0].Reason != "too large" || resp.Scanned.Skipped != 1 {
+				t.Fatalf("skipped = %+v, scanned %+v, %v", resp.SkippedCustomers, resp.Scanned, err)
+			}
+			if resp, _ := svc.GetSuggestions(ctx, domain.StandardChangeSuggestionsRequest{AccountID: e.accounts["B"]}); len(resp.SkippedCustomers) != 0 {
+				t.Errorf("customer B's skipped = %+v, want none", resp.SkippedCustomers)
+			}
+			expectErr[*apierror.ConflictError](t, repo.SkipCustomer(ctx, run.ID, e.accounts["B"], "late"), "a skip on a published run")
 		})
 	}
 }

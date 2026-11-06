@@ -549,22 +549,27 @@ request in the window with its plan text (tens of thousands); see entity-service
 change suggestions". **Off unless `STANDARD_CHANGE_SUGGESTIONS_ENABLED=true`**, like every task here that
 calls a route a deployed entity-service may not have yet: deploy entity-service (migrations 0283 and
 100030) first, then turn it on. Until the first run publishes, the page says no suggestions have been
-computed yet.
+computed yet. The skipped-customer fields below also need entity-service migration 0285.
 
 This task is a **trigger only**, like `incident_autoclose`. It calls `POST
 /standard-change-suggestions/refresh` with the shared `OAUTH2_*` client, which must be in entity-service's
 `M2M_CLIENT_IDS` (the route is service-only: a user token is a 403).
 - **Paging.** The first call (`{"limit": 50}`) starts a run; entity-service computes up to 50 customers,
-  one at a time, stopping early after 40 seconds, and answers `more` with a `nextCursor`. The handler asks
+  one at a time, starting no new one after 20 seconds, and answers `more` with a `nextCursor`. The handler asks
   again with `{runId, cursor}` while `more` is true, at most 2,000 pages. The page that answers
   `more: false` publishes the run in one transaction. Each call waits 60s (entity-service's
-  `REQUEST_TIMEOUT`).
+  `REQUEST_TIMEOUT`; a page ends within about 50: the 20 s budget plus one customer's 30 s deadline).
+- **A customer too large to compute in time is skipped, not a failure.** entity-service gives each
+  customer 30 seconds; one that overruns is recorded as skipped (the page's and the run's `skipped`), logged
+  there with its account id, and the run carries on and is published, so one customer never costs every
+  other one its suggestions. The page tells staff that customer's suggestions were not computed.
 - **Failures fail the run and publish nothing.** A failed call, a page that makes no progress (`more`
   set but the run or cursor did not move on) or the page cap returns an error, so the engine alerts and
   retries on the next tick. Readers keep the previous snapshot meanwhile; the retry starts a new run, and
   the unfinished one is never read (entity-service deletes it at the next publish).
 - **Logged**: one line when published (`runId`, `computedOn`, pages, customers, change requests,
-  clusters, eligible, `durationMs`); entity-service logs each page and the run's own duration.
+  clusters, eligible, skipped, `durationMs`), plus a WARN when `skipped` is above zero; entity-service logs
+  each page, each skipped customer and the run's own duration.
 - **By hand**: `--run-now=standard_change_suggestions_refresh` (no flags of its own). It only computes, so
   it is safe beside the scheduled run: whichever publishes last is what the page shows. The thresholds
   are entity-service's `STANDARD_CHANGE_SUGGESTION_*` (min closes 5, 12 months, 90% success, 50% plan

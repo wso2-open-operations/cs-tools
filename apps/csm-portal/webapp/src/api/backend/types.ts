@@ -6007,8 +6007,14 @@ export interface BeStandardChangeSuggestionDismissal {
 }
 
 export interface BeStandardChangeSuggestion {
-  /** The normalised subject the cluster is known (and dismissed) by. */
+  /**
+   * The cluster's own key: unique within its customer, kept across refreshes,
+   * what it is dismissed by. Several clusters can share a subject (`subjectKey`),
+   * so this, never the subject, identifies a row.
+   */
   key: string;
+  /** The normalised subject the cluster's members share. */
+  subjectKey?: string;
   customer: BeEntityRef;
   /** The newest member's subject, as written. */
   subject: string;
@@ -6033,6 +6039,17 @@ export interface BeStandardChangeSuggestion {
   openProposals: BeEntityRef[];
   members: BeStandardChangeSuggestionMember[];
   dismissal?: BeStandardChangeSuggestionDismissal | null;
+  /**
+   * Present when the subject had more change requests than entity-service
+   * compares (500): the cluster was built from the newest `compared` of `total`.
+   */
+  sample?: { compared: number; total: number } | null;
+}
+
+/** A customer the latest refresh could not compute in time: the snapshot holds nothing for it. */
+export interface BeStandardChangeSuggestionSkipped {
+  customer: BeEntityRef;
+  reason: string;
 }
 
 export interface BeStandardChangeSuggestionsQuery {
@@ -6047,7 +6064,16 @@ export interface BeStandardChangeSuggestionsResponse {
   criteria: BeStandardChangeSuggestionCriteria;
   /** When the snapshot was published (a scheduled refresh, once a day); null before the first. */
   computedOn?: string | null;
-  scanned: { customers?: number; changeRequests: number; clusters: number; eligible: number; dismissed: number };
+  scanned: {
+    customers?: number;
+    changeRequests: number;
+    clusters: number;
+    eligible: number;
+    dismissed: number;
+    skipped?: number;
+  };
+  /** Customers (the one asked for, or all) whose suggestions were not computed in the latest refresh. */
+  skippedCustomers?: BeStandardChangeSuggestionSkipped[];
 }
 
 export interface BeDismissStandardChangeSuggestionPayload {

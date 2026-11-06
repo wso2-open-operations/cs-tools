@@ -22,12 +22,15 @@
 -- Existing change requests have no recorded source: a clone made before this
 -- cannot be told apart from a change typed from scratch, so nothing is backfilled.
 
+-- One transaction with a short lock timeout: adding the column (with its foreign
+-- key) takes an exclusive lock on change_request, which is written all day, so
+-- rather than queue every write behind it this gives up after 5s; re-run it when
+-- the table is quiet. Its index is built without blocking writes, in 0284.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE change_request
     ADD COLUMN IF NOT EXISTS cloned_from_change_request_id UUID
         REFERENCES change_request(id) ON DELETE SET NULL;
 
--- Partial: nearly every row has no source, and the readers look up the clones of
--- given change requests (and the ON DELETE SET NULL of a deleted source).
-CREATE INDEX IF NOT EXISTS idx_change_request_cloned_from
-    ON change_request (cloned_from_change_request_id)
-    WHERE cloned_from_change_request_id IS NOT NULL;
+COMMIT;

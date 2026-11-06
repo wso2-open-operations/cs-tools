@@ -52,7 +52,7 @@ func TestClient_RefreshPostsThePage(t *testing.T) {
 		path, auth = r.URL.Path, r.Header.Get("Authorization")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
-		_, _ = w.Write([]byte(`{"runId":"r1","customers":2,"changeRequests":40,"suggestions":3,"more":true,"nextCursor":"a2"}`))
+		_, _ = w.Write([]byte(`{"runId":"r1","customers":2,"changeRequests":40,"suggestions":3,"skipped":1,"more":true,"nextCursor":"a2"}`))
 	})
 	resp, err := c.Refresh(context.Background(), Request{RunID: "r1", Cursor: "a1", Limit: PageSize})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestClient_RefreshPostsThePage(t *testing.T) {
 	if body["runId"] != "r1" || body["cursor"] != "a1" || body["limit"] != float64(PageSize) || len(body) != 3 {
 		t.Errorf("body = %v", body)
 	}
-	if resp.RunID != "r1" || resp.Customers != 2 || !resp.More || resp.NextCursor != "a2" {
+	if resp.RunID != "r1" || resp.Customers != 2 || resp.Skipped != 1 || !resp.More || resp.NextCursor != "a2" {
 		t.Errorf("resp = %+v", resp)
 	}
 }
