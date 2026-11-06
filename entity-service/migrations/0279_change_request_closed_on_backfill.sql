@@ -40,6 +40,22 @@
 -- with no closed_on are written, and a second run finds none. The UPDATE itself
 -- goes through change_request_outbox like any write; its rows carry only these
 -- two columns, which no consumer reacts to.
+--
+-- RUN IT AGAIN ONCE THE NEW CODE IS FULLY ROLLED OUT. `make migrate` runs before
+-- the rollout, and pods still on the old code keep completing change requests
+-- without closed_on until they are replaced; this file is recorded as applied and
+-- `make migrate` never runs it again. Re-running it by hand afterwards fills those
+-- (and touches nothing else):
+--   psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0279_change_request_closed_on_backfill.sql
+--
+-- change_request and work_item are row-level-secured with FORCE (100006, 100008):
+-- a migrating role without BYPASSRLS that is not flagged internal sees no row, and
+-- the UPDATE would write nothing without an error. So the session is flagged
+-- internal for it, as the application's own writes are, and cleared afterwards,
+-- as 0193 does (session-level, not LOCAL: a migration runs in plain autocommit,
+-- where a LOCAL setting would be gone before the UPDATE runs).
+
+SELECT set_config('app.is_internal', 'true', false);
 
 WITH first_completion AS (
     SELECT DISTINCT ON (eo.entity_id) eo.entity_id, eo.occurred_on
@@ -62,3 +78,5 @@ UPDATE change_request cr
  WHERE cr.id = fc.entity_id
    AND cr.closed_on IS NULL
    AND cr.state IN ('CLOSED', 'ROLLBACK');
+
+SELECT set_config('app.is_internal', '', false);

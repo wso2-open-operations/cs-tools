@@ -547,9 +547,11 @@ like the same change done again, which Operations > Change requests > Standard c
 The page reads the snapshot only and never computes, because computing reads every completed change
 request in the window with its plan text (tens of thousands); see entity-service's CLAUDE.md, "Standard
 change suggestions". **Off unless `STANDARD_CHANGE_SUGGESTIONS_ENABLED=true`**, like every task here that
-calls a route a deployed entity-service may not have yet: deploy entity-service (migrations 0283 and
-100030) first, then turn it on. Until the first run publishes, the page says no suggestions have been
-computed yet. The skipped-customer fields below also need entity-service migration 0285.
+calls a route a deployed entity-service may not have yet: deploy entity-service with migrations **0283,
+0285, 0286 and 100030** applied first (the refresh's first call writes the skipped column and the nullable
+per-customer count 0285 adds, and a skip writes 0286's carried keys, so without them a run fails), then
+turn it on. Until the first run
+publishes, the page says no suggestions have been computed yet.
 
 This task is a **trigger only**, like `incident_autoclose`. It calls `POST
 /standard-change-suggestions/refresh` with the shared `OAUTH2_*` client, which must be in entity-service's
@@ -571,7 +573,9 @@ This task is a **trigger only**, like `incident_autoclose`. It calls `POST
   clusters, eligible, skipped, `durationMs`), plus a WARN when `skipped` is above zero; entity-service logs
   each page, each skipped customer and the run's own duration.
 - **By hand**: `--run-now=standard_change_suggestions_refresh` (no flags of its own). It only computes, so
-  it is safe beside the scheduled run: whichever publishes last is what the page shows. The thresholds
+  it is safe beside the scheduled run. Of two runs at once, **the first to publish wins**: publishing deletes
+  every other run, so the other's next page is a 409, and the handler treats a 409 on a continuation page as
+  superseded (an INFO line, no error, no alert) and stops. A 409 starting a run is still a failure. The thresholds
   are entity-service's `STANDARD_CHANGE_SUGGESTION_*` (min closes 5, 12 months, 90% success, 50% plan
   similarity; its `.env.example`), not settings here; a change applies from the next refresh. The
   schedule is this task's `SUB_CRON_SCHEDULES` entry, `{"standard_change_suggestions_refresh": "<cron>"}`.
@@ -834,7 +838,7 @@ reading the handlers' code and doc comments (a judgement, not a test):
   daily limit); `incident_autoclose` (entity-service's row-locked re-check and per-call daily budget); `acp_closure` (each notice and suspension is recorded in CSM, so the scheduled run does not repeat
   them; it is a real run, sending real notices and suspending, with the configured `ACP_*` settings);
   `acp_reopen_check` (entity-service records each reopen); `standard_change_suggestions_refresh` (only
-  computes a new snapshot; whichever run publishes last wins); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
+  computes a new snapshot; of two at once the first to publish wins and the other stops quietly); `usage_rollup_daily`, `usage_rollup_monthly` (rebuild rows, documented idempotent);
   `housekeeping_cleanup` (deletes resolved rows older than retention); `publish_scheduled_announcements` and
   `cloud_status_webhooks` (a handled item leaves the due or pending set; documented idempotent per period);
   `rota_manual_reminder` (claims waiting requests, each reported once).

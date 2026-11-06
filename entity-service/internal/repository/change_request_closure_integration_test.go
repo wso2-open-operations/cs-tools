@@ -17,6 +17,7 @@
 package repository_test
 
 import (
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -163,9 +164,23 @@ func TestChangeRequestClosureIntegration_Backfill(t *testing.T) {
 	f.execSQL(`UPDATE change_request SET closed_on = '2020-01-01T00:00:00Z' WHERE id = $1`, kept)
 
 	for run := 1; run <= 2; run++ {
-		if _, err := f.scoped.Exec(f.sys, string(sql)); err != nil {
+		// As `make migrate` runs it: a plain session, nobody flagged internal (as
+		// csm_app, which has no BYPASSRLS, FORCE row-level security would hide
+		// every row from an unflagged UPDATE).
+		conn, err := f.pool.Acquire(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := conn.Exec(context.Background(), string(sql)); err != nil {
+			conn.Release()
 			t.Fatalf("run %d of 0279: %v", run, err)
 		}
+		var flag string
+		if err := conn.QueryRow(context.Background(), `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&flag); err != nil || flag != "" {
+			conn.Release()
+			t.Fatalf("run %d: app.is_internal = %q after 0279 (%v), want it cleared", run, flag, err)
+		}
+		conn.Release()
 		if on, by := f.closure(closed); on == nil || !on.Equal(*wantOn) || by == nil || *by != crFlowCreatorID {
 			t.Fatalf("run %d: closed: closed_on = %v (want %v), closed_by = %v", run, on, wantOn, by)
 		}

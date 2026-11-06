@@ -4948,8 +4948,21 @@ Rollback gives `closed_on` (its `occurred_on`, the writing transaction's `NOW()`
 `work_item.updated_by` only while the work item still carries that exact `updated_on` (the PATCH
 stamps both in the same transaction; anything written since leaves no closer rather than a
 guess). Rows with `closed_on` already set, or with no recorded transition, are left alone;
-re-running it writes nothing. Tests: `change_request_closure_integration_test.go`
-(`CHANGE_REQUEST_TEST_DSN`, superuser and `csm_app`).
+re-running it writes nothing else.
+- **Run it as internal.** `change_request` and `work_item` have FORCE row-level security
+  (100006, 100008), so a migrating role without BYPASSRLS that is not flagged internal would see no
+  row and update none, with no error, and the file would be recorded as applied. It brackets the
+  UPDATE with `set_config('app.is_internal', 'true' / '', false)` as 0193 does (session-level: a
+  migration runs in autocommit).
+- **Post-deploy step: run it again once the new code is fully rolled out.** `make migrate` runs
+  before the rollout, so change requests completed by pods still on the old code meanwhile get no
+  `closed_on`, and `make migrate` never runs the recorded file again. Its UPDATE is idempotent, so
+  run it by hand afterwards: `psql "$conn" -v ON_ERROR_STOP=1 -f migrations/0279_change_request_closed_on_backfill.sql`.
+  (No copy under a new filename: the repo has no precedent for shipping a migration twice.)
+
+Tests: `change_request_closure_integration_test.go` (`CHANGE_REQUEST_TEST_DSN`, superuser and
+`csm_app`; the backfill runs on a plain pooled connection with nobody flagged internal, as `make
+migrate` runs it, and checks the flag is cleared afterwards).
 
 ### Clone lineage: `cloned_from_change_request_id` (migration 0282)
 
@@ -4967,15 +4980,16 @@ are (an interrupted build leaves an INVALID index that `IF NOT EXISTS` skips: fi
   creates nothing. Checked in the create transaction and written by the create's own INSERT
   (`checkCloneSource`, both create paths through `createChangeRequestWithScope`) and, on dual-write, before the previous system is
   called (`ValidateChangeRequestLinks`, `ChangeRequestLinkSelection.CloneSourceID`). The mirror
-  leaves it out; `DATA_SOURCE=servicenow` refuses it (400), like `projectId`, which a clone carries
-  anyway. Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
+  leaves it out, and `DATA_SOURCE=servicenow` ignores it (dropped with a debug log: the portal's
+  Clone sends it for every clone, and lineage is not content, so it must not fail the create; the
+  standard change template fields are still refused there, and so is `projectId`). Never changed afterwards: `PatchChangeRequestRequest` has no such field (an unknown field
   is a 400).
 - **Read**: `clonedFrom` {id, name: the source's number} on the detail, staff only and best-effort
   like the tags; omitted when none was recorded or the source was deleted.
 - No backfill: clones made before this are not recognisable. The standard change suggestions
   (below) join a clone to its source's cluster directly.
 
-Tests: `change_request_clone_source_integration_test.go`, `TestSNChangeRequestService_RefusesTheCloneSource`.
+Tests: `change_request_clone_source_integration_test.go`, `TestSNChangeRequestService_IgnoresTheCloneSource`.
 
 ### Tags
 
@@ -8640,8 +8654,9 @@ Which of a customer's completed change requests look like the same change done a
 standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
 normalising, clustering, judging), `standard_change_suggestion_service.go`,
 `standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
-dismissals), `0283` (the snapshot), `0285` (skipped customers) and `100029` / `100030` (their row-level
-security, internal only).
+dismissals), `0283` (the snapshot), `0285` (skipped customers), `0286` (the keys a skip carries) and
+`100029` / `100030` (their row-level security, internal only). The refresh needs 0283, 0285, 0286 and
+100030 applied before csm-scheduled-tasks' task is turned on.
 PostgreSQL data sources only.
 
 **Computed on a schedule, read from a snapshot.** Reading every completed change request with its plan
@@ -8678,6 +8693,10 @@ a day by `operations/csm-scheduled-tasks`' `standard_change_suggestions_refresh`
   the next publish or by a run started a day later. A page of a published or replaced run is a 409.
 - **The window and the criteria are the run's**: the window counts back from the run's start, and every
   page judges by the criteria stored with it.
+- **One snapshot per read.** GET reads the latest run, its counts, its skipped customers and its rows as
+  separate statements; a refresh publishing in between deletes the run read first and would answer its
+  `computedOn` and totals with no rows. So after the rows it looks up the latest run again, and when that
+  moved it reads once more (a second publish within one read is not retried).
 - **Read live, not stored**: the open proposals (from the members' ids, `member_ids`) and the
   dismissals, so a suggestion proposed or dismissed since the snapshot says so at once. The incidents
   are as they were at the refresh.
@@ -8742,17 +8761,22 @@ refresh to the next**, or a dismissal stops applying:
 - Nothing about a cluster alone is that stable. Its members change daily (new completions, the oldest
   leaving the window and the newest-500 cap), so a key taken from, say, its oldest member would move every
   time that member left: monthly for a monthly change. So the key is **carried over**: a cluster takes the
-  key of the previous published snapshot's cluster of the same customer and subject that it shares the most
-  change requests with (each key to one cluster, largest overlaps first). Consecutive runs share nearly
+  key of the previous published snapshot's cluster of the same customer that it shares the most change
+  requests with (each key to one cluster, largest overlaps first), **whatever the subjects**: a cluster
+  joined by clone lineage can change its largest subject group, and keeps its key. Nothing parses a subject
+  out of a key; the subject is `subjectKey`. Consecutive runs share nearly
   every member, so a cluster keeps its key as long as it exists, and when a subject splits the part with the
   larger overlap keeps it. One extra read per customer (`SnapshotKeys` of the previous run: keys and member ids only).
-- A cluster with no predecessor (new, the first refresh, or a customer the previous refresh skipped) is
-  **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
+- **A skipped customer keeps its keys.** A skip stores no rows, and publishing deletes the previous run, so
+  `SkipCustomer` copies the customer's keys and member ids from the latest published run (its rows, or what
+  that run carried when it skipped the customer too) into `run_customer.carried_keys` (migration 0286).
+  `SnapshotKeys` returns them after the run's own rows; GET and the counts never read them. Computing the
+  customer after all (`SaveCustomer`) clears them.
+- A cluster with no predecessor (new, or the first refresh) is **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
   else the subject key, `#` and 12 hex digits of a SHA-256 of its oldest core member's id (the next
   oldest's on a clash). So most suggestions, a subject with one cluster, keep the bare subject key, and the
   dismissals made before this (bare subject keys, local stacks only) **keep matching** the cluster that holds
-  it; none were dropped. After a skipped run the keys are minted again by the same rule, so a split
-  cluster's key comes back unless its oldest core member left the window meanwhile.
+  it; none were dropped.
 - `subjectKey` is the subject key, returned beside it. A subject key is capped at 499 bytes so a key
   (512, the column) always fits the suffix.
 
@@ -8816,10 +8840,12 @@ paging, time budget, re-sent page and publish, and the read, over an in-memory r
 the context checks, a customer that overruns its deadline skipped while the call's own deadline is an
 error, the customer list read once per run), `standard_change_suggestion_identity_test.go` (two clusters of
 one subject get keys of their own and are dismissed apart; keys kept across a refresh whose oldest members
-left; a split, minting, one key per cluster; key validation), `standard_change_suggestion_words_test.go` (the tokenizer
+left, and across a skipped refresh; a key kept when the subject changes; a split, minting, one key per
+cluster; key validation; GET reading again when a refresh publishes during it), `standard_change_suggestion_words_test.go` (the tokenizer
 against the old passes, and its benchmark), `standard_change_suggestion_integration_test.go` (real
 PostgreSQL, a full paged refresh twice, a split subject dismissed by its suffixed key and still dismissed
-after the next refresh, then the listed customers, a skip and its totals and names,
+after the next refresh, then the listed customers, the keys a skip carries (twice running, and cleared
+when the customer is computed after all), a skip and its totals and names,
 `STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s

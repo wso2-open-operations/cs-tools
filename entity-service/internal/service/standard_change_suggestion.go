@@ -566,23 +566,19 @@ func suggestionWindowStart(now time.Time, months int) time.Time {
 // cap), so a key taken from, say, its oldest member would move every time that
 // member left (monthly, for a monthly change). So the key is carried over from
 // the previous snapshot: a cluster takes the key of the previous run's cluster of
-// the same customer and subject it shares the most change requests with (each
-// key to one cluster, the largest overlaps first). Consecutive runs share nearly
-// every member, so a cluster keeps its key for as long as it exists; when a
-// subject splits, the part with the larger overlap keeps it.
+// the same customer it shares the most change requests with (each key to one
+// cluster, the largest overlaps first), whatever the subjects: a cluster joined by
+// clone lineage can change its largest subject group, and keeps its key. A
+// customer the previous run skipped keeps the keys that skip carried over.
+// Consecutive runs share nearly every member, so a cluster keeps its key for as
+// long as it exists; when a subject splits, the part with the larger overlap
+// keeps it. Nothing parses a subject out of a key: the subject is subjectKey.
 //
-// A cluster with no predecessor (a new one, the first refresh, or a customer the
-// previous refresh skipped) is minted a key: the bare subject key when no other
+// A cluster with no predecessor (a new one, or the first refresh) is minted a key: the bare subject key when no other
 // cluster of the subject holds it (most subjects have one cluster, and a
 // dismissal made before clusters had keys of their own keeps matching), else the
 // subject key, '#' and 12 hex digits of a hash of its oldest core member's id
 // (the next oldest's on a clash). The largest new clusters are minted first.
-
-// suggestionSubjectOf is the subject key a cluster key starts with.
-func suggestionSubjectOf(key string) string {
-	subject, _, _ := strings.Cut(key, "#")
-	return subject
-}
 
 // validSuggestionKey reports whether key is a cluster key as minted here: a
 // subject key, optionally '#' and suggestionIDSuffixLen lower-case hex digits.
@@ -627,7 +623,7 @@ func assignSuggestionIdentities(clusters []suggestionCluster, previous []reposit
 			ids[strings.ToLower(n.c.ID)] = true
 		}
 		for pi, prev := range previous {
-			if !validSuggestionKey(prev.Key) || suggestionSubjectOf(prev.Key) != cl.key {
+			if !validSuggestionKey(prev.Key) {
 				continue
 			}
 			overlap := 0

@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -362,6 +363,14 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			// The customers are listed once, when a run starts; one that overran its
 			// deadline is recorded as skipped and counted apart.
 			repo := repository.NewStandardChangeSuggestionRepository(e.s)
+			latest, err := repo.LatestRun(ctx)
+			if err != nil || latest == nil {
+				t.Fatalf("latest run: %v, %v", latest, err)
+			}
+			keysOfA, err := repo.SnapshotKeys(ctx, latest.ID, e.accounts["A"])
+			if err != nil || len(keysOfA) != 2 {
+				t.Fatalf("customer A's keys = %+v, %v; want its two clusters", keysOfA, err)
+			}
 			run, err := repo.StartRun(ctx, DefaultStandardChangeSuggestionCriteria, func(started time.Time) time.Time { return started.AddDate(-1, 0, 0) })
 			if err != nil {
 				t.Fatalf("start run: %v", err)
@@ -375,6 +384,10 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 			}
 			if err := repo.SkipCustomer(ctx, run.ID, e.accounts["A"], "too large"); err != nil {
 				t.Fatalf("skip A: %v", err)
+			}
+			// The skip carried A's keys into this run, for the next one to keep.
+			if carried, err := repo.SnapshotKeys(ctx, run.ID, e.accounts["A"]); err != nil || !reflect.DeepEqual(carried, keysOfA) {
+				t.Fatalf("carried = %+v, %v; want %+v", carried, err, keysOfA)
 			}
 			if err := repo.SaveCustomer(ctx, run.ID, e.accounts["B"], 5, nil); err != nil {
 				t.Fatalf("save B: %v", err)
@@ -395,6 +408,28 @@ func TestStandardChangeSuggestionIntegration(t *testing.T) {
 				t.Errorf("customer B's skipped = %+v, want none", resp.SkippedCustomers)
 			}
 			expectErr[*apierror.ConflictError](t, repo.SkipCustomer(ctx, run.ID, e.accounts["B"], "late"), "a skip on a published run")
+			if resp.Scanned.Clusters != published.Counts.Clusters {
+				t.Errorf("carried keys counted as clusters: scanned %+v, run %+v", resp.Scanned, published.Counts)
+			}
+
+			// Skipped again: the keys the last skip carried come along once more.
+			again, err := repo.StartRun(ctx, DefaultStandardChangeSuggestionCriteria, func(started time.Time) time.Time { return started.AddDate(-1, 0, 0) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.SkipCustomer(ctx, again.ID, e.accounts["A"], "too large"); err != nil {
+				t.Fatal(err)
+			}
+			if carried, err := repo.SnapshotKeys(ctx, again.ID, e.accounts["A"]); err != nil || !reflect.DeepEqual(carried, keysOfA) {
+				t.Fatalf("carried twice = %+v, %v; want %+v", carried, err, keysOfA)
+			}
+			// Computed after all (a page sent again): nothing carried any more.
+			if err := repo.SaveCustomer(ctx, again.ID, e.accounts["A"], 1, nil); err != nil {
+				t.Fatal(err)
+			}
+			if carried, _ := repo.SnapshotKeys(ctx, again.ID, e.accounts["A"]); len(carried) != 0 {
+				t.Errorf("after saving A, carried = %+v", carried)
+			}
 		})
 	}
 }

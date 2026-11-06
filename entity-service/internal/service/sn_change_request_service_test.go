@@ -1470,16 +1470,36 @@ func TestSNChangeRequestService_RefusesTheDeviation(t *testing.T) {
 }
 
 // Clone lineage is the CSM database's alone: the data source that talks to the
-// previous system directly refuses it before anything is sent; blank is none.
-func TestSNChangeRequestService_RefusesTheCloneSource(t *testing.T) {
-	svc := NewServiceNowChangeRequestService(nil)
-	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+// previous system directly drops it (the portal sends it with every clone, and a
+// clone must not fail there), and sends nothing of it.
+func TestSNChangeRequestService_IgnoresTheCloneSource(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/change-requests", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"message": "Change request created", "changeRequest": {"id": "` + uuidToSysid(testCaseUUID) + `", "number": "CHG0001", "createdOn": "2026-01-01 00:00:00", "createdBy": "engineer@example.com"}}`))
+	})
+	svc := NewServiceNowChangeRequestService(newTestSNClient(t, mux))
 	create := validCreateChangeRequestRequest()
 	source := testUUID
 	create.ClonedFromChangeRequestID = &source
-	_, err := svc.CreateChangeRequest(ctx, create)
+	if _, err := svc.CreateChangeRequest(contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com")), create); err != nil {
+		t.Fatalf("create with a clone source: %v, want it created with the field ignored", err)
+	}
+	for key := range gotBody {
+		if strings.Contains(strings.ToLower(key), "clone") {
+			t.Errorf("%s was sent to ServiceNow: %v", key, gotBody[key])
+		}
+	}
+	// The standard change template fields are still refused.
+	tpl := validCreateChangeRequestRequest()
+	tpl.StandardChangeTemplateID = &source
 	var ve *apierror.ValidationError
-	if !errors.As(err, &ve) || !strings.Contains(ve.Msg, "clonedFromChangeRequestId") {
-		t.Errorf("create with a clone source: err = %v, want that data source's refusal", err)
+	if _, err := svc.CreateChangeRequest(contextWithUserIDToken("token"), tpl); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "standard change templates") {
+		t.Errorf("create from a template: err = %v, want that data source's refusal", err)
 	}
 }

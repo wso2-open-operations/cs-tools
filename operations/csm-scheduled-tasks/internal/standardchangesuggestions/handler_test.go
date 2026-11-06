@@ -21,13 +21,17 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/apierror"
 )
 
 type fakeRefresher struct {
 	pages []Response
-	errAt int // 1-based page that fails; 0 never
+	errAt int   // 1-based page that fails; 0 never
+	err   error // what it fails with (a 503 when nil)
 	reqs  []Request
 }
 
@@ -35,6 +39,9 @@ func (f *fakeRefresher) Refresh(_ context.Context, req Request) (Response, error
 	f.reqs = append(f.reqs, req)
 	n := len(f.reqs)
 	if n == f.errAt {
+		if f.err != nil {
+			return Response{}, f.err
+		}
 		return Response{}, errors.New("503 from entity-service")
 	}
 	return f.pages[n-1], nil
@@ -107,5 +114,21 @@ func TestRun_ReportsSkippedCustomers(t *testing.T) {
 	}
 	if out := buf.String(); !strings.Contains(out, "skipped=1") || !strings.Contains(out, "level=WARN") {
 		t.Errorf("log = %s, want the skipped count and a warning", out)
+	}
+}
+
+// Another run (a run-now beside the scheduled one) published first and deleted
+// this one: its next page is a 409. The first to publish wins; this one stops
+// without an error (no alert), having published nothing.
+func TestRun_SupersededRunIsNotAFailure(t *testing.T) {
+	gone := &apierror.Error{StatusCode: http.StatusConflict, Body: `{"message":"this refresh run is no longer open"}`}
+	f := &fakeRefresher{pages: []Response{{RunID: "r1", Customers: 50, More: true, NextCursor: "a50"}}, errAt: 2, err: gone}
+	if err := Run(f)(context.Background()); err != nil {
+		t.Fatalf("superseded run: %v, want nil", err)
+	}
+	// A 409 on the first page (no run yet) is still a failure.
+	f = &fakeRefresher{errAt: 1, err: gone}
+	if err := Run(f)(context.Background()); err == nil {
+		t.Fatal("a 409 starting a run: nil, want an error")
 	}
 }
