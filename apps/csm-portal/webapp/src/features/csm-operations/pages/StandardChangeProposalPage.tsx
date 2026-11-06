@@ -98,6 +98,7 @@ import {
   normalizeStandardChangeParameters,
   STANDARD_CHANGE_APPROVAL_RULE,
   STANDARD_CHANGE_AUTHORITY,
+  STANDARD_CHANGE_AUTHORITY_APPROVALS,
   STANDARD_CHANGE_HIGH_RISK_REASON,
   STANDARD_CHANGE_RISK_OPTIONS,
   STANDARD_CHANGE_PROPOSALS_PATH,
@@ -358,8 +359,8 @@ function EvidenceTable({
   disabled?: boolean;
   /**
    * The proposal's customer: a change request whose project now belongs to
-   * another customer (or to none) is marked, since the CAB cannot approve the
-   * proposal while it cites one.
+   * another customer (or to none) is marked, since the authority cannot approve
+   * the proposal while it cites one.
    */
   customerId?: string | null;
 }): JSX.Element {
@@ -498,7 +499,7 @@ function ProposalEditor({
     );
   };
 
-  // Submit saves first, so what the CAB sees is what is on screen.
+  // Submit saves first, so what the authority sees is what is on screen.
   const saveAndSubmit = async (): Promise<void> => {
     setNotice(null);
     try {
@@ -894,8 +895,8 @@ function ProposalEditor({
 
       <Section title="Evidence">
         <Typography variant="body2" color="text.secondary">
-          Closed change requests of the proposal&apos;s customer that show this change has been done safely before. The
-          CAB judges them.
+          Closed change requests of the proposal&apos;s customer that show this change has been done safely before. The{" "}
+          {STANDARD_CHANGE_AUTHORITY} judges them.
         </Typography>
         <EvidenceTable
           evidence={form.evidence}
@@ -935,8 +936,8 @@ function ProposalEditor({
             </Typography>
           ) : canSubmitNow ? (
             <Typography variant="body2" color="text.secondary">
-              Ready to submit: the CAB, then two members of the {STANDARD_CHANGE_AUTHORITY}, approve it. Submitting
-              saves first.
+              Ready to submit: two members of the {STANDARD_CHANGE_AUTHORITY} other than you must authorise it.
+              Submitting saves first.
             </Typography>
           ) : (
             <Typography variant="body2" color="text.secondary">
@@ -1086,20 +1087,19 @@ function DecisionDialog({
   onDecide: (comment: string) => void;
 }): JSX.Element {
   const reject = decision === "rejected";
-  const authority = stage?.label === STANDARD_CHANGE_AUTHORITY;
   // From the page as loaded: another member may have authorised since, so it
   // never promises that nothing will be applied.
-  const remaining = stage ? Math.max(stage.requiredApprovals - stage.approvals, 1) : 1;
-  const approveText = !authority
-    ? `Your approval settles the CAB's stage. Nothing is applied yet: two members of the ${STANDARD_CHANGE_AUTHORITY} are asked next.`
-    : remaining > 1
-      ? `${stage!.requiredApprovals} different members of the ${STANDARD_CHANGE_AUTHORITY} must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
-      : `Yours is the last approval needed: approving applies the template change.`;
+  const required = stage?.requiredApprovals ?? STANDARD_CHANGE_AUTHORITY_APPROVALS;
+  const remaining = Math.max(required - (stage?.approvals ?? 0), 1);
+  const approveText =
+    remaining > 1
+      ? `${required} different members of the ${STANDARD_CHANGE_AUTHORITY} must approve; the template change is applied by the last of them (yours, if another member has approved since you opened this page).`
+      : `Yours is the last approval needed: authorising applies the template change.`;
   return (
     <ReasonDialog
       open={decision !== null}
       titleId="std-decision-title"
-      title={reject ? "Reject the proposal" : authority ? "Authorise the proposal" : "Approve the proposal"}
+      title={reject ? "Reject the proposal" : "Authorise the proposal"}
       text={
         reject
           ? "A rejection ends the proposal: the catalogue is left as it is and the proposal is kept as the record, with your comment."
@@ -1108,7 +1108,7 @@ function DecisionDialog({
       label={reject ? "Comment (required)" : "Comment (optional)"}
       required={reject}
       helperText={reject ? "Say why, so the proposer can act on it." : undefined}
-      confirmLabel={reject ? "Reject" : authority ? "Authorise" : "Approve"}
+      confirmLabel={reject ? "Reject" : "Authorise"}
       confirmColor={reject ? "error" : "success"}
       pending={pending}
       error={error}
@@ -1196,29 +1196,43 @@ function ConfirmDialog({
   );
 }
 
-/** One approval stage: its progress and its approvers. */
+/**
+ * One approval stage, named by its own label: its progress and its approvers. A
+ * proposal has one stage now, the authority's; one decided or returned to draft
+ * before may hold an earlier stage too, numbered in order.
+ */
 function StageApprovers({
   stage,
   index,
+  latest,
   approvers,
   proposalState,
 }: {
   stage: BeStandardChangeProposalStage | null;
-  index: number;
+  /** Its place among several stages; null when it is the only one. */
+  index: number | null;
+  /** Whether it is the proposal's latest stage, the only one that can still be open. */
+  latest: boolean;
   approvers: BeStandardChangeProposalApprover[];
   proposalState: string;
 }): JSX.Element {
-  const label = stage?.label === STANDARD_CHANGE_AUTHORITY ? STANDARD_CHANGE_AUTHORITY : "CAB";
+  const label = stage?.label || STANDARD_CHANGE_AUTHORITY;
   const status = !stage
     ? null
     : stage.decision === "APPROVED"
       ? { text: "Approved", color: "success" as const }
       : stage.decision === "REJECTED"
         ? { text: "Rejected", color: "error" as const }
-        : !isStandardChangeProposalInReview(proposalState)
-          ? // Ended before the stage was settled: it waits for nobody now.
+        : !latest || !isStandardChangeProposalInReview(proposalState)
+          ? // Ended before the stage was settled (or a later stage replaced it,
+            // as the CAB stage of a proposal returned to draft): it waits for nobody now.
             {
-              text: proposalState === "cancelled" ? "Cancelled" : proposalState === "withdrawn" ? "Withdrawn" : "Not decided",
+              text:
+                latest && proposalState === "cancelled"
+                  ? "Cancelled"
+                  : latest && proposalState === "withdrawn"
+                    ? "Withdrawn"
+                    : "Not decided",
               color: "default" as const,
             }
           : {
@@ -1231,7 +1245,7 @@ function StageApprovers({
   return (
     <Box component="section" aria-label={`${label} approvers`} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
       <Box sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-        <Typography variant="subtitle2">{`${index + 1}. ${label}`}</Typography>
+        <Typography variant="subtitle2">{index === null ? label : `${index + 1}. ${label}`}</Typography>
         {status && <Chip size="small" variant="outlined" color={status.color} label={status.text} />}
       </Box>
       <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
@@ -1272,17 +1286,21 @@ function StageApprovers({
   );
 }
 
+/** Who settled a proposal: the authority, or (on one decided before) the stage named by its own label. */
+function settledBy(verb: "Approved" | "Rejected", stage: BeStandardChangeProposalStage | undefined): string {
+  if (!stage || stage.label === STANDARD_CHANGE_AUTHORITY) return `${verb} by the ${STANDARD_CHANGE_AUTHORITY}`;
+  return `${verb} at the ${stage.label} stage`;
+}
+
 /** How a final proposal ended, for the decision banner. */
 function decisionHeadline(proposal: BeStandardChangeProposal): string {
   const stages = proposal.stages ?? [];
-  const rejectedAt = stages.find((s) => s.decision === "REJECTED");
-  // A proposal approved before the second stage existed was approved by the CAB alone.
-  const authorised = stages.some((s) => s.label === STANDARD_CHANGE_AUTHORITY && s.decision === "APPROVED");
   switch (proposal.state) {
     case "approved":
-      return authorised ? `Approved by the CAB and the ${STANDARD_CHANGE_AUTHORITY}` : "Approved by the CAB";
+      // The last stage approved is the one that applied it.
+      return settledBy("Approved", stages.filter((s) => s.decision === "APPROVED").pop());
     case "rejected":
-      return rejectedAt?.label === STANDARD_CHANGE_AUTHORITY ? `Rejected by the ${STANDARD_CHANGE_AUTHORITY}` : "Rejected by the CAB";
+      return settledBy("Rejected", stages.find((s) => s.decision === "REJECTED"));
     case "cancelled":
       return `Cancelled by the ${STANDARD_CHANGE_AUTHORITY}`;
     default:
@@ -1292,11 +1310,12 @@ function decisionHeadline(proposal: BeStandardChangeProposal): string {
 
 /**
  * One standard change proposal (`/operations/standard-change-proposals/:id`): a
- * request to the CAB to add a template to the catalogue, revise one or retire one.
- * Its proposer edits a draft here (`canEdit`): the content, generalised with
- * `{{key}}` placeholders, the parameters they need, a live preview and the
- * evidence, then sends it to the CAB. Everybody else (and the proposer once it is
- * submitted) reads it; a CAB member decides on their own row (`canDecide`). A
+ * request to the Standard Change Authority to add a template to the catalogue,
+ * revise one or retire one. Its proposer edits a draft here (`canEdit`): the
+ * content, generalised with `{{key}}` placeholders, the parameters they need, a
+ * live preview and the evidence, then submits it. Everybody else (and the
+ * proposer once it is submitted) reads it; an authority member decides on their
+ * own row (`canDecide`), and the second approval applies it. A
  * rejected or withdrawn new-template proposal stays as the record and can be
  * copied into a new one.
  */
@@ -1375,8 +1394,8 @@ export default function StandardChangeProposalPage(): JSX.Element {
   const myRow = approvers.find((a) => a.canDecide);
   const stages = proposal.stages ?? [];
   const myStage = stages.find((st) => st.id === myRow?.stageId) ?? stages[stages.length - 1] ?? null;
-  // One table per stage, latest stage first in the API; shown oldest first. An
-  // answer without stages (an older server) is one table.
+  // One table per stage, oldest first (an older decided proposal may hold a
+  // stage before the authority's). An answer without stages is one table.
   const stageGroups =
     stages.length > 0
       ? stages.map((st) => ({ stage: st, rows: approvers.filter((a) => a.stageId === st.id) }))
@@ -1574,7 +1593,7 @@ export default function StandardChangeProposalPage(): JSX.Element {
             myRow ? (
               <Box sx={{ display: "flex", gap: 1 }}>
                 <Button size="small" variant="contained" color="success" startIcon={<Check size={16} />} onClick={() => setDecision("approved")}>
-                  {myStage?.label === STANDARD_CHANGE_AUTHORITY ? "Authorise" : "Approve"}
+                  Authorise
                 </Button>
                 <Button size="small" variant="outlined" color="error" startIcon={<X size={16} />} onClick={() => setDecision("rejected")}>
                   Reject
@@ -1583,23 +1602,22 @@ export default function StandardChangeProposalPage(): JSX.Element {
             ) : undefined
           }
         >
-          <Typography variant="body2" color="text.secondary">
-            {STANDARD_CHANGE_APPROVAL_RULE}
-          </Typography>
+          {/* The rule holds for a proposal still to be decided, not one decided under an older one. */}
+          {(proposal.state === "draft" || isStandardChangeProposalInReview(proposal.state)) && (
+            <Typography variant="body2" color="text.secondary">
+              {STANDARD_CHANGE_APPROVAL_RULE}
+            </Typography>
+          )}
           {stageGroups.map((g, i) => (
             <StageApprovers
               key={g.stage?.id ?? "all"}
               stage={g.stage}
-              index={i}
+              index={stageGroups.length > 1 ? i : null}
+              latest={i === stageGroups.length - 1}
               approvers={g.rows}
               proposalState={proposal.state}
             />
           ))}
-          {proposal.state === "cab_review" && (
-            <Typography variant="caption" color="text.secondary">
-              {`2. ${STANDARD_CHANGE_AUTHORITY}: asked once the CAB approves.`}
-            </Typography>
-          )}
         </Section>
       )}
 
@@ -1618,8 +1636,8 @@ export default function StandardChangeProposalPage(): JSX.Element {
               id: proposal.id,
               decision: decision!,
               ...(comment ? { comment } : {}),
-              // The stage this page shows: a decision meant for the CAB is refused,
-              // not recorded as an authorisation, if the CAB settled meanwhile.
+              // The stage this page shows: the decision is refused, not recorded
+              // elsewhere, if that stage was settled or closed meanwhile.
               ...(myRow?.stageId ? { stageId: myRow.stageId } : {}),
             },
             { onSuccess: () => setDecision(null) },

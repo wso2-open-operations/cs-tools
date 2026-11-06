@@ -83,7 +83,7 @@ const PROPOSALS = [
     id: "scp-1",
     number: "SCP0000001",
     kind: "new",
-    state: "cab_review",
+    state: "authority_review",
     name: "Rotate a TLS certificate",
     customer: { id: "acct-2", name: "Other Corp" },
     template: null,
@@ -134,7 +134,7 @@ const count = (n: number): CountResult => ({ data: n, isPending: false, isSucces
 const PENDING: CountResult = { isPending: true, isSuccess: false, isError: false };
 const FAILED: CountResult = { isPending: false, isSuccess: false, isError: true };
 
-/** What the two counts answer: proposals awaiting my CAB decision, and my drafts. */
+/** What the two counts answer: proposals awaiting my authorisation, and my drafts. */
 function counts(awaiting: CountResult, drafts: CountResult): void {
   mocks.proposalCount.mockImplementation((filter: Record<string, unknown>) =>
     filter.awaitingMyDecision ? awaiting : drafts,
@@ -331,7 +331,7 @@ describe("StandardChangesTab — proposals", () => {
     const row = within(screen.getByRole("table", { name: "Standard change proposals" })).getAllByRole("row")[1]!;
     expect(row).toHaveTextContent("SCP0000001");
     expect(row).toHaveTextContent("New template");
-    expect(row).toHaveTextContent("CAB review");
+    expect(row).toHaveTextContent("Awaiting authorisation");
     expect(row).toHaveTextContent("Jane Doe");
   });
 
@@ -348,6 +348,20 @@ describe("StandardChangesTab — proposals", () => {
       "All proposals",
       "Proposed by me",
       "Awaiting my decision",
+    ]);
+  });
+
+  it("offers the proposal states, one review state among them: the authority's", () => {
+    renderTab(PROPOSALS_VIEW);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "State" }));
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Any state",
+      "Draft",
+      "Awaiting authorisation",
+      "Approved",
+      "Rejected",
+      "Withdrawn",
+      "Cancelled",
     ]);
   });
 
@@ -369,7 +383,9 @@ describe("StandardChangesTab — proposals", () => {
   it.each([
     ["&scope=awaiting", { awaitingMyDecision: true }, "Awaiting my decision", "Any state"],
     ["&scope=mine&state=draft", { proposedByMe: true, states: ["draft"] }, "Proposed by me", "Draft"],
-    ["&scope=all&state=cab_review", { states: ["cab_review"] }, "All proposals", "CAB review"],
+    ["&scope=all&state=authority_review", { states: ["authority_review"] }, "All proposals", "Awaiting authorisation"],
+    // CAB review is no longer a state: an old link's filter is dropped.
+    ["&state=cab_review", {}, "All proposals", "Any state"],
     ["&scope=nonsense&state=open", {}, "All proposals", "Any state"],
   ])("reads its filters from a link (%s)", (query, payload, scopeLabel, stateLabel) => {
     renderTab(`${PROPOSALS_VIEW}${query}`);
@@ -405,7 +421,7 @@ describe("StandardChangesTab — proposals", () => {
 });
 
 describe("StandardChangesTab — what needs your attention", () => {
-  it("asks for the proposals awaiting my CAB decision and my own drafts", () => {
+  it("asks for the proposals awaiting my authorisation and my own drafts", () => {
     renderTab();
     expect(mocks.proposalCount).toHaveBeenCalledWith({ awaitingMyDecision: true });
     expect(mocks.proposalCount).toHaveBeenCalledWith({ proposedByMe: true, states: ["draft"] });

@@ -598,7 +598,7 @@ function AttentionLine(): JSX.Element | null {
 /**
  * Standard changes, the second sub-view of Operations > Change requests (see
  * `ChangeRequestsArea`, which owns the sub-navigation and the `?view=standard`
- * it is kept in). It opens on the catalogue of CAB-approved standard change
+ * it is kept in). It opens on the catalogue of approved standard change
  * templates (a standard change can only be raised from an active one), under a
  * line saying what needs the viewer's attention, if anything does. The
  * proposals that create, revise or retire templates are a secondary view of the

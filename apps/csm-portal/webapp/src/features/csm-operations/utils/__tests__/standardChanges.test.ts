@@ -44,6 +44,7 @@ import {
   proposalStateFilter,
   renderStandardChangePlainText,
   splitPlaceholders,
+  STANDARD_CHANGE_PROPOSAL_STATES,
   STANDARD_CHANGE_PROPOSALS_PATH,
   standardChangeProposalCustomerEditable,
   standardChangeProposalCustomerFixedReason,
@@ -245,7 +246,7 @@ describe("inserting a placeholder", () => {
   });
 });
 
-describe("what a proposal still needs before the CAB", () => {
+describe("what a proposal still needs before the Standard Change Authority", () => {
   const complete = {
     name: "Rotate",
     rationale: "<p>Done often.</p>",
@@ -402,7 +403,9 @@ describe("standard changes inside Operations > Change requests", () => {
     expect(proposalScope(q("scope=everyone"))).toBe("all");
     expect(proposalStateFilter(q(""))).toBe("");
     expect(proposalStateFilter(q("state=draft"))).toBe("draft");
-    expect(proposalStateFilter(q("state=cab_review"))).toBe("cab_review");
+    expect(proposalStateFilter(q("state=authority_review"))).toBe("authority_review");
+    // CAB review is no longer a state (the CAB does not decide a proposal): an old link's filter is dropped.
+    expect(proposalStateFilter(q("state=cab_review"))).toBe("");
     expect(proposalStateFilter(q("state=open"))).toBe("");
   });
 
@@ -509,10 +512,13 @@ describe("standard changes inside Operations > Change requests", () => {
 });
 
 describe("the Standard Change Authority's states, and what a template fixes", () => {
-  it("names the two review states and the cancelled one", () => {
+  it("names the one review state and the cancelled one", () => {
     expect(standardChangeProposalStateLabel("authority_review")).toBe("Awaiting authorisation");
     expect(standardChangeProposalStateLabel("cancelled")).toBe("Cancelled");
-    expect(isStandardChangeProposalInReview("cab_review")).toBe(true);
+    expect(STANDARD_CHANGE_PROPOSAL_STATES).toEqual(["draft", "authority_review", "approved", "rejected", "withdrawn", "cancelled"]);
+    // A state the page does not know is shown as it comes, never as a CAB stage.
+    expect(standardChangeProposalStateLabel("cab_review")).toBe("cab_review");
+    expect(isStandardChangeProposalInReview("cab_review")).toBe(false);
     expect(isStandardChangeProposalInReview("authority_review")).toBe(true);
     expect(isStandardChangeProposalInReview("draft")).toBe(false);
     expect(isStandardChangeProposalFinal("cancelled")).toBe(true);

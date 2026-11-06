@@ -175,7 +175,7 @@ beforeEach(() => {
   });
   mocks.submitAsync.mockReset().mockImplementation(async () => {
     mocks.calls.push("submit");
-    return { ...DRAFT, state: "cab_review" };
+    return { ...DRAFT, state: "authority_review" };
   });
   mocks.withdraw.mockReset();
   mocks.decide.mockReset();
@@ -317,7 +317,7 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     expect(lastPatch().evidenceChangeRequestIds).toEqual(["chg-7"]);
   });
 
-  it("saves, then sends it to the CAB", async () => {
+  it("saves, then submits it to the Standard Change Authority", async () => {
     renderPage();
     fireEvent.click(submitButton());
     await waitFor(() => expect(mocks.submitAsync).toHaveBeenCalledWith("scp-1"));
@@ -325,7 +325,7 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     expect(mocks.updateAsync.mock.calls[0]![0].id).toBe("scp-1");
   });
 
-  it("says when it saved but the CAB submission was refused", async () => {
+  it("says when it saved but the submission was refused", async () => {
     mocks.submitAsync.mockRejectedValue(new Error("the proposal is not complete; it still needs: testPlan"));
     renderPage();
     fireEvent.click(submitButton());
@@ -340,6 +340,15 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
     fireEvent.click(submitButton());
     expect(await screen.findByRole("alert")).toHaveTextContent("refused");
     expect(mocks.submitAsync).not.toHaveBeenCalled();
+  });
+
+  it("says a complete draft goes to two members of the Standard Change Authority, and who judges the evidence", () => {
+    renderPage();
+    expect(submitButton()).toBeEnabled();
+    expect(
+      screen.getByText("Ready to submit: two members of the Standard Change Authority other than you must authorise it. Submitting saves first."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Evidence" })).toHaveTextContent("The Standard Change Authority judges them.");
   });
 
   it("lists what a draft still needs and holds Submit back", () => {
@@ -396,7 +405,7 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
       expect(evidencePicker()).toHaveAttribute("data-search-extra", "acct-1");
     });
 
-    it("asks a new proposal for its customer before evidence and before the CAB", () => {
+    it("asks a new proposal for its customer before evidence and before the authority", () => {
       mocks.proposal = BLANK_NEW;
       renderPage();
       expect(customerField()).not.toHaveAttribute("readonly");
@@ -467,17 +476,18 @@ describe("StandardChangeProposalPage — the proposer's editor", () => {
   });
 });
 
-describe("StandardChangeProposalPage — read-only and the CAB's decision", () => {
+describe("StandardChangeProposalPage — read-only and the authority's decision", () => {
   const IN_REVIEW: BeStandardChangeProposal = {
     ...DRAFT,
-    state: "cab_review",
+    state: "authority_review",
     canEdit: false,
     canSubmit: false,
     canWithdraw: false,
     submittedOn: "2026-10-02T00:00:00Z",
+    stages: [{ id: "st-1", label: "Standard Change Authority", requiredApprovals: 2, approvals: 0, decision: null }],
     approvers: [
-      { id: "a-1", approver: { id: "u-2", name: "Carol Cab", email: "carol@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: true },
-      { id: "a-2", approver: { id: "u-3", name: "Dan Cab", email: "dan@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false },
+      { id: "a-1", stageId: "st-1", approver: { id: "u-2", name: "Hana Head", email: "hana@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: true },
+      { id: "a-2", stageId: "st-1", approver: { id: "u-3", name: "Ivan Head", email: "ivan@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false },
     ],
   };
 
@@ -487,8 +497,8 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^name/i })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Implementation plan" })).toHaveTextContent("Steps.");
-    const approvers = screen.getByRole("table", { name: "CAB approvers" });
-    expect(within(approvers).getByText("Carol Cab")).toBeInTheDocument();
+    const approvers = screen.getByRole("table", { name: "Standard Change Authority approvers" });
+    expect(within(approvers).getByText("Hana Head")).toBeInTheDocument();
     expect(within(approvers).getByText("(you)")).toBeInTheDocument();
   });
 
@@ -503,7 +513,7 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     });
   });
 
-  it("marks evidence that is now another customer's, which the CAB cannot approve with", () => {
+  it("marks evidence that is now another customer's, which the authority cannot approve with", () => {
     mocks.proposal = {
       ...IN_REVIEW,
       evidence: [
@@ -537,25 +547,33 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     expect(reject).toBeDisabled();
     fireEvent.change(within(dialog).getByRole("textbox", { name: /comment/i }), { target: { value: " Too broad. " } });
     fireEvent.click(reject);
-    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "rejected", comment: "Too broad." }, expect.anything());
+    expect(mocks.decide).toHaveBeenCalledWith(
+      { id: "scp-1", decision: "rejected", comment: "Too broad.", stageId: "st-1" },
+      expect.anything(),
+    );
   });
 
-  it("approves with no comment needed", () => {
+  it("authorises with no comment needed, saying a second member must approve too", () => {
     mocks.proposal = IN_REVIEW;
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: /approve the proposal/i })).getByRole("button", { name: "Approve" }));
-    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved" }, expect.anything());
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
+    const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
+    expect(dialog).toHaveTextContent(
+      "2 different members of the Standard Change Authority must approve; the template change is applied by the last of them",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
+    expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved", stageId: "st-1" }, expect.anything());
   });
 
   it("offers no decision to a viewer without a pending row of their own", () => {
     mocks.proposal = { ...IN_REVIEW, approvers: IN_REVIEW.approvers!.map((a) => ({ ...a, canDecide: false })) };
     renderPage();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Authorise" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
   });
 
-  it("lets the proposer withdraw it while the CAB reviews it", () => {
+  it("lets the proposer withdraw it while the authority reviews it", () => {
     mocks.proposal = { ...IN_REVIEW, canWithdraw: true };
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Withdraw" }));
@@ -567,14 +585,15 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     mocks.proposal = {
       ...IN_REVIEW,
       state: "rejected",
+      stages: [{ ...IN_REVIEW.stages![0]!, decision: "REJECTED" }],
       approvers: [],
       decidedOn: "2026-10-03T00:00:00Z",
-      decidedBy: { id: "u-2", name: "Carol Cab", email: "carol@example.com" },
+      decidedBy: { id: "u-2", name: "Hana Head", email: "hana@example.com" },
       decisionComment: "Too broad: split it per gateway.",
     };
     renderPage();
     const decision = screen.getByRole("region", { name: "Decision" });
-    expect(decision).toHaveTextContent("Rejected by the CAB");
+    expect(decision).toHaveTextContent("Rejected by the Standard Change Authority");
     expect(decision).toHaveTextContent("Too broad: split it per gateway.");
     expect(decision).toHaveTextContent(/catalogue was not changed/i);
     fireEvent.click(screen.getByRole("button", { name: /copy into a new proposal/i }));
@@ -595,13 +614,14 @@ describe("StandardChangeProposalPage — read-only and the CAB's decision", () =
     mocks.proposal = {
       ...IN_REVIEW,
       state: "approved",
+      stages: [{ ...IN_REVIEW.stages![0]!, approvals: 2, decision: "APPROVED" }],
       approvers: [],
       template: { id: "tpl-1", name: "Rotate a TLS certificate" },
       resultingVersion: 1,
     };
     renderPage();
     const decision = screen.getByRole("region", { name: "Decision" });
-    expect(decision).toHaveTextContent("Approved by the CAB");
+    expect(decision).toHaveTextContent("Approved by the Standard Change Authority");
     expect(decision).toHaveTextContent(/resulting template: rotate a tls certificate, version 1/i);
     fireEvent.click(within(decision).getByRole("button", { name: "Rotate a TLS certificate" }));
     expect(mocks.navigate).toHaveBeenCalledWith("/operations/standard-changes/tpl-1", {
@@ -651,7 +671,6 @@ describe("StandardChangeProposalPage — what a template fixes, and getting rid 
 });
 
 describe("StandardChangeProposalPage — the Standard Change Authority", () => {
-  const CAB_STAGE = { id: "st-1", label: "CAB Approval", requiredApprovals: 1, approvals: 1, decision: "APPROVED" as const };
   const AUTHORITY_STAGE = { id: "st-2", label: "Standard Change Authority", requiredApprovals: 2, approvals: 1, decision: null };
   const AUTHORITY_REVIEW: BeStandardChangeProposal = {
     ...DRAFT,
@@ -660,26 +679,30 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     canSubmit: false,
     canWithdraw: false,
     submittedOn: "2026-10-02T00:00:00Z",
-    stages: [CAB_STAGE, AUTHORITY_STAGE],
+    stages: [AUTHORITY_STAGE],
     approvers: [
       { id: "a-3", stageId: "st-2", approver: { id: "u-5", name: "Hana Head", email: "hana@example.com" }, state: "REQUESTED", comments: null, updatedOn: "2026-10-03T00:00:00Z", canDecide: true },
       { id: "a-4", stageId: "st-2", approver: { id: "u-6", name: "Ivan Head", email: "ivan@example.com" }, state: "APPROVED", comments: "Fine", updatedOn: "2026-10-03T00:00:00Z", canDecide: false },
-      { id: "a-1", stageId: "st-1", approver: { id: "u-2", name: "Carol Cab", email: "carol@example.com" }, state: "APPROVED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false },
     ],
   };
+  /** A stage of a proposal decided before the CAB stopped deciding proposals: shown by its own label, nothing more. */
+  const OLDER_STAGE = { id: "st-1", label: "CAB Approval", requiredApprovals: 1, approvals: 1, decision: "APPROVED" as const };
+  const OLDER_ROW = { id: "a-1", stageId: "st-1", approver: { id: "u-2", name: "Carol Silva", email: "carol@example.com" }, state: "APPROVED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false };
 
-  it("shows each stage with its progress, the CAB first", () => {
+  it("shows its one stage, the authority's, with its progress", () => {
     mocks.proposal = AUTHORITY_REVIEW;
     renderPage();
     expect(screen.getByText("Awaiting authorisation")).toBeInTheDocument();
-    const cab = screen.getByRole("region", { name: "CAB approvers" });
-    expect(cab).toHaveTextContent("1. CAB");
-    expect(cab).toHaveTextContent("Approved");
-    expect(within(cab).getByText("Carol Cab")).toBeInTheDocument();
+    expect(screen.getAllByRole("region", { name: / approvers$/ })).toHaveLength(1);
     const authority = screen.getByRole("region", { name: "Standard Change Authority approvers" });
-    expect(authority).toHaveTextContent("2. Standard Change Authority");
+    // One stage is not numbered.
+    expect(within(authority).getByText("Standard Change Authority")).toBeInTheDocument();
+    expect(authority).not.toHaveTextContent("1. ");
     expect(authority).toHaveTextContent("1 of 2 approvals");
     expect(within(authority).getByText("Hana Head")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Approval" })).toHaveTextContent(
+      "its template is authorised by two different members of the Standard Change Authority. The proposer cannot authorise their own proposal.",
+    );
   });
 
   it("authorises: the second approval applies it", () => {
@@ -687,25 +710,65 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Authorise" }));
     const dialog = screen.getByRole("dialog", { name: /authorise the proposal/i });
-    expect(dialog).toHaveTextContent("Yours is the last approval needed");
+    expect(dialog).toHaveTextContent("Yours is the last approval needed: authorising applies the template change.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Authorise" }));
-    // It names the stage this page shows, so a decision meant for another stage is refused, not recorded.
+    // It names the stage this page shows, so a decision on a stage settled or closed meanwhile is refused, not recorded.
     expect(mocks.decide).toHaveBeenCalledWith({ id: "scp-1", decision: "approved", stageId: "st-2" }, expect.anything());
   });
 
-  it("tells the CAB that the authority is asked next", () => {
+  it("shows an older decided proposal's stages in order, each by its own label and count", () => {
     mocks.proposal = {
       ...AUTHORITY_REVIEW,
-      state: "cab_review",
-      stages: [{ ...CAB_STAGE, approvals: 0, decision: null }],
-      approvers: [{ ...AUTHORITY_REVIEW.approvers![2]!, state: "REQUESTED", canDecide: true }],
+      state: "approved",
+      stages: [OLDER_STAGE, { ...AUTHORITY_STAGE, approvals: 2, decision: "APPROVED" }],
+      approvers: [{ ...AUTHORITY_REVIEW.approvers![0]!, state: "APPROVED", canDecide: false }, AUTHORITY_REVIEW.approvers![1]!, OLDER_ROW],
     };
     renderPage();
-    expect(screen.getByText("2. Standard Change Authority: asked once the CAB approves.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(screen.getByRole("dialog", { name: /approve the proposal/i })).toHaveTextContent(
-      "two members of the Standard Change Authority are asked next",
-    );
+    const older = screen.getByRole("region", { name: "CAB Approval approvers" });
+    expect(older).toHaveTextContent("1. CAB Approval");
+    expect(older).toHaveTextContent("Approved");
+    expect(within(older).getByText("Carol Silva")).toBeInTheDocument();
+    const authority = screen.getByRole("region", { name: "Standard Change Authority approvers" });
+    expect(authority).toHaveTextContent("2. Standard Change Authority");
+    expect(authority).toHaveTextContent("Approved");
+    expect(screen.queryByRole("button", { name: /^(Approve|Authorise)$/ })).not.toBeInTheDocument();
+    // The authority's approval applied it.
+    expect(screen.getByRole("region", { name: "Decision" })).toHaveTextContent("Approved by the Standard Change Authority");
+    // The rule is today's; a decided proposal was settled under its own.
+    expect(screen.getByRole("region", { name: "Approval" })).not.toHaveTextContent("two different members of the Standard Change Authority");
+  });
+
+  /** The CAB stage of a proposal returned to draft when the CAB stopped deciding proposals: never decided, its rows cancelled. */
+  const RETURNED_STAGE = { id: "st-0", label: "CAB Approval", requiredApprovals: 1, approvals: 0, decision: null };
+  const RETURNED_ROW = { id: "a-0", stageId: "st-0", approver: { id: "u-2", name: "Carol Silva", email: "carol@example.com" }, state: "CANCELLED", comments: null, updatedOn: "2026-10-02T00:00:00Z", canDecide: false };
+
+  it("shows the CAB stage of a proposal returned to draft and resubmitted as not decided, waiting only on the authority", () => {
+    mocks.proposal = {
+      ...AUTHORITY_REVIEW,
+      stages: [RETURNED_STAGE, { ...AUTHORITY_STAGE, approvals: 0 }],
+      approvers: [RETURNED_ROW, { ...AUTHORITY_REVIEW.approvers![0]!, canDecide: false }, { ...AUTHORITY_REVIEW.approvers![1]!, state: "REQUESTED", comments: null }],
+    };
+    renderPage();
+    const older = screen.getByRole("region", { name: "CAB Approval approvers" });
+    expect(older).toHaveTextContent("1. CAB Approval");
+    expect(older).toHaveTextContent("Not decided");
+    expect(older).not.toHaveTextContent("Waiting for a decision");
+    expect(within(older).getByText("Carol Silva")).toBeInTheDocument();
+    const authority = screen.getByRole("region", { name: "Standard Change Authority approvers" });
+    expect(authority).toHaveTextContent("2. Standard Change Authority");
+    expect(authority).toHaveTextContent("0 of 2 approvals");
+    expect(screen.getByRole("region", { name: "Approval" })).toHaveTextContent("two different members of the Standard Change Authority");
+  });
+
+  it("shows the cancelled CAB stage of a proposal returned to draft as not decided", () => {
+    mocks.proposal = { ...DRAFT, stages: [RETURNED_STAGE], approvers: [RETURNED_ROW] };
+    renderPage();
+    const older = screen.getByRole("region", { name: "CAB Approval approvers" });
+    expect(older).not.toHaveTextContent("1. ");
+    expect(older).toHaveTextContent("Not decided");
+    expect(older).not.toHaveTextContent("Waiting for a decision");
+    expect(screen.queryByRole("button", { name: /^(Approve|Authorise)$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Approval" })).toHaveTextContent("two different members of the Standard Change Authority");
   });
 
   it("lets an authority member cancel someone else's proposal, with a reason", () => {
@@ -736,12 +799,21 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     );
   });
 
-  it("says a proposal approved before the authority's stage existed was approved by the CAB", () => {
-    mocks.proposal = { ...AUTHORITY_REVIEW, state: "approved", stages: [CAB_STAGE] };
+  it("names the stage that settled an older proposal decided before the authority's stage existed", () => {
+    mocks.proposal = { ...AUTHORITY_REVIEW, state: "approved", stages: [OLDER_STAGE], approvers: [OLDER_ROW] };
     renderPage();
     const decision = screen.getByRole("region", { name: "Decision" });
-    expect(decision).toHaveTextContent("Approved by the CAB");
+    expect(decision).toHaveTextContent("Approved at the CAB Approval stage");
     expect(decision).not.toHaveTextContent("Standard Change Authority");
+    // Its one stage is shown, unnumbered, by its own label.
+    expect(screen.getByRole("region", { name: "CAB Approval approvers" })).not.toHaveTextContent("1. ");
+    expect(screen.getByRole("region", { name: "Approval" })).not.toHaveTextContent("Standard Change Authority");
+  });
+
+  it("names the stage that rejected an older proposal", () => {
+    mocks.proposal = { ...AUTHORITY_REVIEW, state: "rejected", stages: [{ ...OLDER_STAGE, decision: "REJECTED" }], approvers: [] };
+    renderPage();
+    expect(screen.getByRole("region", { name: "Decision" })).toHaveTextContent("Rejected at the CAB Approval stage");
   });
 
   it("says who ended a cancelled proposal, and why", () => {
@@ -763,7 +835,7 @@ describe("StandardChangeProposalPage — the Standard Change Authority", () => {
     mocks.proposal = {
       ...AUTHORITY_REVIEW,
       state: "rejected",
-      stages: [CAB_STAGE, { ...AUTHORITY_STAGE, decision: "REJECTED" }],
+      stages: [{ ...AUTHORITY_STAGE, decision: "REJECTED" }],
       decisionComment: "Too broad",
     };
     renderPage();

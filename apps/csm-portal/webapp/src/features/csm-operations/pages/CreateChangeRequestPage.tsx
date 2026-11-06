@@ -343,7 +343,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     customerApprovalRequired,
     customerReviewRequired,
   );
-  // STANDARD: raised from a CAB-approved template. The template's current
+  // STANDARD: raised from an approved template. The template's current
   // version specifies the subject, the plans, impact, category, rollback duration
   // and the customer settings (shown read-only, as a preview); only its
   // parameters ("change specifics") and what the template does not specify
@@ -1107,8 +1107,8 @@ export default function CreateChangeRequestPage(): JSX.Element {
                   </Typography>
                 </Box>
                 <Typography variant="body2" color="text.secondary">
-                  A standard change is raised from a CAB-approved template and needs no approval of its own. What the
-                  template specifies is fixed; fill in its change specifics below.
+                  A standard change is raised from a template the Standard Change Authority has approved and needs no
+                  approval of its own. What the template specifies is fixed; fill in its change specifics below.
                 </Typography>
                 <AsyncEntitySelect<BeStandardChangeTemplate>
                   id="cr-standard-template"

@@ -152,7 +152,7 @@ describe("OperationsPage — header", () => {
     renderAt(entry);
     expect(heading()).toEqual({
       title: "Standard changes",
-      subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+      subtitle: "Pre-authorised change requests, raised from templates the Standard Change Authority has approved.",
     });
     expect(screen.queryByText("Operations")).not.toBeInTheDocument();
     expect(screen.queryByText(OPERATIONS_SUBTITLE)).not.toBeInTheDocument();

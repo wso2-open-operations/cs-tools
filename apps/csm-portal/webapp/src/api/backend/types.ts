@@ -5556,7 +5556,7 @@ export interface BeSpecialistHandoffSummary {
 
 
 // ---------------------------------------------------------------------------
-// Standard changes: the CAB-approved template catalogue and its proposals
+// Standard changes: the template catalogue the Standard Change Authority approves, and its proposals
 // (`/standard-change-templates/...`, `/standard-change-proposals/...`; entity
 // service `domain/standard_change.go`)
 // ---------------------------------------------------------------------------
@@ -5564,13 +5564,12 @@ export interface BeSpecialistHandoffSummary {
 export type BeStandardChangeTemplateState = "active" | "suspended" | "retired";
 export type BeStandardChangeProposalKind = "new" | "modify" | "retire";
 /**
- * `authority_review`: the CAB approved; the Standard Change Authority has not yet
- * (two of its members must). `cancelled`: an authority member ended someone
- * else's open proposal, with a reason.
+ * `authority_review`: submitted; two different members of the Standard Change
+ * Authority must approve it (the CAB does not decide a proposal). `cancelled`: an
+ * authority member ended someone else's open proposal, with a reason.
  */
 export type BeStandardChangeProposalState =
   | "draft"
-  | "cab_review"
   | "authority_review"
   | "approved"
   | "rejected"
@@ -5635,7 +5634,7 @@ export interface BeStandardChangeTemplateUsage {
   lastUsedOn: string | null;
 }
 
-/** One CAB-approved version of a template; never changed once written. */
+/** One approved version of a template; never changed once written. */
 export interface BeStandardChangeTemplateVersion extends BeStandardChangeContent {
   id: string;
   templateId: string;
@@ -5682,7 +5681,7 @@ export interface BeStandardChangeTemplate {
   suspendedReason: string | null;
   suspendedOn: string | null;
   suspendedBy: string | null;
-  /** The modification or retirement now in draft or CAB review, if any. */
+  /** The modification or retirement now in draft or in review, if any. */
   openProposal: BeEntityRef | null;
   usage: BeStandardChangeTemplateUsage;
   createdOn: string;
@@ -5757,12 +5756,17 @@ export interface BeStandardChangeEvidence {
   customer?: BeEntityRef | null;
 }
 
-/** One approval stage of a proposal: the CAB, then the Standard Change Authority. */
+/**
+ * One approval stage of a proposal: the Standard Change Authority's, the only one
+ * now. A proposal from before migration 0287 (decided, still in authority review,
+ * or returned to draft and possibly resubmitted) may also hold an earlier
+ * "CAB Approval" stage.
+ */
 export interface BeStandardChangeProposalStage {
   id: string;
-  /** "CAB Approval" or "Standard Change Authority". */
+  /** "Standard Change Authority" (or, on a proposal from before 0287, "CAB Approval"). */
   label: string;
-  /** How many different approvers must approve (1 for the CAB, 2 for the authority). */
+  /** How many different approvers must approve (2 for the authority). */
   requiredApprovals: number;
   approvals: number;
   /** APPROVED or REJECTED once settled; null while open. */
@@ -5899,8 +5903,8 @@ export interface BeDecideStandardChangeProposalPayload {
   comment?: string;
   /**
    * The stage the page showed the caller deciding on: if the proposal has moved
-   * on since (the CAB settled while the page was open), the server refuses (409)
-   * and writes nothing, so a CAB vote is never recorded as an authorisation.
+   * on since (that stage was settled or closed while the page was open), the
+   * server refuses (409) and writes nothing.
    */
   stageId?: string;
 }
@@ -5912,7 +5916,7 @@ export interface BeSearchStandardChangeProposalsPayload {
   /** Narrows the list to the proposals for one customer (account). */
   accountId?: string;
   proposedByMe?: boolean;
-  /** Waiting on a stage (CAB or authority) on which the caller holds a pending approval. */
+  /** Awaiting authorisation, with a pending approval of the caller's. */
   awaitingMyDecision?: boolean;
   query?: string;
   pagination: BePagination;

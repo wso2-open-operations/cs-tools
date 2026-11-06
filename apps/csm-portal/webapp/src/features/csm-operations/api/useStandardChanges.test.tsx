@@ -127,7 +127,7 @@ describe("standard change reads", () => {
 
   it("searches proposals with the body as given", async () => {
     const client = newClient();
-    const body = { awaitingMyDecision: true, states: ["cab_review" as const], pagination: { offset: 0, limit: 20 } };
+    const body = { awaitingMyDecision: true, states: ["authority_review" as const], pagination: { offset: 0, limit: 20 } };
     const { result } = renderHook(() => useSearchStandardChangeProposals(body), { wrapper: wrapper(client) });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(postMock).toHaveBeenCalledWith("/standard-change-proposals/search", body);

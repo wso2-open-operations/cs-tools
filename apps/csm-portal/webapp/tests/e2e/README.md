@@ -153,13 +153,15 @@ E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csm-platform-postgres-1 \
   npx playwright test tests/e2e/specs/team-schedule/sme-tiers.spec.ts
 ```
 
-## Standard changes: propose, CAB approval, raise from a template (real local stack)
+## Standard changes: propose, the Standard Change Authority's approval, raise from a template (real local stack)
 
 `specs/operations/standard-changes.spec.ts` drives the real stack through the UI.
 
 Prerequisite: the standard change seed. The first test checks the seed's own templates and proposals (by the names the
-script gives them), so seed the stack once before running the spec (it is idempotent; `--reset` rebuilds it from scratch and, on a stack
-started under another compose project name, needs `COMPOSE_PROJECT_NAME=<name>`, e.g. `csmcr`):
+script gives them), so seed the stack once before running the spec (it is idempotent; `--reset` rebuilds it from scratch). Every run reaches
+the local Postgres through docker to make alice and jane the Standard Change Authority's members, so it needs docker,
+and on a stack started under another compose project name `COMPOSE_PROJECT_NAME=<name>` (e.g. `csmcr`) or
+`PG_CONTAINER` on every run, not only with `--reset`:
 
 ```bash
 scripts/csm-compose/seed-standard-changes.sh    # from the repository root (entity-service :8081, mock OIDC :9100)
@@ -177,7 +179,8 @@ What it checks:
   to the list with the filter applied (the search box holds it and the list reads "No change requests found."), and
   going back to the list drops only `view` / `show` / `scope` / `state`.
 - **The page heading** (what users complained about): on the catalogue and on the proposals the heading is exactly
-  "Standard changes" with "Pre-authorised change requests, raised from templates the CAB has approved.", and says
+  "Standard changes" with "Pre-authorised change requests, raised from templates the Standard Change Authority has
+  approved.", and says
   nothing about service requests, incidents, problems or runbooks. Every other Operations tab (the change request list
   included) keeps "Operations" and its Operations-wide line. The sidebar is checked first: each Operations entry is
   polled until it is visible (none is skipped), and only then that there is no "Standard changes" entry of its own.
@@ -190,7 +193,8 @@ What it checks:
   templates (counted in Postgres), each with Other Corp in its Customer cell. The suspended template's page shows its
   customer ("For Example Corp: used only for this customer's projects." and the Customer fact), the seed's current
   reason in full ("The owner is reworking the restart procedure for clustered deployments. ...") and who suspended it;
-  the proposals list (also with a Customer column) shows the seed's rejected, in-CAB-review and draft proposals and its
+  the proposals list (also with a Customer column) shows the seed's rejected and draft proposals (the one the seed left
+  in CAB review was returned to Draft when CAB review was removed) and its
   approved revision, each in its state and with its customer.
 - **Breadcrumbs, Back, pins and the sidebar**: a template page reads "Change requests › Standard changes › STD…", a
   proposal page "Change requests › Standard changes › Proposals › SCP…"; Back returns to the view (and filter) the record
@@ -206,9 +210,10 @@ What it checks:
   state selects showing the filters kept, with no history entry of their own (one Back returns to the page they were
   opened from); the ones that carried `crQ` return to the filtered list through the "Change requests" tab.
 - **The attention strip** above the catalogue: hidden for `jane`, who has nothing pending (checked once both counts have
-  been answered); for `carol` (asked about the seed's proposal in CAB review) and `bob` (the seed's draft) it reads the
-  counts Postgres holds, worded as the page words them, and each part links to the proposals filtered to it
-  (`scope=awaiting`; `scope=mine&state=draft`), which list exactly that many. Not shown on the proposals view. `jane`,
+  been answered), and for `carol`, a CAB member, whom no proposal asks (the CAB does not decide a proposal); for `bob`
+  (the seed's drafts) it reads the counts Postgres holds, worded as the page words them, and its link opens the
+  proposals filtered to them (`scope=mine&state=draft`), which list exactly that many. The `scope=awaiting` part is
+  followed in the whole flow, by `alice`. Not shown on the proposals view. `jane`,
   who has proposed nothing (checked in Postgres), opens the proposals on all of them and sees bob's seeded ones;
   "Proposed by me" then lists none.
 - **The whole flow**: `bob` proposes a standard change from a closed change request of Example Corp (raised for
@@ -221,8 +226,12 @@ What it checks:
   only the host typed, filled `{{host}}` and open `{{env}}` marks sit side by side on the same preview (and in the
   subject), and their computed styles are compared there: neither has the browser's own yellow `<mark>` background, the
   open one is monospace and not underlined, the filled one is in the text's font with a dotted underline, and their
-  backgrounds, fonts and underlines differ; after the environment too, every mark is filled with the values. He saves and submits it to the CAB; `carol` (CAB) reaches it through her attention
-  strip and approves it; the template's page shows the current version with its placeholders highlighted and its
+  backgrounds, fonts and underlines differ; after the environment too, every mark is filled with the values. He saves
+  and submits it: it awaits authorisation in one stage, the Standard Change Authority's ("0 of 2 approvals", `alice`
+  and `jane` asked, not `bob`, no CAB stage; the API's `stages` is that one stage needing 2, and `carol` on the CAB is
+  asked nothing). `alice` reaches it through her attention strip and authorises it ("1 of 2 approvals"); `jane`
+  authorises it too, and hers applies it ("Approved by the Standard Change Authority"); the template's page shows the
+  current version with its placeholders highlighted and its
   customer (Example Corp, also from the API), and it is in the catalogue as active version 1 of Example Corp (impact
   Medium). `alice` raises a change request from it on the create form. With type Standard the template picker is
   disabled until a Customer Project is chosen. With Other Corp's project (402) it offers Other Corp's templates only:

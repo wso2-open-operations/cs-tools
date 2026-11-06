@@ -184,7 +184,6 @@ export function standardChangeTemplateStateColor(state?: string | null): ChipCol
 
 const PROPOSAL_STATE: Record<BeStandardChangeProposalState, { label: string; color: ChipColor }> = {
   draft: { label: "Draft", color: "default" },
-  cab_review: { label: "CAB review", color: "info" },
   authority_review: { label: "Awaiting authorisation", color: "info" },
   approved: { label: "Approved", color: "success" },
   rejected: { label: "Rejected", color: "error" },
@@ -217,17 +216,20 @@ export function isStandardChangeProposalFinal(state?: string | null): boolean {
   return state === "approved" || state === "rejected" || state === "withdrawn" || state === "cancelled";
 }
 
-/** A proposal waiting on a stage: the CAB's, or the Standard Change Authority's. */
+/** A proposal waiting on the Standard Change Authority's decision. */
 export function isStandardChangeProposalInReview(state?: string | null): boolean {
-  return state === "cab_review" || state === "authority_review";
+  return state === "authority_review";
 }
 
-/** The name of the group that authorises a template after the CAB (the server's `StandardChangeAuthorityGroupName`). */
+/** The name of the group that approves a template (the server's `StandardChangeAuthorityGroupName`). */
 export const STANDARD_CHANGE_AUTHORITY = "Standard Change Authority";
 
-/** What the two approval stages are, for the proposal page and its dialogs. */
+/** How many different members of the authority must approve (the server's `StandardChangeAuthorityApprovals`). */
+export const STANDARD_CHANGE_AUTHORITY_APPROVALS = 2;
+
+/** Who approves a template, for the proposal page and its dialogs. */
 export const STANDARD_CHANGE_APPROVAL_RULE =
-  "A standard change skips the CAB every time it is used, so its template is approved twice: by the CAB, then by two members of the Standard Change Authority. Neither the proposer nor the CAB member who approved can authorise it.";
+  "A standard change skips the CAB every time it is used, so its template is authorised by two different members of the Standard Change Authority. The proposer cannot authorise their own proposal.";
 
 /** The longest summary the server takes. */
 export const MAX_STANDARD_CHANGE_SUMMARY = 2000;
@@ -288,7 +290,7 @@ export function contentPlaceholderKeys(content: Partial<Pick<BeStandardChangeCon
   return [...seen].sort();
 }
 
-/** The placeholders the content uses that no parameter declares (the CAB is never asked while there are any). */
+/** The placeholders the content uses that no parameter declares (the authority is never asked while there are any). */
 export function undeclaredPlaceholders(
   content: Partial<Pick<BeStandardChangeContent, StandardChangeTextField>>,
   parameters: readonly BeStandardChangeParameter[],
@@ -523,7 +525,7 @@ export function raiseFromTemplatePath(templateId: string): string {
  * Operations > Change requests (`/operations/change-requests`) as ONE sub-view
  * next to the change request list, chosen by `?view=standard`: no `view` (or
  * one this page does not know) is the list, exactly as before. Inside it the
- * template catalogue is the default and the proposals to the CAB a secondary
+ * template catalogue is the default and the proposals a secondary
  * view (`&show=proposals`), whose filters are `scope` (all proposals by
  * default; mine / awaiting my decision when picked) and `state`. Everything is
  * in the URL so each place is linkable and Back from a template or a proposal
@@ -734,7 +736,7 @@ export function standardChangeRecentEntry(
   };
 }
 
-/** What a proposal still needs before the CAB can be asked (the server's `checkStandardChangeProposalComplete`), worded for the form. */
+/** What a proposal still needs before the authority can be asked (the server's `checkStandardChangeProposalComplete`), worded for the form. */
 export function standardChangeProposalGaps(
   kind: BeStandardChangeProposalKind,
   draft: {

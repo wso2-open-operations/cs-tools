@@ -50,11 +50,11 @@ import type {
   BeUpdateStandardChangeProposalPayload,
 } from "@api/backend/types";
 
-// Operations > Change requests > Standard changes: the CAB-approved template
+// Operations > Change requests > Standard changes: the approved template
 // catalogue and the proposals that create, revise or retire its templates.
 // Every route is a thin BFF proxy of entity-service, which decides who may act
-// (the proposer edits, submits and deletes a draft; the CAB, then two members
-// of the Standard Change Authority, decide; the owner, the CAB or the authority
+// (the proposer edits, submits and deletes a draft; two members of the Standard
+// Change Authority decide, the CAB not at all; the owner, the CAB or the authority
 // suspends; only the authority resumes, clears a review flag or cancels someone
 // else's proposal): a refusal keeps its message and `errorCode`, so callers show
 // `err.message`.
@@ -137,7 +137,7 @@ export function useGetStandardChangeTemplate(
   });
 }
 
-/** One version as the CAB approved it (immutable, so cached for good). */
+/** One version as it was approved (immutable, so cached for good). */
 export function useGetStandardChangeTemplateVersion(
   templateId: string | undefined,
   versionId: string | undefined,
@@ -191,7 +191,7 @@ export function useCountStandardChangeProposals(
   });
 }
 
-/** A proposal with its content, evidence and CAB approvers; `null` when not found. */
+/** A proposal with its content, evidence, stages and approvers; `null` when not found. */
 export function useGetStandardChangeProposal(
   id: string | undefined,
 ): UseQueryResult<BeStandardChangeProposal | null, Error> {
@@ -224,7 +224,7 @@ function useStandardChangeMutation<TVars, TResult>(
 export const MAX_SUSPEND_REASON_LENGTH = 1000;
 
 /**
- * `POST /standard-change-templates/{id}/suspend` (the owner or a CAB member), with
+ * `POST /standard-change-templates/{id}/suspend` (the owner, a CAB member or an authority member), with
  * the optional reason trimmed: a blank one is left out of the body.
  */
 export function useSuspendStandardChangeTemplate(): UseMutationResult<
@@ -294,7 +294,7 @@ export function useUpdateStandardChangeProposal(): UseMutationResult<
   );
 }
 
-/** `POST /standard-change-proposals/{id}/submit`: sends a complete draft to the CAB. */
+/** `POST /standard-change-proposals/{id}/submit`: sends a complete draft to the Standard Change Authority. */
 export function useSubmitStandardChangeProposal(): UseMutationResult<BeStandardChangeProposal, Error, string> {
   const api = useBackendApi();
   return useStandardChangeMutation((id: string) =>
@@ -330,7 +330,7 @@ export function useDeleteStandardChangeProposal(): UseMutationResult<null, Error
   return useStandardChangeMutation((id: string) => api.del<null>(`${PROPOSALS}/${enc(id)}`));
 }
 
-/** `POST /standard-change-proposals/{id}/decision`: a CAB or authority member on their own row. */
+/** `POST /standard-change-proposals/{id}/decision`: an authority member on their own row. */
 export function useDecideStandardChangeProposal(): UseMutationResult<
   BeStandardChangeProposal,
   Error,

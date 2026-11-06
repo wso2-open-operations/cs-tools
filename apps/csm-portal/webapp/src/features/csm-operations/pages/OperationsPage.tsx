@@ -48,7 +48,7 @@ const OPERATIONS_HEADING: PageHeading = {
  */
 const STANDARD_CHANGES_HEADING: PageHeading = {
   title: "Standard changes",
-  subtitle: "Pre-authorised change requests, raised from templates the CAB has approved.",
+  subtitle: "Pre-authorised change requests, raised from templates the Standard Change Authority has approved.",
 };
 
 /**
