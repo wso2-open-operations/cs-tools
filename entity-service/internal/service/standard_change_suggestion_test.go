@@ -439,6 +439,9 @@ func (f *fakeSuggestionRepo) CustomerCounts(_ context.Context, runID, account st
 	}
 	return out, nil
 }
+func (f *fakeSuggestionRepo) SnapshotKeys(ctx context.Context, runID, account string) ([]repository.SuggestionSnapshotRow, error) {
+	return f.SnapshotRows(ctx, runID, account, true)
+}
 func (f *fakeSuggestionRepo) SnapshotRows(_ context.Context, runID, account string, includeIneligible bool) ([]repository.SuggestionSnapshotRow, error) {
 	var out []repository.SuggestionSnapshotRow
 	for _, r := range f.rows[runID] {

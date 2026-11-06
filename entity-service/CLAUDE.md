@@ -8705,7 +8705,7 @@ whose project has a customer. Clusters never mix customers: a template belongs t
 1. Same normalised subject (`suggestionKey`): HTML and `{{placeholders}}` removed, lower case, `[tags]`,
    ticket numbers (`CHG…`, `INC…`, `SCP…`, …), dates, times, versions, ordinals and digits removed, then
    filler words (articles, prepositions, "please", "change", month and day names) and one-letter words
-   dropped. The key is the cluster's name and what a dismissal is stored under.
+   dropped. The subject key (`subjectKey`) groups the candidates; it is not the cluster's key (below).
 2. Confirmed by the implementation plans: inside one subject group, two members whose plans both have at
    least three meaningful words are the same change only when the plans' word sets are at least
    `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
@@ -8728,6 +8728,31 @@ whose project has a customer. Clusters never mix customers: a template belongs t
    whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
 Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
 self-hosted models would be allowed anyway.
+
+**A cluster's key** (`key`; `assignSuggestionIdentities`). One subject can split into several clusters
+(step 2: "Update the firewall rules for partner integrations" done five times with a security-group plan
+and five with a WAF plan), so the subject key does not tell a customer's clusters apart. Keyed by subject,
+the two came back as two suggestions with one key, so the page expanded both on one click, left ghost rows
+(a duplicate React key), marked both busy on Propose, and one dismissal hid both. So every cluster has a key
+of its own, unique within its customer: the snapshot's `suggestion_key`, what a dismissal is stored under
+and matched by, the API's `key` and the page's row identity. It must also **stay the same from one daily
+refresh to the next**, or a dismissal stops applying:
+- Nothing about a cluster alone is that stable. Its members change daily (new completions, the oldest
+  leaving the window and the newest-500 cap), so a key taken from, say, its oldest member would move every
+  time that member left: monthly for a monthly change. So the key is **carried over**: a cluster takes the
+  key of the previous published snapshot's cluster of the same customer and subject that it shares the most
+  change requests with (each key to one cluster, largest overlaps first). Consecutive runs share nearly
+  every member, so a cluster keeps its key as long as it exists, and when a subject splits the part with the
+  larger overlap keeps it. One extra read per customer (`SnapshotKeys` of the previous run: keys and member ids only).
+- A cluster with no predecessor (new, the first refresh, or a customer the previous refresh skipped) is
+  **minted** a key, largest first: the bare subject key when no other cluster of that subject holds it,
+  else the subject key, `#` and 12 hex digits of a SHA-256 of its oldest core member's id (the next
+  oldest's on a clash). So most suggestions, a subject with one cluster, keep the bare subject key, and the
+  dismissals made before this (bare subject keys, local stacks only) **keep matching** the cluster that holds
+  it; none were dropped. After a skipped run the keys are minted again by the same rule, so a split
+  cluster's key comes back unless its oldest core member left the window meanwhile.
+- `subjectKey` is the subject key, returned beside it. A subject key is capped at 499 bytes so a key
+  (512, the column) always fits the suffix.
 
 **Eligible** (`judgeSuggestionCluster`, every threshold configurable): closed at least `minClosed` times in
 the window; success rate closed / (closed + rolled back) at least `minSuccessPercent`; no incident names a
@@ -8776,7 +8801,8 @@ are listed per suggestion (`memberCount` is the true count).
 
 **Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
 `POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
-suggestion key, i.e. `suggestionKey(key) == key`; a reason of at most 1000 characters is required; a
+cluster key as minted, `validSuggestionKey`: a normalised subject key, optionally `#` and 12 lower-case
+hex digits; a reason of at most 1000 characters is required; a
 second one is a 409, no such customer a 400) hides the suggestion for that customer however many members
 it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
 /standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
@@ -8786,9 +8812,12 @@ Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging; t
 paging, time budget, re-sent page and publish, and the read, over an in-memory repository),
 `standard_change_suggestion_scale_test.go` (the cap and its sample, `similarAtLeast` against `jaccard`,
 the context checks, a customer that overruns its deadline skipped while the call's own deadline is an
-error, the customer list read once per run), `standard_change_suggestion_words_test.go` (the tokenizer
+error, the customer list read once per run), `standard_change_suggestion_identity_test.go` (two clusters of
+one subject get keys of their own and are dismissed apart; keys kept across a refresh whose oldest members
+left; a split, minting, one key per cluster; key validation), `standard_change_suggestion_words_test.go` (the tokenizer
 against the old passes, and its benchmark), `standard_change_suggestion_integration_test.go` (real
-PostgreSQL, a full paged refresh twice, then the listed customers, a skip and its totals and names,
+PostgreSQL, a full paged refresh twice, a split subject dismissed by its suffixed key and still dismissed
+after the next refresh, then the listed customers, a skip and its totals and names,
 `STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s

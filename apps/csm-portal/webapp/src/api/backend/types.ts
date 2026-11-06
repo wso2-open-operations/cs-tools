@@ -6007,8 +6007,14 @@ export interface BeStandardChangeSuggestionDismissal {
 }
 
 export interface BeStandardChangeSuggestion {
-  /** The normalised subject the cluster is known (and dismissed) by. */
+  /**
+   * The cluster's own key: unique within its customer, kept across refreshes,
+   * what it is dismissed by. Several clusters can share a subject (`subjectKey`),
+   * so this, never the subject, identifies a row.
+   */
   key: string;
+  /** The normalised subject the cluster's members share. */
+  subjectKey?: string;
   customer: BeEntityRef;
   /** The newest member's subject, as written. */
   subject: string;

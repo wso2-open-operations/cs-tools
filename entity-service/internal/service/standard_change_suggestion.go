@@ -18,6 +18,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"regexp"
@@ -57,7 +59,13 @@ import (
 // raised from a template are not candidates at all, which is exact.
 
 // suggestionMaxKey is the longest key stored (standard_change_suggestion_dismissal.suggestion_key).
-const suggestionMaxKey = 512
+// A key is a subject key, or a subject key, '#' and suggestionIDSuffixLen hex
+// digits (see assignSuggestionIdentities), so a subject key is capped shorter.
+const (
+	suggestionMaxKey        = 512
+	suggestionIDSuffixLen   = 12
+	suggestionMaxSubjectKey = suggestionMaxKey - 1 - suggestionIDSuffixLen
+)
 
 // suggestionMaxListed caps the members listed per suggestion (memberCount stays
 // the true count); suggestionMaxEvidence keeps the source plus the evidence
@@ -132,11 +140,12 @@ func suggestionWords(text string) []string {
 	return out
 }
 
-// suggestionKey is a subject's normalised form: the cluster's name, and what a
-// dismissal is recorded under. "" when nothing meaningful is left.
+// suggestionKey is a subject's normalised form: what groups change requests
+// into clusters, and the start of a cluster's key (assignSuggestionIdentities).
+// "" when nothing meaningful is left.
 func suggestionKey(subject string) string {
 	k := strings.Join(suggestionWords(subject), " ")
-	for len(k) > suggestionMaxKey {
+	for len(k) > suggestionMaxSubjectKey {
 		_, size := utf8.DecodeLastRuneInString(k)
 		k = k[:len(k)-size]
 	}
@@ -211,7 +220,8 @@ func newer(a, b repository.SuggestionCandidate) bool {
 // subject group had more than suggestionMaxCompared members: the cluster was
 // built from the newest compared of them.
 type suggestionCluster struct {
-	key             string
+	key             string // the subject key
+	id              string // the cluster's key, unique in its customer (assignSuggestionIdentities)
 	nodes           []suggestionNode
 	core            map[int]bool // index into nodes
 	compared, total int
@@ -450,8 +460,13 @@ func plural(n int, one, many string) string {
 // caller.
 func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSuggestionCriteria,
 	incidents, openProposals map[string][]domain.EntityRef) domain.StandardChangeSuggestion {
+	id := cl.id
+	if id == "" {
+		id = cl.key
+	}
 	s := domain.StandardChangeSuggestion{
-		Key:           cl.key,
+		Key:           id,
+		SubjectKey:    cl.key,
 		Customer:      domain.EntityRef{ID: cl.nodes[0].c.AccountID, Name: cl.nodes[0].c.AccountName},
 		Subject:       cl.nodes[0].c.Subject,
 		MemberCount:   len(cl.nodes),
@@ -538,4 +553,148 @@ func judgeSuggestionCluster(cl suggestionCluster, crit domain.StandardChangeSugg
 // suggestionWindowStart is the earliest completion the window counts.
 func suggestionWindowStart(now time.Time, months int) time.Time {
 	return now.AddDate(0, -months, 0)
+}
+
+// A subject can split into several clusters (plans less alike than
+// PlanSimilarityPercent), so the subject key alone does not tell one customer's
+// clusters apart, and a cluster needs a key of its own: the snapshot row, a
+// dismissal, the API and the page all use it. It must stay the same from one
+// daily refresh to the next, or a dismissal stops applying.
+//
+// No property of the cluster alone is that stable: its members change every day
+// (new completions in, the oldest out of the window and out of the newest-500
+// cap), so a key taken from, say, its oldest member would move every time that
+// member left (monthly, for a monthly change). So the key is carried over from
+// the previous snapshot: a cluster takes the key of the previous run's cluster of
+// the same customer and subject it shares the most change requests with (each
+// key to one cluster, the largest overlaps first). Consecutive runs share nearly
+// every member, so a cluster keeps its key for as long as it exists; when a
+// subject splits, the part with the larger overlap keeps it.
+//
+// A cluster with no predecessor (a new one, the first refresh, or a customer the
+// previous refresh skipped) is minted a key: the bare subject key when no other
+// cluster of the subject holds it (most subjects have one cluster, and a
+// dismissal made before clusters had keys of their own keeps matching), else the
+// subject key, '#' and 12 hex digits of a hash of its oldest core member's id
+// (the next oldest's on a clash). The largest new clusters are minted first.
+
+// suggestionSubjectOf is the subject key a cluster key starts with.
+func suggestionSubjectOf(key string) string {
+	subject, _, _ := strings.Cut(key, "#")
+	return subject
+}
+
+// validSuggestionKey reports whether key is a cluster key as minted here: a
+// subject key, optionally '#' and suggestionIDSuffixLen lower-case hex digits.
+func validSuggestionKey(key string) bool {
+	subject, suffix, split := strings.Cut(key, "#")
+	if subject == "" || suggestionKey(subject) != subject {
+		return false
+	}
+	if !split {
+		return true
+	}
+	if len(suffix) != suggestionIDSuffixLen {
+		return false
+	}
+	for _, r := range suffix {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// oldestCoreFirst lists a cluster's core members, oldest first (nodes are newest first).
+func (cl suggestionCluster) oldestCoreFirst() []suggestionNode {
+	var out []suggestionNode
+	for i := len(cl.nodes) - 1; i >= 0; i-- {
+		if cl.core[i] {
+			out = append(out, cl.nodes[i])
+		}
+	}
+	return out
+}
+
+// assignSuggestionIdentities sets id on each of ONE customer's clusters, from
+// that customer's rows of the previous snapshot (see above).
+func assignSuggestionIdentities(clusters []suggestionCluster, previous []repository.SuggestionSnapshotRow) {
+	type match struct{ cluster, prev, overlap int }
+	var matches []match
+	for ci, cl := range clusters {
+		ids := make(map[string]bool, len(cl.nodes))
+		for _, n := range cl.nodes {
+			ids[strings.ToLower(n.c.ID)] = true
+		}
+		for pi, prev := range previous {
+			if !validSuggestionKey(prev.Key) || suggestionSubjectOf(prev.Key) != cl.key {
+				continue
+			}
+			overlap := 0
+			for _, id := range prev.MemberIDs {
+				if ids[strings.ToLower(id)] {
+					overlap++
+				}
+			}
+			if overlap > 0 {
+				matches = append(matches, match{ci, pi, overlap})
+			}
+		}
+	}
+	sort.SliceStable(matches, func(a, b int) bool {
+		if matches[a].overlap != matches[b].overlap {
+			return matches[a].overlap > matches[b].overlap
+		}
+		if matches[a].cluster != matches[b].cluster {
+			return matches[a].cluster < matches[b].cluster
+		}
+		return matches[a].prev < matches[b].prev
+	})
+	taken := map[string]bool{}
+	for _, m := range matches {
+		key := previous[m.prev].Key
+		if clusters[m.cluster].id != "" || taken[key] {
+			continue
+		}
+		clusters[m.cluster].id, taken[key] = key, true
+	}
+
+	var fresh []int
+	for ci := range clusters {
+		if clusters[ci].id == "" {
+			fresh = append(fresh, ci)
+		}
+	}
+	sort.SliceStable(fresh, func(a, b int) bool {
+		x, y := clusters[fresh[a]], clusters[fresh[b]]
+		if len(x.nodes) != len(y.nodes) {
+			return len(x.nodes) > len(y.nodes)
+		}
+		return x.oldestCoreFirst()[0].c.ID < y.oldestCoreFirst()[0].c.ID
+	})
+	for _, ci := range fresh {
+		cl := &clusters[ci]
+		if !taken[cl.key] {
+			cl.id, taken[cl.key] = cl.key, true
+			continue
+		}
+		core := cl.oldestCoreFirst()
+		for _, n := range core {
+			if key := cl.key + "#" + suggestionIDSuffix(n.c.ID); !taken[key] {
+				cl.id, taken[key] = key, true
+				break
+			}
+		}
+		for i := 1; cl.id == ""; i++ { // every core member's clashed: practically never
+			if key := cl.key + "#" + suggestionIDSuffix(fmt.Sprintf("%s/%d", core[0].c.ID, i)); !taken[key] {
+				cl.id, taken[key] = key, true
+			}
+		}
+	}
+}
+
+// suggestionIDSuffix is suggestionIDSuffixLen hex digits of a hash of id.
+func suggestionIDSuffix(id string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(id)))
+	return hex.EncodeToString(sum[:])[:suggestionIDSuffixLen]
 }

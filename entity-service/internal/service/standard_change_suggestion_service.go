@@ -246,6 +246,11 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		return domain.RefreshStandardChangeSuggestionsResponse{}, err
 	}
 	resp := domain.RefreshStandardChangeSuggestionsResponse{RunID: run.ID}
+	// The previous snapshot, which each customer's clusters take their keys from.
+	previous, err := s.repo.LatestRun(ctx)
+	if err != nil {
+		return resp, err
+	}
 	todo := accounts[:min(limit, len(accounts))]
 	for i, account := range todo {
 		if i > 0 && s.now().Sub(pageStart) > suggestionRefreshBudget {
@@ -256,7 +261,7 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 		}
 		customerStart := s.now()
 		customerCtx, cancel := context.WithTimeout(ctx, suggestionCustomerTimeout)
-		rows, candidates, err := s.computeCustomer(customerCtx, account, since, crit)
+		rows, candidates, err := s.computeCustomer(customerCtx, account, since, crit, previous)
 		// Its own deadline, not the call's (a query cut short reports it in its own words).
 		overran := errors.Is(customerCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancel()
@@ -307,9 +312,10 @@ func (s *standardChangeSuggestionService) Refresh(ctx context.Context, req domai
 }
 
 // computeCustomer computes one customer's suggestions: its candidates and their
-// clusters, each judged. It also returns how many candidates there were (also
+// clusters, each judged and keyed from the customer's rows of the previous
+// snapshot (nil: none). It also returns how many candidates there were (also
 // with an error, once they were read). It stops with ctx's error when ctx ends.
-func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria) ([]repository.SuggestionSnapshotRow, int, error) {
+func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, account string, since time.Time, crit domain.StandardChangeSuggestionCriteria, previous *repository.SuggestionRun) ([]repository.SuggestionSnapshotRow, int, error) {
 	cands, err := s.repo.Candidates(ctx, account, since)
 	if err != nil {
 		return nil, 0, err
@@ -321,6 +327,13 @@ func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, a
 	if len(clusters) == 0 {
 		return nil, len(cands), nil
 	}
+	var before []repository.SuggestionSnapshotRow
+	if previous != nil {
+		if before, err = s.repo.SnapshotKeys(ctx, previous.ID, account); err != nil {
+			return nil, len(cands), err
+		}
+	}
+	assignSuggestionIdentities(clusters, before)
 	var memberIDs []string
 	for _, cl := range clusters {
 		for _, n := range cl.nodes {
@@ -338,7 +351,7 @@ func (s *standardChangeSuggestionService) computeCustomer(ctx context.Context, a
 		for i, n := range cl.nodes {
 			ids[i] = n.c.ID
 		}
-		rows = append(rows, repository.SuggestionSnapshotRow{AccountID: account, Key: cl.key, Eligible: sg.Eligible, MemberIDs: ids, Suggestion: sg})
+		rows = append(rows, repository.SuggestionSnapshotRow{AccountID: account, Key: sg.Key, Eligible: sg.Eligible, MemberIDs: ids, Suggestion: sg})
 	}
 	return rows, len(cands), nil
 }
@@ -369,9 +382,9 @@ func (s *standardChangeSuggestionService) DismissSuggestion(ctx context.Context,
 	if key == "" || len(key) > suggestionMaxKey {
 		return domain.StandardChangeSuggestionDismissal{}, &apierror.ValidationError{Msg: fmt.Sprintf("key is required (the suggestion's key, at most %d bytes)", suggestionMaxKey)}
 	}
-	// The key is the normalised subject: a key that is not one never matches a
-	// suggestion, so it is refused rather than stored.
-	if suggestionKey(key) != key {
+	// A key that is not a cluster key never matches a suggestion, so it is
+	// refused rather than stored.
+	if !validSuggestionKey(key) {
 		return domain.StandardChangeSuggestionDismissal{}, &apierror.ValidationError{Msg: "key is not a suggestion key: send the key the suggestion carries"}
 	}
 	reason := strings.TrimSpace(req.Reason)

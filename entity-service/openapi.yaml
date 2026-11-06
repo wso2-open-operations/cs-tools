@@ -34171,7 +34171,15 @@ components:
     StandardChangeSuggestion:
       type: object
       properties:
-        key: {type: string, description: "The normalised subject the cluster is known and dismissed by."}
+        key:
+          type: string
+          description: >-
+            The cluster's own key: unique within its customer, kept from one refresh to the next (a
+            cluster takes the key of the previous snapshot's cluster it shares the most change
+            requests with), and what it is dismissed by. It is subjectKey, or, when the subject
+            split into more than one cluster (plans less alike than planSimilarityPercent),
+            subjectKey, '#' and 12 hex digits.
+        subjectKey: {type: string, description: "The normalised subject the cluster's members share; several clusters can share one."}
         customer: {$ref: '#/components/schemas/EntityRef'}
         subject: {type: string, description: "The newest member's subject, as written."}
         memberCount: {type: integer}

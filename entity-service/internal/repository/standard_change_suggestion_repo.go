@@ -86,6 +86,10 @@ type StandardChangeSuggestionRepository interface {
 	// SnapshotRows reads a run's rows: of one customer when accountID is set, and
 	// only the eligible ones unless includeIneligible.
 	SnapshotRows(ctx context.Context, runID, accountID string, includeIneligible bool) ([]SuggestionSnapshotRow, error)
+	// SnapshotKeys is one customer's rows of a run with only their keys and
+	// member ids (no suggestion decoded): what the next refresh carries the
+	// clusters' keys over from.
+	SnapshotKeys(ctx context.Context, runID, accountID string) ([]SuggestionSnapshotRow, error)
 }
 
 // SuggestionRun is one refresh run (standard_change_suggestion_run).
@@ -561,6 +565,31 @@ func (r *standardChangeSuggestionRepo) SnapshotRows(ctx context.Context, runID, 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read suggestions: %w", err)
+	}
+	return out, nil
+}
+
+// SnapshotKeys implements StandardChangeSuggestionRepository.
+func (r *standardChangeSuggestionRepo) SnapshotKeys(ctx context.Context, runID, accountID string) ([]SuggestionSnapshotRow, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT suggestion_key, member_ids::text[]
+		  FROM standard_change_suggestion_snapshot
+		 WHERE run_id = $1::uuid AND account_id = $2::uuid
+		 ORDER BY id`, runID, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("read suggestion keys: %w", err)
+	}
+	defer rows.Close()
+	var out []SuggestionSnapshotRow
+	for rows.Next() {
+		row := SuggestionSnapshotRow{AccountID: accountID}
+		if err := rows.Scan(&row.Key, &row.MemberIDs); err != nil {
+			return nil, fmt.Errorf("read suggestion keys: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read suggestion keys: %w", err)
 	}
 	return out, nil
 }

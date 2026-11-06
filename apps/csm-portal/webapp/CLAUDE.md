@@ -743,7 +743,10 @@ declarations, values, `{{key}}` placeholders, completeness, the preview's render
     refresh: …", up to five names, then "and N more"), and with that one customer selected the empty table
     says the same instead of "No change is done often enough". A suggestion built from only part of a large
     subject (entity-service compares the newest 500) carries `sample`: a "Newest 500 of 3,000" chip on the
-    row (`suggestionSampleLabel`) and a "Based on" line in the details (`suggestionSampleText`).
+    row (`suggestionSampleLabel`) and a "Based on" line in the details (`suggestionSampleText`). A row is
+    identified by customer and `key`, never by the subject: one subject can split into several clusters
+    (`subjectKey` is shared, `key` is not), and keyed by subject they expanded, went busy and were dismissed
+    together, and left ghost rows behind a filter.
     Each row: the newest subject, chips for a near miss, a dismissal, incidents; closed / rolled back / success;
     the last completion; and the actions (`suggestionActions`): **Propose** (`kind: "new"` from `proposeFrom`,
     then a PATCH citing `suggestionProposalEvidence`: the source and the other closed members, at most 100),

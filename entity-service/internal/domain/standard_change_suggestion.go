@@ -114,9 +114,14 @@ type StandardChangeSuggestionSkipped struct {
 // StandardChangeSuggestion is one cluster of a customer's completed change
 // requests that look like the same change done again and again.
 type StandardChangeSuggestion struct {
-	// Key is the normalised subject the cluster is known (and dismissed) by.
-	Key      string    `json:"key"`
-	Customer EntityRef `json:"customer"`
+	// Key is the cluster's own key, unique within its customer and kept from one
+	// refresh to the next: what it is dismissed by. It is SubjectKey, or
+	// SubjectKey, '#' and 12 hex digits when the subject split into more than
+	// one cluster.
+	Key string `json:"key"`
+	// SubjectKey is the normalised subject the cluster's members share.
+	SubjectKey string    `json:"subjectKey"`
+	Customer   EntityRef `json:"customer"`
 	// Subject is the newest member's subject, as written.
 	Subject       string  `json:"subject"`
 	MemberCount   int     `json:"memberCount"`
