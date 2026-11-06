@@ -64,6 +64,22 @@ function startOfRelativeQuarter(now: Date, n: number): Date {
   return base;
 }
 
+/** The Monday of the week `n` weeks from `now`'s own week (local), e.g. n=0
+ * this week, n=-1 last week. Weeks run Monday to Sunday (ISO) — mirrors
+ * `case_filters.go`'s `startOfRelativeWeek`. */
+function startOfRelativeWeek(now: Date, n: number): Date {
+  const refToday = today(now);
+  // getDay(): 0 = Sunday ... 6 = Saturday, so Sunday is 6 days after Monday.
+  const sinceMonday = (refToday.getDay() + 6) % 7;
+  return addDays(refToday, -sinceMonday + n * 7);
+}
+
+/** 1 January of the year `n` years from `now`'s own year (local) — mirrors
+ * `case_filters.go`'s `startOfRelativeYear`. */
+function startOfRelativeYear(now: Date, n: number): Date {
+  return localMidnight(now.getFullYear() + n, 0, 1);
+}
+
 /**
  * Converts a resolved calendar day (local midnight) into the concrete RFC3339
  * instant this filter entry's own `op` means: for `lte`, the day is inclusive
@@ -128,7 +144,7 @@ export function resolveRelativeDatePlaceholderToDate(value: string, now: Date): 
 }
 
 /** "this month", "last month", "next month", "the month 3 months ago". */
-function periodPhrase(unit: "month" | "quarter", n: number): string {
+function periodPhrase(unit: "week" | "month" | "quarter" | "year", n: number): string {
   if (n === 0) return `this ${unit}`;
   if (n === -1) return `last ${unit}`;
   if (n === 1) return `next ${unit}`;
@@ -137,7 +153,8 @@ function periodPhrase(unit: "month" | "quarter", n: number): string {
 
 /**
  * A relative-date placeholder in words, for showing a filter to a person:
- * "Today", "30 days ago", "Start of last month", "End of this quarter". The
+ * "Today", "30 days ago", "Start of this week", "Start of last month", "End of
+ * this quarter", "End of last year". The
  * same wording as the Cases list's `RELATIVE_DATE_PRESETS`, so a widget's
  * placeholder reads the same wherever it is shown. `undefined` for anything
  * {@link resolveRelativeDatePlaceholder} would not resolve.
@@ -160,6 +177,14 @@ export function describeRelativeDatePlaceholder(value: string): string | undefin
       return `Start of ${periodPhrase("quarter", n)}`;
     case "endOfQuarter":
       return `End of ${periodPhrase("quarter", n)}`;
+    case "startOfWeek":
+      return `Start of ${periodPhrase("week", n)}`;
+    case "endOfWeek":
+      return `End of ${periodPhrase("week", n)}`;
+    case "startOfYear":
+      return `Start of ${periodPhrase("year", n)}`;
+    case "endOfYear":
+      return `End of ${periodPhrase("year", n)}`;
     default:
       return undefined;
   }
@@ -204,6 +229,27 @@ function relativeDay(value: string, now: Date): Date | undefined {
     case "endOfQuarter": {
       if (argStr === undefined) return undefined;
       return addDays(startOfRelativeQuarter(now, Number(argStr) + 1), -1);
+    }
+
+    case "startOfWeek": {
+      if (argStr === undefined) return undefined;
+      return startOfRelativeWeek(now, Number(argStr));
+    }
+
+    case "endOfWeek": {
+      if (argStr === undefined) return undefined;
+      // The Sunday: six days after that week's Monday.
+      return addDays(startOfRelativeWeek(now, Number(argStr)), 6);
+    }
+
+    case "startOfYear": {
+      if (argStr === undefined) return undefined;
+      return startOfRelativeYear(now, Number(argStr));
+    }
+
+    case "endOfYear": {
+      if (argStr === undefined) return undefined;
+      return addDays(startOfRelativeYear(now, Number(argStr) + 1), -1);
     }
 
     default:

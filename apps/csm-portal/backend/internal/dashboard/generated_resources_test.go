@@ -25,6 +25,24 @@ func opsDashboard(widgets ...string) string {
 	return `{"displayName":"Operations","type":"cs","isDefault":false,"targetTeam":"","isTeamBased":false,"widgets":[` + strings.Join(widgets, ",") + `]}`
 }
 
+// TestParseGenerated_AcceptsWeekAndYearDates: an operations widget's created
+// date may be this or last week, or this or last year.
+func TestParseGenerated_AcceptsWeekAndYearDates(t *testing.T) {
+	raw := opsDashboard(
+		`{"id":"incidents-this-week","displayName":"Incidents This Week","resourceType":"incident","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfWeek:0__"]}]}}`,
+		`{"id":"incidents-last-week","displayName":"Incidents Last Week","resourceType":"incident","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfWeek:-1__"]},{"field":"createdOn","op":"lte","values":["__endOfWeek:-1__"]}]}}`,
+		`{"id":"crs-this-year","displayName":"Change Requests This Year","resourceType":"change_request","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfYear:0__"]}]}}`,
+		`{"id":"crs-last-year","displayName":"Change Requests Last Year","resourceType":"change_request","shape":"count","gridWidth":3,
+		  "query":{"filters":[{"field":"createdOn","op":"gte","values":["__startOfYear:-1__"]},{"field":"createdOn","op":"lte","values":["__endOfYear:-1__"]}]}}`,
+	)
+	if _, err := ParseGenerated([]byte(raw)); err != nil {
+		t.Fatalf("ParseGenerated: %v", err)
+	}
+}
+
 func TestParseGenerated_AcceptsOperationsWidgets(t *testing.T) {
 	raw := opsDashboard(
 		`{"id":"p1-open","displayName":"Critical Open Incidents","resourceType":"incident","shape":"count","gridWidth":3,

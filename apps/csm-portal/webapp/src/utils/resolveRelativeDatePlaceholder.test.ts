@@ -15,7 +15,11 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { describeRelativeDatePlaceholder, resolveRelativeDatePlaceholder } from "./resolveRelativeDatePlaceholder";
+import {
+  describeRelativeDatePlaceholder,
+  resolveRelativeDatePlaceholder,
+  resolveRelativeDatePlaceholderToDate,
+} from "./resolveRelativeDatePlaceholder";
 
 // A fixed reference instant so every assertion is deterministic regardless of
 // the machine/timezone running the test — 2026-08-15 14:30 in whatever
@@ -88,6 +92,76 @@ describe("resolveRelativeDatePlaceholder", () => {
     );
   });
 
+  it("resolves __startOfWeek:N__ / __endOfWeek:N__ to weeks that run Monday to Sunday", () => {
+    // Aug 15, 2026 is a Saturday. This week (n=0): Mon Aug 10 - Sun Aug 16.
+    expect(resolveRelativeDatePlaceholder("__startOfWeek:0__", "gte", NOW)).toBe(
+      localMidnightIso(2026, 7, 10),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfWeek:0__", "lte", NOW)).toBe(
+      localEndOfDayIso(2026, 7, 16),
+    );
+    // Last week (n=-1): Mon Aug 3 - Sun Aug 9.
+    expect(resolveRelativeDatePlaceholder("__startOfWeek:-1__", "gte", NOW)).toBe(
+      localMidnightIso(2026, 7, 3),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfWeek:-1__", "lte", NOW)).toBe(
+      localEndOfDayIso(2026, 7, 9),
+    );
+  });
+
+  it("counts a Sunday as the last day of its week, and a Monday as the first", () => {
+    const sunday = new Date(2026, 7, 16, 9, 0, 0, 0);
+    expect(resolveRelativeDatePlaceholder("__startOfWeek:0__", "gte", sunday)).toBe(
+      localMidnightIso(2026, 7, 10),
+    );
+    const monday = new Date(2026, 7, 10, 9, 0, 0, 0);
+    expect(resolveRelativeDatePlaceholder("__startOfWeek:0__", "gte", monday)).toBe(
+      localMidnightIso(2026, 7, 10),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfWeek:0__", "lte", monday)).toBe(
+      localEndOfDayIso(2026, 7, 16),
+    );
+  });
+
+  it("crosses a month and a year boundary for a week", () => {
+    // Thu Jan 1, 2026: its week starts Mon Dec 29, 2025.
+    const newYear = new Date(2026, 0, 1, 9, 0, 0, 0);
+    expect(resolveRelativeDatePlaceholder("__startOfWeek:0__", "gte", newYear)).toBe(
+      localMidnightIso(2025, 11, 29),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfWeek:0__", "lte", newYear)).toBe(
+      localEndOfDayIso(2026, 0, 4),
+    );
+  });
+
+  it("resolves __startOfYear:N__ / __endOfYear:N__", () => {
+    expect(resolveRelativeDatePlaceholder("__startOfYear:0__", "gte", NOW)).toBe(
+      localMidnightIso(2026, 0, 1),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfYear:0__", "lte", NOW)).toBe(
+      localEndOfDayIso(2026, 11, 31),
+    );
+    expect(resolveRelativeDatePlaceholder("__startOfYear:-1__", "gte", NOW)).toBe(
+      localMidnightIso(2025, 0, 1),
+    );
+    expect(resolveRelativeDatePlaceholder("__endOfYear:-1__", "lte", NOW)).toBe(
+      localEndOfDayIso(2025, 11, 31),
+    );
+  });
+
+  it("needs an offset on the week and year placeholders", () => {
+    for (const v of ["__startOfWeek__", "__endOfWeek__", "__startOfYear__", "__endOfYear__"]) {
+      expect(resolveRelativeDatePlaceholder(v, "gte", NOW)).toBeUndefined();
+    }
+  });
+
+  it("resolves the week and year placeholders to plain dates for a time card's whole-day bounds", () => {
+    expect(resolveRelativeDatePlaceholderToDate("__startOfWeek:0__", NOW)).toBe("2026-08-10");
+    expect(resolveRelativeDatePlaceholderToDate("__endOfWeek:0__", NOW)).toBe("2026-08-16");
+    expect(resolveRelativeDatePlaceholderToDate("__startOfYear:-1__", NOW)).toBe("2025-01-01");
+    expect(resolveRelativeDatePlaceholderToDate("__endOfYear:-1__", NOW)).toBe("2025-12-31");
+  });
+
   it("leaves a literal date value untouched", () => {
     expect(resolveRelativeDatePlaceholder("2026-01-01", "gte", NOW)).toBeUndefined();
     expect(
@@ -134,6 +208,11 @@ describe("describeRelativeDatePlaceholder", () => {
     expect(describeRelativeDatePlaceholder("__startOfMonth:-3__")).toBe("Start of the month 3 months ago");
     expect(describeRelativeDatePlaceholder("__endOfQuarter:-1__")).toBe("End of last quarter");
     expect(describeRelativeDatePlaceholder("__startOfQuarter:2__")).toBe("Start of the quarter 2 quarters ahead");
+    expect(describeRelativeDatePlaceholder("__startOfWeek:0__")).toBe("Start of this week");
+    expect(describeRelativeDatePlaceholder("__endOfWeek:-1__")).toBe("End of last week");
+    expect(describeRelativeDatePlaceholder("__startOfWeek:-2__")).toBe("Start of the week 2 weeks ago");
+    expect(describeRelativeDatePlaceholder("__startOfYear:0__")).toBe("Start of this year");
+    expect(describeRelativeDatePlaceholder("__endOfYear:-1__")).toBe("End of last year");
   });
 
   it("describes nothing the resolver would not resolve", () => {

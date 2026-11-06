@@ -456,6 +456,15 @@ func TestResolveRelativeDate_Resolutions(t *testing.T) {
 		{"endOfQuarter 0 (Q3 ends Sep 30)", "__endOfQuarter:0__", "2026-09-30"},
 		{"endOfQuarter 1 (Q4 ends Dec 31)", "__endOfQuarter:1__", "2026-12-31"},
 		{"year rollover: startOfMonth 6 from August", "__startOfMonth:6__", "2027-02-01"},
+		// Weeks run Monday to Sunday; fixedNow is a Saturday.
+		{"startOfWeek 0 (this week starts Monday)", "__startOfWeek:0__", "2026-08-10"},
+		{"endOfWeek 0 (this week ends Sunday)", "__endOfWeek:0__", "2026-08-16"},
+		{"startOfWeek -1 (last week)", "__startOfWeek:-1__", "2026-08-03"},
+		{"endOfWeek -1 (last week)", "__endOfWeek:-1__", "2026-08-09"},
+		{"startOfYear 0 (this year)", "__startOfYear:0__", "2026-01-01"},
+		{"endOfYear 0 (this year)", "__endOfYear:0__", "2026-12-31"},
+		{"startOfYear -1 (last year)", "__startOfYear:-1__", "2025-01-01"},
+		{"endOfYear -1 (last year)", "__endOfYear:-1__", "2025-12-31"},
 	}
 
 	for _, tc := range cases {
@@ -469,6 +478,29 @@ func TestResolveRelativeDate_Resolutions(t *testing.T) {
 			}
 			if resolved != tc.expected {
 				t.Fatalf("resolveRelativeDate(%q) = %q, want %q", tc.value, resolved, tc.expected)
+			}
+		})
+	}
+}
+
+// A week's edges, on the days that decide them: a Sunday ends its week, a
+// Monday starts one, and a week can start in the previous year.
+func TestResolveRelativeDate_WeekEdges(t *testing.T) {
+	cases := []struct {
+		name, value string
+		now         time.Time
+		expected    string
+	}{
+		{"a Sunday's week started the Monday before", "__startOfWeek:0__", time.Date(2026, time.August, 16, 23, 0, 0, 0, time.UTC), "2026-08-10"},
+		{"a Monday starts its own week", "__startOfWeek:0__", time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC), "2026-08-10"},
+		{"1 January 2026's week starts in 2025", "__startOfWeek:0__", time.Date(2026, time.January, 1, 9, 0, 0, 0, time.UTC), "2025-12-29"},
+		{"and ends in 2026", "__endOfWeek:0__", time.Date(2026, time.January, 1, 9, 0, 0, 0, time.UTC), "2026-01-04"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved, matched, err := resolveRelativeDate(tc.value, tc.now)
+			if err != nil || !matched || resolved != tc.expected {
+				t.Fatalf("resolveRelativeDate(%q) on %s = %q %v %v, want %q", tc.value, tc.now.Format("2006-01-02"), resolved, matched, err, tc.expected)
 			}
 		})
 	}
@@ -498,6 +530,8 @@ func TestResolveRelativeDate_Rejections(t *testing.T) {
 		"__today:5__",        // today takes no argument
 		"__startOfMonth__",   // missing required offset
 		"__startOfQuarter__", // missing required offset
+		"__startOfWeek__",    // missing required offset
+		"__endOfYear:x__",    // non-integer offset
 	}
 
 	for _, value := range cases {
