@@ -84,6 +84,7 @@ import {
   RICH_TEXT_BLOCK_TAGS,
 } from "@components/rich-text-editor/richTextConstants";
 import {
+  imagePasteRefusalMessage,
   inlineImageRefusal,
   inlineImagesInEditor,
   inlineImagesTotalMessage,
@@ -285,40 +286,24 @@ const Toolbar = ({
         resetInput();
         return;
       }
-      if (imageUploader) {
-        const refusal = inlineImageRefusal(inlineImagesInEditor(editor), file.size);
-        if (refusal) {
-          showError(refusal === "count" ? MAX_COMMENT_IMAGES_MESSAGE : inlineImagesTotalMessage());
-          resetInput();
-          return;
-        }
-        const src = imageUploader(file);
-        rememberInlineImageSize(src, file.size);
-        editor.focus(() => {
-          editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
-        });
+      if (!imageUploader) {
+        showError(imagePasteRefusalMessage("disabled"));
         resetInput();
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          editor.focus(() => {
-            editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-              src: reader.result as string,
-              altText: file.name,
-            });
-          });
-        }
+      const refusal = inlineImageRefusal(inlineImagesInEditor(editor), file.size);
+      if (refusal) {
+        showError(refusal === "count" ? MAX_COMMENT_IMAGES_MESSAGE : inlineImagesTotalMessage());
         resetInput();
-      };
-      reader.onerror = () => {
-        showError(
-          `Failed to read image file "${file.name}". Please try again.`,
-        );
-        resetInput();
-      };
-      reader.readAsDataURL(file);
+        return;
+      }
+      const src = imageUploader(file);
+      rememberInlineImageSize(src, file.size);
+      editor.focus(() => {
+        editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src, altText: file.name });
+      });
+      resetInput();
+      return;
     }
   };
 
@@ -847,18 +832,20 @@ const Toolbar = ({
 
           {!isDescribeIssue && (
             <>
-              <Tooltip title="Upload Image">
-                <ToggleButton size="small" component="label" value="image">
-                  <ImageIcon size={16} />
-                  <input
-                    ref={imageInputRef}
-                    type="file"
-                    hidden
-                    accept={ALLOWED_IMAGE_MIME_TYPES.join(",")}
-                    onChange={onImageUpload}
-                  />
-                </ToggleButton>
-              </Tooltip>
+              {imageUploader && (
+                <Tooltip title="Upload Image">
+                  <ToggleButton size="small" component="label" value="image">
+                    <ImageIcon size={16} />
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      hidden
+                      accept={ALLOWED_IMAGE_MIME_TYPES.join(",")}
+                      onChange={onImageUpload}
+                    />
+                  </ToggleButton>
+                </Tooltip>
+              )}
 
               {onAttachmentClick && (
                 <Tooltip title="Attach File">

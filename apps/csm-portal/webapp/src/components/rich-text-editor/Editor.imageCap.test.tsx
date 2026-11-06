@@ -166,20 +166,26 @@ describe("Editor image cap (upload on paste)", () => {
     expect(onPasteError).toHaveBeenCalledWith("count");
   });
 
-  it("does not cap an editor without onImageUpload (it embeds base64; the server caps those)", async () => {
+  it("refuses an image in an editor without onImageUpload and never embeds it as base64", async () => {
     const { onPasteError } = setup(false);
-    const readAsDataURL = vi
-      .spyOn(FileReader.prototype, "readAsDataURL")
-      .mockImplementation(function (this: FileReader) {
-        Object.defineProperty(this, "result", { value: "data:image/png;base64,AAAA" });
-        this.onload?.({ target: this } as unknown as ProgressEvent<FileReader>);
-      });
+    const readAsDataURL = vi.spyOn(FileReader.prototype, "readAsDataURL");
     try {
-      for (let i = 0; i < MAX_COMMENT_IMAGES + 2; i += 1) await pasteImages([png()]);
-      await waitFor(() => expect(editorImages()).toHaveLength(MAX_COMMENT_IMAGES + 2));
-      expect(onPasteError).not.toHaveBeenCalled();
+      const event = await pasteImages([png()]);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onPasteError).toHaveBeenCalledWith("disabled");
+      expect(readAsDataURL).not.toHaveBeenCalled();
+      expect(editorImages()).toHaveLength(0);
     } finally {
       readAsDataURL.mockRestore();
     }
+  });
+
+  it("says why when no handler is given for a refused image", async () => {
+    render(<Editor autoFocus showToolbar={false} onChange={() => {}} />);
+
+    await pasteImages([png()]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Images can't be added to this field.");
   });
 });

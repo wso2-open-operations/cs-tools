@@ -78,7 +78,7 @@ export function inlineImagesTotalMessage(): string {
 }
 
 /** Why a pasted image was refused. */
-export type ImagePasteRefusal = "size" | "type" | "count" | "total";
+export type ImagePasteRefusal = "size" | "type" | "count" | "total" | "disabled";
 
 /** The message for a refused pasted image. */
 export function imagePasteRefusalMessage(reason: ImagePasteRefusal): string {
@@ -87,6 +87,8 @@ export function imagePasteRefusalMessage(reason: ImagePasteRefusal): string {
       return MAX_COMMENT_IMAGES_MESSAGE;
     case "total":
       return inlineImagesTotalMessage();
+    case "disabled":
+      return "Images can't be added to this field.";
     case "type":
       return `That image format isn't supported. Allowed formats: ${ALLOWED_IMAGE_TYPES_LABEL}.`;
     default:
