@@ -72,7 +72,9 @@ window.config = {
   // A section's setting cascades to its tabs, and a tab can override it: the
   // block below puts Operations in preview while keeping the finished
   // Incidents tab usable (which also keeps Operations itself clickable for
-  // everyone). A "hidden" section hides its tabs unconditionally.
+  // everyone). A "hidden" section hides its tabs unconditionally, including a
+  // tab set to "enabled". That lasts until the first save, which stores the
+  // section as "preview", so an explicitly enabled tab then opens.
   //
   // Available ids: dashboard, support, operations{.service-requests,
   // .change-requests, .incidents, .problems}, engagements, security-center

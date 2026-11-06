@@ -194,7 +194,7 @@ and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
   tag on such a section. `wip` is only read, from `config.js`, as `preview`.
 * **`hidden` is no longer a stored state.** It still exists as a *resolved* result: a role capability the user
   lacks, a Preview page for someone who is not an admin, or a legacy `hidden` line in `config.js` nobody has
-  saved over yet (that line keeps hiding until the first save writes it as `preview`). Settings never offers it.
+  saved over yet (that line keeps hiding until the first save writes it as `preview`, including a page under it that was explicitly `enabled`; that page then opens). Settings never offers it.
 * **The browser-local Feature Preview** (`FeaturePreviewDialog`, `featurePreview.ts`) is unchanged and now only
   has legacy `hidden` lines to offer. It is slated for removal in a follow-up once this has been seen working.
 * **Re-rendering.** `featureState` is a plain function, so anything that renders from it calls
