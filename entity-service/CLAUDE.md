@@ -8642,6 +8642,32 @@ an unknown creator is a validation error. Verified against the real schema with
 `PREPARE` on staging and end to end on a local database built from all
 migrations.
 
+**Update: plain-Postgres creates now use ServiceNow's number format.** `case_repo.go`'s
+five `create*PortalQuery` statements (case, announcement, service request, engagement,
+security report analysis) call `next_work_item_number('<TYPE>')` (`CS0000123`, one shared
+`cs_number_seq`) and `next_wso2_id(project)` (`<project key>-<n>`, `project.wso2_id_counter`)
+from migration `0180`, instead of the `CS-PORTAL-` / `-PORTAL-` generators below. The same
+switch applies to **incident** (`INC...`), **change request** (`CHG...`), **problem**
+(`PRB...`, both `problem_repo.go` and the incident report flow) and **conversation**
+(`CHAT...`); incident tasks were already on the `TASK` series (migration 0201, started at
+`TASK1000000`). The portal generators remain only for records already created and for
+`incident_task_cascade_integration_test.go`'s raw SQL.
+
+**Deploy preconditions, not optional.** (1) ServiceNow must have **stopped allocating** these
+numbers and ids and the final sync must be done: both sides draw from the same series, so a
+number issued here can otherwise be issued by ServiceNow too, and the second insert then
+fails on `work_item_number_key` / `work_item_wso2_id_key`. Re-running the seed after a late
+sync moves *our* counters past ServiceNow's new maximum, but it cannot undo a number that was
+already issued on both sides, so it is not a substitute for stopping ServiceNow first (the
+seed script's own header says the same: run it after the final sync, with the sync stopped).
+If the two systems have to run side by side, this change needs disjoint ranges instead (for
+example seeding the counters well above ServiceNow's range, as incident tasks do). (2) Every
+counter starts at 0/1, so each database must run `scripts/cutover/seed_native_numbering.sql`
+(dry run by default; `-v apply=1` to apply) right before this build is deployed to it, or a
+new case's `<key>-1` collides with an existing synced id and a `CS` number does once the
+sequence reaches a synced one. The dual-write create path takes ServiceNow's own number and
+is unaffected. Existing `CS-PORTAL-` records are not renamed.
+
 **Resolved by migration `0140_portal_created_work_item_numbering.sql`**, which
 this section used to say was still an open product decision. `number` for
 every work_item type comes from `next_portal_work_item_number()`
