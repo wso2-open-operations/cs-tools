@@ -62,7 +62,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
   it("does nothing when the description has no local image", async () => {
     const draft = draftOf({});
     const source = '<p>hi</p><img src="/abcdef12-0000-0000-0000-000000000000">';
-    const result = await uploadInlineImagesBeforeCreate(authFetch, "p1", source, draft);
+    const result = await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, source, draft);
     expect(result).toEqual({ ok: true, html: source });
     expect(mocks.uploadStoredAttachment).not.toHaveBeenCalled();
   });
@@ -71,7 +71,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
     const draft = draftOf({ "blob:a": "a.png", "blob:b": "b.png" });
     const result = await uploadInlineImagesBeforeCreate(
       authFetch,
-      "p1",
+      { projectId: "p1" },
       html("blob:a", "blob:b"),
       draft,
     );
@@ -87,6 +87,14 @@ describe("uploadInlineImagesBeforeCreate", () => {
     expect(out).toContain('src="/id-2"');
   });
 
+  it("uploads under the record when given a parentId (a comment on an existing record)", async () => {
+    const draft = draftOf({ "blob:a": "a.png" });
+    await uploadInlineImagesBeforeCreate(authFetch, { parentId: "case-1" }, html("blob:a"), draft);
+    const input = mocks.uploadStoredAttachment.mock.calls[0][1];
+    expect(input).toMatchObject({ type: "comment", parentId: "case-1" });
+    expect(input).not.toHaveProperty("projectId");
+  });
+
   it("starts all uploads before any finishes (in parallel)", async () => {
     const release: Array<() => void> = [];
     mocks.uploadStoredAttachment.mockImplementation(
@@ -95,7 +103,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
     const draft = draftOf({ "blob:a": "a.png", "blob:b": "b.png", "blob:c": "c.png" });
     const pending = uploadInlineImagesBeforeCreate(
       authFetch,
-      "p1",
+      { projectId: "p1" },
       html("blob:a", "blob:b", "blob:c"),
       draft,
     );
@@ -110,7 +118,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
     const draft = draftOf({ "blob:a": "a.png" });
     const result = await uploadInlineImagesBeforeCreate(
       authFetch,
-      "p1",
+      { projectId: "p1" },
       html("blob:a", "blob:a"),
       draft,
     );
@@ -120,7 +128,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
 
   it("ignores a queued image that the description no longer shows", async () => {
     const draft = draftOf({ "blob:a": "a.png", "blob:gone": "gone.png" });
-    await uploadInlineImagesBeforeCreate(authFetch, "p1", html("blob:a"), draft);
+    await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, html("blob:a"), draft);
     expect(mocks.uploadStoredAttachment).toHaveBeenCalledTimes(1);
   });
 
@@ -132,14 +140,14 @@ describe("uploadInlineImagesBeforeCreate", () => {
     const draft = draftOf({ "blob:a": "a.png", "blob:b": "bad.png" });
     const source = html("blob:a", "blob:b");
 
-    const first = await uploadInlineImagesBeforeCreate(authFetch, "p1", source, draft);
+    const first = await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, source, draft);
     expect(first).toEqual({ ok: false, message: "Upload failed." });
     expect(draft.ids.get("blob:a")).toBe("id-a.png");
     expect(draft.queued.has("blob:b")).toBe(true);
 
     mocks.uploadStoredAttachment.mockClear();
     mocks.uploadStoredAttachment.mockResolvedValue({ id: "id-b" });
-    const second = await uploadInlineImagesBeforeCreate(authFetch, "p1", source, draft);
+    const second = await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, source, draft);
     expect(mocks.uploadStoredAttachment).toHaveBeenCalledTimes(1);
     expect(second.ok).toBe(true);
     expect((second as { html: string }).html).toContain('src="/id-a.png"');
@@ -152,7 +160,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
     );
     mocks.confirmStoredUpload.mockResolvedValue({ id: "att-9" });
     const draft = draftOf({ "blob:a": "a.png" });
-    const result = await uploadInlineImagesBeforeCreate(authFetch, "p1", html("blob:a"), draft);
+    const result = await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, html("blob:a"), draft);
     expect(mocks.uploadStoredAttachment).toHaveBeenCalledTimes(1);
     expect(mocks.confirmStoredUpload).toHaveBeenCalledWith(authFetch, {
       type: "comment",
@@ -165,7 +173,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
   it("refuses a local image that has no file behind it", async () => {
     const result = await uploadInlineImagesBeforeCreate(
       authFetch,
-      "p1",
+      { projectId: "p1" },
       html("blob:unknown"),
       draftOf({}),
     );
@@ -176,7 +184,7 @@ describe("uploadInlineImagesBeforeCreate", () => {
   it("reports progress as images finish", async () => {
     const draft = draftOf({ "blob:a": "a.png", "blob:b": "b.png" });
     const seen: number[] = [];
-    await uploadInlineImagesBeforeCreate(authFetch, "p1", html("blob:a", "blob:b"), draft, (n) =>
+    await uploadInlineImagesBeforeCreate(authFetch, { projectId: "p1" }, html("blob:a", "blob:b"), draft, (n) =>
       seen.push(n),
     );
     expect(seen).toEqual([2, 1, 0]);

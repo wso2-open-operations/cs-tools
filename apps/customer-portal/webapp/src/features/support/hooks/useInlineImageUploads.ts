@@ -47,12 +47,15 @@ export interface InlineImageUploads {
  * uploaded to the project when the form is submitted, before the record is
  * created. Images that uploaded stay uploaded across a failed attempt.
  *
- * @param projectId - The project the record is created in.
+ * @param scope - `projectId` of the project the record is created in, or `parentId` of the record a comment is added to.
  * @returns {InlineImageUploads} The handler for the editor and the upload step.
  */
-export function useInlineImageUploads(
-  projectId: string | undefined,
-): InlineImageUploads {
+export function useInlineImageUploads(scope: {
+  projectId?: string;
+  /** Set for a comment on an existing record instead of `projectId`. */
+  parentId?: string;
+}): InlineImageUploads {
+  const { projectId, parentId } = scope;
   const authFetch = useAuthApiClient();
   const draftRef = useRef<InlineImageDraft>({
     queued: new Map(),
@@ -81,12 +84,17 @@ export function useInlineImageUploads(
 
   const uploadImages = useCallback(
     async (html: string): Promise<InlineImageUploadResult> => {
-      if (!projectId) return { ok: true, html };
+      const target = parentId
+        ? { parentId }
+        : projectId
+          ? { projectId }
+          : null;
+      if (!target) return { ok: true, html };
       setIsUploadingImages(true);
       try {
         return await uploadInlineImagesBeforeCreate(
           authFetch,
-          projectId,
+          target,
           html,
           draftRef.current,
           setPendingImages,
@@ -96,7 +104,7 @@ export function useInlineImageUploads(
         setPendingImages(0);
       }
     },
-    [authFetch, projectId],
+    [authFetch, projectId, parentId],
   );
 
   return { onImageUpload, uploadImages, isUploadingImages, pendingImages, release };
