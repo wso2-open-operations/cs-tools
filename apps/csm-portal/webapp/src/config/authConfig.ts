@@ -125,8 +125,8 @@ declare global {
        */
       CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
       /**
-       * Largest image, in megabytes, that can be pasted or inserted into a
-       * comment (default 10, the entity-service default). A number or numeric
+       * Most image megabytes one comment or description may hold in total, and
+       * so the largest single image (default 25). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.
        */
       CSM_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
