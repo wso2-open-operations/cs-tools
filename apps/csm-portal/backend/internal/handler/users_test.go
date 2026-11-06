@@ -889,7 +889,7 @@ func TestUpdateUser(t *testing.T) {
 			},
 		}
 		h := NewUsersHandler(&mockSCIMClient{}, entity, testDirectory(t), false, nil)
-		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"phone":"`+strings.Repeat("1", 40)+`"}`)))
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/users/"+targetID, strings.NewReader(`{"phone":"+15550100000"}`)))
 		r.SetPathValue("id", targetID)
 		w := httptest.NewRecorder()
 		h.UpdateUser(w, r)
