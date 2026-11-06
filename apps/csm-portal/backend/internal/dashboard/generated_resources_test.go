@@ -17,6 +17,8 @@ package dashboard
 
 import (
 	"errors"
+	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -69,6 +71,50 @@ func TestParseGenerated_AcceptsLineWindows(t *testing.T) {
 	_, err = ParseGenerated([]byte(tooLong))
 	if !errors.Is(err, ErrGeneratedInvalid) || !strings.Contains(err.Error(), "cover at most 90 days") {
 		t.Errorf("a year by day: err = %v, want ErrGeneratedInvalid naming the 90 day limit", err)
+	}
+}
+
+// TestParseGenerated_TheCatalogueLineExampleIsValid: the line widget the
+// catalogue shows the model (section 4, a fixed window) passes this
+// backend's own check, so the catalogue cannot teach a line the save would
+// refuse.
+func TestParseGenerated_TheCatalogueLineExampleIsValid(t *testing.T) {
+	if _, err := os.Stat(aiIntegrationService); errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("the AI integration service (%s) is not in this checkout", aiIntegrationService)
+	}
+	raw, err := os.ReadFile(serviceCatalogue)
+	if err != nil {
+		t.Fatalf("read the AI integration service's catalogue (%s): %v", serviceCatalogue, err)
+	}
+	_, section, ok := strings.Cut(string(raw), "## 4. Shapes")
+	if !ok {
+		t.Fatal("catalogue has no section 4")
+	}
+	section, _, _ = strings.Cut(section, "## 5.")
+	var lines []string
+	for rest := section; ; {
+		_, after, found := strings.Cut(rest, "```json\n")
+		if !found {
+			break
+		}
+		block, next, _ := strings.Cut(after, "```")
+		if strings.Contains(block, `"shape": "line"`) {
+			lines = append(lines, block)
+		}
+		rest = next
+	}
+	if len(lines) == 0 {
+		t.Fatal("found no line example in section 4")
+	}
+	for i, w := range lines {
+		d, err := ParseGenerated([]byte(opsDashboard(w)))
+		if err != nil {
+			t.Errorf("section 4 line example %d is rejected: %v\n%s", i+1, err, w)
+			continue
+		}
+		if got := d.Widgets[0]; got.StartDate == "" || got.EndDate == "" {
+			t.Errorf("section 4 line example %d has no fixed window: %+v", i+1, got)
+		}
 	}
 }
 

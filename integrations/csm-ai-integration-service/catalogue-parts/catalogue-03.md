@@ -116,7 +116,7 @@ Never set both `slices` and `groupBy`.
 | "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
 | editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
 | editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
-| a trend or "per day" over a **named past period** ("cases per day in December 2025") | not a `line` (it always ends today): a `bar` with one slice per week of that month (or one per month of a named year), each slice's `query.filters` holding that week's or month's `createdOn` `gte` and `lte` plain dates, plus a `description` saying so |
+| a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
 | "cases" with no other type named | `resourceType: "case"` |
@@ -149,8 +149,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, `days` 1-90; `series` absent (both lines) or exactly
-   `["opened"]` or `["closed"]`. An edit keeps a line widget's `series` unless the request changes it.
+5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
+   dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
+   absent (both lines) or exactly `["opened"]` or `["closed"]`. An edit keeps a line widget's `series`
+   and window unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),

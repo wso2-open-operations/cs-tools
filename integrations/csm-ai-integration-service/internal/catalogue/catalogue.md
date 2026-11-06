@@ -84,7 +84,7 @@ Do not use any other dashboard field.
 | `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day. | **Only with `resourceType: "case"`.** `days` 1 to 90 (default 30). Optional `series`: `["opened"]` draws only the cases opened per day, `["closed"]` only the cases closed per day; leave it out to draw both (section 8). |
+| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project or day, counting cards or summing hours; no `line`).
@@ -94,7 +94,28 @@ with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count
 with `groupBy.bucket` (section 5d) or rating `slices` (no `line`).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
-`slices`/`groupBy` on pie/bar only, `days`/`series` on line only).
+`slices`/`groupBy` on pie/bar only, `days`/`series`/`startDate`/`endDate`/`bucket` on line only).
+
+**A line's window.** "Last N days" (N up to 90) and a trend with no period is `days`. Any other period
+is `startDate` and `endDate` with the dates of section 5 (both plain dates for a named period, both
+tokens for one counted from today; a period that includes today ends at `__today__`, so the line stops
+today), plus a `bucket`:
+
+| Request | `bucket` |
+|---|---|
+| "per day", "daily", or no unit named, for a window of at most 90 days (a month, a range) | `day` (or leave it out) |
+| "per week", "weekly", or no unit named for a quarter up to a year (a quarter can be 92 days, too long per day) | `week` (at most 53 weeks) |
+| "per month", "monthly", or a window over a year (at most 24 months) | `month` |
+
+"Per day" over more than 90 days uses `week` instead (and "per week" over more than 53 weeks, `month`),
+with a `description` saying so. Over 24 months: reply with `{"error": ...}`. "Last N weeks" / "last N
+months" is `__startOfWeek:-<N-1>__` / `__startOfMonth:-<N-1>__` to `__today__`, by week / month.
+
+```json
+{ "id": "cases-per-day-dec-2025", "displayName": "Cases Created per Day in December 2025",
+  "resourceType": "case", "shape": "line", "gridWidth": 12, "query": {}, "series": ["opened"],
+  "startDate": "2025-12-01", "endDate": "2025-12-31" }
+```
 
 ---
 
@@ -510,7 +531,7 @@ Never set both `slices` and `groupBy`.
 | "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
 | editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
 | editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
-| a trend or "per day" over a **named past period** ("cases per day in December 2025") | not a `line` (it always ends today): a `bar` with one slice per week of that month (or one per month of a named year), each slice's `query.filters` holding that week's or month's `createdOn` `gte` and `lte` plain dates, plus a `description` saying so |
+| a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
 | "cases" with no other type named | `resourceType: "case"` |
@@ -543,8 +564,10 @@ If two readings are plausible and the table does not settle it, pick the one abo
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, `days` 1-90; `series` absent (both lines) or exactly
-   `["opened"]` or `["closed"]`. An edit keeps a line widget's `series` unless the request changes it.
+5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
+   dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
+   absent (both lines) or exactly `["opened"]` or `["closed"]`. An edit keeps a line widget's `series`
+   and window unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),
