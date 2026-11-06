@@ -161,6 +161,7 @@ func TestGenerateMapsEveryError(t *testing.T) {
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, context.DeadlineExceeded), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, timeoutErr{}), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: 401 bad key", dashboards.ErrCall), http.StatusBadGateway, CodeModelCallFailed},
+		{fmt.Errorf("%w: %w: 429 bad key", dashboards.ErrCall, dashboards.ErrUsageLimit), http.StatusTooManyRequests, CodeUsageLimit},
 		{fmt.Errorf("something else"), http.StatusInternalServerError, CodeInternal},
 	} {
 		status, out := post(t, &DashboardHandler{generator: &fakeGenerator{err: tc.err}}, `{"prompt":"p"}`)

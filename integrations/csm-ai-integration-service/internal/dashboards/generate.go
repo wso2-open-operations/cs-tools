@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -47,6 +48,10 @@ var (
 	// ErrCall: the call itself failed (the gateway answered an error, the
 	// connection failed, or it timed out). Wraps the SDK error.
 	ErrCall = errors.New("model call failed")
+	// ErrUsageLimit: the gateway answered 429, a request, token or spend
+	// limit on the AI side, also after the SDK's one retry. Wrapped together
+	// with ErrCall, so it is a call failure too.
+	ErrUsageLimit = errors.New("model usage limit reached")
 	// ErrRefused: the model refused (stop reason "refusal").
 	ErrRefused = errors.New("model refused the request")
 	// ErrTruncated: the reply hit maxTokens before finishing.
@@ -126,6 +131,10 @@ func (g *Generator) Generate(ctx context.Context, req Request) (Result, error) {
 	})
 	took := time.Since(start)
 	if err != nil {
+		if isUsageLimit(err) {
+			logUsage(ctx, g.model, outcomeUsageLimit, "", anthropic.Usage{}, took)
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrCall, ErrUsageLimit, err)
+		}
 		logUsage(ctx, g.model, outcomeFailed, "", anthropic.Usage{}, took)
 		return Result{}, fmt.Errorf("%w: %w", ErrCall, err)
 	}
@@ -142,7 +151,17 @@ const (
 	outcomeTruncated = "truncated"
 	outcomeUnusable  = "unusable"
 	outcomeFailed    = "failed" // no reply: the gateway answered an error, the connection failed, or it timed out
+	// outcomeUsageLimit: no reply, the gateway answered 429 (ErrUsageLimit).
+	outcomeUsageLimit = "usage_limit"
 )
+
+// isUsageLimit reports whether err is the gateway answering 429 Too Many
+// Requests. An overloaded gateway (529 or 503) is not a usage limit: it stays
+// an ordinary call failure.
+func isUsageLimit(err error) bool {
+	var apiErr *anthropic.Error
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
+}
 
 // readReply reads the model's reply into a result, and names its outcome.
 func readReply(msg *anthropic.Message) (Result, string, error) {
