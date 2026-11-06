@@ -41,7 +41,7 @@ func writeFeatureOverrideJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// ListFeatureOverrides handles GET /feature-overrides.
+// ListFeatureOverrides handles GET /features.
 func (h *FeatureOverrideHandler) ListFeatureOverrides(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.List(r.Context())
 	if err != nil {
@@ -51,7 +51,7 @@ func (h *FeatureOverrideHandler) ListFeatureOverrides(w http.ResponseWriter, r *
 	writeFeatureOverrideJSON(w, resp)
 }
 
-// PutFeatureOverride handles PUT /feature-overrides.
+// PutFeatureOverride handles PUT /features.
 func (h *FeatureOverrideHandler) PutFeatureOverride(w http.ResponseWriter, r *http.Request) {
 	var req domain.SaveFeatureOverrideRequest
 	if !decodeRequest(w, r, &req) {

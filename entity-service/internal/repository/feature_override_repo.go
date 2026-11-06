@@ -25,7 +25,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// FeatureOverrideRepository reads and writes feature_override (migration 0277).
+// FeatureOverrideRepository reads and writes features (migration 0277).
 type FeatureOverrideRepository interface {
 	List(ctx context.Context) (domain.FeatureOverrideList, error)
 	// Put upserts one row. When markSaved is set, it also inserts the
@@ -56,7 +56,7 @@ func (r *featureOverrideRepo) List(ctx context.Context) (domain.FeatureOverrideL
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	rows, err := tx.Query(ctx, `SELECT nav_node_id, state, updated_on, updated_by
-		FROM feature_override ORDER BY nav_node_id`)
+		FROM features ORDER BY nav_node_id`)
 	if err != nil {
 		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: %w", err)
 	}
@@ -74,7 +74,7 @@ func (r *featureOverrideRepo) List(ctx context.Context) (domain.FeatureOverrideL
 	}
 	rows.Close()
 	var savedOnce bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_override_mark)`).Scan(&savedOnce); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feature_saved)`).Scan(&savedOnce); err != nil {
 		return domain.FeatureOverrideList{}, fmt.Errorf("list feature overrides: mark: %w", err)
 	}
 	return domain.FeatureOverrideList{Overrides: out, SavedOnce: savedOnce}, nil
@@ -88,7 +88,7 @@ func (r *featureOverrideRepo) Put(ctx context.Context, actor string, req domain.
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	err = tx.QueryRow(ctx, `INSERT INTO feature_override (nav_node_id, state, updated_by)
+	err = tx.QueryRow(ctx, `INSERT INTO features (nav_node_id, state, updated_by)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (nav_node_id) DO UPDATE SET
 			state = EXCLUDED.state, updated_on = NOW(), updated_by = EXCLUDED.updated_by
@@ -98,7 +98,7 @@ func (r *featureOverrideRepo) Put(ctx context.Context, actor string, req domain.
 		return out, fmt.Errorf("put feature override: %w", err)
 	}
 	if req.MarkSaved {
-		if _, err := tx.Exec(ctx, `INSERT INTO feature_override_mark (only_row, saved_by)
+		if _, err := tx.Exec(ctx, `INSERT INTO feature_saved (only_row, saved_by)
 			VALUES (TRUE, $1) ON CONFLICT (only_row) DO NOTHING`, actor); err != nil {
 			return out, fmt.Errorf("put feature override: mark: %w", err)
 		}

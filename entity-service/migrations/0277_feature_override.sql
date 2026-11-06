@@ -14,37 +14,53 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- feature_override: one nav-node id and its shared state, edited from CSM
--- Settings. state is enabled or preview. A row is never deleted: setting a
--- page back to available updates state to enabled, the same way an unpublished
--- banner stays in portal_banner. A page with no row is available, or follows
--- its section. The menu rules stay in the webapp.
+-- features: one nav-node id and its shared state, edited from CSM Settings.
+-- state is enabled or preview. A row is never deleted: setting a page back to
+-- available updates state to enabled, the same way an unpublished banner stays
+-- in portal_banner. A page with no row is available, or follows its section.
+-- The menu rules stay in the webapp.
 --
--- feature_override_mark: at most one row. Until it exists, an empty
--- feature_override table means the portal still reads config.js. The first
--- successful save writes that mark. Entity-service owns both tables. No
--- row-level security. The admin check lives in the CSM portal backend.
+-- feature_saved: at most one row. Until it exists, an empty features table
+-- means the portal still reads config.js. The first successful save writes
+-- that mark. Entity-service owns both tables. No row-level security. The
+-- admin check lives in the CSM portal backend.
+--
+-- A database that already has the earlier names (feature_override,
+-- feature_override_mark) is renamed in place so this file stays safe to run
+-- again by hand.
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
-CREATE TABLE IF NOT EXISTS feature_override (
+DO $$
+BEGIN
+    IF to_regclass('public.feature_override') IS NOT NULL
+       AND to_regclass('public.features') IS NULL THEN
+        ALTER TABLE feature_override RENAME TO features;
+    END IF;
+    IF to_regclass('public.feature_override_mark') IS NOT NULL
+       AND to_regclass('public.feature_saved') IS NULL THEN
+        ALTER TABLE feature_override_mark RENAME TO feature_saved;
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS features (
     nav_node_id  TEXT        PRIMARY KEY CHECK (btrim(nav_node_id) <> ''),
     state        TEXT        NOT NULL CHECK (state IN ('enabled', 'preview')),
     updated_on   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by   TEXT        NOT NULL
 );
 
-COMMENT ON TABLE feature_override IS
+COMMENT ON TABLE features IS
     'Shared CSM page visibility. enabled or preview. Rows are never deleted. A missing row means the page was never saved.';
 
-CREATE TABLE IF NOT EXISTS feature_override_mark (
+CREATE TABLE IF NOT EXISTS feature_saved (
     only_row  BOOLEAN     PRIMARY KEY DEFAULT TRUE CHECK (only_row),
     saved_on  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     saved_by  TEXT        NOT NULL
 );
 
-COMMENT ON TABLE feature_override_mark IS
+COMMENT ON TABLE feature_saved IS
     'One row after the first successful feature-visibility save. Until then the portal still reads config.js.';
 
 COMMIT;

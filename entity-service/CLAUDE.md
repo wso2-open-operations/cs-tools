@@ -2657,13 +2657,13 @@ touched, since each of them is reachable by more than just csm-portal-backend
 (or is reasoned about independently) and a blanket switch away from
 `AUTH_ADMIN_ROLES` was never the ask.
 
-## Feature overrides: the portal's shared per-page state (migration 0277)
+## Features: the portal's shared per-page state (migration 0277)
 
-`feature_override` holds one row per nav-node id (`operations`, `operations.incidents`) with a
-`state` of `enabled` or `preview`; `feature_override_mark` holds at most one row, written by the first
+`features` holds one row per nav-node id (`operations`, `operations.incidents`) with a
+`state` of `enabled` or `preview`; `feature_saved` holds at most one row, written by the first
 successful save. Both are entity-service-only tables (no sync-service mirror, no row-level security).
-`GET /feature-overrides` returns every row, including `enabled` ones, plus `savedOnce`; `PUT
-/feature-overrides` upserts `{ navNodeId, state, markSaved }`. There is no delete route and none should be
+`GET /features` returns every row, including `enabled` ones, plus `savedOnce`; `PUT
+/features` upserts `{ navNodeId, state, markSaved }`. There is no delete route and none should be
 added: setting a page back to available writes `enabled`, so an explicit `enabled` row under a `preview`
 section (the "Incidents stays open" case) is a real setting, not an absence. A page with no row was never
 saved: a section is available and a page follows its section. This service does not apply inheritance, the

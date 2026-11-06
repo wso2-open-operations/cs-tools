@@ -2358,8 +2358,8 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	if featureOverrideHandler != nil {
 		// Shared per-page feature state. Any internal caller reads it. A write
 		// is gated on the CSM portal backend's client id, like banner changes.
-		mux.HandleFunc("GET /feature-overrides", featureOverrideHandler.ListFeatureOverrides)
-		mux.HandleFunc("PUT /feature-overrides", featureOverrideHandler.PutFeatureOverride)
+		mux.HandleFunc("GET /features", featureOverrideHandler.ListFeatureOverrides)
+		mux.HandleFunc("PUT /features", featureOverrideHandler.PutFeatureOverride)
 	}
 	if caseAlertSettingsHandler != nil {
 		// Case Alerts settings: chat rooms, group routes and the other ladder

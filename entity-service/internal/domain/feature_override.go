@@ -25,7 +25,7 @@ const (
 	FeaturePreview = "preview"
 )
 
-// FeatureOverride is one row of feature_override.
+// FeatureOverride is one row of features.
 type FeatureOverride struct {
 	NavNodeID string    `json:"navNodeId"`
 	State     string    `json:"state"`
@@ -33,13 +33,13 @@ type FeatureOverride struct {
 	UpdatedBy string    `json:"updatedBy"`
 }
 
-// FeatureOverrideList is the body of GET /feature-overrides.
+// FeatureOverrideList is the body of GET /features.
 type FeatureOverrideList struct {
 	Overrides []FeatureOverride `json:"overrides"`
 	SavedOnce bool              `json:"savedOnce"`
 }
 
-// SaveFeatureOverrideRequest is the body of PUT /feature-overrides.
+// SaveFeatureOverrideRequest is the body of PUT /features.
 // MarkSaved records the first successful save. It is set on the last write
 // of that save so a stopped save does not hide config.js.
 type SaveFeatureOverrideRequest struct {

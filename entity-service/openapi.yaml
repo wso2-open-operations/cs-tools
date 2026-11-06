@@ -12978,7 +12978,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /feature-overrides:
+  /features:
     get:
       summary: The shared per-page feature state for the CSM portal.
       description: >
