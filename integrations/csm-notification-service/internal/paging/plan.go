@@ -300,7 +300,7 @@ func BuildPlan(ctx context.Context, t Trigger, policies map[string]PriorityPolic
 		for _, rec := range recipients {
 			if needsPhone && rec.Phone == "" {
 				plan.Issues = append(plan.Issues, PlanIssue{
-					Level: level, At: opensAt, Reason: "NO_NUMBER", Detail: rec.Email,
+					Level: level, At: opensAt, Reason: rec.phoneProblem(), Detail: rec.Email,
 				})
 				continue
 			}
@@ -572,6 +572,14 @@ func (t Trigger) VoiceSpeech() notifications.Speech {
 // fired says whether somebody changed the status or left a public comment.
 // Empty defaults to "Acknowledged", the wording the documented sample uses.
 func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time.Time, reason string) []string {
+	lines, _ := p.executionSummary(placed, failed, cancelledAt, reason)
+	return lines
+}
+
+// executionSummary is ExecutionSummary plus the number of distinct recipients
+// whose call is reported as a problem (no number, a number dropped as invalid,
+// a provider rejection), which WorkNote turns into its headline.
+func (p Plan) executionSummary(placed []bool, failed []string, cancelledAt *time.Time, reason string) ([]string, int) {
 	const stamp = "2006-01-02 15:04:05"
 	lines := []string{
 		fmt.Sprintf("[%s][OK][Start : Notification Plan - %s][%s/%s]",
@@ -626,6 +634,7 @@ func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time
 		return bi.level < bj.level
 	})
 
+	problems := map[string]bool{}
 	for _, level := range order {
 		b := blocks[level]
 		if cancelledAt != nil && !b.opensA.Before(*cancelledAt) {
@@ -635,6 +644,9 @@ func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time
 		for _, is := range b.issues {
 			lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][%s][%s]",
 				is.At.Format(stamp), is.Level, is.Reason, is.Detail))
+			if isPhoneProblem(is.Reason) {
+				problems[strings.ToLower(is.Detail)] = true
+			}
 		}
 
 		// One "Notification Attempt" line per attempt, then that attempt's
@@ -662,8 +674,23 @@ func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time
 				due.Format(stamp), b.level))
 			for _, c := range attempted {
 				if why := failureOf(failed, c); why != "" {
+					problems[strings.ToLower(c.Recipient.Email)] = true
+					// No number to dial is the recipient's problem, not the
+					// provider's: same shape as the plan issue's NO_NUMBER line.
+					if isPhoneProblem(why) {
+						lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][%s][%s]",
+							c.At.Format(stamp), c.Level, why, c.Recipient.Email))
+						continue
+					}
 					lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][CALL_FAILED][%s][%s]",
 						c.At.Format(stamp), c.Level, c.Recipient.Email, why))
+					continue
+				}
+				if c.Recipient.Phone == "" {
+					// Never "[OK][Call]" with nothing dialled.
+					problems[strings.ToLower(c.Recipient.Email)] = true
+					lines = append(lines, fmt.Sprintf("[%s][%s][ERROR][%s][%s]",
+						c.At.Format(stamp), c.Level, c.Recipient.phoneProblem(), c.Recipient.Email))
 					continue
 				}
 				lines = append(lines, fmt.Sprintf("[%s][%s][OK][Call][%s][%s]",
@@ -690,7 +717,7 @@ func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time
 		lines = append(lines, fmt.Sprintf("[%s][OK][%s : %d call(s) cancelled]",
 			cancelledAt.Format(stamp), reason, dropped))
 	}
-	return lines
+	return lines, len(problems)
 }
 
 // WorkNote renders the execution summary as the work note section 11.0
@@ -698,7 +725,11 @@ func (p Plan) ExecutionSummary(placed []bool, failed []string, cancelledAt *time
 func (p Plan) WorkNote(placed []bool, failed []string, cancelledAt *time.Time, reason string) string {
 	const stamp = "2006-01-02 15:04:05"
 	var b strings.Builder
+	lines, problems := p.executionSummary(placed, failed, cancelledAt, reason)
 	b.WriteString("Execution Summary Of the Escalation Flow\n\n")
+	if problems > 0 {
+		b.WriteString(callProblemsLine(problems))
+	}
 	heading := "Incident Created/Priority Updated time"
 	if p.Trigger.isCase() {
 		heading = "Case Created/Severity Updated time"
@@ -717,8 +748,14 @@ func (p Plan) WorkNote(placed []bool, failed []string, cancelledAt *time.Time, r
 		orNone(p.Trigger.Routing.AssignedCRETeam),
 		p.Trigger.Routing.ABTEligibility()))
 	b.WriteString("Execution Summary:\n\n")
-	b.WriteString(strings.Join(p.ExecutionSummary(placed, failed, cancelledAt, reason), "\n"))
+	b.WriteString(strings.Join(lines, "\n"))
 	return b.String()
+}
+
+// callProblemsLine is the headline that keeps a call that never happened from
+// being buried among the OK lines; it ends in a blank line.
+func callProblemsLine(n int) string {
+	return fmt.Sprintf("Call problems: %d recipient(s) could not be called (see ERROR lines)\n\n", n)
 }
 
 // withIndex returns a copy carrying its position in Plan.Calls, so wasPlaced
