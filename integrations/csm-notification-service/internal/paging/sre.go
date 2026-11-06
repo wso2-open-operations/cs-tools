@@ -67,10 +67,15 @@ const (
 const (
 	RotaSRESaaS = "SRE_SAAS"
 	RotaSREIaaS = "SRE_IAAS"
+	// U2 and B-Central's rotas keep the codes migration 0217 gave them when
+	// they were SME rotas; migration 0242 moved them to the SRE family.
+	RotaSREU2       = "SME_U2"
+	RotaSREBCentral = "SME_B_CENTRAL"
 )
 
 // SREChain names the SRE chain an incident pages, for the people who read
-// about it: "SaaS SRE" or "IaaS SRE", "SRE" for a rota with no name here, and
+// about it: "SaaS SRE", "IaaS SRE", "U2-SRE" or "B-Central-SRE" (named after the
+// assignment group the incident comes from), "SRE" for a rota with no name here, and
 // "" when the rota is unknown -- a catalogue with no rotas -- which keeps every
 // card, voice message and work note exactly as it read before rotas existed.
 func (rc RoutingContext) SREChain() string {
@@ -81,6 +86,10 @@ func (rc RoutingContext) SREChain() string {
 		return "SaaS SRE"
 	case RotaSREIaaS:
 		return "IaaS SRE"
+	case RotaSREU2:
+		return "U2-SRE"
+	case RotaSREBCentral:
+		return "B-Central-SRE"
 	}
 	return "SRE"
 }

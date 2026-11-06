@@ -25,6 +25,8 @@ const TEAMS = [
   { key: "apollo", family: "SRE" as const, rotaCode: "SRE_SAAS" },
   { key: "artemis", family: "SRE" as const, rotaCode: "SRE_SAAS" },
   { key: "iaas", family: "SRE" as const, rotaCode: "SRE_IAAS" },
+  { key: "u2", family: "SRE" as const, rotaCode: "SME_U2" },
+  { key: "b-central", family: "SRE" as const, rotaCode: "SME_B_CENTRAL" },
   { key: "paas", family: "SRE" as const },
   { key: "asgardeo", family: "SME" as const, rotaCode: "SME_ASGARDEO" },
 ];
@@ -36,7 +38,15 @@ const reader = (
 
 describe("chainOfTeam", () => {
   it("is the family's chain, or the SRE rota's", () => {
-    expect(TEAMS.map((t) => chainOfTeam(t))).toEqual(["CRE", "CRE", "SRE_SAAS", "SRE_SAAS", "SRE_IAAS", "PAAS", "SME"]);
+    expect(TEAMS.map((t) => chainOfTeam(t))).toEqual([
+      "CRE", "CRE", "SRE_SAAS", "SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL", "PAAS", "SME",
+    ]);
+  });
+
+  it("keeps U2 and B-Central on the SME chain until their rotas are SRE rotas", () => {
+    // Before entity-service migration 0242 they are SME teams on the same rota codes.
+    expect(chainOfTeam({ family: "SME", rotaCode: "SME_U2" })).toBe("SME");
+    expect(chainOfTeam({ family: "SME", rotaCode: "SME_B_CENTRAL" })).toBe("SME");
   });
 });
 
@@ -44,6 +54,8 @@ describe("caseAlertChainsFor", () => {
   it("gives each lead their own team's chain only", () => {
     expect(reader(["apollo"])).toEqual(["SRE_SAAS"]);
     expect(reader(["iaas"])).toEqual(["SRE_IAAS"]);
+    expect(reader(["u2"])).toEqual(["SRE_U2"]);
+    expect(reader(["b-central"])).toEqual(["SRE_B_CENTRAL"]);
     expect(reader(["paas"])).toEqual(["PAAS"]);
     expect(reader(["asgardeo"])).toEqual(["SME"]);
   });
@@ -85,11 +97,11 @@ describe("caseAlertChainsFor", () => {
     expect(reader(["castor", "americas"], { settingsLadders: ["CRE"] })).toEqual(["CRE"]);
     expect(caseAlertsOffered(true, reader([], { settingsLadders: ["CRE"] }))).toBe(true);
     // Somebody with all three rota admin roles.
-    expect(reader([], { settingsLadders: ["CRE", "SRE", "SME"] })).toEqual(["CRE", "SRE_SAAS", "SRE_IAAS", "SME"]);
+    expect(reader([], { settingsLadders: ["CRE", "SRE", "SME"] })).toEqual(["CRE", "SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL", "SME"]);
     // An SRE rota admin who also leads a CRE team: that team's CRE chain too.
-    expect(reader(["castor", "apollo"], { settingsLadders: ["SRE"] })).toEqual(["CRE", "SRE_SAAS", "SRE_IAAS"]);
+    expect(reader(["castor", "apollo"], { settingsLadders: ["SRE"] })).toEqual(["CRE", "SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL"]);
     // An SRE rota admin who runs no CRE team and may change nothing of CRE's: no CRE chain.
-    expect(reader(["apollo"], { settingsLadders: ["SRE"] })).toEqual(["SRE_SAAS", "SRE_IAAS"]);
+    expect(reader(["apollo"], { settingsLadders: ["SRE"] })).toEqual(["SRE_SAAS", "SRE_IAAS", "SRE_U2", "SRE_B_CENTRAL"]);
   });
 
   it("gives a CSM admin every chain", () => {
