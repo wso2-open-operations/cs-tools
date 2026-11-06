@@ -183,6 +183,31 @@ describe("CasePagingPanel: the CRE chain as a team-by-level matrix", () => {
     expect(within(tier3[1]).getByLabelText("Americas America lead")).toBeDisabled();
   });
 
+  it("offers Test call on each Americas Team lead as on any other cell, editing or not", () => {
+    const testCall = { masked: "+94•••••001", source: "profile" as const };
+    const base = matrixChain();
+    chain.data = {
+      ...base,
+      members: base.members.map((m) =>
+        m.membershipId === "am1" || m.membershipId === "v1"
+          ? { ...m, hasProfilePhone: true, canTestCall: true, testCall }
+          : m,
+      ),
+    };
+    const phone = { edit: vi.fn(), remove: vi.fn(), test: vi.fn(), calling: () => false };
+    render(<CasePagingPanel readiness={{ ...readiness, chain: readinessChain({ chain: "CRE" }) }} phone={phone} />);
+    const tier2 = () => within(rowOf(/^Level 1/)).getAllByRole("cell");
+    const nightTest = () =>
+      within(tier2()[2]).getByRole("button", { name: "Test call Nia Night's profile number +94•••••001" });
+
+    fireEvent.click(nightTest());
+    expect(phone.test).toHaveBeenCalledWith(expect.objectContaining({ membershipId: "am1" }));
+    expect(within(tier2()[0]).getByRole("button", { name: /^Test call Vic Lead/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit alert chain/ }));
+    expect(nightTest()).toBeInTheDocument();
+  });
+
   it("edits a cell where the reader may, and locks the rest saying who may", async () => {
     renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /Edit alert chain/ }));

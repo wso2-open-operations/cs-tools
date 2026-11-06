@@ -74,18 +74,35 @@ const (
 //     cannot reach the real lists.
 //  2. the chosen source.
 //
-// Neither source falls back to the other. An earlier version fell
-// through from configured to derived when nothing was configured, which
-// turned a blank entry -- {"to": [""]} -- into a mail to the
-// registry-derived recipients: precisely what configuring the lists
-// exists to prevent. Whichever source is selected and comes back empty,
-// nothing is sent, which is the safe failure.
+// Neither source falls back to the other FOR THE To LINE. An earlier
+// version fell through from configured to derived when nothing was
+// configured, which turned a blank entry -- {"to": [""]} -- into a mail
+// to the registry-derived recipients: precisely what configuring the
+// lists exists to prevent. Whichever source is selected and comes back
+// empty, nothing is sent, which is the safe failure.
+//
+// Cc IS THE EXCEPTION, and only on the derived source: a configured cc
+// is ADDED to the derived one rather than discarded. The registry
+// derives a team's own group addresses and has no way to express "also
+// copy this standing list", because carrying such an address would mean
+// inventing a team row for a group that is not a team -- which
+// misrepresents the org chart and, since a leadership-typed team also
+// contributes its members to To, quietly promotes anyone later added to
+// it. Precedent: query_hours_weekly_report already treats its
+// configured to as an addition to the audience it derives.
+//
+// The To line keeps the old rule. Widening who a report is addressed to
+// should stay a deliberate switch of source, not a side effect of
+// adding a cc.
 func Resolve(derived Recipients, configured Audience, source Source, override []string) Audience {
 	if o := clean(override); len(o) > 0 {
 		return Audience{To: o}
 	}
 	if source == SourceDerived {
-		return Audience{To: dedupe(derived.To), Cc: dedupe(derived.Cc)}
+		return Audience{
+			To: dedupe(derived.To),
+			Cc: dedupe(append(append([]string{}, derived.Cc...), configured.Cc...)),
+		}
 	}
 	return Audience{To: dedupe(configured.To), Cc: dedupe(configured.Cc)}
 }

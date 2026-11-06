@@ -22,6 +22,7 @@ import {
   firstEnabledDestination,
   isFeatureEnabled,
   isFeatureVisible,
+  isPreviewedOnly,
   listPreviewableFeatures,
   navigableNavNodes,
   resetFeatureStatesForTests,
@@ -362,5 +363,44 @@ describe("listPreviewableFeatures", () => {
     const ids = listPreviewableFeatures().map((n) => n.id);
     expect(ids).toContain("operations");
     expect(ids).toContain("operations.incidents");
+  });
+});
+
+describe("isPreviewedOnly", () => {
+  const admin = getPortalAccess(["admin"]);
+  const csEngineer = getPortalAccess(["cs_engineer"]);
+
+  it("is false for a non-admin, even with a real override set for them", () => {
+    setOverrides({ updates: "hidden" });
+    expect(isPreviewedOnly("updates", csEngineer, { updates: true })).toBe(false);
+  });
+
+  it("is false for an admin with no override toggled on at all", () => {
+    setOverrides({ updates: "hidden" });
+    expect(isPreviewedOnly("updates", admin)).toBe(false);
+    expect(isPreviewedOnly("updates", admin, {})).toBe(false);
+  });
+
+  it("is true for an admin who directly toggled on a hidden node", () => {
+    setOverrides({ updates: "hidden" });
+    expect(isPreviewedOnly("updates", admin, { updates: true })).toBe(true);
+  });
+
+  it("is true for a parent enabled only because a DESCENDANT's own preview toggle promoted it, even with no override of its own", () => {
+    // Mirrors admin.user-management / admin.user-management.users: the
+    // parent section itself carries no CSM_PORTAL_FEATURE_OVERRIDES entry,
+    // but inherits "hidden" from... no, here we restrict the parent directly
+    // and preview only its child, so the parent's own promotion comes solely
+    // from `hasPreviewedDescendant`, not a direct override on the parent id.
+    setOverrides({ operations: "hidden" });
+    expect(featureState("operations", admin, { "operations.incidents": true })).toBe("enabled");
+    expect(isPreviewedOnly("operations", admin, { "operations.incidents": true })).toBe(true);
+  });
+
+  it("is false for a node that is already enabled on its own merits, even if an override map happens to carry a stray true for it", () => {
+    // Nothing restricts "dashboard" in this deployment, so it is "enabled"
+    // regardless of previewOverrides -- a stray/leftover true entry for it
+    // must never read as "preview-only".
+    expect(isPreviewedOnly("dashboard", admin, { dashboard: true })).toBe(false);
   });
 });

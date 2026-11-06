@@ -97,9 +97,6 @@ func (unusedReferenceDataRepo) EnumLabels(context.Context, []string) (map[string
 func (unusedReferenceDataRepo) ListTimeZones(context.Context) ([]repository.TimeZoneRow, error) {
 	return nil, nil
 }
-func (unusedReferenceDataRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
-	return nil, nil
-}
 func (unusedReferenceDataRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
 	return nil, nil
 }
@@ -122,9 +119,6 @@ func (fakeTimeZoneRepo) EnumLabels(context.Context, []string) (map[string][]stri
 }
 func (f fakeTimeZoneRepo) ListTimeZones(context.Context) ([]repository.TimeZoneRow, error) {
 	return f.timeZones, nil
-}
-func (fakeTimeZoneRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
-	return nil, nil
 }
 func (fakeTimeZoneRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {
 	return nil, nil
@@ -173,9 +167,6 @@ func (fakeFeedbackEmojiRepo) EnumLabels(context.Context, []string) (map[string][
 	return nil, nil
 }
 func (fakeFeedbackEmojiRepo) ListTimeZones(context.Context) ([]repository.TimeZoneRow, error) {
-	return nil, nil
-}
-func (fakeFeedbackEmojiRepo) ListSLADurationPolicy(context.Context) ([]repository.SLADurationPolicyRow, error) {
 	return nil, nil
 }
 func (f fakeFeedbackEmojiRepo) ListFeedbackEmojis(context.Context) ([]repository.FeedbackEmojiRow, error) {

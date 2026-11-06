@@ -183,12 +183,12 @@ describe("Editor", () => {
       }
     });
 
-    it("does not upload an image over the 1 MB default and reports it", () => {
+    it("does not upload an image over the 10 MB default and reports it", () => {
       const onImageUpload = vi.fn();
       const onPasteError = vi.fn();
       renderEditor({ onImageUpload, onPasteError });
       const big = new File(["x"], "big.png", { type: "image/png" });
-      Object.defineProperty(big, "size", { value: 1024 * 1024 + 1 });
+      Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
       paste(screen.getByTestId("case-description-editor"), big);
       expect(onImageUpload).not.toHaveBeenCalled();
       expect(onPasteError).toHaveBeenCalledWith("size");

@@ -29,7 +29,10 @@ const { apiMock, details, noResults } = vi.hoisted(() => ({
 }));
 vi.mock("@api/backend/client", () => ({ useBackendApi: () => apiMock }));
 vi.mock("@api/useSearchUsersByName", () => ({ useSearchInternalUsersByName: noResults }));
-vi.mock("@api/useSearchGroups", () => ({ useSearchGroups: noResults }));
+// One assignment group to pick.
+vi.mock("@api/useSearchGroups", () => ({
+  useSearchGroups: () => ({ data: [{ id: "team-2", name: "Platform" }], isFetching: false, isError: false }),
+}));
 vi.mock("@api/useSearchItServices", () => ({ useSearchItServices: noResults }));
 vi.mock("@api/useSearchServiceOfferings", () => ({ useSearchServiceOfferings: noResults }));
 vi.mock("@features/csm-operations/api/useSearchServiceRequestsForSelect", () => ({
@@ -41,14 +44,25 @@ vi.mock("@features/csm-cases/components/AsyncProjectSelect", () => ({
     label,
     value,
     disabled,
+    required,
+    helperText,
     onChange,
   }: {
     label: string;
     value: string;
     disabled?: boolean;
+    required?: boolean;
+    helperText?: string;
     onChange: (next: string, name?: string) => void;
   }) => (
-    <input aria-label={label} disabled={disabled} value={value} onChange={(e) => onChange(e.target.value, "Acme")} />
+    <input
+      aria-label={label}
+      data-helper-text={helperText ?? ""}
+      disabled={disabled}
+      required={required}
+      value={value}
+      onChange={(e) => onChange(e.target.value, "Acme")}
+    />
   ),
 }));
 // Project "proj-a" has one deployment; its products come back once it is chosen, as the real lookup does.
@@ -143,6 +157,14 @@ beforeEach(() => {
 });
 
 describe("BulkEditChangeRequestsDialog", () => {
+  it("never offers Standard: a change becomes one only by being raised from a template", async () => {
+    const dialog = renderDialog([cr("a"), cr("b")]);
+    await loaded(dialog);
+    const options = optionsOf(dialog, "Type");
+    expect(options).toEqual(expect.arrayContaining(["Normal", "Emergency"]));
+    expect(options).not.toContain("Standard");
+  });
+
   it("opens wide, so its columns and plan panels never squeeze a field", async () => {
     const dialog = renderDialog([cr("a")]);
     await loaded(dialog);
@@ -156,7 +178,7 @@ describe("BulkEditChangeRequestsDialog", () => {
     expect(apply).toBeDisabled();
 
     type(dialog, "Short description", " Rotate the gateway certificates ");
-    pick(dialog, "Type", "Standard");
+    pick(dialog, "Type", "Normal");
     pick(dialog, "Category", "Software");
     pick(dialog, "Impact", "Medium");
     pick(dialog, "Priority", "High");
@@ -178,7 +200,7 @@ describe("BulkEditChangeRequestsDialog", () => {
     fireEvent.click(apply);
     expect(onApply).toHaveBeenCalledWith({
       title: "Rotate the gateway certificates",
-      type: "standard",
+      type: "normal",
       category: "software",
       impact: "medium",
       priority: "high",
@@ -393,4 +415,123 @@ describe("BulkEditChangeRequestsDialog", () => {
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(within(dialog).getByRole("textbox", { name: "Work note (internal)" })).toBeDisabled();
   });
+});
+
+describe("BulkEditChangeRequestsDialog — what Request Approval needs", () => {
+  const TEAM = { id: "team-1", name: "Platform" };
+  const group = (dialog: HTMLElement): HTMLElement => within(dialog).getByRole("combobox", { name: "Assignment group" });
+  const project = (dialog: HTMLElement): HTMLElement => within(dialog).getByRole("textbox", { name: "Customer Project" });
+
+  it("marks the Assignment group required while a selected change request has none, and still applies", async () => {
+    const dialog = renderDialog([cr("a", { assignedTeam: TEAM }), cr("b")]);
+    await loaded(dialog);
+    expect(group(dialog)).not.toBeRequired();
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(group(dialog)).toBeRequired();
+    expect(group(dialog)).toHaveAccessibleDescription(
+      "Required to request approval: 1 of the selected change requests has no assignment group, and without one it is skipped.",
+    );
+    // Not a block on the whole edit: the one without a team is skipped by the run, the other goes through.
+    const apply = within(dialog).getByRole("button", { name: "Apply to 2 change requests" });
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+    expect(onApply).toHaveBeenCalledWith({ state: "assess" });
+  }, 20_000);
+
+  it("does not mark it when every selected change request has a team, or for another state", async () => {
+    const dialog = renderDialog([cr("a", { assignedTeam: TEAM }), cr("b", { assignedTeam: TEAM })]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(group(dialog)).not.toBeRequired();
+    cleanup();
+    const other = renderDialog([cr("c")]);
+    await loaded(other);
+    pick(other, "State", "Cancel change (Canceled)");
+    expect(group(other)).not.toBeRequired();
+  }, 20_000);
+
+  it("marks the Customer Project required when a selected change request has a customer step and no project", async () => {
+    const dialog = renderDialog([cr("a", { assignedTeam: TEAM, customerApprovalRequired: true }), cr("b", { assignedTeam: TEAM })]);
+    await loaded(dialog);
+    expect(project(dialog)).not.toBeRequired();
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(project(dialog)).toBeRequired();
+    expect(project(dialog)).toHaveAttribute(
+      "data-helper-text",
+      "Required to request approval: 1 of the selected change requests has a customer step ticked and no Customer Project, and without one it is skipped.",
+    );
+    // An Emergency change asks the customer nothing: re-typing to it needs no project.
+    pick(dialog, "Type", "Emergency");
+    expect(project(dialog)).not.toBeRequired();
+  }, 20_000);
+
+  it("does not mark the Customer Project where it can't be set here, and says plainly who is skipped", async () => {
+    // A mixed selection: one New with a customer step and no project, one past New in another project. Past New the
+    // backend offers no Request Approval, so this fixture (legalNextStates with "assess") stands in for a selection
+    // whose details changed after Request Approval was picked. The project is set only when all are New, so the
+    // picker is disabled.
+    const dialog = renderDialog([
+      cr("a", { assignedTeam: TEAM, customerApprovalRequired: true }),
+      cr("b", {
+        state: "authorize",
+        assignedTeam: TEAM,
+        project: { id: "proj-b", name: "Beta" },
+        legalNextStates: ["assess", "canceled"],
+      }),
+    ]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(project(dialog)).toBeDisabled();
+    expect(project(dialog)).not.toBeRequired();
+    expect(project(dialog)).toHaveAttribute("data-helper-text", "");
+    expect(
+      within(dialog).getByText(
+        "1 of the selected change requests has a customer step ticked and no Customer Project, so it is skipped.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/^Required to request approval/)).not.toBeInTheDocument();
+
+    // The note follows the pick: with the customer's approval taken off, nobody needs a project.
+    pick(dialog, "Customer approval", "Not required");
+    expect(within(dialog).queryByText(/no Customer Project, so it is skipped/)).not.toBeInTheDocument();
+
+    // Not a block on the edit either way.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 change requests" }));
+    expect(onApply).toHaveBeenCalledWith({ state: "assess", customerApprovalRequired: false });
+  }, 20_000);
+
+  it("counts a customer step set in the same edit, and a project already stored", async () => {
+    const dialog = renderDialog([
+      cr("a", { assignedTeam: TEAM }),
+      cr("b", { assignedTeam: TEAM, project: { id: "proj-a", name: "Acme" } }),
+    ]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(project(dialog)).not.toBeRequired();
+    pick(dialog, "Customer approval", "Required");
+    expect(project(dialog)).toBeRequired();
+    expect(project(dialog)).toHaveAttribute("data-helper-text", expect.stringMatching(/^Required to request approval: 1 of /));
+  }, 20_000);
+
+  it("drops the mark and the count once the field is filled in here, since that value counts for all of them", async () => {
+    const dialog = renderDialog([cr("a", { customerApprovalRequired: true }), cr("b", { assignedTeam: TEAM })]);
+    await loaded(dialog);
+    pick(dialog, "State", "Request Approval (Assess)");
+    expect(group(dialog)).toBeRequired();
+    expect(project(dialog)).toBeRequired();
+
+    pick(dialog, "Assignment group", "Platform");
+    expect(group(dialog)).not.toBeRequired();
+    expect(group(dialog)).not.toHaveAccessibleDescription();
+
+    fireEvent.change(project(dialog), { target: { value: "proj-a" } });
+    expect(project(dialog)).not.toBeRequired();
+    expect(project(dialog)).toHaveAttribute("data-helper-text", "");
+
+    // Both go out with the move, and the run's plan takes them over what each one has stored.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply to 2 change requests" }));
+    expect(onApply).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "assess", assignedTeamId: "team-2", projectId: "proj-a" }),
+    );
+  }, 20_000);
 });

@@ -83,7 +83,11 @@ function makeRow(id: string, caseNumber: string, subject: string): CsmCaseRow {
 
 const PAGE_ONE = [
   makeRow("case-1", "CS-1001", "First page, first row"),
-  makeRow("case-2", "CS-1002", "First page, second row"),
+  {
+    ...makeRow("case-2", "CS-1002", "First page, second row"),
+    resolvedAt: "2026-01-03T00:00:00Z",
+    closedAt: "2026-01-04T00:00:00Z",
+  },
 ];
 const PAGE_TWO = [
   makeRow("case-3", "CS-1003", "=Second page, first row"),
@@ -201,13 +205,16 @@ describe("CsmIssuesView Export selected", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Export selected (2)" }));
 
-    const updated = formatBackendTimestampForDisplay("2026-01-02T00:00:00Z", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const fmt = (ts: string) =>
+      formatBackendTimestampForDisplay(ts, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    const updated = fmt("2026-01-02T00:00:00Z");
+    const created = fmt("2026-01-01T00:00:00Z");
     expect(downloadCsv).toHaveBeenCalledTimes(1);
     const [header, rows, filename] = vi.mocked(downloadCsv).mock.calls[0];
     expect(header).toEqual([
@@ -218,6 +225,9 @@ describe("CsmIssuesView Export selected", () => {
       "Severity",
       "State",
       "Updated",
+      "Created",
+      "Resolved",
+      "Closed",
     ]);
     expect(rows).toEqual([
       [
@@ -228,6 +238,9 @@ describe("CsmIssuesView Export selected", () => {
         "S2",
         "Open",
         updated,
+        created,
+        fmt("2026-01-03T00:00:00Z"),
+        fmt("2026-01-04T00:00:00Z"),
       ],
       [
         "ACME-003/CS-1003",
@@ -237,6 +250,9 @@ describe("CsmIssuesView Export selected", () => {
         "S2",
         "Open",
         updated,
+        created,
+        "",
+        "",
       ],
     ]);
     expect(filename).toMatch(/^cases-selected-export-.*\.csv$/);

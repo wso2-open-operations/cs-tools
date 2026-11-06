@@ -38,6 +38,8 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/mailpaging"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
@@ -375,7 +377,12 @@ func main() {
 		// resolveFullCaseDescription/resolveFullCommentContent).
 		WithFullContentFetcher(customerEntityClient).
 		WithIncidentChatFanout(incidentChatFanout).
-		WithIncidentRoutes(incidentRoutes)
+		WithIncidentRoutes(incidentRoutes).
+		// ACP_REACTIVATION_CC is CC'd on the "Back to Open state" email
+		// (project.reactivated), e.g. the customer lifecycle and billing lists;
+		// checked by acpReactivationCC, which stops startup on a bad entry.
+		// The email goes only to @wso2.com addresses: it is an internal notice.
+		WithACPReactivation(acpReactivationCC(), "@wso2.com")
 
 	// Status page webhooks (outage.status_page_due on sre-events): posted here
 	// the moment entity-service publishes them, reported back to
@@ -575,6 +582,9 @@ func main() {
 			redisOpts = &redis.Options{Addr: redisAddr, Password: os.Getenv("REDIS_PASSWORD")}
 		}
 		redisClient = redis.NewClient(redisOpts)
+		// The "Back to Open state" email's duplicate guard: a notice already
+		// sent is not sent again when its event is redelivered.
+		dispatcher.WithACPReactivationLedger(dispatch.NewRedisReactivationLedger(redisClient))
 
 		// slaengine.EntityClient talks to the exact same entity-service as
 		// customerEntityClient above — not a different backend — so it
@@ -608,57 +618,78 @@ func main() {
 		slaProducer = eventbus.NewProducer(eventBusCfg)
 
 		// GET /sla-duration-policy is fetched exactly once, here, at
-		// startup — not refreshed again for the life of this process (see
-		// slaengine.Engine's own doc comment on why). A failure here is
-		// loud but not fatal: this is a nice-to-have engine layered on top
-		// of the notification channels this service exists for, not core
-		// delivery, so SLA tracking is simply disabled for this run rather
-		// than crash-looping the whole service over one failed startup
-		// call — restarting (or redeploying) picks it up once
-		// entity-service is reachable again. The 30s timeout bounds how
-		// long this can delay event consumption below by at most that much
-		// — acceptable once, at startup, for a feature that's otherwise
-		// entirely event-driven with no further entity-service calls.
+		// startup — not refreshed again for the life of this process. This
+		// feed is no longer used by slaengine.Engine itself (which now
+		// resolves each clock's real duration live, per clock, from
+		// entity-service's own GetClockState/GetActiveCSMSLAClocks — see
+		// RegisterClocks'/reconcileClock's own doc comments). It is kept
+		// here purely because internal/paging's own rung-email feature
+		// (RungEmailSending.SLADurations, below) still wants a severity ->
+		// clock-type duration map for its "response SLA remaining time"
+		// display — a separate, pre-existing feature this change does not
+		// touch, and a real, live consumer entity-service's own endpoint
+		// still serves (now computed from the real sla_policy table instead
+		// of the static one it used to read — see that repo's own
+		// CLAUDE.md). A failure here is logged and otherwise ignored; that
+		// feature's own documented fallback ("nil; the email then uses the
+		// published defaults") already handles it gracefully. The 30s
+		// timeout bounds how long this can delay event consumption below by
+		// at most that much.
 		slaStartupCtx, slaStartupCancel := context.WithTimeout(ctx, 30*time.Second)
 		durations, err := slaEntityClient.GetDurationPolicy(slaStartupCtx)
 		slaStartupCancel()
 		if err != nil {
-			slog.Error("slaengine: failed to fetch sla duration policy at startup, sla tracking is disabled for this run", "err", err)
+			slog.Warn("slaengine: failed to fetch sla duration policy at startup, the case-paging rung email falls back to published defaults", "err", err)
 		} else {
 			slaDurations = durations
-			slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, durations, slaEntityClient, slaEmailSendingEnabled)
-			dispatcher = dispatcher.WithSLAEngine(slaEngine)
-
-			// One-shot reconciliation: rebuilds every currently-open clock's
-			// Redis state from entity-service's own durable record (see
-			// Engine.Reconcile's own doc comment) — the recovery path Redis
-			// itself has none of. Must run here, before RunTicker starts and
-			// before any consumer does (same ordering reasoning this whole
-			// block's own leading comment already gives for WithSLAEngine):
-			// a tick that runs before reconciliation finishes could find an
-			// empty wake-index and correctly conclude there's nothing due
-			// yet, but a case.created delivered before reconciliation
-			// finishes is harmless either way (RegisterClocks/SetClock are
-			// idempotent against whatever reconciliation later writes for
-			// the same clock). Logged, not fatal: a failure here means this
-			// run starts with whatever Redis already had (empty, if it was
-			// genuinely just wiped) rather than refusing to serve
-			// notifications at all over a recovery step failing.
-			reconcileCtx, reconcileCancel := context.WithTimeout(ctx, 60*time.Second)
-			if err := slaEngine.Reconcile(reconcileCtx, slaEntityClient); err != nil {
-				slog.Error("slaengine: reconciliation failed, starting with whatever redis already has", "err", err)
-			}
-			reconcileCancel()
-
-			// SLA_TICK_INTERVAL defaults far above the old wake-index
-			// design's original 15s: this engine now schedules a wake entry
-			// per tier at registration time (RegisterClocks), so a tick only
-			// needs to notice whichever ones have since become due, not
-			// recompute anything — 5 minutes balances alert latency against
-			// a near-zero load on Redis either way.
-			tickInterval := envDuration("SLA_TICK_INTERVAL", 5*time.Minute)
-			go slaEngine.RunTicker(ctx, tickInterval)
 		}
+
+		// The SLA breach-alerting engine itself is constructed unconditionally
+		// now (no longer gated on the duration-policy fetch above succeeding):
+		// it needs no startup data of its own any more, only the live
+		// entity-service client it already has, wired to RegisterClocks/
+		// reconcileClock. A failure of the (unrelated) rung-email duration
+		// fetch above must not also disable SLA breach tracking.
+		slaEngine := slaengine.NewEngine(slaengine.NewStore(redisClient), slaProducer, googleChatClient, linkResolver, slaEntityClient, slaEmailSendingEnabled, emailClient, emailDebugMode, emailDebugRecipients)
+		dispatcher = dispatcher.WithSLAEngine(slaEngine)
+
+		// Durable record-level dedup, see dispatch.Dispatcher.redisDedup's
+		// own doc comment: closes the restart/rebalance redelivery gap the
+		// in-memory done map alone can't. Shares this same redisClient with
+		// slaengine.NewStore above -- no second Redis connection, no new
+		// env var, same optional-per-deployment posture (nil without
+		// REDIS_ADDR/REDIS_URL, exactly as before this feature existed).
+		dispatcher = dispatcher.WithDurableDedup(redisClient)
+
+		// One-shot reconciliation: rebuilds every currently-open clock's
+		// Redis state from entity-service's own durable record (see
+		// Engine.Reconcile's own doc comment) — the recovery path Redis
+		// itself has none of. Must run here, before RunTicker starts and
+		// before any consumer does (same ordering reasoning this whole
+		// block's own leading comment already gives for WithSLAEngine):
+		// a tick that runs before reconciliation finishes could find an
+		// empty wake-index and correctly conclude there's nothing due
+		// yet, but a case.created delivered before reconciliation
+		// finishes is harmless either way (RegisterClocks/SetClock are
+		// idempotent against whatever reconciliation later writes for
+		// the same clock). Logged, not fatal: a failure here means this
+		// run starts with whatever Redis already had (empty, if it was
+		// genuinely just wiped) rather than refusing to serve
+		// notifications at all over a recovery step failing.
+		reconcileCtx, reconcileCancel := context.WithTimeout(ctx, 60*time.Second)
+		if err := slaEngine.Reconcile(reconcileCtx, slaEntityClient); err != nil {
+			slog.Error("slaengine: reconciliation failed, starting with whatever redis already has", "err", err)
+		}
+		reconcileCancel()
+
+		// SLA_TICK_INTERVAL defaults far above the old wake-index
+		// design's original 15s: this engine now schedules a wake entry
+		// per tier at registration time (RegisterClocks), so a tick only
+		// needs to notice whichever ones have since become due, not
+		// recompute anything — 5 minutes balances alert latency against
+		// a near-zero load on Redis either way.
+		tickInterval := envDuration("SLA_TICK_INTERVAL", 5*time.Minute)
+		go slaEngine.RunTicker(ctx, tickInterval)
 	}
 
 	// Team-sourced Chat spaces: entity-service's "team" table
@@ -769,6 +800,37 @@ func main() {
 			"allowListed", len(testCallCfg.AllowedNumbers) > 0, "sending", callSendingEnabled)
 	} else {
 		slog.Warn("paging test calls need Redis and CUSTOMER_ENTITY_BASE_URL; paging.test_call_requested will be ignored")
+	}
+
+	// Alert-email phone escalation (mail.alert.received, published by
+	// csm-mail-paging-service). Off unless MAIL_ESCALATION_CONFIG names the
+	// ladder file and Redis and entity-service are configured; without any of
+	// them the event is acknowledged and ignored. Its own engine and Redis keys, nothing shared
+	// with internal/paging but the Twilio client.
+	var mailPaging *mailpaging.Engine
+	if path := os.Getenv("MAIL_ESCALATION_CONFIG"); path != "" {
+		switch mailCfg, err := mailpaging.Load(path); {
+		case err != nil:
+			slog.Error("invalid MAIL_ESCALATION_CONFIG; mail alert paging is off", "err", err)
+		case redisClient == nil:
+			slog.Error("MAIL_ESCALATION_CONFIG needs Redis (REDIS_URL or REDIS_ADDR); mail alert paging is off")
+		case os.Getenv("CUSTOMER_ENTITY_BASE_URL") == "":
+			slog.Error("MAIL_ESCALATION_CONFIG needs CUSTOMER_ENTITY_BASE_URL (phone numbers are looked up there); mail alert paging is off")
+		default:
+			// The same entity-service lookup the incident ladders use for a
+			// person's number: their profile number, else the paging-only one.
+			phones := paging.NewEntityClient(paging.EntityConfig{
+				BaseURL:      os.Getenv("CUSTOMER_ENTITY_BASE_URL"),
+				TokenURL:     os.Getenv("OAUTH2_TOKEN_URL"),
+				ClientID:     os.Getenv("OAUTH2_CLIENT_ID"),
+				ClientSecret: os.Getenv("OAUTH2_CLIENT_SECRET"),
+				Scopes:       splitComma(os.Getenv("CUSTOMER_ENTITY_SCOPES")),
+			})
+			mailPaging = mailpaging.NewEngine(mailCfg, mailpaging.NewRedisStore(redisClient), phones, twilioClient, callSendingEnabled)
+			dispatcher = dispatcher.WithMailAlertPaging(mailPaging)
+			go mailPaging.RunTicker(ctx, envDuration("MAIL_ESCALATION_TICK_INTERVAL", 5*time.Second))
+			slog.Info("mail alert paging is enabled", "rules", len(mailCfg.Rules), "sending", callSendingEnabled)
+		}
 	}
 
 	// incident.special_ops_alert (sre-events) pages the SME through the SRE
@@ -1801,10 +1863,38 @@ func applyIncidentRoutes(sre paging.LadderConfig, chat *notifications.GoogleChat
 	})
 	chat.SetIncidentRouteSpaces(table.Spaces)
 	routes.Set(table.Fanout)
+	routes.SetTeamless(table.Teamless)
+	routes.SetKnownSRETeam(func(group string) bool { return paging.KnownSRETeam(sre, group) })
 	_, fallback := table.Spaces[notifications.IncidentFallbackAudience]
 	slog.Info("incident cards follow the Alert Settings group mapping",
 		"mappedGroups", table.Mapped, "defaultGroupsFannedOut", len(table.Fanout), "sharedSRERoom", fallback)
 	if !fallback {
 		slog.Warn("incident cards: the SRE ladder has no shared room (sre.chat), so an incident whose group maps to no team room still gets no card")
 	}
+}
+
+// acpReactivationCC reads ACP_REACTIVATION_CC, the CC list of the "Back to
+// Open state" email, and stops startup when an entry is not an address: the
+// email service would reject every send, each one retried and then
+// dead-lettered.
+func acpReactivationCC() []string {
+	cc, err := parseACPReactivationCC(os.Getenv("ACP_REACTIVATION_CC"))
+	if err != nil {
+		slog.Error("invalid ACP_REACTIVATION_CC", "err", err)
+		os.Exit(1)
+	}
+	return cc
+}
+
+// parseACPReactivationCC splits ACP_REACTIVATION_CC on commas (entries
+// trimmed, empty ones dropped) and refuses an entry that is not an address,
+// naming it by position, never by value.
+func parseACPReactivationCC(raw string) ([]string, error) {
+	cc := splitComma(raw)
+	for i, a := range cc {
+		if !events.LooksLikeEmail(a) {
+			return nil, fmt.Errorf("entry %d is not an email address", i+1)
+		}
+	}
+	return cc, nil
 }

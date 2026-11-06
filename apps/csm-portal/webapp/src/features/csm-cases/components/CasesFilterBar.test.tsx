@@ -887,3 +887,45 @@ describe("CasesFilterBar — per-consumer hidden Simple-mode controls", () => {
     expect(screen.getByRole("combobox", { name: "Severity" })).toBeInTheDocument();
   });
 });
+
+describe("CasesFilterBar — severity options", () => {
+  function simpleSeverityOptions(): string[] {
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Severity" }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  }
+
+  it("Simple mode offers S0-S4 by default", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(simpleSeverityOptions()).toEqual(["S0", "S1", "S2", "S3", "S4"]);
+  });
+
+  it("Simple mode offers only the passed options (no S0) for a service-request list", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      severityOptions: ["S1", "S2", "S3", "S4"].map((v) => ({
+        value: v as "S1" | "S2" | "S3" | "S4",
+        label: v,
+      })),
+    });
+    expect(simpleSeverityOptions()).toEqual(["S1", "S2", "S3", "S4"]);
+  });
+
+  it("Advanced mode offers the same passed options (no S0)", () => {
+    // `tags` has no Simple control, so this mounts straight into Advanced mode.
+    renderBar({ ...DEFAULT_CASES_FILTERS, tags: ["micro-gw"], severities: ["S1"] }, vi.fn(), {
+      severityOptions: ["S1", "S2", "S3", "S4"].map((v) => ({
+        value: v as "S1" | "S2" | "S3" | "S4",
+        label: v,
+      })),
+    });
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    const valueBoxes = screen.getAllByRole("combobox", { name: "Value(s)" });
+    // The severity row is the first typed row in catalogue order.
+    fireEvent.mouseDown(valueBoxes[0]);
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+    ]);
+  });
+});

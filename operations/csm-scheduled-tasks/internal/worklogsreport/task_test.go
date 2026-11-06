@@ -266,11 +266,20 @@ func TestSendDerivedSourceUsesTheRegistryAudience(t *testing.T) {
 	if err := handler(context.Background()); err != nil {
 		t.Fatalf("handler: %v", err)
 	}
+	// To is still the registry's alone. A configured to must never leak
+	// into it: widening who the report is ADDRESSED to stays a
+	// deliberate change of source.
 	if len(email.to) != 1 || email.to[0] != "registry-lead@example.com" {
 		t.Errorf("to = %v, want the registry's audience alone", email.to)
 	}
-	if len(email.cc) != 1 || email.cc[0] != "registry-list@example.com" {
-		t.Errorf("cc = %v, want the registry's audience alone", email.cc)
+	// Cc is the documented exception: the configured list is appended to
+	// the derived one, so a standing list can be copied without taking
+	// ownership of the whole audience. See Resolve's own comment for why
+	// this cannot be expressed in the team registry instead.
+	if len(email.cc) != 2 ||
+		email.cc[0] != "registry-list@example.com" ||
+		email.cc[1] != "configured-cc@example.com" {
+		t.Errorf("cc = %v, want the registry's list then the configured one", email.cc)
 	}
 }
 

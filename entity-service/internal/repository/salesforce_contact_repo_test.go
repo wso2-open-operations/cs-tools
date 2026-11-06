@@ -233,7 +233,7 @@ func TestUpsertAccountContact_PrimaryFlag(t *testing.T) {
 		{match: "FROM account_contact WHERE account_id", row: noRows},
 		{match: "INSERT INTO account_contact", row: scriptedRow{vals: []any{"ac-1"}}},
 	}}
-	if _, _, err := upsertAccountContact(context.Background(), q, "003A", "acct-1", "jane@acme.com", boolPtr(true), "actor"); err != nil {
+	if _, _, err := upsertAccountContact(context.Background(), q, "003A", "acct-1", "jane@acme.com", boolPtr(true), "actor", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(q.queries[2], "COALESCE($5::boolean, FALSE)") {
@@ -243,7 +243,7 @@ func TestUpsertAccountContact_PrimaryFlag(t *testing.T) {
 	q = &scriptedQuerier{t: t, script: []scriptStep{
 		{match: "FROM account_contact ac WHERE ac.sf_id", row: scriptedRow{vals: []any{"ac-1", int64(1)}}},
 	}}
-	if _, _, err := upsertAccountContact(context.Background(), q, "003A", "acct-1", "jane@acme.com", nil, "actor"); err != nil {
+	if _, _, err := upsertAccountContact(context.Background(), q, "003A", "acct-1", "jane@acme.com", nil, "actor", ""); err != nil {
 		t.Fatal(err)
 	}
 	upd := q.execsMatching("UPDATE account_contact")

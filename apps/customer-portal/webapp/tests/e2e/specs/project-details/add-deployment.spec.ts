@@ -474,24 +474,32 @@ test.describe("Deployment", () => {
       const deployments = new ProjectDeploymentsPage(page);
       await deployments.openDeploymentsTab(project.id);
 
-      // The fixture has to be there for the backend to reject anything. Checked
-      // *before* submitting, because a missing fixture does not fail loudly: the
-      // create would succeed, leaving a permanent deployment with that name and
-      // reporting "expected 409, got 201" — after which the test would pass on
-      // every later run because it had created its own fixture.
+      // The colliding name is READ OFF THE PAGE rather than taken from config.
+      //
+      // It used to come from `DEPLOYMENT_INPUT.existingName`, and that silently
+      // stopped working: every deployment this suite creates carries a
+      // timestamp suffix, so nothing is ever named exactly "Automation Test
+      // Deployment" and the guard below skipped the test on every run — the
+      // duplicate rule went unexercised while the suite reported green.
+      //
+      // Taking the name from the list cannot go stale, and it also removes the
+      // hazard the old guard existed to prevent: a name that is listed is by
+      // definition already taken, so the create cannot succeed and leave a
+      // permanent deployment behind.
       //
       // Being listed also means being active; a deactivated one is filtered out.
+      const existingNames = await deployments.deploymentNames();
       test.skip(
-        !(await deployments.isDeploymentListed(DEPLOYMENT_INPUT.existingName)),
-        `No active deployment named "${DEPLOYMENT_INPUT.existingName}" on this ` +
-          `project, so there is nothing to collide with. Update ` +
-          `DEPLOYMENT_INPUT.existingName in tests/e2e/config/testData.ts.`,
+        existingNames.length === 0,
+        `This project lists no deployments, so there is no name to collide ` +
+          `with. Create one, or run the "adds a deployment" case first.`,
       );
+      const duplicateName = existingNames[0];
 
       await deployments.openAddDeploymentModal();
 
       await deployments.fillDeployment(
-        DEPLOYMENT_INPUT.existingName,
+        duplicateName,
         DEPLOYMENT_INPUT.type,
         DEPLOYMENT_INPUT.description,
       );
@@ -507,13 +515,20 @@ test.describe("Deployment", () => {
 
       // The backend enforces name uniqueness per project. Nothing is created, so
       // this case is safe to re-run.
-      expect(response.status()).toBe(409);
+      expect(
+        response.status(),
+        `creating a second deployment named "${duplicateName}" should be rejected`,
+      ).toBe(409);
       expect(await response.text()).toContain("already exists");
 
       // The modal stays open on failure. Note the UI surfaces no visible error
       // here — from the user's side the button simply does nothing — which is
       // worth treating as a product defect rather than expected behaviour.
       await expect(deployments.modal()).toBeVisible();
+
+      console.log(
+        `Deployment validation: duplicate name "${duplicateName}" rejected with 409`,
+      );
     });
 
     test("cancelling closes the modal without creating a deployment", async ({

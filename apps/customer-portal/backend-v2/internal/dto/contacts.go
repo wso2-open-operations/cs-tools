@@ -55,9 +55,15 @@ type Contact struct {
 	Account             *ContactAccount `json:"account,omitempty"`
 	// CanResendInvitation is set only on database-backed rows
 	// (CSM_MIGRATION_PORTAL_CONTACTS_ENABLED) whose invitation is still
-	// outstanding, so the webapp shows the resend action exactly when
+	// outstanding and who are not integration (system) users, which are never
+	// invited, so the webapp shows the resend action exactly when
 	// POST .../resend-invitation can succeed. It is never set before cutover.
 	CanResendInvitation bool `json:"canResendInvitation,omitempty"`
+	// IsAccountAdmin is read-only: true when the contact holds an account-level
+	// admin role. It is set only on database-backed rows and is never read on
+	// the write path, so it cannot turn into a per-project role. IsCsAdmin stays
+	// the project-level Admin role, which is the editable one.
+	IsAccountAdmin bool `json:"isAccountAdmin,omitempty"`
 }
 
 // MapContact builds the portal response from a usermanagement.Contact.

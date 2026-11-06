@@ -79,13 +79,6 @@ type invitationProcessingResponse struct {
 // webapp keeps the row pending and refreshes the list until it appears.
 const invitationStatusProcessing = "PROCESSING"
 
-// accountAdminRoles are the account-level roles, as entity-service's
-// GET /users/me returns them, that allow managing a project's contacts.
-// customer_admin covers the caller's own account's projects and
-// partner_admin the customer projects a partner works on; the membership
-// check in requireProjectAdmin is what ties either one to a project.
-var accountAdminRoles = []string{"customer_admin", "partner_admin"}
-
 // membershipStateDeactivated is the membership state that no longer grants
 // anything, compared case-insensitively against the contact list's status.
 const membershipStateDeactivated = "DEACTIVATED"
@@ -151,6 +144,12 @@ func NewContactHandler(entityClient entityProjectResolver, contactsClient contac
 		portalContactsEnabled: portalContacts && memberships != nil,
 	}
 }
+
+// PortalContactsEnabled reports the handler's effective mode: true only when
+// the flag is on and an entity-service memberships client was supplied. In that
+// mode every write handler calls requireProjectAdmin before touching anything,
+// so the route middleware may defer the authorization decision to it.
+func (h *ContactHandler) PortalContactsEnabled() bool { return h.portalContactsEnabled }
 
 // GetProjectContacts handles GET /projects/{id}/contacts.
 func (h *ContactHandler) GetProjectContacts(w http.ResponseWriter, r *http.Request) {
@@ -578,10 +577,10 @@ func (h *ContactHandler) ResendProjectContactInvitation(w http.ResponseWriter, r
 // particular user may change this particular project's contacts is the
 // portal's call. Two conditions, both required:
 //
-//   - The caller holds an account admin role (accountAdminRoles). Admin is a
-//     property of the person, not of each project, as it is in ServiceNow:
-//     the migration carries it into user_role, and the Salesforce ingest
-//     keeps it derived from there on.
+//   - The caller is an admin by either signal: an account admin role
+//     (dto.AccountAdminRoles, from GET /users/me), which the migration
+//     carries into user_role and the Salesforce ingest keeps derived from
+//     there, or the project's own ADMIN role on the caller's membership.
 //   - The caller has an active membership on this project. user_role has no
 //     account or project column, so without this an admin of one customer
 //     could manage the contacts of any project whose id they know.
@@ -595,11 +594,7 @@ func (h *ContactHandler) requireProjectAdmin(w http.ResponseWriter, r *http.Requ
 		mapUpstreamError(w, err, "Failed to retrieve user details.")
 		return false
 	}
-	if !hasAccountAdminRole(me.Roles) {
-		slog.WarnContext(r.Context(), "project contact write refused: caller holds no account admin role", "userID", user.UserID, "projectID", projectID)
-		writeError(w, http.StatusForbidden, ErrMsgForbidden)
-		return false
-	}
+	accountAdmin := hasAccountAdminRole(me.Roles)
 
 	contacts, err := h.memberships.ListProjectContacts(r.Context(), projectID)
 	if err != nil {
@@ -612,14 +607,34 @@ func (h *ContactHandler) requireProjectAdmin(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusForbidden, ErrMsgForbidden)
 		return false
 	}
+	if !accountAdmin && !hasProjectAdminRole(contacts, user.Email) {
+		slog.WarnContext(r.Context(), "project contact write refused: caller holds no admin role", "userID", user.UserID, "projectID", projectID)
+		writeError(w, http.StatusForbidden, ErrMsgForbidden)
+		return false
+	}
 	return true
 }
 
-// hasAccountAdminRole reports whether roles include one of accountAdminRoles.
-func hasAccountAdminRole(roles []string) bool {
-	for _, r := range roles {
-		for _, admin := range accountAdminRoles {
-			if strings.EqualFold(strings.TrimSpace(r), admin) {
+// hasAccountAdminRole reports whether roles include one of dto.AccountAdminRoles.
+func hasAccountAdminRole(roles []string) bool { return dto.HasAccountAdminRole(roles) }
+
+// hasProjectAdminRole reports whether email has a membership on the project
+// that has not been deactivated and carries the project's ADMIN role. Email
+// comparison ignores case, as in isActiveProjectMember.
+func hasProjectAdminRole(contacts []entity.ProjectContact, email string) bool {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return false
+	}
+	for _, c := range contacts {
+		if !strings.EqualFold(strings.TrimSpace(c.Email), email) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(c.RegistrationState), membershipStateDeactivated) {
+			continue
+		}
+		for _, r := range c.Roles {
+			if strings.EqualFold(strings.TrimSpace(r), dto.ProjectRoleAdmin) {
 				return true
 			}
 		}

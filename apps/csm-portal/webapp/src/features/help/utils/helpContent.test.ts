@@ -81,10 +81,15 @@ describe("Operations help: the proposed-time bullet", () => {
     expect(notRecorded.textContent).toContain("A date a WSO2 user wrote in the previous system");
     expect(notRecorded.textContent).toContain("nobody is recorded as having proposed it");
     expect(notRecorded.textContent).toContain("no staff action stands in for the customer's own answer");
-    // The only thing on record is the last writer: a genuine proposal reads "nobody is recorded" after a staff edit, and the help says so.
+    // A customer's proposal records who proposed it, and a later staff edit does not change that; a time proposed
+    // before the record was kept is judged by the last writer, whom a later change now records first, and the help
+    // says both.
     const oneLine = (notRecorded.textContent ?? "").replace(/\s+/g, " ");
-    expect(oneLine).toContain("who last changed the change request");
-    expect(oneLine).toContain("once anyone at WSO2 has edited the change request since");
+    expect(oneLine).toContain("A customer's proposal records who proposed it");
+    expect(oneLine).toContain("what you do on the change request afterwards (a work note, a comment, putting it on hold) does not change that");
+    expect(oneLine).toContain("A time proposed before that record was kept is judged by who last changed the change request");
+    expect(oneLine).toContain("a change by anyone else now records that contact as its proposer first");
+    expect(oneLine).not.toContain("once anyone at WSO2 has edited");
     // Nothing asks the engineer to confirm and accept it anyway.
     expect(notRecorded.textContent).not.toMatch(/confirm|check that/i);
     expect(movedOn.textContent).toContain("dialog closes");

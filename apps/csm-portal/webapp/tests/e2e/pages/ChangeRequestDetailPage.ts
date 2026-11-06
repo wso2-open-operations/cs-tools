@@ -204,8 +204,9 @@ export class ChangeRequestDetailPage {
     return this.page.getByRole("dialog", { name: "Add tag" });
   }
 
+  /** Marker-tolerant: the Tag field is required, so its label carries an asterisk. */
   addTagSearchField(): Locator {
-    return this.addTagDialog().getByLabel("Tag", { exact: true });
+    return this.addTagDialog().getByRole("combobox", { name: /^Tag\s*\*?$/ });
   }
 
   addTagSubmit(): Locator {
@@ -423,14 +424,37 @@ export class ChangeRequestDetailPage {
     return this.editDialog().getByRole("button", { name: /^(Save|Saving…)$/ });
   }
 
-  /** The form's one action once the change request has been approved: every field is read-only, a work note is all it adds. */
+  /** The form's action once the change request has been approved, while only a work note is entered: every field is read-only
+   * but the work note and (in implement, review and customer_review) the deviation from the implementation plan; once the
+   * deviation is edited the button reads "Save". */
   addWorkNoteButton(): Locator {
     return this.editDialog().getByRole("button", { name: /^(Add work note|Saving…)$/ });
   }
 
-  /** The notice over the form once the change request has been approved (CAB approval received). */
+  /** The notice over the form once the change request has been approved (CAB approval received; a Standard change once
+   * Request Approval scheduled it). */
   editApprovedNotice(): Locator {
-    return this.editDialog().getByText(/CAB approval has been received, so this change request's fields are read-only/);
+    return this.editDialog().getByText(/This change request has been approved, so its fields are read-only/);
+  }
+
+  /** The Edit form's "Deviation from the implementation plan" (its labelled group). */
+  editDeviationGroup(): Locator {
+    return this.editDialog().getByRole("group", { name: /^Deviation from the implementation plan/ });
+  }
+
+  /** The editable surface of the Edit form's deviation field. */
+  editDeviationEditor(): Locator {
+    return this.editDeviationGroup().locator(".editor-input");
+  }
+
+  /** The Plan tab; named "Plan, has a deviation from the implementation plan" when there is one. */
+  planTab(): Locator {
+    return this.page.getByRole("tab", { name: /^Plan/ });
+  }
+
+  /** The deviation from the implementation plan on the Plan tab. */
+  deviationSection(): Locator {
+    return this.page.getByRole("region", { name: "Deviation from the implementation plan" });
   }
 
   /** The form's internal work note. */

@@ -18,13 +18,78 @@ import { describe, expect, it } from "vitest";
 import { projectContactRoleLabels } from "@features/csm-projects/utils/projectContactRoles";
 
 describe("projectContactRoleLabels", () => {
-  it("does not show Admin for an account admin whose project groups are only Full Access", () => {
+  it("shows Admin for a customer_admin account role without the project ADMIN role", () => {
     expect(
       projectContactRoleLabels({
         roles: ["PORTAL_USER", "SECURITY_CONTACT"],
         accountRoles: ["customer", "customer_admin", "external"],
       }),
-    ).toEqual(["Portal User", "Security User"]);
+    ).toEqual(["Admin", "Portal User", "Security User"]);
+  });
+
+  it("shows Admin for a partner_admin account role without the project ADMIN role", () => {
+    expect(
+      projectContactRoleLabels({
+        roles: ["PORTAL_USER"],
+        accountRoles: ["partner", "partner_admin", "external"],
+      }),
+    ).toEqual(["Admin", "Portal User"]);
+  });
+
+  it("shows Admin for a project ADMIN role alone", () => {
+    expect(
+      projectContactRoleLabels({ roles: ["ADMIN", "PORTAL_USER"], accountRoles: ["customer"] }),
+    ).toEqual(["Admin", "Portal User"]);
+  });
+
+  it("shows Admin once when both the project and account signals are present", () => {
+    expect(
+      projectContactRoleLabels({
+        roles: ["ADMIN"],
+        accountRoles: ["customer_admin", "partner_admin"],
+      }),
+    ).toEqual(["Admin", "Portal User"]);
+  });
+
+  it("does not show Admin when neither signal is present", () => {
+    expect(
+      projectContactRoleLabels({
+        roles: ["PORTAL_USER"],
+        accountRoles: ["customer", "partner", "external"],
+      }),
+    ).toEqual(["Portal User"]);
+  });
+
+  it("matches admin roles case-insensitively and ignores whitespace", () => {
+    expect(
+      projectContactRoleLabels({ roles: ["PORTAL_USER"], accountRoles: ["  Customer_Admin "] }),
+    ).toEqual(["Admin", "Portal User"]);
+    expect(
+      projectContactRoleLabels({ roles: ["PORTAL_USER"], accountRoles: [" PARTNER_ADMIN"] }),
+    ).toEqual(["Admin", "Portal User"]);
+    expect(projectContactRoleLabels({ roles: [" admin "] })).toEqual(["Admin", "Portal User"]);
+  });
+
+  it("treats undefined accountRoles as no global admin", () => {
+    expect(projectContactRoleLabels({ roles: ["PORTAL_USER"], accountRoles: undefined })).toEqual([
+      "Portal User",
+    ]);
+  });
+
+  it("keeps Admin first and leaves the other chips unchanged", () => {
+    expect(
+      projectContactRoleLabels({
+        roles: ["BUSINESS_CONTACT", "LEAD_USER", "PORTAL_USER", "SECURITY_CONTACT"],
+        accountRoles: ["customer_admin"],
+      }),
+    ).toEqual(["Admin", "Lead", "Portal User", "Security User", "Business Contact"]);
+    expect(
+      projectContactRoleLabels({
+        roles: ["LEAD_USER"],
+        isCsIntegrationUser: true,
+        accountRoles: ["partner_admin"],
+      }),
+    ).toEqual(["Admin", "Lead", "System User"]);
   });
 
   it("shows Admin from the project ADMIN role, once", () => {
@@ -48,7 +113,7 @@ describe("projectContactRoleLabels", () => {
     expect(
       projectContactRoleLabels({
         roles: ["BUSINESS_CONTACT"],
-        accountRoles: ["partner", "partner_admin", "external"],
+        accountRoles: ["partner", "external"],
       }),
     ).toEqual(["Portal User", "Business Contact"]);
   });

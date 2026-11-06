@@ -296,3 +296,38 @@ describe("AdvancedFiltersBuilder — Yes/No value", () => {
     expect(valueSelect()).not.toHaveTextContent(/Yes|No/);
   });
 });
+
+describe("AdvancedFiltersBuilder — severity options", () => {
+  const severityRow: UnifiedFilterRow = {
+    field: "severity",
+    op: "in",
+    values: [],
+    origin: "typed",
+  };
+
+  function openSeverityValues(severityOptions?: { value: string; label: string }[]): string[] {
+    render(
+      <AdvancedFiltersBuilder
+        rows={[severityRow]}
+        onUpdateRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+        onAddRow={vi.fn()}
+        creTeamOptions={[]}
+        sreTeamOptions={[]}
+        severityOptions={severityOptions}
+      />,
+    );
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Value(s)" }));
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  }
+
+  it("offers S0-S4 by default", () => {
+    expect(openSeverityValues()).toEqual(["S0", "S1", "S2", "S3", "S4"]);
+  });
+
+  it("offers only the overriding list (no S0) when one is passed", () => {
+    expect(
+      openSeverityValues(["S1", "S2", "S3", "S4"].map((v) => ({ value: v, label: v }))),
+    ).toEqual(["S1", "S2", "S3", "S4"]);
+  });
+});

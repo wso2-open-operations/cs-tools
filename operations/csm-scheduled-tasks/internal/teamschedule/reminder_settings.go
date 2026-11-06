@@ -41,7 +41,13 @@ type ReminderSettings struct {
 	InvitesEnabled  bool                      `json:"invitesEnabled"`
 	WeekendRequired map[string]int            `json:"weekendRequired"`
 	Windows         map[string]ReminderWindow `json:"windows"`
-	CopyTo          []string                  `json:"copyTo"`
+	// InviteRotations is, per rotation (the shift code of its window),
+	// whether its reminders carry a calendar invitation. A rotation not named
+	// does.
+	InviteRotations map[string]bool `json:"inviteRotations"`
+	CopyTo          []string        `json:"copyTo"`
+	// WeekendCopyTo is copied on the weekend summary email only.
+	WeekendCopyTo []string `json:"weekendCopyTo"`
 }
 
 // ReminderSettingsFor is the family's saved reminder settings, or nil when

@@ -386,7 +386,7 @@ export default function OutageDetailPage(): JSX.Element {
 
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 1, borderTop: 1, borderColor: "divider" }}>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-            <FormControl size="small" sx={{ minWidth: 200 }} disabled={addCommunication.isPending}>
+            <FormControl size="small" sx={{ minWidth: 200 }} disabled={addCommunication.isPending} required>
               <InputLabel id="outage-comm-channel-label">Channel</InputLabel>
               <Select
                 labelId="outage-comm-channel-label"
@@ -416,6 +416,7 @@ export default function OutageDetailPage(): JSX.Element {
             label="Communication"
             value={body}
             onChange={(e) => setBody(e.target.value)}
+            required
             fullWidth
             multiline
             minRows={2}

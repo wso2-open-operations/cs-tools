@@ -174,3 +174,52 @@ func contains(xs []string, s string) bool {
 	}
 	return false
 }
+
+// A standing list can be copied on the derived audience without taking
+// ownership of the whole To line.
+//
+// The alternative was a team row carrying the address, which only works
+// if the row claims a type it does not have -- the routing is driven by
+// team.type -- and which would promote anyone later attached to it onto
+// the To line.
+func TestResolveDerivedAddsConfiguredCc(t *testing.T) {
+	derived := worklogreport.Recipients{
+		To: []string{"lead-a@example.com", "lead-b@example.com"},
+		Cc: []string{"team-a@example.com"},
+	}
+	configured := worklogreport.Audience{
+		To: []string{"should-be-ignored@example.com"},
+		Cc: []string{"cs-group@example.com"},
+	}
+
+	got := worklogreport.Resolve(derived, configured, worklogreport.SourceDerived, nil)
+
+	// The To line is untouched: adding a cc must never widen it.
+	if strings.Join(got.To, ",") != "lead-a@example.com,lead-b@example.com" {
+		t.Errorf("To = %v, want the derived list only", got.To)
+	}
+	if strings.Join(got.Cc, ",") != "team-a@example.com,cs-group@example.com" {
+		t.Errorf("Cc = %v, want the derived group then the configured one", got.Cc)
+	}
+
+	// Configured source is unchanged -- it still owns both lines.
+	cfg := worklogreport.Resolve(derived, configured, worklogreport.SourceConfigured, nil)
+	if strings.Join(cfg.To, ",") != "should-be-ignored@example.com" ||
+		strings.Join(cfg.Cc, ",") != "cs-group@example.com" {
+		t.Errorf("configured source changed: To=%v Cc=%v", cfg.To, cfg.Cc)
+	}
+
+	// An override still replaces everything, cc included.
+	ov := worklogreport.Resolve(derived, configured, worklogreport.SourceDerived, []string{"me@example.com"})
+	if strings.Join(ov.To, ",") != "me@example.com" || len(ov.Cc) != 0 {
+		t.Errorf("override leaked: To=%v Cc=%v", ov.To, ov.Cc)
+	}
+
+	// A duplicate address appears once.
+	dup := worklogreport.Resolve(derived,
+		worklogreport.Audience{Cc: []string{"TEAM-A@example.com"}},
+		worklogreport.SourceDerived, nil)
+	if len(dup.Cc) != 1 {
+		t.Errorf("Cc = %v, want the duplicate collapsed", dup.Cc)
+	}
+}

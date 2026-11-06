@@ -29,8 +29,13 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/salesentity"
 )
 
-// sf_invoice's bounded text columns (migration 0081) are all VARCHAR(40).
-const maxSfInvoiceTextChars = 40
+// sf_invoice's bounded text columns (migration 0081, name and description
+// widened by migration 0254). classification is still VARCHAR(40).
+const (
+	maxSfInvoiceNameChars        = 80
+	maxSfInvoiceDescriptionChars = 255
+	maxSfInvoiceClassChars       = 40
+)
 
 // SalesEntityInvoiceClient fetches one Salesforce Invoice__c from REST
 // sales/sales-entity-service.
@@ -77,8 +82,19 @@ func (s *salesforceEventService) RetryInvoiceIngest(ctx context.Context, invoice
 	return s.ingestInvoice(ctx, invoiceSfID, domain.SalesforceEventUpdated)
 }
 
-// handleInvoiceEvent is the Invoice__c branch of HandleEvent.
+// handleInvoiceEvent is the Invoice__c branch of HandleEvent: the invoice
+// ingest, then the ACP reopen check (acp_reopen.go) for the projects the
+// invoice belongs to, which runs only once the ingest succeeded and whether or
+// not the ingest is on.
 func (s *salesforceEventService) handleInvoiceEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
+	if err := s.ingestInvoiceEvent(ctx, req); err != nil {
+		return err
+	}
+	return s.reopenAfterInvoiceEvent(ctx, req)
+}
+
+// ingestInvoiceEvent is the invoice ingest's part of handleInvoiceEvent.
+func (s *salesforceEventService) ingestInvoiceEvent(ctx context.Context, req domain.SalesforceEventRequest) error {
 	if !s.invoices.enabled() {
 		slog.InfoContext(ctx, "salesforce: invoice ingest disabled, ignoring invoice event",
 			"eventType", req.EventType, "referenceId", req.ReferenceID)
@@ -112,6 +128,15 @@ func (s *salesforceEventService) ingestInvoice(ctx context.Context, sfID, eventT
 	inv, err := s.invoices.SalesEntity.GetInvoice(ctx, sfID)
 	if err != nil {
 		return err
+	}
+	return s.ingestInvoiceRecord(ctx, inv, sfID, eventType)
+}
+
+// ingestInvoiceRecord is ingestInvoice's body for an Invoice__c already in
+// hand: the admin resync reads invoices itself and writes them here.
+func (s *salesforceEventService) ingestInvoiceRecord(ctx context.Context, inv salesentity.Invoice, sfID, eventType string) error {
+	if s.support.States == nil {
+		return errors.New("salesforce: salesforce_ingest_state ledger is not configured")
 	}
 	if id := strings.TrimSpace(derefString(inv.ID)); id != "" {
 		sfID = id
@@ -185,11 +210,11 @@ func (s *salesforceEventService) deleteInvoice(ctx context.Context, sfID string)
 // mapSalesEntityInvoice maps the Sales Entity record onto sf_invoice's
 // columns; OpportunityID is resolved by the caller. The original due date
 // falls back to the current one when Salesforce has none, as the ServiceNow
-// script did. The three text columns are VARCHAR(40); a longer value is cut
-// and logged.
+// script did. The three text columns are bounded (name 80, description 255,
+// classification 40); a longer value is cut and logged.
 func mapSalesEntityInvoice(ctx context.Context, sfID string, inv salesentity.Invoice) domain.SalesforceInvoiceUpsert {
-	text := func(column string, v *string) *string {
-		return truncateSfColumn(ctx, "sf_invoice."+column, sfID, optionalPtr(v), maxSfInvoiceTextChars)
+	text := func(column string, v *string, max int) *string {
+		return truncateSfColumn(ctx, "sf_invoice."+column, sfID, optionalPtr(v), max)
 	}
 	originalDue := inv.OriginalInvoiceDueDate
 	if optionalPtr(originalDue) == nil {
@@ -197,9 +222,9 @@ func mapSalesEntityInvoice(ctx context.Context, sfID string, inv salesentity.Inv
 	}
 	return domain.SalesforceInvoiceUpsert{
 		SfID:                   sfID,
-		Name:                   text("name", inv.Name),
-		Description:            text("description", inv.Description),
-		Classification:         text("classification", inv.Classification),
+		Name:                   text("name", inv.Name, maxSfInvoiceNameChars),
+		Description:            text("description", inv.Description, maxSfInvoiceDescriptionChars),
+		Classification:         text("classification", inv.Classification, maxSfInvoiceClassChars),
 		InvoicedAmount:         inv.Amount,
 		InvoiceDate:            parseSalesforceDate(ctx, "invoiceDate", sfID, inv.InvoiceDate),
 		InvoicedDueDate:        parseSalesforceDate(ctx, "dueDate", sfID, inv.DueDate),

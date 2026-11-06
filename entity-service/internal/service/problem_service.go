@@ -361,26 +361,28 @@ func checkProblemTransitionRequirements(t repository.ProblemTransition, req doma
 //     checked against the problem's current state (wrong state = 400 naming
 //     it, as ServiceNow answers) and applied with its side effects and the
 //     fields in one transaction (ProblemRepository.ApplyProblemTransition).
-//   - DATA_SOURCE=postgres-servicenow-dual-write, transition: ServiceNow
-//     FIRST, synchronously, with the whole request. ServiceNow runs its own
-//     state model and business rules and can refuse or silently revert a
-//     move (its "Update Problem State to Assess" rule forces Assess back
-//     whenever the problem has an assignee; ProblemUtils reports that as a
-//     409). Only once ServiceNow has accepted is the same move written to
-//     Postgres, without the from-state check, since Postgres may lag
-//     ServiceNow. A ServiceNow refusal returns as-is and Postgres is
-//     untouched, so the two never disagree about the state.
+//   - DATA_SOURCE=postgres-servicenow-dual-write, transition: Postgres
+//     FIRST, exactly as in postgres mode (from-state enforced, a wrong state
+//     is a 400 naming it, and ServiceNow is not called). Postgres is the
+//     system of record, so a row that lags ServiceNow can always be moved.
+//     Once Postgres has committed, the move and the request's fields are
+//     mirrored to ServiceNow best-effort through the async write-back
+//     (snWriteback), as the fields-only path does. A ServiceNow refusal or
+//     failure (a business rule reverting the move, an "invalid state" answer,
+//     an outage) is logged and recorded by the dispatcher, never returned: an
+//     update does not block on, or fail with, the secondary store. The two
+//     can differ until the mirror is replayed.
 //   - dual-write, assigning an owner to a NEW problem that has none, with no
 //     transition: ServiceNow moves such a problem to Assess on its own when
 //     an owner is set, and a fields-only write would never learn of it,
 //     leaving Postgres in NEW. So this is treated as an implied assess and
-//     takes the transition path above (ServiceNow first, then the fields and
-//     the move to Assess in one Postgres transaction). A clear or blank
-//     assignee, an already-owned problem, or a problem not in NEW is not
-//     affected.
+//     takes the transition path above (the fields and the move to Assess in
+//     one Postgres transaction first; the mirror carries only the fields,
+//     since ServiceNow performs the move itself). A clear or blank assignee,
+//     an already-owned problem, or a problem not in NEW is not affected.
 //   - dual-write, fields only: Postgres first, then a best-effort async
-//     ServiceNow mirror (snWriteback), as before. A failed mirror leaves
-//     ServiceNow one field stale until retried, never a different state.
+//     ServiceNow mirror (snWriteback). A failed mirror leaves ServiceNow
+//     one field stale until retried.
 func (s *problemService) UpdateProblem(ctx context.Context, req domain.UpdateProblemRequest) (domain.UpdateProblemResponse, error) {
 	if err := validateUUIDs("id", []string{req.ID}); err != nil {
 		return domain.UpdateProblemResponse{}, err
@@ -448,33 +450,22 @@ func (s *problemService) UpdateProblem(ctx context.Context, req domain.UpdatePro
 	}
 
 	var updatedOn time.Time
-	switch {
-	case transition != nil && s.snMirror != nil:
-		snReq := req
-		snReq.TargetResolutionDate = snTargetDate
-		if _, err := s.snMirror.UpdateProblem(ctx, snReq); err != nil {
-			return domain.UpdateProblemResponse{}, err
-		}
-		updatedOn, err = s.repo.ApplyProblemTransition(ctx, req, *transition, false, actorEmail)
-		if err != nil {
-			// ServiceNow has moved; Postgres has not. Loud, like
-			// createProblemSNFirst's own drift branch: the next sync, or a
-			// retry of the same request, brings Postgres level.
-			slog.ErrorContext(ctx, "update problem: ServiceNow applied the transition but the Postgres write failed",
-				"problemId", req.ID, "transition", transition.Name, "error", err)
-			return domain.UpdateProblemResponse{}, err
-		}
-	case transition != nil:
+	if transition != nil {
+		// Postgres first with the from-state enforced, in every mode.
 		updatedOn, err = s.repo.ApplyProblemTransition(ctx, req, *transition, true, actorEmail)
 		if err != nil {
 			return domain.UpdateProblemResponse{}, err
 		}
-	default:
+		// An implied assess has no explicit transition in the request:
+		// ServiceNow makes that move itself when it sees the owner, so the
+		// mirror carries the fields only.
+		s.mirrorProblemUpdate(ctx, req, snTargetDate)
+	} else {
 		updatedOn, err = s.repo.UpdateProblemFields(ctx, req, actorEmail)
 		if err != nil {
 			return domain.UpdateProblemResponse{}, err
 		}
-		s.mirrorProblemFields(ctx, req, snTargetDate)
+		s.mirrorProblemUpdate(ctx, req, snTargetDate)
 	}
 
 	// Re-read so State/ResolutionCode/AssignedTo show the real post-write
@@ -504,17 +495,21 @@ func (s *problemService) UpdateProblem(ctx context.Context, req domain.UpdatePro
 	}, nil
 }
 
-// mirrorProblemFields is the dual-write fields-only path's best-effort async
-// ServiceNow write; a no-op on DATA_SOURCE=postgres. Dispatched once Postgres
-// has committed and before the re-read, so a failed re-read can't skip it.
-// mirrorReq carries only the fields this call set, never a transition (a
-// transition goes to ServiceNow synchronously instead).
-func (s *problemService) mirrorProblemFields(ctx context.Context, req domain.UpdateProblemRequest, snTargetDate *string) {
+// mirrorProblemUpdate is the dual-write path's best-effort async ServiceNow
+// write; a no-op on DATA_SOURCE=postgres. Dispatched once Postgres has
+// committed and before the re-read, so a failed re-read can't skip it. It
+// carries the fields this call set and, when the caller asked for one, the
+// transition (req.Transition; nil for fields-only and implied-assess calls).
+// A ServiceNow failure is logged and recorded by the dispatcher and never
+// reaches the caller; the dispatcher makes a single attempt, so a refusal
+// such as "already at the target state" cannot loop.
+func (s *problemService) mirrorProblemUpdate(ctx context.Context, req domain.UpdateProblemRequest, snTargetDate *string) {
 	if s.snWriteback == nil {
 		return
 	}
 	mirrorReq := domain.UpdateProblemRequest{
 		ID:                   req.ID,
+		Transition:           req.Transition,
 		AssignedToID:         req.AssignedToID,
 		AssignmentGroupID:    req.AssignmentGroupID,
 		CauseNotes:           req.CauseNotes,
@@ -523,6 +518,9 @@ func (s *problemService) mirrorProblemFields(ctx context.Context, req domain.Upd
 		TargetResolutionDate: snTargetDate,
 	}
 	payload := map[string]any{"id": req.ID}
+	if req.Transition != nil {
+		payload["transition"] = *req.Transition
+	}
 	for key, val := range map[string]*string{
 		"assignedToId": req.AssignedToID, "assignmentGroupId": req.AssignmentGroupID,
 		"causeNotes": req.CauseNotes, "fixNotes": req.FixNotes, "workaround": req.Workaround,

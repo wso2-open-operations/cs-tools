@@ -21,6 +21,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -32,11 +33,19 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/config"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/gmail"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/gmailauth"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/poller"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-mail-paging-service/internal/rules"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "gmail-auth" {
+		if err := gmailauth.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "gmail-auth:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("csm-mail-paging-service stopped", "err", err)
 		os.Exit(1)
@@ -56,9 +65,10 @@ func run() error {
 	defer stop()
 
 	mb, err := gmail.New(ctx, gmail.Config{
-		CredentialsJSON: cfg.GmailCredentialsJSON,
-		DelegatedUser:   cfg.GmailDelegatedUser,
-		ProcessedLabel:  cfg.ProcessedLabel,
+		ClientID:       cfg.GmailClientID,
+		ClientSecret:   cfg.GmailClientSecret,
+		RefreshToken:   cfg.GmailRefreshToken,
+		ProcessedLabel: cfg.ProcessedLabel,
 	})
 	if err != nil {
 		return err

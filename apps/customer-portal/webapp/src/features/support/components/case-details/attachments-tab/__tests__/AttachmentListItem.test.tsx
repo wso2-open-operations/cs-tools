@@ -16,9 +16,11 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
 import type { CaseAttachment } from "@features/support/types/cases";
+import { formatDateTime } from "@features/support/utils/support";
 
 const mockAttachment: CaseAttachment = {
   id: "att-1",
@@ -36,14 +38,20 @@ function renderItem(
   onDownload = vi.fn(),
   isDownloadLoading = false,
 ) {
+  // The item fetches its image preview through a query hook (disabled until expanded).
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <ThemeProvider theme={createTheme()}>
-      <AttachmentListItem
-        attachment={att}
-        onDownload={onDownload}
-        isDownloadLoading={isDownloadLoading}
-      />
-    </ThemeProvider>,
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider theme={createTheme()}>
+        <AttachmentListItem
+          attachment={att}
+          onDownload={onDownload}
+          isDownloadLoading={isDownloadLoading}
+        />
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -55,7 +63,10 @@ describe("AttachmentListItem", () => {
     expect(
       screen.getByText(/Uploaded by user@example.com/),
     ).toBeInTheDocument();
-    expect(screen.getByText("2026-02-13 10:00:00")).toBeInTheDocument();
+    // Rendered through formatDateTime (locale/timezone dependent), not the raw string.
+    expect(
+      screen.getByText(formatDateTime(mockAttachment.createdOn)),
+    ).toBeInTheDocument();
   });
 
   it("should call onDownload when Download button is clicked", () => {

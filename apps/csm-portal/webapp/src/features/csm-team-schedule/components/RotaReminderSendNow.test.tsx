@@ -134,7 +134,7 @@ afterEach(() => {
 });
 
 describe("RotaReminderSendNow", () => {
-  it("offers the next working day and the weekend as one choice, each with its dates", () => {
+  it("offers the Morning, the Evening and the weekend as one choice, each with its dates", () => {
     render(<RotaReminderSendNow />);
     expect(screen.getByRole("heading", { name: "Send now", level: 4 })).toBeInTheDocument();
     expect(
@@ -144,22 +144,25 @@ describe("RotaReminderSendNow", () => {
     ).toBeInTheDocument();
 
     expect(screen.getByRole("group", { name: "What to send" })).toBeInTheDocument();
-    const weekday = screen.getByRole("radio", { name: "Next working day" });
+    const morning = screen.getByRole("radio", { name: "Morning" });
+    const evening = screen.getByRole("radio", { name: "Evening" });
     const weekend = screen.getByRole("radio", { name: "Weekend" });
-    expect(weekday).toBeChecked();
+    expect(morning).toBeChecked();
+    expect(evening).not.toBeChecked();
     expect(weekend).not.toBeChecked();
-    expect(weekday).toHaveAccessibleDescription("Thursday, 22 October");
+    expect(morning).toHaveAccessibleDescription("Thursday, 22 October");
+    expect(screen.queryByRole("radio", { name: "Next working day" })).not.toBeInTheDocument();
     // Said once under the choice (the table lists each day on its own rows).
     expect(screen.getByText("Thursday, 22 October", { selector: "p" })).toBeInTheDocument();
 
     pickWeekend();
     expect(weekend).toBeChecked();
-    expect(weekday).not.toBeChecked();
+    expect(morning).not.toBeChecked();
     expect(weekend).toHaveAccessibleDescription("Saturday, 24 and Sunday, 25 October");
     expect(screen.getByText("Saturday, 24 and Sunday, 25 October", { selector: "p" })).toBeInTheDocument();
   });
 
-  it("previews the next working day as a table of day, rotation and people", () => {
+  it("previews the next working day's Morning as a table of day, rotation and people", () => {
     render(<RotaReminderSendNow />);
     expect(previewArgs).toHaveBeenLastCalledWith(THU, THU, true);
 
@@ -172,12 +175,20 @@ describe("RotaReminderSendNow", () => {
     expect(bodyRows(table)).toEqual([
       ["Thursday, 22 October", "Morning", "1 · Fay"],
       ["Thursday, 22 October", "Morning on-call", "nobody"],
-      ["Thursday, 22 October", "Evening", "2 · Gus, Hal"],
     ]);
     expect(screen.getByText("People on leave are left out.")).toBeInTheDocument();
     expect(
       screen.queryByText(/^Sent even if the weekend is not fully marked/),
     ).not.toBeInTheDocument();
+  });
+
+  it("previews the Evening on its own, for the same day", () => {
+    render(<RotaReminderSendNow />);
+    fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+    expect(previewArgs).toHaveBeenLastCalledWith(THU, THU, true);
+    expect(bodyRows(screen.getByRole("table", { name: "Who gets it" }))).toEqual([
+      ["Thursday, 22 October", "Evening", "2 · Gus, Hal"],
+    ]);
   });
 
   it("previews the weekend by day and rotation, and counts each person once", () => {
@@ -242,12 +253,18 @@ describe("RotaReminderSendNow", () => {
     expect(mutate.mock.calls[0]?.[0]).toEqual({ kind: "weekend", test: false });
   });
 
-  it("sends the next working day's reminders as weekday", () => {
+  it("sends the Morning and the Evening apart, each to its own people", () => {
     render(<RotaReminderSendNow />);
     fireEvent.click(sendButton());
-    expect(screen.getByText("Email 3 people now?")).toBeInTheDocument();
+    expect(screen.getByText("Email 1 person now?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
-    expect(mutate.mock.calls[0]?.[0]).toEqual({ kind: "weekday", test: false });
+    expect(mutate.mock.calls[0]?.[0]).toEqual({ kind: "morning", test: false });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+    fireEvent.click(sendButton());
+    expect(screen.getByText("Email 2 people now?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Yes, send" }));
+    expect(mutate.mock.calls[1]?.[0]).toEqual({ kind: "evening", test: false });
   });
 
   it("does not send on Cancel, and offers Send now again", () => {
@@ -291,7 +308,7 @@ describe("RotaReminderSendNow", () => {
     requests.data = [request({ kind: "weekend", status: "QUEUED" })];
     render(<RotaReminderSendNow />);
 
-    // The weekday reminder is not the one waiting.
+    // The Morning reminder is not the one waiting.
     expect(sendButton()).toBeEnabled();
     expect(screen.queryByText(/is already waiting to be sent\.$/)).not.toBeInTheDocument();
 
@@ -299,15 +316,28 @@ describe("RotaReminderSendNow", () => {
     expect(sendButton()).toBeDisabled();
     expect(screen.getByText("A weekend reminder is already waiting to be sent.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("radio", { name: "Next working day" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Morning" }));
     expect(sendButton()).toBeEnabled();
   });
 
-  it("holds Send now while a reminder of that kind is being sent", () => {
+  it("holds the Morning but not the Evening while a Morning reminder waits", () => {
+    requests.data = [request({ kind: "morning", status: "QUEUED" })];
+    render(<RotaReminderSendNow />);
+    expect(sendButton()).toBeDisabled();
+    expect(screen.getByText("A morning reminder is already waiting to be sent.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+    expect(sendButton()).toBeEnabled();
+  });
+
+  it("holds the Morning and the Evening while an older weekday request, which sends both, is being sent", () => {
     requests.data = [request({ kind: "weekday", status: "SENDING" })];
     render(<RotaReminderSendNow />);
     expect(sendButton()).toBeDisabled();
-    expect(screen.getByText("A weekday reminder is already waiting to be sent.")).toBeInTheDocument();
+    expect(screen.getByText("A morning reminder is already waiting to be sent.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+    expect(sendButton()).toBeDisabled();
+    pickWeekend();
+    expect(sendButton()).toBeEnabled();
   });
 
   it("holds Send now while the ask is on its way", () => {
@@ -328,10 +358,13 @@ describe("RotaReminderSendNow", () => {
       expect(screen.queryByText(/^Email \d+ (people|person) now\?$/)).not.toBeInTheDocument();
     });
 
-    it("asks for the weekday test when the next working day is chosen", () => {
+    it("asks for the Morning or the Evening test as chosen", () => {
       render(<RotaReminderSendNow />);
       fireEvent.click(testButton());
-      expect(mutate.mock.calls[0]?.[0]).toEqual({ kind: "weekday", test: true });
+      expect(mutate.mock.calls[0]?.[0]).toEqual({ kind: "morning", test: true });
+      fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+      fireEvent.click(testButton());
+      expect(mutate.mock.calls[1]?.[0]).toEqual({ kind: "evening", test: true });
     });
 
     it("says the test is queued, and goes only to the person asking", () => {
@@ -405,6 +438,8 @@ describe("RotaReminderSendNow", () => {
       }),
       request({ id: "d", kind: "weekday", status: "SENT", requestedBy: "dee@example.com", handledOn: "2026-10-19T10:00:00Z" }),
       request({ id: "e", kind: "weekday", status: "FAILED", requestedBy: "eve@example.com", result: "mail server down" }),
+      request({ id: "f", kind: "morning", status: "QUEUED", requestedBy: "fay@example.com" }),
+      request({ id: "g", kind: "evening", status: "QUEUED", requestedBy: "gus@example.com" }),
     ];
     render(<RotaReminderSendNow />);
 
@@ -423,6 +458,8 @@ describe("RotaReminderSendNow", () => {
       [asked, "Weekend", "cid@example.com", `Sent on ${when("2026-10-20T10:00:00Z")}: 12 emails sent`],
       [asked, "Weekday", "dee@example.com", `Sent on ${when("2026-10-19T10:00:00Z")}`],
       [asked, "Weekday", "eve@example.com", "Failed: mail server down"],
+      [asked, "Morning", "fay@example.com", "Waiting to be sent"],
+      [asked, "Evening", "gus@example.com", "Waiting to be sent"],
     ]);
   });
 

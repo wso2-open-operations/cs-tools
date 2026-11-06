@@ -20,6 +20,7 @@ import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { memberFamiliesOf, useChangeRotaAccess, useRotaAccess, type RotaAccessChange } from "../api/useRotaAccess";
 import type { RotaAdminGrant, RotaFamily, RotaMarkerGrant, ScheduleTeam } from "../types";
+import { teamDisplayName } from "../utils/teamDisplayName";
 import RotaReminderSettings from "./RotaReminderSettings";
 import ScheduleSkeleton from "./ScheduleSkeleton";
 
@@ -39,8 +40,9 @@ interface Props {
  *                admin grants it.
  *   Rota marker  marks one team -- its rotations, leave and allocations -- and
  *                nothing else: not Generate month, not the tags, not the
- *                paging chain. A CSM admin names any team's, a rota admin
- *                their own group's, and only from the team's own members.
+ *                paging chain. A CSM or portal admin names any team's, a
+ *                rota admin their own group's, a team's lead their own
+ *                team's, and only from the team's own members.
  *
  * And who is on each team: a CSM admin adds and removes any team's members, a
  * rota admin their own group's. Leads are not made here, and a lead (for a
@@ -50,16 +52,28 @@ interface Props {
  * The server decides who may change what and answers with it (canManage); the
  * page only offers what it says. Every change saves the moment it is made.
  */
-export default function RotaAccessTab({ teams }: Props): JSX.Element {
+export default function RotaAccessTab({ teams: synced }: Props): JSX.Element {
+  // Team names come synced as identifiers ("americas_cre_team"); the tables
+  // and labels below show them as the rest of the page does ("Americas").
+  const teams = useMemo(() => synced.map((t) => ({ ...t, name: teamDisplayName(t.name) })), [synced]);
   const access = useRotaAccess();
   const change = useChangeRotaAccess();
   const [error, setError] = useState<string | null>(null);
 
   const canAdmins = access.data?.canManage.rotaAdmins ?? false;
-  const markerFamilies = access.data?.canManage.markerFamilies ?? [];
+  const markerFamilies = useMemo(() => access.data?.canManage.markerFamilies ?? [], [access.data]);
   const memberFamilies = memberFamiliesOf(access.data);
+  // The teams the reader leads: their Rota Managers are theirs to change even
+  // in a group the reader does not run.
+  const markerTeams = useMemo(
+    () => new Set((access.data?.canManage.markerTeams ?? []).map((k) => k.toLowerCase())),
+    [access.data],
+  );
+  const ledHere = (t: ScheduleTeam): boolean => markerTeams.has(t.key.toLowerCase());
+  // Every group the reader may change some team of, in the usual order.
+  const groups = FAMILIES.filter((f) => markerFamilies.includes(f) || teams.some((t) => t.family === f && ledHere(t)));
   const [familyChoice, setFamily] = useState<RotaFamily | null>(null);
-  const family = familyChoice && markerFamilies.includes(familyChoice) ? familyChoice : markerFamilies[0];
+  const family = familyChoice && groups.includes(familyChoice) ? familyChoice : groups[0];
 
   // A refusal is shown above the sections, which can be far up the page from
   // the control that caused it (a long member list): bring it into view.
@@ -113,9 +127,9 @@ export default function RotaAccessTab({ teams }: Props): JSX.Element {
         <section className="ra-sec" aria-labelledby="ra-markers-h">
           <div className="ra-sech">
             <h3 id="ra-markers-h">Rota Managers</h3>
-            {markerFamilies.length > 1 ? (
+            {groups.length > 1 ? (
               <div className="seg teamseg" role="tablist" aria-label="Group">
-                {markerFamilies.map((f) => (
+                {groups.map((f) => (
                   <button
                     key={f}
                     id={`ra-fam-${f}`}
@@ -136,11 +150,11 @@ export default function RotaAccessTab({ teams }: Props): JSX.Element {
               are no tabs, so it is a plain region named by the heading. */}
           <div
             id="ra-markers-panel"
-            role={markerFamilies.length > 1 ? "tabpanel" : undefined}
-            aria-labelledby={markerFamilies.length > 1 ? `ra-fam-${family}` : undefined}
+            role={groups.length > 1 ? "tabpanel" : undefined}
+            aria-labelledby={groups.length > 1 ? `ra-fam-${family}` : undefined}
           >
             <MarkerTable
-              teams={teams.filter((t) => t.family === family)}
+              teams={teams.filter((t) => t.family === family && (markerFamilies.includes(family) || ledHere(t)))}
               markers={access.data.markers.filter((m) => m.family === family)}
               busy={change.isPending}
               onChange={apply}
@@ -320,7 +334,12 @@ function MarkerTable({
           const held = byTeam.get(t.key) ?? [];
           const heldIds = new Set(held.map((m) => m.userId));
           const members = t.members ?? [];
-          const leads = members.filter((m) => m.isLead);
+          // A team with a head (the Americas team lead) names only them as
+          // its Lead; its leads are listed with the Rota Managers, the part
+          // of the lead role this table is about. Roles are unchanged.
+          const heads = t.heads ?? [];
+          const leads = heads.length > 0 ? heads : members.filter((m) => m.isLead);
+          const leadManagers = heads.length > 0 ? members.filter((m) => m.isLead && !heldIds.has(m.userId)) : [];
           // A lead already marks their own team; offering them would grant
           // nothing they do not hold.
           const pickable = members.filter((m) => !m.isLead && !heldIds.has(m.userId));
@@ -332,8 +351,15 @@ function MarkerTable({
               <td className="ra-leads">{leads.length > 0 ? leads.map((m) => m.name).join(", ") : "—"}</td>
               <td>
                 <div className="ra-cell">
-                  {held.length > 0 ? (
+                  {held.length + leadManagers.length > 0 ? (
                     <ul className="ra-list" aria-label={`${t.name} Rota Managers`}>
+                      {leadManagers.map((m) => (
+                        <li key={m.userId}>
+                          <span className="ra-name" title="A lead of this team, so they manage its rota.">
+                            {m.name || m.email}
+                          </span>
+                        </li>
+                      ))}
                       {held.map((m) => (
                         <li key={m.userId} className={m.active ? undefined : "off"}>
                           <span

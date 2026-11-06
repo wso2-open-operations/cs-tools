@@ -22,6 +22,7 @@ import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import DirectoryMemberPage from "@features/csm-admin/components/DirectoryMemberPage";
 import TeamChatSpaceCard from "@features/csm-admin/components/TeamChatSpaceCard";
 import TeamLeadCard from "@features/csm-admin/components/TeamLeadCard";
+import TeamMembersManageCard from "@features/csm-admin/components/TeamMembersManageCard";
 import { useGetTeamMembers } from "@features/csm-admin/api/useTeamMembers";
 import { useTeamEntityId } from "@features/csm-admin/hooks/useTeamEntityId";
 import { callerIsTeamLead } from "@features/csm-admin/utils/teamLeadAccess";
@@ -36,7 +37,9 @@ import { callerIsTeamLead } from "@features/csm-admin/utils/teamLeadAccess";
  * team's own Chat space link (admin or this team's own lead) and the team
  * lead itself (admin only, since reassigning it also changes who
  * entity-service's incident call-escalation ladder pages for this team).
- * Neither section renders at all for anyone else — see each card's own doc
+ * An admin also gets "Manage members" (add, remove, change role/alert tier,
+ * move), keyed by the registry key `:id` as the team-schedule routes are.
+ * None of these sections render at all for anyone else — see each card's own doc
  * comment for why this is a deliberate exception to the show-and-let-the-
  * backend-reject default this app's CLAUDE.md otherwise documents for
  * role/group/team member pages.
@@ -71,6 +74,8 @@ export default function TeamMembersPage(): JSX.Element {
           {isAdmin && <TeamLeadCard teamEntityId={teamEntityId} isAdmin={isAdmin} />}
         </Box>
       )}
+
+      {isAdmin && id && <TeamMembersManageCard teamKey={id} isAdmin={isAdmin} />}
 
       <DirectoryMemberPage filterKey="teamIds" entityNoun="team" listPath="/admin/teams" />
     </Box>

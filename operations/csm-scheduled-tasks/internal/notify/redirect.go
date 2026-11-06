@@ -46,15 +46,34 @@ func ForReport(inner Sender, debugRecipients []string) Sender {
 	return &redirected{inner: inner, debug: debug}
 }
 
+// ForRunNow returns the Sender for a manual run-now that replaces a
+// report's audience: every email goes to to (and cc) instead of its
+// intended To/Cc, with "[Test copy]" prefixed to the subject and a notice
+// just inside <body> naming who it would have gone to. Unlike ForReport it
+// is not debug mail mode and can address a Cc. The real audience is named
+// in the body and never addressed.
+func ForRunNow(inner Sender, to, cc []string) Sender {
+	return &redirected{inner: inner, debug: cleanAddresses(to), cc: cleanAddresses(cc), runNow: true}
+}
+
 type redirected struct {
 	inner Sender
 	debug []string
+	// cc and runNow are set only by ForRunNow.
+	cc     []string
+	runNow bool
 }
 
 func (r *redirected) SendEmail(ctx context.Context, to, cc []string, subject, htmlBody string) error {
 	// The real audience is named in the body and never addressed. The log
 	// line is the audit trail of what was redirected; the addresses
 	// themselves stay out of the logs.
+	if r.runNow {
+		slog.Info("run-now: redirecting a report to the given recipients",
+			"subject", subject, "intendedTo", len(to), "intendedCc", len(cc), "to", len(r.debug), "cc", len(r.cc))
+		return r.inner.SendEmail(ctx, r.debug, r.cc, "[Test copy] "+subject,
+			testCopyNoticeFor(htmlBody, to, cc, "This run was started by hand with its recipients replaced."))
+	}
 	slog.Info("debug mail mode: redirecting a report to its debug recipients",
 		"subject", subject, "intendedTo", len(to), "intendedCc", len(cc), "debugRecipients", len(r.debug))
 	return r.inner.SendEmail(ctx, r.debug, nil, "[Test copy] "+subject, testCopyNotice(htmlBody, to, cc))
@@ -77,11 +96,20 @@ func cleanAddresses(in []string) []string {
 // one, so a full HTML document keeps its head and styles, and at the very
 // start otherwise.
 func testCopyNotice(htmlBody string, to, cc []string) string {
+	return testCopyNoticeFor(htmlBody, to, cc, "Debug mail mode is on for this report.")
+}
+
+// testCopyNoticeFor is testCopyNotice with the sentence that says why this
+// is a test copy.
+func testCopyNoticeFor(htmlBody string, to, cc []string, reason string) string {
 	intended := "To: " + strings.Join(to, ", ")
+	if len(to) == 0 {
+		intended = "no To address"
+	}
 	if len(cc) > 0 {
 		intended += "; Cc: " + strings.Join(cc, ", ")
 	}
-	notice := `<p style="margin:0; padding:12px 16px; background-color:#fff4e5; color:#7a4100; font-family:Arial, Helvetica, sans-serif; font-size:13px;"><b>[Test copy]</b> Debug mail mode is on for this report. It would have been sent to ` +
+	notice := `<p style="margin:0; padding:12px 16px; background-color:#fff4e5; color:#7a4100; font-family:Arial, Helvetica, sans-serif; font-size:13px;"><b>[Test copy]</b> ` + escapeHTML(reason) + ` It would have been sent to ` +
 		escapeHTML(intended) + `.</p>` + "\n"
 	if i := strings.Index(strings.ToLower(htmlBody), "<body"); i >= 0 {
 		if j := strings.Index(htmlBody[i:], ">"); j >= 0 {

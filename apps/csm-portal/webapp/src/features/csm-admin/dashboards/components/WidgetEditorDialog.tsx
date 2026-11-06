@@ -40,6 +40,7 @@ import type {
   BeWidgetResourceType,
   BeWidgetShape,
 } from "@api/backend/types";
+import RequiredMark from "@components/RequiredMark";
 import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import DashboardWidgetTile from "@features/csm-dashboard/components/DashboardWidgetTile";
 import { useWidgetData } from "@features/csm-dashboard/api/useWidgetData";
@@ -313,7 +314,27 @@ export default function WidgetEditorDialog({
     [columnPathSampleData],
   );
 
-  const canSave = displayName.trim().length > 0 && gridWidth >= 1 && gridWidth <= 12;
+  const isChartShape = shape === "pie" || shape === "bar";
+  const isListShape = shape === "list";
+  // Manual slices are what a pie/bar widget is built from unless it carries a
+  // groupBy (see buildWidget).
+  const usesManualSlices = isChartShape && existingGroupBy === undefined;
+  // A column row needs both a path and a label, and a slice needs a label:
+  // draftsToColumns/draftsToSlices drop a row missing either, so saving one
+  // would silently lose it. And the dashboard loader refuses a pie/bar widget
+  // with neither slices nor a groupBy.
+  const hasIncompleteColumn =
+    isListShape && columnDrafts.some((d) => !d.path.trim() || !d.label.trim());
+  const hasUnlabelledSlice = usesManualSlices && sliceDrafts.some((d) => !d.label.trim());
+  const needsSlice = usesManualSlices && sliceDrafts.length === 0;
+
+  const canSave =
+    displayName.trim().length > 0 &&
+    gridWidth >= 1 &&
+    gridWidth <= 12 &&
+    !hasIncompleteColumn &&
+    !hasUnlabelledSlice &&
+    !needsSlice;
 
   const buildWidget = (): BeDashboardWidget => {
     // Absent (not an empty array) when unconfigured — the same "no-op,
@@ -373,8 +394,6 @@ export default function WidgetEditorDialog({
   const updateColumn = (index: number, patch: Partial<ColumnDraft>): void =>
     setColumnDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
 
-  const isChartShape = shape === "pie" || shape === "bar";
-  const isListShape = shape === "list";
   const previewKey = useMemo(
     () => (previewSnapshot ? JSON.stringify(previewSnapshot) : undefined),
     [previewSnapshot],
@@ -524,6 +543,7 @@ export default function WidgetEditorDialog({
                       <TextField
                         {...params}
                         label="Path"
+                        required
                         placeholder="e.g. project.key"
                         helperText={
                           discoveredColumnPaths.length === 0
@@ -538,6 +558,7 @@ export default function WidgetEditorDialog({
                   />
                   <TextField
                     label="Label"
+                    required
                     value={column.label}
                     onChange={(e) => updateColumn(index, { label: e.target.value })}
                     size="small"
@@ -605,12 +626,18 @@ export default function WidgetEditorDialog({
             </>
           )}
 
-          {isChartShape && existingGroupBy === undefined && (
+          {usesManualSlices && (
             <>
               <Divider />
               <Typography variant="subtitle2">
-                Slices — one search per slice, each merged under the filters above
+                Slices
+                <RequiredMark /> — one search per slice, each merged under the filters above
               </Typography>
+              {needsSlice && (
+                <Typography variant="caption" color="text.secondary">
+                  Add at least one slice: the dashboard loader refuses a pie or bar widget without one.
+                </Typography>
+              )}
               {sliceDrafts.map((slice, index) => (
                 <Box
                   key={index}
@@ -619,6 +646,7 @@ export default function WidgetEditorDialog({
                   <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
                     <TextField
                       label="Slice label"
+                      required
                       value={slice.label}
                       onChange={(e) => updateSlice(index, { label: e.target.value })}
                       size="small"

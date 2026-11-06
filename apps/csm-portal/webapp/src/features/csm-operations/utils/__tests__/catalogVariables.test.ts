@@ -21,6 +21,7 @@ import {
   getFirstFieldFailingValidation,
   getUserEditableVariables,
   isVariableRequired,
+  isVariableRequiredOnForm,
 } from "@features/csm-operations/utils/catalogVariables";
 import type { BeCatalogItemVariable } from "@api/backend/types";
 
@@ -96,6 +97,27 @@ describe("getFirstEmptyRequiredField", () => {
   it("returns null once the mandatory field has a value", () => {
     const vars = [textVariable({ id: "v1", questionText: "Required field", mandatory: true })];
     expect(getFirstEmptyRequiredField(vars, { v1: "answered" })).toBeNull();
+  });
+
+  it("does not block on an empty mandatory read-only field, which the user cannot fill", () => {
+    const vars = [
+      textVariable({ id: "v1", questionText: "Catalog value", mandatory: true, readOnly: true }),
+      textVariable({ id: "v2", questionText: "Untagged read-only", readOnly: true }),
+    ];
+    expect(getFirstEmptyRequiredField(vars, {})).toBeNull();
+  });
+});
+
+describe("isVariableRequiredOnForm", () => {
+  it("follows isVariableRequired for an editable variable", () => {
+    expect(isVariableRequiredOnForm(textVariable({ mandatory: true }))).toBe(true);
+    expect(isVariableRequiredOnForm(textVariable({ mandatory: false }))).toBe(false);
+    expect(isVariableRequiredOnForm(textVariable())).toBe(true);
+  });
+
+  it("is false for a read-only variable, mandatory or not", () => {
+    expect(isVariableRequiredOnForm(textVariable({ mandatory: true, readOnly: true }))).toBe(false);
+    expect(isVariableRequiredOnForm(textVariable({ readOnly: true }))).toBe(false);
   });
 });
 

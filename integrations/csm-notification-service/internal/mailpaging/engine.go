@@ -1,0 +1,285 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package mailpaging
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"regexp"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/paging"
+)
+
+// e164 is the format a call can be placed to, the same rule internal/paging
+// applies to a looked-up number.
+var e164 = regexp.MustCompile(`^\+[1-9]\d{7,14}$`)
+
+const (
+	tickBatch = 20
+	// leaseTTL is how long a worker holds a level before another may take it
+	// over. It must outlast placing a level's calls; a worker that dies leaves
+	// the level to be placed again after this long.
+	leaseTTL = 2 * time.Minute
+	// maxSpokenSubject keeps the spoken message short; the subject is
+	// email-supplied text.
+	maxSpokenSubject = 100
+)
+
+// PhoneLookup returns the number to call for each email, keyed by lower-cased
+// email; someone with none is absent. paging.EntityClient.DialNumbers is the
+// real one: entity-service's profile number, else the paging-only one.
+type PhoneLookup interface {
+	DialNumbers(ctx context.Context, emails []string) (map[string]paging.DialNumber, error)
+}
+
+// Caller places one voice call; *notifications.TwilioClient implements it.
+type Caller interface {
+	MakeCall(ctx context.Context, to, message string) (notifications.Call, error)
+}
+
+// step is one pending level of one alert. It is the sorted-set member, so
+// everything needed to place the calls travels with it and no second record
+// has to be kept in step with it.
+type step struct {
+	AlertID string `json:"a"`
+	Rule    string `json:"r"`
+	Subject string `json:"s"`
+	Level   int    `json:"l"`
+}
+
+// Engine runs the ladders.
+type Engine struct {
+	cfg     Config
+	store   Store
+	phones  PhoneLookup
+	caller  Caller
+	sending bool
+	now     func() time.Time
+	// lookupRetryDelay separates the attempts of a failing number lookup.
+	lookupRetryDelay time.Duration
+}
+
+// NewEngine builds an Engine. sending=false (CALL_SENDING_ENABLED) logs each
+// call instead of placing it.
+func NewEngine(cfg Config, store Store, phones PhoneLookup, caller Caller, sending bool) *Engine {
+	return &Engine{cfg: cfg, store: store, phones: phones, caller: caller, sending: sending,
+		now: time.Now, lookupRetryDelay: time.Second}
+}
+
+// HandleAlert starts the ladder for one mail.alert.received. A rule with no
+// ladder is not an error: the mail service may publish rules this service has
+// no ladder for.
+func (e *Engine) HandleAlert(ctx context.Context, p events.MailAlertReceivedPayload) error {
+	if _, ok := e.cfg.Rules[p.RuleName]; !ok {
+		slog.InfoContext(ctx, "mailpaging: no ladder configured for this rule; ignoring", "rule", p.RuleName)
+		return nil
+	}
+	started, err := e.store.Started(ctx, p.DedupeKey)
+	if err != nil {
+		return fmt.Errorf("mailpaging: check started: %w", err)
+	}
+	if started {
+		slog.InfoContext(ctx, "mailpaging: ladder already started for this alert", "rule", p.RuleName)
+		return nil
+	}
+	// Scheduled before it is marked: a failure in between makes a retry
+	// schedule the same step again (a no-op while it is pending) rather than
+	// leaving an alert marked started with nothing scheduled.
+	if err := e.schedule(ctx, step{AlertID: p.DedupeKey, Rule: p.RuleName, Subject: p.Subject}, e.now()); err != nil {
+		return err
+	}
+	if err := e.store.MarkStarted(ctx, p.DedupeKey); err != nil {
+		return fmt.Errorf("mailpaging: mark started: %w", err)
+	}
+	slog.InfoContext(ctx, "mailpaging: ladder started", "rule", p.RuleName)
+	return nil
+}
+
+func (e *Engine) schedule(ctx context.Context, s step, at time.Time) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	if err := e.store.Schedule(ctx, string(b), at); err != nil {
+		return fmt.Errorf("mailpaging: schedule level %d: %w", s.Level, err)
+	}
+	return nil
+}
+
+// RunTicker places due levels every interval until ctx ends.
+func (e *Engine) RunTicker(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := e.Tick(ctx); err != nil {
+				slog.ErrorContext(ctx, "mailpaging: tick failed", "err", err)
+			}
+		}
+	}
+}
+
+// Tick places every level that is due. A level is leased, not removed, while
+// its calls are placed, and removed only once that is done: a crash or
+// shutdown part-way leaves it to be placed again when the lease runs out
+// (so a person may be called twice, never zero times).
+func (e *Engine) Tick(ctx context.Context) error {
+	due, err := e.store.Due(ctx, e.now(), tickBatch)
+	if err != nil {
+		return fmt.Errorf("mailpaging: list due: %w", err)
+	}
+	for _, member := range due {
+		won, err := e.store.Lease(ctx, member, e.now(), leaseTTL)
+		if err != nil {
+			slog.ErrorContext(ctx, "mailpaging: lease failed", "err", err)
+			continue
+		}
+		if !won {
+			continue
+		}
+		if !e.run(ctx, member) {
+			slog.WarnContext(ctx, "mailpaging: level not finished; it will be placed again when its lease runs out")
+			continue
+		}
+		// Not the tick's own context: a shutdown must not stop the ack of a
+		// level whose calls were all placed.
+		if err := e.store.Ack(context.WithoutCancel(ctx), member); err != nil {
+			slog.ErrorContext(ctx, "mailpaging: could not remove a finished level; it may be called again", "err", err)
+		}
+	}
+	return nil
+}
+
+// run places one level's calls and reports whether the step is finished and
+// may be removed. The next level is scheduled first (a no-op if it already
+// is), so a level that has to be retried does not schedule it twice. It is
+// not finished when the next level could not be scheduled or when ctx ended
+// while the calls were being placed; a failed call or an unreachable number
+// lookup is logged and counts as finished, so a broken dependency cannot make
+// one level repeat for ever.
+func (e *Engine) run(ctx context.Context, member string) bool {
+	var s step
+	if err := json.Unmarshal([]byte(member), &s); err != nil {
+		slog.ErrorContext(ctx, "mailpaging: dropping an unreadable step", "err", err)
+		return true
+	}
+	rule, ok := e.cfg.Rules[s.Rule]
+	if !ok || s.Level < 0 || s.Level >= len(rule.Levels) {
+		slog.WarnContext(ctx, "mailpaging: step no longer matches the config; dropping it", "rule", s.Rule, "level", s.Level)
+		return true
+	}
+	if s.Level+1 < len(rule.Levels) {
+		next := s
+		next.Level++
+		if err := e.schedule(ctx, next, e.now().Add(rule.Wait())); err != nil {
+			slog.ErrorContext(ctx, "mailpaging: could not schedule the next level", "rule", s.Rule, "level", rule.Levels[s.Level].Name, "err", err)
+			return false
+		}
+	}
+	level := rule.Levels[s.Level]
+	numbers, missing := e.numbersFor(ctx, level)
+	msg := spokenMessage(s.Rule, level.Name, s.Subject)
+	placed, failed := 0, 0
+	for _, number := range numbers {
+		if !e.sending {
+			slog.InfoContext(ctx, "mailpaging: CALL_SENDING_ENABLED=false; call logged, not placed", "rule", s.Rule, "level", level.Name)
+			continue
+		}
+		if _, err := e.caller.MakeCall(ctx, number, msg); err != nil {
+			failed++
+			slog.ErrorContext(ctx, "mailpaging: call failed", "rule", s.Rule, "level", level.Name, "err", err)
+			continue
+		}
+		placed++
+	}
+	slog.InfoContext(ctx, "mailpaging: level called", "rule", s.Rule, "level", level.Name,
+		"people", len(level.Emails), "noNumber", missing, "placed", placed, "failed", failed)
+	return ctx.Err() == nil
+}
+
+// lookupAttempts bounds a failing number lookup: this runs on the ticker, so
+// it must not hold up the other levels for long.
+const lookupAttempts = 3
+
+// numbersFor resolves a level's people to numbers in one entity-service
+// request. Someone with no number, or one that is not E.164, is counted in
+// missing and skipped; a lookup that keeps failing yields no numbers for this
+// level (the next one is already scheduled).
+func (e *Engine) numbersFor(ctx context.Context, level Level) (numbers []string, missing int) {
+	var answers map[string]paging.DialNumber
+	var err error
+	for attempt := 1; attempt <= lookupAttempts; attempt++ {
+		if answers, err = e.phones.DialNumbers(ctx, level.Emails); err == nil {
+			break
+		}
+		slog.WarnContext(ctx, "mailpaging: phone lookup failed", "level", level.Name, "attempt", attempt, "err", err)
+		if attempt < lookupAttempts {
+			select {
+			case <-ctx.Done():
+				return nil, len(level.Emails)
+			case <-time.After(e.lookupRetryDelay):
+			}
+		}
+	}
+	if err != nil {
+		slog.ErrorContext(ctx, "mailpaging: no numbers for this level; skipping its calls", "level", level.Name)
+		return nil, len(level.Emails)
+	}
+	seen := map[string]bool{}
+	for _, email := range level.Emails {
+		n := strings.TrimSpace(answers[email].Number)
+		if !e164.MatchString(n) {
+			missing++
+			continue
+		}
+		if !seen[n] {
+			seen[n] = true
+			numbers = append(numbers, n)
+		}
+	}
+	return numbers, missing
+}
+
+// spokenMessage is what the call reads aloud. The subject is email-supplied,
+// so control characters are dropped and it is cut short; the Twilio client
+// builds the TwiML with encoding/xml, so it cannot inject markup.
+func spokenMessage(rule, level, subject string) string {
+	clean := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, subject)
+	clean = strings.Join(strings.Fields(clean), " ")
+	if r := []rune(clean); len(r) > maxSpokenSubject {
+		clean = string(r[:maxSpokenSubject])
+	}
+	if clean == "" {
+		return fmt.Sprintf("Alert email received for %s. Escalation level %s.", rule, level)
+	}
+	return fmt.Sprintf("Alert email received for %s. Escalation level %s. Subject: %s.", rule, level, clean)
+}

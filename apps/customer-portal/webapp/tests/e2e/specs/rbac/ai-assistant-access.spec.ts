@@ -81,7 +81,6 @@ const EXPECTATIONS: { role: RoleKey; canEdit: boolean }[] = [
   { role: "ADMIN", canEdit: true },
   { role: "PORTAL", canEdit: false },
   { role: "LEAD", canEdit: false },
-  { role: "SECURITY", canEdit: false },
 ];
 
 const novera = SETTINGS.aiAssistant.novera;

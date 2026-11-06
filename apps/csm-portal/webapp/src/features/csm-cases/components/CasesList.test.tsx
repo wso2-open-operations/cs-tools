@@ -726,3 +726,49 @@ describe("CasesList background fetch", () => {
     expect(screen.getByRole("progressbar", { name: "Updating the list" })).toBeInTheDocument();
   });
 });
+
+describe("CasesList — spare width on a wide screen", () => {
+  // Regression: the last (Updated) column used to be the one `1fr` track, so on
+  // a wide screen it soaked up all the spare width and left a large empty band
+  // at the right of the table. Every track is capped now and the grid spreads
+  // the spare width between its columns instead.
+  it("spreads spare width between columns instead of growing the Updated track", () => {
+    renderWithProviders(
+      <Routes>
+        <Route path="/cases" element={<CasesList cases={[CASE]} isLoading={false} />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    const grid = screen.getByText("Updated").closest("[class*='MuiBox-root']")?.parentElement;
+    expect(grid).not.toBeNull();
+    const style = getComputedStyle(grid!);
+    expect(style.justifyContent).toBe("space-between");
+    expect(style.gridTemplateColumns).not.toContain("fr");
+    expect(style.gridTemplateColumns.endsWith("minmax(90px, max-content)")).toBe(true);
+  });
+});
+
+describe("CasesList — service request severity", () => {
+  const renderRow = (row: CsmCaseRow): void => {
+    renderWithProviders(
+      <CasesList cases={[row]} isLoading={false} optionalColumns={["severity"]} />,
+      ["/operations/service-requests"],
+    );
+  };
+
+  it("shows a service request's severity badge in the severity column", () => {
+    renderRow({ ...CASE, caseType: "service_request", severity: "S1" });
+    expect(screen.getByText("S1")).toBeInTheDocument();
+  });
+
+  it("never shows the Unset badge for a service request", () => {
+    renderRow({ ...CASE, caseType: "service_request", severity: "unset" });
+    expect(screen.queryByText("Unset")).not.toBeInTheDocument();
+  });
+
+  it("still shows the Unset badge for a support case with no severity", () => {
+    renderRow({ ...CASE, caseType: "case", severity: "unset" });
+    expect(screen.getByText("Unset")).toBeInTheDocument();
+  });
+});

@@ -90,6 +90,7 @@ export default function EditUserModal({
   const getInitialRoles = useCallback(() => {
     if (!contact) return new Set<EditableRoleId>();
     const initial = new Set<EditableRoleId>();
+    // Must not read isAccountAdmin: submit writes isCsAdmin as a per-project role.
     if (contact.isCsAdmin) initial.add("admin");
     if (contact.isLead) initial.add("lead");
     // isPortalUser is the explicit flag; fall back to !isCsIntegrationUser if absent

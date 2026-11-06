@@ -46,6 +46,9 @@ type IncidentRouteTable struct {
 	// Mapped is the number of assignment groups (aliases and team keys)
 	// that resolved to a room, for the start-up log line.
 	Mapped int
+	// Teamless is the sre.teamlessChats team keys with a room: where an S0
+	// case whose account has no SRE team gets its card.
+	Teamless []string
 }
 
 // BuildIncidentRoutes builds the IncidentRouteTable from the SRE ladder's merged
@@ -89,6 +92,7 @@ func BuildIncidentRoutes(l LadderConfig, url func(Chat) (string, bool)) Incident
 			teamless = append(teamless, teamKeyFor(k))
 		}
 	}
+	out.Teamless = teamless
 	if len(teamless) > 0 {
 		for _, g := range l.Teams.DefaultGroups {
 			if key := teamKeyFor(g); key != "" && !ownRoom[key] {

@@ -63,9 +63,9 @@ func (h *TeamHandler) SearchTeams(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListChatWebhooks handles GET /teams/chat-webhooks -- a plain GET with no
-// query params or pagination, like GET /sla-duration-policy: internal
-// callers only (TeamService.ListChatWebhooks enforces this), and the result
-// set is bounded by how many teams exist, not large enough to need paging.
+// query params or pagination: internal callers only
+// (TeamService.ListChatWebhooks enforces this), and the result set is
+// bounded by how many teams exist, not large enough to need paging.
 func (h *TeamHandler) ListChatWebhooks(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.ListChatWebhooks(r.Context())
 	if err != nil {

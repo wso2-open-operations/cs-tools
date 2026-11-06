@@ -561,6 +561,9 @@ function DashboardWidgetTile({
   const href = config.buildHref(resolvePlaceholders(filters), {
     widgetId,
     displayName: resolvedDisplayName,
+    // Only a count tile reads `distinctBy` (see `useWidgetData`), so only
+    // there does it change where the click goes.
+    distinctByField: shape === "count" ? distinctBy?.field : undefined,
   });
   const Icon = config.icon;
   const isListShape = shape === "list";

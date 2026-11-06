@@ -139,7 +139,7 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
     expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
   });
 
-  it("Patch hides Severity, shows Regression, and requires Update Level + Public Git Issue", () => {
+  it("Patch hides Severity, shows Regression, requires Update Level, and leaves Public Git Issue optional", () => {
     render(
       <CreateGithubIssueDialog
         open
@@ -160,15 +160,12 @@ describe("CreateGithubIssueDialog — per-type field rules", () => {
     expect(screen.queryByRole("combobox", { name: /severity/i })).not.toBeInTheDocument();
     expect(screen.getByText("Hotfix Required")).toBeInTheDocument();
     expect(screen.getByText("Regression")).toBeInTheDocument();
+    // Public Git Issue is shown but, unlike Update Level, never blocks submit.
+    expect(screen.getByLabelText(/public git issue/i)).not.toBeRequired();
     expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/update level/i), {
       target: { value: "7.1.0" },
-    });
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/public git issue/i), {
-      target: { value: "https://github.com/wso2/example/issues/1" },
     });
     expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
   });

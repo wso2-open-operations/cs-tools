@@ -97,6 +97,16 @@ vi.mock("@features/support/api/usePostComment", () => ({
   })),
 }));
 
+// The comment input is only rendered for users who may create cases.
+vi.mock("@hooks/useCustomerPermissions", () => ({
+  useCustomerPermissions: () => ({
+    isLoading: false,
+    isExternalUser: true,
+    canCreateCase: true,
+    canUpdateCase: true,
+  }),
+}));
+
 vi.mock("@asgardeo/react", () => ({
   useAsgardeo: vi.fn(() => ({
     isSignedIn: true,
@@ -147,14 +157,19 @@ describe("CaseDetailsActivityPanel", () => {
     expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
   });
 
-  it("should show Support Engineer chip for non-current-user comments", () => {
+  it("should show the author's identity for non-current-user comments", () => {
     renderPanel();
-    expect(screen.getAllByText(/Support Engineer/).length).toBeGreaterThan(0);
+    // No generic "Support Engineer" chip any more: the author's email is shown
+    // when the comment carries no full name.
+    expect(screen.getByText("support@wso2.com")).toBeInTheDocument();
+    expect(screen.queryByText(/Support Engineer/)).not.toBeInTheDocument();
   });
 
-  it("should show case created date when caseCreatedOn is provided", () => {
+  it("should not show the case created divider even when caseCreatedOn is provided", () => {
+    // Deliberately removed when the activity area became a single scrollable
+    // list (the prop is accepted but no longer rendered).
     renderPanel({ caseCreatedOn: "2026-01-31 10:45:12" });
-    expect(screen.getByText(/Case created on/)).toBeInTheDocument();
+    expect(screen.queryByText(/Case created on/)).not.toBeInTheDocument();
   });
 
   it("should not show case created section when caseCreatedOn is null", () => {

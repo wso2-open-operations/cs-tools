@@ -142,6 +142,24 @@ describe("EditorWithSourceToggle (keepStyledHtmlAsSource) — ordinary content i
   });
 });
 
+describe("EditorWithSourceToggle — ariaRequired", () => {
+  it("marks the rich editor and the source box aria-required when set", () => {
+    render(<EditorWithSourceToggle value={SIMPLE_HTML} onChange={vi.fn()} ariaRequired />);
+    expect(richEditor()).toHaveAttribute("aria-required", "true");
+
+    fireEvent.click(screen.getByRole("switch"));
+    expect(sourceBox()).toHaveAttribute("aria-required", "true");
+  });
+
+  it("marks neither when not set", () => {
+    render(<EditorWithSourceToggle value={SIMPLE_HTML} onChange={vi.fn()} />);
+    expect(richEditor()).not.toHaveAttribute("aria-required");
+
+    fireEvent.click(screen.getByRole("switch"));
+    expect(sourceBox()).not.toHaveAttribute("aria-required");
+  });
+});
+
 describe("EditorWithSourceToggle (keepStyledHtmlAsSource) — preview", () => {
   it("shows a preview of the styled HTML under the source box, without changing it", async () => {
     const onChange = vi.fn();

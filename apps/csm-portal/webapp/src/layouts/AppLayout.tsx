@@ -36,9 +36,8 @@ import {
 } from "@features/case-tabs/components/CaseTabsWorkspace";
 import { useSyncRecentViewsIdentity } from "@features/csm-recent/hooks/useRecentViews";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
-import HtmlAnnouncementBanner from "@components/announcement-banner/HtmlAnnouncementBanner";
 import MobileAppBanner from "@components/mobile-app-banner/MobileAppBanner";
-import TopBanners from "@components/top-banner/TopBanners";
+import PortalBanners from "@components/portal-banners/PortalBanners";
 import Header from "@components/header/Header";
 import CsmSideBar from "@components/side-nav-bar/CsmSideBar";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
@@ -166,10 +165,9 @@ export default function AppLayout({
           }}
         >
           <Box className="csm-print-hide">
-            <TopBanners />
+            <PortalBanners />
             <MobileAppBanner />
             <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
-            <HtmlAnnouncementBanner />
           </Box>
           <AppShellLayout
             header={

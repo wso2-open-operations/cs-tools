@@ -15,8 +15,11 @@
 // under the License.
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useDarkMode } from "@utils/useDarkMode";
+
+// Exercise the real hook; undo the global mock from vitest.setup.ts.
+vi.unmock("@utils/useDarkMode");
 
 describe("useDarkMode", () => {
   it("reflects data-color-scheme changes", async () => {

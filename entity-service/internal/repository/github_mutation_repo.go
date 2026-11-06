@@ -54,6 +54,8 @@ type NewServiceRequestFromIssue struct {
 	// Fields are the template's captured values, stored verbatim.
 	Fields    map[string]string
 	CreatedBy string
+	// Severity is the template's Priority as a severity; empty keeps the column default.
+	Severity domain.CaseSeverity
 	// ProjectID is the repository's declared project (case.project). Empty
 	// leaves it null, as for a repository mapped only in account_github_repo.
 	ProjectID string
@@ -564,7 +566,14 @@ func (r *githubMutationRepository) CreateServiceRequestFromIssue(ctx context.Con
 		const insertSR = `
 			INSERT INTO service_request (id, state, category, json_data)
 			VALUES ($1::uuid, 'OPEN', NULLIF($2, ''), $3::jsonb)`
-		if _, err := tx.Exec(ctx, insertSR, id, in.Catalog, payload); err != nil {
+		const insertSRWithSeverity = `
+			INSERT INTO service_request (id, state, category, json_data, severity)
+			VALUES ($1::uuid, 'OPEN', NULLIF($2, ''), $3::jsonb, $4::case_severity_enum)`
+		query, args := insertSR, []any{id, in.Catalog, payload}
+		if sev, ok := caseSeverityToEnum[in.Severity]; ok && sev != "S0" {
+			query, args = insertSRWithSeverity, append(args, sev)
+		}
+		if _, err := tx.Exec(ctx, query, args...); err != nil {
 			return fmt.Errorf("github: insert service request: %w", err)
 		}
 		return nil

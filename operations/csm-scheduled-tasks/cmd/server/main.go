@@ -39,14 +39,20 @@ import (
 	"time"
 
 	"github.com/adhocore/gronx"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
+	acpentity "github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/salesentity"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/announcementpublish"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationscan"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
@@ -69,6 +75,22 @@ import (
 func main() {
 	loadDotEnv(".env")
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	// An on-demand run (--run-now=<task>, see runnow.go) is parsed first, before
+	// anything is built: a bad argument must stop here, never fall through to the
+	// schedule. Whether the named task is registered is checked once the tasks are
+	// built, and also refuses to start.
+	runNow, err := parseRunNowArgs(os.Args[1:])
+	if err != nil {
+		slog.Error("invalid command line; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	if runNow != nil {
+		if err := checkRunNow(runNow, os.Getenv("TRYOUT_TASK")); err != nil {
+			slog.Error("run-now refused", "err", err)
+			os.Exit(1)
+		}
+	}
 
 	driverInterval := envDuration("DRIVER_INTERVAL", time.Hour)
 
@@ -146,6 +168,20 @@ func main() {
 	})
 	if err != nil {
 		slog.Error("failed to construct entity-service migration-scan client", "err", err)
+		os.Exit(1)
+	}
+
+	// The stale cases report's own client: the same deployment and
+	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("failed to construct entity-service long-open-cases client", "err", err)
 		os.Exit(1)
 	}
 
@@ -324,15 +360,17 @@ func main() {
 	}
 
 	// Rota reminders: emails to the people rostered on a rotation shift in the
-	// Team Schedule. *** OFF UNLESS ROTA_REMINDERS_ENABLED=true. *** They
-	// email real staff from the real rota, so an environment that holds the
-	// rota but must not mail people turns them on only with
-	// ROTA_REMINDER_REDIRECT_TO set. Registered only when enabled, like
-	// cloud_status_webhooks, so the ledger shows no run for a task that is off.
-	rotaRemindersEnabled := envBool("ROTA_REMINDERS_ENABLED", false)
+	// Team Schedule. They are turned on and off only on the Team Schedule's
+	// Rota Access tab ("CRE rota reminders"): nothing in this component's
+	// configuration switches them on, and a family that has never saved the
+	// card gets no scheduled reminder (rotareminder.withSettings). The tasks
+	// are registered whenever there is an email service to send through, so
+	// Send now and "Send a test to me" work without a redeploy; with no
+	// EMAIL_BASE_URL nothing could be sent and they are left out.
+	rotaRemindersAvailable := strings.TrimSpace(os.Getenv("EMAIL_BASE_URL")) != ""
 	var teamScheduleClient *teamschedule.Client
 	rotaZone := time.UTC
-	if rotaRemindersEnabled {
+	if rotaRemindersAvailable {
 		teamScheduleClient, err = teamschedule.NewClient(teamschedule.Config{
 			BaseURL:      entityServiceBaseURL,
 			TokenURL:     oauthTokenURL,
@@ -349,8 +387,67 @@ func main() {
 			slog.Error("ROTA_REMINDER_TIME_ZONE is not a known time zone", "err", err)
 			os.Exit(1)
 		}
-		if u := os.Getenv("ROTA_REMINDER_SCHEDULE_URL"); u != "" && !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
-			slog.Error("ROTA_REMINDER_SCHEDULE_URL must be an http(s) URL", "value", u)
+	} else {
+		slog.Info("rota reminders are not registered: EMAIL_BASE_URL is not set, so no reminder could be sent")
+	}
+
+	// Case auto-closure: reminders and automatic closure of tickets that sit in
+	// Awaiting Info or Solution Proposed with no activity -- see
+	// internal/autoclosure's package doc and entity-service's CLAUDE.md, "Case
+	// auto-closure". OFF unless AUTOCLOSURE_ENABLED=true: it comments on and
+	// closes customers' tickets, so it is never on by accident. this component's client id must be in
+	// entity-service's M2M_CLIENT_IDS. entity-service's AUTOCLOSURE_SYSTEM_USER_EMAIL
+	// is optional: empty acts as "System user".
+	autoclosureEnabled := envBool("AUTOCLOSURE_ENABLED", false)
+	var autoclosureClient *autoclosure.Client
+	// AUTOCLOSURE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK find
+	// it) but never fired by the engine's tick.
+	autoclosureUnscheduled := false
+	if autoclosureEnabled {
+		autoclosureClient, err = autoclosure.NewClient(autoclosure.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service auto-closure client", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// Incident auto-close: closes an incident 14 days after it was resolved --
+	// see internal/incidentautoclose's package doc and CLAUDE.md, "Incident
+	// auto-close". OFF unless INCIDENT_AUTOCLOSE_ENABLED=true, as for
+	// case_autoclosure: it closes incidents, so it is never on by accident, and
+	// the first run should be a dry run (INCIDENT_AUTOCLOSE_DRY_RUN=true) whose
+	// count is reviewed. This component's client id must be in entity-service's
+	// M2M_CLIENT_IDS, and entity-service must run on Postgres
+	// (DATA_SOURCE=servicenow answers 503).
+	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", false)
+	var incidentAutocloseClient *incidentautoclose.Client
+	var incidentAutocloseCfg incidentautoclose.Config
+	// INCIDENT_AUTOCLOSE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK
+	// find it) but not fired by the engine tick, as for case_autoclosure.
+	incidentAutocloseUnscheduled := false
+	if incidentAutocloseEnabled {
+		// A malformed value refuses to start rather than falling back: a mistyped
+		// dry run must not become a real one.
+		incidentAutocloseCfg, err = incidentautoclose.ConfigFromEnv(os.Getenv)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		incidentAutocloseClient, err = incidentautoclose.NewClient(incidentautoclose.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service incident auto-close client", "err", err)
 			os.Exit(1)
 		}
 	}
@@ -419,11 +516,10 @@ func main() {
 	const staleCasesTaskName = "stale_cases_report"
 	staleCasesTo, staleCasesCc := recipientsFor(recipientOverrides, staleCasesTaskName)
 	staleCasesEmail := notify.ForReport(emailClient, debugFor(recipientOverrides, staleCasesTaskName))
-	// Fixed, not env-configurable — unlike HOUSEKEEPING_RETENTION_DAYS, there's
-	// no operational reason to tune this per deployment today. Revisit as an
-	// env var (mirroring envDays("HOUSEKEEPING_RETENTION_DAYS", 30)'s shape)
-	// if that changes.
-	const staleCaseThreshold = 30 * 24 * time.Hour
+	// Fixed, not env-configurable: there's no operational reason to tune this
+	// per deployment today. It is the age window asked of entity-service's
+	// long-open cases report and named in the mail's subject.
+	const staleCaseOlderThanDays = 30
 
 	const openCasesTaskName = "open_cases_report"
 	// Where an issue key in a CS Worklogs mail points: the CSM portal,
@@ -561,17 +657,31 @@ func main() {
 		if len(to) > 0 {
 			regressionTasksWithRecipients = append(regressionTasksWithRecipients, name)
 		}
+		v, to, cc := v, to, cc
 		regressionTasks = append(regressionTasks, registry.Task{
 			Name:     name,
 			Schedule: scheduleFor(scheduleOverrides, name, "30 3 1 * *"),
 			Handler: regressionscan.SendReport(regressionReportClient,
 				notify.ForReport(emailClient, debugFor(recipientOverrides, name)),
 				v, to, cc, regressionCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(notify.ForReport(emailClient, debugFor(recipientOverrides, name)), emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return regressionscan.SendReport(regressionReportClient, email,
+						v, orRecipients(to, rec), cc, regressionCaseLinkBase, alertsEnabled)
+				}),
 		})
 	}
 
 	const publishScheduledAnnouncementsTaskName = "publish_scheduled_announcements"
 	publishScheduledAnnouncementsTo, publishScheduledAnnouncementsCc := recipientsFor(recipientOverrides, publishScheduledAnnouncementsTaskName)
+
+	const autoclosureTaskName = "case_autoclosure"
+	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
+
+	const incidentAutocloseTaskName = "incident_autoclose"
+	incidentAutocloseTo, incidentAutocloseCc := recipientsFor(recipientOverrides, incidentAutocloseTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -602,19 +712,28 @@ func main() {
 			To:       housekeepingTo,
 			Cc:       housekeepingCc,
 		},
-		// Emails staleCasesTo/Cc a report of every case open more than
-		// staleCaseThreshold — see internal/stalecases's own doc comment.
-		// Sends nothing (but still succeeds) if staleCasesTo is empty, i.e.
-		// this task isn't mentioned in SUB_CRON_RECIPIENTS. Default schedule
-		// is daily at 07:00 (again, TZ=UTC-dependent — see above), ahead of
-		// most business hours; override via SUB_CRON_SCHEDULES if needed.
+		// Emails staleCasesTo/Cc the long-open cases report (cases open more
+		// than staleCaseOlderThanDays, in two tables) fetched from
+		// entity-service; see internal/stalecases's own doc comment. Sends
+		// nothing (but still succeeds) if staleCasesTo is empty, i.e. this task
+		// isn't mentioned in SUB_CRON_RECIPIENTS, or if both tables are empty.
+		// Default schedule is daily at 07:00 (again, TZ=UTC-dependent; see
+		// above), ahead of most business hours; override via
+		// SUB_CRON_SCHEDULES if needed.
 		{
 			Name:     staleCasesTaskName,
 			Schedule: scheduleFor(scheduleOverrides, staleCasesTaskName, "0 7 * * *"),
-			Handler: stalecases.SendReport(entityCasesClient, staleCasesEmail,
-				staleCaseThreshold, staleCasesTo, staleCasesCc, alertsEnabled),
+			Handler: stalecases.SendReport(longOpenReportClient, staleCasesEmail,
+				staleCaseOlderThanDays, staleCasesTo, staleCasesCc, worklogCaseLinkBase, alertsEnabled),
 			To: staleCasesTo,
 			Cc: staleCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(staleCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return stalecases.SendReport(longOpenReportClient, email,
+						staleCaseOlderThanDays, orRecipients(staleCasesTo, rec), staleCasesCc, worklogCaseLinkBase, alertsEnabled)
+				}),
 		},
 		// Products that deployment nodes report but the product catalogue does not
 		// know -- ServiceNow emailed one fixed address on every such miss. Daily, to
@@ -628,6 +747,13 @@ func main() {
 				24*time.Hour, unresolvedProductsTo, unresolvedProductsCc, alertsEnabled, time.Now),
 			To: unresolvedProductsTo,
 			Cc: unresolvedProductsCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(unresolvedProductsEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return unresolvedproducts.SendDigest(unresolvedProductsClient, email,
+						24*time.Hour, orRecipients(unresolvedProductsTo, rec), unresolvedProductsCc, alertsEnabled, time.Now)
+				}),
 		},
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
@@ -641,6 +767,12 @@ func main() {
 			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's
 		// own doc comment. The audience is the mail groups of the teams
@@ -660,6 +792,14 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, migrationCaseReportTaskName, "30 22 * * 0"),
 			Handler: migrationscan.SendReport(migrationReportClient, migrationCaseEmail,
 				migrationCaseOlderThanDays, migrationCaseTo, migrationCaseCc, migrationCaseLinkBase, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. The
+			// scheduled handler above is untouched.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(migrationCaseEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return migrationscan.SendReport(migrationReportClient, email,
+						migrationCaseOlderThanDays, orRecipients(migrationCaseTo, rec), migrationCaseCc, migrationCaseLinkBase, alertsEnabled)
+				}),
 		},
 		// The CS Worklogs reports. Both default schedules are the times
 		// ServiceNow actually sends at, expressed in UTC because these
@@ -693,6 +833,16 @@ func main() {
 				periodStart(worklogsDailySchedule),
 				worklogsDailyTo, worklogsDailyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceDaily, worklogsDailyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendDailyWith(worklogReportClient, email,
+						periodStart(worklogsDailySchedule),
+						orRecipients(worklogsDailyTo, rec), worklogsDailyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		{
 			Name:     worklogsWeeklyTaskName,
@@ -701,6 +851,16 @@ func main() {
 				periodStart(worklogsWeeklySchedule),
 				worklogsWeeklyTo, worklogsWeeklyCc, worklogRecipientSource,
 				worklogCaseLinkBase, alertsEnabled),
+			// --from-date/--to-date/--recipients/--cc of a manual run-now only; the
+			// scheduled handler above is untouched. See worklogsRunNow.
+			RunNowNarrow: worklogsRunNow(worklogreport.CadenceWeekly, worklogsWeeklyEmail, emailClient,
+				func(email notify.Sender, win worklogsreport.Override, rec []string) func(ctx context.Context) error {
+					return worklogsreport.SendWeeklyWith(worklogReportClient, email,
+						periodStart(worklogsWeeklySchedule),
+						orRecipients(worklogsWeeklyTo, rec), worklogsWeeklyCc, worklogRecipientSource,
+						worklogCaseLinkBase, alertsEnabled, win)
+				}),
+			RunNowFlags: worklogsRunNowFlags,
 		},
 		// Query-hour utilisation, ported from ServiceNow's two flows.
 		//
@@ -718,12 +878,27 @@ func main() {
 			Schedule: scheduleFor(scheduleOverrides, queryHoursNoticeTaskName, "15 * * * *"),
 			Handler: queryhoursreport.SendUsageNotifications(queryHourClient, queryHoursNoticeEmail,
 				queryHoursNoticeCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow. A
+			// transition whose owners are unknown is still skipped.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: consumesCrossings(reportRunNow(queryHoursNoticeEmail, emailClient,
+				func(email notify.Sender, _ []string) func(ctx context.Context) error {
+					return queryhoursreport.SendUsageNotifications(queryHourClient, email,
+						queryHoursNoticeCc, queryHoursOverride, alertsEnabled)
+				})),
 		},
 		{
 			Name:     queryHoursWeeklyTaskName,
 			Schedule: scheduleFor(scheduleOverrides, queryHoursWeeklyTaskName, "0 4 * * 1"),
 			Handler: queryhoursreport.SendWeeklyReport(queryHourClient, queryHoursWeeklyEmail,
 				queryHoursWeeklyTo, queryHoursWeeklyCc, queryHoursOverride, alertsEnabled),
+			// --recipients/--cc of a manual run-now only; see reportRunNow.
+			RunNowFlags: reportRunNowFlags,
+			RunNowNarrow: reportRunNow(queryHoursWeeklyEmail, emailClient,
+				func(email notify.Sender, rec []string) func(ctx context.Context) error {
+					return queryhoursreport.SendWeeklyReport(queryHourClient, email,
+						orRecipients(queryHoursWeeklyTo, rec), queryHoursWeeklyCc, queryHoursOverride, alertsEnabled)
+				}),
 		},
 		// The first sub-cron here that does real, per-row, multi-step,
 		// partial-failure-tolerant work rather than a bulk delete or a
@@ -853,14 +1028,15 @@ func main() {
 	//     summary again, the invitations as updates, and cancellations.
 	// A task's SUB_CRON_RECIPIENTS to/cc get its failure alerts; they are
 	// copied on its emails only with ROTA_REMINDER_COPY_TASK_RECIPIENTS=true.
-	if rotaRemindersEnabled {
+	if rotaRemindersAvailable {
 		family := envString("ROTA_REMINDER_FAMILY", "CRE")
 		copyTaskRecipients := envBool("ROTA_REMINDER_COPY_TASK_RECIPIENTS", false)
-		// Invitations need an organizer: the address the emails come from.
-		organizer := strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS"))
+		// Invitations need an organizer: the address the emails come from,
+		// without the display name a "Name <address>" sender carries.
+		organizer, organizerOK := rotareminder.InviteOrganizer(os.Getenv("EMAIL_FROM_ADDRESS"))
 		invites := envBool("ROTA_REMINDER_INVITES_ENABLED", true)
-		if invites && !rotareminder.ValidInviteAddress(organizer) {
-			slog.Warn("rota reminder calendar invitations are off: EMAIL_FROM_ADDRESS is not set or is not a plain email address, and an invitation needs an organizer")
+		if invites && !organizerOK {
+			slog.Warn("rota reminder calendar invitations are off: EMAIL_FROM_ADDRESS is not set or holds no email address, and an invitation needs an organizer")
 			invites = false
 		}
 		scheduleURL := strings.TrimSpace(os.Getenv("ROTA_REMINDER_SCHEDULE_URL"))
@@ -883,6 +1059,12 @@ func main() {
 			slog.Error("ROTA_REMINDER_WINDOWS is malformed; refusing to start", "err", err)
 			os.Exit(1)
 		}
+		// The CRE weekend summary also lists the SRE people on the weekend
+		// (SaaS weekend day and TZ3 night), for information.
+		var rotaSupport rotareminder.SupportRota
+		if strings.EqualFold(family, "CRE") {
+			rotaSupport = rotareminder.SREWeekendSupport()
+		}
 		rotaConfig := func(task, sched string, rotations map[string]string, to, cc []string) rotareminder.Config {
 			var copied []string
 			if copyTaskRecipients {
@@ -897,6 +1079,7 @@ func main() {
 				Invites:        invites,
 				OrganizerEmail: organizer,
 				Required:       weekendRequired,
+				Support:        rotaSupport,
 				Windows:        rotaWindows,
 				Settings:       teamScheduleClient,
 				EmailsEnabled:  alertsEnabled,
@@ -955,6 +1138,149 @@ func main() {
 		)
 	}
 
+	// Daily at 02:30 UTC (08:00 IST), every day including weekends, the slot the
+	// legacy job this replaces ran in (TZ=UTC-dependent, like every schedule
+	// here; the real firing is the first driver start after the slot). The limit is per UTC day and enforced by
+	// entity-service from its audit table, so the engine retrying a failed run
+	// the same day cannot exceed it. A partial failure is retried the next tick:
+	// tickets already advanced are no longer due, so only what is left is done.
+	if autoclosureEnabled {
+		autoclosureCfg := autoclosure.RunConfig{
+			IntervalDays: envInt("AUTOCLOSURE_INTERVAL_DAYS", 7),
+			DailyLimit:   envInt("AUTOCLOSURE_DAILY_LIMIT", 500),
+			// Solution Proposed on its own first, then Awaiting Info: set
+			// AUTOCLOSURE_STATES=solution_proposed until the first has been watched.
+			States:    splitComma(os.Getenv("AUTOCLOSURE_STATES")),
+			Templates: autoclosureTemplates(),
+			// AUTOCLOSURE_DRY_RUN=true: decide and log, change nothing. Use it to see
+			// what the first real run would do to a large backlog.
+			DryRun: envBool("AUTOCLOSURE_DRY_RUN", false),
+		}
+		// A value entity-service would reject on every call must stop startup, not
+		// fail and alert every day while no ticket is processed.
+		if err := autoclosureCfg.Validate(); err != nil {
+			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		// A tryout runs the handler once, outside the ledger, against the real
+		// entity-service: here that would comment on and close real tickets. Only the
+		// debug recipients are protected from the alert email, not the tickets, so a
+		// tryout of this task is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == autoclosureTaskName && !autoclosureCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is case_autoclosure: running as a dry run, nothing will be changed; set AUTOCLOSURE_DRY_RUN=true explicitly to silence this")
+			autoclosureCfg.DryRun = true
+		}
+		// AUTOCLOSURE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=case_autoclosure).
+		// Anything but a boolean refuses to start, like the other AUTOCLOSURE_*
+		// settings: a typo must not silently leave the schedule on or off.
+		autoclosureScheduled, err := parseStrictBool("AUTOCLOSURE_SCHEDULED", os.Getenv("AUTOCLOSURE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid AUTOCLOSURE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !autoclosureScheduled {
+			autoclosureUnscheduled = true
+			slog.Info("case_autoclosure is not scheduled (AUTOCLOSURE_SCHEDULED=false): it runs only with --run-now=case_autoclosure")
+		}
+		// An on-demand run (--run-now=case_autoclosure) uses the configured settings
+		// narrowed by its arguments, and the same handler and entity-service calls
+		// as the scheduled run. Like every run-now it does not touch the ledger: a
+		// ledger row would either mark the day's period done (suppressing the
+		// scheduled run) or be claimed alongside it. Idempotence is entity-service's:
+		// each ticket's advance is a compare-and-set claim, and the daily limit comes
+		// from its audit table, so a run-now beside a scheduled run cannot send
+		// anything twice or exceed the day's budget.
+		runNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowAutoclosure(autoclosureCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := runCfg.Validate(); err != nil {
+				return nil, nil, err
+			}
+			return autoclosure.Run(autoclosureClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit, "states", describeStates(runCfg.States)}, nil
+		}
+		tasks = append(tasks, registry.Task{
+			Name:         autoclosureTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, autoclosureTaskName, autoclosureDefaultSchedule),
+			Handler:      autoclosure.Run(autoclosureClient, autoclosureCfg),
+			RunNowNarrow: runNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit", "--states"},
+			To:           autoclosureTo,
+			Cc:           autoclosureCc,
+		})
+	}
+
+	// Hourly, at whatever minute the Choreo trigger fires. A failed run is retried the next tick: closed
+	// incidents are no longer due, so only what is left is attempted.
+	if incidentAutocloseEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so,
+		// as for case_autoclosure, it is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == incidentAutocloseTaskName && !incidentAutocloseCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is incident_autoclose: running as a dry run, nothing will be closed; set INCIDENT_AUTOCLOSE_DRY_RUN=true explicitly to silence this")
+			incidentAutocloseCfg.DryRun = true
+		}
+		// INCIDENT_AUTOCLOSE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=incident_autoclose).
+		// Anything but a boolean refuses to start, like the other
+		// INCIDENT_AUTOCLOSE_* settings.
+		incidentAutocloseScheduled, err := parseStrictBool("INCIDENT_AUTOCLOSE_SCHEDULED", os.Getenv("INCIDENT_AUTOCLOSE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !incidentAutocloseScheduled {
+			incidentAutocloseUnscheduled = true
+			slog.Info("incident_autoclose is not scheduled (INCIDENT_AUTOCLOSE_SCHEDULED=false): it runs only with --run-now=incident_autoclose")
+		}
+		// An on-demand run uses the configured settings narrowed by its arguments
+		// and writes no ledger row, like every run-now. That is safe beside the
+		// scheduled run: entity-service re-checks each incident under its row lock
+		// and recomputes the daily budget from its own data on every call.
+		incidentRunNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowIncidentAutoclose(incidentAutocloseCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			return incidentautoclose.Run(incidentAutocloseClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit}, nil
+		}
+		tasks = append(tasks, registry.Task{
+			Name:         incidentAutocloseTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
+			Handler:      incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
+			RunNowNarrow: incidentRunNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit"},
+			To:           incidentAutocloseTo,
+			Cc:           incidentAutocloseCc,
+		})
+	}
+	// entity-service's daily ACP reopen check -- see internal/acp's
+	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
+	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
+	// CSM_ACP_REOPEN_ENABLED=true (else POST /acp/reopen-check is a 404 and
+	// the run fails and alerts). Whether anything is written is
+	// entity-service's own dry run (CSM_ACP_REOPEN_DRY_RUN), not a setting here.
+	// Registered before acp_closure on purpose: the engine runs the tasks due
+	// in one tick in registration order, so when one tick covers both (the
+	// driver late, or a restart after 04:00 UTC) a project is reopened before
+	// acp_closure could send it a reminder.
+	if envBool("ACP_REOPEN_CHECK_ENABLED", false) {
+		tasks = append(tasks, acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, scheduleOverrides, recipientOverrides))
+	}
+	// The Account Closure Process -- see internal/acp's package doc and this
+	// component's CLAUDE.md, "ACP closure". OFF unless ACP_ENABLED=true: it
+	// emails customers and suspends their projects in CSM and Salesforce, so
+	// it is never on by accident, and no ACP_* setting is read (or required)
+	// while it is off.
+	if envBool("ACP_ENABLED", false) {
+		tasks = append(tasks, acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret,
+			entityServiceScopes, emailClient, emailBaseURL, alertsEnabled, scheduleOverrides, recipientOverrides))
+	}
+
 	var tasksWithRecipients []string
 	for _, t := range tasks {
 		if !gronx.IsValid(t.Schedule) {
@@ -974,18 +1300,20 @@ func main() {
 	// just the standing ALERT_RECIPIENTS audience. Skipped entirely when
 	// ALERTS_ENABLED=false — no email will ever be sent in that case, so an
 	// unset EMAIL_BASE_URL isn't a misconfiguration.
-	// Rota reminders always have recipients (the people on the shift), so
-	// turning them on with email unconfigured is the same misconfiguration.
-	if alertsEnabled && emailBaseURL == "" && rotaRemindersEnabled {
-		slog.Error("ROTA_REMINDERS_ENABLED is true but EMAIL_BASE_URL is not set; refusing to start since no reminder could be sent")
-		os.Exit(1)
-	}
 	// The product regression reports keep their audience out of task.To (see
 	// their registration above), so it is checked here by name instead.
 	if alertsEnabled && emailBaseURL == "" && (len(alertRecipients) > 0 || len(tasksWithRecipients) > 0 || len(regressionTasksWithRecipients) > 0) {
 		slog.Error("failure alert recipients are configured but EMAIL_BASE_URL is not; refusing to start since those alerts could never actually send",
 			"alertRecipientsSet", len(alertRecipients) > 0, "tasksWithOwnRecipients", tasksWithRecipients,
 			"reportTasksWithOwnRecipients", regressionTasksWithRecipients)
+		os.Exit(1)
+	}
+
+	// Every report task takes --recipients/--cc on --run-now. A report task
+	// added to reportTaskNames without the hook is a code error: stop rather
+	// than leave it out quietly.
+	if missing := tasksMissingReportRunNow(tasks, reportTaskNames()); len(missing) > 0 {
+		slog.Error("report tasks without the run-now recipient override", "tasks", missing)
 		os.Exit(1)
 	}
 
@@ -998,12 +1326,28 @@ func main() {
 	// the engine never ticks. In Choreo: add the task's "debug" list to
 	// SUB_CRON_RECIPIENTS, set TRYOUT_TASK, run the task once by hand, read
 	// the log and the debug inbox, then remove both.
+	if runNow != nil {
+		handler, settings, err := resolveRunNow(tasks, *runNow)
+		if err != nil {
+			slog.Error("run-now refused", "err", err)
+			os.Exit(1)
+		}
+		runOnDemand(runNow.Task, handler, settings)
+		return
+	}
 	if tryout := strings.TrimSpace(os.Getenv("TRYOUT_TASK")); tryout != "" {
 		runTryout(tasks, tryout, debugFor(recipientOverrides, tryout), alertsEnabled)
 		return
 	}
 
-	eng := engine.New(tasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
+	engineTasks := tasks
+	if autoclosureUnscheduled {
+		engineTasks = withoutTask(engineTasks, autoclosureTaskName)
+	}
+	if incidentAutocloseUnscheduled {
+		engineTasks = withoutTask(engineTasks, incidentAutocloseTaskName)
+	}
+	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 
 	// No app-level execution timeout here — Choreo's own Scheduled Task
 	// execution-time limit already bounds how long one invocation can run.
@@ -1018,6 +1362,127 @@ func main() {
 	start := time.Now()
 	eng.Tick(ctx, start)
 	slog.Info("tick complete", "elapsed", time.Since(start).String())
+}
+
+// acpTaskName is the acp_closure sub-cron's ledger key.
+const acpTaskName = "acp_closure"
+
+// acpReopenCheckTaskName is the acp_reopen_check sub-cron's ledger key.
+const acpReopenCheckTaskName = "acp_reopen_check"
+
+// acpReopenCheckCallTimeout bounds one page of the reopen check: longer than
+// the client's usual 25 seconds, since entity-service checks several
+// projects (a few Salesforce calls each) per page.
+const acpReopenCheckCallTimeout = 2 * time.Minute
+
+// acpReopenCheckTask builds the acp_reopen_check task. Called only when
+// ACP_REOPEN_CHECK_ENABLED=true.
+func acpReopenCheckTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	client, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+		Timeout:      acpReopenCheckCallTimeout,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for the ACP reopen check; refusing to start", "err", err)
+		os.Exit(1)
+	}
+	to, cc := recipientsFor(recipientOverrides, acpReopenCheckTaskName)
+	return registry.Task{
+		// 03:30 UTC is 09:00 in Colombo, every day: half an hour before
+		// acp_closure, so a project reopened here is not sent a reminder.
+		Name:         acpReopenCheckTaskName,
+		Schedule:     scheduleFor(scheduleOverrides, acpReopenCheckTaskName, "30 3 * * *"),
+		Handler:      acp.RunReopenCheck(client),
+		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
+		To:           to,
+		Cc:           cc,
+	}
+}
+
+// acpRetryBackoff is how long a failed ACP run waits before it is retried.
+// Longer than the driver's hour on purpose: a retry re-sends a notice whose
+// email went out but whose CSM record failed, so fewer retries mean fewer
+// such duplicates, and 4 hours still lands in the same working day.
+const acpRetryBackoff = 4 * time.Hour
+
+// acpMaxAttempts allows each ACP task one retry per day. For acp_closure a
+// retry can send a project's notice again (its email went out, its CSM record
+// failed), so the rest waits for the next weekday's run; the failure alert
+// says so. For acp_reopen_check a retry repeats nothing, but a failure that
+// lasts (entity-service's reopen not enabled yet, a 404 or 403, during the
+// rollout) would otherwise alert every 4 hours; tomorrow's run catches up.
+const acpMaxAttempts = 2
+
+// acpTask builds the acp_closure task from the ACP_* settings, stopping
+// startup on a missing or unsafe one: a task that fails every weekday is
+// worse than one that never starts. Called only when ACP_ENABLED=true.
+func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecret string, entityServiceScopes []string,
+	emailClient notify.Sender, emailBaseURL string, alertsEnabled bool,
+	scheduleOverrides map[string]string, recipientOverrides map[string]subCronRecipients) registry.Task {
+	// CSM: entity-service itself, with this component's shared credentials.
+	// Its client id must be in entity-service's M2M_CLIENT_IDS, or every
+	// notice and suspension write (PATCH /projects/{id}) is refused.
+	csmClient, err := acpentity.NewClient(acpentity.Config{
+		BaseURL:      entityServiceBaseURL,
+		TokenURL:     oauthTokenURL,
+		ClientID:     oauthClientID,
+		ClientSecret: oauthClientSecret,
+		Scopes:       entityServiceScopes,
+	})
+	if err != nil {
+		slog.Error("invalid entity-service configuration for ACP; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	// Salesforce: sales-entity-service, with its own client credentials.
+	salesEntityClient, err := salesentity.NewClient(salesentity.Config{
+		BaseURL:      mustEnv("ACP_SALES_ENTITY_BASE_URL"),
+		TokenURL:     mustEnv("ACP_SALES_ENTITY_TOKEN_URL"),
+		ClientID:     mustEnv("ACP_SALES_ENTITY_CLIENT_ID"),
+		ClientSecret: mustEnv("ACP_SALES_ENTITY_CLIENT_SECRET"),
+		Scopes:       strings.Fields(os.Getenv("ACP_SALES_ENTITY_SCOPES")),
+	})
+	if err != nil {
+		slog.Error("invalid ACP_SALES_ENTITY_* configuration; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	// The unsafe combinations are refused here, not warned about: see
+	// acpConfig.
+	debug := debugFor(recipientOverrides, acpTaskName)
+	cfg, warnings, err := acpConfig(readACPSettings(alertsEnabled, emailBaseURL, debug))
+	for _, w := range warnings {
+		slog.Warn(w)
+	}
+	if err != nil {
+		slog.Error("unsafe ACP configuration; refusing to start", "err", err)
+		os.Exit(1)
+	}
+
+	to, cc := recipientsFor(recipientOverrides, acpTaskName)
+	return registry.Task{
+		// 04:00 UTC is 09:30 in Colombo, Monday to Friday. The handler also
+		// skips a weekend in Colombo time, for a retry that lands on one.
+		Name:     acpTaskName,
+		Schedule: scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
+		Handler: acp.Run(acp.Clients{
+			CSM:         csmClient,
+			SalesEntity: salesEntityClient,
+			// A "debug" list in SUB_CRON_RECIPIENTS sends every notice there
+			// instead, the same as a report task's debug mail mode.
+			Email: notify.ForReport(emailClient, debug),
+		}, cfg),
+		RetryBackoff: acpRetryBackoff,
+		MaxAttempts:  acpMaxAttempts,
+		To:           to,
+		Cc:           cc,
+	}
 }
 
 // parseStringMap decodes a flat JSON object of string values, the same shape
@@ -1037,6 +1502,22 @@ func parseStringMap(name, raw string) map[string]string {
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		slog.Error("ignoring malformed configuration value; treating it as unset", "key", name, "err", err)
 		return nil
+	}
+	return out
+}
+
+// autoclosureTemplates reads AUTOCLOSURE_TEMPLATES. Unlike the other maps here,
+// a malformed value stops startup: treating it as unset would silently post the
+// built-in wording to customers instead of the wording the operator meant.
+func autoclosureTemplates() map[string]string {
+	raw := os.Getenv("AUTOCLOSURE_TEMPLATES")
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		slog.Error("AUTOCLOSURE_TEMPLATES is not a JSON object of strings; refusing to start", "err", err)
+		os.Exit(1)
 	}
 	return out
 }
@@ -1192,6 +1673,25 @@ func runTryout(tasks []registry.Task, name string, debugRecipients []string, ema
 	slog.Info("tryout complete", "task", name, "elapsed", time.Since(start).String())
 }
 
+// runOnDemand runs a --run-now task's handler once, outside the schedule and
+// the ledger, and exits the process: 0 on success, 1 on failure. Unlike
+// runTryout it is real: it reaches the task's real recipients (or its debug list
+// if it has one, as a scheduled run does), and the settings it logs are the ones
+// it acts with.
+func runOnDemand(name string, handler func(ctx context.Context) error, settings []any) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	slog.Warn("run-now: running the task once for real, outside its schedule and the ledger",
+		append([]any{"task", name}, settings...)...)
+	start := time.Now()
+	if err := handler(ctx); err != nil {
+		slog.Error("run-now failed", "task", name, "elapsed", time.Since(start).String(), "err", err)
+		os.Exit(1)
+	}
+	slog.Info("run-now complete", "task", name, "elapsed", time.Since(start).String())
+}
+
 // periodStart returns the scheduled firing time a run of expr made now belongs
 // to: the period key the engine claims it under (schedule.PeriodKey), and so
 // the same for every retry of that run. The schedule is checked at startup, so
@@ -1309,6 +1809,22 @@ func envDays(key string, defDays int) time.Duration {
 		return def
 	}
 	return time.Duration(n) * 24 * time.Hour
+}
+
+// envInt returns the given environment variable parsed as a non-negative
+// integer, or def if unset or malformed (logged, not fatal: a typo in a tuning
+// knob must not stop every other task in this component from running).
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		slog.Warn("environment variable is not a valid non-negative integer; using default", "key", key, "value", v, "default", def)
+		return def
+	}
+	return n
 }
 
 func splitComma(s string) []string {

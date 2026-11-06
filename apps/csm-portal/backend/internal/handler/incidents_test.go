@@ -79,6 +79,37 @@ func TestSearchIncidents(t *testing.T) {
 		assertContentType(t, w, "application/json")
 	})
 
+	t.Run("rejects non-UUID parentIncidentIds entry", func(t *testing.T) {
+		h := NewIncidentHandler(&mockEntityIncidentClient{})
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/search", strings.NewReader(`{"filters":{"parentIncidentIds":["11111111-1111-1111-1111-111111111111","not-a-uuid"]}}`)))
+		w := httptest.NewRecorder()
+		h.SearchIncidents(w, r)
+		assertStatus(t, w, http.StatusBadRequest)
+		assertErrorMessage(t, w, ErrMsgBadRequest)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("forwards valid parentIncidentIds filter unchanged", func(t *testing.T) {
+		const reqPayload = `{"filters":{"parentIncidentIds":["11111111-1111-1111-1111-111111111111"]},"pagination":{"limit":50,"offset":0}}`
+		var capturedBody []byte
+		client := &mockEntityIncidentClient{
+			searchIncidentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+				capturedBody = body
+				return []byte(`{"incidents":[{"id":"22222222-2222-2222-2222-222222222222","number":"INC0002","parentIncident":{"id":"11111111-1111-1111-1111-111111111111","name":"INC0001"}}],"total":1}`), nil
+			},
+		}
+		h := NewIncidentHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/search", strings.NewReader(reqPayload)))
+		w := httptest.NewRecorder()
+		h.SearchIncidents(w, r)
+
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+		if string(capturedBody) != reqPayload {
+			t.Errorf("upstream received body %q, want %q", capturedBody, reqPayload)
+		}
+	})
+
 	t.Run("rejects invalid sortBy field", func(t *testing.T) {
 		h := NewIncidentHandler(&mockEntityIncidentClient{})
 		r := withUser(httptest.NewRequest(http.MethodPost, "/incidents/search", strings.NewReader(`{"sortBy":{"field":"subject","order":"asc"}}`)))

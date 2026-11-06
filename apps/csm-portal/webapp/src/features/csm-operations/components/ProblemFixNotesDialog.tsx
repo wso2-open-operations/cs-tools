@@ -36,14 +36,12 @@ interface ProblemFixNotesDialogProps {
 }
 
 /**
- * Optional-notes dialog for the `fix` transition (Root Cause Analysis ->
- * Fix in Progress). Unlike `IncidentResolutionDialog`'s `resolutionCode`/
- * `resolutionNotes` (ServiceNow-required, confirmed live: those 500 without
- * it), `causeNotes`/`fixNotes` are genuinely optional on this transition per
- * `CHANGES-problem-update.md` §3 — so this dialog can be skipped rather than
- * blocking the transition on empty fields, same "confirm without forcing
- * input" shape as `ChangeRequestTransitionReasonDialog` but without the
- * required-field gate that dialog has for its two destructive transitions.
+ * Notes dialog for the `fix` transition (Root Cause Analysis -> Fix in
+ * Progress). Both `causeNotes` and `fixNotes` are required: the data source
+ * refuses a Fix without them (409), so a blank or whitespace-only field is
+ * flagged inline on submit and the transition is not sent. Values are trimmed
+ * before they reach `onConfirm`. Same required-field shape as
+ * `ProblemTransitionRequirementDialog` (Resolve needs fix notes).
  */
 export default function ProblemFixNotesDialog({
   isSubmitting,
@@ -53,6 +51,15 @@ export default function ProblemFixNotesDialog({
 }: ProblemFixNotesDialogProps): JSX.Element {
   const [causeNotes, setCauseNotes] = useState("");
   const [fixNotes, setFixNotes] = useState("");
+  const [attempted, setAttempted] = useState(false);
+  const causeMissing = causeNotes.trim() === "";
+  const fixMissing = fixNotes.trim() === "";
+
+  const submit = (): void => {
+    setAttempted(true);
+    if (causeMissing || fixMissing) return;
+    onConfirm({ causeNotes: causeNotes.trim(), fixNotes: fixNotes.trim() });
+  };
 
   return (
     <Dialog
@@ -69,11 +76,12 @@ export default function ProblemFixNotesDialog({
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
           {error && <Alert severity="error">{error}</Alert>}
           <DialogContentText variant="body2">
-            Cause and fix notes are optional here — you can add them now or
-            edit them later from the problem's overview.
+            A problem needs cause notes and fix notes before it can move to Fix
+            In Progress.
           </DialogContentText>
           <TextField
             label="Cause notes"
+            required
             multiline
             minRows={2}
             fullWidth
@@ -81,10 +89,14 @@ export default function ProblemFixNotesDialog({
             value={causeNotes}
             disabled={isSubmitting}
             onChange={(e) => setCauseNotes(e.target.value)}
-            helperText="Root cause / detailed RCA."
+            error={attempted && causeMissing}
+            helperText={
+              attempted && causeMissing ? "Cause notes are required." : "Root cause / detailed RCA."
+            }
           />
           <TextField
             label="Fix notes"
+            required
             multiline
             minRows={2}
             fullWidth
@@ -92,7 +104,12 @@ export default function ProblemFixNotesDialog({
             value={fixNotes}
             disabled={isSubmitting}
             onChange={(e) => setFixNotes(e.target.value)}
-            helperText="Description of the permanent fix being applied."
+            error={attempted && fixMissing}
+            helperText={
+              attempted && fixMissing
+                ? "Fix notes are required."
+                : "Description of the permanent fix being applied."
+            }
           />
         </Box>
       </DialogContent>
@@ -102,7 +119,7 @@ export default function ProblemFixNotesDialog({
         </Button>
         <Button
           variant="contained"
-          onClick={() => onConfirm({ causeNotes: causeNotes.trim(), fixNotes: fixNotes.trim() })}
+          onClick={submit}
           disabled={isSubmitting}
           loading={isSubmitting}
         >

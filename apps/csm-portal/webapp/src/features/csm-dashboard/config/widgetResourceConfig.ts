@@ -65,7 +65,17 @@ import type { BeTaskState } from "@api/backend/types";
 import {
   appendWidgetTitleParam,
   buildWidgetPreviewHref,
+  GROUPABLE_FIELD_ACCOUNT,
 } from "@features/csm-dashboard/utils/widgetPreviewUrl";
+
+/** The owning widget, handed to a resourceType's `buildHref`. */
+export interface WidgetHrefContext {
+  widgetId: string;
+  displayName: string;
+  /** The widget's `distinctBy.field`, when it is a count of distinct values.
+   * `"account"` makes a case tile open the grouped-by-account preview. */
+  distinctByField?: string;
+}
 
 /** A resolved search-result row, typed loosely since its real shape depends
  * on `resourceType` — the label extractors below narrow what they read. */
@@ -98,10 +108,7 @@ export interface WidgetResourceConfig {
    * through the generic dashboard-widget preview page instead, which is the
    * only destination that can render this exact widget's own filtered
    * result set — every other resourceType ignores it. */
-  buildHref: (
-    filters: Record<string, unknown>,
-    ctx?: { widgetId: string; displayName: string },
-  ) => string;
+  buildHref: (filters: Record<string, unknown>, ctx?: WidgetHrefContext) => string;
   /** Icon shown on the tile, one per resource type (not per individual
    * widget — the backend registry doesn't carry per-widget icon metadata). */
   icon: LucideIcon;
@@ -549,7 +556,7 @@ function widgetPreviewFallbackHref(
   previewSlug: string,
   resourceType: BeWidgetResourceType,
   filters: Record<string, unknown>,
-  ctx: { widgetId: string; displayName: string } | undefined,
+  ctx: WidgetHrefContext | undefined,
 ): string {
   return buildWidgetPreviewHref({
     previewSlug,
@@ -557,6 +564,7 @@ function widgetPreviewFallbackHref(
     displayName: ctx?.displayName || "Dashboard widget",
     filters,
     resourceType,
+    groupBy: ctx?.distinctByField === GROUPABLE_FIELD_ACCOUNT ? GROUPABLE_FIELD_ACCOUNT : undefined,
   });
 }
 
@@ -576,10 +584,14 @@ function widgetPreviewFallbackHref(
 function caseFamilyBuildHref(
   previewSlug: string,
   filters: Record<string, unknown>,
-  ctx: { widgetId: string; displayName: string } | undefined,
+  ctx: WidgetHrefContext | undefined,
   fallback: () => string,
 ): string {
-  if (!translateCaseDashboardFiltersChecked(filters).lossless) {
+  // A count tile configured to count distinct accounts must open the
+  // grouped-by-account view whatever its filters, since the flat list pages
+  // cannot show "one row per account".
+  const groupsByAccount = ctx?.distinctByField === GROUPABLE_FIELD_ACCOUNT;
+  if (groupsByAccount || !translateCaseDashboardFiltersChecked(filters).lossless) {
     // Only ever called for the case-family resourceTypes; any one of them
     // picks the same case-DSL encoding, so the literal here doesn't need to
     // match the caller's own exact resourceType.
@@ -985,10 +997,35 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   account: {
     searchEndpoint: "/accounts/search",
+    // The preview page's URL round-trip decodes every filter value as a
+    // comma-split string array; the account search's single-valued keys take
+    // one string, and `hasProject`/`active` a JSON boolean, so unwrap them
+    // back (a no-op for a tile's own fetch, whose filters never went through
+    // that round-trip). The rest is the default `{filters, pagination}` body:
+    // the search takes no `sortBy`.
+    buildSearchRequestBody: ({ filters, offset, limit }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      for (const key of ["lifeCycle", "abtTeam", "healthStatus"] as const) {
+        const v = flat[key];
+        if (Array.isArray(v)) flat[key] = v[0];
+      }
+      for (const key of ["hasProject", "active"] as const) {
+        const v = Array.isArray(flat[key]) ? (flat[key] as unknown[])[0] : flat[key];
+        if (v === "true" || v === "false") flat[key] = v === "true";
+      }
+      return { filters: flat, pagination: { offset, limit } };
+    },
     itemsKey: "accounts",
     primaryLabel: (item) => asString(item.name) ?? "—",
     secondaryLabel: (item) => asString(item.tier),
-    buildHref: () => "/customers/accounts",
+    // The Accounts page reads no filters from its URL, so it can only show
+    // the unfiltered list: a widget that filters accounts (life cycle, team,
+    // risk, health) opens the preview page instead, which lists exactly what
+    // the tile counted.
+    buildHref: (filters, ctx) =>
+      hasFiltersBeyond(filters, [])
+        ? widgetPreviewFallbackHref("accounts", "account", filters, ctx)
+        : "/customers/accounts",
     icon: Building2,
     iconColor: "secondary",
     previewSlug: "accounts",
@@ -1062,6 +1099,16 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   user: {
     searchEndpoint: "/users/search",
+    // The preview page's URL round trip turns a boolean filter into a
+    // string array (`active=true` -> `["true"]`); `/users/search` takes
+    // `active` as a boolean, so turn it back. The rest is the default
+    // `{filters, pagination, sortBy?}` body.
+    buildSearchRequestBody: ({ filters, offset, limit, sortBy }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      const v = Array.isArray(flat.active) ? (flat.active as unknown[])[0] : flat.active;
+      if (v === "true" || v === "false") flat.active = v === "true";
+      return { filters: flat, pagination: { offset, limit }, ...(sortBy ? { sortBy } : {}) };
+    },
     itemsKey: "users",
     primaryLabel: (item) => {
       const first = asString(item.firstName);
@@ -1079,6 +1126,19 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   time_card: {
     searchEndpoint: "/time-cards/search",
+    // The preview page's URL round-trip decodes every filter value as a
+    // comma-split array; the search's `startDate`/`endDate` are single
+    // dates, so unwrap them back (a no-op for a tile's own fetch, whose
+    // filters never went through that round-trip). The rest is the default
+    // `{filters, pagination, sortBy?}` body.
+    buildSearchRequestBody: ({ filters, offset, limit, sortBy }) => {
+      const flat: Record<string, unknown> = { ...filters };
+      for (const key of ["startDate", "endDate"] as const) {
+        const v = flat[key];
+        if (Array.isArray(v)) flat[key] = v[0];
+      }
+      return { filters: flat, pagination: { offset, limit }, ...(sortBy ? { sortBy } : {}) };
+    },
     itemsKey: "timeCards",
     primaryLabel: (item) => {
       const caseNumber = nestedNumber(item.case);
@@ -1089,7 +1149,14 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       const state = asString(item.state);
       return state ? humanizeState(state) : undefined;
     },
-    buildHref: () => "/time-cards",
+    // The Time Cards page reads no filters from its URL, so it can only show
+    // the unfiltered list: a widget that filters time cards (by state, date,
+    // "mine") opens the preview page instead, which lists exactly what the
+    // tile counted.
+    buildHref: (filters, ctx) =>
+      hasFiltersBeyond(filters, [])
+        ? widgetPreviewFallbackHref("time-cards", "time_card", filters, ctx)
+        : "/time-cards",
     icon: Clock,
     iconColor: "warning",
     previewSlug: "time-cards",

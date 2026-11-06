@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import EventSourcePolyfill from "@sanity/eventsource";
 import { useAsgardeo } from "@asgardeo/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiConfig } from "@config/apiConfig";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { useLogger } from "@hooks/useLogger";
+import { refreshCaseComments } from "@features/support/api/caseCommentsRefresh";
+import { useIsIdle } from "@providers/IdleStateContext";
 
 /** Base delay before the first reconnect attempt after the stream errors out or drops. */
 const RECONNECT_BASE_DELAY_MS = 3_000;
@@ -38,21 +41,50 @@ const MAX_BACKOFF_ATTEMPTS = 10;
 const RECONNECT_IDLE_DELAY_MS = 5 * 60_000;
 
 /**
- * Query key prefixes refreshed when the stream reports a case change.
- * - CASE_COMMENTS: the activity feed.
- * - CASE_DETAILS: the case's own attributes.
- * - PROJECT_CASES: case list/search rows (state, assignee, severity).
- * - CASES_STATS, SUPPORT_STATS, PROJECT_STATS: counts derived from case
- *   state and severity (open/ongoing/outstanding, SLA status).
+ * A connection must stay open this long (or deliver an event) before it counts
+ * as healthy and the backoff resets. The stream can answer 200 and then be cut
+ * straight away; resetting on `open` would turn that into a tight reconnect loop.
  */
-const CASE_STREAM_INVALIDATION_KEYS = [
-  ApiQueryKeys.CASE_COMMENTS,
-  ApiQueryKeys.CASE_DETAILS,
-  ApiQueryKeys.PROJECT_CASES,
+const STABLE_CONNECTION_MS = 30_000;
+/** Minimum gap between case-details invalidations triggered by a routine reconnect, per case. */
+const CATCH_UP_MIN_INTERVAL_MS = 60_000;
+
+/** Event `type` values the server sends in the `case_updated` payload. */
+const COMMENT_ADDED_TYPE = "case.comment_added";
+
+/** Case-scoped queries that render the case's own attributes. */
+const isCaseDetailsQuery = (caseId: string) => (query: { queryKey: readonly unknown[] }) =>
+  query.queryKey[0] === ApiQueryKeys.CASE_DETAILS && query.queryKey[2] === caseId;
+
+/**
+ * Case list/search queries share the PROJECT_CASES prefix with the project
+ * filters query (static metadata), which a case change never affects.
+ */
+const isCaseListQuery = (query: { queryKey: readonly unknown[] }): boolean =>
+  query.queryKey[0] === ApiQueryKeys.PROJECT_CASES && query.queryKey[1] !== "filters";
+
+/** Counts derived from case state and severity (open/ongoing/outstanding, SLA status). */
+const CASE_STATS_KEYS = [
   ApiQueryKeys.CASES_STATS,
   ApiQueryKeys.SUPPORT_STATS,
   ApiQueryKeys.PROJECT_STATS,
 ] as const;
+
+/** Reads the `type` of a `case_updated` payload; undefined if absent or unparseable. */
+function parseEventType(event: Event): string | undefined {
+  const data = (event as MessageEvent).data;
+  if (typeof data !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (parsed && typeof parsed === "object" && "type" in parsed) {
+      const type = (parsed as { type: unknown }).type;
+      return typeof type === "string" ? type : undefined;
+    }
+  } catch {
+    // Malformed payload: treated as an unknown change.
+  }
+  return undefined;
+}
 
 /**
  * Exponential backoff with full jitter (attempt 0 is a random delay in
@@ -70,9 +102,11 @@ function reconnectDelay(attempt: number): number {
 }
 
 /**
- * Refetches the case's comments, details and the lists/stats that show its
- * attributes whenever the activity stream
- * reports the case changed. No-op unless both stream config keys are set.
+ * Keeps the case's comments, details and the lists/stats that show its
+ * attributes fresh while the activity stream reports changes. A comment event
+ * only pulls the newest comments into the cache; any other (or unrecognised)
+ * change also refreshes case details, case lists and stats. No-op unless both
+ * stream config keys are set.
  *
  * Uses `@sanity/eventsource` because native `EventSource` cannot set headers.
  * Sends the same headers as useAuthApiClient — the gateway injects
@@ -81,30 +115,94 @@ function reconnectDelay(attempt: number): number {
  * Reconnects by hand rather than letting the polyfill retry: its headers are
  * fixed at construction, so a token expiring mid-connection would have it
  * retry forever with the same stale one.
+ *
+ * Connecting or reconnecting never calls the comments/activities API: the
+ * server ends each stream cleanly every few minutes, so routine reconnects are
+ * frequent. An event published in the short gap between connections is
+ * recovered by the next event or a reload. A routine reconnect only
+ * invalidates case details, at most once a minute per case.
+ *
+ * Stays disconnected while the user is idle (the session warning is open), so
+ * an abandoned tab doesn't hold a long-lived stream open. The gap can be
+ * minutes to hours, so the first `open` after idle clears catches up once:
+ * the newest comments plus case details, regardless of the one-minute limit.
  */
 export function useCaseActivityStream(caseId: string | undefined): void {
   const queryClient = useQueryClient();
   const { getIdToken } = useAsgardeo();
   const logger = useLogger();
+  const isIdle = useIsIdle();
+  const authFetch = useAuthApiClient();
+
+  // authFetch is a new closure every render; keep it out of the effect deps so
+  // a re-render does not tear down and reopen the stream.
+  const authFetchRef = useRef(authFetch);
+  useEffect(() => {
+    authFetchRef.current = authFetch;
+  }, [authFetch]);
+
+  // Survives the effect re-running (idle -> active) for the same case, so the
+  // first open after idle counts as a reconnect and the details rate limit holds.
+  // `catchUpOnOpen` is set when idle begins on an already-opened stream and
+  // consumed by the next `open`.
+  const connectionRef = useRef<{
+    caseId?: string;
+    hasOpened: boolean;
+    lastCatchUpAt: number;
+    catchUpOnOpen: boolean;
+  }>({
+    hasOpened: false,
+    lastCatchUpAt: 0,
+    catchUpOnOpen: false,
+  });
 
   useEffect(() => {
+    if (isIdle) {
+      const idleConnection = connectionRef.current;
+      if (idleConnection.caseId === caseId && idleConnection.hasOpened) {
+        idleConnection.catchUpOnOpen = true;
+      }
+      return;
+    }
     if (!caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+
+    if (connectionRef.current.caseId !== caseId) {
+      connectionRef.current = { caseId, hasOpened: false, lastCatchUpAt: 0, catchUpOnOpen: false };
+    }
+    const connection = connectionRef.current;
 
     let cancelled = false;
     let source: EventSourcePolyfill | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let stableTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
 
-    const invalidateCaseQueries = (): void => {
-      // Invalidated by key prefix rather than the queries' full keys, which
-      // also carry the project id this hook isn't given — the same thing
-      // usePostComment already does after posting a comment. The event is
-      // ID-only, so anything that renders this case's attributes (state,
-      // assignee, severity, acknowledgement) or its activity feed refetches.
-      // Only mounted queries refetch right away; the rest are marked stale
-      // and refetch on next mount, so the list/stat keys are cheap to include.
-      for (const key of CASE_STREAM_INVALIDATION_KEYS) {
+    const refreshComments = (): void => {
+      void refreshCaseComments(queryClient, authFetchRef.current, caseId, logger);
+    };
+
+    const invalidateCaseDetails = (): void => {
+      void queryClient.invalidateQueries({ predicate: isCaseDetailsQuery(caseId) });
+    };
+
+    // Case attributes changed (or we cannot tell what changed): refresh
+    // everything that renders them. Only mounted queries refetch right away;
+    // the rest are marked stale and refetch on next mount. Case lists are
+    // matched by predicate so the static project filters query is left alone.
+    const invalidateCaseAttributes = (): void => {
+      invalidateCaseDetails();
+      void queryClient.invalidateQueries({ predicate: isCaseListQuery });
+      for (const key of CASE_STATS_KEYS) {
         void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    };
+
+    const handleCaseUpdated = (event: Event): void => {
+      // An event proves the connection is alive.
+      attempt = 0;
+      refreshComments();
+      if (parseEventType(event) !== COMMENT_ADDED_TYPE) {
+        invalidateCaseAttributes();
       }
     };
 
@@ -139,18 +237,41 @@ export function useCaseActivityStream(caseId: string | undefined): void {
       });
 
       source.addEventListener("open", () => {
-        // Only *consecutive* failures should back off.
-        attempt = 0;
+        // Only a connection that stays up resets the backoff; one that opens
+        // and is cut straight away keeps backing off.
+        clearTimeout(stableTimer);
+        stableTimer = setTimeout(() => {
+          attempt = 0;
+        }, STABLE_CONNECTION_MS);
 
-        // Nothing published before the subscriber registers is replayed, so
-        // refetch on every connection to cover that window.
-        invalidateCaseQueries();
+        // No comments/activities request here: routine reconnects are frequent
+        // and an event in the reconnect gap is recovered by the next event.
+        const isReconnect = connection.hasOpened;
+        connection.hasOpened = true;
+        const now = Date.now();
+
+        // Resume after idle: the gap can be long, so catch up once, exempt
+        // from the rate limit.
+        if (connection.catchUpOnOpen) {
+          connection.catchUpOnOpen = false;
+          connection.lastCatchUpAt = now;
+          refreshComments();
+          invalidateCaseDetails();
+          return;
+        }
+
+        // Routine reconnect: refresh case details only, rate-limited so a
+        // flapping connection cannot turn this into a request storm.
+        if (now - connection.lastCatchUpAt < CATCH_UP_MIN_INTERVAL_MS) return;
+        connection.lastCatchUpAt = now;
+        if (isReconnect) invalidateCaseDetails();
       });
 
-      source.addEventListener("case_updated", invalidateCaseQueries);
+      source.addEventListener("case_updated", handleCaseUpdated);
 
       source.addEventListener("error", () => {
         logger.debug("[case-activity-stream] connection error, reconnecting");
+        clearTimeout(stableTimer);
         source?.close();
         if (!cancelled) {
           scheduleReconnect();
@@ -163,7 +284,8 @@ export function useCaseActivityStream(caseId: string | undefined): void {
     return () => {
       cancelled = true;
       clearTimeout(reconnectTimer);
+      clearTimeout(stableTimer);
       source?.close();
     };
-  }, [caseId, queryClient, getIdToken, logger]);
+  }, [caseId, isIdle, queryClient, getIdToken, logger]);
 }

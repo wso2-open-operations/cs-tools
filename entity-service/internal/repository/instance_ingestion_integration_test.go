@@ -108,6 +108,13 @@ func instanceIngestionTestPool(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(ctx, string(rollup)); err != nil {
 		t.Fatalf("apply 0245: %v", err)
 	}
+	monthlyNullSource, err := os.ReadFile("../../migrations/0250_usage_rollup_monthly_null_source.sql")
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, string(monthlyNullSource)); err != nil {
+		t.Fatalf("apply 0250: %v", err)
+	}
 	reported, err := os.ReadFile("../../migrations/0247_deployment_node_reported_product.sql")
 	if err != nil {
 		t.Fatalf("read migration: %v", err)

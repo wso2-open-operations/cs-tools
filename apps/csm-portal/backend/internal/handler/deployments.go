@@ -68,6 +68,7 @@ type entityDeploymentClient interface {
 	SearchDeployedProducts(ctx context.Context, body []byte) ([]byte, error)
 	SearchProjectsByProductVersion(ctx context.Context, body []byte) ([]byte, error)
 	PatchDeployment(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
+	SetDeploymentAirGapped(ctx context.Context, deploymentID string, body []byte) ([]byte, error)
 	PostDeployedProduct(ctx context.Context, body []byte) ([]byte, error)
 	PatchDeployedProduct(ctx context.Context, deployedProductID string, body []byte) ([]byte, error)
 }
@@ -158,6 +159,64 @@ func (h *DeploymentHandler) PatchDeployment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	writeJSON(w, http.StatusOK, result)
+}
+
+// setDeploymentAirGappedRequest is the only body PUT /deployments/{id}/air-gapped accepts.
+type setDeploymentAirGappedRequest struct {
+	AirGapped *bool `json:"airGapped"`
+}
+
+// SetDeploymentAirGapped handles PUT /deployments/{id}/air-gapped.
+// Marks a deployment air-gapped (its products cannot reach WSO2, so the licences
+// PCS issues for it tell them not to publish usage online) or clears the mark.
+// Entity-service only lets internal callers set it and leaves restricting it to
+// staff to the portal backend, which the route's PermWrite does. The body must be
+// {"airGapped": true|false}; only that field is forwarded.
+func (h *DeploymentHandler) SetDeploymentAirGapped(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserInfoFromContext(r.Context())
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, ErrMsgUnauthorized)
+		return
+	}
+
+	deploymentID := r.PathValue("id")
+	if deploymentID == "" || !uuidRe.MatchString(deploymentID) {
+		writeError(w, http.StatusBadRequest, ErrMsgInvalidUUID)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, ErrMsgTooLarge)
+			return
+		}
+		writeError(w, http.StatusBadRequest, errMsgReadBody)
+		return
+	}
+
+	var req setDeploymentAirGappedRequest
+	if err := json.Unmarshal(body, &req); err != nil || req.AirGapped == nil {
+		writeError(w, http.StatusBadRequest, ErrMsgBadRequest)
+		return
+	}
+	forward, err := json.Marshal(req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, ErrMsgInternal)
+		return
+	}
+
+	result, err := h.entity.SetDeploymentAirGapped(r.Context(), deploymentID, forward)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity SetDeploymentAirGapped failed", "userID", user.UserID, "deploymentID", deploymentID, "err", err)
+		mapUpstreamError(w, err, "Failed to update the deployment's air-gapped setting.")
+		return
+	}
+
+	slog.InfoContext(r.Context(), "deployment air-gapped setting changed", "userID", user.UserID, "deploymentID", deploymentID, "airGapped", *req.AirGapped)
 	writeJSON(w, http.StatusOK, result)
 }
 

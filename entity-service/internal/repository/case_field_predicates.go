@@ -43,6 +43,11 @@ type caseFieldSet struct {
 	Tags             []string
 	ExcludeTags      []string
 
+	// SeverityColumn is the severity column expression the Severities filter
+	// matches (see severityColumnFor): "c.severity" when empty. It includes a
+	// service request's severity only for a caller allowed to see it.
+	SeverityColumn string
+
 	// DefaultTypes limits an empty Types to the five case-like work-item types.
 	// True for the top-level search, so it never returns change requests or
 	// incidents; false inside an anyOf branch, where "no type" means no
@@ -204,8 +209,8 @@ func caseLikeStateLookupClause(types []string, placeholder string, negate bool) 
 // arguments for f, numbering placeholders from argIdx, and the next free index.
 //
 // Column notes: state is matched on caseLikeStateColumn (it exists on all five
-// case-like extension tables); severity, issue type, work state and escalation
-// level live only on "case" (migration 0023) and engagement type only on
+// case-like extension tables); severity (and, for an internal caller, a service request's), issue type,
+// work state and escalation level live on "case" (migration 0023) and engagement type only on
 // engagement, so those narrow the result to those rows. escalationLevel matches
 // "case".current_escalation_level, the value the case detail shows. Labels are
 // UPPER_SNAKE_CASE in the enums and lowercase in the domain, hence ToUpper;
@@ -256,7 +261,11 @@ func caseFieldPredicates(f caseFieldSet, argIdx int) ([]string, []any, int, erro
 		for i, s := range f.Severities {
 			sev[i] = caseSeverityToEnum[s]
 		}
-		add("c.severity = ANY($%d::case_severity_enum[])", sev)
+		col := f.SeverityColumn
+		if col == "" {
+			col = "c.severity"
+		}
+		add(col+" = ANY($%d::case_severity_enum[])", sev)
 	}
 	if len(f.IssueTypes) > 0 {
 		add("c.issue_type = ANY($%d::case_issue_type_enum[])", upper(len(f.IssueTypes), func(i int) string { return string(f.IssueTypes[i]) }))

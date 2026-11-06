@@ -18,6 +18,7 @@
 package sources
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -49,6 +50,7 @@ func New() (*Registry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aws: %w", err)
 	}
+	awsTagger := aws.NewBudgetTagger(context.Background())
 	azureCfg, err := azure.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("azure: %w", err)
@@ -88,7 +90,7 @@ func New() (*Registry, error) {
 
 	return &Registry{transforms: map[string]Transform{
 		"aws": func(raw []byte) ([]model.Alert, error) {
-			a, err := aws.Transform(raw, awsCfg)
+			a, err := aws.Transform(raw, awsCfg, awsTagger)
 			return one(err, model.Alert(a))
 		},
 		"azure": func(raw []byte) ([]model.Alert, error) {

@@ -18,6 +18,8 @@ package notifications
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -47,6 +49,71 @@ const IncidentFallbackAudience = IncidentAudiencePrefix + "#unmapped"
 type IncidentRoutes struct {
 	mu     sync.RWMutex
 	fanout map[string][]string
+	// teamless is the sre.teamlessChats team keys with a room: where an S0
+	// case whose account has no SRE team gets its card (TeamlessAudiences).
+	teamless []string
+	// knownSRETeam reports whether a group is an SRE team of its own on the
+	// SRE ladder (paging.KnownSRETeam); nil until the paging configuration is
+	// loaded, when every group counts as unknown.
+	knownSRETeam func(group string) bool
+}
+
+// SetKnownSRETeam sets the SRE ladder's known-team check (paging.KnownSRETeam).
+func (r *IncidentRoutes) SetKnownSRETeam(known func(group string) bool) {
+	r.mu.Lock()
+	r.knownSRETeam = known
+	r.mu.Unlock()
+}
+
+// CaseSREAudiences is where an S0 case's card, and its SRE paging replies,
+// go: the rooms of its account SRE group (IncidentAudiences) when that group
+// is an SRE team of its own, else the teamless rooms (TeamlessAudiences) --
+// a case with no SRE team, or one the SRE ladder does not know and so pages
+// like a teamless case. The dispatcher and the paging engine both call it, so
+// the card, the replies and the calls agree.
+func CaseSREAudiences(routes *IncidentRoutes, env map[string][]string, sreGroup string, has func(string) bool) []string {
+	if strings.TrimSpace(sreGroup) != "" && routes != nil {
+		routes.mu.RLock()
+		known := routes.knownSRETeam
+		routes.mu.RUnlock()
+		if known != nil && known(sreGroup) {
+			audiences, _ := IncidentAudiences(routes, env, sreGroup, has)
+			return audiences
+		}
+	}
+	return TeamlessAudiences(routes, has)
+}
+
+// SetTeamless replaces the teamless rooms' team keys.
+func (r *IncidentRoutes) SetTeamless(keys []string) {
+	r.mu.Lock()
+	r.teamless = slices.Clone(keys)
+	r.mu.Unlock()
+}
+
+// TeamlessAudiences is the audiences, each with a space, of the teamless
+// rooms: where an S0 case whose account has no SRE team gets its card, and
+// its SRE paging replies under it -- the rooms its rung cards always went
+// to. Else IncidentFallbackAudience when has knows it, else none. The
+// dispatcher and the paging engine both use it, so the card and the replies
+// pick the same rooms.
+func TeamlessAudiences(routes *IncidentRoutes, has func(string) bool) []string {
+	var keys []string
+	if routes != nil {
+		routes.mu.RLock()
+		keys = slices.Clone(routes.teamless)
+		routes.mu.RUnlock()
+	}
+	var audiences []string
+	for _, k := range keys {
+		if audience := IncidentAudience(k); has(audience) && !slices.Contains(audiences, audience) {
+			audiences = append(audiences, audience)
+		}
+	}
+	if len(audiences) == 0 && has(IncidentFallbackAudience) {
+		return []string{IncidentFallbackAudience}
+	}
+	return audiences
 }
 
 // Set replaces the routed fan-out (assignment group -> groups or team keys).
@@ -132,6 +199,23 @@ type IncidentCreatedAlert struct {
 	Category         string
 	State            string
 	IncidentLink     string
+	// Case renders the card for an S0 customer case on the SRE ladder:
+	// "Case Reported", "View Case", "Case Details" and the case severity. An
+	// incident leaves it false and gets the card exactly as before.
+	Case bool
+	// Project is the case's project, shown in Case Details in place of State
+	// (a case card carries no state); left out when empty. Case only.
+	Project string
+	// ThreadKey is the card's thread; empty is IncidentThreadKey(IncidentID).
+	// An S0 case sets CaseS0ThreadKey, so each time it becomes S0 it starts a
+	// thread of its own.
+	ThreadKey string
+}
+
+// casePriorityLabels renders a case severity on the card when Case is set.
+var casePriorityLabels = map[string]struct{ word, label string }{
+	"CATASTROPHIC": {"Catastrophic", "S0 - Catastrophic"},
+	"S0":           {"Catastrophic", "S0 - Catastrophic"},
 }
 
 // IncidentAssignedAlert is SendIncidentAssignedAlert's card content.
@@ -164,7 +248,15 @@ func (c *GoogleChatClient) SendIncidentCreatedAlert(ctx context.Context, audienc
 		return fmt.Errorf("notifications: incidentId is required")
 	}
 	priority := incidentPriorityLabels[strings.ToUpper(strings.TrimSpace(a.Priority))]
-	title := "Priority Incident Reported"
+	threadKey := a.ThreadKey
+	if threadKey == "" {
+		threadKey = IncidentThreadKey(a.IncidentID)
+	}
+	noun := "Incident"
+	if a.Case {
+		priority, noun = casePriorityLabels[strings.ToUpper(strings.TrimSpace(a.Priority))], "Case"
+	}
+	title := "Priority " + noun + " Reported"
 	if priority.word != "" {
 		title = priority.word + " " + title
 	}
@@ -183,18 +275,23 @@ func (c *GoogleChatClient) SendIncidentCreatedAlert(ctx context.Context, audienc
 	}}}
 	if a.IncidentLink != "" {
 		summary = append(summary, chatCardWidget{ButtonList: &chatButtonList{
-			Buttons: []chatButton{{Text: "View Incident", OnClick: chatOnClick{OpenLink: chatOpenLink{URL: a.IncidentLink}}}},
+			Buttons: []chatButton{{Text: "View " + noun, OnClick: chatOnClick{OpenLink: chatOpenLink{URL: a.IncidentLink}}}},
 		}})
 	}
 	details := []string{
 		caseAlertLine(`<b>Category:</b> %s`, orEmDash(strings.ToLower(a.Category))),
 		caseAlertLine(`<b>Priority:</b> %s`, orEmDash(priority.label)),
-		caseAlertLine(`<b>State:</b> %s`, orEmDash(humanizeEnumLabel(a.State))),
+	}
+	switch {
+	case !a.Case:
+		details = append(details, caseAlertLine(`<b>State:</b> %s`, orEmDash(humanizeEnumLabel(a.State))))
+	case strings.TrimSpace(a.Project) != "":
+		details = append(details, caseAlertLine(`<b>Project:</b> %s`, strings.TrimSpace(a.Project)))
 	}
 	sections := []chatCardSection{
 		{Widgets: summary},
 		{
-			Header:      "Incident Details",
+			Header:      noun + " Details",
 			Collapsible: true,
 			Widgets:     []chatCardWidget{{TextParagraph: &chatTextParagraph{Text: strings.Join(details, "<br>")}}},
 		},
@@ -205,7 +302,7 @@ func (c *GoogleChatClient) SendIncidentCreatedAlert(ctx context.Context, audienc
 			Header:   &chatCardHeader{Title: title, Subtitle: subtitle},
 			Sections: sections,
 		}}},
-		Thread: &chatThread{ThreadKey: IncidentThreadKey(a.IncidentID)},
+		Thread: &chatThread{ThreadKey: threadKey},
 	}
 	return c.sendCardToAudience(ctx, audience, a.Number, a.IncidentID, msg)
 }
@@ -343,6 +440,17 @@ func incidentRef(number, incidentID string) string {
 // IncidentThreadKey keeps an incident's created card and its replies, the paging rungs included, in one Chat thread.
 func IncidentThreadKey(incidentID string) string {
 	return "incident-" + incidentID
+}
+
+// CaseS0ThreadKey is the thread of one S0 episode of a case: the dispatcher's
+// SRE room card and the SRE ladder's messages for the record that made the
+// case S0 (created at S0, or raised to it). Both read that same record, so
+// both derive the same key from its bytes without sharing any state; a later
+// raise to S0 is a new record and so a new thread, and a redelivered record
+// keeps its thread.
+func CaseS0ThreadKey(caseID string, record []byte) string {
+	sum := sha256.Sum256(record)
+	return IncidentThreadKey(caseID) + "-" + hex.EncodeToString(sum[:6])
 }
 
 // humanizeEnumLabel turns an UPPER_SNAKE value such as IN_PROGRESS into "In Progress".

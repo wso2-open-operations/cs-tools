@@ -64,11 +64,16 @@ const USER_MANAGEMENT_INDEX_PATH = "/admin/user-management";
 export default function CsmAdminLayout(): JSX.Element {
   const { user } = useCurrentUser();
   const hasDashboardsTabAccess = hasDashboardBuilderAccess(user?.roles);
+  const hasBannersTabAccess = (user?.roles ?? []).some((role) => role.toLowerCase() === "admin");
+  const hasSlaEngineTabAccess = hasBannersTabAccess;
   const allTabs = useRouteTabs("admin");
   const tabs = useMemo(() => {
-    const visible = allTabs.tabs.filter(
-      (tab) => tab.node.id !== "admin.dashboards" || hasDashboardsTabAccess,
-    );
+    const visible = allTabs.tabs.filter((tab) => {
+      if (tab.node.id === "admin.dashboards") return hasDashboardsTabAccess;
+      if (tab.node.id === "admin.banners") return hasBannersTabAccess;
+      if (tab.node.id === "admin.sla-engine") return hasSlaEngineTabAccess;
+      return true;
+    });
     // `allTabs.activeKey` was resolved against the UNFILTERED list — if
     // filtering it out here just removed the active one (a caller without
     // access whose URL still names it), fall back to this narrower list's
@@ -78,7 +83,7 @@ export default function CsmAdminLayout(): JSX.Element {
       ? allTabs.activeKey
       : (visible[0]?.key ?? "");
     return { ...allTabs, tabs: visible, activeKey };
-  }, [allTabs, hasDashboardsTabAccess]);
+  }, [allTabs, hasDashboardsTabAccess, hasBannersTabAccess, hasSlaEngineTabAccess]);
 
   const location = useLocation();
   const { pathname } = location;

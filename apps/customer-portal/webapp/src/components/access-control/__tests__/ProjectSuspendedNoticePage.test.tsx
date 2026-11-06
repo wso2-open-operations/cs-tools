@@ -23,9 +23,37 @@ vi.mock("@api/useAttachmentPreview", () => ({
   useAttachmentPreview: () => ({ data: null, isLoading: false }),
 }));
 
+const project = { id: "p", name: "Proj", closureState: "Suspended" } as never;
+
 describe("ProjectSuspendedNoticePage", () => {
-  it("renders", () => {
-    render(<ProjectSuspendedNoticePage project={{ id: "p", name: "Proj", closureState: "Suspended" } as never} />);
-    expect(screen.getByText(/This project was suspended/i)).toBeInTheDocument();
+  it("renders the generic suspension notice and billing contact", () => {
+    render(<ProjectSuspendedNoticePage project={project} />);
+    expect(screen.getByText("Project Suspension Notice")).toBeInTheDocument();
+    expect(screen.getByText(/This project has been suspended/i)).toBeInTheDocument();
+    expect(screen.getByText("billing@wso2.com")).toHaveAttribute(
+      "href",
+      "mailto:billing@wso2.com",
+    );
+    // The reasons block only appears when the backend supplies reasons.
+    expect(screen.queryByText(/suspended for the following reasons/i)).toBeNull();
+  });
+
+  it("lists suspension reasons when provided", () => {
+    render(
+      <ProjectSuspendedNoticePage
+        project={
+          {
+            id: "p",
+            name: "Proj",
+            closureState: "Suspended",
+            suspensionReasons: ["Payment overdue"],
+          } as never
+        }
+      />,
+    );
+    expect(
+      screen.getByText(/suspended for the following reasons/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Payment overdue/)).toBeInTheDocument();
   });
 });

@@ -25,13 +25,16 @@ import {
 } from "@features/project-details/utils/usageMetrics";
 
 describe("formatIsoDateForUsageChart", () => {
-  it("formats date with year on large screens", () => {
-    expect(formatIsoDateForUsageChart("2024-06-15", false)).toContain("Jun");
-    expect(formatIsoDateForUsageChart("2024-06-15", false)).toContain("2024");
+  it("formats the date as MM/DD on large screens", () => {
+    expect(formatIsoDateForUsageChart("2024-06-15", false)).toBe("06/15");
   });
 
-  it("omits year on small screens", () => {
-    expect(formatIsoDateForUsageChart("2024-06-15", true)).toBe("Jun 15");
+  it("uses the same MM/DD label on small screens", () => {
+    expect(formatIsoDateForUsageChart("2024-06-15", true)).toBe("06/15");
+  });
+
+  it("falls back to the MM-DD slice of an unparseable date", () => {
+    expect(formatIsoDateForUsageChart("2024-13-45")).toBe("13-45");
   });
 });
 

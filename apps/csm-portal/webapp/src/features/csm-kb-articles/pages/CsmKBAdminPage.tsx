@@ -106,7 +106,13 @@ function CreateKBDialog({ open, onClose }: { open: boolean; onClose: () => void 
             ))}
           </Select>
         </FormControl>
-        <TextField label="Knowledge base name" value={name} onChange={(e) => setName(e.target.value)} fullWidth />
+        <TextField
+          label="Knowledge base name"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          fullWidth
+        />
         {create.isError && (
           <Alert severity="error">
             {create.error instanceof Error ? create.error.message : "Failed to create knowledge base."}
@@ -117,7 +123,7 @@ function CreateKBDialog({ open, onClose }: { open: boolean; onClose: () => void 
         <Button onClick={onClose} disabled={create.isPending}>
           Cancel
         </Button>
-        <Button variant="contained" onClick={handleCreate} disabled={create.isPending}>
+        <Button variant="contained" onClick={handleCreate} disabled={create.isPending || !name.trim()}>
           Create
         </Button>
       </DialogActions>
@@ -162,7 +168,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
     <Dialog open={Boolean(kb)} onClose={handleClose} fullWidth maxWidth="sm">
       <DialogTitle>Edit "{kb?.title}"</DialogTitle>
       <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 1 }}>
-        <TextField label="Name" value={name} onChange={(e) => setName(e.target.value)} fullWidth />
+        <TextField label="Name" required value={name} onChange={(e) => setName(e.target.value)} fullWidth />
         {update.isError && (
           <Alert severity="error">
             {update.error instanceof Error ? update.error.message : "Failed to rename."}
@@ -213,7 +219,7 @@ function EditKBDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: () =
         <Button onClick={handleClose} disabled={update.isPending}>
           Close
         </Button>
-        <Button variant="contained" onClick={handleSave} disabled={update.isPending}>
+        <Button variant="contained" onClick={handleSave} disabled={update.isPending || !name.trim()}>
           Save name
         </Button>
       </DialogActions>
@@ -323,7 +329,14 @@ function ApproversDialog({ kb, onClose }: { kb: KnowledgeBase | null; onClose: (
             onChange={(e) => setEmail(e.target.value)}
             fullWidth
           />
-          <Button variant="outlined" onClick={handleAddUser} disabled={createManagerUser.isPending}>
+          {/* No asterisk on either inline "add" field: each is needed only by
+              its own Add button (disabled until it is filled in), and adding
+              an approver is optional for this dialog. */}
+          <Button
+            variant="outlined"
+            onClick={handleAddUser}
+            disabled={createManagerUser.isPending || !email.trim()}
+          >
             Add
           </Button>
         </Box>

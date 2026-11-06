@@ -107,6 +107,7 @@ describe("resolveDisplayNameAlias", () => {
     expect(resolveDisplayNameAlias("Service Request - In-Progress")).toBe("In-Progress SR");
     expect(resolveDisplayNameAlias("Escalated")).toBe("Escalations");
     expect(resolveDisplayNameAlias("Escalated Cases")).toBe("Escalations");
+    expect(resolveDisplayNameAlias("Escalated Accounts")).toBe("Escalations");
     expect(resolveDisplayNameAlias("SRE - SLA Violations")).toBe("SLA Violations");
     expect(resolveDisplayNameAlias("30+ Days")).toBe("30+ Days Cases");
   });
@@ -124,6 +125,7 @@ describe("resolveDisplayNameAlias", () => {
     const order: readonly string[] = CRE_PRIMARY_ORDER;
     expect(order.indexOf(resolveDisplayNameAlias("Escalated"))).toBe(order.indexOf("Escalations"));
     expect(order.indexOf(resolveDisplayNameAlias("Escalated Cases"))).toBe(order.indexOf("Escalations"));
+    expect(order.indexOf(resolveDisplayNameAlias("Escalated Accounts"))).toBe(order.indexOf("Escalations"));
     expect(order.indexOf("Escalations")).toBe(order.indexOf("SLA Violations") + 1);
   });
 
@@ -233,6 +235,12 @@ describe("sortByFixedOrder", () => {
       "Migration",
       "Awaiting Info",
     ]);
+  });
+
+  it("places 'SLA At Risk' after 'Awaiting Info', wherever it appears in the input", () => {
+    const input = [item("SLA At Risk"), item("Awaiting Info"), item("At WSO2 Incidents")];
+    const sorted = sortByFixedOrder(input, CRE_SECONDARY_ORDER);
+    expect(sorted.map((i) => i.displayName)).toEqual(["At WSO2 Incidents", "Awaiting Info", "SLA At Risk"]);
   });
 
   it("keeps an unrecognized item in its original relative position, appended after every named one", () => {

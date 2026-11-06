@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -60,7 +61,18 @@ func main() {
 	// deploy-time misconfiguration, not something this service validates
 	// defensively -- the resulting entity-service 403 surfaces normally.
 	umtActorEmail := os.Getenv("UMT_INTEGRATION_ACTOR_EMAIL")
-	caseHandler := handler.NewCaseHandler(entityClient, umtActorEmail)
+	// MARK_FIX_ISSUED_ACTOR_EMAILS maps a third-party consumer's own client id
+	// (as asserted in the x-jwt-assertion header Choreo's gateway forwards) to
+	// that consumer's display email, so a PATCH /cases/{id} markFixIssued call
+	// is attributed to the real integration that made it in entity-service's
+	// work_item_activity feed, instead of always showing this service's own
+	// single, shared service-to-service client id (see
+	// handler.CaseHandler.clientActorEmails' own doc comment). A JSON object,
+	// e.g. {"client-a":"team-a@example.com"}. Optional by design: a client id
+	// with no entry here is simply not attributed, same as before this
+	// existed.
+	markFixIssuedActorEmails := parseClientActorEmails(os.Getenv("MARK_FIX_ISSUED_ACTOR_EMAILS"))
+	caseHandler := handler.NewCaseHandler(entityClient, umtActorEmail, markFixIssuedActorEmails)
 	opportunityHandler := handler.NewOpportunityHandler(entityClient)
 	invoiceHandler := handler.NewInvoiceHandler(entityClient)
 	projectOpportunityLinkHandler := handler.NewProjectOpportunityLinkHandler(entityClient)
@@ -203,6 +215,39 @@ func loadDotEnv(path string) {
 	if err := scanner.Err(); err != nil {
 		slog.Warn("loadDotEnv: error reading .env file", "err", err)
 	}
+}
+
+// parseClientActorEmails parses a JSON object value, e.g.
+// `{"client-a":"team-a@example.com","client-b":"team-b@example.com"}`, into
+// a map. An empty input, or one that fails to parse as a JSON object of
+// strings, is logged (the latter at WARN) and returns nil -- this config
+// only drives a best-effort display-attribution enrichment, never a security
+// decision, so a malformed value must not fail startup; it should just
+// disable the enrichment, which handler.CaseHandler.attributeMarkFixIssued
+// already treats a nil/empty map as. An entry whose client id or email is
+// blank once trimmed is dropped individually, with the same reasoning.
+func parseClientActorEmails(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	var raw map[string]string
+	if err := json.Unmarshal([]byte(s), &raw); err != nil {
+		slog.Warn("MARK_FIX_ISSUED_ACTOR_EMAILS: not a valid JSON object of client id to email, disabling markFixIssued attribution", "err", err)
+		return nil
+	}
+	result := make(map[string]string, len(raw))
+	for clientID, email := range raw {
+		clientID, email = strings.TrimSpace(clientID), strings.TrimSpace(email)
+		if clientID == "" || email == "" {
+			slog.Warn("MARK_FIX_ISSUED_ACTOR_EMAILS: skipping entry with a blank client id or email")
+			continue
+		}
+		result[clientID] = email
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func splitComma(s string) []string {

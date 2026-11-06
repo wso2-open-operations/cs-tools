@@ -47,6 +47,9 @@ import (
 // write, whether or not the guard ran.
 func shouldSkipIngest(ctx context.Context, states repository.SalesforceIngestStateRepository, entity, sfID, eventType string, lastModified *string) (skip bool, eventModifiedOn time.Time, err error) {
 	eventModifiedOn, hasModified := parseSalesforceLastModified(lastModified)
+	if isResyncApply(ctx) {
+		return resyncGuard(ctx, states, entity, sfID, eventModifiedOn, hasModified)
+	}
 	if !hasModified {
 		slog.WarnContext(ctx, "salesforce: record has no parseable lastModifiedDate, skipping duplicate guard",
 			"entity", entity, "sfId", sfID, "eventType", eventType, "lastModifiedDate", derefString(lastModified))
@@ -63,4 +66,65 @@ func shouldSkipIngest(ctx context.Context, states repository.SalesforceIngestSta
 		return true, eventModifiedOn, nil
 	}
 	return false, eventModifiedOn, nil
+}
+
+// resyncGuard is the duplicate guard on the admin resync's apply path. The
+// resync overwrites on purpose, so a ledger version EQUAL to the snapshot's
+// does not block it (a row that was written cut shares its last-modified time
+// with the ledger). But the snapshot was read earlier in the request: a
+// SUCCEEDED ledger row strictly NEWER than it, a DELETED one included, means
+// the record changed since, and writing the snapshot would restore old state.
+// That record is left alone and reported (noteResyncStale). A DELETED row at
+// or before the snapshot never blocks, so an undelete still works. Without a
+// parseable lastModified nothing can be compared: the stored version is kept
+// (the ledger never moves backwards), else now, as the event path does.
+func resyncGuard(ctx context.Context, states repository.SalesforceIngestStateRepository, entity, sfID string, eventModifiedOn time.Time, hasModified bool) (bool, time.Time, error) {
+	st, err := states.Get(ctx, entity, sfID)
+	if err != nil {
+		return false, eventModifiedOn, err
+	}
+	if !hasModified {
+		if st != nil {
+			return false, st.EventModifiedOn, nil
+		}
+		return false, time.Now().UTC(), nil
+	}
+	if st != nil && st.Status == domain.SalesforceIngestSucceeded && st.EventModifiedOn.After(eventModifiedOn) {
+		slog.InfoContext(ctx, "salesforce resync: record changed since it was read, leaving it alone",
+			"entity", entity, "sfId", sfID, "snapshotModifiedOn", eventModifiedOn, "recordedOn", st.EventModifiedOn, "recordedEventType", st.EventType)
+		noteResyncStale(ctx, sfID)
+		return true, eventModifiedOn, nil
+	}
+	return false, eventModifiedOn, nil
+}
+
+// resyncApplyKey marks a context as the admin resync's apply path.
+type resyncApplyKey struct{}
+
+// resyncStale collects the records the apply left alone because they changed
+// after the snapshot was read.
+type resyncStale struct{ ids []string }
+
+// withResyncApply returns ctx marked as the admin resync's apply path. It is
+// set by the resync service only; the event path never sets it, so every
+// ingest behaves as before there. On a marked context the duplicate-event
+// guard (shouldSkipIngest and the membership ingest's own onboarding-step
+// guard) lets an equal version through but refuses one newer than the
+// snapshot (resyncGuard), the ingests only add and update (no row is
+// deleted), no invitation or welcome event is published, and no partner
+// refresh is started behind a membership.
+func withResyncApply(ctx context.Context) (context.Context, *resyncStale) {
+	st := &resyncStale{}
+	return context.WithValue(ctx, resyncApplyKey{}, st), st
+}
+
+func isResyncApply(ctx context.Context) bool {
+	_, ok := ctx.Value(resyncApplyKey{}).(*resyncStale)
+	return ok
+}
+
+func noteResyncStale(ctx context.Context, sfID string) {
+	if st, ok := ctx.Value(resyncApplyKey{}).(*resyncStale); ok {
+		st.ids = append(st.ids, sfID)
+	}
 }

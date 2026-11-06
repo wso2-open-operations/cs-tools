@@ -47,5 +47,50 @@ describe("AddUserModal", () => {
       expect.any(Object),
     );
   });
-});
 
+  describe("details step", () => {
+    const openDetails = (onSubmit = vi.fn()) => {
+      mutateMock.mockImplementation(
+        (_vars: unknown, opts: { onSuccess: (d: { isContactValid: boolean }) => void }) =>
+          opts.onSuccess({ isContactValid: true }),
+      );
+      render(<AddUserModal open projectId="p-1" onClose={vi.fn()} onSubmit={onSubmit} />);
+      fireEvent.change(screen.getByLabelText("Email Address *"), {
+        target: { value: "jane.doe@example.com" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      return onSubmit;
+    };
+
+    it("keeps the invitation wording for portal users", () => {
+      openDetails();
+      expect(
+        screen.getByText("Send an invitation to a new user to access the portal"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send Invitation" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Add User" })).not.toBeInTheDocument();
+    });
+
+    it("shows system-user wording and button label when System User is selected", () => {
+      const onSubmit = openDetails();
+      fireEvent.change(screen.getByLabelText("First Name *"), { target: { value: "Jane" } });
+      fireEvent.change(screen.getByLabelText("Last Name *"), { target: { value: "Doe" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: /System User/ }));
+
+      expect(
+        screen.getByText(
+          "Add a system user for system to system integrations. No invitation email is sent; the user is active immediately.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("Send an invitation to a new user to access the portal"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Send Invitation" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Add User" }));
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ contactEmail: "jane.doe@example.com", isCsIntegrationUser: true }),
+      );
+    });
+  });
+});

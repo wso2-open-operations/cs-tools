@@ -253,47 +253,44 @@ type searchCasesResponse struct {
 	Limit  int              `json:"limit"`
 }
 
-// SearchOpenCasesOlderThan returns every case whose state is not "closed"
-// and whose createdOn is at least olderThan in the past — the entity-service
-// query behind an "open too long" report. Sorted oldest-first (createdOn
-// ascending), so a caller building a report table can just take the
-// returned order as given.
-func (c *Client) SearchOpenCasesOlderThan(ctx context.Context, olderThan time.Duration) ([]Case, error) {
-	cutoff := time.Now().Add(-olderThan).UTC().Format(time.RFC3339)
-	return c.searchCases(ctx, []caseFieldFilter{
-		{Field: "state", Op: "notIn", Values: []string{"closed"}},
-		{Field: "createdOn", Op: "lte", Values: []string{cutoff}},
-	})
-}
-
 // SearchCasesInStateCreatedBeforeYesterday returns every case whose state is
 // exactly state (not "not closed" — an exact match, e.g. "open") and whose
-// createdOn falls before the start of yesterday. Unlike
-// SearchOpenCasesOlderThan's rolling-duration cutoff, this is a calendar-day
+// createdOn falls before the start of yesterday. This is a calendar-day
 // boundary computed in UTC: a case created at 23:59 yesterday is excluded, one
 // created at 00:01 the day before is included, regardless of what time of day
 // this method itself is called — "before yesterday" is a calendar concept,
-// not a fixed number of hours ago. Sorted oldest-first, same as
-// SearchOpenCasesOlderThan.
+// not a fixed number of hours ago. Sorted oldest-first.
+//
+// Errors, rather than returning a partial list, if the result set exceeds the
+// pagination cap — see searchCases.
 func (c *Client) SearchCasesInStateCreatedBeforeYesterday(ctx context.Context, state string) ([]Case, error) {
 	startOfToday := time.Now().UTC().Truncate(24 * time.Hour)
 	startOfYesterday := startOfToday.Add(-24 * time.Hour)
 	cutoff := startOfYesterday.Format(time.RFC3339)
-	return c.searchCases(ctx, []caseFieldFilter{
+	cases, total, err := c.searchCases(ctx, []caseFieldFilter{
 		{Field: "state", Op: "in", Values: []string{state}},
 		{Field: "createdOn", Op: "lte", Values: []string{cutoff}},
 	})
+	if err != nil {
+		return nil, err
+	}
+	if total > len(cases) {
+		return nil, fmt.Errorf("entitycases: search results exceed the %d-row pagination cap (total=%d) — refusing to return a silently-incomplete report",
+			maxSearchPages*searchPageSize, total)
+	}
+	return cases, nil
 }
 
 // searchCases runs one case-search query to completion, paginating through
 // entity-service's own 50-row page cap internally (see
 // searchPageSize/maxSearchPages) and returning one flat, oldest-first slice.
 //
-// Returns an error, rather than a silently-truncated slice, if the result
-// set is still larger than maxSearchPages*searchPageSize after the last
-// allowed page — a caller building a report from a partial result would
-// otherwise under-report without any indication it happened.
-func (c *Client) searchCases(ctx context.Context, filters []caseFieldFilter) ([]Case, error) {
+// total is entity-service's reported match count. If it exceeds
+// maxSearchPages*searchPageSize, the returned slice holds only the first
+// maxSearchPages*searchPageSize cases and total > len(cases): callers must
+// compare the two and either surface the truncation or error, never present
+// the slice as complete.
+func (c *Client) searchCases(ctx context.Context, filters []caseFieldFilter) ([]Case, int, error) {
 	var all []Case
 	offset := 0
 	for page := 0; page < maxSearchPages; page++ {
@@ -303,38 +300,37 @@ func (c *Client) searchCases(ctx context.Context, filters []caseFieldFilter) ([]
 			Pagination: pagination{Limit: searchPageSize, Offset: offset},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("entitycases: encode search request: %w", err)
+			return nil, 0, fmt.Errorf("entitycases: encode search request: %w", err)
 		}
 
 		respBody, err := c.do(ctx, http.MethodPost, "/cases/search", reqBody)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		var resp searchCasesResponse
 		if err := json.Unmarshal(respBody, &resp); err != nil {
-			return nil, fmt.Errorf("entitycases: decode search response: %w", err)
+			return nil, 0, fmt.Errorf("entitycases: decode search response: %w", err)
 		}
 
 		for _, cv := range resp.Cases {
 			c, err := toCase(cv)
 			if err != nil {
-				return nil, fmt.Errorf("entitycases: case %s: %w", cv.ID, err)
+				return nil, 0, fmt.Errorf("entitycases: case %s: %w", cv.ID, err)
 			}
 			all = append(all, c)
 		}
 
 		offset += searchPageSize
 		if len(resp.Cases) == 0 || offset >= resp.Total {
-			return all, nil
+			return all, len(all), nil
 		}
 		if page == maxSearchPages-1 {
-			return nil, fmt.Errorf("entitycases: search results exceed the %d-row pagination cap (total=%d) — refusing to return a silently-incomplete report",
-				maxSearchPages*searchPageSize, resp.Total)
+			return all, resp.Total, nil
 		}
 	}
 	// Unreachable: every iteration above returns before the loop can exit on
 	// its own condition. Required only because the compiler can't prove that.
-	return all, nil
+	return all, len(all), nil
 }
 
 func toCase(cv searchCaseView) (Case, error) {

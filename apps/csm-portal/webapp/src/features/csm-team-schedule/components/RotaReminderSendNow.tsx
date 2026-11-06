@@ -28,12 +28,16 @@ interface Rotation {
 }
 
 /** The rotations each reminder is about, in the order they are listed. */
+const MORNING: readonly Rotation[] = [
+  { code: "CRE_MORNING", label: "Morning" },
+  { code: "CRE_MORNING_OC", label: "Morning on-call" },
+];
+const EVENING: readonly Rotation[] = [{ code: "CRE_EVENING", label: "Evening" }];
+
 const ROTATIONS: Record<RotaReminderKind, readonly Rotation[]> = {
-  weekday: [
-    { code: "CRE_MORNING", label: "Morning" },
-    { code: "CRE_MORNING_OC", label: "Morning on-call" },
-    { code: "CRE_EVENING", label: "Evening" },
-  ],
+  morning: MORNING,
+  evening: EVENING,
+  weekday: [...MORNING, ...EVENING],
   weekend: [
     { code: "CRE_WEEKEND", label: "LK Weekend" },
     { code: "CRE_WEEKEND_NIGHT", label: "Americas Weekend" },
@@ -42,11 +46,26 @@ const ROTATIONS: Record<RotaReminderKind, readonly Rotation[]> = {
 };
 
 const OPTIONS: readonly { kind: RotaReminderKind; label: string }[] = [
-  { kind: "weekday", label: "Next working day" },
+  { kind: "morning", label: "Morning" },
+  { kind: "evening", label: "Evening" },
   { kind: "weekend", label: "Weekend" },
 ];
 
-const KIND_LABEL: Record<RotaReminderKind, string> = { weekday: "Weekday", weekend: "Weekend" };
+const KIND_LABEL: Record<RotaReminderKind, string> = {
+  morning: "Morning",
+  evening: "Evening",
+  weekday: "Weekday",
+  weekend: "Weekend",
+};
+
+/**
+ * Whether a waiting request of kind `queued` already sends what `asked` would:
+ * the same kind, or an older "weekday" request, which sends the Morning and
+ * the Evening together.
+ */
+function covers(queued: RotaReminderKind, asked: RotaReminderKind): boolean {
+  return queued === asked || (queued === "weekday" && (asked === "morning" || asked === "evening"));
+}
 
 /** What the last ask said, once it was taken: a real one, or a test copy. */
 type Notice = "queued" | "test";
@@ -115,8 +134,9 @@ function statusCell(r: RotaReminderRequest): string {
 }
 
 /**
- * The "Send now" panel of the CRE rota reminders card: asks for the weekday or
- * the weekend reminders, and their calendar invitations, to go out now rather
+ * The "Send now" panel of the CRE rota reminders card: asks for the next working
+ * day's Morning or Evening reminder, or the weekend's, and their calendar
+ * invitations, to go out now rather
  * than at their usual time. It shows who would be emailed first and asks once
  * more before it asks. The ask is queued: the scheduled task sends it at its
  * next run. "Send a test to me" asks for the same reminder to reach only the
@@ -129,7 +149,7 @@ export default function RotaReminderSendNow(): JSX.Element {
   const id = (part: string): string => `${uid}-${part}`;
   const headingId = id("h");
 
-  const [kind, setKind] = useState<RotaReminderKind>("weekday");
+  const [kind, setKind] = useState<RotaReminderKind>("morning");
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +166,7 @@ export default function RotaReminderSendNow(): JSX.Element {
   // A test copy reaches only the person who asked and changes nothing real, so
   // a waiting one does not hold the real reminder back.
   const waiting = recent.some(
-    (r) => !r.test && r.kind === kind && (r.status === "QUEUED" || r.status === "SENDING"),
+    (r) => !r.test && covers(r.kind, kind) && (r.status === "QUEUED" || r.status === "SENDING"),
   );
 
   const preview = roster.data ? buildPreview(kind, days, roster.data.assignments) : null;
@@ -265,7 +285,9 @@ export default function RotaReminderSendNow(): JSX.Element {
         <p className="cas-status info">Nobody is on these rotations, so nothing would be sent.</p>
       ) : null}
 
-      {waiting ? <p className="cp-help">A {kind} reminder is already waiting to be sent.</p> : null}
+      {waiting ? (
+        <p className="cp-help">A {KIND_LABEL[kind].toLowerCase()} reminder is already waiting to be sent.</p>
+      ) : null}
 
       {confirming ? (
         <div className="rrs-acts" role="group" aria-labelledby={id("confirm")}>

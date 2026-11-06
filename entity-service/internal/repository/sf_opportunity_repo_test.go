@@ -43,6 +43,12 @@ type oppQuerier struct {
 	statements []string
 	ledger     []domain.UpsertSalesforceIngestStateRequest
 	nextID     int
+	// hoursFor lists the opportunities the project hours hook ran for.
+	hoursFor []string
+	// linkedProjects are the projects linked to the opportunity being deleted;
+	// projectsRecomputed lists the projects the hours hook ran for.
+	linkedProjects     []string
+	projectsRecomputed []string
 }
 
 func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -77,13 +83,30 @@ func (q *oppQuerier) Exec(_ context.Context, sql string, args ...any) (pgconn.Co
 	return pgconn.NewCommandTag("SELECT 1"), nil
 }
 
-func (q *oppQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+func (q *oppQuerier) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+		// The project hours hook: no linked projects.
+		q.statements = append(q.statements, sql)
+		q.hoursFor = append(q.hoursFor, args[0].(string))
+		return &fakeRows{}, nil
+	}
 	return nil, fmt.Errorf("unexpected Query")
 }
 
 func (q *oppQuerier) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	q.statements = append(q.statements, sql)
 	switch sql {
+	case projectHoursStateQuery:
+		q.projectsRecomputed = append(q.projectsRecomputed, args[0].(string))
+		return scanRow{err: pgx.ErrNoRows}
+	case previousOpportunityProjectsQuery:
+		return scanRow{vals: []any{q.linkedProjects}}
+	case previousLineItemOpportunitiesQuery:
+		prev := []string{}
+		if owner, ok := q.products[args[0].(string)]; ok {
+			prev = append(prev, owner)
+		}
+		return scanRow{vals: []any{prev}}
 	case insertSfOpportunityQuery:
 		q.nextID++
 		id := fmt.Sprintf("opp-row-%d", q.nextID)
@@ -183,6 +206,10 @@ func TestWriteSfOpportunity_InsertsNewOpportunityWithLineItems(t *testing.T) {
 	if !strings.Contains(q.statements[0], "pg_advisory_xact_lock") {
 		t.Errorf("first statement = %q, want the advisory lock", q.statements[0])
 	}
+	// Project hours are recomputed once for the opportunity written.
+	if !reflect.DeepEqual(q.hoursFor, []string{"opp-row-1"}) {
+		t.Errorf("project hours recomputed for %v, want [opp-row-1]", q.hoursFor)
+	}
 	if len(q.ledger) != 1 || q.ledger[0].Entity != "opportunity" || q.ledger[0].EventType != "CREATED" {
 		t.Errorf("ledger = %+v", q.ledger)
 	}
@@ -265,6 +292,18 @@ func TestDeleteSfOpportunity_CascadeIntent(t *testing.T) {
 	}
 }
 
+// Deleting an opportunity recomputes the projects that were linked to it.
+func TestDeleteSfOpportunity_RecomputesItsProjects(t *testing.T) {
+	q := &oppQuerier{opportunities: map[string]string{"006xx": "opp-a"}, products: map[string]string{},
+		linkedProjects: []string{"p1", "p2"}}
+	if _, err := deleteSfOpportunity(context.Background(), q, "006xx", oppState("DELETED")); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(q.projectsRecomputed, []string{"p1", "p2"}) {
+		t.Errorf("projects recomputed = %v, want [p1 p2]", q.projectsRecomputed)
+	}
+}
+
 // setColumns returns the column names assigned in an UPDATE ... SET list.
 func setColumns(sql string) []string {
 	body := sql[strings.Index(sql, " SET")+4 : strings.Index(sql, "WHERE")]
@@ -300,5 +339,28 @@ func TestSfOpportunitySQL_NeverTouchesServiceNowColumns(t *testing.T) {
 		if m := forbidden.FindString(sql); m != "" {
 			t.Errorf("%s writes ServiceNow-owned column %q", name, m)
 		}
+	}
+}
+
+// A line item the opportunity set takes over from another opportunity
+// re-derives the opportunity it left, after the new one.
+func TestWriteSfOpportunity_LineItemMoveDerivesPreviousOpportunity(t *testing.T) {
+	q := &oppQuerier{
+		opportunities: map[string]string{"006xx": "opp-a", "006yy": "opp-b"},
+		products:      map[string]string{"00k-moved": "opp-b"},
+	}
+	if _, err := writeSfOpportunity(context.Background(), q, domain.SalesforceOpportunityUpsert{
+		SfID: "006xx", KeepStaleLineItems: true, LineItems: []domain.SalesforceOpportunityLineItemUpsert{lineItem("00k-moved")},
+	}, oppState("UPDATED")); err != nil {
+		t.Fatal(err)
+	}
+	var derived int
+	for _, s := range q.statements {
+		if s == deriveOnboardingForOpportunityQuery {
+			derived++
+		}
+	}
+	if derived != 2 {
+		t.Errorf("derive statements = %d, want 2 (new opportunity, then the previous one)", derived)
 	}
 }

@@ -64,7 +64,17 @@ type partnerReplaceCall struct {
 
 type fakePartnerWriteRepo struct {
 	calls []partnerReplaceCall
-	err   error
+	// adds records AddPartners calls (the admin resync's insert-only path).
+	adds []partnerReplaceCall
+	err  error
+}
+
+func (f *fakePartnerWriteRepo) AddPartners(_ context.Context, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (int, error) {
+	f.adds = append(f.adds, partnerReplaceCall{customerSfID, customerID, append([]string(nil), partnerIDs...), state})
+	if f.err != nil {
+		return 0, f.err
+	}
+	return 2 * len(partnerIDs), nil
 }
 
 func (f *fakePartnerWriteRepo) ReplacePartners(_ context.Context, customerSfID, customerID string, partnerIDs []string, state domain.UpsertSalesforceIngestStateRequest) (int, int, error) {

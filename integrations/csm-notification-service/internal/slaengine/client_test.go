@@ -102,16 +102,13 @@ func TestGetDurationPolicy_UpstreamError(t *testing.T) {
 }
 
 // TestGetActiveCSMSLAClocks_PagesThroughEveryRow confirms the client keeps
-// requesting pages (always with source=csm) until it has every row the
-// server reports via total, not just the first page.
+// requesting pages until it has every row the server reports via total, not
+// just the first page.
 func TestGetActiveCSMSLAClocks_PagesThroughEveryRow(t *testing.T) {
 	const total = activeSLAStatusPageSize + 1 // forces a second page
 	var gotPaths []string
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.String())
-		if got := r.URL.Query().Get("source"); got != "csm" {
-			t.Errorf("source query param = %q, want csm", got)
-		}
 		offset := 0
 		if raw := r.URL.Query().Get("offset"); raw != "" {
 			offset, _ = strconv.Atoi(raw)

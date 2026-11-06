@@ -62,10 +62,11 @@ func TestEnsureUserProvisioned(t *testing.T) {
 			t.Fatal("CreateUser was not called")
 		}
 		var req struct {
-			FirstName string   `json:"firstName"`
-			LastName  string   `json:"lastName"`
-			Email     string   `json:"email"`
-			Roles     []string `json:"roles"`
+			FirstName         string   `json:"firstName"`
+			LastName          string   `json:"lastName"`
+			Email             string   `json:"email"`
+			Roles             []string `json:"roles"`
+			SystemProvisioned bool     `json:"systemProvisioned"`
 		}
 		if err := json.Unmarshal(gotBody, &req); err != nil {
 			t.Fatalf("decode CreateUser body: %v", err)
@@ -75,6 +76,9 @@ func TestEnsureUserProvisioned(t *testing.T) {
 		}
 		if len(req.Roles) != 1 || req.Roles[0] != "internal" {
 			t.Errorf("CreateUser roles = %v, want [\"internal\"]", req.Roles)
+		}
+		if !req.SystemProvisioned {
+			t.Error("CreateUser body systemProvisioned = false, want true -- this row must not be self-attributed to the person it provisions")
 		}
 	})
 

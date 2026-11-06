@@ -1,5 +1,11 @@
 # ACP Closure Service
 
+**Superseded by `operations/csm-scheduled-tasks`' `acp_closure` sub-cron.**
+`main` refuses to start unless `DRY_RUN=true` and `IS_EMAIL_SEND_ENABLED=false`,
+so this service can only decide and log, never run for real beside
+`acp_closure`. Its rules are frozen: change `internal/acp` there instead. The
+rest of this file describes the service as built.
+
 Go port of Phase 1 of the Account Closure Process (ACP) — subscription
 end-date closure only. Ports the decision/action logic from
 `docs/legacy-servicenow-reference/ACPMainProcess.js` and
@@ -16,7 +22,7 @@ no in-process ticker, no long-running state, no health endpoint.
 
 ## Two sources: CSM for ACP's own records, Salesforce for the rest
 
-Agreed with Sajith: Salesforce data is read live from sales-entity-service
+Agreed in review: Salesforce data is read live from sales-entity-service
 instead of CSM's copy; ACP's own records stay on CSM; ACP writes to both
 itself (see "Writes" below). Nothing syncs CSM to Salesforce.
 
@@ -224,6 +230,34 @@ builds on it and updates it after a successful PATCH.
 covers both orders. As with `alreadyClosed`, don't fix this with a live
 re-fetch: the backend isn't read-after-write consistent.
 
+**A renewal resets a track's saved state to `open`** (`resetToOpen`,
+`sweep.go`). Legacy recomputed each track's `event_type` from its date on
+every run and saved it, so a date more than 90 days away saved `open` and
+the next term's reminders started over. This port only wrote when a notice
+fired, so a project renewed after its 30-day reminder kept
+`30_days_notice` and silently skipped its next 90, 60 and 30-day reminders.
+Now, when a track doesn't fire and has a notice recorded, its section is
+saved as `{"event_type":"open"}` if:
+
+- end date: the end date is more than 90 days away;
+- invoice: there is no due invoice (paid), the account is a Partner without
+  a primary partner, or the suspend date is more than 90 days away.
+
+A track is reset only while its own closure state (`endDateClosureState` /
+`invoiceDueDateClosureState`) is still `Open`; the other track may be
+suspended. Example: the contract is renewed and an unpaid invoice suspends
+the project in the same run. The end-date record is reset to `open` (that
+track really was renewed), the project stays Suspended through
+`invoiceDueDateClosureState`, and no email goes out. Legacy did the same: it
+recomputed each track from its own date on every run, whatever the other
+track's state. The reset never changes a closure state, so it never reopens
+anything; the overall `closureState` is derived from the closure states
+only. A track that is itself suspended keeps its record until someone
+reopens it (CSM closure state and Salesforce State), which stays manual;
+once reopened, the next run resets the record. A failed invoice lookup is not
+"no due invoice" and never resets. The reset sends no email, writes nothing
+in a dry run, and logs `state reset to open`. Tests: `renewal_test.go`.
+
 ## End-date suspension writes "Closed", invoice suspension "Suspended"
 
 `suspend` (`sweep.go`) writes `endDateClosureState: "Closed"`; `suspendInvoice`
@@ -276,7 +310,7 @@ not `"Customer contract"`. A null or any other stage is ineligible, as in
 legacy's equality check.
 
 The stage half was missing until the Opportunity API started returning
-`stage` (added by Sajith; confirmed present on both `GET /opportunities/{id}`
+`stage` (added by the sales-entity-service team; confirmed present on both `GET /opportunities/{id}`
 and `/opportunities/search`). Before that, an unpaid invoice on a
 not-yet-won opportunity (e.g. `"45 - Proposal"`) could drive invoice
 notices and suspension, which legacy never did. The shared test
@@ -400,7 +434,7 @@ excluded, `GetProject` is never called at all.
 This came out of a real production incident (a project returning `500` on
 both `GET` and `PATCH` — a genuine data problem on the entity-service side,
 confirmed by the fact that even a bare read failed, not just the write) and
-a design discussion with Sajith Ekanayake about how to handle it. The
+a design review about how to handle it. The
 resulting agreement, worth preserving verbatim since it's easy to
 misapply this mechanism otherwise:
 
@@ -430,7 +464,7 @@ misapply this mechanism otherwise:
   evaluated. This does *not* answer "is the underlying issue still there" —
   that still requires someone to actually go check, same as before.
 
-## Notice audience matrix and content (redesigned per Chamara's direct request)
+## Notice audience matrix and content (redesigned at the business owner's request)
 
 Confirmed audience rule, unchanged: 90/60/30-day windows are internal-only;
 15/7/0-day windows are both internal and customer (`needsCustomerAudience`
@@ -449,7 +483,7 @@ isn't lost or re-litigated:
   nudge) fires only for 15/7/0.
 - **`Subject`** has no single template — four distinct ones
   (`internalNoticeSubject`/`customerNoticeSubject` in `sweep.go`), confirmed
-  against multiple real examples from Chamara:
+  against multiple real examples from the business owner:
   - Internal, day-count (90/60/30/15/7): `"[ACP] {N} Days Reminder of
     Project for {ProjectName} of {AccountName}"`. The `[ACP]` prefix marks
     "this is the internal-audience copy" and applies to **every** window,
@@ -465,8 +499,8 @@ isn't lost or re-litigated:
   - No-business-contact (see below): `"[Urgent] [ACP] No Business Contacts
     Specified for Project {ProjectName}"`.
   `ProjectName` itself often already contains the word "Subscription"
-  (e.g. `"TICKETNETWORK - Subscription"`), which is why a literal internal
-  subject can visually resemble "...Subscription of TicketNetwork" without
+  (e.g. `"EXAMPLETIX - Subscription"`), which is why a literal internal
+  subject can visually resemble "...Subscription of ExampleTix" without
   "Subscription of" being separate template wording.
 - **Every notice has a real `Body` now** — not just the no-business-contact
   one. Internal bodies (`internalNoticeBody`) open with a greeting that
@@ -500,11 +534,11 @@ isn't lost or re-litigated:
   go out, and to how many recipients). A separate `"dry-run: would update
   project"` line describing the raw PATCH body used to exist here and was
   removed deliberately — it's noise once every window produces a real
-  notice log, and stays noise once real email sending (Sajith's team, still
+  notice log, and stays noise once real email sending (the email service team, still
   pending) replaces `LoggingNotifier` as the thing this component
   ultimately integrates with. Don't re-add logging to this type without
   confirming that direction has changed.
-- **No log line carries personal data, in any mode.** Rashmika asked on PR
+- **No log line carries personal data, in any mode.** The email service team asked on PR
   #2134 whether emails or other PII are logged on success or failure. The
   answer now is no:
   - The `"notice"` line (log-only mode) logs project details, the subject,
@@ -589,13 +623,13 @@ API populates it. No change is needed here when it does: `project.SfID`
 already reads the field from both endpoints.
 
 **"Invoice Id" shows the invoice number, not a record ID.** The internal
-invoice notice's "Invoice Id:" field shows the invoice's `name` (ServiceNow
-`u_name`, e.g. `US20268838`), which is what the real legacy email shows. The
+invoice notice's "Invoice Id:" field shows the invoice's `name` (a legacy
+column name, e.g. `US00000001`), which is what the real legacy email shows. The
 API's `id` is an internal record ID (a UUID) that nobody recognises. The
-invoice's Salesforce ID (ServiceNow `u_id`, the API's `sfId`) is used only
+invoice's Salesforce ID (a legacy column, the API's `sfId`) is used only
 for the "Open in Salesforce" link, as in the reference email. Confirmed by
-comparing a real staging invoice in ServiceNow: `u_name` = `2166`, `u_id` =
-`a0IE200000AJuOvMAL`. `invoiceNumber` (`invoice_resolve.go`) falls back to
+comparing a real staging invoice in the legacy system: name `2166`, Salesforce
+ID `a0I000000000001AAA`. `invoiceNumber` (`invoice_resolve.go`) falls back to
 the record ID only when an invoice has no name. The field showed the UUID
 until 2026-09-28.
 
@@ -634,7 +668,7 @@ icon is deliberately left out, as for the Project Name link.
 Free-form JSON written by an existing, live ServiceNow suspension flow —
 **not** something this component's design invented. Confirmed via a real
 write against the dedicated test project
-(`e3e87599-1bc7-6650-182c-0dc5604bcb68`):
+(`00000000-0000-4000-8000-000000000001`):
 
 ```json
 {
@@ -763,9 +797,9 @@ client package was confirmed to fail with the token-client guard removed.
 ## Real email sending
 
 `notify.EmailNotifier` calls WSO2's internal email notification service
-(owned by Rashmika's team) via `internal/emailservice.Client`, replacing
+(owned by the email service team) via `internal/emailservice.Client`, replacing
 `LoggingNotifier` when `IS_EMAIL_SEND_ENABLED=true`. Confirmed directly with
-Rashmika, this superseded an earlier plan (referenced in older commit
+the email service team, this superseded an earlier plan (referenced in older commit
 history) to publish an event/message onto a queue instead — "I don't think
 you need to publish an event to send an email for this use case, you could
 use our email service directly." No queue exists or is needed; this is a
@@ -773,7 +807,7 @@ plain authenticated HTTP call.
 
 - **Wire contract confirmed against real code, not a spec document**:
   `integrations/csm-notification-service/internal/notifications/email.go`
-  on the `dev-app-csm-portal` branch of this same repo is Rashmika's own
+  on the `dev-app-csm-portal` branch of this same repo is the email service team's own
   client for this service — `POST /send-email`, OAuth2 client-credentials
   auth, `{to, cc, from, subject, template}` request body. `emailservice`'s
   `sendEmailRequest` mirrors this exactly, including typing `Template` as
@@ -783,7 +817,7 @@ plain authenticated HTTP call.
   exist on the real API but have no ACP use case, so they're left out of
   this component's client entirely rather than plumbed through unused.
 - **No OAuth2 scope is required** for this token endpoint — confirmed
-  explicitly with Rashmika, unlike `csm-integration-service`'s
+  explicitly with the email service team, unlike `csm-integration-service`'s
   `CSM_INTEGRATION_SCOPES`. Don't add a scopes config value here without
   re-confirming that's changed.
 - **`FromAddress` is fixed at config level**, not a per-`Notice` value —
@@ -792,7 +826,7 @@ plain authenticated HTTP call.
   non-empty, every customer is in `to` and the three internal people are
   `cc`'d; otherwise (internal-only notices, and the no-business-contact
   notice) all populated internal recipients go in `to`. This is a design
-  decision made in this codebase, not something Rashmika's API dictates —
+  decision made in this codebase, not something the email service's API dictates —
   reconsider if it turns out wrong in practice.
 - **`StandingRecipients` (`STANDING_CC_RECIPIENTS`) adds a fixed address
   list to every notice**, subscription and invoice cascades alike, in
@@ -817,8 +851,8 @@ plain authenticated HTTP call.
   defaults false: real people/teams must not receive test traffic. Entries
   still pass through `filterRecipients` like any other recipient — this is
   not a bypass of the WSO2-only staging safeguard.
-- **The WSO2-only staging safeguard is a hard requirement from Rashmika's
-  team**, not a suggestion: "make sure emails aren't being sent in staging
+- **The WSO2-only staging safeguard is a hard requirement from the email
+  service team**, not a suggestion: "make sure emails aren't being sent in staging
   environment for any non-wso2 emails." `EMAIL_SERVICE_ALLOW_NON_WSO2_RECIPIENTS`
   defaults to `false`, filtering any recipient not ending in `@wso2.com`
   before every send. If filtering leaves zero `to` recipients, `Send` skips
@@ -836,7 +870,7 @@ plain authenticated HTTP call.
   gets wrapped in `emailHTMLTemplate` (`renderEmailHTML`), unconditionally:
   a real branded shell (WSO2 logo, orange accent border, footer
   disclaimer), confirmed against real received examples of both kinds
-  (e.g. a real internal day-0 notice, "Dear Nisha Farook..."). An earlier
+  (e.g. a real internal day-0 notice, "Dear Nora Example..."). An earlier
   version of this code kept the internal notice on the bare
   `plainTextToHTML` fragment alone (based on a different, less complete
   reference) — that was wrong, corrected once a fuller real example

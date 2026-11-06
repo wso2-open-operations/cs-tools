@@ -16,8 +16,10 @@
  * under the License.
  */
 import { useId, useState, type FormEvent, type JSX } from "react";
+import RequiredMark from "@components/RequiredMark";
 import { useRotaReminderSettings, useSaveRotaReminderSettings } from "../api/useRotaReminderSettings";
 import type { ReminderWindow, RotaFamily, RotaReminderSettings, SaveRotaReminderSettings } from "../types";
+import { observesDaylightSaving, zoneNameAllYear } from "../utils/rota";
 import RotaReminderSendNow from "./RotaReminderSendNow";
 
 const FAMILY: RotaFamily = "CRE";
@@ -26,6 +28,26 @@ const FAMILY: RotaFamily = "CRE";
 const LK_WEEKEND = "CRE_WEEKEND";
 const AMERICAS_WEEKEND = "CRE_WEEKEND_NIGHT";
 const WINDOW_CODES = ["CRE_WEEKEND_NIGHT", "CRE_WEEKEND_NIGHT_OC"] as const;
+
+/**
+ * The rotations whose calendar invitations can be turned off one by one, by
+ * the shift code of the window they are sent for (an on-call person is a
+ * guest of their rotation's event, so on-call has no switch of its own).
+ */
+const INVITE_ROTATIONS = [
+  { code: "CRE_MORNING", key: "inviteMorning", label: "Morning", help: "With the Morning on-call person." },
+  { code: "CRE_EVENING", key: "inviteEvening", label: "Evening", help: "" },
+  { code: LK_WEEKEND, key: "inviteLkWeekend", label: "LK Weekend (IST)", help: "Saturday and Sunday, one event each." },
+  {
+    code: AMERICAS_WEEKEND,
+    key: "inviteAmericasWeekend",
+    // Followed by the zone of the hours below, which the invitations are timed in.
+    label: "Americas Weekend",
+    help: "With the LK On-call person. Saturday and Sunday, one event each.",
+  },
+] as const;
+
+type InviteKey = (typeof INVITE_ROTATIONS)[number]["key"];
 
 const MAX_PEOPLE = 20;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -42,10 +64,14 @@ const TIME_ZONES = [
 
 const DEFAULT_WINDOW: ReminderWindow = { start: "08:00", end: "18:00", timeZone: "America/Los_Angeles" };
 
-/** What the reminders use until something is saved: the built-in settings. */
+/**
+ * What the card shows until something is saved. The automatic reminders are
+ * off until somebody turns them on here: nothing in the deployment's
+ * configuration switches them on.
+ */
 const DEFAULTS: SaveRotaReminderSettings = {
-  weekdayEnabled: true,
-  weekendEnabled: true,
+  weekdayEnabled: false,
+  weekendEnabled: false,
   invitesEnabled: true,
   weekendRequired: { [LK_WEEKEND]: 3, [AMERICAS_WEEKEND]: 1 },
   windows: { [WINDOW_CODES[0]]: DEFAULT_WINDOW, [WINDOW_CODES[1]]: DEFAULT_WINDOW },
@@ -53,7 +79,7 @@ const DEFAULTS: SaveRotaReminderSettings = {
 };
 
 /** The form as typed: numbers and addresses stay text until they are checked. */
-interface Form {
+interface Form extends Record<InviteKey, boolean> {
   weekdayEnabled: boolean;
   weekendEnabled: boolean;
   invitesEnabled: boolean;
@@ -63,22 +89,30 @@ interface Form {
   end: string;
   timeZone: string;
   copyTo: string;
+  weekendCopyTo: string;
 }
 
 function toForm(s: SaveRotaReminderSettings): Form {
   const required = s.weekendRequired ?? {};
   const windows = s.windows ?? {};
   const w = windows[WINDOW_CODES[0]] ?? windows[WINDOW_CODES[1]] ?? DEFAULT_WINDOW;
+  // A rotation the saved settings do not name sends its invitations.
+  const invites = s.inviteRotations ?? {};
   return {
     weekdayEnabled: s.weekdayEnabled,
     weekendEnabled: s.weekendEnabled,
     invitesEnabled: s.invitesEnabled,
+    inviteMorning: invites.CRE_MORNING !== false,
+    inviteEvening: invites.CRE_EVENING !== false,
+    inviteLkWeekend: invites[LK_WEEKEND] !== false,
+    inviteAmericasWeekend: invites[AMERICAS_WEEKEND] !== false,
     lkWeekend: String(required[LK_WEEKEND] ?? DEFAULTS.weekendRequired[LK_WEEKEND]),
     americasWeekend: String(required[AMERICAS_WEEKEND] ?? DEFAULTS.weekendRequired[AMERICAS_WEEKEND]),
     start: w.start,
     end: w.end,
     timeZone: w.timeZone,
     copyTo: (s.copyTo ?? []).join("\n"),
+    weekendCopyTo: (s.weekendCopyTo ?? []).join("\n"),
   };
 }
 
@@ -142,6 +176,8 @@ function buildBody(
 
   const copyTo = addresses(form.copyTo);
   if (typeof copyTo === "string") return { error: copyTo };
+  const weekendCopyTo = addresses(form.weekendCopyTo);
+  if (typeof weekendCopyTo === "string") return { error: weekendCopyTo };
 
   const savedRequired = saved?.weekendRequired ?? {};
   const savedWindows = saved?.windows ?? {};
@@ -157,6 +193,9 @@ function buildBody(
     const hours: ReminderWindow = { start: form.start, end: form.end, timeZone: form.timeZone };
     for (const code of WINDOW_CODES) windows[code] = { ...hours };
   }
+  // Every switch is sent, on or off, over any other code already saved.
+  const inviteRotations: Record<string, boolean> = { ...(saved?.inviteRotations ?? {}) };
+  for (const r of INVITE_ROTATIONS) inviteRotations[r.code] = form[r.key];
   return {
     body: {
       weekdayEnabled: form.weekdayEnabled,
@@ -164,7 +203,9 @@ function buildBody(
       invitesEnabled: form.invitesEnabled,
       weekendRequired,
       windows,
+      inviteRotations,
       copyTo,
+      weekendCopyTo,
     },
   };
 }
@@ -256,6 +297,8 @@ export default function RotaReminderSettings(): JSX.Element {
 
   // A zone saved by somebody else stays choosable rather than vanishing.
   const zones = TIME_ZONES.includes(form.timeZone) ? TIME_ZONES : [form.timeZone, ...TIME_ZONES];
+  // Only a clock that changes moves the window against IST and UTC.
+  const movesWithClocks = observesDaylightSaving(form.timeZone);
   const changedOn = loaded?.updatedOn ? new Date(loaded.updatedOn).toLocaleString() : "";
 
   return (
@@ -270,7 +313,7 @@ export default function RotaReminderSettings(): JSX.Element {
         </span>
       </div>
       {loaded === null ? (
-        <p className="cp-help rrs-meta">Not saved yet: the reminders use the deployment&apos;s settings, and the values below are the defaults. Only what you change here is saved.</p>
+        <p className="cp-help rrs-meta">Not saved yet: no automatic reminder is sent until one is turned on here and saved. The other values below are the deployment&apos;s defaults; only what you change here is saved.</p>
       ) : (
         <p className="cp-help rrs-meta">
           Last changed by {loaded.updatedBy}
@@ -284,6 +327,9 @@ export default function RotaReminderSettings(): JSX.Element {
           <form className="rrs" noValidate onSubmit={submit}>
             <fieldset className="rrs-group">
               <legend>Automatic reminders</legend>
+              <p className="cp-help" id={id("automatic-help")}>
+                The only on/off for the automatic reminders in this environment. A change applies from the next run.
+              </p>
               <div className="rrs-checks">
                 <div>
                   <label className="cas-check" htmlFor={id("weekday")}>
@@ -332,6 +378,35 @@ export default function RotaReminderSettings(): JSX.Element {
                   </p>
                 </div>
               </div>
+              <fieldset className="rrs-win rrs-invites" disabled={!form.invitesEnabled} aria-describedby={id("rot-help")}>
+                <legend>Calendar invitations for</legend>
+                <div className="rrs-checks">
+                  {INVITE_ROTATIONS.map((r) => (
+                    <div key={r.code}>
+                      <label className="cas-check" htmlFor={id(r.key)}>
+                        <input
+                          id={id(r.key)}
+                          type="checkbox"
+                          checked={form.invitesEnabled && form[r.key]}
+                          aria-describedby={r.help ? id(`${r.key}-help`) : undefined}
+                          onChange={(e) => edit({ [r.key]: e.target.checked })}
+                        />
+                        {r.code === AMERICAS_WEEKEND ? `${r.label} (${zoneNameAllYear(form.timeZone)})` : r.label}
+                      </label>
+                      {r.help ? (
+                        <p className="cp-help" id={id(`${r.key}-help`)}>
+                          {r.help}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                <p className="cp-help" id={id("rot-help")}>
+                  {form.invitesEnabled
+                    ? "A rotation turned off still gets its reminder email, without the invitation. Invitations already sent are left as they are."
+                    : "Turn on calendar invitations above to choose the rotations."}
+                </p>
+              </fieldset>
             </fieldset>
 
             <fieldset className="rrs-group">
@@ -339,10 +414,14 @@ export default function RotaReminderSettings(): JSX.Element {
               <div>
                 <div className="rrs-grid">
                   <div className="rrs-field">
-                    <label htmlFor={id("lk")}>People needed on LK Weekend each day</label>
+                    <label htmlFor={id("lk")}>
+                      People needed on LK Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("lk")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -353,10 +432,14 @@ export default function RotaReminderSettings(): JSX.Element {
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("americas")}>People needed on Americas Weekend each day</label>
+                    <label htmlFor={id("americas")}>
+                      People needed on Americas Weekend each day
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("americas")}
                       type="number"
+                      required
                       min={0}
                       max={MAX_PEOPLE}
                       step={1}
@@ -373,31 +456,43 @@ export default function RotaReminderSettings(): JSX.Element {
                 </p>
               </div>
 
-              <fieldset className="rrs-win" aria-describedby={id("window-help")}>
+              <fieldset className="rrs-win" aria-describedby={movesWithClocks ? id("window-help") : undefined}>
                 <legend>Americas Weekend and LK On-call hours</legend>
                 <div className="rrs-times">
                   <div className="rrs-field">
-                    <label htmlFor={id("start")}>Start</label>
+                    <label htmlFor={id("start")}>
+                      Start
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("start")}
                       type="time"
+                      required
                       value={form.start}
                       onChange={(e) => edit({ start: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("end")}>End</label>
+                    <label htmlFor={id("end")}>
+                      End
+                      <RequiredMark />
+                    </label>
                     <input
                       id={id("end")}
                       type="time"
+                      required
                       value={form.end}
                       onChange={(e) => edit({ end: e.target.value })}
                     />
                   </div>
                   <div className="rrs-field">
-                    <label htmlFor={id("zone")}>Time zone</label>
+                    <label htmlFor={id("zone")}>
+                      Time zone
+                      <RequiredMark />
+                    </label>
                     <select
                       id={id("zone")}
+                      required
                       value={form.timeZone}
                       onChange={(e) => edit({ timeZone: e.target.value })}
                     >
@@ -409,16 +504,18 @@ export default function RotaReminderSettings(): JSX.Element {
                     </select>
                   </div>
                 </div>
-                <p className="cp-help" id={id("window-help")}>
-                  Kept on this clock: in IST and UTC the window moves by an hour when US daylight saving changes.
-                </p>
+                {movesWithClocks ? (
+                  <p className="cp-help" id={id("window-help")}>
+                    Kept on this clock: in IST and UTC the window moves by an hour when its daylight saving changes.
+                  </p>
+                ) : null}
               </fieldset>
             </fieldset>
 
             <fieldset className="rrs-group">
-              <legend>Copies</legend>
+              <legend>Cc</legend>
               <div className="rrs-field">
-                <label htmlFor={id("copy")}>Also copy every reminder to</label>
+                <label htmlFor={id("copy")}>Cc on every reminder</label>
                 <textarea
                   id={id("copy")}
                   rows={3}
@@ -427,7 +524,22 @@ export default function RotaReminderSettings(): JSX.Element {
                   onChange={(e) => edit({ copyTo: e.target.value })}
                 />
                 <p className="cp-help" id={id("copy-help")}>
-                  Email addresses, separated by commas or new lines. Optional.
+                  Email addresses, separated by commas or new lines. Optional. Added to the Cc line, so everybody the
+                  reminder goes to sees them.
+                </p>
+              </div>
+              <div className="rrs-field">
+                <label htmlFor={id("weekend-copy")}>Cc on weekend reminders only</label>
+                <textarea
+                  id={id("weekend-copy")}
+                  rows={2}
+                  value={form.weekendCopyTo}
+                  aria-describedby={id("weekend-copy-help")}
+                  onChange={(e) => edit({ weekendCopyTo: e.target.value })}
+                />
+                <p className="cp-help" id={id("weekend-copy-help")}>
+                  Cc on the weekend summary email (the Saturday and Sunday teams) only: not the weekday reminders or the
+                  calendar invitation emails. Optional.
                 </p>
               </div>
             </fieldset>

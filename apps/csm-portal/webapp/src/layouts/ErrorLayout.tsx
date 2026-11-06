@@ -18,7 +18,7 @@ import { type JSX, type ReactNode } from "react";
 import { Box } from "@wso2/oxygen-ui";
 import { notificationBannerConfig } from "@config/notificationBannerConfig";
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
-import TopBanners from "@components/top-banner/TopBanners";
+import PortalBanners from "@components/portal-banners/PortalBanners";
 
 interface ErrorLayoutProps {
   children: ReactNode;
@@ -39,7 +39,7 @@ export default function ErrorLayout({ children }: ErrorLayoutProps): JSX.Element
         overflow: "hidden",
       }}
     >
-      <TopBanners />
+      <PortalBanners />
       <GlobalNotificationBanner visible={notificationBannerConfig.visible} />
       <Box
         sx={{

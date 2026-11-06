@@ -106,6 +106,9 @@ export default function DeploymentDetailsDialog({
           {deployment.type && (
             <Chip size="small" variant="outlined" label={deploymentTypeLabel(deployment.type)} />
           )}
+          {deployment.airGapped === true && (
+            <Chip size="small" color="warning" variant="outlined" label="Air-gapped" />
+          )}
         </Box>
         <Divider />
         <Box sx={{ p: 3, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2.5 }}>

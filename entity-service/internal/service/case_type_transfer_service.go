@@ -385,6 +385,17 @@ func (s *caseService) transferCaseType(ctx context.Context, req domain.UpdateCas
 			resp.Message = "Case type changed successfully."
 		}
 	}
+	// A catastrophic case cannot be a service request: it was stored one level
+	// lower. The transfer did not fail; the caller is told, in a form it can
+	// build a notice on.
+	if d := result.SeverityDowngrade; d != nil {
+		resp.Warnings = append(resp.Warnings, domain.ResponseWarning{
+			Code:    domain.ResponseWarningSeverityDowngraded,
+			Message: "A service request cannot have severity " + string(d.From) + "; it was set to " + string(d.To) + ".",
+			From:    string(d.From),
+			To:      string(d.To),
+		})
+	}
 	return resp, nil
 }
 

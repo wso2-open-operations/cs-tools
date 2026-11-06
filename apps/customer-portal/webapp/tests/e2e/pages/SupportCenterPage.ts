@@ -74,6 +74,27 @@ export class SupportCenterPage {
   }
 
   /**
+   * The number a stat card shows.
+   *
+   * Waits for the value to replace the skeleton first: ListStatGrid renders
+   * the label immediately but the count only once `GET …/stats/support` has
+   * answered, and the card's text starts with the bare number (no grouping
+   * separators — the support grid passes no `valueFormatter`).
+   *
+   * @param label - The card's label.
+   * @returns The count on the card.
+   */
+  async statCardValue(label: string): Promise<number> {
+    const card = this.statCard(label);
+    await expect(card).toHaveText(/^\s*\d/, { timeout: LOAD_TIMEOUT_MS });
+    const match = /^\s*(\d+)/.exec(await card.innerText());
+    if (!match) {
+      throw new Error(`"${label}" card shows no count: ${await card.innerText()}`);
+    }
+    return Number(match[1]);
+  }
+
+  /**
    * All four stat cards, for counting them.
    *
    * Identified by the accessible name starting with the stat's own value — the

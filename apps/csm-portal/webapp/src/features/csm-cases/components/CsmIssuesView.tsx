@@ -63,6 +63,10 @@ import { useDirectoryUsers } from "@api/useDirectoryUsers";
 import { BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { visibleCaseTypes } from "@features/csm-cases/utils/caseType";
 import {
+  SERVICE_REQUEST_SEVERITY_OPTIONS,
+  SEVERITY_OPTIONS,
+} from "@features/csm-cases/utils/caseFilterOptions";
+import {
   DEFAULT_CASES_FILTERS,
   readCasesFiltersFromUrl,
   writeCasesFiltersToUrl,
@@ -445,34 +449,34 @@ export default function CsmIssuesView({
   // The URL write happens in an effect so it is not a navigate during
   // render, and only for this clamp — a general pagination effect races
   // filter updates that also call `setSearchParams`.
-  const clampedPageRef = useRef<number | null>(null);
+  // The clamp is recorded in state (a fresh object per clamp, set during
+  // render); the ref remembers which clamp the effect has already written so
+  // later effect re-runs do not replay it.
+  const [clampedPage, setClampedPage] = useState<{ page: number } | null>(null);
+  const writtenClampRef = useRef<{ page: number } | null>(null);
   useEffect(() => {
-    const clamped = clampedPageRef.current;
-    if (clamped == null) return;
-    clampedPageRef.current = null;
-    writePaginationToUrl(clamped, rowsPerPage);
-  }, [page, rowsPerPage, writePaginationToUrl]);
+    if (clampedPage == null || writtenClampRef.current === clampedPage) return;
+    writtenClampRef.current = clampedPage;
+    writePaginationToUrl(clampedPage.page, rowsPerPage);
+  }, [clampedPage, rowsPerPage, writePaginationToUrl]);
 
   const { canWrite, canUseSecurityCenter, canUpdateDeleteAnyComment } = usePortalAccess();
   // See visibleCaseTypes's own doc comment: must mirror PermViewSecurityCenter
   // exactly, which comment_updater also holds.
   const canSeeSecurityReports = canUseSecurityCenter || canUpdateDeleteAnyComment;
 
-  // Severity (S1-S4) is a support-case concept, so the severity filter is by
-  // default only shown on the support-cases list — i.e. when the surrounding
-  // view locks the record type to `case`. Every other list (service
-  // requests, engagements, security reports) hides it, unless the caller
+  // Severity (S1-S4) is a support-case and service-request concept, so the
+  // severity filter is by default only shown on those lists — i.e. when the
+  // surrounding view locks the record type to `case` or `service_request`.
+  // Every other list (engagements, security reports) hides it, unless the caller
   // overrides with `showSeverityFilter` (see its own doc comment — the
   // project Work items tab does this since its type filter is unlocked and
   // visible rather than fixed via `lockedFilters`).
   const showSeverityFilter =
     showSeverityFilterOverride ??
     (lockedFilters?.caseTypes?.length === 1 &&
-      lockedFilters.caseTypes[0] === "case");
-  // Service Requests don't carry a severity, so the column is redundant there.
-  const isServiceRequestOnly =
-    lockedFilters?.caseTypes?.length === 1 &&
-    lockedFilters.caseTypes[0] === "service_request";
+      (lockedFilters.caseTypes[0] === "case" ||
+        lockedFilters.caseTypes[0] === "service_request"));
 
   const debouncedSearch = useDebouncedValue(filters.search, 300);
   // User filters (debounced search) with the locked overrides applied last so
@@ -568,10 +572,9 @@ export default function CsmIssuesView({
 
   // "Customise columns" — off unless a caller opts in (see `enableColumnCustomization`'s
   // doc). `showSeverityColumn` mirrors the exact gate `CasesList` itself is given below
-  // (`isServiceRequestOnly || hideSeverityColumn`) so the picker can never offer a
-  // Severity column that would just render "—" for every row (service requests have no
-  // severity concept at all).
-  const showSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // (`hideSeverityColumn`) so the picker can never offer a Severity column that would
+  // just render "—" for every row.
+  const showSeverityColumn = !hideSeverityColumn;
   // Every current caller of this view locks the case type via `lockedFilters` (Case, SR,
   // SRA, Engagements each fix `caseTypes` to one value) — the Type column would then show
   // the same chip on every row, so it's still offered (a legacy row that predates type
@@ -636,23 +639,23 @@ export default function CsmIssuesView({
     [api, queryFilters, exportSearch, sortField, sortOrder, currentUserId, currentUserEmail],
   );
 
-  // Same gate `CasesList` is given (`hideSeverityColumn={isServiceRequestOnly
-  // || hideSeverityColumn}`) so the export's column set can never drift from
-  // what's actually rendered.
-  const showExportSeverityColumn = !(isServiceRequestOnly || hideSeverityColumn);
+  // Same gate `CasesList` is given (`hideSeverityColumn`) so the export's column
+  // set can never drift from what's actually rendered.
+  const showExportSeverityColumn = !hideSeverityColumn;
   const caseToCsvRow = useCallback(
     (c: CsmCaseRow): string[] => {
       const caseId =
         c.wso2CaseId && c.caseNumber
           ? `${c.wso2CaseId}/${c.caseNumber}`
           : c.wso2CaseId || c.caseNumber || "";
-      const updated = formatBackendTimestampForDisplay(c.updatedAt, {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      const fmt = (ts: string | undefined) =>
+        formatBackendTimestampForDisplay(ts, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }) ?? "";
       const stateText =
         stateLabel(c.state) +
         (c.state === "work_in_progress" && c.workState
@@ -660,7 +663,8 @@ export default function CsmIssuesView({
           : "");
       const row = [caseId, c.subject, c.projectName, c.product];
       if (showExportSeverityColumn) row.push(c.severity);
-      row.push(stateText, updated ?? "");
+      // Resolved = moved to solution proposed (kept through closure); Closed only once closed.
+      row.push(stateText, fmt(c.updatedAt), fmt(c.createdAt), fmt(c.resolvedAt), fmt(c.closedAt));
       return row;
     },
     [showExportSeverityColumn],
@@ -673,6 +677,9 @@ export default function CsmIssuesView({
     ...(showExportSeverityColumn ? ["Severity"] : []),
     "State",
     "Updated",
+    "Created",
+    "Resolved",
+    "Closed",
   ];
 
   const { showSuccess } = useSuccessBanner();
@@ -722,7 +729,7 @@ export default function CsmIssuesView({
   // setState in effects); React re-renders before committing, so it's not a
   // user-visible extra paint.
   if (data !== undefined && !data.hasMore && page > lastPage) {
-    clampedPageRef.current = lastPage;
+    setClampedPage({ page: lastPage });
     setPage(lastPage);
   }
   const paginationCount = data === undefined || data.hasMore ? -1 : total;
@@ -810,6 +817,17 @@ export default function CsmIssuesView({
         availableAssigneeUsers={availableAssigneeUsers}
         availableProjects={availableProjects}
         showSeverityFilter={showSeverityFilter}
+        // Service requests have no S0, so it is not offered as a new pick.
+        // A shared URL or saved view can still carry `severities=S0`, so keep
+        // it listed while selected, otherwise the user could not deselect it.
+        severityOptions={
+          lockedFilters?.caseTypes?.length === 1 &&
+          lockedFilters.caseTypes[0] === "service_request"
+            ? filters.severities.includes("S0")
+              ? SEVERITY_OPTIONS
+              : SERVICE_REQUEST_SEVERITY_OPTIONS
+            : SEVERITY_OPTIONS
+        }
         hideTypeFilter={hideTypeFilter}
         typeFilterLabel={typeFilterLabel}
         hideProjectFilter={hideProjectFilter}
@@ -848,7 +866,7 @@ export default function CsmIssuesView({
         isFetching={isFetching}
         skeletonCount={rowsPerPage}
         detailBasePath={detailBasePath}
-        hideSeverityColumn={isServiceRequestOnly || hideSeverityColumn}
+        hideSeverityColumn={hideSeverityColumn}
         selectable={canWrite}
         selectedIds={selectedRowIds}
         onToggleRow={toggleRow}

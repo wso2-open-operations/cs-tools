@@ -27,7 +27,7 @@ const productRegressionReportTimezone = "Asia/Colombo"
 // product with a count per product and in total -- the layout of the
 // report it replaces. unitLabel names the business unit ("APIM").
 // caseLinkBase is a case page prefix; when set, each row's case id links
-// to <caseLinkBase>/<case number>, else it is plain text. [YEAR] is
+// to <caseLinkBase>/<case id>, else it is plain text. [YEAR] is
 // today's year, the footer-only detail every template here has.
 func RenderProductRegressionReport(r regressionreport.Report, unitLabel, caseLinkBase string) string {
 	loc, err := time.LoadLocation(productRegressionReportTimezone)
@@ -62,14 +62,17 @@ func renderRegressionRows(groups []regressionreport.Group, caseLinkBase string) 
 	if len(groups) == 0 {
 		return fmt.Sprintf(`<tr><td colspan="%d" style="padding:16px 10px; text-align:center; color:#8a8f98;">No regression cases this month.</td></tr>`, regressionRowColumns)
 	}
-	const cell = `<td style="padding:8px 10px; border-bottom:1px solid #e8eaed; vertical-align:top;">%s</td>`
+	const cell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; word-wrap:break-word;">%s</td>`
+	// The case id is a single token; breaking it across two lines doubles
+	// the row height and helps nobody.
+	const idCell = `<td style="padding:5px 8px; line-height:16px; border-bottom:1px solid #e8eaed; vertical-align:top; white-space:nowrap;">%s</td>`
 	var b strings.Builder
 	for _, g := range groups {
 		fmt.Fprintf(&b, `<tr><td colspan="%d" style="padding:10px; background-color:#f8f9fa; border-bottom:1px solid #e8eaed; font-weight:700;">WSO2 Product: %s <span style="font-weight:400; color:#8a8f98;">(%d)</span></td></tr>`,
 			regressionRowColumns, escapeHTML(g.Product), len(g.Cases))
 		for _, row := range g.Cases {
 			b.WriteString("<tr>")
-			fmt.Fprintf(&b, cell, regressionCaseLink(caseLinkBase, row))
+			fmt.Fprintf(&b, idCell, regressionCaseLink(caseLinkBase, row))
 			fmt.Fprintf(&b, cell, orDash(escapeHTML(row.Subject)))
 			fmt.Fprintf(&b, cell, orDash(escapeHTML(row.DeployedProduct)))
 			b.WriteString("</tr>")
@@ -79,17 +82,18 @@ func renderRegressionRows(groups []regressionreport.Group, caseLinkBase string) 
 }
 
 // regressionCaseLink is the row's case id, linked to the case page
-// (<caseLinkBase>/<number>) when a base URL is configured. The key falls
-// back to the number so the cell is never blank; the number is
-// path-escaped because it is data.
+// (<caseLinkBase>/<case id>) when a base URL is configured. The CSM portal
+// addresses a case by its id, not its number, so the link uses the id; a
+// row without one stays plain text. The key falls back to the number so
+// the cell is never blank; the id is path-escaped because it is data.
 func regressionCaseLink(caseLinkBase string, row regressionreport.Row) string {
 	text := row.IssueKey
 	if text == "" {
 		text = row.Number
 	}
-	if caseLinkBase == "" || row.Number == "" {
+	if caseLinkBase == "" || row.ID == "" {
 		return escapeHTML(text)
 	}
-	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.Number)
+	href := strings.TrimRight(caseLinkBase, "/") + "/" + url.PathEscape(row.ID)
 	return fmt.Sprintf(`<a href="%s" target="_blank" style="color:#ff7300;">%s</a>`, escapeHTML(href), escapeHTML(text))
 }

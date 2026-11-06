@@ -271,10 +271,9 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
     expect(within(picker).getByText("Severity")).toBeInTheDocument();
   });
 
-  it("service_request: does not offer a Severity column in the picker, unlike case", () => {
-    // Severity is a support-case concept; a widget for any other case-family
-    // resourceType sharing this same renderer must not offer a column that
-    // would only ever render "—".
+  it("service_request: offers a Severity column in the picker, like case", () => {
+    // A service request carries an internal S1-S4 severity, so the shared
+    // case-family renderer offers the column for it too.
     const Renderer = WIDGET_LIST_RENDERERS.service_request;
     renderRenderer(
       <Renderer
@@ -283,6 +282,25 @@ describe("widgetListConfig — quick-preview icon per resourceType", () => {
         isLoading={false}
       />,
       "/operations/service-requests/:id",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
+    const picker = screen.getByRole("list", { name: "Customise columns" });
+    expect(within(picker).getByText("Severity")).toBeInTheDocument();
+  });
+
+  it("security_report_analysis: does not offer a Severity column in the picker", () => {
+    // Severity is not a concept for every case-family type; a widget for one
+    // without it sharing this same renderer must not offer a column that
+    // would only ever render "—".
+    const Renderer = WIDGET_LIST_RENDERERS.security_report_analysis;
+    renderRenderer(
+      <Renderer
+        resourceType="security_report_analysis"
+        items={[{ id: "sra-1", caseNumber: "CS0000003", subject: "Report" }]}
+        isLoading={false}
+      />,
+      "/security-center/:id",
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Customise columns" }));
