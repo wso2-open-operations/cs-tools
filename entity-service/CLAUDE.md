@@ -1575,6 +1575,12 @@ link-related. `publishStatusChanged`/`publishCaseAssigned` additionally set
 `case.*` email's subject to follow one explicit standard format,
 `"[WSO2 Support] (<wso2 case id>/<case number>) <title>"` (see that
 service's own `CLAUDE.md`, `dispatch.subjectLine`).
+`publishStatusChangedEvent` also sets `PreviousStatus` (the display label of
+`before.State`, empty when the prior state is unknown) so a consumer can tell
+whether the change is visible to a given audience: customers see Work In
+Progress and Waiting On WSO2 as one "In Progress" state, so
+`csm-notification-service` skips the customer email for a move between the two.
+Entity-service itself never merges the states; it only supplies the previous one.
 - **`snCaseService.UpdateCase`** publishes `case.status_changed` via
   `publishStatusChanged`, called only when the PATCH's own `req.State` was
   set (a `nil` `State` — e.g. an `assigneeEmail`-only PATCH — never

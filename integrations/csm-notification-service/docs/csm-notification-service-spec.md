@@ -467,6 +467,13 @@ emails, not one shared one.
   else is treated as a customer. Every time this domain fallback is used,
   it is logged as a warning, since it means the proper, role-based answer
   wasn't available.
+- **A status-change email shows customers one "In Progress" state.**
+  Work In Progress and Waiting On WSO2 are the same state to a customer, so
+  the customer copy says "In Progress" for either, and a change between the
+  two sends the customer no email at all — they would be told about a
+  change they cannot see. The staff copy keeps the real status and is
+  always sent. If the event does not say what the status was before, the
+  customer copy is sent, so nothing is lost for want of information.
 - **A small, fixed list of default internal addresses is copied onto every
   case email's internal/staff copy only** — never the customer-facing copy,
   under any circumstance, including the service's own safe-testing mode
@@ -502,7 +509,7 @@ unless noted otherwise.
 | Case created | A new case is opened | Email, and chat unless the case is low severity or one of a few case types that are email-only | The case's recipient list; chat goes to a fixed monitoring space |
 | Announcement created | An announcement case is created for a project | Email only, never chat | Every registered portal user on the project — or, for a security announcement, only that project's designated security contacts (section 2.2.3) |
 | Comment added | A comment is posted on a case | Email, with a different layout for an internal-only note | The case's recipient list, narrowed to WSO2 addresses only for an internal note (section 2.2.2) |
-| Status changed | A case's status changes | Email | The case's recipient list |
+| Status changed | A case's status changes | Email | The case's recipient list; customers see Work In Progress and Waiting On WSO2 as "In Progress" and are not emailed for a move between them (section 2.2.5) |
 | Case assigned | A case gets a new assignee | Email | The case's recipient list |
 | Case acknowledged | A case is claimed for the first time | Chat only, as a reply under the creation alert | A fixed monitoring space |
 | Severity changed | A case's severity changes | Email and chat | The case's recipient list, and a fixed monitoring space |
