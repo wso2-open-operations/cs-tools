@@ -448,6 +448,7 @@ func (r *storedAttachmentRepo) LinkInlineImages(ctx context.Context, commentID, 
 		WHERE id = ANY($4::uuid[])
 		  AND work_item_id = $2
 		  AND status = 'COMPLETE'
+		  AND description_image = false
 		  AND lower(created_by) = lower($3)
 		  AND (comment_id IS NULL OR comment_id = $1)
 		RETURNING id::TEXT`, commentID, workItemID, email, ids)

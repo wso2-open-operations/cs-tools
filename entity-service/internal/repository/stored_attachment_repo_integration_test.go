@@ -376,3 +376,116 @@ func TestStoredAttachment_MarkDeletedAndTheLists(t *testing.T) {
 		t.Error("an external caller marked an attachment deleted directly")
 	}
 }
+
+// A draft description image: uploaded to a project before the record exists,
+// private to its uploader, then linked to the work item, after which every member
+// of the project sees it and the 24h cleanup never lists it.
+func TestStoredAttachment_DraftDescriptionImageLifecycle(t *testing.T) {
+	_, repo := storedAttachmentFixture(t)
+	kind := domain.StoredAttachmentComment
+
+	// The project is found only for a member.
+	if p, err := repo.GetProject(saCustomerCtx(), saProject1); err != nil || p.ProjectNumber != "SA-PRJ-1" {
+		t.Fatalf("GetProject(member) = %+v, %v", p, err)
+	}
+	var nf *apierror.NotFoundError
+	if _, err := repo.GetProject(saCustomerCtx(), saProject2); !errors.As(err, &nf) {
+		t.Errorf("GetProject(not a member) err = %v, want NotFoundError", err)
+	}
+	if _, err := repo.GetProject(saSystemCtx(), saProject2); err != nil {
+		t.Errorf("GetProject(internal) = %v, want it found", err)
+	}
+
+	// A member can start a draft; one for a project they are not in is refused.
+	in := domain.StoredAttachmentInsert{ParentID: saProject1, Name: "a.png", ContentType: "image/png", SizeBytes: 10, CreatedBy: saCustomer, Draft: true}
+	row, err := repo.InsertPending(saCustomerCtx(), kind, in)
+	if err != nil {
+		t.Fatalf("InsertPending(draft): %v", err)
+	}
+	if !row.Draft || row.ParentID != saProject1 {
+		t.Errorf("row = %+v, want a draft whose parent is the project", row)
+	}
+	in2 := in
+	in2.ParentID = saProject2
+	if _, err := repo.InsertPending(saCustomerCtx(), kind, in2); !errors.As(err, &nf) {
+		t.Errorf("InsertPending(draft in a foreign project) err = %v, want NotFoundError", err)
+	}
+	// An external caller may not record a draft as somebody else's.
+	in3 := in
+	in3.CreatedBy = saStranger
+	if _, err := repo.InsertPending(saCustomerCtx(), kind, in3); err == nil {
+		t.Error("a draft recorded under another email must be refused")
+	}
+
+	// Private to its uploader.
+	if rows, _ := repo.GetByIDs(saStrangerCtx(), kind, []string{row.ID}); len(rows) != 0 {
+		t.Error("a draft must not be visible to someone else")
+	}
+	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, []string{row.ID}); len(rows) != 1 {
+		t.Error("a draft must be visible to its uploader")
+	}
+
+	// Not COMPLETE yet: not a usable draft.
+	if d, _ := repo.ListDescriptionDrafts(saSystemCtx(), saProject1, saCustomer, []string{row.ID}); len(d) != 0 {
+		t.Error("a PENDING draft must not be listed")
+	}
+	if ok, err := repo.MarkComplete(saSystemCtx(), kind, row.ID, "csm/projects/sa_prj_1/workitems/drafts/inline_attachments/x.png", 10); err != nil || !ok {
+		t.Fatalf("MarkComplete = %v, %v", ok, err)
+	}
+	if d, _ := repo.ListDescriptionDrafts(saSystemCtx(), saProject1, saCustomer, []string{row.ID}); len(d) != 1 {
+		t.Fatalf("a COMPLETE draft must be listed, got %d", len(d))
+	}
+	if d, _ := repo.ListDescriptionDrafts(saSystemCtx(), saProject2, saCustomer, []string{row.ID}); len(d) != 0 {
+		t.Error("another project's drafts must not match")
+	}
+	if d, _ := repo.ListDescriptionDrafts(saSystemCtx(), saProject1, saStranger, []string{row.ID}); len(d) != 0 {
+		t.Error("another uploader's drafts must not match")
+	}
+
+	// An unlinked draft is abandoned after 24h.
+	future := time.Now().Add(time.Hour)
+	listed := func() bool {
+		rows, err := repo.ListUnlinkedImages(saSystemCtx(), future, 100)
+		if err != nil {
+			t.Fatalf("ListUnlinkedImages: %v", err)
+		}
+		for _, r := range rows {
+			if r.ID == row.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if !listed() {
+		t.Error("an unlinked draft must be in the cleanup queue")
+	}
+
+	// A guarded link: wrong project or wrong author links nothing.
+	if got, _ := repo.LinkDescriptionImages(saSystemCtx(), saWIOpen, saProject2, saCustomer, []string{row.ID}); len(got) != 0 {
+		t.Error("linking with another project must change nothing")
+	}
+	if got, _ := repo.LinkDescriptionImages(saSystemCtx(), saWIOpen, saProject1, saStranger, []string{row.ID}); len(got) != 0 {
+		t.Error("linking with another author must change nothing")
+	}
+	got, err := repo.LinkDescriptionImages(saSystemCtx(), saWIOpen, saProject1, saCustomer, []string{row.ID})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("LinkDescriptionImages = %v, %v", got, err)
+	}
+	if again, _ := repo.LinkDescriptionImages(saSystemCtx(), saWIOpen, saProject1, saCustomer, []string{row.ID}); len(again) != 1 {
+		t.Error("repeating the link must report the image as linked")
+	}
+	if other, _ := repo.LinkDescriptionImages(saSystemCtx(), saWIClosed, saProject1, saCustomer, []string{row.ID}); len(other) != 0 {
+		t.Error("a linked image must not move to another work item")
+	}
+
+	// Linked: never cleaned up, and visible to the project's members only.
+	if listed() {
+		t.Error("a linked description image must never be in the cleanup queue")
+	}
+	if rows, _ := repo.GetByIDs(saStrangerCtx(), kind, []string{row.ID}); len(rows) != 0 {
+		t.Error("a linked description image must stay hidden from non-members")
+	}
+	if rows, _ := repo.GetByIDs(saCustomerCtx(), kind, []string{row.ID}); len(rows) != 1 || rows[0].Draft || rows[0].ParentID != saWIOpen {
+		t.Errorf("a member must see the linked image on its work item, got %+v", rows)
+	}
+}
