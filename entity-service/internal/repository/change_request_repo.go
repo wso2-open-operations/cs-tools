@@ -3418,7 +3418,7 @@ func (r *changeRequestRepo) DecideChangeRequestApproval(ctx context.Context, id,
 // uses (answerCustomerStageViaPatch), so both mechanisms record the same stage
 // rows, move the state the same way and stamp the same flags.
 func decideChangeRequestApprovalTx(ctx context.Context, tx pgx.Tx, id, approverUserID, decision, actorEmail string) (string, error) {
-	// The approval tables also hold the CAB stage of a standard change proposal
+	// The approval tables also hold the approval stages of a standard change proposal
 	// (another work item type, decided only through its own route, which records
 	// the outcome on the proposal): never decided here.
 	if err := refuseOtherWorkItemType(ctx, tx, id); err != nil {

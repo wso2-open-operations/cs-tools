@@ -19,16 +19,16 @@ package domain
 import "time"
 
 // Standard change templates (migration 0252). A standard change is pre-authorised:
-// the CAB assesses its risk once, when the template is created or changed (a
+// its risk is assessed once, when the template is created or changed (a
 // StandardChangeProposal), and a change request raised from an active template is
-// scheduled without any approval of its own. What the CAB approved -- the plans,
+// scheduled without any approval of its own. What was approved -- the plans,
 // the risk, the customer gates -- is frozen on every change request raised from it;
 // only the declared parameters, the schedule and the scope vary per use.
 
-// A proposal is approved in two stages: the CAB, then the Standard Change
-// Authority (StandardChangeAuthorityGroupName), of whom
-// StandardChangeAuthorityApprovals different people must approve. Nobody approves
-// at both stages, and the proposer at neither.
+// A proposal is approved in one stage, by the Standard Change Authority
+// (StandardChangeAuthorityGroupName), of whom StandardChangeAuthorityApprovals
+// different people must approve; the proposer cannot. The CAB has no stage of its
+// own: being on it lets nobody decide a proposal.
 const StandardChangeAuthorityApprovals = 2
 
 // StandardChangeTemplateState is a template's lifecycle state.
@@ -45,7 +45,8 @@ const (
 	StandardChangeTemplateStateRetired StandardChangeTemplateState = "retired"
 )
 
-// StandardChangeProposalKind says what a proposal asks the CAB to authorise.
+// StandardChangeProposalKind says what a proposal asks the Standard Change
+// Authority to authorise.
 type StandardChangeProposalKind string
 
 const (
@@ -61,9 +62,10 @@ const (
 type StandardChangeProposalState string
 
 const (
-	StandardChangeProposalStateDraft     StandardChangeProposalState = "draft"
-	StandardChangeProposalStateCABReview StandardChangeProposalState = "cab_review"
-	// AuthorityReview: the CAB approved; the Standard Change Authority has not yet.
+	StandardChangeProposalStateDraft StandardChangeProposalState = "draft"
+	// AuthorityReview: submitted, waiting on the Standard Change Authority. (A
+	// proposal used to go to the CAB first, in cab_review; migration 0287 returned
+	// the ones still there to draft, and no proposal holds that state any more.)
 	StandardChangeProposalStateAuthorityReview StandardChangeProposalState = "authority_review"
 	StandardChangeProposalStateApproved        StandardChangeProposalState = "approved"
 	StandardChangeProposalStateRejected        StandardChangeProposalState = "rejected"
@@ -79,10 +81,10 @@ func (s StandardChangeProposalState) IsOpen() bool {
 	return s == StandardChangeProposalStateDraft || s.IsInReview()
 }
 
-// IsInReview reports whether a proposal in this state waits on a decision: of
-// the CAB, or of the Standard Change Authority.
+// IsInReview reports whether a proposal in this state waits on a decision of the
+// Standard Change Authority.
 func (s StandardChangeProposalState) IsInReview() bool {
-	return s == StandardChangeProposalStateCABReview || s == StandardChangeProposalStateAuthorityReview
+	return s == StandardChangeProposalStateAuthorityReview
 }
 
 // StandardChangeParameterType is the input a parameter takes.
@@ -167,7 +169,7 @@ type StandardChangeTemplateUsage struct {
 	LastUsedOn *time.Time `json:"lastUsedOn"`
 }
 
-// StandardChangeTemplateVersion is one CAB-approved version of a template.
+// StandardChangeTemplateVersion is one approved version of a template.
 // Immutable once written.
 type StandardChangeTemplateVersion struct {
 	ID         string `json:"id"`
@@ -205,7 +207,8 @@ type StandardChangeTemplate struct {
 	CurrentVersion *StandardChangeTemplateVersion `json:"currentVersion"`
 	// ReviewRequired is raised when a change request raised from the template was
 	// rolled back or deviated from its implementation plan. It does not stop the
-	// template being used: the owner and the CAB decide what to do.
+	// template being used: the owner proposes a revision or a retirement, or a
+	// Standard Change Authority member clears the flag.
 	ReviewRequired              bool       `json:"reviewRequired"`
 	ReviewRequiredReason        *string    `json:"reviewRequiredReason"`
 	ReviewRequiredOn            *time.Time `json:"reviewRequiredOn"`
@@ -227,7 +230,7 @@ type StandardChangeTemplate struct {
 	SuspendedReason *string    `json:"suspendedReason"`
 	SuspendedOn     *time.Time `json:"suspendedOn"`
 	SuspendedBy     *string    `json:"suspendedBy"`
-	// OpenProposal is the modification or retirement now in draft or CAB review,
+	// OpenProposal is the modification or retirement now in draft or in review,
 	// if any (there is at most one).
 	OpenProposal *EntityRef                  `json:"openProposal"`
 	Usage        StandardChangeTemplateUsage `json:"usage"`
@@ -309,11 +312,14 @@ type StandardChangeEvidence struct {
 	Customer *EntityRef `json:"customer"`
 }
 
-// StandardChangeProposalStage is one approval stage of a proposal: the CAB, then
-// the Standard Change Authority.
+// StandardChangeProposalStage is one approval stage of a proposal: the Standard
+// Change Authority's. A proposal from before migration 0287 removed the CAB
+// stage (decided, still in authority review, or returned to draft and possibly
+// resubmitted) may also show its "CAB Approval" stage, first.
 type StandardChangeProposalStage struct {
 	ID string `json:"id"`
-	// Label is the stage's name ("CAB Approval", "Standard Change Authority").
+	// Label is the stage's name ("Standard Change Authority"; "CAB Approval" on
+	// a proposal from before 0287).
 	Label string `json:"label"`
 	// RequiredApprovals is how many different approvers must approve it;
 	// Approvals is how many have.
@@ -401,7 +407,7 @@ type CreateStandardChangeProposalRequest struct {
 	TemplateID            *string                    `json:"templateId,omitempty"`
 	SourceChangeRequestID *string                    `json:"sourceChangeRequestId,omitempty"`
 	// CopyFromProposalID starts a new draft from another proposal's content (for
-	// example one the CAB rejected). The draft is new in every other respect.
+	// example a rejected one). The draft is new in every other respect.
 	CopyFromProposalID *string `json:"copyFromProposalId,omitempty"`
 	Name               *string `json:"name,omitempty"`
 	// AccountID is the customer a NEW proposal is for. One started from a change
@@ -454,10 +460,10 @@ type DecideStandardChangeProposalRequest struct {
 	// Comment is required for a rejection.
 	Comment *string `json:"comment,omitempty"`
 	// StageID is the stage the caller decides on, as their page showed it. When
-	// sent and the proposal has moved on to another stage since (the CAB settled
-	// while the page was open), the decision is refused (409) and nothing is
-	// written, so a CAB vote is never recorded as an authorisation. The webapp
-	// always sends it.
+	// sent and it is not the stage the proposal waits on (the proposal was
+	// returned to draft and submitted again while the page was open), the
+	// decision is refused (409) and nothing is written. The webapp always sends
+	// it.
 	StageID *string `json:"stageId,omitempty"`
 }
 
@@ -477,8 +483,8 @@ type SearchStandardChangeProposalsRequest struct {
 	AccountID *string `json:"accountId,omitempty"`
 	// ProposedByMe narrows to the caller's own proposals.
 	ProposedByMe bool `json:"proposedByMe,omitempty"`
-	// AwaitingMyDecision narrows to proposals waiting on a stage (CAB or
-	// authority) on which the caller holds a pending approval.
+	// AwaitingMyDecision narrows to proposals in authority review on which the
+	// caller holds a pending approval.
 	AwaitingMyDecision bool       `json:"awaitingMyDecision,omitempty"`
 	Query              *string    `json:"query,omitempty"`
 	Pagination         Pagination `json:"pagination"`

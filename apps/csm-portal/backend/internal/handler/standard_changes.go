@@ -39,7 +39,7 @@ type entityStandardChangeClient interface {
 
 // StandardChangeHandler proxies the standard change catalogue and its proposals.
 // entity-service decides everything about them (who may suspend a template, edit
-// or submit a proposal, decide as the CAB) and its refusals are shown as they are.
+// or submit a proposal, decide one) and its refusals are shown as they are.
 type StandardChangeHandler struct {
 	entity entityStandardChangeClient
 }

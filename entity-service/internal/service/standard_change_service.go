@@ -33,7 +33,8 @@ import (
 // standardChangeService serves the standard change catalogue and its proposals.
 // Every method is for internal (WSO2) callers only; a write also needs the
 // caller's own user token, because who did it decides what they may do (the
-// proposer edits, a CAB member decides, and nobody decides their own proposal).
+// proposer edits, a Standard Change Authority member decides, and nobody decides
+// their own proposal).
 type standardChangeService struct {
 	repo   repository.StandardChangeRepository
 	access AccessService
@@ -52,9 +53,15 @@ var standardChangeTemplateStates = map[domain.StandardChangeTemplateState]string
 	domain.StandardChangeTemplateStateRetired:   "RETIRED",
 }
 
+// legacyCABReviewState was a proposal state until migration 0287 removed the CAB
+// stage. SearchProposals still accepts it, and it matches no proposal, because a
+// webapp deployed before this release (services deploy separately) or a
+// bookmarked URL may still send it. Remove it, and its branch in
+// SearchProposals, in the release after the one that ships 0287.
+const legacyCABReviewState domain.StandardChangeProposalState = "cab_review"
+
 var standardChangeProposalStates = map[domain.StandardChangeProposalState]string{
 	domain.StandardChangeProposalStateDraft:           "DRAFT",
-	domain.StandardChangeProposalStateCABReview:       "CAB_REVIEW",
 	domain.StandardChangeProposalStateAuthorityReview: "AUTHORITY_REVIEW",
 	domain.StandardChangeProposalStateApproved:        "APPROVED",
 	domain.StandardChangeProposalStateRejected:        "REJECTED",
@@ -426,8 +433,12 @@ func (s *standardChangeService) SearchProposals(ctx context.Context, req domain.
 	f := repository.StandardChangeProposalFilter{Limit: req.Pagination.Limit, Offset: req.Pagination.Offset}
 	for _, st := range req.States {
 		v, ok := standardChangeProposalStates[st]
+		if st == legacyCABReviewState {
+			// No row holds it (0287's check), so it narrows to nothing.
+			v, ok = "CAB_REVIEW", true
+		}
 		if !ok {
-			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, cab_review, authority_review, approved, rejected, withdrawn or cancelled"}
+			return domain.SearchStandardChangeProposalsResponse{}, &apierror.ValidationError{Msg: "states must be draft, authority_review, approved, rejected, withdrawn or cancelled"}
 		}
 		f.States = append(f.States, v)
 	}

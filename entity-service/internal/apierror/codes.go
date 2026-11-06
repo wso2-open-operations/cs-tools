@@ -142,7 +142,7 @@ const (
 	// CodeChangeRequestStandardTemplateField is the 400 for a create or PATCH of a
 	// change request raised from a standard change template that sets or changes a
 	// field the template specifies (the plans, the impact and risk, the customer
-	// gates, the type): those come from the CAB-approved template and cannot
+	// gates, the type): those come from the authorised template and cannot
 	// deviate from it. Only the template's parameters and the fields it does not
 	// specify are the caller's. Nothing was written.
 	CodeChangeRequestStandardTemplateField = "change_request_standard_template_field"

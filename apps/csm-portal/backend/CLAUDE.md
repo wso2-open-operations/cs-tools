@@ -495,8 +495,8 @@ create, revise or retire them (entity-service CLAUDE.md, "Standard changes"), an
 completed change requests (below). The fifteen template and proposal routes
 are a thin proxy (`CustomerEntityClient.StandardChangeCall`, the path built from validated UUIDs
 only): reads are `PermViewOperations`, every write `PermWrite`. Who may act on a given template or
-proposal (the proposer edits, submits and deletes a draft; the CAB, then two Standard Change
-Authority members, decide; the owner, the CAB or the authority suspends; only the authority resumes,
+proposal (the proposer edits, submits and deletes a draft; two Standard Change Authority
+members decide, with no CAB stage; the owner, the CAB or the authority suspends; only the authority resumes,
 clears a review flag or cancels someone else's proposal) is entity-service's decision, so a 400 /
 403 / 404 / 409 keeps its message and `errorCode` (a 403 here is a reason the page shows, unlike
 `mapUpstreamError`'s generic one); a 5xx is the generic fallback. Suspend's body `{reason}` and the

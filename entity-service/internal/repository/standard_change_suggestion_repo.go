@@ -250,12 +250,12 @@ func (r *standardChangeSuggestionRepo) OpenProposalsOf(ctx context.Context, ids 
 		SELECT DISTINCT l.cr_id::text, wi.id::text, wi.number
 		  FROM (SELECT p.source_change_request_id AS cr_id, p.id FROM standard_change_proposal p
 		         WHERE p.source_change_request_id = ANY($1::uuid[])
-		           AND p.state IN ('DRAFT', 'CAB_REVIEW', 'AUTHORITY_REVIEW')
+		           AND p.state IN ('DRAFT', 'AUTHORITY_REVIEW')
 		        UNION
 		        SELECT e.change_request_id, p.id FROM standard_change_proposal_evidence e
 		          JOIN standard_change_proposal p ON p.id = e.proposal_id
 		         WHERE e.change_request_id = ANY($1::uuid[])
-		           AND p.state IN ('DRAFT', 'CAB_REVIEW', 'AUTHORITY_REVIEW')) l
+		           AND p.state IN ('DRAFT', 'AUTHORITY_REVIEW')) l
 		  JOIN work_item wi ON wi.id = l.id
 		 ORDER BY 1, 3`, ids)
 }

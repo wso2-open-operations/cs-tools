@@ -35,7 +35,7 @@ import (
 //
 //   - the fields the template specifies are frozen from creation on, in every
 //     state: what is implemented, tested and backed out cannot deviate from the
-//     CAB-approved template (checkStandardChangeTemplateFields);
+//     authorised template (checkStandardChangeTemplateFields);
 //   - its type stays standard, and no other change request becomes a standard
 //     change by a PATCH (checkStandardChangeTypeEdit);
 //   - Request Approval needs the template still active and still at the version
@@ -502,8 +502,8 @@ func readChangeRequestStandardChange(ctx context.Context, q crQuerier, id string
 }
 
 // refuseOtherWorkItemType answers 404 for a work item the caller can see that is
-// not a change request (a standard change proposal, whose CAB stage lives in the
-// same approval tables). A work item the caller cannot see is left to the caller's
+// not a change request (a standard change proposal, whose approval stages live in
+// the same approval tables). A work item the caller cannot see is left to the caller's
 // own visibility handling.
 func refuseOtherWorkItemType(ctx context.Context, q crQuerier, id string) error {
 	var typ string

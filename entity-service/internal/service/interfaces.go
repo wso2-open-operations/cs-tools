@@ -210,7 +210,7 @@ type RunbookService interface {
 }
 
 // StandardChangeService serves the standard change catalogue (templates and their
-// CAB-approved versions) and the proposals that create, modify or retire them.
+// approved versions) and the proposals that create, modify or retire them.
 // Internal (WSO2) callers only.
 type StandardChangeService interface {
 	SearchTemplates(ctx context.Context, req domain.SearchStandardChangeTemplatesRequest) (domain.SearchStandardChangeTemplatesResponse, error)

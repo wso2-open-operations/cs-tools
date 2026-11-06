@@ -33,7 +33,7 @@ import (
 )
 
 // This file holds the pure rules of a standard change template: what a parameter
-// declaration may look like, what a proposal must contain before the CAB sees it,
+// declaration may look like, what a proposal must contain before it is submitted,
 // and how a version is rendered into a change request with the values it is raised
 // with. No I/O, so every rule is unit-tested on its own.
 
@@ -176,9 +176,9 @@ func blankText(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" 
 
 func blankRich(s *string) bool { return s == nil || repository.IsBlankRichText(*s) }
 
-// checkStandardChangeProposalComplete is what a proposal must hold before the CAB
-// is asked: everything a change request raised from it needs and cannot supply
-// itself. A retirement needs only its rationale.
+// checkStandardChangeProposalComplete is what a proposal must hold before the
+// Standard Change Authority is asked: everything a change request raised from it
+// needs and cannot supply itself. A retirement needs only its rationale.
 func checkStandardChangeProposalComplete(p domain.StandardChangeProposal) error {
 	var missing []string
 	if strings.TrimSpace(p.Name) == "" {

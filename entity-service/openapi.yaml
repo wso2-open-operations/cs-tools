@@ -12983,7 +12983,7 @@ paths:
       summary: Search the standard change catalogue.
       operationId: searchStandardChangeTemplates
       description: >-
-        The CAB-approved standard change templates, by name. Internal callers only;
+        The approved standard change templates, by name. Internal callers only;
         PostgreSQL data sources only. With no states the list is the active and
         suspended templates; each carries its current version's content, its usage
         counts and whether a change raised from it failed (reviewRequired).
@@ -13072,7 +13072,7 @@ paths:
     get:
       summary: Get one version of a standard change template.
       operationId: getStandardChangeTemplateVersion
-      description: A version as the CAB approved it. Versions are never changed. Internal callers only.
+      description: A version as it was approved. Versions are never changed. Internal callers only.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: versionId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -13119,8 +13119,9 @@ paths:
       operationId: suspendStandardChangeTemplate
       description: >-
         No change request can be raised from a suspended template, and one already
-        raised cannot be sent for approval. The template's owner or a member of the CAB
-        Approval group. 409 when it is not active. The body is optional: an empty body
+        raised cannot be sent for approval. The template's owner, a member of the CAB
+        Approval group or a member of the Standard Change Authority (canSuspend). 409 when
+        it is not active. The body is optional: an empty body
         suspends without a reason. The reason, the time and the caller are recorded on
         the template (suspendedReason, suspendedOn, suspendedBy) until it is resumed or
         retired.
@@ -13402,7 +13403,7 @@ paths:
       summary: Get a standard change proposal.
       operationId: getStandardChangeProposal
       description: >-
-        The proposal with its evidence, its CAB approvers and what the caller may do
+        The proposal with its evidence, its approvers and what the caller may do
         (canEdit, canSubmit, canWithdraw, and canDecide on their own pending approver
         row). Internal callers only.
       parameters:
@@ -13553,20 +13554,22 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/submit:
     post:
-      summary: Send a standard change proposal to the CAB.
+      summary: Send a standard change proposal to the Standard Change Authority.
       operationId: submitStandardChangeProposal
       description: >-
         The proposer only. The proposal must be complete (name, rationale, subject,
         implementation / backout / test plans, impact, risk other than high, every
-        placeholder declared: 400 naming what is missing). Opens a CAB Approval stage
-        whose approvers are the active internal members of the CAB Approval group; the
-        proposer is listed cancelled. A modification whose template moved on since it
+        placeholder declared: 400 naming what is missing). Opens the proposal's one
+        approval stage, "Standard Change Authority", whose approvers are the active
+        internal members of that group; the proposer is listed cancelled, and two
+        different members must approve. 400 when the group has fewer than two eligible
+        members besides the proposer. A modification whose template moved on since it
         was drafted is a 409.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         "200":
-          description: The proposal, in cab_review.
+          description: The proposal, in authority_review.
           content:
             application/json:
               schema:
@@ -13611,7 +13614,7 @@ paths:
     post:
       summary: Withdraw a standard change proposal.
       operationId: withdrawStandardChangeProposal
-      description: The proposer only, while it is open (draft, CAB review or authority review). Pending approvers are cancelled; the proposal is kept.
+      description: The proposer only, while it is open (draft or authority review). Pending approvers are cancelled; the proposal is kept.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -13659,22 +13662,20 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /standard-change-proposals/{id}/decision:
     post:
-      summary: Approve or reject a standard change proposal (CAB, then the Standard Change Authority).
+      summary: Approve or reject a standard change proposal (Standard Change Authority).
       operationId: decideStandardChangeProposal
       description: >-
         A decision on the caller's own pending approver row of the stage the proposal
-        waits on; the proposer never decides (403). Two stages: the CAB (the first
-        decision settles it; its approval moves the proposal to authority_review and asks
-        the Standard Change Authority group, without the proposer or the CAB member who
-        approved), then the authority, which needs two different members' approvals (the
-        second one applies the proposal: a new template (version 1), a new version of the
-        template, or the template retired). Any rejection ends the proposal; it needs a
-        comment, nothing in the catalogue changes and the proposal is kept as the record.
-        409 when it is not waiting for a decision, when the authority group would have too
-        few members to authorise it, or the approval would clash (a live template of the
-        same name for the customer, the template moved on, or the source change request or
-        a piece of evidence is no longer a closed change request of the proposal's
-        customer).
+        waits on (the Standard Change Authority's); the proposer never decides, nor does
+        anyone without a pending row there, CAB members included (403). The stage needs
+        two different members' approvals: the second one applies the proposal (a new
+        template (version 1), a new version of the template, or the template retired).
+        Any rejection ends the proposal; it needs a comment, nothing in the catalogue
+        changes and the proposal is kept as the record. 409 when it is not waiting for a
+        decision, when stageId is not the stage it waits on, or the approval would clash
+        (a live template of the same name for the customer, the template moved on, or the
+        source change request or a piece of evidence is no longer a closed change request
+        of the proposal's customer).
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -13731,8 +13732,8 @@ paths:
       summary: Cancel someone else's open standard change proposal (Standard Change Authority).
       operationId: cancelStandardChangeProposal
       description: >-
-        A member of the Standard Change Authority group ends an open proposal (draft, CAB
-        review or authority review) its proposer abandoned, with a reason: pending approvers
+        A member of the Standard Change Authority group ends an open proposal (draft or
+        authority review) its proposer abandoned, with a reason: pending approvers
         are cancelled, the proposal is kept (state cancelled), and a modification or
         retirement no longer holds its template. The proposer withdraws or deletes their own
         (409).
@@ -34257,8 +34258,8 @@ components:
       type: object
       properties:
         id: {type: string, format: uuid}
-        label: {type: string, description: '"CAB Approval" or "Standard Change Authority".'}
-        requiredApprovals: {type: integer, description: 'How many different approvers must approve the stage (1 for the CAB, 2 for the authority).'}
+        label: {type: string, description: '"Standard Change Authority". A proposal decided before the CAB stage was removed may also show a "CAB Approval" stage before it.'}
+        requiredApprovals: {type: integer, description: 'How many different approvers must approve the stage (2 for the authority; 1 on an older CAB stage).'}
         approvals: {type: integer}
         decision: {type: string, nullable: true, enum: [APPROVED, REJECTED], description: 'Null while the stage is open.'}
     SuspendStandardChangeTemplateRequest:
@@ -34320,7 +34321,7 @@ components:
             id: {type: string, format: uuid}
             number: {type: string, description: 'SCP number.'}
             kind: {type: string, enum: [new, modify, retire]}
-            state: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
+            state: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled]}
             name: {type: string}
             customer:
               allOf: [{$ref: '#/components/schemas/EntityRef'}]
@@ -34451,22 +34452,25 @@ components:
           format: uuid
           nullable: true
           description: >-
-            The stage the caller decides on, as their page showed it. When sent and the proposal has
-            moved on to another stage since (the CAB settled while the page was open), the decision is
-            a 409 and nothing is written: a CAB vote is never recorded as an authorisation.
+            The stage the caller decides on, as their page showed it. When sent and it is not the stage
+            the proposal waits on (it was submitted again while the page was open), the decision is a 409
+            and nothing is written.
     SearchStandardChangeProposalsRequest:
       type: object
       properties:
         states:
           type: array
-          items: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
+          description: >
+            cab_review (a state until migration 0287 removed the CAB stage) is still accepted for one
+            release, for a client deployed before it, and matches no proposal.
+          items: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled, cab_review]}
         kinds:
           type: array
           items: {type: string, enum: [new, modify, retire]}
         templateId: {type: string, format: uuid, nullable: true}
         accountId: {type: string, format: uuid, nullable: true, description: 'Narrows the list to the proposals for one customer.'}
         proposedByMe: {type: boolean}
-        awaitingMyDecision: {type: boolean}
+        awaitingMyDecision: {type: boolean, description: 'Proposals in authority_review on which the caller holds a pending approver row.'}
         query: {type: string, nullable: true}
         pagination: {$ref: '#/components/schemas/Pagination'}
     StandardChangeProposalSummary:
@@ -34475,7 +34479,7 @@ components:
         id: {type: string, format: uuid}
         number: {type: string}
         kind: {type: string, enum: [new, modify, retire]}
-        state: {type: string, enum: [draft, cab_review, authority_review, approved, rejected, withdrawn, cancelled]}
+        state: {type: string, enum: [draft, authority_review, approved, rejected, withdrawn, cancelled]}
         name: {type: string}
         customer:
           allOf: [{$ref: '#/components/schemas/EntityRef'}]

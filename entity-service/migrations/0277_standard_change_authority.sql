@@ -14,14 +14,17 @@
 -- specific language governing permissions and limitations
 -- under the License.
 
--- Standard changes, second approval stage and the rest of the template gate.
+-- Standard changes, the Standard Change Authority and the rest of the template
+-- gate.
 --
 -- A standard change skips the CAB on every use, so making something one is the
--- risky step. A proposal (new template, revision, retirement) is now approved in
--- two stages: the CAB, as before, then the "Standard Change Authority" group (the
--- heads of SaaS SRE, of each SaaS ABT and of SRE), of whom two different people
--- must approve. Neither the proposer nor the CAB member who approved may approve
--- the second stage.
+-- risky step. A proposal (new template, revision, retirement) is approved by the
+-- "Standard Change Authority" group (the heads of SaaS SRE, of each SaaS ABT and
+-- of SRE), of whom two different people must approve; the proposer may not.
+-- (This migration was written for two stages, the CAB and then the authority,
+-- and so keeps CAB_REVIEW in the state check below; 0287 removed the CAB stage,
+-- returned the proposals still in CAB review to draft and recreated the check
+-- without it.)
 --
 --   "group" "Standard Change Authority"    Created empty, like the CAB group in
 --                                           0188: who sits on it is an operator's
@@ -33,8 +36,8 @@
 --                                           needs. 1 (every existing stage, and
 --                                           every change request stage) keeps the
 --                                           "first decision settles it" rule.
---   standard_change_proposal.state         + AUTHORITY_REVIEW (CAB approved, the
---                                           authority has not), + CANCELLED (an
+--   standard_change_proposal.state         + AUTHORITY_REVIEW (waiting on the
+--                                           authority), + CANCELLED (an
 --                                           authority member ended a proposal its
 --                                           proposer abandoned). The one-open-per-
 --                                           template index counts AUTHORITY_REVIEW.

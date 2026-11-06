@@ -60,7 +60,7 @@ func wantCode(t *testing.T, err error, code, what string) {
 }
 
 // stdApprovedTemplate takes a proposal from a closed change request through the
-// CAB and the authority and returns the template.
+// Standard Change Authority and returns the template.
 func stdApprovedTemplate(t *testing.T, env *stdEnv, name string) domain.StandardChangeTemplate {
 	t.Helper()
 	p, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
@@ -72,7 +72,7 @@ func stdApprovedTemplate(t *testing.T, env *stdEnv, name string) domain.Standard
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), p.ID); err != nil {
 		t.Fatal(err)
 	}
-	p = cabThenAuthority(t, env, p.ID)
+	p = authorise(t, env, p.ID)
 	tpl, err := env.svc.GetTemplate(stdCtx(stdCAB1), p.Template.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -157,8 +157,9 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 		t.Fatalf("standardChange.customer = %+v", sc.Customer)
 	}
 
-	// A proposal's CAB rows live in the change request approval tables, but the
-	// change request routes never reach them: it is decided on its own route only.
+	// A proposal's approver rows live in the change request approval tables, but
+	// the change request routes never reach them: it is decided on its own route
+	// only.
 	pending, err := env.svc.CreateProposal(stdCtx(stdProposer), domain.CreateStandardChangeProposalRequest{
 		Kind: domain.StandardChangeProposalKindNew, SourceChangeRequestID: stdp(env.crs["closed2"])})
 	if err != nil {
@@ -172,7 +173,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	expectErr[*apierror.NotFoundError](t, err, "decide a proposal through the change request route")
 	_, err = crs.GetChangeRequestApprovals(crCtx(t, stdCAB1), pending.ID)
 	expectErr[*apierror.NotFoundError](t, err, "read a proposal's approvals through the change request route")
-	if p, _ := env.svc.GetProposal(stdCtx(stdCAB1), pending.ID); p.State != domain.StandardChangeProposalStateCABReview || approverStates(p)[stdCAB1] != "REQUESTED" {
+	if p, _ := env.svc.GetProposal(stdCtx(stdCAB1), pending.ID); p.State != domain.StandardChangeProposalStateAuthorityReview || approverStates(p)[stdCAB1] != "REQUESTED" {
 		t.Fatalf("the change request route touched the proposal: %s %v", p.State, approverStates(p))
 	}
 
@@ -285,7 +286,7 @@ func stdChangeRequestFlow(t *testing.T, env *stdEnv, crs ChangeRequestService) {
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), m.ID); err != nil {
 		t.Fatal(err)
 	}
-	cabThenAuthority(t, env, m.ID)
+	authorise(t, env, m.ID)
 	_, err = crs.PatchChangeRequest(ctx, third.ChangeRequest.ID, domain.PatchChangeRequestRequest{State: &assess})
 	wantCode(t, err, apierror.CodeStandardChangeTemplateUnavailable, "request approval after the template was revised")
 	if c, _ := crs.GetChangeRequest(ctx, third.ChangeRequest.ID); c.StandardChange == nil || c.StandardChange.Version != 1 {
@@ -461,7 +462,7 @@ func stdChangeRequestScope(t *testing.T, env *stdEnv, crs ChangeRequestService) 
 	if _, err := env.svc.SubmitProposal(stdCtx(stdProposer), p.ID); err != nil {
 		t.Fatal(err)
 	}
-	p = cabThenAuthority(t, env, p.ID)
+	p = authorise(t, env, p.ID)
 	tpl, err := env.svc.GetTemplate(ctx, p.Template.ID)
 	if err != nil || tpl.CurrentVersion.Priority == nil || *tpl.CurrentVersion.Priority != high || len(tpl.CurrentVersion.DeploymentTypes) != 1 ||
 		tpl.CurrentVersion.Summary == nil {
