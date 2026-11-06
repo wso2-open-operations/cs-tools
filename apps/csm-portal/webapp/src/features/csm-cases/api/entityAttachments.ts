@@ -385,9 +385,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export interface UploadEntityAttachmentArgs {
+/**
+ * What an upload belongs to: `parentId` is the record it is attached to;
+ * `projectId` (only for a `comment` upload) is a draft image added before the
+ * record exists, to be linked when the record is created. Exactly one is given.
+ */
+export type UploadEntityAttachmentTarget =
+  | { parentId: string; projectId?: undefined }
+  | { projectId: string; parentId?: undefined };
+
+export type UploadEntityAttachmentArgs = UploadEntityAttachmentTarget & {
   type: EntityAttachmentType;
-  parentId: string;
   file: File;
   /** Display name; defaults to the file's own name. */
   name?: string;
@@ -395,7 +403,7 @@ export interface UploadEntityAttachmentArgs {
   onProgress?: (percent: number) => void;
   /** Aborts a running chunked upload. */
   signal?: AbortSignal;
-}
+};
 
 /** Shown when the user cancels an upload. */
 export const UPLOAD_CANCELLED_MESSAGE = "The upload was cancelled.";
@@ -528,10 +536,14 @@ export async function uploadEntityAttachment(
   const name = args.name?.trim() || args.file.name;
 
   args.onProgress?.(0);
+  if (!!args.parentId === !!args.projectId) {
+    throw new Error("An upload needs exactly one of parentId and projectId.");
+  }
   const start = await api.post<
     {
       type: EntityAttachmentType;
-      parentId: string;
+      parentId?: string;
+      projectId?: string;
       name: string;
       contentType: string;
       sizeBytes: number;
@@ -539,7 +551,7 @@ export async function uploadEntityAttachment(
     EntityUploadStart
   >("/attachments/upload", {
     type: args.type,
-    parentId: args.parentId,
+    ...(args.parentId ? { parentId: args.parentId } : { projectId: args.projectId }),
     name,
     contentType: args.file.type || "application/octet-stream",
     sizeBytes: args.file.size,
