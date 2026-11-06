@@ -15626,6 +15626,146 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions:
+    get:
+      summary: What a customer's completed change requests suggest as standard changes.
+      operationId: getStandardChangeSuggestions
+      description: >
+        Forwarded to the entity service, which computes the clusters (see its
+        openapi.yaml for the response). Only these parameters are forwarded, each
+        checked for shape here (400 with no upstream call otherwise); the ranges of
+        the thresholds are the entity service's.
+      parameters:
+        - {name: accountId, in: query, required: false, schema: {type: string, format: uuid}}
+        - {name: includeIneligible, in: query, required: false, schema: {type: boolean}}
+        - {name: includeDismissed, in: query, required: false, schema: {type: boolean}}
+        - {name: windowMonths, in: query, required: false, schema: {type: integer}}
+        - {name: minClosed, in: query, required: false, schema: {type: integer}}
+        - {name: minSuccessPercent, in: query, required: false, schema: {type: integer}}
+        - {name: planSimilarityPercent, in: query, required: false, schema: {type: integer}}
+      responses:
+        "200":
+          description: Ok.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals:
+    post:
+      summary: Dismiss a standard change suggestion for a customer (body {accountId, key, reason}).
+      operationId: dismissStandardChangeSuggestion
+      description: >
+        Forwarded to the entity service; its refusal (400, 403, 404, 409) is returned
+        with its own message and errorCode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: The dismissal.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /standard-change-suggestions/dismissals/{id}:
+    delete:
+      summary: Restore a dismissed standard change suggestion.
+      operationId: restoreStandardChangeSuggestion
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "204":
+          description: Restored.
+        "400":
+          description: Bad request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /runbooks:
     get:
       summary: The runbook catalog (Operations > Runbooks).

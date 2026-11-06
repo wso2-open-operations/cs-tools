@@ -848,6 +848,11 @@ func main() {
 	route("POST /standard-change-proposals/{id}/decision", handler.PermWrite, standardChangeHandler.DecideProposal)
 	route("POST /standard-change-proposals/{id}/cancel", handler.PermWrite, standardChangeHandler.CancelProposal)
 	route("DELETE /standard-change-proposals/{id}", handler.PermWrite, standardChangeHandler.DeleteProposal)
+	// What a customer's completed change requests suggest as standard changes, and
+	// their dismissals (entity-service computes them; the BFF checks shapes).
+	route("GET /standard-change-suggestions", handler.PermViewOperations, standardChangeHandler.GetSuggestions)
+	route("POST /standard-change-suggestions/dismissals", handler.PermWrite, standardChangeHandler.DismissSuggestion)
+	route("DELETE /standard-change-suggestions/dismissals/{id}", handler.PermWrite, standardChangeHandler.RestoreSuggestion)
 
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)

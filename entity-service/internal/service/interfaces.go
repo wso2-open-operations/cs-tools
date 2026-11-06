@@ -236,6 +236,15 @@ type StandardChangeService interface {
 	DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 }
 
+// StandardChangeSuggestionService finds the standard changes a customer's
+// completed change requests suggest (standard_change_suggestion.go) and keeps
+// the dismissals. Internal callers only; a dismissal also needs a person.
+type StandardChangeSuggestionService interface {
+	GetSuggestions(ctx context.Context, req domain.StandardChangeSuggestionsRequest) (domain.StandardChangeSuggestionsResponse, error)
+	DismissSuggestion(ctx context.Context, req domain.DismissStandardChangeSuggestionRequest) (domain.StandardChangeSuggestionDismissal, error)
+	RestoreSuggestion(ctx context.Context, id string) error
+}
+
 // SNUserService defines the user operations backed by the ServiceNow data source.
 type SNUserService interface {
 	// SearchUsers returns a paginated list of ServiceNow users that match the

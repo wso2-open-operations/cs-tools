@@ -99,6 +99,7 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `MIGRATION_CASE_REPORT_TEAM_KEYS` | no | none | Team keys whose `group_email` the scan returns as recipients |
 | `LONG_OPEN_CASES_REPORT_PROJECT_TYPES` | no | `Subscription,Managed Cloud Subscription,Cloud Support,Development Support,Professional Services` | Project type names (exact match) a case's project must have to be listed by `GET /reports/long-open-cases`. Blank falls back to the default |
 | `LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS` | no | `migrartion,migration-assistance` | Tag names (ignoring case) that remove a case from the long-open cases report. Blank falls back to the default |
+| `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` / `_MIN_CLOSED` / `_MIN_SUCCESS_PERCENT` / `_PLAN_SIMILARITY_PERCENT` / `_COVERED_PERCENT` / `_CLOSE_PERCENT` | no | `12` / `3` / `90` / `50` / `80` / `50` | Thresholds of `GET /standard-change-suggestions` (see "Standard change suggestions"). Unset, unparseable or not positive takes the default; percentages are capped at 100 and the close threshold at the covered one. Starting values, to be measured on production data |
 
 \* `DB_USER`/`DB_PASSWORD`/`DB_NAME` are required when `DATA_SOURCE=postgres`
 and **optional** when `DATA_SOURCE=servicenow`, where entity reads and writes
@@ -8625,6 +8626,82 @@ suspend body),
 `standard_change_integration_test.go` and `change_request_standard_change_integration_test.go`
 (real PostgreSQL; `STANDARD_CHANGE_TEST_DSN` and `STANDARD_CHANGE_TEST_APP_DSN`, the second a role
 without BYPASSRLS so the internal-only policies apply; run with `-p 1`).
+
+## Standard change suggestions (`GET /standard-change-suggestions`)
+
+Which of a customer's completed change requests look like the same change done again and again, so a
+standard change template could pre-authorise it. Code: `standard_change_suggestion.go` (the pure part:
+normalising, clustering, judging, relating to templates), `standard_change_suggestion_service.go`,
+`standard_change_suggestion_repo.go`, `standard_change_suggestion_handler.go`; migrations `0281` (the
+dismissals) and `100029` (their row-level security, internal only). PostgreSQL data sources only; every
+route is `internalOnly`. Computed on every request: nothing is stored but the dismissals.
+
+**What is considered.** Change requests in Closed or Rollback, completed within `windowMonths` (by
+`closed_on`, which 0279 made reliable; a row with none falls back to the work item's last update), **not**
+raised from a template (`standard_change_template_version_id IS NULL`: those already are standard changes),
+whose project has a customer. Clusters never mix customers: a template belongs to one
+(`project.account_id`), so the clustering runs per customer.
+
+**A cluster** (`clusterSuggestionCandidates`):
+1. Same normalised subject (`suggestionKey`): HTML and `{{placeholders}}` removed, lower case, `[tags]`,
+   ticket numbers (`CHG…`, `INC…`, `SCP…`, …), dates, times, versions, ordinals and digits removed, then
+   filler words (articles, prepositions, "please", "change", month and day names) and one-letter words
+   dropped. The key is the cluster's name and what a dismissal is stored under.
+2. Confirmed by the implementation plans: inside one subject group, two members whose plans both have at
+   least three meaningful words are the same change only when the plans' word sets are at least
+   `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
+   the subject, so it joins the group's largest confirmed cluster (it never bridges two).
+3. Clone lineage (`cloned_from_change_request_id`, 0280) joins a member to its source's cluster directly,
+   whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
+Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
+self-hosted models would be allowed anyway.
+
+**Eligible** (`judgeSuggestionCluster`, every threshold configurable): closed at least `minClosed` times in
+the window; success rate closed / (closed + rolled back) at least `minSuccessPercent`; no incident names a
+member, as `incident.caused_by_id` **or** `incident.change_request_id` (both are counted, as asked; the
+incident form labels them "Caused by" and "Change request", and the second may name a change raised to
+fix the incident rather than one that caused it, which then blocks its cluster too: check this against
+production data); no member with high risk; no member with high impact. An unknown
+risk or impact is counted (`unknown`) and does not block. `unmet` says, in words, each one it misses.
+`proposeFrom` is the newest closed member with no deviation from its plan (none: nothing to propose
+from), `evidence` the other closed members newest first, at most 99, so the source plus the evidence fit
+the 100 a proposal may cite. `openProposals` are the open proposals (draft, CAB or authority review)
+already started from or citing a member.
+
+**Templates** (`matchSuggestionTemplate`): against each of the customer's live templates (active or
+suspended), current version with its placeholders removed: subject words by **overlap** (a template's
+subject is the cluster's with the varying words turned into placeholders, a subset that Jaccard would
+penalise), implementation plan by Jaccard, half each (the subject alone when either side has no plan).
+The nearest scoring at least `coveredPercent` covers the cluster (`covered`: the change requests were
+raised by hand instead of from it), at least `closePercent` is `close` (revise it), else `new`.
+
+**Thresholds**: `STANDARD_CHANGE_SUGGESTION_WINDOW_MONTHS` (12), `_MIN_CLOSED` (3), `_MIN_SUCCESS_PERCENT`
+(90), `_PLAN_SIMILARITY_PERCENT` (50), `_COVERED_PERCENT` (80), `_CLOSE_PERCENT` (50, never above
+covered). Starting values, **not yet measured on production data**: the request may override the first
+four (`windowMonths` 1-60, `minClosed` 1-1000, `minSuccessPercent` 0-100, `planSimilarityPercent` 1-100;
+out of range is a 400), and `includeIneligible=true` returns the near misses with their `unmet`, so the
+values can be measured before they are set. The response carries the `criteria` used and `scanned`
+counts.
+
+**Request**: `accountId` (optional, a UUID: one customer), `includeIneligible`, `includeDismissed`. Order:
+eligible first, then most often closed, then most recent. At most 100 members are listed per suggestion
+(`memberCount` is the true count).
+
+**Dismissals** (`standard_change_suggestion_dismissal`, one row per customer and key, who and why):
+`POST /standard-change-suggestions/dismissals {accountId, key, reason}` (201; the key must be a
+suggestion key, i.e. `suggestionKey(key) == key`; a reason of at most 1000 characters is required; a
+second one is a 409, no such customer a 400) hides the suggestion for that customer however many members
+it gains; `includeDismissed=true` shows it with its `dismissal`; `DELETE
+/standard-change-suggestions/dismissals/{id}` (204, 404) restores it. A person is required for both (401
+for a machine caller).
+
+**Cost**: one read of the window's completed change requests (subject and implementation plan included)
+for the customer or for all, then the incidents, open proposals, templates and dismissals of the clusters
+found, each one query; the pairwise plan comparison is inside one subject group only.
+
+Tests: `standard_change_suggestion_test.go` (normalising, clustering, judging, templates, the service over
+a fake repository), `standard_change_suggestion_integration_test.go` (real PostgreSQL,
+`STANDARD_CHANGE_TEST_DSN` / `STANDARD_CHANGE_TEST_APP_DSN`, `-p 1`).
 
 ## Fixing case enum-casing/mapping bugs and GetCaseByID's false 404s
 

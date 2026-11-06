@@ -1,0 +1,177 @@
+// Copyright (c) 2026 WSO2 LLC. (https://www.wso2.com).
+//
+// WSO2 LLC. licenses this file to you under the Apache License,
+// Version 2.0 (the "License"); you may not use this file except
+// in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License.
+
+package domain
+
+import "time"
+
+// StandardChangeSuggestionCriteria are the thresholds a cluster of completed
+// change requests is judged by. The defaults are configuration
+// (STANDARD_CHANGE_SUGGESTION_*); a request may override them to measure what
+// they should be.
+type StandardChangeSuggestionCriteria struct {
+	// WindowMonths: only change requests completed within this many months count.
+	WindowMonths int `json:"windowMonths"`
+	// MinClosed: at least this many members closed (not rolled back) in the window.
+	MinClosed int `json:"minClosed"`
+	// MinSuccessPercent: closed / (closed + rolled back), at least this, in percent.
+	MinSuccessPercent int `json:"minSuccessPercent"`
+	// PlanSimilarityPercent: two members with the same normalised subject are the
+	// same change only when their implementation plans are at least this similar
+	// (word-set Jaccard, percent).
+	PlanSimilarityPercent int `json:"planSimilarityPercent"`
+	// CoveredPercent / ClosePercent: a cluster this similar to one of the
+	// customer's live templates is "covered by" it, or "close to" it.
+	CoveredPercent int `json:"coveredPercent"`
+	ClosePercent   int `json:"closePercent"`
+}
+
+// StandardChangeSuggestionMatch says how a cluster relates to the customer's
+// live standard change templates.
+type StandardChangeSuggestionMatch string
+
+const (
+	// StandardChangeSuggestionCovered: a live template already does this change;
+	// the change requests were raised by hand instead of from it.
+	StandardChangeSuggestionCovered StandardChangeSuggestionMatch = "covered"
+	// StandardChangeSuggestionClose: a live template is near: revise it.
+	StandardChangeSuggestionClose StandardChangeSuggestionMatch = "close"
+	// StandardChangeSuggestionNew: no live template is near: propose one.
+	StandardChangeSuggestionNew StandardChangeSuggestionMatch = "new"
+)
+
+// StandardChangeSuggestionsRequest is GET /standard-change-suggestions' query.
+type StandardChangeSuggestionsRequest struct {
+	// AccountID limits the suggestions to one customer; empty is every customer.
+	AccountID string
+	// IncludeIneligible also returns clusters of two or more that miss a
+	// criterion, each naming what it misses (for measuring the thresholds).
+	IncludeIneligible bool
+	// IncludeDismissed also returns dismissed suggestions, with their dismissal.
+	IncludeDismissed bool
+	// Overrides of the configured criteria; nil keeps the configured value.
+	WindowMonths, MinClosed, MinSuccessPercent, PlanSimilarityPercent *int
+}
+
+// StandardChangeSuggestionsResponse is GET /standard-change-suggestions' answer.
+type StandardChangeSuggestionsResponse struct {
+	Suggestions []StandardChangeSuggestion       `json:"suggestions"`
+	Criteria    StandardChangeSuggestionCriteria `json:"criteria"`
+	// Scanned: completed change requests considered (not raised from a template,
+	// of a customer, completed in the window) and the clusters they formed
+	// (two or more members).
+	Scanned StandardChangeSuggestionScan `json:"scanned"`
+}
+
+// StandardChangeSuggestionScan counts what one computation looked at.
+type StandardChangeSuggestionScan struct {
+	ChangeRequests int `json:"changeRequests"`
+	Clusters       int `json:"clusters"`
+	Eligible       int `json:"eligible"`
+	Dismissed      int `json:"dismissed"`
+}
+
+// StandardChangeSuggestion is one cluster of a customer's completed change
+// requests that look like the same change done again and again.
+type StandardChangeSuggestion struct {
+	// Key is the normalised subject the cluster is known (and dismissed) by.
+	Key      string    `json:"key"`
+	Customer EntityRef `json:"customer"`
+	// Subject is the newest member's subject, as written.
+	Subject       string  `json:"subject"`
+	MemberCount   int     `json:"memberCount"`
+	ClosedCount   int     `json:"closedCount"`
+	RollbackCount int     `json:"rollbackCount"`
+	SuccessRate   float64 `json:"successRate"`
+	// Incidents caused by a member (incident.caused_by_id or change_request_id).
+	Incidents []EntityRef                       `json:"incidents"`
+	Risk      StandardChangeSuggestionBreakdown `json:"risk"`
+	Impact    StandardChangeSuggestionBreakdown `json:"impact"`
+	// FirstCompletedOn / LastCompletedOn bound the members' completions.
+	FirstCompletedOn time.Time `json:"firstCompletedOn"`
+	LastCompletedOn  time.Time `json:"lastCompletedOn"`
+	// Eligible: every criterion is met; Unmet names those that are not.
+	Eligible bool     `json:"eligible"`
+	Unmet    []string `json:"unmet"`
+	// Match relates the cluster to the customer's live templates; Template is
+	// the nearest one (nil for "new").
+	Match    StandardChangeSuggestionMatch        `json:"match"`
+	Template *StandardChangeSuggestionTemplateRef `json:"template"`
+	// ProposeFrom is the newest clean member (closed, no deviation from its
+	// implementation plan): what a proposal starts from. Evidence is every other
+	// closed member, newest first, so that ProposeFrom plus Evidence is at most
+	// the 100 a proposal can cite.
+	ProposeFrom *EntityRef  `json:"proposeFrom"`
+	Evidence    []EntityRef `json:"evidence"`
+	// OpenProposals already started from, or citing, a member (draft or under
+	// review): proposing again would duplicate them.
+	OpenProposals []EntityRef `json:"openProposals"`
+	// Members, newest completion first.
+	Members   []StandardChangeSuggestionMember   `json:"members"`
+	Dismissal *StandardChangeSuggestionDismissal `json:"dismissal"`
+}
+
+// StandardChangeSuggestionTemplateRef names the nearest live template.
+type StandardChangeSuggestionTemplateRef struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	// Score is how similar it is (0 to 1).
+	Score float64 `json:"score"`
+}
+
+// StandardChangeSuggestionBreakdown counts members by level; Unknown is a
+// member with none recorded.
+type StandardChangeSuggestionBreakdown struct {
+	Low      int `json:"low"`
+	Moderate int `json:"moderate"`
+	High     int `json:"high"`
+	Unknown  int `json:"unknown"`
+}
+
+// StandardChangeSuggestionMember is one completed change request of a cluster.
+type StandardChangeSuggestionMember struct {
+	ID          string    `json:"id"`
+	Number      string    `json:"number"`
+	Subject     string    `json:"subject"`
+	State       string    `json:"state"`
+	CompletedOn time.Time `json:"completedOn"`
+	Risk        *string   `json:"risk"`
+	Impact      *string   `json:"impact"`
+	// ClonedFrom is the member's clone source, when it was recorded.
+	ClonedFrom   *string `json:"clonedFromId"`
+	HasDeviation bool    `json:"hasDeviation"`
+	// Why the member is in the cluster: "subject" (same normalised subject and a
+	// similar or no implementation plan) or "clone" (cloned from a member).
+	JoinedBy string `json:"joinedBy"`
+}
+
+// StandardChangeSuggestionDismissal records that a suggestion was dismissed.
+type StandardChangeSuggestionDismissal struct {
+	ID          string     `json:"id"`
+	Reason      string     `json:"reason"`
+	DismissedBy *EntityRef `json:"dismissedBy"`
+	DismissedOn time.Time  `json:"dismissedOn"`
+}
+
+// DismissStandardChangeSuggestionRequest is the body of
+// POST /standard-change-suggestions/dismissals.
+type DismissStandardChangeSuggestionRequest struct {
+	AccountID string `json:"accountId"`
+	Key       string `json:"key"`
+	Reason    string `json:"reason"`
+}

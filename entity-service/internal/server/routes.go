@@ -375,6 +375,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	// (migration 0252); Postgres only. standardChangeRepo is also what the change
 	// request create and PATCH use to apply a template.
 	var standardChangeHandler *handler.StandardChangeHandler
+	var standardChangeSuggestionHandler *handler.StandardChangeSuggestionHandler
 	var standardChangeRepo repository.StandardChangeRepository
 	var portalBannerHandler *handler.PortalBannerHandler
 	var productCatalogHandler *handler.ProductCatalogHandler
@@ -1771,6 +1772,17 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		// retire them: internal callers only.
 		standardChangeRepo = repository.NewStandardChangeRepository(repository.NewScoped(db))
 		standardChangeHandler = handler.NewStandardChangeHandler(service.NewStandardChangeService(standardChangeRepo, accessSvc))
+		// What a customer's completed change requests suggest as standard changes.
+		standardChangeSuggestionHandler = handler.NewStandardChangeSuggestionHandler(service.NewStandardChangeSuggestionService(
+			repository.NewStandardChangeSuggestionRepository(repository.NewScoped(db)), accessSvc,
+			domain.StandardChangeSuggestionCriteria{
+				WindowMonths:          cfg.StandardChangeSuggestionWindowMonths,
+				MinClosed:             cfg.StandardChangeSuggestionMinClosed,
+				MinSuccessPercent:     cfg.StandardChangeSuggestionMinSuccessPercent,
+				PlanSimilarityPercent: cfg.StandardChangeSuggestionPlanSimilarityPercent,
+				CoveredPercent:        cfg.StandardChangeSuggestionCoveredPercent,
+				ClosePercent:          cfg.StandardChangeSuggestionClosePercent,
+			}))
 		// From here on a standard change is raised from a template of this
 		// catalogue (the change request service is a pointer the handler shares; a
 		// ServiceNow-backed one is returned unchanged).
@@ -2343,6 +2355,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /standard-change-proposals/{id}/decision", internalOnly(accessSvc, standardChangeHandler.DecideProposal))
 		mux.HandleFunc("POST /standard-change-proposals/{id}/cancel", internalOnly(accessSvc, standardChangeHandler.CancelProposal))
 		mux.HandleFunc("DELETE /standard-change-proposals/{id}", internalOnly(accessSvc, standardChangeHandler.DeleteProposal))
+		mux.HandleFunc("GET /standard-change-suggestions", internalOnly(accessSvc, standardChangeSuggestionHandler.GetSuggestions))
+		mux.HandleFunc("POST /standard-change-suggestions/dismissals", internalOnly(accessSvc, standardChangeSuggestionHandler.DismissSuggestion))
+		mux.HandleFunc("DELETE /standard-change-suggestions/dismissals/{id}", internalOnly(accessSvc, standardChangeSuggestionHandler.RestoreSuggestion))
 	}
 	if portalBannerHandler != nil {
 		// Banners. GET /banners is the customer portal and always returns that
