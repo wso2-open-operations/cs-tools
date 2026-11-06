@@ -65,7 +65,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 10 MiB | Largest uploaded file / comment image. Provisional. An unparseable or non-positive value falls back to the default |
+| `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` | no | 100 MiB / 25 MiB | Largest uploaded file / comment or description image. Provisional. An unparseable or non-positive value falls back to the default |
+| `INLINE_IMAGES_TOTAL_MAX_BYTES` | no | 25 MiB | Total size of all images in ONE comment or description (at most 5 images, `service.MaxInlineImagesPerContent`). Same fallback rule |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1773,17 +1774,49 @@ image (`comment_id` set), but only if the comment's author uploaded it, it is st
 the comment's own work item. That is best effort: a failure is logged and the comment is saved anyway.
 Content that still embeds a base64 image is saved as written; this service stores no file.
 
+**Limits per comment or description.** One comment or description shows at most 5 images
+(`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_BYTES` together; one image is at most
+`INLINE_IMAGE_MAX_BYTES` (25 MiB). Comment create (`commentService.CreateComment`,
+`caseService.createCaseCommentAs`) and edit (`UpdateComment`) call `InlineImageLinker.ValidateCommentImages`
+BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
+(the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
+(`mayHaveInlineImages`, one regexp).
+
+**Description images (uploaded before the record exists).** A rich-text description can show inline images
+before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
+`parentId` (exactly one; both or neither is a 400): the row is a **draft** (`comment_attachment`:
+`comment_id` and `work_item_id` NULL, `project_id` set, migration 0250). The caller must be a REGISTERED
+member of the project (internal callers unrestricted, an unseen project is 404; `repo.GetProject`, since
+`project` has no RLS); same PNG/JPEG/WebP rule and per-image limit. A draft's storage key is
+`csm/projects/<project>/workitems/drafts/inline_attachments/<number>_<name>` (`storageKeyFor`, `draftFolder`);
+it is stored at confirm and stays valid after linking. Authorize/confirm resolve the parent through
+`parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
+member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
+visible to anyone who can see the work item's project; an external INSERT of a draft must be PENDING, no
+`storage_key`, `created_by` = their email, project member. UPDATE/DELETE stay internal-only.
+Every create path with a rich-text description (`caseService.CreateCase`, both plain and dual-write, so all of
+case/service_request/engagement/security_report_analysis/announcement, and `changeRequestService.CreateChangeRequest`)
+calls `validateDescriptionImages` BEFORE creating anything (`ValidateDescriptionImages`: at most 5 distinct
+images, total within the limit, each a COMPLETE draft of that project uploaded by the caller and not linked
+elsewhere, no `src="blob:`; a 400 in words otherwise; unreferenced drafts are ignored) and `linkDescriptionImages`
+right after the record exists (`LinkDescriptionImages`, best effort: one guarded UPDATE as the system that sets
+`work_item_id` and `description_image = true` only while the row is still a draft of that project by that
+email). Both are free for a description without an image reference. `data:image` base64 images are NOT
+refused (other callers still send them). Incidents and problems have no project on their create request, so
+they take no draft images; the ServiceNow-only data source stores no images.
+`LinkInlineImages` (comments) never takes a `description_image` row.
+
 **Cleanup.** Nothing here deletes a blob, so cleanup is a two-step handoff to a caller that can both
 delete blobs and call this service (internal callers only). `POST /attachments/uploads/cleanup` marks
 uploads still `PENDING` after 24 hours `FAILED` (an upload that was never confirmed leaves nothing in
 storage: uncommitted blocks expire by themselves) and returns the comment images that were never linked
-in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists them again until
+to a comment or (for drafts) a record's description in `orphans` (`{id, storageKey}`) **without marking them `DELETED`**, so every run lists them again until
 the caller removes the files and then calls `POST /attachments/uploads/cleanup/acknowledge` with their
 ids (at most 200). Only then are they marked `DELETED`. A `DELETED` row is never listed again, so marking
 first would lose the key if the response were lost; this way nothing is lost and a repeated call is safe.
 Acknowledge only marks an id that is still an orphan (re-read from the unlinked list), so it cannot be
 used to delete an arbitrary image; others are counted as `skipped`. An unlinked image with no file is
-marked `DELETED` straight away.
+marked `DELETED` straight away. A draft description image (no work item, `project_id` set) is abandoned after 24 hours like an unlinked comment image; a LINKED one (`description_image = true`) is never listed (`ListUnlinkedImages` filters `description_image = false`).
 
 **Audit.** Each upload start, link, delete and cleanup writes an `audit: true` line with the
 `callerId` (the user's UUID, else the client id of a machine caller), the `correlationId`, the kind and

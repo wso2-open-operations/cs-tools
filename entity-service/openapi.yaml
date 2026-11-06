@@ -242,7 +242,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/InitiateAttachmentUploadResponse'
         "400":
-          description: 'Invalid request: type, parentId, name, contentType, or sizeBytes over the limit.'
+          description: 'Invalid request: type, parentId / projectId (exactly one for a comment image), name, contentType, or sizeBytes over the limit.'
           content:
             application/json:
               schema:
@@ -254,7 +254,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: The parent does not exist or the caller may not see it.
+          description: The parent (or, with projectId, the project) does not exist or the caller may not see it.
           content:
             application/json:
               schema:
@@ -5702,6 +5702,13 @@ paths:
     post:
       summary: Create a new support case.
       operationId: createCase
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_BYTES together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -7291,6 +7298,13 @@ paths:
     post:
       summary: Create a change request.
       operationId: createChangeRequest
+      description: >-
+        If the description shows inline images (src="/<attachmentId>") they must
+        be draft images uploaded to the request's project by the caller
+        (POST /attachments/upload with projectId): at most 5, within
+        INLINE_IMAGES_TOTAL_MAX_BYTES together, none still a blob: URL; otherwise
+        a 400 and nothing is created. They are linked to the new record right
+        after it exists. data:image base64 images are still accepted as before.
       requestBody:
         required: true
         content:
@@ -36221,8 +36235,14 @@ components:
 
     InitiateAttachmentUploadRequest:
       type: object
-      required: [type, parentId, name, sizeBytes]
+      required: [type, name, sizeBytes]
       additionalProperties: false
+      description: >-
+        Send parentId, except for a comment image that is a draft for the
+        description of a record that does not exist yet: then send projectId
+        instead. For type comment exactly one of parentId and projectId is
+        required (both or neither is a 400); for the other types parentId is
+        required and projectId is refused.
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
@@ -36232,6 +36252,20 @@ components:
           description: >-
             The work item (types work_item and comment) or the deployment (type
             deployment) the file belongs to.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            Type comment only, instead of parentId. The project the draft
+            description image is uploaded to. The caller must be a REGISTERED
+            member of it (internal callers are unrestricted); a project the
+            caller cannot see is a 404. The image is private to its uploader
+            until the record is created: the create request's description then
+            refers to it as src="/<attachmentId>" and entity-service links it
+            (work_item_id set, description_image true) when the record exists.
+            Its storage key is csm/projects/<project>/workitems/drafts/inline_attachments/...
+            and stays valid after linking. Draft images never linked within 24
+            hours are removed by the upload cleanup; linked ones never are.
         name:
           type: string
           maxLength: 255
@@ -36246,7 +36280,11 @@ components:
           minimum: 1
           description: >-
             The file's size. Checked against ATTACHMENT_MAX_BYTES (type comment:
-            INLINE_IMAGE_MAX_BYTES), and the uploaded file must match it.
+            INLINE_IMAGE_MAX_BYTES, default 25 MiB), and the uploaded file must
+            match it. One comment or description may show at most 5 images and
+            at most INLINE_IMAGES_TOTAL_MAX_BYTES (default 25 MiB) together; a
+            comment (create or edit) or a record whose description exceeds
+            either is a 400 and nothing is saved.
 
     InitiateAttachmentUploadResponse:
       type: object
