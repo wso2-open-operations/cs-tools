@@ -29,7 +29,7 @@ import (
 )
 
 // The change request a change request was cloned from
-// (change_request.cloned_from_change_request_id, migration 0280): written once,
+// (change_request.cloned_from_change_request_id, migration 0282): written once,
 // in the create transaction, from POST /change-requests clonedFromChangeRequestId,
 // and never changed afterwards. Clone lineage is a fact of this database only:
 // the previous system has no field for it (the dual-write mirror leaves it out,

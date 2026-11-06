@@ -25,7 +25,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 )
 
-// Clone lineage (migration 0280): a create that names clonedFromChangeRequestId
+// Clone lineage (migration 0282): a create that names clonedFromChangeRequestId
 // records it and the detail reads it back as clonedFrom; a source that is not a
 // UUID or not a change request is a 400 that creates nothing (and is refused by
 // the dual-write pre-flight too); deleting the source clears the link. Same

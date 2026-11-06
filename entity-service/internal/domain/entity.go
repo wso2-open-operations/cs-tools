@@ -5789,7 +5789,7 @@ type ChangeRequest struct {
 	StandardChange *ChangeRequestStandardChange `json:"standardChange,omitempty"`
 
 	// ClonedFrom is the change request this one was cloned from ({id, name: its
-	// number}), when one was recorded on create (migration 0280). Staff only,
+	// number}), when one was recorded on create (migration 0282). Staff only,
 	// PostgreSQL data sources only; omitted otherwise, and once the source is
 	// deleted.
 	ClonedFrom *EntityRef `json:"clonedFrom,omitempty"`

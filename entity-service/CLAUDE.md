@@ -4951,7 +4951,7 @@ guess). Rows with `closed_on` already set, or with no recorded transition, are l
 re-running it writes nothing. Tests: `change_request_closure_integration_test.go`
 (`CHANGE_REQUEST_TEST_DSN`, superuser and `csm_app`).
 
-### Clone lineage: `cloned_from_change_request_id` (migration 0280)
+### Clone lineage: `cloned_from_change_request_id` (migration 0282)
 
 The portal's Clone used to leave no trace: a clone could not be told apart from a change request
 typed from scratch. `change_request.cloned_from_change_request_id` (UUID, `REFERENCES
@@ -8651,7 +8651,7 @@ whose project has a customer. Clusters never mix customers: a template belongs t
    least three meaningful words are the same change only when the plans' word sets are at least
    `planSimilarityPercent` alike (Jaccard), single linkage. A member with no usable plan cannot contradict
    the subject, so it joins the group's largest confirmed cluster (it never bridges two).
-3. Clone lineage (`cloned_from_change_request_id`, 0280) joins a member to its source's cluster directly,
+3. Clone lineage (`cloned_from_change_request_id`, 0282) joins a member to its source's cluster directly,
    whatever its subject or plan. Such a member reads `joinedBy: "clone"`.
 Clusters of one are dropped. No embeddings or model: deterministic, explainable rules, and only
 self-hosted models would be allowed anyway.
