@@ -843,6 +843,15 @@ with `PermWrite` a view-only recipient would be handed a dashboard that answers 
 no data: each widget calls its own search route with the viewer's permissions (time cards, incidents
 and change requests keep theirs), so a widget outside the viewer's role fails on its own.
 
+**A closest dashboard's note.** When a request cannot be built exactly, the catalogue (section 1) has the
+model build the closest dashboard it can and add a top-level `note`, one sentence on what differs from the
+request; it declines only when nothing close answers it. `splitGeneratedNote`
+(`internal/handler/dashboard_generator_service.go`) takes the note off each candidate before
+`ParseGenerated` and starts the chat `reply` with it. The note is never part of the dashboard, so the
+draft, a save and a share never carry one, and `ParseGenerated` stays strict: a saved definition with a
+`note` is refused like any unknown field. A note that is not a string or is over
+`generatedNoteMaxChars` (500) makes that candidate invalid.
+
 **Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
 `user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
 a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
