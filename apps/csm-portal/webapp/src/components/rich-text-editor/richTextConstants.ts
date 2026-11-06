@@ -32,13 +32,13 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
 export const ALLOWED_IMAGE_TYPES_LABEL = "PNG, JPEG, or WEBP";
 
 /**
- * The most images one comment draft may hold when images are stored through an
+ * The most images one comment or description draft may hold when images are stored through an
  * `onImageUpload` handler (each one costs a server-side share link and a rate
  * limit). The base64 editors are capped by the server instead.
  */
 export const MAX_COMMENT_IMAGES = 5;
 
-export const MAX_COMMENT_IMAGES_MESSAGE = `A comment can have at most ${MAX_COMMENT_IMAGES} images.`;
+export const MAX_COMMENT_IMAGES_MESSAGE = `A comment or description can have at most ${MAX_COMMENT_IMAGES} images.`;
 
 export type RichTextBlockVariant =
   | "h1"
