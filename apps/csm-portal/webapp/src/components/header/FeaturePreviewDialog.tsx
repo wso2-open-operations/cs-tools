@@ -112,8 +112,8 @@ export default function FeaturePreviewDialog({
                     {!enabled && (
                       <Chip
                         size="small"
-                        color={state === "wip" ? "warning" : "default"}
-                        label={state === "wip" ? "WIP" : "Hidden"}
+                        color={state === "preview" ? "warning" : "default"}
+                        label={state === "preview" ? "Preview" : "Hidden"}
                       />
                     )}
                   </Box>

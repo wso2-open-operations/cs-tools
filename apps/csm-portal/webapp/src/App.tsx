@@ -17,7 +17,6 @@
 import { type JSX } from "react";
 import {
   Navigate,
-  Outlet,
   Route,
   Routes,
   useLocation,
@@ -30,18 +29,12 @@ import {
   LegacyQueryTabRedirect,
   SectionIndexRedirect,
 } from "@components/section-tabs/SectionTabs";
-import { navNodeForPath } from "@config/csmNavItems";
-import {
-  featureStateForPath,
-  firstEnabledDestination,
-} from "@config/featureFlags";
-import { useFeaturePreviewOverrides } from "@config/featurePreview";
-import { usePortalAccess, useSafeCurrentUserId } from "@context/current-user/usePortalAccess";
 import {
   POST_LOGIN_REDIRECT_KEY,
   PostLoginRedirectConsumer,
 } from "@layouts/postLoginRedirect";
 import ErrorLayout from "@layouts/ErrorLayout";
+import FeatureRouteGuard from "@components/feature-route-guard/FeatureRouteGuard";
 import CsmComingSoonPage from "@features/csm-coming-soon/pages/CsmComingSoonPage";
 import Error401Page from "@components/error/Error401Page";
 import Error403Page from "@components/error/Error403Page";
@@ -105,6 +98,8 @@ import CsmDashboardBuilderEditorPage from "@features/csm-admin/dashboards/pages/
 import CsmDashboardSharedConfigPage from "@features/csm-admin/dashboards/pages/CsmDashboardSharedConfigPage";
 import CsmBannersRouteGuard from "@features/csm-admin/banners/CsmBannersRouteGuard";
 import CsmBannersPage from "@features/csm-admin/banners/CsmBannersPage";
+import CsmFeatureVisibilityRouteGuard from "@features/csm-admin/feature-visibility/CsmFeatureVisibilityRouteGuard";
+import CsmFeatureVisibilityPage from "@features/csm-admin/feature-visibility/CsmFeatureVisibilityPage";
 import CsmSlaEngineRouteGuard from "@features/csm-admin/sla-engine/CsmSlaEngineRouteGuard";
 import CsmSlaEnginePage from "@features/csm-admin/sla-engine/CsmSlaEnginePage";
 import CsmCustomersLayout from "@features/csm-customers/pages/CsmCustomersLayout";
@@ -183,56 +178,6 @@ function RootLanding(): JSX.Element | null {
   return pending || hasDeepLinkSearch ? null : <Navigate to="/dashboard" replace />;
 }
 
-/**
- * Layout guard honouring the `CSM_PORTAL_FEATURE_OVERRIDES` runtime config, so
- * a direct, pinned or shared link can't reach a page the deployment restricts.
- *
- * A `wip` page renders the shared "coming soon" message in place — the URL
- * survives and the wording matches the nav's "work in progress" tooltip. The
- * exception is a page that already renders a more specific unavailable message
- * of its own (`rendersOwnWipPage`), which is let through rather than downgraded
- * to the generic one.
- *
- * A `hidden` page has no nav entry at all, so there is nothing to stay
- * consistent with and the link is bounced to the first destination this
- * deployment does offer. That target is never assumed to exist: a config that
- * hides everything, or that hides the target itself, falls through to `/404`,
- * which sits outside this guard and so cannot bounce back here.
- *
- * The path resolves to the most specific nav node, so restricting a section
- * does not restrict a finished tab inside it (and vice versa).
- */
-function FeatureRouteGuard(): JSX.Element {
-  const { pathname } = useLocation();
-  const access = usePortalAccess();
-  const node = navNodeForPath(pathname);
-  // An admin's own Feature Preview toggles (browser-local, see
-  // featurePreview.ts) can promote a hidden/WIP page to enabled for them
-  // alone -- never for any other caller, and never touching the deployment
-  // config itself.
-  const { overrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
-  // Per-user: a page the user's roles don't unlock (e.g. Operations for a
-  // view-only role) is hidden the same way a deployment-hidden page is.
-  const state = featureStateForPath(pathname, access, overrides);
-
-  if (state === "hidden") {
-    const fallback = firstEnabledDestination(access, overrides);
-    const samePath = fallback !== undefined && fallback.split(/[?#]/)[0] === pathname;
-    return <Navigate to={!fallback || samePath ? "/404" : fallback} replace />;
-  }
-
-  if (state === "wip" && !node?.rendersOwnWipPage) {
-    const label = node?.label ?? "This section";
-    return (
-      <CsmComingSoonPage
-        title={label}
-        description={`${label} is still a work in progress and isn't available yet.`}
-      />
-    );
-  }
-
-  return <Outlet />;
-}
 
 /**
  * Redirects a legacy detail path (`/accounts/:id`, `/projects/:id`) to its new
@@ -411,6 +356,9 @@ export default function App(): JSX.Element {
                     </Route>
                     <Route path="banners" element={<CsmBannersRouteGuard />}>
                       <Route index element={<CsmBannersPage />} />
+                    </Route>
+                    <Route path="feature-visibility" element={<CsmFeatureVisibilityRouteGuard />}>
+                      <Route index element={<CsmFeatureVisibilityPage />} />
                     </Route>
                     <Route path="sla-engine" element={<CsmSlaEngineRouteGuard />}>
                       <Route index element={<CsmSlaEnginePage />} />

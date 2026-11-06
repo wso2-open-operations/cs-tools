@@ -17,7 +17,8 @@
 /**
  * Drives a section's second-level tab strip from the navigation tree, so the
  * tabs a deployment is allowed to see are decided in one place
- * (`CSM_PORTAL_FEATURE_OVERRIDES`) rather than per page.
+ * (the shared per-page state set in Settings > Feature visibility, with
+ * `CSM_PORTAL_FEATURE_OVERRIDES` as the fallback) rather than per page.
  *
  * Three flavours, matching the tab idioms in the app: `useQueryTabs` for a
  * legacy `?tab=` reader (kept only for the redirect off old Operations/
@@ -25,10 +26,9 @@
  * a section whose tab strip is itself a real path segment (Operations,
  * Security Center), and `useRouteTabs` for sections whose tabs are child
  * routes with their own nested layout (Customers, Settings, Dashboards,
- * Knowledge). Only `useRouteTabs` currently reads `PortalAccess`/Feature
- * Preview itself (see its own doc comment) — `useQueryTabs`/
- * `usePathSectionTabs` resolve tabs from the deployment's
- * `CSM_PORTAL_FEATURE_OVERRIDES` state alone, same as before.
+ * Knowledge). All three read the signed-in user's `PortalAccess` (through
+ * `useTabAccess`) so a tab in Preview opens for an admin and stays inert for
+ * everyone else; `useRouteTabs` also needs it for a tab's own `requires`.
  *
  * A detail page's own static tab strip (Case/Incident/Change Request/Project
  * detail — not driven by the nav tree at all, just a caller-supplied list) is
@@ -50,6 +50,7 @@ import {
   visibleNavChildren,
 } from "@config/featureFlags";
 import { useFeaturePreviewOverrides } from "@config/featurePreview";
+import { useFeatureOverridesVersion } from "@config/featureOverridesStore";
 import { useNavTransition } from "@hooks/useNavTransition";
 import { useCaseRouteOverride } from "@context/case-tabs/CaseRouteOverrideContext";
 import type { PortalAccess } from "@context/current-user/portalAccess";
@@ -95,6 +96,22 @@ function resolveActiveKey(tabs: SectionTab[], requested: string | null): string 
   );
 }
 
+/**
+ * What every tab resolver needs to know about the caller: their capabilities
+ * (an admin opens a Preview tab) and their own Feature Preview toggles. Also
+ * repaints the caller when the shared per-page state loads or is saved, so a
+ * strip never keeps showing the old state.
+ */
+export function useTabAccess(): {
+  access: PortalAccess;
+  previewOverrides: Record<string, boolean>;
+} {
+  const access = usePortalAccess();
+  const { overrides: previewOverrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
+  useFeatureOverridesVersion();
+  return { access, previewOverrides };
+}
+
 function tabsFor(
   sectionId: string,
   keyOf: (node: CsmNavNode) => string,
@@ -115,9 +132,10 @@ function tabsFor(
 /** Tab strip for a section that keeps its selection in the `?tab=` query. */
 export function useQueryTabs(sectionId: string): SectionTabsState {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { access, previewOverrides } = useTabAccess();
   // Query tabs declare their `?tab=` value on the nav node; a node without one
   // can't be selected, so it is keyed by id and simply never matches.
-  const tabs = tabsFor(sectionId, (node) => node.tab ?? node.id);
+  const tabs = tabsFor(sectionId, (node) => node.tab ?? node.id, access, previewOverrides);
   const activeKey = resolveActiveKey(tabs, searchParams.get("tab"));
 
   return {
@@ -159,7 +177,8 @@ export function usePathSectionTabs(
 ): SectionTabsState {
   const { tab: rawTab } = useParams();
   const navigate = useNavTransition();
-  const tabs = tabsFor(sectionId, pathTabKey);
+  const { access, previewOverrides } = useTabAccess();
+  const tabs = tabsFor(sectionId, pathTabKey, access, previewOverrides);
   const activeKey = resolveActiveKey(tabs, rawTab ?? null);
 
   return {
@@ -176,8 +195,12 @@ export function usePathSectionTabs(
  * `SectionIndexRedirect`). `undefined` when every tab is restricted, same as
  * `firstEnabledTabHref`.
  */
-export function firstEnabledPathTab(sectionId: string): string | undefined {
-  return enabledPathTabKeys(sectionId)[0];
+export function firstEnabledPathTab(
+  sectionId: string,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): string | undefined {
+  return enabledPathTabKeys(sectionId, access, previewOverrides)[0];
 }
 
 /**
@@ -186,10 +209,14 @@ export function firstEnabledPathTab(sectionId: string): string | undefined {
  * requested key names a tab this deployment actually offers, not just fetch
  * the first one.
  */
-export function enabledPathTabKeys(sectionId: string): string[] {
+export function enabledPathTabKeys(
+  sectionId: string,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): string[] {
   const section = navNodeById(sectionId);
   if (!section) return [];
-  return enabledNavChildren(section).map(pathTabKey);
+  return enabledNavChildren(section, access, previewOverrides).map(pathTabKey);
 }
 
 /**
@@ -222,8 +249,7 @@ export function routeTabForPath(
 export function useRouteTabs(sectionId: string): SectionTabsState {
   const { pathname } = useLocation();
   const navigate = useNavTransition();
-  const access = usePortalAccess();
-  const { overrides: previewOverrides } = useFeaturePreviewOverrides(useSafeCurrentUserId());
+  const { access, previewOverrides } = useTabAccess();
   const tabs = tabsFor(sectionId, (node) => navNodePath(node), access, previewOverrides);
 
   const current = routeTabForPath(tabs, pathname);
@@ -240,9 +266,13 @@ export function useRouteTabs(sectionId: string): SectionTabsState {
  * Where a section's index route should land: its first usable tab. Returns
  * `undefined` when every tab is restricted, leaving the caller to decide.
  */
-export function firstEnabledTabHref(sectionId: string): string | undefined {
+export function firstEnabledTabHref(
+  sectionId: string,
+  access?: PortalAccess,
+  previewOverrides?: Record<string, boolean>,
+): string | undefined {
   const section = navNodeById(sectionId);
-  return section ? enabledNavChildren(section)[0]?.href : undefined;
+  return section ? enabledNavChildren(section, access, previewOverrides)[0]?.href : undefined;
 }
 
 /**

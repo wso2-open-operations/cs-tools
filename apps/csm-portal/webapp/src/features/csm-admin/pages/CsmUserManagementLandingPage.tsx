@@ -50,11 +50,11 @@ export default function CsmUserManagementLandingPage(): JSX.Element {
     >
       {tabs.map((tab) => {
         const Icon = tab.node.icon ?? LayoutGrid;
-        const isWip = tab.state === "wip";
+        const isPreview = tab.state === "preview";
         return (
           <Card key={tab.key} variant="outlined">
             <CardActionArea
-              disabled={isWip}
+              disabled={isPreview}
               onClick={() => navigate(tab.key)}
               sx={{
                 p: 3,
@@ -70,13 +70,22 @@ export default function CsmUserManagementLandingPage(): JSX.Element {
                 <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   {tab.label}
                 </Typography>
-                {isWip && (
+                {isPreview && (
                   <Chip
                     size="small"
-                    label="WIP"
+                    label="Preview"
                     color="warning"
                     variant="outlined"
                     sx={{ height: 18, fontSize: 10 }}
+                  />
+                )}
+                {tab.previewedOnly && (
+                  <Chip
+                    size="small"
+                    label="Preview"
+                    color="primary"
+                    variant="filled"
+                    sx={{ height: 18, fontSize: 10, fontWeight: 600 }}
                   />
                 )}
               </Box>

@@ -308,10 +308,10 @@ describe("navSectionForPath", () => {
   });
 });
 
-describe("rendersOwnWipPage", () => {
+describe("rendersOwnPreviewPage", () => {
   it("is set exactly on the admin tabs that route to their own placeholder", () => {
     const flagged = flattenNavNodes()
-      .filter((node) => node.rendersOwnWipPage)
+      .filter((node) => node.rendersOwnPreviewPage)
       .map((node) => node.id);
     expect(flagged).toEqual(["admin.user-management.permissions"]);
   });

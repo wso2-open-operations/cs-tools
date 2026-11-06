@@ -22,6 +22,7 @@ import {
   enabledPathTabKeys,
   firstEnabledPathTab,
   firstEnabledTabHref,
+  useTabAccess,
 } from "@hooks/useSectionTabs";
 
 interface SectionTabsProps extends SectionTabsState {
@@ -45,7 +46,7 @@ interface SectionTabsProps extends SectionTabsState {
  * second level is just a second `<SectionTabs>` fed by a second hook call,
  * not a different component.
  *
- * A tab the deployment marked WIP stays in the strip but is disabled and
+ * A tab in preview stays in the strip but is disabled and
  * chipped, so the section still advertises what is coming without offering a
  * dead panel; a hidden tab never reaches this component. A tab that's only
  * visible because the signed-in admin switched it on in their own Feature
@@ -95,8 +96,9 @@ export default function SectionTabs({
         }
       >
         {tabs.map((tab) =>
-          tab.state === "wip" ? (
-            // The chip carries the "not ready yet" message on its own: a
+          tab.state === "preview" ? (
+            // A preview tab this user cannot open (an admin gets the enabled
+            // branch below instead). The chip carries the message on its own: a
             // Tooltip would never fire here, because a disabled MUI Tab drops
             // pointer events for its whole subtree.
             <Tab
@@ -111,7 +113,7 @@ export default function SectionTabs({
                   {tab.label}
                   <Chip
                     size="small"
-                    label="WIP"
+                    label="Preview"
                     color="warning"
                     variant="outlined"
                     sx={{ height: 18, fontSize: 10 }}
@@ -164,7 +166,10 @@ export function SectionIndexRedirect({
 }: {
   sectionId: string;
 }): JSX.Element {
-  return <Navigate to={firstEnabledTabHref(sectionId) ?? "/dashboard"} replace />;
+  const { access, previewOverrides } = useTabAccess();
+  return (
+    <Navigate to={firstEnabledTabHref(sectionId, access, previewOverrides) ?? "/dashboard"} replace />
+  );
 }
 
 /**
@@ -196,7 +201,8 @@ export function LegacyQueryTabRedirect({
   const params = new URLSearchParams(location.search);
   const legacyTab = params.get("tab");
   const requestedKey = legacyTab ? legacyTab.replace(/_/g, "-") : undefined;
-  const enabledKeys = enabledPathTabKeys(sectionId);
+  const { access, previewOverrides } = useTabAccess();
+  const enabledKeys = enabledPathTabKeys(sectionId, access, previewOverrides);
   // Only honour the requested key when it names a tab this deployment
   // actually offers — a restricted or unknown legacy `?tab=` value falls
   // through to the same first-usable-tab default the bare-path case uses,
@@ -205,7 +211,7 @@ export function LegacyQueryTabRedirect({
   const targetKey =
     requestedKey && enabledKeys.includes(requestedKey)
       ? requestedKey
-      : (firstEnabledPathTab(sectionId) ?? undefined);
+      : (firstEnabledPathTab(sectionId, access, previewOverrides) ?? undefined);
 
   params.delete("tab");
   const rest = params.toString();

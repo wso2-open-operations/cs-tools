@@ -38,6 +38,7 @@ import { useSyncRecentViewsIdentity } from "@features/csm-recent/hooks/useRecent
 import GlobalNotificationBanner from "@components/notification-banner/GlobalNotificationBanner";
 import MobileAppBanner from "@components/mobile-app-banner/MobileAppBanner";
 import PortalBanners from "@components/portal-banners/PortalBanners";
+import { useSharedFeatureOverrides } from "@hooks/useFeatureOverrides";
 import Header from "@components/header/Header";
 import CsmSideBar from "@components/side-nav-bar/CsmSideBar";
 import RouteSuspenseFallback from "@components/route-fallback/RouteSuspenseFallback";
@@ -93,6 +94,9 @@ export default function AppLayout({
   const mainContentRef = useRef<HTMLDivElement>(null);
   const { isLoading: isAuthLoading, isSignedIn } = useAsgardeo();
   const { isErrorPageDisplayed } = useErrorPageContext();
+  // The shared per-page feature state (Settings > Feature visibility), fed to
+  // the flag engine. Fails open to `config.js`, so it never blocks the shell.
+  useSharedFeatureOverrides(isSignedIn && !isAuthLoading);
   useSyncRecentViewsIdentity();
 
   // Resets the top-level scroll region on every route change — including a
