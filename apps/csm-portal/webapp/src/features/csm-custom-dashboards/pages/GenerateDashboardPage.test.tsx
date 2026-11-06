@@ -28,9 +28,11 @@ let savePending = false;
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
-    constructor(status: number, message: string) {
+    payload?: { message?: string };
+    constructor(status: number, message: string, payload?: { message?: string }) {
       super(message);
       this.status = status;
+      this.payload = payload;
     }
   },
 }));
@@ -272,34 +274,84 @@ describe("GenerateDashboardPage: the chat", () => {
   });
 
   it("says so when the first message can't be turned into a dashboard", async () => {
-    generateMock.mockRejectedValueOnce(new Error("refused"));
+    const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock.mockRejectedValueOnce(new BackendApiError(422, message, { message }));
     renderPage();
 
     await sendMessage("Hello", "The dashboard cannot be generated from the input.");
 
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
     expect(screen.getByText("Your dashboard will appear here")).toBeInTheDocument();
+  });
+
+  it("says the change can't be made when a follow-up message is declined", async () => {
+    const message = "A cases-per-month line chart can cover at most 24 months.";
+    generateMock
+      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
+      .mockRejectedValueOnce(new BackendApiError(422, message, { message }));
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    await sendMessage("Per month for 3 years", "This dashboard cannot be modified with your input.");
+
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
   });
 
   it.each([
     [429, "You've sent a lot of messages in a short time. Try again in 42 seconds."],
     [413, "The dashboard being edited is too large to change in the chat. Start a new one."],
+    [400, "The description is too long: keep it under 2,000 characters."],
+    [502, "The AI assistant can't be reached right now. Try again in a few minutes."],
+    [502, "The dashboard was too large to create in one go. Ask for fewer widgets, or build it in steps."],
+    [503, "The AI assistant has reached its usage limit. Try again later."],
+    [504, "The AI assistant took too long to answer. Try again."],
   ])("shows the backend's message for a %d", async (status, message) => {
-    generateMock.mockRejectedValueOnce(new BackendApiError(status, message));
+    generateMock.mockRejectedValueOnce(new BackendApiError(status, message, { message }));
     renderPage();
 
     await sendMessage("My cases", message);
 
-    expect(screen.queryByText("The dashboard cannot be generated from the input.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+  });
+
+  it("shows the backend's message for a follow-up message too", async () => {
+    const message = "The AI assistant has reached its usage limit. Try again later.";
+    generateMock
+      .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
+      .mockRejectedValueOnce(new BackendApiError(503, message, { message }));
+    renderPage();
+    await sendMessage("My cases", "Here it is.");
+
+    await sendMessage("Make it purple", message);
+
+    expect(screen.queryByText(/Something went wrong/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a proxy's own 504 (no JSON message)", new BackendApiError(504, "Gateway Timeout"), "The AI assistant took too long to answer. Try again."],
+    ["a proxy's own 502", new BackendApiError(502, "Bad Gateway"), "The AI assistant can't be reached right now. Try again in a few minutes."],
+    ["no answer at all", new TypeError("Failed to fetch"), "The portal didn't get an answer. Check your connection and try again."],
+    ["an internal error", new BackendApiError(500, "Internal error", { message: "Internal error" }), "Something went wrong while creating the dashboard. Try again."],
+  ])("says where it failed for %s, never that the input did not work", async (_name, err, message) => {
+    generateMock.mockRejectedValueOnce(err);
+    renderPage();
+
+    await sendMessage("My cases", message);
+
+    expect(screen.queryByText(/input/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Bad Gateway")).not.toBeInTheDocument();
   });
 
   it("keeps the preview when a follow-up message fails", async () => {
     generateMock
       .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
-      .mockRejectedValueOnce(new Error("timeout"));
+      .mockRejectedValueOnce(new BackendApiError(500, "Internal error", { message: "Internal error" }));
     renderPage();
     await sendMessage("My cases", "Here it is.");
 
-    await sendMessage("Make it purple", "This dashboard cannot be modified with your input.");
+    await sendMessage("Make it purple", "Something went wrong while changing the dashboard. Try again.");
 
     expect(screen.getByRole("heading", { name: "My Cases" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();

@@ -640,6 +640,28 @@ The fix is not to change the container but to clean the body before it is render
 
 `apps/customer-portal/webapp`'s comment cards (case Activity tab, service request comments, announcement comments) have the same helper in `features/support/utils/support.ts`, copied rather than shared because the two apps don't share a package; its card makes `<p>` `pre-wrap`, so a hand-wrapped paragraph printed its source line breaks there. Keep the two copies in step.
 
+## Generate chat: a failed message
+
+A failed `POST /dashboards/generate` turn keeps the draft and answers in the chat with
+`generateErrorMessage` (`features/csm-custom-dashboards/utils`), which says what actually went wrong and
+never that the user's input did not work when the failure was elsewhere:
+
+- **A 422 is the request itself not working** (the model declining it, a refusal, or a team it cannot
+  filter by): "The dashboard cannot be generated from the input." ("This dashboard cannot be modified
+  with your input." with a draft on screen), not the backend's sentence (the model's reason stays in the
+  backend's response and logs).
+- **The backend's own message** (its JSON body's `message`, `BackendApiError.payload.message`) for 400
+  (the prompt or draft), 413 (the draft too large), 429 (the user's own per-minute / per-day limit), 502 (an
+  unusable or cut-off reply, or the AI assistant unreachable), 503 (generation unavailable, or the AI
+  side's usage limit: the model gateway's 429, which the backend sends as 503 so 429 always means the
+  user's own limit) and 504 (too slow).
+- **No backend message**, worded by where it failed: a proxy's own 504 page "took too long", its own
+  502 / 503 "can't be reached right now"; no answer at all (fetch threw: offline, or the connection was
+  dropped, which a proxy does when its timeout is shorter than the model call's 45 s; the local
+  `gateway-shim`'s 30 s write timeout did exactly that) "The portal didn't get an answer"; a 500 or
+  anything else "Something went wrong while creating the dashboard" ("changing" with a draft on screen).
+  A proxy's status text ("Bad Gateway") is never shown.
+
 ## My Dashboards: the name on Save, and Rename
 
 A saved dashboard's name is its definition's `displayName` (entity-service keeps it as the row's `name`:
