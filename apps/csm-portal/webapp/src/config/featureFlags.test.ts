@@ -311,7 +311,7 @@ describe("featureState preview overrides", () => {
     // A hidden node stays hidden for an admin without the browser override. A
     // preview node is the admin's to open, but nobody else's.
     expect(featureState("updates", admin)).toBe("hidden");
-    expect(featureState("engagements", csEngineer)).toBe("preview");
+    expect(featureState("engagements", csEngineer)).toBe("hidden");
     expect(featureState("engagements")).toBe("preview");
     expect(featureState("dashboard")).toBe("enabled");
   });

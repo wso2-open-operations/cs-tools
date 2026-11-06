@@ -19,7 +19,7 @@ import { useMutation, useQuery, type UseMutationResult, type UseQueryResult } fr
 import { useBackendApi } from "@api/backend/client";
 import { setSharedFeatureOverrides } from "@config/featureOverridesStore";
 
-/** One saved row, as `GET /feature-overrides` returns it. */
+/** One saved row, as `GET /features` returns it. */
 export interface FeatureOverrideRow {
   navNodeId: string;
   state: string;
@@ -45,7 +45,7 @@ export interface FeatureOverridesData {
 /** Shared by the shell (which feeds the flag engine) and the Settings page. */
 export const FEATURE_OVERRIDES_KEY = ["feature-overrides"] as const;
 
-/** Write body of `PUT /feature-overrides`: one page, plus the first-save mark on the last write. */
+/** Write body of `PUT /features`: one page, plus the first-save mark on the last write. */
 export interface SaveFeatureOverride {
   navNodeId: string;
   state: "enabled" | "preview";
@@ -67,7 +67,7 @@ export function useFeatureOverridesQuery(enabled = true): UseQueryResult<Feature
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
     queryFn: async () => {
-      const body = await api.get<FeatureOverrideList>("/feature-overrides");
+      const body = await api.get<FeatureOverrideList>("/features");
       const rows: Record<string, string> = {};
       const meta: FeatureOverridesData["meta"] = {};
       for (const row of body?.overrides ?? []) {
@@ -98,6 +98,6 @@ export function useSharedFeatureOverrides(enabled: boolean): void {
 export function usePutFeatureOverride(): UseMutationResult<FeatureOverrideRow, Error, SaveFeatureOverride> {
   const api = useBackendApi();
   return useMutation<FeatureOverrideRow, Error, SaveFeatureOverride>({
-    mutationFn: (input) => api.put<SaveFeatureOverride, FeatureOverrideRow>("/feature-overrides", input),
+    mutationFn: (input) => api.put<SaveFeatureOverride, FeatureOverrideRow>("/features", input),
   });
 }

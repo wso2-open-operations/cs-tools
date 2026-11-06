@@ -99,11 +99,11 @@ afterEach(() => {
 });
 
 describe("FeatureRouteGuard and a page in Preview", () => {
-  it("shows everyone but an admin the coming-soon page, with the URL kept", () => {
+  it("sends everyone but an admin away from a Preview page", () => {
     renderAt("/operations/problems");
-    expect(screen.getByText(/is in preview and isn't open to everyone yet/)).toBeInTheDocument();
     expect(screen.queryByText("problems page")).not.toBeInTheDocument();
-    expect(screen.getByTestId("location-probe")).toHaveTextContent("/operations/problems");
+    expect(screen.queryByText(/is in preview and isn't open to everyone yet/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("location-probe")).not.toHaveTextContent("/operations/problems");
   });
 
   it("opens the page for an admin, under a Preview note", () => {
@@ -126,13 +126,15 @@ describe("FeatureRouteGuard and a page in Preview", () => {
     expect(screen.queryByText(/isn't open to everyone yet/)).not.toBeInTheDocument();
   });
 
-  it("lets a page through that renders its own, more specific message", () => {
+  it("opens a page that renders its own message for an admin, under the Preview note", () => {
+    currentRoles.value = ["admin"];
     setSharedFeatureOverrides({
       rows: { "admin.user-management.permissions": "preview" },
       savedOnce: true,
     });
     renderAt("/admin/user-management/permissions");
     expect(screen.getByText("permissions own placeholder")).toBeInTheDocument();
+    expect(screen.getByText(/This page isn't open to everyone yet/)).toBeInTheDocument();
     expect(screen.queryByText(/is in preview and isn't open to everyone yet/)).not.toBeInTheDocument();
   });
 
@@ -146,7 +148,8 @@ describe("FeatureRouteGuard and a page in Preview", () => {
         savedOnce: true,
       });
     });
-    expect(screen.getByText(/is in preview and isn't open to everyone yet/)).toBeInTheDocument();
+    expect(screen.queryByText("incidents page")).not.toBeInTheDocument();
+    expect(screen.getByTestId("location-probe")).not.toHaveTextContent("/operations/incidents");
   });
 });
 

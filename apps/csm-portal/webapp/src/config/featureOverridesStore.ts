@@ -18,7 +18,7 @@ import { useSyncExternalStore } from "react";
 
 /**
  * The shared per-page feature state the signed-in shell loaded from
- * `GET /feature-overrides` (see `useSharedFeatureOverrides`). `rows` is the
+ * `GET /features` (see `useSharedFeatureOverrides`). `rows` is the
  * saved `nav-node id -> state` map, `savedOnce` says an admin has finished a
  * first save in Settings. `featureFlags.ts` reads it instead of
  * `CSM_PORTAL_FEATURE_OVERRIDES` once `savedOnce` is true, and layers it over

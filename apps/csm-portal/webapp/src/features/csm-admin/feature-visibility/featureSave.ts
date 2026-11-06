@@ -17,7 +17,7 @@
 import type { StoredFeatureState } from "@config/featureFlags";
 import type { FeatureMap } from "@features/csm-admin/feature-visibility/featureTree";
 
-/** One `PUT /feature-overrides`. */
+/** One `PUT /features`. */
 export interface FeatureWrite {
   navNodeId: string;
   state: StoredFeatureState;

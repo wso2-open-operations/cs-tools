@@ -99,14 +99,14 @@ describe("the saved map, once an admin has saved", () => {
       savedOnce: true,
     });
     expect(featureState("operations.incidents", csEngineer)).toBe("enabled");
-    expect(featureState("operations.problems", csEngineer)).toBe("preview");
+    expect(featureState("operations.problems", csEngineer)).toBe("hidden");
     // The section is promoted for the menu so the open page can be reached.
     expect(featureState("operations", csEngineer)).toBe("enabled");
   });
 
   it("lets a page with no row follow its section", () => {
     setSharedFeatureOverrides({ rows: { operations: "preview" }, savedOnce: true });
-    expect(featureState("operations.service-requests", csEngineer)).toBe("preview");
+    expect(featureState("operations.service-requests", csEngineer)).toBe("hidden");
   });
 
   it("ignores a stored value it does not know, and a page that does not exist", () => {
@@ -136,9 +136,9 @@ describe("a Preview page for an admin and for everyone else", () => {
     });
   });
 
-  it("opens for an admin and stays greyed out for everyone else", () => {
+  it("opens for an admin and stays out of the menu for everyone else", () => {
     expect(featureState("operations.problems", admin)).toBe("enabled");
-    expect(featureState("operations.problems", csEngineer)).toBe("preview");
+    expect(featureState("operations.problems", csEngineer)).toBe("hidden");
     expect(featureState("operations.problems")).toBe("preview");
   });
 
@@ -155,12 +155,13 @@ describe("a Preview page for an admin and for everyone else", () => {
     expect(isPreviewedOnly("operations.problems")).toBe(false);
   });
 
-  it("keeps a Preview tab in the strip for everyone, so it still advertises", () => {
+  it("keeps a Preview tab in the strip for an admin only", () => {
     const operations = navNodeById("operations")!;
     const ids = (access: ReturnType<typeof getPortalAccess>) =>
       visibleNavChildren(operations, access).map((node) => node.id);
     expect(ids(admin)).toContain("operations.problems");
-    expect(ids(csEngineer)).toContain("operations.problems");
+    expect(ids(csEngineer)).not.toContain("operations.problems");
+    expect(ids(csEngineer)).toContain("operations.incidents");
   });
 
   it("does not open a page whose role capability the admin lacks", () => {

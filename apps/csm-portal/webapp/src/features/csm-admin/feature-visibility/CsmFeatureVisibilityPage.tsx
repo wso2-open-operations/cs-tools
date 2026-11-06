@@ -67,7 +67,7 @@ const CHOICES: StoredFeatureState[] = ["enabled", "preview"];
 /** What a bulk choice does. The ticked rows can be sections and pages together, so the words fit either. */
 const BULK_HELP: Record<StoredFeatureState, string> = {
   enabled: "Everyone can open the selected items.",
-  preview: "Admins can open them, with a Preview tag. Everyone else sees them greyed out.",
+  preview: "Admins can open them, with a Preview tag. Everyone else does not see them in the menu.",
 };
 
 /** One saved change, as the popup after a save lists it. */
@@ -89,8 +89,8 @@ function rowsToMap(rows: Record<string, string>, knownIds: ReadonlySet<string>):
 
 /**
  * Settings > Feature visibility. An admin sets each section and page to
- * Available or Preview. A Preview page opens for admins with a Preview tag and
- * is greyed out for everyone else.
+ * Available or Preview. A Preview page opens for admins with a Preview tag.
+ * Everyone else does not see it in the menu.
  *
  * One list: every row has a checkbox (several can be changed at once), and a
  * section's pages sit in an accordion under it. Each row has a pencil to pick
@@ -273,7 +273,7 @@ export default function CsmFeatureVisibilityPage(): JSX.Element {
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="h6">Feature Visibility</Typography>
         <Typography variant="body2" color="text.secondary">
-          Preview pages open for admins with a Preview tag, and are greyed out for everyone else. A page follows its
+          Preview pages open for admins with a Preview tag, and stay out of the menu for everyone else. A page follows its
           section unless you set that page on its own. The menu and tabs follow your changes once you save.
         </Typography>
       </Box>

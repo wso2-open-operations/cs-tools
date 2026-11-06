@@ -258,15 +258,16 @@ export default function CsmSideBar({
       <Sidebar.Nav>
         <Sidebar.Category>
           {
-            /* `hidden` sections are filtered out entirely; `preview` ones stay
-               rendered but disabled below (an admin can open them, see
-               `featureState`). */
+            /* `hidden` sections are filtered out entirely. A `preview` section is
+               too, once the caller is known not to be an admin (`featureState`
+               resolves it to hidden). An admin can open it. The disabled branch
+               below is only for a caller whose access is not known yet. */
             visibleNavSections(access, previewOverrides)
               .map((item) => {
-                // Only reachable once `item` has already resolved to
-                // "enabled" (a `preview` item that this user cannot open takes
-                // the branch below and returns early), so this can never also
-                // be true for a disabled item -- no badge conflict to resolve.
+                // Only reachable once `item` has already resolved to "enabled"
+                // for this caller. A Preview item is hidden for a non-admin, and
+                // the disabled branch below is only for a caller whose access is
+                // not known yet.
                 const itemPreviewedOnly = isPreviewedOnly(item.id, access, previewOverrides);
                 const itemContent = (
                   <Sidebar.Item id={item.id}>
@@ -283,14 +284,10 @@ export default function CsmSideBar({
                   </Sidebar.Item>
                 );
 
-                // Preview sections stay visible but disabled for anyone who cannot
-                // open them: no navigating Link, dimmed
-                // and non-clickable (pointer events blocked on the inner box so no
-                // click reaches Oxygen's select handler). The outer element is a
-                // focusable div (tabIndex 0, aria-disabled) so keyboard users can
-                // reach it and reveal the "in preview" tooltip, which fires on
-                // both hover and focus. Their routes render the coming-soon page
-                // (see App.tsx's WipRouteGuard).
+                // A Preview section whose caller is not known yet stays visible but
+                // disabled: no navigating Link, dimmed and non-clickable. A
+                // signed-in person who is not an admin never reaches this branch,
+                // because `featureState` has already resolved the section to hidden.
                 if (featureState(item.id, access, previewOverrides) === "preview") {
                   return (
                     <Tooltip

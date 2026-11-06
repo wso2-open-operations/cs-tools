@@ -61,9 +61,9 @@ window.config = {
   // ("operations") or one of its tabs ("operations.incidents"). Values:
   //   "enabled" - Available. Also what any page NOT listed here gets, so only
   //               list a page when you want to restrict it.
-  //   "preview" - an admin can open it, with a Preview tag. Everyone else sees
-  //               it greyed out with the same tag, dropped from the quick-nav
-  //               palette, and its routes render the shared "coming soon" page.
+  //   "preview" - an admin can open it, with a Preview tag. A signed-in person
+  //               who is not an admin does not see it in the menu, and a direct
+  //               link is sent away.
   //   "wip"     - the older name for "preview", still read as "preview".
   //   "hidden"  - the older "no nav entry at all" state, still honoured here
   //               until the first save in Settings (which saves it as

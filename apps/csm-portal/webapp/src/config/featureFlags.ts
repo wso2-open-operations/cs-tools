@@ -59,9 +59,9 @@ import {
  * The two states an admin can save for a page.
  *
  * - `enabled` — Available. The default for anything without an entry.
- * - `preview` — in preview: an admin can open it, with a Preview tag; everyone
- *   else sees it greyed out with the same tag, dropped from Quick-nav, and its
- *   routes render the shared "coming soon" page.
+ * - `preview` — in preview: an admin can open it, with a Preview tag. A
+ *   signed-in person who is not an admin does not see it in the menu, and a
+ *   direct link is sent away, the same as `hidden`.
  */
 export type StoredFeatureState = "enabled" | "preview";
 
@@ -360,8 +360,11 @@ function ownFeatureState(
   const need = requirements().get(id);
   const capabilityOk = !access || !need || access[need];
   if (!capabilityOk) return "hidden";
-  // An admin can open a Preview page. Everyone else keeps it greyed out.
+  // An admin can open a Preview page. A signed-in person who is not an admin
+  // does not see it: the menu omits it and the route redirects, same as hidden.
+  // With no access yet the stored preview state is left as-is.
   if (state === "preview" && access?.isAdmin) return "enabled";
+  if (state === "preview" && access && !access.isAdmin) return "hidden";
   if (state !== "hidden" && state !== "preview") return state;
   if (!access?.isAdmin) return state;
   if (previewOverrides?.[id] === true) return "enabled";

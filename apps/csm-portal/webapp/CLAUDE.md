@@ -176,7 +176,7 @@ A test that renders these hooks without a signed-in user now sees no access (Ope
 
 An admin sets each section and page to **Available** (`enabled`) or **Preview** in Settings > Feature
 visibility (`src/features/csm-admin/feature-visibility/`). The saved map lives in entity-service
-(`GET`/`PUT /feature-overrides`, one row per nav-node id, never deleted: choosing Available writes `enabled`),
+(`GET`/`PUT /features`, one row per nav-node id, never deleted: choosing Available writes `enabled`),
 reaches the app through `useSharedFeatureOverrides` (mounted in `AppLayout`) into `featureOverridesStore.ts`,
 and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
 
@@ -185,15 +185,16 @@ and `featureFlags.ts` reads it instead of `CSM_PORTAL_FEATURE_OVERRIDES`.
   the shared map cannot be loaded (old backend, missing table, not staff) the store is cleared and `config.js`
   alone applies, exactly as before — the loader never blocks the shell, and `FeatureRouteGuard` waits for the
   first response only briefly (2.5s) so a Preview page never opens for a moment from a stale config.
-* **`preview` replaced `wip`.** A `preview` page is the old WIP page for everyone except an admin: greyed out,
-  tagged, dropped from Quick-nav, route renders "coming soon". An admin (`access.isAdmin`) sees it as `enabled`
-  (`ownFeatureState`), tagged **Preview** through the existing `isPreviewedOnly` path (sidebar badge, filled
-  tab chip) and under a thin `PreviewPageNotice` above the page. The menu rule (a `preview` section with an
-  `enabled` page is promoted for the menu) is unchanged; `isPreviewedOnly` uses the state *before* that
-  promotion, so an admin still sees the tag on such a section. `wip` is only read, from `config.js`, as `preview`.
-* **`hidden` is no longer a stored state.** It still exists as a *resolved* result (a role capability the user
-  lacks, or a legacy `hidden` line in `config.js` nobody has saved over yet, which keeps hiding until the first
-  save writes it as `preview`). Settings never offers it.
+* **`preview` replaced `wip`.** A `preview` page is open to an admin only: tagged **Preview**
+  through `isPreviewedOnly` (sidebar badge, filled tab chip) and under a thin `PreviewPageNotice`.
+  An admin (`access.isAdmin`) sees it as `enabled` (`ownFeatureState`). A signed-in person who is
+  not an admin has it resolved to `hidden`, so it is left out of the menu and a direct link is sent
+  away. The menu rule (a `preview` section with an `enabled` page is promoted for the menu) is
+  unchanged; `isPreviewedOnly` uses the state *before* that promotion, so an admin still sees the
+  tag on such a section. `wip` is only read, from `config.js`, as `preview`.
+* **`hidden` is no longer a stored state.** It still exists as a *resolved* result: a role capability the user
+  lacks, a Preview page for someone who is not an admin, or a legacy `hidden` line in `config.js` nobody has
+  saved over yet (that line keeps hiding until the first save writes it as `preview`). Settings never offers it.
 * **The browser-local Feature Preview** (`FeaturePreviewDialog`, `featurePreview.ts`) is unchanged and now only
   has legacy `hidden` lines to offer. It is slated for removal in a follow-up once this has been seen working.
 * **Re-rendering.** `featureState` is a plain function, so anything that renders from it calls

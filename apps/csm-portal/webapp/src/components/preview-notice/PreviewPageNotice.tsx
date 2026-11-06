@@ -20,8 +20,7 @@ import type { JSX } from "react";
 /**
  * A thin note above a page an admin can open only because it is in Preview (set
  * in Settings > Feature visibility), so "I can see this" is never mistaken for
- * "this is live for everyone". Everyone else gets the coming-soon page in its
- * place and never sees this.
+ * "this is live for everyone". Everyone else is sent away and never sees this.
  */
 export default function PreviewPageNotice(): JSX.Element {
   return (

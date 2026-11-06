@@ -31,11 +31,11 @@ export const STATE_HELP: Record<"section" | "page", Record<StoredFeatureState, s
   section: {
     enabled: "Everyone can open this section.",
     preview:
-      "Admins can open it, with a Preview tag. Everyone else sees it greyed out unless a page in it is Available.",
+      "Admins can open it, with a Preview tag. Everyone else does not see it in the menu unless a page in it is Available.",
   },
   page: {
     enabled: "Everyone can open this page, even if its section is in preview.",
-    preview: "Admins can open it, with a Preview tag. Everyone else sees it greyed out.",
+    preview: "Admins can open it, with a Preview tag. Everyone else does not see it in the menu.",
   },
 };
 

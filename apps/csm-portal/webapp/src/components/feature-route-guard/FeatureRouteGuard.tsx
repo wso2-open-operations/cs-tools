@@ -35,12 +35,13 @@ import { useFeatureOverridesQuery } from "@hooks/useFeatureOverrides";
  * visibility, with `CSM_PORTAL_FEATURE_OVERRIDES` as the fallback), so a
  * direct, pinned or shared link can't reach a page that is restricted.
  *
- * A `preview` page renders the shared "coming soon" message in place for
- * everyone but an admin — the URL survives and the wording matches the nav's
- * "in preview" tooltip. An admin gets the page itself, under a short Preview
- * note. The exception is a page that already renders a more specific
- * unavailable message of its own (`rendersOwnPreviewPage`), which is let
- * through rather than downgraded to the generic one.
+ * A `preview` page is open to an admin, under a short Preview note. A
+ * signed-in person who is not an admin is sent away, the same as `hidden`,
+ * so the page never appears in their menu. When the caller is not known yet
+ * the stored preview state is left as-is and this guard shows the shared
+ * "coming soon" message. The exception is a page that already renders a more
+ * specific unavailable message of its own (`rendersOwnPreviewPage`), which is
+ * let through rather than downgraded to the generic one.
  *
  * A `hidden` page has no nav entry at all, so there is nothing to stay
  * consistent with and the link is bounced to the first destination this

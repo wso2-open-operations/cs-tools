@@ -568,8 +568,8 @@ describe("CsmSideBar — Feature Preview and the Customers shortcut", () => {
 });
 
 // A page or section the admins put in Preview (Settings > Feature visibility)
-// opens for an admin with a Preview badge, and stays greyed out and inert for
-// everyone else, with the same word on it.
+// opens for an admin with a Preview badge, and is left out of the menu for
+// everyone else.
 describe("CsmSideBar — a section in Preview", () => {
   function setOverrides(value: unknown): void {
     window.config = {
@@ -602,23 +602,21 @@ describe("CsmSideBar — a section in Preview", () => {
     expect(container.querySelector("[aria-disabled]")).toBeNull();
   });
 
-  it("tags the same Preview page for someone who cannot open it, and never says WIP", () => {
+  it("leaves a Preview page out of the menu for someone who cannot open it", () => {
     currentRoles.value = ["cs_engineer"];
     setOverrides({ operations: "preview", "operations.incidents": "enabled" });
     const { container } = renderAt("/dashboard");
 
-    expect(container.querySelector('[data-item-id="operations.problems"]')).toHaveTextContent("Preview");
-    expect(container.querySelector('[data-item-id="operations.incidents"]')).not.toHaveTextContent("Preview");
+    expect(container.querySelector('[data-item-id="operations.problems"]')).toBeNull();
+    expect(container.querySelector('[data-item-id="operations.incidents"]')).not.toBeNull();
     expect(container).not.toHaveTextContent("WIP");
   });
 
-  it("greys out a Preview section with no open page for everyone but an admin", () => {
+  it("leaves a Preview section out of the menu for everyone but an admin", () => {
     currentRoles.value = ["cs_engineer"];
     setOverrides({ customers: "preview" });
     const { container } = renderAt("/dashboard");
-    const greyed = container.querySelector("[aria-disabled]");
-    expect(greyed).not.toBeNull();
-    expect(greyed).toHaveTextContent("Customers");
+    expect(container.querySelector('[data-item-id="customers"]')).toBeNull();
 
     currentRoles.value = ["admin"];
     const adminView = renderAt("/dashboard");

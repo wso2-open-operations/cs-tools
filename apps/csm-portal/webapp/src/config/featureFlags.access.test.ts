@@ -335,9 +335,9 @@ describe("Customer Health under Customers for a viewer", () => {
     expect(ids(visibleNavSections(viewer))).not.toContain("customer-health");
   });
 
-  it("marks the shortcut preview when a deployment marks Customer Health preview", () => {
+  it("hides the shortcut when a deployment marks Customer Health preview", () => {
     setOverrides({ "customer-health": "preview" });
-    expect(featureState("customers.customer-health", viewer)).toBe("preview");
+    expect(featureState("customers.customer-health", viewer)).toBe("hidden");
   });
 
   it("hides only the shortcut when a deployment hides it, bringing back the top-level entry", () => {
@@ -346,12 +346,11 @@ describe("Customer Health under Customers for a viewer", () => {
     expect(ids(visibleNavSections(viewer))).toContain("customer-health");
   });
 
-  // The shipped config.js.example marks Customers preview. A preview section renders
-  // as one disabled entry with no dropdown, so the viewer must keep the
-  // working top-level Customer Health entry instead of losing it.
+  // A Preview Customers section is hidden for a viewer, the same as a hidden
+  // one, so the viewer keeps the working top-level Customer Health entry.
   it("keeps a viewer's top-level entry when a deployment marks Customers preview", () => {
     setOverrides({ customers: "preview" });
-    expect(featureState("customers", viewer)).toBe("preview");
+    expect(featureState("customers", viewer)).toBe("hidden");
     expect(visibleShortcutTo("customer-health", viewer)).toBeUndefined();
     expect(ids(visibleNavSections(viewer))).toContain("customer-health");
     expect(featureState("customer-health", viewer)).toBe("enabled");
@@ -376,7 +375,7 @@ describe("Customer Health under Customers for a viewer", () => {
   it("does not let the shortcut promote a preview Customers section for anyone", () => {
     setOverrides({ customers: "preview", "customers.customer-health": "enabled" });
     expect(featureState("customers")).toBe("preview");
-    expect(featureState("customers", getPortalAccess(["cs_engineer"]))).toBe("preview");
+    expect(featureState("customers", getPortalAccess(["cs_engineer"]))).toBe("hidden");
   });
 
   // An admin's Feature Preview toggles (featurePreview.ts) only ever promote
@@ -425,7 +424,7 @@ describe("Customer Health under Customers for a viewer", () => {
     // that a stored value for the shortcut still does not change it.
     setOverrides({ customers: "preview" });
     const csEngineer = getPortalAccess(["cs_engineer"]);
-    expect(featureState("customers", csEngineer, { "customers.customer-health": true })).toBe("preview");
+    expect(featureState("customers", csEngineer, { "customers.customer-health": true })).toBe("hidden");
   });
 
   it("does not change anything a viewer sees, whatever preview values are passed for them", () => {
@@ -486,8 +485,8 @@ describe("Customer Health under Customers for a viewer", () => {
     ).toBeUndefined();
 
     // A preview section opens as a dropdown for an admin, so it offers its
-    // shortcut. For anyone else it stays one greyed entry with no dropdown, and
-    // a stored browser value for the section changes nothing for them.
+    // shortcut. For anyone else the section is hidden, and a stored browser
+    // value for the section changes nothing for them.
     setOverrides({ customers: "preview" });
     expect(visibleShortcutTo("customer-health", adminUnderCustomers)?.id).toBe(
       "customers.customer-health",
