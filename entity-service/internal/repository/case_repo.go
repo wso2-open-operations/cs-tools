@@ -765,12 +765,17 @@ func NewCaseRepository(db *Scoped, vis ...CRVisibility) CaseRepository {
 //
 // work_item.number (every type) and wso2_id (the five case-like types all
 // require one, per work_item_wso2_id_required_by_type) come from
-// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140),
-// which resolves the product decision this method used to defer (see
-// CLAUDE.md, "CreateCase and case numbers"): a portal-created record gets a
-// visually distinct number/id rather than one drawn from the same series
-// ServiceNow's still-running sync allocates from, so the two can never
-// collide. service_request/engagement/security_report_analysis/announcement
+// next_work_item_number()/next_wso2_id() (migration 0180): the same
+// "CS0000123" / "<project key>-<n>" format ServiceNow allocates, so a
+// portal-created record looks like a synced one. These replaced
+// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140,
+// "CS-PORTAL-..." / "<key>-PORTAL-<n>"). The series start at 1, so
+// cs_number_seq and each project's wso2_id_counter MUST be seeded past the
+// highest synced value (scripts/cutover/seed_native_numbering.sql) before this
+// is deployed to a database, and this must only be deployed once ServiceNow
+// has stopped allocating from the same series, or a number issued here can
+// later be issued by ServiceNow too (CLAUDE.md, "CreateCase and case
+// numbers"). service_request/engagement/security_report_analysis/announcement
 // were previously rejected outright on this data source
 // (caseService.CreateCase's own "supported only for dual-write" check,
 // updated alongside this) purely because this method had nowhere to write
@@ -1031,7 +1036,7 @@ const createCasePortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
+		       next_work_item_number('CASE'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1068,7 +1073,7 @@ const createAnnouncementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
+		       next_work_item_number('ANNOUNCEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
 		       $2::uuid, NULL, NULL, creator.id, p.account_id,
 		       NULLIF($6, '')::uuid
 		FROM creator
@@ -1107,7 +1112,7 @@ const createServiceRequestPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
+		       next_work_item_number('SERVICE_REQUEST'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
@@ -1147,7 +1152,7 @@ const createEngagementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
+		       next_work_item_number('ENGAGEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1184,7 +1189,7 @@ const createSecurityReportAnalysisPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
+		       next_work_item_number('SECURITY_REPORT_ANALYSIS'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
