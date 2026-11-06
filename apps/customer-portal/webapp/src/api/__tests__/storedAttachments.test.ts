@@ -200,6 +200,21 @@ describe("storedAttachments", () => {
       expect(authFetch).toHaveBeenCalledTimes(1);
     });
 
+    it("starts a comment image under a project, without a parent, before its record exists", async () => {
+      authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
+      await expect(
+        uploadStoredAttachment(authFetch, {
+          type: "comment",
+          projectId: "project-1",
+          file: { size: 10 * 1024 * 1024, name: "p.png", type: "image/png" } as File,
+          name: "p.png",
+        }),
+      ).rejects.toThrow(/exceeds the 5 MB limit/);
+      const startBody = JSON.parse(authFetch.mock.calls[0][1].body);
+      expect(startBody).toMatchObject({ type: "comment", projectId: "project-1", name: "p.png" });
+      expect(startBody).not.toHaveProperty("parentId");
+    });
+
     it("surfaces the closed-case message from the server", async () => {
       authFetch.mockResolvedValueOnce(
         json({ message: "This case is closed, so new attachments can't be added." }, 409),

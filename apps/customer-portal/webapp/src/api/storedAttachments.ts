@@ -390,7 +390,13 @@ export async function startStoredUpload(
   authFetch: AuthFetch,
   input: {
     type: StoredAttachmentType;
-    parentId: string;
+    /** The record the attachment belongs to. Give this or `projectId`. */
+    parentId?: string;
+    /**
+     * A comment image uploaded before its record exists (a case being created)
+     * belongs to the project instead; give this or `parentId`, never both.
+     */
+    projectId?: string;
     name: string;
     contentType?: string;
     sizeBytes: number;
@@ -398,7 +404,8 @@ export async function startStoredUpload(
 ): Promise<StoredAttachmentUploadStart> {
   const response = await postJson(authFetch, "/attachments/upload", {
     type: input.type,
-    parentId: input.parentId,
+    ...(input.parentId ? { parentId: input.parentId } : {}),
+    ...(input.projectId && !input.parentId ? { projectId: input.projectId } : {}),
     name: input.name,
     ...(input.contentType ? { contentType: input.contentType } : {}),
     sizeBytes: input.sizeBytes,
@@ -559,7 +566,9 @@ export async function uploadStoredAttachment(
   authFetch: AuthFetch,
   input: {
     type: StoredAttachmentType;
-    parentId: string;
+    /** The record to attach to. Give this or `projectId` (see startStoredUpload). */
+    parentId?: string;
+    projectId?: string;
     file: File;
     name: string;
     onStep?: (step: StoredUploadStep) => void;
@@ -569,7 +578,7 @@ export async function uploadStoredAttachment(
     onProgress?: (bytesSent: number, bytesTotal: number) => void;
   },
 ): Promise<StoredAttachmentConfirmed> {
-  const { type, parentId, file, name, onStep, signal, onProgress } = input;
+  const { type, parentId, projectId, file, name, onStep, signal, onProgress } = input;
   // Only an early refusal: entity-service enforces its own limit, and the
   // `maxBytes` of the upload response is checked below too.
   const localMaxBytes =
@@ -583,6 +592,7 @@ export async function uploadStoredAttachment(
   const start = await startStoredUpload(authFetch, {
     type,
     parentId,
+    projectId,
     name,
     contentType: file.type || undefined,
     sizeBytes: file.size,
