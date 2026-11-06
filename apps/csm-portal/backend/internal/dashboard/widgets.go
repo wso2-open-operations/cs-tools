@@ -73,6 +73,11 @@ const (
 	// the endpoint from resourceType entirely on its own, same as every other
 	// ResourceType here.
 	ResourceCaseFeedback ResourceType = "case_feedback"
+	// ResourcePlgOrganization identifies a widget whose data is PLG
+	// organisations, searched with the PLG list's own POST
+	// /plg/organizations/search. Only PLG users (handler.PermUsePlg) can read
+	// it, so the webapp shows a no-access tile to anyone else.
+	ResourcePlgOrganization ResourceType = "plg_organization"
 )
 
 // Shape is how a widget's resolved data should be rendered.

@@ -772,7 +772,8 @@ var validWidgetResourceTypes = map[ResourceType]bool{
 	// injectImpliedTypeFilters).
 	ResourceServiceRequest: true, ResourceSecurityReportAnalysis: true,
 	ResourceAnnouncement: true, ResourceEngagement: true,
-	ResourceCaseFeedback: true,
+	ResourceCaseFeedback:    true,
+	ResourcePlgOrganization: true,
 }
 
 var validWidgetShapes = map[Shape]bool{

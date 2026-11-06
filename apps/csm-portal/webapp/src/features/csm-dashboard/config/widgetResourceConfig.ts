@@ -26,6 +26,7 @@ import {
   GitPullRequest,
   Handshake,
   Megaphone,
+  Rocket,
   Shield,
   ShieldAlert,
   Star,
@@ -1354,7 +1355,87 @@ export const WIDGET_RESOURCE_CONFIG: Record<
       return caseId ? `/cases/${caseId}` : undefined;
     },
   },
+  plg_organization: {
+    searchEndpoint: "/plg/organizations/search",
+    buildSearchRequestBody: plgOrganizationSearchBody,
+    itemsKey: "organizations",
+    primaryLabel: (item) => asString(item.organizationName) ?? "—",
+    secondaryLabel: (item) => asString(item.registeredEmail),
+    // The PLG Organizations page reads no filters from its URL, so it can
+    // only show the unfiltered list: a widget that filters organisations
+    // opens the preview page instead, which lists exactly what the tile
+    // counted.
+    buildHref: (filters, ctx) =>
+      hasFiltersBeyond(filters, [])
+        ? widgetPreviewFallbackHref("plg-organizations", "plg_organization", filters, ctx)
+        : "/plg/organizations",
+    icon: Rocket,
+    iconColor: "info",
+    previewSlug: "plg-organizations",
+    detailHref: (item) =>
+      asString(item.id) ? `/plg/organizations/${asString(item.id)}` : undefined,
+  },
 };
+
+/** The PLG organisation search's single-valued filters (the list ones,
+ * `productCodes`, `lifecycleStages`, `subscriptionTiers`, stay arrays). */
+const PLG_ORGANIZATION_SCALAR_FILTERS = [
+  "query",
+  "organizationName",
+  "registeredEmail",
+  "registeredFrom",
+  "registeredTo",
+] as const;
+
+/** A plain `YYYY-MM-DD`, which the PLG search's date bounds do not take. */
+const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `POST /plg/organizations/search`'s body. The default `{filters,
+ * pagination, sortBy}` shape with three differences:
+ * - The preview page's URL round trip decodes every filter value as a
+ *   comma-split array, so the single-valued keys are unwrapped back, and
+ *   `unowned` is turned back into a JSON boolean. The preview page's
+ *   search box adds `searchQuery`, which this search calls `query`.
+ * - `registeredFrom` / `registeredTo` are timestamps: a plain date is sent
+ *   as the start of that day (UTC) for `registeredFrom` and its end for
+ *   `registeredTo`, so both bounds include the day.
+ * - The search sorts by `sortBy: "name"` or, by default, by registration
+ *   date, newest first, with `sortOrder` "asc" / "desc" beside it rather
+ *   than a `{field, order}` object.
+ */
+function plgOrganizationSearchBody({
+  filters,
+  offset,
+  limit,
+  sortBy,
+}: {
+  filters: Record<string, unknown>;
+  offset: number;
+  limit: number;
+  sortBy?: Record<string, unknown>;
+}): Record<string, unknown> {
+  const { searchQuery, ...rest } = filters;
+  const flat: Record<string, unknown> = { ...rest };
+  if (typeof searchQuery === "string" && searchQuery.trim()) flat.query = searchQuery.trim();
+  for (const key of PLG_ORGANIZATION_SCALAR_FILTERS) {
+    const v = flat[key];
+    if (Array.isArray(v)) flat[key] = v[0];
+  }
+  const unowned = Array.isArray(flat.unowned) ? (flat.unowned as unknown[])[0] : flat.unowned;
+  if (unowned === "true" || unowned === "false") flat.unowned = unowned === "true";
+  for (const [key, time] of [
+    ["registeredFrom", "T00:00:00Z"],
+    ["registeredTo", "T23:59:59Z"],
+  ] as const) {
+    const v = flat[key];
+    if (typeof v === "string" && PLAIN_DATE.test(v)) flat[key] = `${v}${time}`;
+  }
+  const body: Record<string, unknown> = { filters: flat, pagination: { offset, limit } };
+  if (sortBy?.field === "name") body.sortBy = "name";
+  if (sortBy?.order === "asc" || sortBy?.order === "desc") body.sortOrder = sortBy.order;
+  return body;
+}
 
 /** Reverse lookup of `previewSlug` back to its `resourceType`, for the
  * dashboard widget "View more" preview page's own `/dashboard/:previewSlug`

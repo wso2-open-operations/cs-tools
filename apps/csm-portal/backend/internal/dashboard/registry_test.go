@@ -1273,6 +1273,31 @@ func TestLoadDir_AcceptsGroupByLinkResourceType(t *testing.T) {
 	}
 }
 
+// A PLG organisation widget loads like any other resourceType: a count and a
+// list, with the PLG list's own filters passed through as they are.
+func TestLoadDir_AcceptsPlgOrganizationWidgets(t *testing.T) {
+	dir := t.TempDir()
+	writeDefinition(t, dir, "d.json", `{
+	  "id": "d", "displayName": "D", "type": "cs",
+	  "widgets": [
+	    {"id": "iam-orgs", "displayName": "IAM organisations", "resourceType": "plg_organization", "shape": "count", "gridWidth": 3,
+	     "query": {"productCodes": ["IAM"]}},
+	    {"id": "unowned", "displayName": "Unowned organisations", "resourceType": "plg_organization", "shape": "list", "gridWidth": 6,
+	     "query": {"unowned": true}, "listLimit": 5}
+	  ]
+	}`)
+
+	dashboards, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir returned error: %v", err)
+	}
+	for i, w := range dashboards[0].Widgets {
+		if w.ResourceType != ResourcePlgOrganization {
+			t.Errorf("widgets[%d].resourceType = %q, want %q", i, w.ResourceType, ResourcePlgOrganization)
+		}
+	}
+}
+
 // The deprecated single-variable path gets the same widget validation: unlike
 // "type", none of these fields is new, so an already-deployed value carrying
 // one is already broken.

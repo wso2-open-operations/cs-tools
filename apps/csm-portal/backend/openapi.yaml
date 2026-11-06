@@ -21122,6 +21122,7 @@ components:
             - announcement
             - engagement
             - case_feedback
+            - plg_organization
           description: >
             Which resource's /search endpoint this widget's filters target.
             service_request, security_report_analysis, announcement and
@@ -21134,7 +21135,9 @@ components:
             by the caller against POST /cases/feedback/aggregate instead;
             there is no server-side resourceType-to-endpoint mapping, the
             caller picks the endpoint from resourceType on its own, same as
-            every other value here.
+            every other value here. plg_organization is PLG organisations,
+            searched with POST /plg/organizations/search, which only PLG
+            users may call.
         shape:
           type: string
           enum:

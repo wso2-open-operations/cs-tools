@@ -787,3 +787,93 @@ describe("callRequestWidgetFiltersToQuery", () => {
     expect(callRequestWidgetFiltersToQuery(seeded)).toEqual(widgetFilters);
   });
 });
+
+describe("WIDGET_RESOURCE_CONFIG.plg_organization", () => {
+  const config = WIDGET_RESOURCE_CONFIG.plg_organization;
+  const build = config.buildSearchRequestBody!;
+
+  it("searches the PLG organisation list and reads its organizations page", () => {
+    expect(config.searchEndpoint).toBe("/plg/organizations/search");
+    expect(config.itemsKey).toBe("organizations");
+  });
+
+  it("sends the filters under `filters`, with the page as offset and limit", () => {
+    expect(
+      build({ filters: { productCodes: ["IAM"], lifecycleStages: ["TRIAL"] }, offset: 10, limit: 5 }),
+    ).toEqual({
+      filters: { productCodes: ["IAM"], lifecycleStages: ["TRIAL"] },
+      pagination: { offset: 10, limit: 5 },
+    });
+  });
+
+  it("unwraps single-valued filters and `unowned` from the preview URL round trip, keeping list filters as arrays", () => {
+    expect(
+      build({
+        filters: { query: ["acme"], unowned: ["true"], subscriptionTiers: ["PAID", "TRIAL"] },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ query: "acme", unowned: true, subscriptionTiers: ["PAID", "TRIAL"] });
+    expect(build({ filters: { unowned: false }, offset: 0, limit: 5 }).filters).toEqual({
+      unowned: false,
+    });
+  });
+
+  it("sends the View more search box's searchQuery as the search's query", () => {
+    expect(
+      build({ filters: { productCodes: ["IAM"], searchQuery: " acme " }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ productCodes: ["IAM"], query: "acme" });
+    expect(build({ filters: { searchQuery: "" }, offset: 0, limit: 5 }).filters).toEqual({});
+  });
+
+  it("sends a plain registration date as a timestamp that includes the whole day", () => {
+    expect(
+      build({
+        filters: { registeredFrom: ["2026-01-01"], registeredTo: "2026-03-31" },
+        offset: 0,
+        limit: 5,
+      }).filters,
+    ).toEqual({ registeredFrom: "2026-01-01T00:00:00Z", registeredTo: "2026-03-31T23:59:59Z" });
+  });
+
+  it("passes a registration timestamp through unchanged", () => {
+    expect(
+      build({ filters: { registeredFrom: "2026-01-01T05:30:00Z" }, offset: 0, limit: 5 }).filters,
+    ).toEqual({ registeredFrom: "2026-01-01T05:30:00Z" });
+  });
+
+  it("sorts by name or, by default, registration date, with the order beside it", () => {
+    expect(
+      build({ filters: {}, offset: 0, limit: 5, sortBy: { field: "name", order: "asc" } }),
+    ).toMatchObject({ sortBy: "name", sortOrder: "asc" });
+    const byDate = build({
+      filters: {},
+      offset: 0,
+      limit: 5,
+      sortBy: { field: "registeredOn", order: "desc" },
+    });
+    expect(byDate).not.toHaveProperty("sortBy");
+    expect(byDate.sortOrder).toBe("desc");
+    expect(build({ filters: {}, offset: 0, limit: 5 })).toEqual({
+      filters: {},
+      pagination: { offset: 0, limit: 5 },
+    });
+  });
+
+  it("opens the Organizations page unfiltered, and the preview page once the widget filters", () => {
+    expect(config.buildHref({})).toBe("/plg/organizations");
+    const href = config.buildHref(
+      { productCodes: ["IAM"] },
+      { widgetId: "iam-orgs", displayName: "IAM organisations" },
+    );
+    expect(href).toBe("/dashboard/preview/plg-organizations?w=iam-orgs&n=IAM+organisations&productCodes=IAM");
+  });
+
+  it("labels a row with its name and email, and links it to the organisation's page", () => {
+    const item = { id: "org-1", organizationName: "Acme", registeredEmail: "a@acme.test" };
+    expect(config.primaryLabel(item)).toBe("Acme");
+    expect(config.secondaryLabel?.(item)).toBe("a@acme.test");
+    expect(config.detailHref?.(item)).toBe("/plg/organizations/org-1");
+    expect(config.detailHref?.({})).toBeUndefined();
+  });
+});
