@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildReleaseLinePayload,
   buildVersionCreatePayload,
-  buildVersionSupportPayload,
+  buildVersionEditPayload,
   buildVersionUpdatePayload,
   emptyVersionForm,
   parseTags,
@@ -114,17 +114,23 @@ describe("buildVersionUpdatePayload", () => {
   });
 });
 
-describe("buildVersionSupportPayload", () => {
-  it("sends only the support fields that changed, never row-specific ones", () => {
+describe("buildVersionEditPayload", () => {
+  it("sends only the fields that changed, support and publishing alike, never row-specific ones", () => {
     const live = liveVersion();
     const form = {
       ...versionToForm(live),
       supportEolDate: "2031-01-31",
       deploymentProfile: "Something else",
+      publicId: "999",
       description: "changed",
     };
-    expect(buildVersionSupportPayload(live, form)).toEqual({ supportEolDate: "2031-01-31" });
-    expect(buildVersionSupportPayload(live, versionToForm(live))).toEqual({});
+    expect(buildVersionEditPayload(live, form)).toEqual({ supportEolDate: "2031-01-31", description: "changed" });
+    expect(buildVersionEditPayload(live, versionToForm(live))).toEqual({});
+  });
+
+  it("clears a publishing field emptied in the form", () => {
+    const live = liveVersion({ publicName: "Acme Gateway 1.0" });
+    expect(buildVersionEditPayload(live, { ...versionToForm(live), publicName: "  " })).toEqual({ publicName: null });
   });
 });
 

@@ -84,7 +84,6 @@ describe("top-level nav order", () => {
       "security-center",
       "customers",
       "kb-articles",
-      "products",
       "plg",
       "updates",
       "time-cards",
@@ -98,27 +97,43 @@ describe("top-level nav order", () => {
   });
 });
 
-describe("products section", () => {
-  it("sits directly below Knowledge and is staff-only", () => {
-    const ids = CSM_NAV_ITEMS.map((section) => section.id);
-    expect(ids.indexOf("products")).toBe(ids.indexOf("kb-articles") + 1);
-    expect(navNodeById("products")?.requires).toBe("canViewStaffSections");
+describe("product catalogue in Settings", () => {
+  it("is not a top-level section any more", () => {
+    expect(CSM_NAV_ITEMS.map((section) => section.id)).not.toContain("products");
   });
 
-  it("has the Catalogue and Release lines tabs, none narrower than the section", () => {
-    expect(navNodeById("products")?.children?.map((tab) => tab.id)).toEqual([
-      "products.catalogue",
-      "products.release-lines",
+  it("is the last Settings tab, after the existing ones (ids unchanged)", () => {
+    expect(navNodeById("admin")?.children?.map((tab) => tab.id)).toEqual([
+      "admin.user-management",
+      "admin.dashboards",
+      "admin.banners",
+      "admin.sla-engine",
+      "admin.product-catalog",
     ]);
-    expect(navNodeById("products.catalogue")?.requires).toBeUndefined();
   });
 
-  it("resolves each tab's route, and a section-level path to the section", () => {
-    expect(navNodeMatchForPath("/products/release-lines")).toMatchObject({
-      node: { id: "products.release-lines" },
+  it("has the Products and Release lines tabs", () => {
+    expect(navNodeById("admin.product-catalog")?.children?.map((tab) => [tab.id, tab.label])).toEqual([
+      ["admin.product-catalog.products", "Products"],
+      ["admin.product-catalog.release-lines", "Release lines"],
+    ]);
+  });
+
+  it("is shown, with its help topic, to catalogue managers only", () => {
+    expect(navNodeById("admin.product-catalog")?.requires).toBe("canManageProductCatalog");
+    expect(navNodeById("help.products")?.requires).toBe("canManageProductCatalog");
+    const sees = (roles: string[]): boolean => getPortalAccess(roles).canManageProductCatalog;
+    expect(sees(["cs_engineer"])).toBe(false);
+    expect(sees(["cs_engineer", "product_catalog_manager"])).toBe(true);
+    expect(sees(["admin"])).toBe(true);
+  });
+
+  it("resolves each tab's route, and the catalogue's own path to it", () => {
+    expect(navNodeMatchForPath("/admin/product-catalog/release-lines")).toMatchObject({
+      node: { id: "admin.product-catalog.release-lines" },
     });
-    expect(navNodeMatchForPath("/products")).toMatchObject({
-      node: { id: "products" },
+    expect(navNodeMatchForPath("/admin/product-catalog")).toMatchObject({
+      node: { id: "admin.product-catalog" },
     });
   });
 });

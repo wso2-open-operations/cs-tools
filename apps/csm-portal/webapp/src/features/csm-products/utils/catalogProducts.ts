@@ -18,6 +18,7 @@
 import type {
   CatalogChangePayload,
   CatalogProduct,
+  CatalogSupportStatus,
   CatalogVersion,
 } from "@features/csm-products/types/productCatalog";
 import {
@@ -27,9 +28,9 @@ import {
 } from "@features/csm-products/utils/catalogChange";
 
 /**
- * Pure helpers for the Catalogue tab's table and its two Add dialogs:
+ * Pure helpers for the Products tab's table and its two Add dialogs:
  * which products and versions are listed (not SaaS, not end of life), one row
- * per listing, searching, the product create
+ * per listing, searching, filtering, sorting by a date column, the product create
  * payload, and the publishing settings a new version starts from (its
  * product's latest version) so it publishes like its siblings.
  */
@@ -156,6 +157,93 @@ export function filterCatalogListings(listings: readonly CatalogListing[], query
   );
 }
 
+/** The EOL filter's choices: every version, past EOL, reaching EOL within one, three or six months, or with no EOL date. */
+export type CatalogEolFilter = "all" | "past" | "within1Month" | "within3Months" | "within6Months" | "none";
+
+/** How many months ahead each "EOL within" choice looks. */
+const EOL_WINDOW_MONTHS: Partial<Record<CatalogEolFilter, number>> = { within1Month: 1, within3Months: 3, within6Months: 6 };
+
+/** The products table's filters, beside the search box. Empty lists mean "any". */
+export interface CatalogListingFilters {
+  productIds: string[];
+  statuses: CatalogSupportStatus[];
+  eol: CatalogEolFilter;
+}
+
+export const NO_LISTING_FILTERS: CatalogListingFilters = { productIds: [], statuses: [], eol: "all" };
+
+/** Whether any filter narrows the list. */
+export function hasListingFilters(filters: CatalogListingFilters): boolean {
+  return filters.productIds.length > 0 || filters.statuses.length > 0 || filters.eol !== "all";
+}
+
+/** `date` ("YYYY-MM-DD") moved by `months` calendar months, in UTC. */
+function addMonths(date: string, months: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The listings that pass every filter. `today` ("YYYY-MM-DD") decides the EOL
+ * filter: past EOL is an EOL date before today; within N months is from
+ * today up to (not including) N months from now.
+ */
+export function applyListingFilters(
+  listings: readonly CatalogListing[],
+  filters: CatalogListingFilters,
+  today: string,
+): CatalogListing[] {
+  const window = EOL_WINDOW_MONTHS[filters.eol];
+  const soon = window === undefined ? today : addMonths(today, window);
+  return listings.filter(({ product, version }) => {
+    if (filters.productIds.length > 0 && !filters.productIds.includes(product.id)) return false;
+    if (filters.statuses.length > 0 && (!version.currentSupportStatus || !filters.statuses.includes(version.currentSupportStatus))) {
+      return false;
+    }
+    const eol = version.supportEolDate;
+    switch (filters.eol) {
+      case "past":
+        return Boolean(eol) && (eol as string) < today;
+      case "within1Month":
+      case "within3Months":
+      case "within6Months":
+        return Boolean(eol) && (eol as string) >= today && (eol as string) < soon;
+      case "none":
+        return !eol;
+      default:
+        return true;
+    }
+  });
+}
+
+/** The products table's sortable date columns. */
+export type CatalogDateField = "releaseDate" | "earliestPossibleSupportEolDate" | "supportEolAnnouncementDate" | "supportEolDate";
+
+/**
+ * The listings sorted by one date column. Versions without that date go last
+ * whichever way the column is sorted; ties keep their current order (product
+ * code, newest release first). No sort keeps the order given.
+ */
+export function sortListings(
+  listings: readonly CatalogListing[],
+  sort: { field: CatalogDateField; order: "asc" | "desc" } | null,
+): CatalogListing[] {
+  if (!sort) return [...listings];
+  const dir = sort.order === "asc" ? 1 : -1;
+  return listings
+    .map((listing, index) => ({ listing, index }))
+    .sort((a, b) => {
+      const x = a.listing.version[sort.field];
+      const y = b.listing.version[sort.field];
+      if (!x && !y) return a.index - b.index;
+      if (!x) return 1;
+      if (!y) return -1;
+      return x === y ? a.index - b.index : (x < y ? -1 : 1) * dir;
+    })
+    .map(({ listing }) => listing);
+}
+
 /**
  * The product's most recent live version by release date (a version with no
  * date sorts last), or null when it has none.
@@ -189,7 +277,7 @@ function isBetterSource(a: CatalogVersion, b: CatalogVersion): boolean {
 
 /**
  * The publishing settings of a version — what the Add product version
- * dialog's "Advanced configuration" holds: public name and abbreviation,
+ * dialog shows under "Publishing" and the Edit dialog under "Advanced": public name and abbreviation,
  * description, the two feed flags, release line, tags, release links and the
  * Carbon platform.
  */
@@ -218,27 +306,6 @@ export function listingFormFrom(source: CatalogVersion | null): ListingFormValue
   const out = {} as Record<string, unknown>;
   for (const key of LISTING_FORM_KEYS) out[key] = key === "carbon" ? { ...form.carbon } : form[key];
   return out as unknown as ListingFormValues;
-}
-
-/**
- * The collapsed "Advanced configuration" header's summary, e.g.
- * "copied from 4.7.0: on Support Matrix, on Release Matrix, APIM-4.x", or
- * "edited: not on the public feeds" once the user has changed them.
- */
-export function summarizeListing(
-  values: ListingFormValues,
-  source: CatalogVersion | null,
-  edited: boolean,
-  releaseLineNames?: ReadonlyMap<string, string>,
-): string {
-  const parts: string[] = [];
-  if (values.showInSupportMatrix) parts.push("on Support Matrix");
-  if (values.isPublic) parts.push("on Release Matrix");
-  if (parts.length === 0) parts.push("not on the public feeds");
-  const line = values.releaseLineId ? (releaseLineNames?.get(values.releaseLineId) ?? null) : null;
-  if (line) parts.push(line);
-  const origin = edited ? "edited" : source ? `copied from ${source.version}` : "no earlier version to copy";
-  return `${origin}: ${parts.join(", ")}`;
 }
 
 /** Profiles typed into the Add version dialog: trimmed, blanks dropped, de-duplicated. */
