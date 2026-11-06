@@ -462,7 +462,7 @@ this process only: it is never put in a response, a header or a log.** The modul
 
 | Route | Permission | Does |
 |---|---|---|
-| `POST /attachments/upload` | `PermWrite` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no upload link comes back, only `attachmentId` and `maxBytes`. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400 |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |

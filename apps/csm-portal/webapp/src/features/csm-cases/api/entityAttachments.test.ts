@@ -106,6 +106,38 @@ describe("uploadEntityAttachment", () => {
     expect(progress[progress.length - 1]).toBe(100);
   });
 
+  it("sends projectId instead of parentId for a draft image, and the chunk and confirm by id", async () => {
+    const post = vi.fn().mockResolvedValueOnce(start).mockResolvedValueOnce(confirmed);
+    const putBinary = vi.fn().mockResolvedValue(undefined);
+
+    await uploadEntityAttachment(apiWith(putBinary, post), {
+      type: "comment",
+      projectId: "proj-1",
+      file,
+    });
+
+    expect(post.mock.calls[0][1]).toEqual({
+      type: "comment",
+      projectId: "proj-1",
+      name: "report.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 5,
+    });
+    expect(putBinary.mock.calls[0][0]).toBe("/attachments/upload/att-1/chunks/0?type=comment");
+    expect(post.mock.calls[1]).toEqual(["/attachments/upload/att-1/confirm", { type: "comment", chunks: 1 }]);
+  });
+
+  it("refuses to start without exactly one of parentId and projectId", async () => {
+    const post = vi.fn();
+    const putBinary = vi.fn();
+    const bad = { type: "comment" as const, file, parentId: "p", projectId: "q" };
+    await expect(uploadEntityAttachment(apiWith(putBinary, post), bad as never)).rejects.toThrow(/exactly one/);
+    await expect(
+      uploadEntityAttachment(apiWith(putBinary, post), { type: "comment", file } as never),
+    ).rejects.toThrow(/exactly one/);
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("refuses a file over the limit the server reports, before sending it", async () => {
     const post = vi.fn().mockResolvedValueOnce({ ...start, maxBytes: 3 });
     const putBinary = vi.fn();

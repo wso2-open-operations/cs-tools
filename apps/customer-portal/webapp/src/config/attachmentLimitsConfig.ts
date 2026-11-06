@@ -19,7 +19,10 @@ const MIB = 1024 * 1024;
 
 /** Entity-service's own defaults (`ATTACHMENT_MAX_BYTES`, `INLINE_IMAGE_MAX_BYTES`). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 10;
+/** Total size of the inline images in one comment or description. */
+export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 25;
+/** @deprecated Kept for imports; the limit is now a total per comment or description. */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB;
 
 /**
  * A size in MB from `window.config`. Platform config injection often turns
@@ -51,16 +54,29 @@ export function entityAttachmentMaxBytes(): number {
 }
 
 /**
- * Largest pasted or inserted comment image, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 10). Read at call time.
+ * Most the inline images of one comment or description may add up to, in bytes
+ * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 25). The older
+ * `CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB` is read when the new key is not set.
+ * Read at call time.
+ */
+export function inlineImagesTotalMaxBytes(): number {
+  const config = window.config;
+  const mb = configuredMb(
+    config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB,
+    configuredMb(
+      config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
+      DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB,
+    ),
+  );
+  return Math.floor(mb * MIB);
+}
+
+/**
+ * Largest single inline image, in bytes. One image cannot be bigger than the
+ * total allowed per comment or description, so this is that same limit.
  */
 export function inlineImageMaxBytes(): number {
-  return Math.floor(
-    configuredMb(
-      window.config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
-      DEFAULT_INLINE_IMAGE_MAX_MB,
-    ) * MIB,
-  );
+  return inlineImagesTotalMaxBytes();
 }
 
 /** Ranges of one download fetched at once when nothing is configured. */

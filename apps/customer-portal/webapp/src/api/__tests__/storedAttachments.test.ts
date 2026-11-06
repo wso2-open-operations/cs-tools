@@ -160,7 +160,7 @@ describe("storedAttachments", () => {
       }
     });
 
-    it("refuses a comment image over the 10 MB default before anything is sent", async () => {
+    it("refuses a comment image over the 25 MB default before anything is sent", async () => {
       const big = { size: inlineImageMaxBytes() + 1, name: "p.png", type: "image/png" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
@@ -169,12 +169,12 @@ describe("storedAttachments", () => {
           file: big,
           name: "p.png",
         }),
-      ).rejects.toThrow("File size exceeds 10 MB limit.");
+      ).rejects.toThrow("File size exceeds 25 MB limit.");
       expect(authFetch).not.toHaveBeenCalled();
     });
 
     it("does not apply the image limit to a work item file (only the server's limit)", async () => {
-      const mid = { size: inlineImageMaxBytes() * 6, name: "a.bin", type: "" } as File;
+      const mid = { size: inlineImageMaxBytes() * 3, name: "a.bin", type: "" } as File;
       authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
       await expect(
         uploadStoredAttachment(authFetch, {
@@ -198,6 +198,21 @@ describe("storedAttachments", () => {
         }),
       ).rejects.toThrow(/exceeds/);
       expect(authFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("starts a comment image under a project, without a parent, before its record exists", async () => {
+      authFetch.mockResolvedValueOnce(json({ ...started, maxBytes: 5 * 1024 * 1024 }, 201));
+      await expect(
+        uploadStoredAttachment(authFetch, {
+          type: "comment",
+          projectId: "project-1",
+          file: { size: 10 * 1024 * 1024, name: "p.png", type: "image/png" } as File,
+          name: "p.png",
+        }),
+      ).rejects.toThrow(/exceeds the 5 MB limit/);
+      const startBody = JSON.parse(authFetch.mock.calls[0][1].body);
+      expect(startBody).toMatchObject({ type: "comment", projectId: "project-1", name: "p.png" });
+      expect(startBody).not.toHaveProperty("parentId");
     });
 
     it("surfaces the closed-case message from the server", async () => {

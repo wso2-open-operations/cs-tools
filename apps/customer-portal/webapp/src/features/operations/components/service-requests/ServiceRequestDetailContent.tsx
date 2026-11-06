@@ -44,6 +44,7 @@ import { usePatchCase } from "@features/support/api/usePatchCase";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
+  imageCountExceededMessage,
   imageSizeExceededMessage,
 } from "@constants/common";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
@@ -81,6 +82,7 @@ import { CASE_STATUS_ACTIONS, CommentType } from "@features/support/constants/su
 import ErrorIndicator from "@components/error-indicator/ErrorIndicator";
 import CaseDetailsAttachmentsPanel from "@case-details-attachments/CaseDetailsAttachmentsPanel";
 import Editor from "@components/rich-text-editor/Editor";
+import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
 import DOMPurify from "dompurify";
 import { CASE_STATUS } from "@features/project-details/constants/projectDetailsConstants";
 import { parseBackendTimestamp } from "@utils/dateTime";
@@ -144,6 +146,8 @@ export default function ServiceRequestDetailContent({
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
   const postComment = usePostComment();
+  // Images in a comment stay local previews until it is sent.
+  const inlineImages = useInlineImageUploads({ parentId: caseId });
 
   const { data: filterMetadata } = useGetProjectFilters(projectId ?? "");
   const caseStates = filterMetadata?.caseStates;
@@ -243,16 +247,23 @@ export default function ServiceRequestDetailContent({
     );
   }, [data, statusLabel, requestedBy, commentsToShow]);
 
-  const handleAddComment = () => {
+  const handleAddComment = async () => {
     const content = commentText.trim();
     if (!hasSubmittableEditorContent(content)) return;
+    if (postComment.isPending || inlineImages.isUploadingImages) return;
+    const imageUpload = await inlineImages.uploadImages(content);
+    if (!imageUpload.ok) {
+      showError(`${imageUpload.message} The comment was not sent; try again.`);
+      return;
+    }
     postComment.mutate(
       {
         caseId,
-        body: { content, type: CommentType.COMMENT },
+        body: { content: imageUpload.html, type: CommentType.COMMENT },
       },
       {
         onSuccess: () => {
+          inlineImages.release();
           setCommentText("");
           setCommentResetTrigger((prev) => prev + 1);
         },
@@ -666,17 +677,20 @@ export default function ServiceRequestDetailContent({
               <Editor
                 value={commentText}
                 onChange={setCommentText}
-                disabled={postComment.isPending}
+                disabled={postComment.isPending || inlineImages.isUploadingImages}
                 resetTrigger={commentResetTrigger}
                 minHeight={100}
                 showToolbar
                 placeholder="Add a comment..."
                 onSubmitKeyDown={handleAddComment}
+                onImageUpload={inlineImages.onImageUpload}
                 onPasteError={(reason) =>
                   showError(
                     reason === "type"
                       ? ERROR_UNSUPPORTED_TYPE
-                      : imageSizeExceededMessage(),
+                      : reason === "count"
+                        ? imageCountExceededMessage()
+                        : imageSizeExceededMessage(),
                   )
                 }
               />
@@ -689,7 +703,8 @@ export default function ServiceRequestDetailContent({
                   onClick={handleAddComment}
                   disabled={
                     !hasSubmittableEditorContent(commentText) ||
-                    postComment.isPending
+                    postComment.isPending ||
+                    inlineImages.isUploadingImages
                   }
                   sx={{ textTransform: "none" }}
                 >

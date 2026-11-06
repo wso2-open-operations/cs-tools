@@ -86,6 +86,7 @@ import { BasicInformationSection } from "@features/support/components/case-creat
 import { CaseType } from "@features/support/constants/supportConstants";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLogger } from "@hooks/useLogger";
+import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
 import {
   uploadServiceRequestAttachments,
   ATTACHMENT_UPLOAD_WAIT_MS,
@@ -393,6 +394,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
   );
 
   const { mutateAsync: postCase, isPending: isCreatePending } = usePostCase();
+  // Images in the description stay local previews until submit, when they are
+  // uploaded to the project before the service request is created.
+  const inlineImages = useInlineImageUploads({ projectId });
 
   const isInitialLoading = getCreateServiceRequestLoadingState(
     isProjectLoading,
@@ -520,7 +524,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (isNavigatingAfterCreate) return;
+    if (isNavigatingAfterCreate || inlineImages.isUploadingImages) return;
 
     const deploymentMatch = resolveDeploymentMatch(
       deployment,
@@ -564,13 +568,32 @@ export default function CreateServiceRequestPage(): JSX.Element {
       return;
     }
 
+    // The description's images go first: the request carries `/<id>`
+    // references to them. If one fails nothing is created and the form keeps
+    // its content; images that did upload are not sent again on a retry.
+    const descriptionValues: Record<string, string> = {};
+    for (const v of variables) {
+      if (isContextField(v.questionText ?? "")) continue;
+      if (!isDescriptionField(v.questionText ?? "")) continue;
+      const imageUpload = await inlineImages.uploadImages(
+        variableValues[v.id] ?? "",
+      );
+      if (!imageUpload.ok) {
+        showError(
+          `${imageUpload.message} The service request was not created; try again.`,
+        );
+        return;
+      }
+      descriptionValues[v.id] = imageUpload.html;
+    }
+
     const variablePayload = variables
       .filter((v) => !isContextField(v.questionText ?? ""))
       .map((v) => {
         const raw = variableValues[v.id] ?? "";
         let value: string;
         if (isDescriptionField(v.questionText ?? "")) {
-          value = raw.trim();
+          value = (descriptionValues[v.id] ?? raw).trim();
         } else if (isDateTimeField(v) && raw.trim()) {
           const utcMs = datetimeLocalWallTimeToUtcMs(raw.trim(), userTimeZone);
           value = utcMs != null ? new Date(utcMs).toISOString() : raw.trim();
@@ -669,7 +692,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     productId,
     selectedCatalogId,
     selectedCatalogItemId,
-    isCreatePending: isCreatePending || isNavigatingAfterCreate,
+    isCreatePending:
+      isCreatePending ||
+      isNavigatingAfterCreate ||
+      inlineImages.isUploadingImages,
   });
 
   if (
@@ -819,6 +845,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
               onAttachmentClick={handleAttachmentClick}
               onAttachmentRemove={handleAttachmentRemove}
               userTimeZone={userTimeZone}
+              onImageUpload={inlineImages.onImageUpload}
             />
           </div>
         )}
@@ -845,7 +872,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit || isInitialLoading || deploymentProductsLoading}
           >
-            {isCreatePending
+            {inlineImages.isUploadingImages
+              ? "Uploading images..."
+              : isCreatePending
               ? "Creating..."
               : isNavigatingAfterCreate
                 ? "Opening request..."

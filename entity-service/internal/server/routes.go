@@ -760,8 +760,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		storedAttachmentSvc := service.NewStoredAttachmentService(
 			storedAttachmentRepo,
 			service.StoredAttachmentLimits{
-				MaxBytes:       cfg.AttachmentMaxBytes,
-				InlineMaxBytes: cfg.InlineImageMaxBytes,
+				MaxBytes:            cfg.AttachmentMaxBytes,
+				InlineMaxBytes:      cfg.InlineImageMaxBytes,
+				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
 			},
 		)
 		// Comments created or edited from here on attach the images they show.
@@ -1424,6 +1425,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 	default:
 		activeChangeRequestSvc = service.NewChangeRequestService(changeRequestRepo, userRepo)
 	}
+	activeChangeRequestSvc = service.WithChangeRequestInlineImageLinker(activeChangeRequestSvc, inlineImageLinker)
 	changeRequestHandler := handler.NewChangeRequestHandler(activeChangeRequestSvc)
 
 	timeCardRepo := repository.NewTimeCardRepository(repository.NewScoped(db))

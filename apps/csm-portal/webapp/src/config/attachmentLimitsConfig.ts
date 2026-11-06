@@ -20,8 +20,8 @@ const BYTES_PER_MB = 1024 * 1024;
 /** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 100 MiB). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
 
-/** Largest comment image (entity-service `INLINE_IMAGE_MAX_BYTES` default, 10 MiB). */
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 10;
+/** Most inline-image bytes in one comment or description (25 MiB). */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = 25;
 
 /** A positive number of megabytes from a number or numeric string, else `fallback`. */
 function megabytes(raw: unknown, fallback: number): number {
@@ -49,10 +49,11 @@ export function entityAttachmentMaxBytes(): number {
 }
 
 /**
- * Largest image, in bytes, that can be pasted or inserted into a comment, from
+ * Most bytes of inline images one comment or description may hold in total (so
+ * also the largest single image), from
  * `window.config.CSM_PORTAL_INLINE_IMAGE_MAX_MB` (same rules as above, default
  * {@link DEFAULT_INLINE_IMAGE_MAX_MB}; keep it equal to the entity-service's
- * `INLINE_IMAGE_MAX_BYTES`). Read at call time.
+ * limit). Read at call time.
  */
 export function inlineImageMaxBytes(): number {
   return (

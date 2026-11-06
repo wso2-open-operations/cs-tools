@@ -89,6 +89,7 @@ import {
   escapeHtml,
   htmlToPlainText,
 } from "@features/support/utils/richTextEditor";
+import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
 import PiiWarningDialog from "@features/support/components/dialogs/PiiWarningDialog";
 import UploadAttachmentModal from "@features/support/components/case-details/attachments-tab/UploadAttachmentModal";
@@ -267,6 +268,9 @@ export default function CreateCasePage(): JSX.Element {
   const { mutate: postCase, isPending: isCreatePending } = usePostCase();
   const { upload: storedUpload } = useStoredAttachmentUpload();
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
+  // Images in the description stay local previews until submit, when they are
+  // uploaded to the project before the case is created.
+  const inlineImages = useInlineImageUploads({ projectId });
   // Set synchronously when a submit starts, so a second click before the pending
   // state renders cannot create the case twice.
   const isSubmittingRef = useRef(false);
@@ -1020,7 +1024,13 @@ export default function CreateCasePage(): JSX.Element {
 
   const handleSubmit = async (e?: FormEvent, bypassPii = false) => {
     e?.preventDefault();
-    if (!projectId || isNavigatingAfterCreate || isCreatePending) return;
+    if (
+      !projectId ||
+      isNavigatingAfterCreate ||
+      isCreatePending ||
+      inlineImages.isUploadingImages
+    )
+      return;
     if (isProjectLoading || isProjectFeaturesLoading) return;
 
     const titlePlain = htmlToPlainText(title).trim();
@@ -1110,6 +1120,17 @@ export default function CreateCasePage(): JSX.Element {
 
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
+
+    // The description's images go first: the case request carries `/<id>`
+    // references to them. If one fails nothing is created and the form keeps
+    // its content; images that did upload are not sent again on a retry.
+    const imageUpload = await inlineImages.uploadImages(description);
+    if (!imageUpload.ok) {
+      isSubmittingRef.current = false;
+      showError(`${imageUpload.message} The case was not created; try again.`);
+      return;
+    }
+    payload.description = imageUpload.html;
 
     postCase(payload, {
       onSuccess: async (data) => {
@@ -1484,6 +1505,7 @@ export default function CreateCasePage(): JSX.Element {
                 isSecurityReport={isSecurityReport}
                 excludeS0={excludeS0}
                 isSeverityDisabled={forceSeverityS4}
+                onImageUpload={inlineImages.onImageUpload}
               />
 
               <WatchListSection
@@ -1508,6 +1530,7 @@ export default function CreateCasePage(): JSX.Element {
                     isCreatePending ||
                     isNavigatingAfterCreate ||
                     isPreparingAttachments ||
+                    inlineImages.isUploadingImages ||
                     !projectId ||
                     !selectedDeploymentId ||
                     deploymentProductsLoading ||
@@ -1515,7 +1538,9 @@ export default function CreateCasePage(): JSX.Element {
                     isFormBlockedByMissingOptions
                   }
                 >
-                  {isPreparingAttachments
+                  {inlineImages.isUploadingImages
+                    ? "Uploading images..."
+                    : isPreparingAttachments
                     ? "Uploading attachments..."
                     : isCreatePending
                       ? isSecurityReport

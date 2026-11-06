@@ -106,3 +106,33 @@ func TestStoredAttachments_MapEntityErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestStoredAttachments_CommentImageTarget(t *testing.T) {
+	const pid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	for name, tc := range map[string]struct {
+		body string
+		want int
+	}{
+		"parentId only":       {`{"type":"comment","parentId":"` + pid + `","name":"a.png","sizeBytes":1}`, http.StatusCreated},
+		"projectId only":      {`{"type":"comment","projectId":"` + pid + `","name":"a.png","sizeBytes":1}`, http.StatusCreated},
+		"both":                {`{"type":"comment","parentId":"` + pid + `","projectId":"` + pid + `"}`, http.StatusBadRequest},
+		"neither":             {`{"type":"comment","name":"a.png","sizeBytes":1}`, http.StatusBadRequest},
+		"empty projectId":     {`{"type":"comment","projectId":""}`, http.StatusBadRequest},
+		"bad projectId":       {`{"type":"comment","projectId":"nope"}`, http.StatusBadRequest},
+		"null ids":            {`{"type":"comment","parentId":null,"projectId":null}`, http.StatusBadRequest},
+		"work_item untouched": {`{"type":"work_item","parentId":"p","name":"a","sizeBytes":1}`, http.StatusCreated},
+	} {
+		f := &fakeStoredEntity{}
+		h := NewStoredAttachmentHandler(f)
+		rec := serveStoredAtt(h.InitiateUpload, http.MethodPost, "/attachments/upload", tc.body, true)
+		if rec.Code != tc.want {
+			t.Errorf("%s: status %d, want %d (%s)", name, rec.Code, tc.want, rec.Body.String())
+		}
+		if tc.want == http.StatusCreated && string(f.upload) != tc.body {
+			t.Errorf("%s: body not forwarded untouched: %q", name, f.upload)
+		}
+		if tc.want != http.StatusCreated && f.upload != nil {
+			t.Errorf("%s: entity was called", name)
+		}
+	}
+}

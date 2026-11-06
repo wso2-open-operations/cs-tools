@@ -24,6 +24,9 @@ import CsmCaseCreatePage from "./CsmCaseCreatePage";
 const navigateMock = vi.fn();
 const showErrorMock = vi.fn();
 const mutateAsyncMock = vi.fn();
+const uploadImagesMock = vi.fn();
+const releaseImagesMock = vi.fn();
+const attachmentUploadMock = vi.fn();
 let locationState: CreateRelatedCaseNavState | undefined;
 
 vi.mock("react-router", () => ({
@@ -41,8 +44,16 @@ vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   usePostCsmCaseAttachment: () => ({ mutateAsync: vi.fn() }),
 }));
+vi.mock("@features/csm-cases/api/usePreCreateInlineImages", () => ({
+  usePreCreateInlineImages: (projectId: string | undefined) => ({
+    onImageUpload: projectId ? () => "blob:test" : undefined,
+    uploadImages: uploadImagesMock,
+    release: releaseImagesMock,
+  }),
+  preCreateImagesErrorMessage: (err: unknown) => (err instanceof Error ? err.message : "failed"),
+}));
 vi.mock("@features/csm-cases/api/uploadAttachmentsToCase", () => ({
-  uploadAttachmentsToCase: () => Promise.resolve([]),
+  uploadAttachmentsToCase: (...args: unknown[]) => attachmentUploadMock(...args),
   failedUploadsMessage: () => "upload failed",
 }));
 vi.mock("@features/csm-projects/api/useGetProject", () => ({
@@ -68,15 +79,18 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
   default: ({
     value,
     onChange,
+    onImageUpload,
     ariaRequired,
   }: {
     value: string;
     onChange: (v: string) => void;
+    onImageUpload?: unknown;
     ariaRequired?: boolean;
   }) => (
     <textarea
       aria-label="Description body"
       aria-required={ariaRequired ? "true" : undefined}
+      data-images={onImageUpload ? "on" : "off"}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -171,6 +185,8 @@ const rows = (): string[] =>
 beforeEach(() => {
   vi.clearAllMocks();
   mutateAsyncMock.mockResolvedValue({ id: "case-1" });
+  uploadImagesMock.mockImplementation((html: string) => Promise.resolve(html));
+  attachmentUploadMock.mockResolvedValue([]);
   locationState = undefined;
   contactsByProject = { "proj-a": [JANE, JOHN, INVITED, SECURITY], "proj-b": [] };
   internalUsers = [{ id: "u-1", firstName: "Eve", lastName: "Engineer", email: "eve.engineer@example.com" }];
@@ -341,5 +357,57 @@ describe("CsmCaseCreatePage watch list", () => {
     contactsByProject["proj-a"] = undefined;
     renderPrefilledForm();
     expect(screen.getByRole("button", { name: "Create case" })).toBeDisabled();
+  });
+});
+
+describe("CsmCaseCreatePage description images", () => {
+  const submit = () => fireEvent.click(screen.getByRole("button", { name: "Create case" }));
+
+  it("uploads the description's images first, creates the case with the rewritten HTML, then the attachments", async () => {
+    const order: string[] = [];
+    uploadImagesMock.mockImplementation(async () => {
+      order.push("images");
+      return '<p>Help</p><img src="/img-1">';
+    });
+    mutateAsyncMock.mockImplementation(async () => {
+      order.push("create");
+      return { id: "case-1" };
+    });
+    attachmentUploadMock.mockImplementation(async () => {
+      order.push("attachments");
+      return [];
+    });
+    renderPrefilledForm();
+
+    submit();
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalled());
+    expect(uploadImagesMock).toHaveBeenCalledWith("<p>Help</p>");
+    expect(mutateAsyncMock.mock.calls[0][0]).toMatchObject({ description: '<p>Help</p><img src="/img-1">' });
+    expect(order).toEqual(["images", "create", "attachments"]);
+    expect(releaseImagesMock).toHaveBeenCalledWith("<p>Help</p>");
+  });
+
+  it("creates nothing, shows the error and keeps the form when an image cannot be uploaded", async () => {
+    uploadImagesMock.mockRejectedValueOnce(new Error("Image storage is busy."));
+    renderPrefilledForm();
+
+    submit();
+
+    await waitFor(() => expect(showErrorMock).toHaveBeenCalledWith("Image storage is busy."));
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
+    expect(attachmentUploadMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Description body")).toHaveValue("<p>Help</p>");
+
+    // Retrying goes through the same upload step and then creates the case.
+    submit();
+    await waitFor(() => expect(mutateAsyncMock).toHaveBeenCalledTimes(1));
+    expect(uploadImagesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not offer image insertion while no project is chosen", () => {
+    render(<CsmCaseCreatePage />);
+    expect(screen.getByLabelText("Description body")).toHaveAttribute("data-images", "off");
   });
 });

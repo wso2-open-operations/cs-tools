@@ -1733,4 +1733,16 @@ type AttachmentUploadCleanupService interface {
 // comment. Best effort: it never returns an error, and a nil linker is a no-op.
 type InlineImageLinker interface {
 	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
+	// ValidateCommentImages refuses (a *apierror.ValidationError) a comment that
+	// shows more than MaxInlineImagesPerContent of its author's own images, or
+	// more than the total size limit together. Call it BEFORE saving.
+	ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error
+	// ValidateDescriptionImages checks, BEFORE a record is created, the images its
+	// rich-text description shows: at most MaxInlineImagesPerContent, within the
+	// total size limit, each a COMPLETE draft uploaded to projectID by authorEmail,
+	// and none still a blob: URL. A *apierror.ValidationError otherwise.
+	ValidateDescriptionImages(ctx context.Context, projectID, authorEmail, html string) error
+	// LinkDescriptionImages, right after the record exists, links the drafts its
+	// description shows to it. Best effort: it never returns an error.
+	LinkDescriptionImages(ctx context.Context, workItemID, projectID, authorEmail, html string)
 }

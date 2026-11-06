@@ -416,7 +416,7 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
   it("tells the user a comment can have at most 5 images when the editor refuses another", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
     fireEvent.click(screen.getByRole("button", { name: "paste-too-many" }));
-    expect(screen.getByText("A comment can have at most 5 images.")).toBeInTheDocument();
+    expect(screen.getByText("A comment or description can have at most 5 images.")).toBeInTheDocument();
   });
 
   it("gives the editor no image uploader without a case id, so images are embedded as before", () => {

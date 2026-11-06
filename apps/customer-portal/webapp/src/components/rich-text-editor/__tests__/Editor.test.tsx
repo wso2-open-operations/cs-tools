@@ -183,12 +183,12 @@ describe("Editor", () => {
       }
     });
 
-    it("does not upload an image over the 10 MB default and reports it", () => {
+    it("does not upload an image over the 25 MB default and reports it", () => {
       const onImageUpload = vi.fn();
       const onPasteError = vi.fn();
       renderEditor({ onImageUpload, onPasteError });
       const big = new File(["x"], "big.png", { type: "image/png" });
-      Object.defineProperty(big, "size", { value: 10 * 1024 * 1024 + 1 });
+      Object.defineProperty(big, "size", { value: 25 * 1024 * 1024 + 1 });
       paste(screen.getByTestId("case-description-editor"), big);
       expect(onImageUpload).not.toHaveBeenCalled();
       expect(onPasteError).toHaveBeenCalledWith("size");
@@ -269,6 +269,52 @@ describe("Editor", () => {
         expect(onImageUpload).toHaveBeenCalledTimes(5);
         expect(onPasteError).toHaveBeenCalledTimes(1);
         expect(onPasteError).toHaveBeenCalledWith("count");
+      });
+
+      describe("total size cap", () => {
+        const sized = (mb: number) => {
+          const f = new File(["x"], "sized.png", { type: "image/png" });
+          Object.defineProperty(f, "size", { value: Math.floor(mb * 1024 * 1024) });
+          return f;
+        };
+        beforeEach(() => {
+          (window as unknown as { config?: unknown }).config = {
+            CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 10,
+          };
+        });
+        afterEach(() => {
+          (window as unknown as { config?: unknown }).config = undefined;
+        });
+
+        it("refuses an image that takes the draft over the total", async () => {
+          const onImageUpload = pending();
+          const onPasteError = vi.fn();
+          renderEditor({ onImageUpload, onPasteError });
+          paste(input(), sized(6));
+          await waitFor(() => expect(images()).toHaveLength(1));
+          paste(input(), sized(5));
+          expect(onPasteError).toHaveBeenCalledWith("size");
+          expect(onImageUpload).toHaveBeenCalledTimes(1);
+          await Promise.resolve();
+          expect(images()).toHaveLength(1);
+        });
+
+        it("accepts an image that fits exactly and frees the size when one is removed", async () => {
+          const onImageUpload = pending();
+          const onPasteError = vi.fn();
+          renderEditor({ onImageUpload, onPasteError });
+          paste(input(), sized(6));
+          await waitFor(() => expect(images()).toHaveLength(1));
+          paste(input(), sized(4));
+          await waitFor(() => expect(images()).toHaveLength(2));
+          expect(onPasteError).not.toHaveBeenCalled();
+
+          fireEvent.click(screen.getAllByLabelText("Remove image")[0]);
+          await waitFor(() => expect(images()).toHaveLength(1));
+          paste(input(), sized(6));
+          await waitFor(() => expect(images()).toHaveLength(2));
+          expect(onPasteError).not.toHaveBeenCalled();
+        });
       });
 
       it("does not cap images without onImageUpload", async () => {

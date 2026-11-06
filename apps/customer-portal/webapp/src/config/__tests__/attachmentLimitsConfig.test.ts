@@ -24,6 +24,7 @@ import {
   formatLimit,
   formatLimitMb,
   inlineImageMaxBytes,
+  inlineImagesTotalMaxBytes,
 } from "@config/attachmentLimitsConfig";
 
 const MIB = 1024 * 1024;
@@ -36,10 +37,12 @@ describe("attachment size limits", () => {
 
   it("default to entity-service's own defaults", () => {
     expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-    expect(inlineImageMaxBytes()).toBe(10 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(25 * MIB);
+    expect(inlineImageMaxBytes()).toBe(25 * MIB);
     setConfig({});
     expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-    expect(inlineImageMaxBytes()).toBe(10 * MIB);
+    expect(inlineImagesTotalMaxBytes()).toBe(25 * MIB);
+    expect(inlineImageMaxBytes()).toBe(25 * MIB);
   });
 
   it("read a number or a numeric string, at call time", () => {
@@ -50,12 +53,23 @@ describe("attachment size limits", () => {
     expect(entityAttachmentMaxBytes()).toBe(2.5 * MIB);
   });
 
+  it("prefers the total key over the older per-image key", () => {
+    setConfig({
+      CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: "30",
+    });
+    expect(inlineImagesTotalMaxBytes()).toBe(30 * MIB);
+    setConfig({ CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: "bad", CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5 });
+    expect(inlineImagesTotalMaxBytes()).toBe(5 * MIB);
+  });
+
   it.each([0, -1, "0", "-3", "abc", "", "  ", null, true, NaN, Infinity])(
     "fall back to the default for %j",
     (bad) => {
       setConfig({ CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: bad, CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: bad });
       expect(entityAttachmentMaxBytes()).toBe(100 * MIB);
-      expect(inlineImageMaxBytes()).toBe(10 * MIB);
+      expect(inlineImagesTotalMaxBytes()).toBe(25 * MIB);
+    expect(inlineImageMaxBytes()).toBe(25 * MIB);
     },
   );
 

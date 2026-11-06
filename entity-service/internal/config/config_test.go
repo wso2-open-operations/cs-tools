@@ -1422,13 +1422,18 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 }
 
 func TestLoad_AttachmentSizeLimits(t *testing.T) {
-	for _, k := range []string{"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES"} {
+	for _, k := range []string{"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES"} {
 		t.Setenv(k, "")
 	}
 	c := Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
-		t.Errorf("size limits = %d / %d, want 100 MiB / 10 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 || c.InlineImagesTotalMaxBytes != 25<<20 {
+		t.Errorf("size limits = %d / %d / %d, want 100 MiB / 25 MiB / 25 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes, c.InlineImagesTotalMaxBytes)
 	}
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
+	if c = Load(); c.InlineImagesTotalMaxBytes != 2097152 {
+		t.Errorf("INLINE_IMAGES_TOTAL_MAX_BYTES override not read: %d", c.InlineImagesTotalMaxBytes)
+	}
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "")
 
 	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
 	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
@@ -1441,7 +1446,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
 	t.Setenv("INLINE_IMAGE_MAX_BYTES", "-5")
 	c = Load()
-	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 10<<20 {
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 {
 		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
 }
