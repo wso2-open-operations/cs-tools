@@ -38,6 +38,7 @@ import {
   Upload,
 } from "@wso2/oxygen-ui-icons-react";
 import { useState, useMemo, type JSX } from "react";
+import DownloadProgressBar from "@components/download-progress/DownloadProgressBar";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -359,9 +360,16 @@ function DocumentRow({
           justifyContent: "space-between",
           gap: 1,
           p: 2,
+          position: "relative",
+          overflow: "hidden",
           bgcolor: (theme) => alpha(theme.palette.grey[500], 0.05),
         }}
       >
+        {isDownloadLoading && (
+          <DownloadProgressBar
+            progress={storedDownload.downloadProgressOf(doc.id)}
+          />
+        )}
         {/* file icon + info + optional description */}
         <Box
           sx={{
