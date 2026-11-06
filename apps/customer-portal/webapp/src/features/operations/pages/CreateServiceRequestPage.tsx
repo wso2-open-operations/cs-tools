@@ -229,6 +229,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const requestDetailsSectionRef = useRef<HTMLDivElement>(null);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [watchList, setWatchList] = useState<string[]>([]);
 
   const { data: projectDetails, isLoading: isProjectLoading } =
@@ -621,6 +622,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       const srNumber = (data as { number?: string }).number;
 
       if (attachments.length > 0) {
+        setIsUploadingAttachments(true);
         const uploadPromise = uploadServiceRequestAttachments({
           caseId: data.id,
           attachments,
@@ -652,6 +654,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
         }
       }
 
+      setIsUploadingAttachments(false);
+
       if (projectId) {
         await triggerPostCreationApiCalls(
           authFetch,
@@ -675,6 +679,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       );
     } catch (error) {
       setIsNavigatingAfterCreate(false);
+      setIsUploadingAttachments(false);
       const msg =
         error instanceof Error && error.message.trim()
           ? error.message.trim()
@@ -872,7 +877,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit || isInitialLoading || deploymentProductsLoading}
           >
-            {inlineImages.isUploadingImages || isCreatePending
+            {inlineImages.isUploadingImages || isUploadingAttachments || isCreatePending
               ? "Creating..."
               : isNavigatingAfterCreate
                 ? "Opening request..."
