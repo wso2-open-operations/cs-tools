@@ -440,7 +440,7 @@ describe("ActivityCommentInput", () => {
         screen.getByRole("button", { name: "report too many images" }),
       );
       expect(
-        await screen.findByText("A comment can have at most 5 images."),
+        await screen.findByText("A comment or description can have at most 5 images."),
       ).toBeInTheDocument();
     });
   });

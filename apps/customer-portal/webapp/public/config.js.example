@@ -161,10 +161,12 @@ window.config = {
   //   (zero, negative, text) uses the default.
   // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25,
 
-  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB  (optional — default: 10)
-  //   Largest image pasted or inserted into a comment, in MB. Match entity-service's
-  //   INLINE_IMAGE_MAX_BYTES. Same value rules as above.
-  // CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 25)
+  //   Most the images pasted or inserted into one comment or description may add
+  //   up to, in MB (at most 5 images each). Same value rules as above. The older
+  //   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB still works when this is not set, but
+  //   now means the same total, not a per-image limit.
+  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
 
   // CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM  (optional — default: 4)
   //   How many 8 MiB ranges of one attachment download are fetched at the same
