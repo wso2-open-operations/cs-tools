@@ -1027,8 +1027,8 @@ startup on an ambiguous pair.
 
 | Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back |
-| `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 16 MiB, index within the size limit) |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; the body is forwarded untouched |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
 | `GET /attachments/download/{id}/content?type=` | read | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
