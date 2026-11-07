@@ -17,6 +17,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import { resetFeatureStatesForTests } from "@config/featureFlags";
 import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
 
@@ -45,8 +46,13 @@ function renderTimeline(overrides: Partial<Parameters<typeof SlaImpactTimeline>[
   );
 }
 
+function setOverrides(value: unknown): void {
+  window.config = { CSM_PORTAL_FEATURE_OVERRIDES: value } as unknown as typeof window.config;
+  resetFeatureStatesForTests();
+}
+
 afterEach(() => {
-  window.config = {} as typeof window.config;
+  setOverrides(undefined);
 });
 
 describe("SlaImpactTimeline", () => {
@@ -80,19 +86,28 @@ describe("SlaImpactTimeline", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("is shown when the flag is true and when it is absent", () => {
-    window.config = { CSM_PORTAL_SLA_TIMELINE_ENABLED: true } as unknown as typeof window.config;
+  it("is shown by default and when the override says enabled", () => {
     const { unmount } = renderTimeline();
     expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
     unmount();
-    window.config = {} as typeof window.config;
+    setOverrides({ "support.case-sla-timeline": "enabled" });
     renderTimeline();
     expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
   });
 
-  it("renders nothing when the flag is explicitly false", () => {
-    window.config = { CSM_PORTAL_SLA_TIMELINE_ENABLED: false } as unknown as typeof window.config;
+  it("renders nothing when the feature is overridden to hidden", () => {
+    setOverrides({ "support.case-sla-timeline": "hidden" });
     const { container } = renderTimeline();
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("also renders nothing for wip, and ignores unrelated overrides", () => {
+    setOverrides({ "support.case-sla-timeline": "wip" });
+    const { container, unmount } = renderTimeline();
+    expect(container).toBeEmptyDOMElement();
+    unmount();
+    setOverrides({ operations: "hidden" });
+    renderTimeline();
+    expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
   });
 });

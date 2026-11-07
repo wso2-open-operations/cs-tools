@@ -29,7 +29,7 @@ import {
   User,
 } from "@wso2/oxygen-ui-icons-react";
 import type { JSX, ReactNode } from "react";
-import { isSlaTimelineEnabled } from "@config/slaTimelineConfig";
+import { isFeatureEnabled, SLA_TIMELINE_FEATURE_ID } from "@config/featureFlags";
 import { formatAbsoluteForUser } from "@utils/dateTime";
 import {
   buildSlaImpactTimeline,
@@ -175,7 +175,8 @@ interface SlaImpactTimelineProps {
  * Chronological timeline of what moved a case's SLA: switches between the
  * customer and WSO2 side, fix ETA changes, workaround, severity, closure and
  * reopening. Rendered after the SLA table on the case SLA tab. Hidden when
- * the `CSM_PORTAL_SLA_TIMELINE_ENABLED` runtime flag is explicitly false.
+ * the `support.case-sla-timeline` feature is overridden to `hidden` (or `wip`)
+ * in `CSM_PORTAL_FEATURE_OVERRIDES`.
  */
 export function SlaImpactTimeline({
   entries,
@@ -183,7 +184,7 @@ export function SlaImpactTimeline({
   isError,
   onRetry,
 }: SlaImpactTimelineProps): JSX.Element | null {
-  if (!isSlaTimelineEnabled()) return null;
+  if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
 
   const events = buildSlaImpactTimeline(entries ?? []);
 
