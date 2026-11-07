@@ -142,7 +142,17 @@ func (c *Client) Report(ctx context.Context, olderThanDays int) (Report, error) 
 func (c *Client) OpenBeforeYesterday(ctx context.Context) (Report, error) {
 	q := url.Values{}
 	q.Set("variant", "open-before-yesterday")
-	return c.fetch(ctx, q)
+	rep, err := c.fetch(ctx, q)
+	if err != nil {
+		return Report{}, err
+	}
+	// An entity-service that predates the variant ignores the parameter and
+	// answers with the age-based report. Mailing that to this report's
+	// audience would be wrong, so refuse it.
+	if rep.Variant != "open-before-yesterday" {
+		return Report{}, fmt.Errorf("longopenreport: entity-service answered variant %q, not open-before-yesterday (deploy entity-service first)", rep.Variant)
+	}
+	return rep, nil
 }
 
 func (c *Client) fetch(ctx context.Context, q url.Values) (Report, error) {

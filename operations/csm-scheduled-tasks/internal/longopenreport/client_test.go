@@ -144,3 +144,12 @@ func TestOpenBeforeYesterday(t *testing.T) {
 		t.Errorf("account names = %q, %q", rep.Cases[0].AccountName, rep.Cases[1].AccountName)
 	}
 }
+
+func TestOpenBeforeYesterdayRejectsOlderEntityService(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"olderThanDays":30,"cases":[],"onboardingCases":[],"casesTotal":0}`))
+	})
+	if _, err := c.OpenBeforeYesterday(context.Background()); err == nil {
+		t.Fatal("a response without the variant must be refused")
+	}
+}
