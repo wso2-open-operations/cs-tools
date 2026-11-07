@@ -480,6 +480,12 @@ container-scoped role the container must already exist: the backend only checks 
 separate Go module required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
 `.../acknowledge`).
 
+**Releasing `libs/azblobstore`:** a change to the library reaches this backend only through a version tag. Merge the
+library change to `main`, tag a commit on `main` as `libs/azblobstore/vX.Y.Z` and push the tag, then run
+`go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z` and `go mod tidy` here and commit `go.mod`
+and `go.sum`. `apps/csm-portal/backend` and `apps/customer-portal/backend-v2` must move to the same version together. The
+full steps are in `libs/azblobstore/README.md`, "Releasing a new version". Never move or delete a published tag.
+
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
 A pasted screenshot in a comment or case/incident/change-request description is stored as a real,
