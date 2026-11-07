@@ -66,7 +66,7 @@ func (noopSCIMUserClient) SearchUser(context.Context, string) (*scim.UserInfo, e
 	return nil, nil
 }
 
-func (noopSCIMUserClient) UpdateUserPhone(context.Context, string, string) (*string, error) {
+func (noopSCIMUserClient) UpdateUserPhone(context.Context, string, string, string) (*string, error) {
 	return nil, nil
 }
 
