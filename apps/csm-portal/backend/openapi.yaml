@@ -4898,9 +4898,11 @@ paths:
         message says why), refuses, or names a team that cannot be filtered
         (unknown, in the wrong field, or with no group configured; the message
         says which); 502 when its answer is not
-        a usable dashboard or the model cannot be reached; 504 when it takes
-        too long; 503 when generation is unavailable (no sample loaded, or the
-        AI integration service has no model key). 413 when the dashboard being edited is over
+        a usable dashboard, was cut off (its own message), or the model cannot
+        be reached; 504 when it takes too long; 503 when generation is
+        unavailable (no sample loaded, or the AI integration service has no
+        model key), or when the AI side's usage limit is reached (the model
+        gateway's 429; its own message, unlike the caller's limit below). 413 when the dashboard being edited is over
         64 KiB as a definition (the size a saved one may be), checked before
         any model call. 429, with Retry-After in seconds, when the caller has
         started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)

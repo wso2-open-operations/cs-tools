@@ -43,13 +43,14 @@ type fixedCatalogue struct {
 func (c fixedCatalogue) Text() string { return c.text }
 
 // fakeGateway answers every Messages call with one text block and the given
-// stop reason (or with status/body when status is set), and records the last
-// request body.
+// stop reason (or with status/body/header when status is set), and records
+// the last request body.
 type fakeGateway struct {
 	text       string
 	stopReason string
 	status     int
 	body       string
+	header     map[string]string
 	delay      time.Duration
 	calls      atomic.Int32
 	lastBody   atomic.Value
@@ -72,6 +73,9 @@ func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if f.status != 0 {
+		for k, v := range f.header {
+			w.Header().Set(k, v)
+		}
 		w.WriteHeader(f.status)
 		_, _ = io.WriteString(w, f.body)
 		return
@@ -236,6 +240,9 @@ func TestGenerateDeclined(t *testing.T) {
 	}
 }
 
+// TestGenerateErrors: each way a call gives no candidates is its own error: a
+// refusal, a reply cut off, a reply with no JSON, a gateway error, a timeout
+// (also a deadline), and a gateway 429 (the usage limit).
 func TestGenerateErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -247,6 +254,7 @@ func TestGenerateErrors(t *testing.T) {
 		{"no JSON", &fakeGateway{text: "I cannot help with that."}, ErrUnusable},
 		{"gateway error", &fakeGateway{status: http.StatusUnauthorized, body: `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`}, ErrCall},
 		{"timeout", &fakeGateway{text: validGenerated, delay: 2 * time.Second}, ErrCall},
+		{"usage limit", usageLimitGateway(), ErrUsageLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := newTestGenerator(t, tc.gw, fixedCatalogue{text: "C"}, 300*time.Millisecond).
@@ -258,6 +266,38 @@ func TestGenerateErrors(t *testing.T) {
 				t.Errorf("timeout err = %v, want a deadline", err)
 			}
 		})
+	}
+}
+
+// usageLimitGateway answers every call 429, as the gateway does over a
+// request, token or spend limit; retry-after-ms 0 keeps the SDK's one retry
+// quick.
+func usageLimitGateway() *fakeGateway {
+	return &fakeGateway{status: http.StatusTooManyRequests, header: map[string]string{"retry-after-ms": "0"},
+		body: `{"type":"error","error":{"type":"rate_limit_error","message":"limit reached"}}`}
+}
+
+// TestGenerateUsageLimitIsOnlyA429: a 429 is ErrUsageLimit (and still
+// ErrCall), after the SDK's one retry; an overloaded gateway (529, 503) and
+// an auth failure are ordinary call failures, not a usage limit.
+func TestGenerateUsageLimitIsOnlyA429(t *testing.T) {
+	gw := usageLimitGateway()
+	_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "p"})
+	if !errors.Is(err, ErrUsageLimit) || !errors.Is(err, ErrCall) {
+		t.Errorf("429: err = %v, want ErrUsageLimit and ErrCall", err)
+	}
+	if n := gw.calls.Load(); n != 2 {
+		t.Errorf("429: %d gateway calls, want 2 (the SDK retries once)", n)
+	}
+	for _, status := range []int{529, http.StatusServiceUnavailable, http.StatusUnauthorized} {
+		gw := &fakeGateway{status: status, header: map[string]string{"retry-after-ms": "0"},
+			body: `{"type":"error","error":{"type":"overloaded_error","message":"busy"}}`}
+		_, err := newTestGenerator(t, gw, fixedCatalogue{text: "C"}, 5*time.Second).
+			Generate(context.Background(), Request{Prompt: "p"})
+		if !errors.Is(err, ErrCall) || errors.Is(err, ErrUsageLimit) {
+			t.Errorf("%d: err = %v, want ErrCall and not ErrUsageLimit", status, err)
+		}
 	}
 }
 
@@ -326,6 +366,7 @@ func TestGenerateLogsTokenUsageForEveryOutcome(t *testing.T) {
 		{"cut off", &fakeGateway{text: `{"displayName":`, stopReason: "max_tokens"}, "truncated", 5000},
 		{"no JSON", &fakeGateway{text: "I cannot help with that."}, "unusable", 5000},
 		{"gateway error", &fakeGateway{status: http.StatusUnauthorized, body: `{"type":"error","error":{"type":"authentication_error","message":"bad key"}}`}, "failed", 0},
+		{"usage limit", usageLimitGateway(), "usage_limit", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := captureLog(t)

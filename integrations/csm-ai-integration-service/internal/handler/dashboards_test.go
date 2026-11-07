@@ -149,6 +149,9 @@ func (timeoutErr) Temporary() bool { return true }
 
 var _ net.Error = timeoutErr{}
 
+// TestGenerateMapsEveryError: every generator error answers its own status and
+// code (the usage limit 429 usage_limit, apart from model_call_failed), with
+// a fixed message that never carries upstream detail.
 func TestGenerateMapsEveryError(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
@@ -161,6 +164,7 @@ func TestGenerateMapsEveryError(t *testing.T) {
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, context.DeadlineExceeded), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: %w", dashboards.ErrCall, timeoutErr{}), http.StatusGatewayTimeout, CodeTimeout},
 		{fmt.Errorf("%w: 401 bad key", dashboards.ErrCall), http.StatusBadGateway, CodeModelCallFailed},
+		{fmt.Errorf("%w: %w: 429 bad key", dashboards.ErrCall, dashboards.ErrUsageLimit), http.StatusTooManyRequests, CodeUsageLimit},
 		{fmt.Errorf("something else"), http.StatusInternalServerError, CodeInternal},
 	} {
 		status, out := post(t, &DashboardHandler{generator: &fakeGenerator{err: tc.err}}, `{"prompt":"p"}`)
