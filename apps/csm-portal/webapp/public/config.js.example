@@ -89,6 +89,9 @@ window.config = {
     "customers": "wip",
     "admin": "wip",
     "admin.user-management.users": "enabled",
+    // Embedded (non-navigation) feature: the SLA impact timeline under the SLA
+    // table on a case. Shown unless set to "hidden" (or "wip").
+    // "support.case-sla-timeline": "hidden",
   },
 
   // Mock data: when true, data hooks short-circuit to seeded fixtures instead
