@@ -138,6 +138,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [catalogItemId, setCatalogItemId] = useState("");
   // Variable answers, keyed by variable id.
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // `hasSr` is precomputed by the backing data source, so an ineligible

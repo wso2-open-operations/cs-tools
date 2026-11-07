@@ -1107,24 +1107,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/search:
+  /attachments/delete:
     post:
-      summary: Search attachments linked to a case.
-      operationId: postAttachmentsSearch
+      summary: >-
+        Delete a stored attachment (soft delete; the file is removed from storage). Only
+        the person who uploaded it may, and not once the work item is closed.
+      operationId: postStoredAttachmentsDelete
       requestBody:
-        description: Attachment search payload.
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AttachmentSearchPayload'
+              type: object
+              additionalProperties: false
+              required: [type, id]
+              properties:
+                type:
+                  type: string
+                  enum: [work_item, comment, deployment]
+                  description: Which kind of attachment (the table it lives in).
+                id:
+                  type: string
+                  format: uuid
       responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentSearchResponse'
+        "204":
+          description: Deleted (also when it already was).
         "400":
           description: BadRequest
           content:
@@ -1143,14 +1150,182 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "413":
-          description: RequestEntityTooLarge
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "409":
+          description: Conflict
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
+  /attachments/download/{id}/content:
+    get:
+      summary: Download an attachment.
+      description: >
+        Streams the file as an attachment of an opaque type: always sent with
+        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
+        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
+        so an interrupted download can resume (206, 416 when past the end). Access
+        is checked by entity-service on every request.
+      operationId: getAttachmentsDownloadIdContent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: The file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: A range of the file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "410":
+          description: Gone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "416":
+          description: RangeNotSatisfiable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+  /attachments/inline/{id}/content:
+    get:
+      summary: >-
+        Show a comment's inline image. Streamed through this backend from the entity
+        service, which checks access on every request, so the browser never talks to
+        the file store and no link exists that could be forwarded. The type is one of
+        image/png, image/jpeg, image/gif, image/webp (anything else is sent as
+        application/octet-stream), with X-Content-Type-Options nosniff,
+        Content-Security-Policy "default-src 'none'; sandbox", Content-Disposition
+        inline and Cache-Control private, max-age=300.
+      operationId: getStoredInlineImageContent
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the inline image attachment.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The image bytes.
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+            image/gif:
+              schema: {type: string, format: binary}
+            image/webp:
+              schema: {type: string, format: binary}
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
           content:
             application/json:
               schema:
@@ -1255,6 +1430,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /attachments/upload/{id}/chunks:
+    get:
+      summary: List the chunks already stored for an upload.
+      description: Lets an interrupted upload carry on from the first missing chunk.
+      operationId: getAttachmentsUploadIdChunks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: Ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunkBytes:
+                    type: integer
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index:
+                          type: integer
+                        size:
+                          type: integer
+        "400":
+          description: BadRequest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: NotFound
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "503":
+          description: ServiceUnavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /attachments/upload/{id}/chunks/{index}:
     put:
       summary: Send one chunk of an upload.
@@ -1341,174 +1589,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-  /attachments/upload/{id}/chunks:
-    get:
-      summary: List the chunks already stored for an upload.
-      description: Lets an interrupted upload carry on from the first missing chunk.
-      operationId: getAttachmentsUploadIdChunks
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: type
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [work_item, comment, deployment]
-      responses:
-        "200":
-          description: Ok
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  chunkBytes:
-                    type: integer
-                  chunks:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        index:
-                          type: integer
-                        size:
-                          type: integer
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-  /attachments/download/{id}/content:
-    get:
-      summary: Download an attachment.
-      description: >
-        Streams the file as an attachment of an opaque type: always sent with
-        `Content-Disposition: attachment`, `Content-Type: application/octet-stream`
-        and `X-Content-Type-Options: nosniff`. Supports a single `Range: bytes=a-b`
-        so an interrupted download can resume (206, 416 when past the end). Access
-        is checked by entity-service on every request.
-      operationId: getAttachmentsDownloadIdContent
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: type
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [work_item, comment, deployment]
-      responses:
-        "200":
-          description: The file
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "206":
-          description: A range of the file
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        "410":
-          description: Gone
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "416":
-          description: RangeNotSatisfiable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
   /attachments/upload/{id}/confirm:
     post:
       summary: Finish an upload after its chunks were sent. Only the uploader can confirm.
       description: >
-        With ATTACHMENT_STORAGE_MODE=backend the body also carries `chunks`, the
-        number of 8 MiB chunks sent with `PUT /attachments/upload/{id}/chunks/{index}`
-        (at least 1, and at most the number a file of the allowed size can have);
-        the backend assembles them into the file and confirms its stored size and
-        type. In sftpgo mode the body is just `type`.
+        The body carries `type` and `chunks`, the number of 8 MiB chunks sent with
+        `PUT /attachments/upload/{id}/chunks/{index}` (at least 1, and at most the
+        number a file of the allowed size can have); the backend assembles them into
+        the file and confirms its stored size and type.
       operationId: postStoredAttachmentsUploadConfirm
       parameters:
         - name: id
@@ -1585,107 +1673,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
-  /attachments/delete:
+  /attachments/search:
     post:
-      summary: >-
-        Delete a stored attachment (soft delete; the file is removed from storage). Only
-        the person who uploaded it may, and not once the work item is closed.
-      operationId: postStoredAttachmentsDelete
+      summary: Search attachments linked to a case.
+      operationId: postAttachmentsSearch
       requestBody:
+        description: Attachment search payload.
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [type, id]
-              properties:
-                type:
-                  type: string
-                  enum: [work_item, comment, deployment]
-                  description: Which kind of attachment (the table it lives in).
-                id:
-                  type: string
-                  format: uuid
-      responses:
-        "204":
-          description: Deleted (also when it already was).
-        "400":
-          description: BadRequest
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "403":
-          description: Forbidden
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "409":
-          description: Conflict
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "500":
-          description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-
-  /attachments/inline/{id}/content:
-    get:
-      summary: >-
-        Show a comment's inline image. Streamed through this backend from the entity
-        service, which checks access on every request, so the browser never talks to
-        the file store and no link exists that could be forwarded. The type is one of
-        image/png, image/jpeg, image/gif, image/webp (anything else is sent as
-        application/octet-stream), with X-Content-Type-Options nosniff,
-        Content-Security-Policy "default-src 'none'; sandbox", Content-Disposition
-        inline and Cache-Control private, max-age=300.
-      operationId: getStoredInlineImageContent
-      parameters:
-        - name: id
-          in: path
-          description: UUID of the inline image attachment.
-          required: true
-          schema:
-            type: string
-            format: uuid
+              $ref: '#/components/schemas/AttachmentSearchPayload'
       responses:
         "200":
-          description: The image bytes.
+          description: Ok
           content:
-            image/png:
-              schema: {type: string, format: binary}
-            image/jpeg:
-              schema: {type: string, format: binary}
-            image/gif:
-              schema: {type: string, format: binary}
-            image/webp:
-              schema: {type: string, format: binary}
-            application/octet-stream:
-              schema: {type: string, format: binary}
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentSearchResponse'
         "400":
           description: BadRequest
           content:
@@ -1704,20 +1709,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
-        "404":
-          description: NotFound
+        "413":
+          description: RequestEntityTooLarge
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorPayload'
-        "503":
-          description: ServiceUnavailable
           content:
             application/json:
               schema:
@@ -20272,7 +20271,7 @@ components:
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report; requires `subject` and `description`. Its files are uploaded after the case exists, with `POST /attachments/upload`.
+            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -20309,6 +20308,11 @@ components:
           items:
             $ref: '#/components/schemas/CaseVariable'
           description: Required for `service_request` type.
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseAttachmentPayload'
+          description: Required for `security_report_analysis` type (at least one entry).
         relatedCaseId:
           type: string
           format: uuid
@@ -25233,6 +25237,17 @@ components:
         value:
           type: string
           description: Answer/value for the variable.
+
+    CaseAttachmentPayload:
+      type: object
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          description: File name including extension.
+        file:
+          type: string
+          description: Base64-encoded file content.
 
     CatalogItemRef:
       type: object

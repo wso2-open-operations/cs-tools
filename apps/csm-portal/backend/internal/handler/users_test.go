@@ -1095,7 +1095,7 @@ func TestCreateUser(t *testing.T) {
 				return []byte(`{}`), nil
 			},
 		}
-		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), false, nil)
+		h := NewUsersHandler(&mockSCIMClient{}, entityClient, testDirectory(t), nil)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/users",
 			strings.NewReader(`{"firstName":"Jane","email":"jane@example.com","grantRoles":["cs_engineer"]}`)))
 		w := httptest.NewRecorder()
@@ -1121,7 +1121,7 @@ func TestCreateUser(t *testing.T) {
 				return nil
 			},
 		}
-		h := NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil).
+		h := NewUsersHandler(scimClient, entityClient, testDirectory(t), nil).
 			WithGrantableRoles([]GrantableRole{{Key: "cs_engineer", RoleID: "role-1"}})
 		r := withUser(httptest.NewRequest(http.MethodPost, "/users",
 			strings.NewReader(`{"firstName":"Jane","email":"jane@wso2.com","grantRoles":["cs_engineer"]}`)))
@@ -1299,7 +1299,7 @@ func TestGrantUserRoles(t *testing.T) {
 	grantable := []GrantableRole{{Key: "cs_engineer", RoleID: "role-cs-engineer"}, {Key: "escalator", RoleID: "role-escalator"}}
 
 	newHandler := func(scimClient *mockSCIMClient, entityClient *mockEntityUserClient) *UsersHandler {
-		return NewUsersHandler(scimClient, entityClient, testDirectory(t), false, nil).WithGrantableRoles(grantable)
+		return NewUsersHandler(scimClient, entityClient, testDirectory(t), nil).WithGrantableRoles(grantable)
 	}
 
 	t.Run("requires authenticated user", func(t *testing.T) {

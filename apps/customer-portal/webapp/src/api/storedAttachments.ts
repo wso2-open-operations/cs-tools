@@ -382,46 +382,7 @@ export async function downloadStoredAttachment(
   authFetch: AuthFetch,
   input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
 ): Promise<void> {
-  if (isBackendAttachmentStorage()) {
-    await downloadFromBackend(authFetch, input);
-    return;
-  }
-  const link = await requestAttachmentLink(authFetch, {
-    type: input.type,
-    id: input.id,
-    purpose: "download",
-  });
-  if (!link) {
-    throw new ApiError(404, "Not Found", "Attachment not found.");
-  }
-  if (!link.available || !link.url) {
-    throw new ApiError(
-      link.reason === "STORAGE_UNAVAILABLE" ? 503 : 410,
-      "Unavailable",
-      unavailableMessage(link.reason),
-    );
-  }
-
-  let blob: Blob;
-  try {
-    blob = await fetchLinkBlob(link.url);
-  } catch {
-    const fresh = await requestAttachmentLink(authFetch, {
-      type: input.type,
-      id: input.id,
-      purpose: "download",
-    });
-    if (!fresh?.available || !fresh.url) {
-      throw new ApiError(
-        410,
-        "Unavailable",
-        unavailableMessage(fresh?.reason),
-      );
-    }
-    blob = await fetchLinkBlob(fresh.url);
-  }
-  saveBlobAs(blob, link.name || input.name || "attachment");
-  input.onSaved?.("started");
+  await downloadFromBackend(authFetch, input);
 }
 
 /** Step 1 of an upload: records the attachment and returns its id and the size limit. */

@@ -106,14 +106,6 @@ type storedAttachmentService struct {
 	shares *shareLimiter
 }
 
-// sharesPerMinute is the per-caller link budget: the configured one, else the default.
-func sharesPerMinute(l StoredAttachmentLimits) int {
-	if l.SharesPerCallerPerMinute > 0 {
-		return l.SharesPerCallerPerMinute
-	}
-	return maxSharesPerCallerPerMinute
-}
-
 // NewStoredAttachmentService constructs a StoredAttachmentService.
 //
 // There is no AccessService here on purpose. Who may see an attachment, or add
@@ -280,21 +272,7 @@ func (s *storedAttachmentService) InitiateUpload(ctx context.Context, req domain
 		Number:       row.Number,
 		ExpiresAt:    s.now().Add(abandonedUploadAge),
 		MaxBytes:     limit,
-	}
-	if tus {
-		// Creating the TUS upload spends the share's one use; the chunks that
-		// follow do not need the share, so a resume after expiry still works.
-		resp.UploadMethod = domain.UploadMethodTUS
-		resp.UploadURL = s.store.ChunkedUploadURL()
-		resp.ShareID = shareID
-		resp.Path = "/" + tusStagedName
-		resp.ChunkSize = s.limits.ChunkSizeBytes
-		return resp, nil
-	}
-	resp.UploadMethod = domain.UploadMethodMultipart
-	resp.UploadURL = s.store.UploadURL(shareID)
-	resp.FieldName = "filenames"
-	return resp, nil
+	}, nil
 }
 
 // ConfirmUpload implements StoredAttachmentService.

@@ -208,6 +208,28 @@ func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 	return svc
 }
 
+// WithSLAEngine attaches the CSM-native SLA clock engine to an
+// already-constructed CaseService built via the plain NewCaseService (which
+// has no slaEngine parameter at all -- unlike NewCaseServiceWithSNWriteback,
+// which already takes one). Without this, s.slaEngine is always nil on this
+// path, so CreateCase never registers a case's SLA clocks and UpdateCase
+// never revises them on a severity change -- a real, reported gap: a case
+// created under plain DATA_SOURCE=postgres (no ServiceNow mirror at all) got
+// no SLA tracking whatsoever, from creation onward, regardless of its
+// severity. Same post-construction wiring shape as WithCSEngineerRole, for
+// the same reason -- optional, nil-safe to omit (every slaEngine call site in
+// this file already tolerates s.slaEngine == nil), and every existing
+// NewCaseService call site (60+, every test, every other DataSource branch
+// in routes.go) keeps working completely unchanged. slaEngine may itself be
+// nil (config.CSMSLAEngineEnabled == false, or no database configured at
+// all) -- that's the normal "engine turned off" case, not an error.
+func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.slaEngine = slaEngine
+	}
+	return svc
+}
+
 // WithCaseVolumeTrendCache attaches the optional Redis-backed per-day cache
 // CaseVolumeTrend reads through to an already-constructed CaseService. Same
 // post-construction wiring shape as WithProductCategoryEnforcement/
@@ -757,6 +779,26 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
+	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
+	// same restriction snCaseService.CreateCase applies (see its own
+	// comment and that var's own doc comment for which types are covered
+	// and why). Best-effort and nil-safe: s.slaEngine is nil
+	// when WithSLAEngine was never wired in (e.g. CSM_SLA_ENGINE_ENABLED=
+	// false, or no database configured at all), and a missing/failed clock
+	// registration must never fail case creation, which has already
+	// succeeded by this point. req.Severity/req.ProjectID are used directly
+	// rather than a GetCaseByID re-fetch (unlike snCaseService's own
+	// registerCaseSLAClocksEvent, which needs one because ServiceNow's
+	// create response doesn't echo these back) -- this is a native Postgres
+	// insert, so the request just written already carries both. A real,
+	// reported gap this closes: a case created under plain
+	// DATA_SOURCE=postgres (no ServiceNow mirror at all) got no SLA
+	// tracking whatsoever from creation onward, regardless of severity,
+	// until/unless its severity happened to change later (which calls
+	// ReviseCaseClocks, registering clocks as a side effect).
+	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
+		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
+	}
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
 		// the token validateCreateWatchList already accepted.

@@ -148,29 +148,17 @@ export default function CaseDetailsAttachmentsPanel({
 
   const handleDownload = async (att: CaseAttachment) => {
     try {
-      if (entityAttachments) {
-        try {
-          await storedDownload.downloadStoredAttachment({
-            type: "work_item",
-            id: att.id,
-            name: att.name,
-            size: att.size,
-            onSaved: (outcome) =>
-              showSuccess(
-                outcome === "saved"
-                  ? `Downloaded ${att.name}.`
-                  : `Download of ${att.name} started.`,
-              ),
-          });
-          return;
-        } catch (storedError) {
-          // Not held by entity-service (older attachment): use the existing download.
-          if (!isNotFoundError(storedError)) throw storedError;
-        }
-      }
-      await downloadAttachment({
+      await storedDownload.downloadStoredAttachment({
+        type: "work_item",
         id: att.id,
         name: att.name,
+        size: att.size,
+        onSaved: (outcome) =>
+          showSuccess(
+            outcome === "saved"
+              ? `Downloaded ${att.name}.`
+              : `Download of ${att.name} started.`,
+          ),
       });
     } catch (error) {
       const message =
@@ -288,7 +276,6 @@ export default function CaseDetailsAttachmentsPanel({
                     deleteTooltip={deleteTooltip}
                     hideDescription
                     isDownloadLoading={
-                      (isDownloading && downloadingId === att.id) ||
                       storedDownload.isDownloadingId(att.id)
                     }
                     downloadProgress={storedDownload.downloadProgressOf(att.id)}

@@ -225,13 +225,6 @@ window.config = {
   // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
   // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
 
-  // Where attachment files live. "sftpgo" (default): the browser sends and
-  // fetches files with SFTPGo share links. "backend": the portal backend holds the
-  // files in Azure Blob Storage, so uploads go to it in 8 MiB chunks and
-  // downloads stream from it, with no storage address exposed. Must match the
-  // backend's ATTACHMENT_STORAGE_MODE.
-  // CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
-
   // How many 8 MiB ranges of one attachment download are fetched at the same
   // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a
   // time. A number or numeric string; anything else uses the default.

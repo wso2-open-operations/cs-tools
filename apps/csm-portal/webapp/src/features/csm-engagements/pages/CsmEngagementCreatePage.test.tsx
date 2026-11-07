@@ -75,8 +75,18 @@ vi.mock("@features/csm-cases/components/ProjectSelectionField", () => ({
   ),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+  }) => (
+    <textarea
+      aria-label="editor"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 // CreateSecurityReportPage imports BackendApiError from the real API client
@@ -91,12 +101,6 @@ vi.mock("@api/backend/client", () => ({
       this.status = status;
     }
   },
-}));
-
-vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
-  ),
 }));
 
 import CsmEngagementCreatePage from "@features/csm-engagements/pages/CsmEngagementCreatePage";

@@ -40,6 +40,7 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
 import type { ImageUploadHandler } from "@components/rich-text-editor/localImageUpload";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {

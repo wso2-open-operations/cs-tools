@@ -20,7 +20,6 @@ import {
   DEFAULT_DOWNLOAD_PARALLELISM,
   downloadParallelism,
   downloadToDiskEnabled,
-  LEGACY_ATTACHMENT_MAX_BYTES,
   entityAttachmentMaxBytes,
   formatMegabytes,
   formatSizeLimit,

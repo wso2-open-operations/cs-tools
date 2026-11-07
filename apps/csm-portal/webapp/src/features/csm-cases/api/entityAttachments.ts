@@ -15,7 +15,6 @@
 // under the License.
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
-import { isBackendAttachmentStorage } from "@config/entityAttachmentsConfig";
 import { downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadToDisk";
@@ -57,6 +56,8 @@ export const WORK_ITEM_ATTACHMENT_TYPE: EntityAttachmentType = "work_item";
 export interface EntityUploadStart {
   attachmentId: string;
   number: string;
+  uploadUrl?: string;
+  fieldName?: string;
   expiresAt: string;
   maxBytes: number;
 }
@@ -70,7 +71,7 @@ export interface EntityConfirmedAttachment {
   status: string;
 }
 
-/** Shown when a user has made too many attachment requests in a minute (HTTP 429). */
+/** Shown when a user has made too many link requests in a minute (HTTP 429). */
 export const ENTITY_ATTACHMENT_RATE_LIMIT_MESSAGE =
   "Too many attachment requests. Please wait a minute and try again.";
 
@@ -107,56 +108,6 @@ export class EntityUploadConfirmError extends Error {
     this.type = type;
     this.cause = cause;
   }
-}
-
-/** `POST /attachments/download` for one attachment. `undefined` = no such row. */
-export async function requestDownloadLink(
-  api: BackendApi,
-  type: EntityAttachmentType,
-  id: string,
-  purpose: EntityLinkPurpose,
-): Promise<EntityAttachmentLink | undefined> {
-  const response = await api.post<
-    { type: EntityAttachmentType; ids: string[]; purpose: EntityLinkPurpose },
-    EntityAttachmentLinksResponse
-  >("/attachments/download", { type, ids: [id], purpose });
-  return response?.links?.find((l) => l.id.toLowerCase() === id.toLowerCase());
-}
-
-export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
-
-/**
- * Asks for a link and fetches its bytes straight away. If SFTPGo refuses the
- * link (it may have gone, or been used), asks for a fresh one and tries once
- * more. Returns `undefined` when entity-service has no such attachment or its
- * file is not stored there (`NOT_STORED`), so a caller can fall back to the
- * older flow; any other unavailable reason throws.
- *
- * `firstLink` is a link the caller already requested (and found usable); it is
- * used for the first attempt instead of asking again.
- */
-export async function fetchEntityAttachmentBlob(
-  api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; purpose: EntityLinkPurpose },
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
-  firstLink?: EntityAttachmentLink,
-): Promise<{ blob: Blob; link: EntityAttachmentLink } | undefined> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const link =
-      attempt === 0 && firstLink ? firstLink : await requestDownloadLink(api, args.type, args.id, args.purpose);
-    if (!link) return undefined;
-    if (!link.available || !link.url) {
-      if (link.reason === "NOT_STORED") return undefined;
-      throw new EntityAttachmentUnavailableError(link.reason ?? "");
-    }
-    // Plain cross-origin request to SFTPGo: no cookies, no app credentials.
-    const response = await fetchImpl(link.url, { method: "GET", credentials: "omit" });
-    if (response.ok) return { blob: await response.blob(), link };
-    if (attempt === 1) {
-      throw new Error(`Could not download ${link.name} (HTTP ${response.status}).`);
-    }
-  }
-  return undefined;
 }
 
 /** Tries to read one range of a download before giving up. */
@@ -237,6 +188,18 @@ async function readRange(
 }
 
 /**
+ * Fetches an attachment's file as a blob, for an inline preview. The portal
+ * backend checks access and streams it; any failure (no such attachment, its
+ * file is not stored, a removed file) throws with the backend's message.
+ */
+export function fetchEntityAttachmentBlob(
+  api: BackendApi,
+  args: { type: EntityAttachmentType; id: string },
+): Promise<Blob> {
+  return api.getBlob(attachmentContentPath(args));
+}
+
+/**
  * Downloads an attachment through the portal backend, which checks access and
  * streams the file under its own name. Resolves `false` on a 404 so the caller can
  * use the older flow. The first 8 MiB are asked for with a
@@ -252,7 +215,7 @@ async function readRange(
  * which runs once the download ends, saying whether it was written to the picked
  * file (`saved`) or handed to the browser (`started`).
  */
-export function fetchEntityAttachmentBlob(
+async function downloadFromBackend(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
   save: (blob: Blob, name: string) => void,
@@ -343,26 +306,16 @@ async function readAndStore(
 }
 
 /**
- * Downloads an attachment under its own name (SFTPGo names the file after its
- * stored path, which carries the attachment number). Resolves `false` when
- * entity-service does not hold the file, so the caller can use the older flow.
- * With the backend holding the files it streams through the backend instead of
- * using a link.
+ * Downloads an attachment under its own name through the portal backend, which
+ * streams it. Resolves `false` on a 404.
  */
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
   args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
-  fetchImpl?: FetchLike,
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
-  if (isBackendAttachmentStorage()) return downloadFromBackend(api, args, save);
-  const first = await requestDownloadLink(api, args.type, args.id, "download");
-  const got = await fetchEntityAttachmentBlob(api, { ...args, purpose: "download" }, fetchImpl, first);
-  if (!got) return false;
-  save(got.blob, got.link.name);
-  args.onSaved?.("started");
-  return true;
+  return downloadFromBackend(api, args, save);
 }
 
 /** `POST /attachments/upload/{id}/confirm`. Safe to repeat. */
@@ -370,7 +323,7 @@ export async function confirmEntityAttachment(
   api: BackendApi,
   type: EntityAttachmentType,
   attachmentId: string,
-  /** Number of chunks sent. */
+  /** Number of chunks sent, when the portal backend holds the files. */
   chunks?: number,
 ): Promise<EntityConfirmedAttachment> {
   return api.post<{ type: EntityAttachmentType; chunks?: number }, EntityConfirmedAttachment>(
@@ -401,7 +354,7 @@ export type UploadEntityAttachmentArgs = UploadEntityAttachmentTarget & {
   name?: string;
   /** Overall progress, 0-100. */
   onProgress?: (percent: number) => void;
-  /** Aborts a running chunked upload. */
+  /** Aborts a running chunked upload (a single multipart POST is not interrupted). */
   signal?: AbortSignal;
 };
 

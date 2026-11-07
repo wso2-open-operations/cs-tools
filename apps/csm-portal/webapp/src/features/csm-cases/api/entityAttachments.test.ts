@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@api/backend/client", () => {
   class BackendApiError extends Error {
@@ -251,6 +251,9 @@ describe("chunked upload and streamed download", () => {
     }) as unknown as File;
   const args = (file: File) => ({ type: "work_item" as const, parentId: "wi-1", file });
 
+  beforeEach(() => {
+    window.config = {} as typeof window.config;
+  });
   afterEach(() => {
     vi.useRealTimers();
     window.config = {} as typeof window.config;
@@ -328,7 +331,7 @@ describe("chunked upload and streamed download", () => {
     );
     const post = vi.fn();
     const save = vi.fn();
-    const done = await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, undefined, save);
+    const done = await downloadEntityAttachment(apiWith(vi.fn(), post, getResponse), { type: "work_item", id: ID }, save);
     expect(done).toBe(true);
     expect(getResponse).toHaveBeenCalledTimes(1);
     expect(getResponse.mock.calls[0][0]).toBe(`/attachments/download/${ID}/content?type=work_item`);
@@ -375,7 +378,7 @@ describe("chunked upload and streamed download", () => {
     // The later ranges answer first.
     const server = rangeServer(size, (start) => (start === 0 ? 0 : 40 - (start / DOWNLOAD_RANGE_BYTES) * 10));
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, undefined, save);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
     expect(server.getResponse).toHaveBeenCalledTimes(4);
     const blob = save.mock.calls[0][0] as Blob;
     expect(blob.size).toBe(size);
@@ -398,11 +401,10 @@ describe("chunked upload and streamed download", () => {
     const size = DOWNLOAD_RANGE_BYTES * 6;
     for (const [configured, expected] of [[undefined, 4], [2, 2], ["1", 1]] as const) {
       (window as unknown as { config: unknown }).config = {
-        CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
         CSM_PORTAL_DOWNLOAD_PARALLELISM: configured,
       };
       const server = rangeServer(size, () => 5);
-      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, undefined, vi.fn());
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, vi.fn());
       expect(server.getResponse).toHaveBeenCalledTimes(6);
       expect(server.peak()).toBeLessThanOrEqual(expected);
       if (expected > 1) expect(server.peak()).toBeGreaterThan(1);
@@ -412,7 +414,7 @@ describe("chunked upload and streamed download", () => {
   it("reads the whole body when the server ignores the Range header", async () => {
     const getResponse = vi.fn().mockResolvedValue(new Response("0123456789", { status: 200 }));
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
     expect(getResponse).toHaveBeenCalledTimes(1);
     expect(await blobText(save.mock.calls[0][0] as Blob)).toBe("0123456789");
     expect(save.mock.calls[0][1]).toBe("attachment");
@@ -430,7 +432,7 @@ describe("chunked upload and streamed download", () => {
       return server.getResponse(path, options);
     });
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
     expect(getResponse).toHaveBeenCalledTimes(3); // first range, the broken one, its retry
     expect((save.mock.calls[0][0] as Blob).size).toBe(size);
   });
@@ -450,7 +452,7 @@ describe("chunked upload and streamed download", () => {
       return server.getResponse(path, options);
     });
     const save = vi.fn();
-    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save);
+    await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
     expect((save.mock.calls[0][0] as Blob).size).toBe(size);
   });
 
@@ -477,7 +479,7 @@ describe("chunked upload and streamed download", () => {
     );
     const save = vi.fn();
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
     expect(save).not.toHaveBeenCalled();
   });
@@ -497,7 +499,7 @@ describe("chunked upload and streamed download", () => {
     });
     const save = vi.fn();
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
     expect(save).not.toHaveBeenCalled();
   });
@@ -511,18 +513,16 @@ describe("chunked upload and streamed download", () => {
     });
     const save = vi.fn();
     await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, undefined, save),
+      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("This attachment was removed.");
     expect(getResponse.mock.calls.length).toBeLessThan(6); // the ranges not yet started never are
     expect(save).not.toHaveBeenCalled();
   });
 
-  it("throws the backend's message for a missing or removed file", async () => {
+  it("reports false on a 404 so the older flow can be tried, and throws for a removed file", async () => {
     const save = vi.fn();
-    const missing = vi.fn().mockRejectedValue(apiError(404, "attachment not found"));
-    await expect(
-      downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, save),
-    ).rejects.toThrow("attachment not found");
+    const missing = vi.fn().mockRejectedValue(apiError(404));
+    expect(await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), missing), { type: "work_item", id: ID }, save)).toBe(false);
     const gone = vi.fn().mockRejectedValue(apiError(410, "This attachment was removed."));
     await expect(
       downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), gone), { type: "work_item", id: ID }, save),
@@ -558,7 +558,6 @@ describe("chunked upload and streamed download", () => {
       downloadEntityAttachment(
         apiWith(vi.fn(), vi.fn(), getResponse),
         { type: "work_item", id: ID, name: "big.bin", ...extra },
-        undefined,
         save,
       );
 
@@ -594,7 +593,6 @@ describe("chunked upload and streamed download", () => {
       await downloadEntityAttachment(
         apiWith(vi.fn(), vi.fn(), server.getResponse),
         { type: "work_item", id: ID, name: "big.bin", onSaved },
-        undefined,
         vi.fn(),
       );
       expect(onSaved).toHaveBeenCalledExactlyOnceWith("saved");
@@ -607,7 +605,6 @@ describe("chunked upload and streamed download", () => {
       await downloadEntityAttachment(
         apiWith(vi.fn(), vi.fn(), server.getResponse),
         { type: "work_item", id: ID, name: "big.bin", onSaved },
-        undefined,
         vi.fn(),
       );
       expect(onSaved).toHaveBeenCalledExactlyOnceWith("started");
@@ -620,7 +617,6 @@ describe("chunked upload and streamed download", () => {
       await downloadEntityAttachment(
         apiWith(vi.fn(), vi.fn(), rangeServer(DOWNLOAD_RANGE_BYTES + 5).getResponse),
         { type: "work_item", id: ID, name: "big.bin", onSaved },
-        undefined,
         vi.fn(),
       );
       expect(onSaved).not.toHaveBeenCalled();
@@ -693,7 +689,7 @@ describe("chunked upload and streamed download", () => {
     });
 
     it("skips the dialog when CSM_PORTAL_DOWNLOAD_TO_DISK is false", async () => {
-      window.config = { CSM_PORTAL_ATTACHMENT_STORAGE_MODE: "backend", CSM_PORTAL_DOWNLOAD_TO_DISK: false } as typeof window.config;
+      window.config = { CSM_PORTAL_DOWNLOAD_TO_DISK: false } as typeof window.config;
       const disk = fakeDisk();
       const server = rangeServer(DOWNLOAD_RANGE_BYTES + 5);
       const save = vi.fn();

@@ -44,7 +44,11 @@ vi.mock("@features/csm-cases/api/usePreCreateInlineImages", () => ({
 vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: postCaseMutateAsyncMock }),
 }));
+// AttachmentsField reads only the size constant from this module, whose hooks pull
+// in the current-user context and, through it, the runtime API config that
+// is absent under vitest (same stub as CreateServiceRequestPage.test.tsx).
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
   usePostCsmCaseAttachment: () => ({ mutateAsync: postAttachmentMutateAsyncMock }),
 }));
 vi.mock("@hooks/useEngineerDisplayName", () => ({

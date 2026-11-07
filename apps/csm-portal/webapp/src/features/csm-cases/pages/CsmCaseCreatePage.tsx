@@ -148,11 +148,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
   );
   const [subject, setSubject] = useState(restored?.subject ?? relatedCaseState?.subject ?? "");
   const [description, setDescription] = useState(restored?.description ?? "");
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>(
-    restored?.attachments ?? [],
-  );
-  const [subject, setSubject] = useState(relatedCaseState?.subject ?? "");
-  const [description, setDescription] = useState("");
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   const descriptionImages = usePreCreateInlineImages(projectId || undefined);
@@ -352,6 +348,8 @@ export default function CsmCaseCreatePage(): JSX.Element {
         ...(watchers.length > 0 && { watchList: watchers.map((w) => w.email) }),
       });
       descriptionImages.release(description);
+      submitted.current = true;
+      draftStore.clear();
       // Files are uploaded to the new case afterwards. A partial failure still
       // lands the case.
       const failed = await uploadAttachmentsToCase(

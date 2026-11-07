@@ -1450,3 +1450,34 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
 }
+
+// TestLoad_LongOpenCasesReportSets pins the long-open cases report's two
+// filter sets: the defaults, comma-list trimming with blanks dropped, and a
+// blank value falling back to the default rather than emptying the set.
+func TestLoad_LongOpenCasesReportSets(t *testing.T) {
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", "")
+	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription", "Cloud Support", "Development Support", "Professional Services"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.LongOpenCasesReportProjectTypes, want)
+	}
+	if want := []string{"migrartion", "migration-assistance"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
+		t.Errorf("default excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	}
+
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " Subscription , ,Cloud Support,")
+	t.Setenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS", "a, b")
+	c = Load()
+	if want := []string{"Subscription", "Cloud Support"}; !reflect.DeepEqual(c.LongOpenCasesReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v (trimmed, blanks dropped)", c.LongOpenCasesReportProjectTypes, want)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(c.LongOpenCasesReportExcludedTags, want) {
+		t.Errorf("excluded tags = %v, want %v", c.LongOpenCasesReportExcludedTags, want)
+	}
+
+	// Only commas and spaces is as good as blank: the default applies.
+	t.Setenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES", " , ,")
+	if got := Load().LongOpenCasesReportProjectTypes; len(got) != 5 {
+		t.Errorf("project types from a blank-only list = %v, want the 5 defaults", got)
+	}
+}

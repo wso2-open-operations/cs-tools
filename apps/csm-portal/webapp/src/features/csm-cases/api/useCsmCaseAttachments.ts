@@ -36,7 +36,6 @@ import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
-import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import {
   DOWNLOAD_STARTED,
   downloadPercent,
@@ -44,10 +43,6 @@ import {
   setAttachmentDownloadProgress,
 } from "@features/csm-cases/api/attachmentDownloadProgress";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
-import { BackendApiError } from "@api/backend/client";
-import { LEGACY_ATTACHMENT_MAX_BYTES } from "@config/attachmentLimitsConfig";
-import { isEntityAttachmentsEnabled } from "@config/entityAttachmentsConfig";
 import {
   deleteEntityAttachment,
   downloadEntityAttachment,
@@ -234,47 +229,26 @@ export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
-  const getContent = useGetCsmCaseAttachmentContent();
-  const { user } = useCurrentUser();
   const { showSuccess } = useSuccessBanner();
   const notify = useCallback(
     (name: string, outcome: DownloadSaveOutcome) =>
       showSuccess(outcome === "saved" ? `Downloaded ${name}.` : `Download of ${name} started.`),
     [showSuccess],
   );
-  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
   const download = useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
-      // Entity-service stored attachment: fetch the one-use link's bytes now and
-      // save them under the attachment's own name. A file entity-service does
-      // not hold (an older attachment) falls through to the existing paths.
-      if (isEntityAttachmentsEnabled()) {
-        const done = await downloadEntityAttachment(api, {
-          type: WORK_ITEM_ATTACHMENT_TYPE,
-          id: attachment.id,
-          name: attachment.filename,
-          size: attachment.size,
-          onSaved: (outcome) => notify(attachment.filename, outcome),
-          onProgress: (received, total) =>
-            setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
-        });
-        if (done) return;
-      }
-      if (sftpgoEnabled) {
-        const { shareUrl } = await api.post<
-          Record<string, never>,
-          BeAttachmentShareResponse
-        >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
-        openForDownload(shareUrl);
-        notify(attachment.filename, "started");
-        return;
-      }
-      const blob = await getContent(attachment);
-      saveBlob(blob, attachment.filename);
-      notify(attachment.filename, "started");
+      await downloadEntityAttachment(api, {
+        type: WORK_ITEM_ATTACHMENT_TYPE,
+        id: attachment.id,
+        name: attachment.filename,
+        size: attachment.size,
+        onSaved: (outcome) => notify(attachment.filename, outcome),
+        onProgress: (received, total) =>
+          setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
+      });
     },
-    [api, getContent, sftpgoEnabled, notify],
+    [api, notify],
   );
 
   // One download of an attachment at a time; its row shows how far it has got.

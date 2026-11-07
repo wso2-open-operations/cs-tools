@@ -233,12 +233,11 @@ describe("storedAttachments", () => {
     });
   });
 
-  describe("with the files held by the portal backend", () => {
+  describe("chunked upload and streamed download", () => {
     const CHUNK = 8 * 1024 * 1024;
     const withMode = () => {
       (window as unknown as { config: unknown }).config = {
         CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-        CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
       };
     };
     const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
@@ -275,6 +274,7 @@ describe("storedAttachments", () => {
     });
 
     it("tries a chunk again after a passing failure", async () => {
+      withMode();
       vi.useFakeTimers();
       try {
         let tries = 0;
@@ -300,6 +300,7 @@ describe("storedAttachments", () => {
     });
 
     it("stops taking new chunks after one fails, and throws that failure", async () => {
+      withMode();
       const started10 = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
       const sent: number[] = [];
       authFetch.mockImplementation(async (url: string) => {
@@ -325,6 +326,7 @@ describe("storedAttachments", () => {
     });
 
     it("does not retry a refusal", async () => {
+      withMode();
       let tries = 0;
       authFetch.mockImplementation(async (url: string) => {
         if (url.endsWith("/attachments/upload")) return json(started, 201);
@@ -474,7 +476,6 @@ describe("storedAttachments", () => {
       ] as const) {
         (window as unknown as { config: unknown }).config = {
           CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-          CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
           CUSTOMER_PORTAL_DOWNLOAD_PARALLELISM: configured,
         };
         const server = rangeServer(size, () => 5);
@@ -598,6 +599,7 @@ describe("storedAttachments", () => {
     });
 
     it("reports 404 so the older flow can be tried, and 410 for a removed file", async () => {
+      withMode();
       authFetch.mockResolvedValueOnce(json({ message: "Not found" }, 404));
       await expect(
         downloadStoredAttachment(authFetch, { type: "work_item", id: "a" }),
@@ -740,7 +742,6 @@ describe("storedAttachments", () => {
       it("skips the dialog when CUSTOMER_PORTAL_DOWNLOAD_TO_DISK is false", async () => {
         (window as unknown as { config: unknown }).config = {
           CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
-          CUSTOMER_PORTAL_ATTACHMENT_STORAGE_MODE: "backend",
           CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: false,
         };
         const disk = fakeDisk();

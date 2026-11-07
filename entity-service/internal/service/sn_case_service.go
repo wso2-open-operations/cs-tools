@@ -1730,23 +1730,6 @@ func (s *snCaseService) applyCustomerReplyStateTransition(ctx context.Context, r
 	})
 }
 
-// applyCustomerAttachmentStateTransition is the attachment counterpart of
-// applyCustomerReplyStateTransition: a customer who uploads a file to a case
-// that is Awaiting Info or Solution Proposed has answered WSO2's request just
-// as surely as one who comments, so the case moves to Waiting on WSO2 the
-// same way (the shared moveToWaitingOnWSO2OnCustomerActivity). Only an
-// attachment on the case itself counts; deployment, incident, change request
-// and conversation attachments never move a case. Best-effort: called after
-// the upload has succeeded, and never fails it.
-func (s *snCaseService) applyCustomerAttachmentStateTransition(ctx context.Context, req domain.CreateAttachmentRequest, attachmentID string) {
-	if req.ReferenceType != domain.ReferenceTypeCase {
-		return
-	}
-	s.moveToWaitingOnWSO2OnCustomerActivity(ctx, req.ReferenceID, "customer attachment", func(ctx context.Context) *domain.UserReference {
-		return s.resolveAttachmentAuthor(ctx, req.ReferenceID, attachmentID)
-	})
-}
-
 // moveToWaitingOnWSO2OnCustomerActivity is the rule shared by a customer's
 // comment and a customer's attachment: when the case is Awaiting Info or
 // Solution Proposed and the activity's author holds one of s.customerRoles,

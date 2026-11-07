@@ -480,6 +480,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /customer-engagements/allocations/search:
+    post:
+      summary: >-
+        Find where an attachment's file is, for a portal backend that will read it.
+        Checks, as the caller, that they
+        may see the attachment and returns its storage key, or a reason there is no
+        file (available false, reason NOT_STORED, FAILED or DELETED). An attachment
+        the caller cannot see is 404. The key is internal: it is for the calling
+        backend and must never be sent to a browser. Counts against the caller's
+        per-minute allowance (60). The response is never cacheable.
+      operationId: locateAttachment
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocateAttachmentRequest'
+      responses:
+        "200":
+          description: The attachment's location, or why it has none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttachmentLocation'
+        "400":
+          description: The type or id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: x-user-id-token is missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such attachment, or the caller may not see it, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: The caller asked for too many locations in a minute; retry shortly.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/inline/{id}/location:
     get:
       summary: >-
@@ -709,6 +767,190 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
           description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /customer-engagements/allocations/search:
+    post:
+      summary: Search customer engagement allocations.
+      description: >
+        Read-only, internal staff only. One page of allocations with their
+        engagement, account and engineer, filtered, sorted (default: newest
+        `startDate` first) and counted. `limit` defaults to 20, at most 50.
+        Registered only when a database pool is configured.
+      operationId: searchEngagementAllocations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchEngagementAllocationsRequest'
+      responses:
+        "200":
+          description: One page of allocations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchEngagementAllocationsResponse'
+        "400":
+          description: Bad request (unknown field, malformed id, date or state, limit above 50).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /customer-engagements/allocations/{id}:
+    get:
+      summary: One customer engagement allocation.
+      description: Read-only, internal staff only.
+      operationId: getEngagementAllocation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: The allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationView'
+        "400":
+          description: The id is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /customer-engagements/allocations/{id}/updates:
+    get:
+      summary: The status updates written against an allocation, newest first.
+      description: Read-only, internal staff only. `limit` defaults to 20, at most 50.
+      operationId: listEngagementAllocationUpdates
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: One page of updates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEngagementAllocationUpdatesResponse'
+        "400":
+          description: Bad id, limit or offset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Post a status update on an allocation, as the engineer allocated.
+      description: >
+        Only the engineer the allocation is for may post: the caller's email
+        (from the user token) is resolved to the platform user record and that
+        id must equal the allocation's engineer. The server sets the author,
+        and stores the update as PUBLISHED, INTERNAL, INDIVIDUAL, WEEKLY, with
+        the Monday (UTC) of the current week as `cycleStartDate`. No
+        notification is sent. `subject` is required, at most 512 characters;
+        `content` is required, at most 8000.
+      operationId: createEngagementAllocationUpdate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEngagementAllocationUpdateRequest'
+      responses:
+        "201":
+          description: The stored update.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementAllocationUpdate'
+        "400":
+          description: Missing or too long subject or content, or a bad id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No valid user token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller is not the engineer allocated, or not internal staff.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No such allocation.
           content:
             application/json:
               schema:
@@ -39559,3 +39801,228 @@ components:
         status:
           type: string
           example: COMPLETE
+    SkillLevel:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        value: {type: integer, nullable: true, description: "Orders the levels of a scale (for example 20, 50, 100)."}
+        description: {type: string, nullable: true}
+        color: {type: string, nullable: true}
+    SkillLevelType:
+      type: object
+      required: [id, name, levels]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        levels:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevel'}
+    SkillLevelTypesResponse:
+      type: object
+      required: [levelTypes]
+      properties:
+        levelTypes:
+          type: array
+          items: {$ref: '#/components/schemas/SkillLevelType'}
+    SkillCategory:
+      type: object
+      required: [id, name, isLowestCategory]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        code: {type: string, nullable: true}
+        categoryPath: {type: string, nullable: true}
+        isLowestCategory: {type: boolean}
+        parentId: {type: string, format: uuid, nullable: true}
+    SkillCategoriesResponse:
+      type: object
+      required: [categories]
+      properties:
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategory'}
+    SkillCategoryRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        categoryPath: {type: string, nullable: true}
+    Skill:
+      type: object
+      required: [id, name, active, categories, createdOn, updatedOn]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        description: {type: string, nullable: true}
+        keywords: {type: string, nullable: true}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        createdOn: {type: string, format: date-time}
+        updatedOn: {type: string, format: date-time}
+    SearchSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the name or keywords, ignoring case."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Skills filed under any of these categories or their descendants.
+        levelTypeId: {type: string, format: uuid}
+        includeInactive: {type: boolean, description: "Include deactivated skills. Default false."}
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    SkillPagination:
+      type: object
+      properties:
+        limit: {type: integer, description: "Page size. Defaults to the endpoint's default; above its maximum is a 400."}
+        offset: {type: integer, description: "Zero-based offset."}
+    SearchSkillsResponse:
+      type: object
+      required: [skills, total, limit, offset]
+      properties:
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/Skill'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    CreateSkillRequest:
+      type: object
+      required: [name, levelTypeId]
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, nullable: true, maxLength: 4000}
+        keywords: {type: string, nullable: true, maxLength: 500}
+        levelTypeId: {type: string, format: uuid}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+        active: {type: boolean, description: "Defaults to true."}
+    UpdateSkillRequest:
+      type: object
+      description: Fields left out are unchanged. At least one is required.
+      properties:
+        name: {type: string, maxLength: 255}
+        description: {type: string, maxLength: 4000, description: "An empty string clears it."}
+        keywords: {type: string, maxLength: 500, description: "An empty string clears it."}
+        active: {type: boolean}
+        levelTypeId: {type: string, format: uuid, description: "Refused (409) while anybody holds a level of the skill."}
+        categoryIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: Replaces the category links as a whole; an empty list removes them all.
+    UserSkill:
+      type: object
+      required: [skillId, skillName, skillActive, categories, inherited, updatedOn]
+      properties:
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        skillActive: {type: boolean}
+        categories:
+          type: array
+          items: {$ref: '#/components/schemas/SkillCategoryRef'}
+        levelTypeId: {type: string, format: uuid, nullable: true}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean, description: "True when the row comes from a group; the person cannot change it."}
+        inheritedFromGroupId: {type: string, format: uuid, nullable: true}
+        updatedOn: {type: string, format: date-time}
+    MySkillsResponse:
+      type: object
+      required: [userId, skills]
+      properties:
+        userId: {type: string, format: uuid, description: "The caller's own user id."}
+        skills:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkill'}
+    AddMySkillRequest:
+      type: object
+      required: [skillId, levelId]
+      properties:
+        skillId: {type: string, format: uuid}
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SetMySkillLevelRequest:
+      type: object
+      required: [levelId]
+      properties:
+        levelId: {type: string, format: uuid, description: "A level of the skill's scale."}
+    SkillHistoryEntry:
+      type: object
+      required: [id, skillId, skillName, changedOn]
+      properties:
+        id: {type: string, format: uuid}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        levelFrom:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null the first time the skill was set.
+        levelTo:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+          description: Null when the skill was removed.
+        changedBy: {type: string, nullable: true, description: "Who made the change."}
+        changedOn: {type: string, format: date-time}
+    SkillHistoryResponse:
+      type: object
+      required: [history, total, limit, offset]
+      properties:
+        history:
+          type: array
+          items: {$ref: '#/components/schemas/SkillHistoryEntry'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}
+    SearchUserSkillsRequest:
+      type: object
+      properties:
+        searchQuery: {type: string, description: "Matches the person's name or email, ignoring case."}
+        userIds:
+          type: array
+          items: {type: string, format: uuid}
+        skillIds:
+          type: array
+          items: {type: string, format: uuid}
+        levelIds:
+          type: array
+          items: {type: string, format: uuid}
+        minLevelValue: {type: integer, nullable: true, description: "Rows whose level value is at least this."}
+        teamKeys:
+          type: array
+          items: {type: string}
+          description: People on any of these teams (registry keys).
+        pagination: {$ref: '#/components/schemas/SkillPagination'}
+    UserSkillRow:
+      type: object
+      required: [userId, teamKeys, skillId, skillName, inherited, updatedOn]
+      properties:
+        userId: {type: string, format: uuid}
+        userName: {type: string, nullable: true}
+        userEmail: {type: string, nullable: true}
+        teamKeys:
+          type: array
+          items: {type: string}
+        skillId: {type: string, format: uuid}
+        skillName: {type: string}
+        level:
+          allOf: [{$ref: '#/components/schemas/SkillLevel'}]
+          nullable: true
+        inherited: {type: boolean}
+        updatedOn: {type: string, format: date-time}
+    SearchUserSkillsResponse:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/UserSkillRow'}
+        total: {type: integer}
+        limit: {type: integer}
+        offset: {type: integer}

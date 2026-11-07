@@ -1083,11 +1083,21 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		snSLASearchDelegate = service.NewServiceNowCaseService(serviceNowIntegrationServiceClient, nil, nil, snUserService, cfg.CustomerRoles, cfg.CSEngineerRole, nil)
 	}
 
-	// The CSM-native SLA engine (internal/service/sla_engine_service.go)
-	// writes its own source='CSM' rows into the "sla" table (migration 0134),
-	// resolving durations from the deterministic, severity-keyed sla_policy
-	// rows migration 0203 seeds -- gated on db the same way slaStatusHandler
-	// above is: nowhere to store a clock at all with no database configured.
+	// This service's own in-process SLA engine (internal/service/sla_engine_service.go)
+	// writes source='CSM' rows into the "sla" table (migration 0134's own
+	// original enum intent -- see repository.SLAEngineRepository's own doc
+	// comment for why this engine's clocks must never carry the
+	// 'SERVICENOW' tag, which belongs to a real, independent external sync
+	// job), resolving durations AND applicability from the real, decoded
+	// sla_policy conditions (migrations 0250-0258). Gated on db (same reason slaStatusHandler
+	// above is -- nowhere to store a clock at all with no database
+	// configured) AND on cfg.CSMSLAEngineEnabled -- an explicit, named
+	// toggle (default true) replacing what used to be an implicit "runs
+	// wherever a database happens to be configured" posture. Every caller of
+	// slaEngineSvc below (NewServiceNowCaseService, NewCaseServiceWithSNWriteback,
+	// and the plain NewCaseService via WithSLAEngine) already tolerates a nil
+	// SLAEngineService, so turning this off is as simple as never
+	// constructing one -- no other code path needs to know why.
 	var slaEngineSvc service.SLAEngineService
 	if db != nil && cfg.CSMSLAEngineEnabled {
 		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))

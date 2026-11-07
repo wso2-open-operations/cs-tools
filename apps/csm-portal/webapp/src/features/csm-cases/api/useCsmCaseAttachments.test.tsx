@@ -47,14 +47,9 @@ vi.mock("@features/csm-cases/api/entityAttachments", () => ({
     err instanceof Error ? err.message : fallback,
 }));
 
-vi.mock("@features/csm-cases/api/attachmentStorageTus", () => ({
-  uploadFileViaTus: uploadFileViaTusMock,
-}));
-
 vi.mock("@context/success-banner/SuccessBannerContext", () => ({
   useSuccessBanner: () => ({ showSuccess: vi.fn() }),
 }));
-vi.mock("@utils/saveBlob", () => ({ saveBlob: vi.fn() }));
 
 import {
   useGetCsmCaseAttachments,
@@ -230,7 +225,16 @@ describe("useDownloadCsmCaseAttachment", () => {
 
     await result.current(ATTACHMENT);
 
-    expect(downloadMock).toHaveBeenCalledWith(expect.anything(), { type: "work_item", id: "att-1" });
+    expect(downloadMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "work_item",
+        id: "att-1",
+        name: ATTACHMENT.filename,
+        size: ATTACHMENT.size,
+        onSaved: expect.any(Function),
+      }),
+    );
   });
 
   it("lets a refusal through", async () => {

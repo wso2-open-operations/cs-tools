@@ -42,9 +42,6 @@ import DownloadProgressIndicator from "@components/download-progress/DownloadPro
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
-import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
-import { useGetAttachment } from "@api/useGetAttachment";
-import { isEntityAttachmentsEnabled } from "@/config/entityAttachmentsConfig";
 import {
   useStoredAttachmentDelete,
   useStoredAttachmentDownload,
@@ -304,35 +301,22 @@ function DocumentRow({
   }, [name]);
 
   const isDownloadLoading =
-    (isDownloading && downloadingId === doc.id) ||
     storedDownload.isDownloadingId(doc.id);
 
   const handleDownloadClick = async () => {
     if (!doc.id) return;
     try {
-      if (entityAttachments) {
-        try {
-          await storedDownload.downloadStoredAttachment({
-            type: "deployment",
-            id: doc.id,
-            name: doc.name,
-            size: sizeBytes > 0 ? sizeBytes : undefined,
-            onSaved: (outcome) =>
-              showSuccess(
-                outcome === "saved"
-                  ? `Downloaded ${name}.`
-                  : `Download of ${name} started.`,
-              ),
-          });
-          return;
-        } catch (storedError) {
-          // Not held by entity-service (older document): use the existing download.
-          if (!isNotFoundError(storedError)) throw storedError;
-        }
-      }
-      await downloadAttachment({
+      await storedDownload.downloadStoredAttachment({
+        type: "deployment",
         id: doc.id,
         name: doc.name,
+        size: sizeBytes > 0 ? sizeBytes : undefined,
+        onSaved: (outcome) =>
+          showSuccess(
+            outcome === "saved"
+              ? `Downloaded ${name}.`
+              : `Download of ${name} started.`,
+          ),
       });
     } catch (error) {
       onError(error instanceof Error ? error.message : "Download failed");
