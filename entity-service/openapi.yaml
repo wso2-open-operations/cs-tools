@@ -4340,7 +4340,7 @@ paths:
         Asgardeo admin acting through apps/csm-portal/backend, when
         reassigning a team lead whose paging number needs to be set) can
         update someone else's profile. Both fields are optional but at least
-        one must be present; phone has the same trim/length/clear rules as
+        one must be present; phone has the same trim/E.164/length/clear rules as
         PATCH /users/me. The incident call-escalation ladder dials this
         number for a team's lead, so fine-grained authorization beyond
         "internal service" (e.g. admin-only) is the caller's own job.
@@ -4367,7 +4367,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PatchUserMeResponse'
         '400':
-          description: Bad request (malformed id, neither field present, or phone too long).
+          description: Bad request (malformed id, neither field present, or phone too long or not E.164).
           content:
             application/json:
               schema:
@@ -20956,10 +20956,12 @@ components:
           type: string
           nullable: true
           description: >
-            The user's phone number. Surrounding whitespace is trimmed and no format is
-            enforced. The 32-character limit applies after trimming; longer is a 400. An
-            empty (or whitespace-only) value clears it. Omit or send null to leave it
-            unchanged. Accepted but ignored by the alternate (non-PostgreSQL) data source.
+            The user's phone number. Surrounding whitespace is trimmed, then a non-empty
+            value must be E.164 (`+` and 8 to 15 digits, first digit not 0, no spaces or
+            separators, e.g. `+14155552671`); anything else, including longer than 32
+            characters, is a 400. Values are not normalized. An empty (or whitespace-only)
+            value clears it. Omit or send null to leave it unchanged. Accepted but ignored
+            by the alternate (non-PostgreSQL) data source.
       anyOf:
         - required: [timeZone]
           properties:
@@ -21320,6 +21322,9 @@ components:
         updatedOn:
           type: string
           format: date-time
+        phone:
+          type: string
+          description: The user's phone number. Omitted when none is stored.
         roles:
           type: array
           uniqueItems: true

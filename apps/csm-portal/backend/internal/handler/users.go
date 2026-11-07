@@ -25,6 +25,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -33,6 +34,24 @@ import (
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/scim"
 )
+
+// phoneE164Re is the accepted phone format: E.164, a plus sign then 8-15 digits
+// with no leading zero. Matches the entity service's own rule.
+var phoneE164Re = regexp.MustCompile(`^\+[1-9]\d{7,14}$`)
+
+// errMsgPhoneFormat is the 400 message for a phone that is not E.164.
+const errMsgPhoneFormat = "phone must be in E.164 format, e.g. +14155552671"
+
+// normalizePhone trims a phone and checks it. A blank result is valid and
+// means "clear the phone"; anything else must be E.164. It never rewrites the
+// value beyond trimming, and the rejected value is never echoed or logged.
+func normalizePhone(raw string) (string, bool) {
+	phone := strings.TrimSpace(raw)
+	if phone != "" && !phoneE164Re.MatchString(phone) {
+		return "", false
+	}
+	return phone, true
+}
 
 // scimClient abstracts the SCIM service operations used by UsersHandler,
 // allowing the handler to be tested independently of the real HTTP client.
@@ -417,7 +436,11 @@ func (h *UsersHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	if payload.PhoneNumber != nil {
 		// Trimmed here, so the stored and echoed value is what was meant. A
 		// blank phone becomes "" and clears it, as an empty one always has.
-		trimmed := strings.TrimSpace(*payload.PhoneNumber)
+		trimmed, valid := normalizePhone(*payload.PhoneNumber)
+		if !valid {
+			writeError(w, http.StatusBadRequest, errMsgPhoneFormat)
+			return
+		}
 		phone = &trimmed
 		entityFields["phone"] = trimmed
 	}
@@ -499,7 +522,12 @@ func (h *UsersHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		entityFields["timeZone"] = *payload.TimeZone
 	}
 	if payload.Phone != nil {
-		entityFields["phone"] = *payload.Phone
+		phone, valid := normalizePhone(*payload.Phone)
+		if !valid {
+			writeError(w, http.StatusBadRequest, errMsgPhoneFormat)
+			return
+		}
+		entityFields["phone"] = phone
 	}
 	entityBody, err := json.Marshal(entityFields)
 	if err != nil {
