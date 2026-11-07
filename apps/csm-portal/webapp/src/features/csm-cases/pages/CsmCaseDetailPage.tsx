@@ -3235,6 +3235,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
             isLoading={isActivityLoading}
             isError={isActivityError}
             onRetry={() => void refetchActivities()}
+            openedAt={c?.createdAt}
+            currentState={c?.state}
           />
         </>
       )}

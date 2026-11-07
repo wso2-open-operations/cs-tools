@@ -56,21 +56,37 @@ afterEach(() => {
 });
 
 describe("SlaImpactTimeline", () => {
-  it("renders events with side label, actor and from -> to values", () => {
+  it("renders one focusable marker per event, named with title, values, actor and time", () => {
     renderTimeline();
-    expect(screen.getByText("Waiting on customer")).toBeInTheDocument();
-    expect(screen.getByText("Customer side")).toBeInTheDocument();
-    expect(screen.getByText("Work in progress")).toBeInTheDocument();
-    expect(screen.getByText("Awaiting info")).toBeInTheDocument();
-    expect(screen.getByText("Workaround provided")).toBeInTheDocument();
-    expect(screen.getAllByText(/Jane Doe/)).toHaveLength(2);
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    const markers = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-label"));
+    expect(markers).toHaveLength(2);
+    const state = screen.getByRole("button", { name: /Waiting on customer/ });
+    expect(state).toHaveAccessibleName(/State: Work in progress to Awaiting info/);
+    expect(state).toHaveAccessibleName(/Jane Doe/);
+    expect(state).toHaveAccessibleName(/2026/);
+    expect(screen.getByRole("button", { name: /Workaround provided/ })).toBeInTheDocument();
+    state.focus();
+    expect(state).toHaveFocus();
+  });
+
+  it("shows a legend for the three track colours", () => {
+    renderTimeline();
+    for (const label of ["WSO2 side", "Customer side", "Closed"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it("reveals the details in a tooltip on hover", async () => {
+    renderTimeline();
+    fireEvent.mouseOver(screen.getByRole("button", { name: /Waiting on customer/ }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Customer side");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Awaiting info");
   });
 
   it("shows a loading state", () => {
     renderTimeline({ isLoading: true, entries: undefined });
     expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
-    expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group")).not.toBeInTheDocument();
   });
 
   it("shows an empty state when nothing SLA-relevant was recorded", () => {

@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, Card, Chip, Skeleton, Typography } from "@wso2/oxygen-ui";
+import { Box, Button, Card, Chip, Skeleton, Tooltip, Typography } from "@wso2/oxygen-ui";
 import {
   ArrowRight,
   CalendarClock,
@@ -28,9 +28,17 @@ import {
   TriangleAlert,
   User,
 } from "@wso2/oxygen-ui-icons-react";
-import type { JSX, ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { isFeatureEnabled, SLA_TIMELINE_FEATURE_ID } from "@config/featureFlags";
-import { formatAbsoluteForUser } from "@utils/dateTime";
+import {
+  formatAbsoluteForUser,
+  formatBackendTimestampForDisplay,
+} from "@utils/dateTime";
+import {
+  layoutSlaTrack,
+  type SlaTrackMarker,
+  type SlaTrackSide,
+} from "@features/csm-sla/utils/slaTrackLayout";
 import {
   buildSlaImpactTimeline,
   type SlaTimelineEvent,
@@ -84,80 +92,214 @@ function eventIcon(event: SlaTimelineEvent): ReactNode {
   }
 }
 
-function TimelineItem({ event, last }: { event: SlaTimelineEvent; last: boolean }): JSX.Element {
-  const tone = eventTone(event);
+const MARKER_PX = 32;
+const LANE_STEP_PX = 44;
+const TRACK_PX = 10;
+const PLOT_INSET_PX = 24;
+
+const TRACK_COLOR: Record<SlaTrackSide, string> = {
+  wso2: "info.main",
+  customer: "warning.main",
+  closed: "text.secondary",
+};
+
+const LEGEND: { side: SlaTrackSide; label: string }[] = [
+  { side: "wso2", label: "WSO2 side" },
+  { side: "customer", label: "Customer side" },
+  { side: "closed", label: "Closed" },
+];
+
+function tickLabel(ms: number, spanMs: number): string {
+  const iso = new Date(ms).toISOString();
+  const options: Intl.DateTimeFormatOptions =
+    spanMs < 2 * 24 * 60 * 60 * 1000
+      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+      : spanMs > 300 * 24 * 60 * 60 * 1000
+        ? { month: "short", day: "numeric", year: "numeric" }
+        : { month: "short", day: "numeric" };
+  return formatBackendTimestampForDisplay(iso, options) ?? "";
+}
+
+function describeChanges(event: SlaTimelineEvent): string[] {
+  return event.changes.map((c) => `${c.label}: ${c.from ?? "None"} to ${c.to ?? "Cleared"}`);
+}
+
+function MarkerTooltip({ event }: { event: SlaTimelineEvent }): JSX.Element {
   const when = formatAbsoluteForUser(event.at);
   return (
-    <Box
-      component="li"
-      sx={{
-        display: "flex",
-        gap: 1.5,
-        position: "relative",
-        pb: last ? 0 : 2.5,
-        // Connector down to the next event's badge.
-        "&::before": last
-          ? undefined
-          : {
-              content: '""',
-              position: "absolute",
-              left: 15,
-              top: 32,
-              bottom: 0,
-              width: 2,
-              bgcolor: "divider",
-            },
-      }}
-    >
-      <Box
-        aria-hidden
-        sx={{
-          width: 32,
-          height: 32,
-          flexShrink: 0,
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          ...(tone === "neutral"
-            ? { bgcolor: "action.selected", color: "text.primary", border: 1, borderColor: "divider" }
-            : { bgcolor: `${tone}.main`, color: `${tone}.contrastText` }),
-        }}
-      >
-        {eventIcon(event)}
-      </Box>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {event.title}
-          </Typography>
-          {event.side ? (
-            <Chip
-              size="small"
-              color={event.side === "customer" ? "warning" : "info"}
-              label={SIDE_LABEL[event.side]}
-            />
-          ) : null}
-        </Box>
-        <Typography variant="caption" color="text.secondary" component="div">
-          {when ? <time dateTime={event.at}>{when}</time> : "Unknown time"}
-          {event.actor ? ` · ${event.actor}` : ""}
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5, py: 0.25 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+        <Typography variant="body2" sx={{ fontWeight: 600 }} color="inherit">
+          {event.title}
         </Typography>
-        {event.changes.map((c) => (
+        {event.side ? (
+          <Chip
+            size="small"
+            color={event.side === "customer" ? "warning" : "info"}
+            label={SIDE_LABEL[event.side]}
+          />
+        ) : null}
+      </Box>
+      {event.changes.map((c) => (
+        <Box key={c.label} sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+          <Typography variant="caption" color="inherit">{`${c.label}:`}</Typography>
+          <Typography variant="caption" color="inherit">{c.from ?? "None"}</Typography>
+          <ArrowRight size={12} aria-label="to" />
+          <Typography variant="caption" sx={{ fontWeight: 600 }} color="inherit">
+            {c.to ?? "Cleared"}
+          </Typography>
+        </Box>
+      ))}
+      <Typography variant="caption" color="inherit">
+        {[when ?? "Unknown time", event.actor].filter(Boolean).join(" · ")}
+      </Typography>
+    </Box>
+  );
+}
+
+function Marker({ marker, trackY }: { marker: SlaTrackMarker; trackY: number }): JSX.Element {
+  const { event, lane, leftPct } = marker;
+  const tone = eventTone(event);
+  const when = formatAbsoluteForUser(event.at);
+  const above = lane % 2 === 1;
+  const offset = lane === 0 ? 0 : (above ? -1 : 1) * Math.ceil(lane / 2) * LANE_STEP_PX;
+  const centerY = trackY + offset;
+  const label = [event.title, ...describeChanges(event), event.actor, when]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <>
+      {lane > 0 ? (
+        <Box
+          aria-hidden
+          sx={{
+            position: "absolute",
+            left: `${leftPct}%`,
+            width: 2,
+            ml: "-1px",
+            top: Math.min(centerY, trackY),
+            height: Math.abs(offset),
+            bgcolor: "divider",
+          }}
+        />
+      ) : null}
+      <Tooltip title={<MarkerTooltip event={event} />} arrow enterTouchDelay={0} leaveTouchDelay={5000}>
+        <Box
+          component="button"
+          type="button"
+          aria-label={label}
+          sx={{
+            position: "absolute",
+            left: `${leftPct}%`,
+            top: centerY - MARKER_PX / 2,
+            ml: `${-MARKER_PX / 2}px`,
+            width: MARKER_PX,
+            height: MARKER_PX,
+            p: 0,
+            borderRadius: "50%",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: 2,
+            borderColor: tone === "neutral" ? "text.secondary" : "background.paper",
+            bgcolor: tone === "neutral" ? "background.paper" : `${tone}.main`,
+            color: tone === "neutral" ? "text.primary" : `${tone}.contrastText`,
+            "&:focus-visible": { outline: "2px solid", outlineColor: "text.primary", outlineOffset: 2 },
+          }}
+        >
+          {eventIcon(event)}
+        </Box>
+      </Tooltip>
+    </>
+  );
+}
+
+function TimelineTrack({
+  entries,
+  openedAt,
+  currentState,
+}: {
+  entries: SlaTimelineEvent[];
+  openedAt?: string;
+  currentState?: string;
+}): JSX.Element {
+  // Fixed per mount: the track's right edge is "now" as of when the tab opened.
+  const [nowMs] = useState(() => Date.now());
+  const layout = layoutSlaTrack({
+    events: entries,
+    openedAt,
+    currentState,
+    nowMs,
+    formatTick: tickLabel,
+  });
+  const aboveLevels = Math.ceil(layout.maxLane / 2);
+  const belowLevels = Math.floor(layout.maxLane / 2);
+  const trackY = aboveLevels * LANE_STEP_PX + MARKER_PX / 2 + 4;
+  const tickY = trackY + belowLevels * LANE_STEP_PX + MARKER_PX / 2 + 8;
+
+  return (
+    <Box sx={{ overflowX: "auto", maxWidth: "100%", pb: 0.5 }}>
+      <Box sx={{ minWidth: layout.baseWidthPx + 2 * PLOT_INSET_PX, px: `${PLOT_INSET_PX}px` }}>
+        <Box
+          role="group"
+          aria-label="SLA events, oldest to newest"
+          sx={{ position: "relative", height: tickY + 28 }}
+        >
           <Box
-            key={c.label}
-            sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap", mt: 0.5 }}
+            aria-hidden
+            sx={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: trackY - TRACK_PX / 2,
+              height: TRACK_PX,
+              borderRadius: TRACK_PX,
+              overflow: "hidden",
+              bgcolor: "divider",
+            }}
           >
-            <Typography variant="body2" color="text.secondary">
-              {`${c.label}:`}
-            </Typography>
-            <Typography variant="body2">{c.from ?? "None"}</Typography>
-            <ArrowRight size={14} aria-label="to" />
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {c.to ?? "Cleared"}
-            </Typography>
+            {layout.segments.map((seg, i) => (
+              <Box
+                key={i}
+                sx={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: `${seg.leftPct}%`,
+                  width: `${seg.widthPct}%`,
+                  bgcolor: TRACK_COLOR[seg.side],
+                }}
+              />
+            ))}
           </Box>
-        ))}
+          {layout.ticks.map((t) => (
+            <Box
+              key={t.leftPct}
+              aria-hidden
+              sx={{ position: "absolute", left: `${t.leftPct}%`, top: tickY, width: 0 }}
+            >
+              <Box sx={{ width: 1, height: 6, bgcolor: "text.secondary", mx: "auto" }} />
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  display: "block",
+                  whiteSpace: "nowrap",
+                  transform: "translateX(-50%)",
+                  // Keep the first and last label inside the plot.
+                  ...(t.leftPct === 0 && { transform: "translateX(-8px)" }),
+                  ...(t.leftPct === 100 && { transform: "translateX(calc(-100% + 8px))" }),
+                }}
+              >
+                {t.label}
+              </Typography>
+            </Box>
+          ))}
+          {layout.markers.map((m) => (
+            <Marker key={m.event.id} marker={m} trackY={trackY} />
+          ))}
+        </Box>
       </Box>
     </Box>
   );
@@ -169,10 +311,15 @@ interface SlaImpactTimelineProps {
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+  /** When the case was opened; the track starts here (else at its first event). */
+  openedAt?: string;
+  /** The case's current state; colours the track when no state change was audited. */
+  currentState?: string;
 }
 
 /**
- * Chronological timeline of what moved a case's SLA: switches between the
+ * Horizontal track, open to now (or closure), of what moved a case's SLA, coloured by
+ * whose side holds the case with a marker per event: switches between the
  * customer and WSO2 side, fix ETA changes, workaround, severity, closure and
  * reopening. Rendered after the SLA table on the case SLA tab. Hidden when
  * the `support.case-sla-timeline` feature is overridden to `hidden` (or `wip`)
@@ -183,6 +330,8 @@ export function SlaImpactTimeline({
   isLoading,
   isError,
   onRetry,
+  openedAt,
+  currentState,
 }: SlaImpactTimelineProps): JSX.Element | null {
   if (!isFeatureEnabled(SLA_TIMELINE_FEATURE_ID)) return null;
 
@@ -192,7 +341,7 @@ export function SlaImpactTimeline({
     <Card
       component="section"
       aria-label="SLA impact timeline"
-      sx={{ p: 2.5, mt: 2, display: "flex", flexDirection: "column", gap: 2 }}
+      sx={{ p: 2.5, mt: 2, display: "flex", flexDirection: "column", gap: 2, minWidth: 0, maxWidth: "100%" }}
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
         <History size={16} />
@@ -228,11 +377,20 @@ export function SlaImpactTimeline({
           No SLA-affecting changes recorded for this case yet.
         </Typography>
       ) : (
-        <Box component="ol" sx={{ listStyle: "none", m: 0, p: 0 }}>
-          {events.map((e, i) => (
-            <TimelineItem key={e.id} event={e} last={i === events.length - 1} />
-          ))}
-        </Box>
+        <>
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            {LEGEND.map((l) => (
+              <Box key={l.side} sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <Box
+                  aria-hidden
+                  sx={{ width: 20, height: TRACK_PX, borderRadius: TRACK_PX, bgcolor: TRACK_COLOR[l.side] }}
+                />
+                <Typography variant="caption">{l.label}</Typography>
+              </Box>
+            ))}
+          </Box>
+          <TimelineTrack entries={events} openedAt={openedAt} currentState={currentState} />
+        </>
       )}
     </Card>
   );
