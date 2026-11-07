@@ -215,7 +215,7 @@ window.config = {
 
   // Early size checks for attachments (stored in Azure Blob Storage by the
   // portal backend), in megabytes. Optional:
-  // leave unset for the defaults below, which match the entity-service's own
+  // leave unset for the defaults below (10 MB file, 1 MB images), which match the entity-service's own
   // defaults. Set them to the same values as the entity-service's
   // ATTACHMENT_MAX_MB and its inline image limit; the server stays the
   // authority, these only refuse an oversized file before the upload starts.

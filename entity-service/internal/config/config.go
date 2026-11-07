@@ -809,16 +809,15 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
-	// (ATTACHMENT_MAX_MB, default 100) and one inline comment image
-	// (INLINE_IMAGE_MAX_MB, default 25). The declared size is checked
-	// when an upload starts and the real size when it is confirmed. Provisional
-	// defaults, to be set from the real size distribution.
-	AttachmentMaxBytes  int64
-	InlineImageMaxBytes int64
+	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10).
+	// The declared size is checked when an upload starts and the real size when
+	// it is confirmed. Provisional default, to be set from the real size
+	// distribution.
+	AttachmentMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
-	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 25). At most
-	// service.MaxInlineImagesPerContent (5) images per comment or description.
+	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1), and so also one image.
+	// At most service.MaxInlineImagesPerContent (5) images per comment or
+	// description.
 	InlineImagesTotalMaxBytes int64
 
 	// SCIM* is the Choreo connection to the WSO2 internal-org SCIM search API
@@ -1072,9 +1071,8 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 100)
-	cfg.InlineImageMaxBytes = envMegabytes("INLINE_IMAGE_MAX_MB", "INLINE_IMAGE_MAX_BYTES", 25)
-	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 25)
+	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10)
+	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1)
 	cfg.applySREEventHubTopic()
 	return cfg
 }

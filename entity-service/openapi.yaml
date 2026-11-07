@@ -39591,9 +39591,9 @@ components:
           minimum: 1
           description: >-
             The file's size. Checked against ATTACHMENT_MAX_MB (type comment:
-            INLINE_IMAGE_MAX_MB, default 25 MB), and the uploaded file must
-            match it. One comment or description may show at most 5 images and
-            at most INLINE_IMAGES_TOTAL_MAX_MB (default 25 MB) together; a
+            INLINE_IMAGES_TOTAL_MAX_MB, default 1 MB, so one image is at most
+            that big), and the uploaded file must match it. One comment or description may show at most 5 images and
+            at most INLINE_IMAGES_TOTAL_MAX_MB (default 1 MB) together; a
             comment (create or edit) or a record whose description exceeds
             either is a 400 and nothing is saved.
 

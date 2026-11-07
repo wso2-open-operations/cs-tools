@@ -17,11 +17,11 @@
 
 const BYTES_PER_MB = 1024 * 1024;
 
-/** Largest stored attachment (entity-service `ATTACHMENT_MAX_MB` default, 100 MiB). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
+/** Largest stored attachment (entity-service `ATTACHMENT_MAX_MB` default, 10 MiB). */
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 
-/** Most inline-image bytes in one comment or description (25 MiB). */
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 25;
+/** Most inline-image bytes in one comment or description (1 MiB). */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = 1;
 
 /** A positive number of megabytes from a number or numeric string, else `fallback`. */
 function megabytes(raw: unknown, fallback: number): number {

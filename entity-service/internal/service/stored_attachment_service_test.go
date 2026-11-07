@@ -214,7 +214,7 @@ func (f *fakeStoredRepo) MarkFailed(_ context.Context, _ domain.StoredAttachment
 var saNow = time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
 
 func newStoredSvc(repo *fakeStoredRepo) *storedAttachmentService {
-	svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100}).(*storedAttachmentService)
+	svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100}).(*storedAttachmentService)
 	svc.now = func() time.Time { return saNow }
 	svc.shares.now = func() time.Time { return saNow }
 	return svc
@@ -631,7 +631,7 @@ func TestValidateDescriptionImages(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			repo := newFakeStoredRepo()
 			repo.drafts = c.drafts
-			svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
+			svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
 			email := saEmail
 			if c.email == "-" {
 				email = ""
@@ -711,7 +711,7 @@ func TestValidateCommentImages(t *testing.T) {
 		repo := newFakeStoredRepo()
 		var html string
 		repo.rows, html = build(2, 60)
-		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100, InlineTotalMaxBytes: 100})
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100})
 		err := svc.(InlineImageLinker).ValidateCommentImages(context.Background(), saParentID, saEmail, html)
 		var verr *apierror.ValidationError
 		if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "together") {
@@ -794,7 +794,7 @@ func TestValidateEmbeddedImages(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			svc := NewStoredAttachmentService(newFakeStoredRepo(), StoredAttachmentLimits{MaxBytes: 1000, InlineMaxBytes: 100, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
+			svc := NewStoredAttachmentService(newFakeStoredRepo(), StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: c.total}).(*storedAttachmentService)
 			email := c.email
 			if email == "-" {
 				email = ""

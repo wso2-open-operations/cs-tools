@@ -141,14 +141,14 @@ window.config = {
   // are sent in 8 MiB chunks and downloads stream from the backend, so no
   // storage address is exposed to the browser.
   //
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 100)
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB  (optional — default: 10)
   //   Largest case or deployment file offered for upload, in MB. Set it to match
   //   entity-service's ATTACHMENT_MAX_MB; the service stays authoritative and
   //   this only refuses a file early. A number or numeric string; anything else
   //   (zero, negative, text) uses the default.
-  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25,
+  // CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
 
-  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 25)
+  // CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB  (optional — default: 1)
   //   Most the images pasted or inserted into one comment or description may add
   //   up to, in MB (at most 5 images each). Same value rules as above. The older
   //   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB still works when this is not set, but
