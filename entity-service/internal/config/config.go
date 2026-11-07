@@ -1702,19 +1702,22 @@ func envDuration(key string, def time.Duration) time.Duration {
 }
 
 // envMegabytes reads a size in megabytes (1 MB = 1 MiB = 1048576 bytes; a
-// decimal such as 0.5 is allowed) from mbKey and returns it in bytes. When mbKey
-// is unset or not a positive number it falls back to the older bytes setting
-// bytesKey, then to defMB. A typo costs the override, it does not stop the
-// service starting (same posture as envPositiveInt64).
+// decimal such as 0.5 is allowed) from mbKey and returns it in bytes. The older
+// bytes setting bytesKey is read only when mbKey is unset. When mbKey is set but
+// is not a positive number, the default (defMB) is used, not the older setting.
+// A typo costs the override, it does not stop the service starting (same
+// posture as envPositiveInt64).
 func envMegabytes(mbKey, bytesKey string, defMB int64) int64 {
-	if v := strings.TrimSpace(os.Getenv(mbKey)); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < float64(1<<43) {
-			if n := int64(f * (1 << 20)); n > 0 {
-				return n
-			}
+	v := strings.TrimSpace(os.Getenv(mbKey))
+	if v == "" {
+		return envPositiveInt64(bytesKey, defMB<<20)
+	}
+	if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < float64(1<<43) {
+		if n := int64(f * (1 << 20)); n > 0 {
+			return n
 		}
 	}
-	return envPositiveInt64(bytesKey, defMB<<20)
+	return defMB << 20
 }
 
 // envPositiveInt64 reads a positive integer, falling back to def when unset,

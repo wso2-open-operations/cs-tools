@@ -1462,6 +1462,18 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 		t.Errorf("ATTACHMENT_MAX_MB did not win over ATTACHMENT_MAX_BYTES: %d", g[0])
 	}
 
+	// A MB setting that is set but invalid gives the default, even when the
+	// older bytes setting is also set: the bytes one is read only when the MB
+	// one is unset.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "lots")
+	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
+	t.Setenv("INLINE_IMAGE_MAX_MB", "0")
+	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
+	if g := got(); g[0] != 100<<20 || g[1] != 25<<20 {
+		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
+	}
+
 	// A typo costs the override, not the service.
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
