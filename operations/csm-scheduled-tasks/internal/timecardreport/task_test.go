@@ -17,8 +17,10 @@
 package timecardreport
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -363,5 +365,37 @@ func TestSendReportsRetryUsesSameWindow(t *testing.T) {
 	}
 	if len(src.reportCalls) != 2 || src.reportCalls[0] != src.reportCalls[1] {
 		t.Errorf("report calls differ between attempts: %v", src.reportCalls)
+	}
+}
+
+// The run logs which project it reported on and the figures it carried, without
+// any recipient address.
+func TestSendReportsLogsProjectKeyAndSummary(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	src := &fakeSource{
+		projects: map[string][]timecards.Project{"PRJ-1": {{ID: "id-1", Key: "PRJ-1", Name: "Acme Corp"}}},
+		contacts: map[string][]timecards.Contact{"id-1": {{Email: "jane.doe@example.com"}}},
+		reports:  map[string]timecards.Report{"id-1": report("id-1", "PRJ-1", "Acme Corp", oneCase)},
+	}
+	if err := SendReports(src, &fakeMail{}, period, Config{ProjectKeys: []string{"PRJ-1"}}, true)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"sending the time card report", "sent the time card report",
+		"project=PRJ-1", "from=2030-04-01", "to=2030-04-30", "cases=1",
+		"totalMinutes=90", "billableMinutes=60", "nonBillableMinutes=30", "patchingMinutes=15",
+		"mailsSent=1", "mailsFailed=0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "jane.doe@example.com") {
+		t.Errorf("log carries a recipient address:\n%s", out)
 	}
 }

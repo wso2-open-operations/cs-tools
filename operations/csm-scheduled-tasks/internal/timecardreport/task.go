@@ -232,15 +232,24 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 	if len(cfg.To) > 0 {
 		mails = nil // one mail, below
 	}
-	slog.Info("sending the time card report",
+	// The figures the mail carries, in minutes, so a log line alone shows what a
+	// project was sent. Counts only: no address, case or customer detail.
+	summary := []any{
 		"project", key, "from", from.Format(dateLayout), "to", to.Format(dateLayout),
-		"cases", len(report.Cases), "recipients", len(recipients), "cc", len(cfg.Cc),
-		"mails", max(len(mails), 1))
+		"cases", len(report.Cases),
+		"totalMinutes", report.Totals.TotalMinutes,
+		"billableMinutes", report.Totals.BillableMinutes,
+		"nonBillableMinutes", report.Totals.NonBillableMinutes,
+		"patchingMinutes", report.Totals.PatchingMinutes,
+	}
+	slog.Info("sending the time card report",
+		append(summary, "recipients", len(recipients), "cc", len(cfg.Cc), "mails", max(len(mails), 1))...)
 
 	if len(cfg.To) > 0 {
 		if err := email.SendEmail(ctx, cfg.To, cfg.Cc, subject, body); err != nil {
 			return fmt.Errorf("send report: %w", err)
 		}
+		slog.Info("sent the time card report", append(summary, "mailsSent", 1)...)
 		return nil
 	}
 	sendFailures := 0
@@ -250,6 +259,8 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 			slog.Error("time card report mail failed", "project", key, "err", err)
 		}
 	}
+	slog.Info("sent the time card report",
+		append(summary, "mailsSent", len(mails)-sendFailures, "mailsFailed", sendFailures)...)
 	if sendFailures > 0 {
 		return fmt.Errorf("%d of %d mails failed to send", sendFailures, len(mails))
 	}
