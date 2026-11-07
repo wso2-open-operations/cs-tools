@@ -237,7 +237,6 @@ export default function CsmCaseCreatePage(): JSX.Element {
       issueType,
       subject,
       description,
-      attachments,
       watchEdits,
     });
   }, [
@@ -250,7 +249,6 @@ export default function CsmCaseCreatePage(): JSX.Element {
     issueType,
     subject,
     description,
-    attachments,
     watchEdits,
   ]);
 
