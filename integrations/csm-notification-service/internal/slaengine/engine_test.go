@@ -1008,6 +1008,53 @@ func TestTick_BreachAlert_RealTeamAudienceIsNotRetargeted(t *testing.T) {
 	}
 }
 
+// TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor
+// guards the product decision that a service request's SLA breach stays
+// UI-only: the account's default CRE team (ClockMeta.Team) is often not the
+// SRE group actually working the SR, so a chat/email alert here was a
+// reported false-signal problem. The tier is still claimed, published and
+// advanced exactly as for any other case type -- only the Chat card and the
+// two breach emails are suppressed.
+func TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.email = email
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", CaseType: "SERVICE_REQUEST", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %+v, want none for a service request", chat.calls)
+	}
+	if len(email.calls) != 0 {
+		t.Errorf("email calls = %+v, want none for a service request", email.calls)
+	}
+	if pub.calls != 1 {
+		t.Errorf("publish calls = %d, want 1 -- sla.tier_reached still publishes, the UI still reflects the breach", pub.calls)
+	}
+	if _, stillWaiting := st.wake[wakeMember("case-1", "response", 50)]; stillWaiting {
+		t.Error("wake entry not removed")
+	}
+	meta, _, _ := st.GetClock(context.Background(), "case-1", "response")
+	if meta.AlertedTier != 50 {
+		t.Errorf("AlertedTier = %d, want 50 -- bookkeeping is unaffected by the chat/email suppression", meta.AlertedTier)
+	}
+}
+
 // TestTick_SLANotificationsDisabled_SkipsChatButKeepsPublishAndCursor guards
 // SLA_EMAIL_SENDING_ENABLED=false: no Chat card, but verifyTierStillDue's
 // own entity-service lookup still happens (it runs in processDueMember,
@@ -2537,7 +2584,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForATerminalClock(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockResponse, 50)]; stillThere {
 		t.Error("stale wake entry survived ReviseClocks for a clock that had already reached a terminal stage")
@@ -2577,7 +2624,7 @@ func TestEngine_ReviseClocks_RebuildsFromNewSeverity(t *testing.T) {
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2612,7 +2659,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockWorkaround, 50)]; stillThere {
 		t.Error("stale workaround wake entry survived ReviseClocks despite the new severity having no policy for it")
@@ -2635,7 +2682,7 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2646,6 +2693,42 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	}
 	if meta.CaseType != "CASE" || meta.State != "Work In Progress" {
 		t.Errorf("meta = %+v, want CaseType/State carried forward from the pre-revision hash", meta)
+	}
+}
+
+// TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata guards a
+// CodeRabbit-caught gap: ReviseClocks used to always preserve whatever
+// CaseType was already in Redis, which is correct for a plain severity
+// change (no type involved) but wrong for a genuine case-type transfer --
+// the clock kept its stale pre-transfer type forever, so sendBreachAlert's
+// own CaseType=="SERVICE_REQUEST" guard could never catch a case that
+// transferred INTO a service request, and this engine would happily page a
+// team for what is now an SR's SLA breach. newType ("service_request",
+// entity-service's own raw, lowercase case type) must override the old
+// Redis value, uppercased to match the convention every other CaseType
+// value in this engine already uses.
+func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "CASE", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "SERVICE_REQUEST" {
+		t.Errorf("meta.CaseType = %q, want %q -- the transfer's own new type must override the stale pre-transfer value", meta.CaseType, "SERVICE_REQUEST")
 	}
 }
 
