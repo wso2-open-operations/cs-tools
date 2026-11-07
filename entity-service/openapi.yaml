@@ -480,64 +480,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /customer-engagements/allocations/search:
-    post:
-      summary: >-
-        Find where an attachment's file is, for a portal backend that will read it.
-        Checks, as the caller, that they
-        may see the attachment and returns its storage key, or a reason there is no
-        file (available false, reason NOT_STORED, FAILED or DELETED). An attachment
-        the caller cannot see is 404. The key is internal: it is for the calling
-        backend and must never be sent to a browser. Counts against the caller's
-        per-minute allowance (60). The response is never cacheable.
-      operationId: locateAttachment
-      security:
-        - clientAssertion: []
-          userIdToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LocateAttachmentRequest'
-      responses:
-        "200":
-          description: The attachment's location, or why it has none.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentLocation'
-        "400":
-          description: The type or id is invalid.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "401":
-          description: x-user-id-token is missing.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: No such attachment, or the caller may not see it, or the route is not registered.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "429":
-          description: The caller asked for too many locations in a minute; retry shortly.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
   /attachments/inline/{id}/location:
     get:
       summary: >-
