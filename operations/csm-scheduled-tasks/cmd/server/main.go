@@ -47,7 +47,6 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/availability"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/cloudstatus"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
@@ -141,21 +140,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Same entity-service deployment and credentials as ledgerClient above,
-	// but a separate client — see internal/entitycases' own doc comment for
-	// why case search isn't just another method on ledger.Client.
-	entityCasesClient, err := entitycases.NewClient(entitycases.Config{
-		BaseURL:      entityServiceBaseURL,
-		TokenURL:     oauthTokenURL,
-		ClientID:     oauthClientID,
-		ClientSecret: oauthClientSecret,
-		Scopes:       entityServiceScopes,
-	})
-	if err != nil {
-		slog.Error("failed to construct entity-service case-search client", "err", err)
-		os.Exit(1)
-	}
-
 	// The migration scan's own client: the same deployment and credentials,
 	// a distinct endpoint (GET /reports/migration-cases) with its own
 	// timeout.
@@ -171,8 +155,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The stale cases report's own client: the same deployment and
-	// credentials, a distinct endpoint (GET /reports/long-open-cases).
+	// The stale cases report's own client (also used by the open cases
+	// report's variant): the same deployment and credentials, a distinct
+	// endpoint (GET /reports/long-open-cases).
 	longOpenReportClient, err := longopenreport.NewClient(longopenreport.Config{
 		BaseURL:      entityServiceBaseURL,
 		TokenURL:     oauthTokenURL,
@@ -281,7 +266,7 @@ func main() {
 	}
 
 	// Same entity-service deployment and credentials again — a fourth,
-	// separate client for the same reason entityCasesClient is its own:
+	// separate client, as every entity-service endpoint here gets its own:
 	// this one's Bearer token must satisfy entity-service's own
 	// AUTH_INTERNAL_CLIENT_IDS (AutoPublish is internal-caller-only), a
 	// concern specific to this one task, not shared with case search or
@@ -758,20 +743,22 @@ func main() {
 		// Emails openCasesTo/Cc a report of every case created before
 		// yesterday that's still in "open" state (nobody has moved it out of
 		// initial triage) — see internal/opencases's own doc comment. Sends
-		// nothing (but still succeeds) if openCasesTo is empty. Default
-		// schedule is daily at 08:00 (again, TZ=UTC-dependent — see above);
-		// override via SUB_CRON_SCHEDULES if needed.
+		// nothing (but still succeeds) if openCasesTo is empty or there are no
+		// such cases. Default schedule is daily at 03:30 UTC, which is 09:00
+		// in Colombo, when the original report goes out (again,
+		// TZ=UTC-dependent — see above); override via SUB_CRON_SCHEDULES if
+		// needed.
 		{
 			Name:     openCasesTaskName,
-			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "0 8 * * *"),
-			Handler:  opencases.SendReport(entityCasesClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
+			Schedule: scheduleFor(scheduleOverrides, openCasesTaskName, "30 3 * * *"),
+			Handler:  opencases.SendReport(longOpenReportClient, openCasesEmail, openCasesTo, openCasesCc, alertsEnabled),
 			To:       openCasesTo,
 			Cc:       openCasesCc,
 			// --recipients/--cc of a manual run-now only; see reportRunNow.
 			RunNowFlags: reportRunNowFlags,
 			RunNowNarrow: reportRunNow(openCasesEmail, emailClient,
 				func(email notify.Sender, rec []string) func(ctx context.Context) error {
-					return opencases.SendReport(entityCasesClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
+					return opencases.SendReport(longOpenReportClient, email, orRecipients(openCasesTo, rec), openCasesCc, alertsEnabled)
 				}),
 		},
 		// Emails the weekly migration case scan — see internal/migrationscan's

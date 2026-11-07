@@ -156,38 +156,35 @@ returns an error. `--run-now=stale_cases_report --recipients=... [--cc=...]` wor
 `reportRunNow` like every report: it mails the override list only, even for a task with no `to` of its
 own.
 
-`internal/entitycases.Client` remains a separate entity-service client, used by `open_cases_report`,
-even though both point at the same `CUSTOMER_ENTITY_SERVICE_BASE_URL`/credentials; see that
-package's own doc comment for why case search isn't just another method on `ledger.Client`.
-
 ## Open cases report
 
 `internal/opencases.SendReport`, registered as `"open_cases_report"`, is a narrower, more urgent
 sibling of "Stale cases report" above: it flags a case nobody has even started working on yet,
-rather than any case that's merely been open a long time. Queries entity-service's
-`POST /cases/search` (via `internal/entitycases.Client.SearchCasesInStateCreatedBeforeYesterday`)
-for every case whose `state` is *exactly* `open` (not "any non-closed state" — a case that's since
-moved to `work_in_progress` or anything else no longer belongs here) and whose `createdOn` falls
-before the start of yesterday, then emails a report table of them (oldest first) via
-`notify.RenderOpenCasesReport`.
+rather than any case that's merely been open a long time. It mails entity-service's
+open-before-yesterday report: `internal/longopenreport.Client.OpenBeforeYesterday` calls
+`GET /reports/long-open-cases?variant=open-before-yesterday` (same client, base URL and OAuth client
+credentials as the stale cases report) and `notify.RenderOpenCasesReport` renders its `cases` (oldest
+first). Which cases count (state exactly `open`, created before the start of yesterday), the
+calendar-day boundary (computed by entity-service in Asia/Colombo, not by this task) and the row cap
+(5000) all live in entity-service; this task only fetches, renders and sends. Columns: Account,
+Assigned To, State, Severity, Days Open (whole days since creation, computed here at send time),
+Updated, Case. Subject: `[Immediate-Action-Required][Report] Opened before yesterday cases`.
 
-"Before yesterday" is a calendar-day boundary computed in UTC (`time.Now().UTC().Truncate(24 *
-time.Hour)`, minus 24 hours) — always UTC, regardless of the deployment's own `TZ` setting, unlike a
-rolling duration: a case created at 23:59 yesterday (UTC) is
-excluded, one created at 00:01 the day before is included, regardless of what time of day the task
-itself runs. The "Housekeeping" section's `TZ=UTC` caveat is about something different — when the
-*cron schedule itself* fires (`internal/schedule.PeriodKey`'s own local-time interpretation) — and
-doesn't apply here: this cutoff is UTC-anchored no matter what `TZ` the process runs with.
+If the report has no cases the task sends nothing (a count-only line is logged) and succeeds, as
+the original report does. If entity-service cut the list at its cap (`casesTruncated`), the mail
+is still sent and says "This list is cut: showing only the oldest N of TOTAL".
 
-Default schedule `0 8 * * *` (daily at 08:00, after "Stale cases report"'s 07:00 slot — this time
-itself *is* subject to the same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule);
-override via
-`SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
+This depends on the entity-service `variant` parameter: deploy entity-service first. Against an
+entity-service without it the parameter is ignored and the default age-based report would come
+back, so deploy order matters.
+
+Default schedule `30 3 * * *` (daily at 03:30 UTC, which is 09:00 Asia/Colombo, when the original
+report sends; same `TZ=UTC` caveat as "Housekeeping" above, since it's a cron schedule); override
+via `SUB_CRON_SCHEDULES`. Recipients work exactly like "Stale cases report" above: this task's own
 `SUB_CRON_RECIPIENTS` entry, unrelated to `ALERT_RECIPIENTS`, no report sent (and no entity-service
-query run) if empty. Shares `internal/entitycases.Client` and the row-rendering helpers in
-`internal/notify` with "Stale cases report", but has its own template
-(`internal/notify/templates/open_cases_report.html`) per this component's own "Per-task report
-emails" below.
+query run) if empty. Has its own template (`internal/notify/templates/open_cases_report.html`) per
+this component's own "Per-task report emails" below. `--run-now=open_cases_report
+--recipients=... [--cc=...]` works as for the other report tasks.
 
 ## Rota reminders
 
@@ -1016,8 +1013,8 @@ alerts reach `ALERT_RECIPIENTS` only, never the team mail groups. Each sub-cron'
 (`internal/notify/templates/{stale,open}_cases_report.html`, following `alert.html`'s pattern) and
 its own recipients (its own `SUB_CRON_RECIPIENTS` entry, passed in as plain `to`/`cc` slices) — the
 report is sent from inside the `Handler` closure itself, entirely outside `engine.Engine`'s own
-success/failure path. What they *do* share is the case-search client (`internal/entitycases.Client`)
-and the row-rendering helpers in `internal/notify` (`renderCaseRows`/`humanizeState`/etc.) — real,
+success/failure path. What they *do* share is the long-open report client (`internal/longopenreport.Client`)
+and the row-rendering helpers in `internal/notify` (`humanizeState`/`severityLabel`/etc.) — real,
 already-duplicated logic worth sharing, as distinct from the report's own template/copy, which
 stays owned per task on purpose. A future report-sending sub-cron follows the same split: reuse
 whatever's genuinely identical (a case-search method, a rendering helper), but keep its own

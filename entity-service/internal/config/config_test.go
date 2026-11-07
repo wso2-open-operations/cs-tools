@@ -1482,6 +1482,30 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	}
 }
 
+// TestLoad_OpenBeforeYesterdayReportSets pins the open-before-yesterday
+// variant's two project type sets: the defaults, trimming, and a blank value
+// falling back to the default.
+func TestLoad_OpenBeforeYesterdayReportSets(t *testing.T) {
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", "")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", " , ")
+	c := Load()
+	if want := []string{"Subscription", "Managed Cloud Subscription"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("default project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"Cloud Support"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("default product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES", " A , ,B")
+	t.Setenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES", "C")
+	c = Load()
+	if want := []string{"A", "B"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProjectTypes, want) {
+		t.Errorf("project types = %v, want %v", c.OpenBeforeYesterdayReportProjectTypes, want)
+	}
+	if want := []string{"C"}; !reflect.DeepEqual(c.OpenBeforeYesterdayReportProductProjectTypes, want) {
+		t.Errorf("product project types = %v, want %v", c.OpenBeforeYesterdayReportProductProjectTypes, want)
+	}
+}
+
 // TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
 // valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
 // S0 included, refuses to start.

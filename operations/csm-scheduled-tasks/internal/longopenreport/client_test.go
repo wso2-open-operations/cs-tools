@@ -117,3 +117,39 @@ func TestNewClientRejectsPlainHTTP(t *testing.T) {
 		t.Error("an http token URL must be refused")
 	}
 }
+
+func TestOpenBeforeYesterday(t *testing.T) {
+	var gotQuery string
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"variant":"open-before-yesterday","olderThanDays":1,
+		  "createdBefore":"2026-11-05T18:30:00Z",
+		  "cases":[{"number":"CS0000001","internalId":"ID-1","state":"open","severity":"high",
+		    "assignedEngineer":"Jane Doe","accountName":"Example Corp"},
+		    {"number":"CS0000002","state":"open"}],
+		  "onboardingCases":[],"casesTotal":7,"onboardingCasesTotal":0,
+		  "casesTruncated":true,"onboardingCasesTruncated":false}`))
+	})
+	rep, err := c.OpenBeforeYesterday(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "variant=open-before-yesterday" {
+		t.Errorf("query = %q", gotQuery)
+	}
+	if rep.Variant != "open-before-yesterday" || len(rep.Cases) != 2 || rep.CasesTotal != 7 || !rep.CasesTruncated {
+		t.Errorf("report = %+v", rep)
+	}
+	if rep.Cases[0].AccountName != "Example Corp" || rep.Cases[1].AccountName != "" {
+		t.Errorf("account names = %q, %q", rep.Cases[0].AccountName, rep.Cases[1].AccountName)
+	}
+}
+
+func TestOpenBeforeYesterdayRejectsOlderEntityService(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"olderThanDays":30,"cases":[],"onboardingCases":[],"casesTotal":0}`))
+	})
+	if _, err := c.OpenBeforeYesterday(context.Background()); err == nil {
+		t.Fatal("a response without the variant must be refused")
+	}
+}
