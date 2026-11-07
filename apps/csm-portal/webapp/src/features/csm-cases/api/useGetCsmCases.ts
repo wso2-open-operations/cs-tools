@@ -124,6 +124,7 @@ export function useGetCsmCases(
       [...filters.assignees].sort(),
       [...filters.projects].sort(),
       [...filters.engagementTypes].sort(),
+      [...filters.salesRegions].sort(),
       [...filters.productNames].sort(),
       [...filters.csTeams].sort(),
       [...filters.sreTeams].sort(),

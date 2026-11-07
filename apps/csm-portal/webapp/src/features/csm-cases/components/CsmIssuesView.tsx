@@ -143,6 +143,7 @@ const FILTER_PARAM_KEYS = [
   "workStates",
   "projects",
   "engagementTypes",
+  "salesRegions",
   "products",
   "csTeams",
   "sreTeams",
@@ -213,6 +214,8 @@ interface CsmIssuesViewProps {
   hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in; only the Engagements page passes it). */
+  showSalesRegionFilter?: boolean;
   /**
    * Force the Severity filter/column on or off, overriding the default
    * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
@@ -277,6 +280,7 @@ export default function CsmIssuesView({
   hideCreTeamFilter,
   hideSreTeamFilter,
   showEngagementTypeFilter,
+  showSalesRegionFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
@@ -835,6 +839,7 @@ export default function CsmIssuesView({
         hideCreTeamFilter={hideCreTeamFilter}
         hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
+        showSalesRegionFilter={showSalesRegionFilter}
       />
 
       {canWrite && selectedRows.size > 0 && (

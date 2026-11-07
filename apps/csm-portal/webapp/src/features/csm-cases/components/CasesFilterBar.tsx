@@ -72,6 +72,7 @@ import {
 import { isCompleteAnyOfBranch, type AnyOfBranch } from "@features/csm-cases/utils/anyOfFilters";
 import {
   ENGAGEMENT_TYPE_OPTIONS,
+  SALES_REGION_OPTIONS,
   ONBOARDING_STATUS_OPTIONS,
   SEVERITY_OPTIONS,
   STATE_OPTIONS,
@@ -117,6 +118,9 @@ export interface CasesFilters {
   projects: string[];
   /** Engagement sub-type filter; only meaningful when `caseTypes` is locked to `engagement`. */
   engagementTypes: BeEngagementType[];
+  /** Account sales-region filter (`salesRegion` op:in); empty = all regions.
+   * Only surfaced by views that pass `showSalesRegionFilter`. */
+  salesRegions: string[];
   /** Product family names (e.g. "API Manager"); matches all versions of each. */
   productNames: string[];
   /** CS team group ids (`creTeam` op:in) the case's project is scoped to. */
@@ -242,6 +246,8 @@ interface CasesFilterBarProps {
   hideProjectFilter?: boolean;
   /** Show the engagement-type multi-select (only relevant when type is locked to engagement). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in, like the engagement-type one). */
+  showSalesRegionFilter?: boolean;
   /**
    * Hide the "Onboarding status" Simple-mode control. `onboardingStatuses` is
    * a per-project attribute, not a per-case one — on a view already scoped to
@@ -509,6 +515,7 @@ export default function CasesFilterBar({
   typeFilterLabel = "Case type",
   hideProjectFilter = false,
   showEngagementTypeFilter = false,
+  showSalesRegionFilter = false,
 }: CasesFilterBarProps): JSX.Element {
   const activeCount = countActiveFilters(filters);
   const hasActive = activeCount > 0;
@@ -898,6 +905,17 @@ export default function CasesFilterBar({
                   values={filters.engagementTypes}
                   options={engagementTypeOptions}
                   onChange={(next) => handleSimpleFieldChange({ ...filters, engagementTypes: next })}
+                />
+              </Grid>
+            )}
+            {showSalesRegionFilter && (
+              <Grid size={{ xs: 12, sm: 6, md: 4, lg: 2 }}>
+                <MultiSelectField
+                  id="cases-filter-sales-region"
+                  label="Sales Region"
+                  values={filters.salesRegions}
+                  options={SALES_REGION_OPTIONS}
+                  onChange={(next) => handleSimpleFieldChange({ ...filters, salesRegions: next })}
                 />
               </Grid>
             )}

@@ -434,6 +434,26 @@ describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
   });
 });
 
+describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
+  it("is not rendered unless showSalesRegionFilter is passed", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(screen.queryByRole("combobox", { name: "Sales Region" })).not.toBeInTheDocument();
+  });
+
+  it("renders the static region options and writes the selection to salesRegions", async () => {
+    const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      showSalesRegionFilter: true,
+    });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Sales Region" }));
+    expect(await screen.findByRole("option", { name: "APAC" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Americas" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "EMEA" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));
+  });
+});
+
 // The tri-state include/exclude toggle (digiops-cs#2907) was removed —
 // Simple mode's "State" control is now a plain include-only multi-select,
 // same as every other Simple-mode field (Severity, Case type, ...).

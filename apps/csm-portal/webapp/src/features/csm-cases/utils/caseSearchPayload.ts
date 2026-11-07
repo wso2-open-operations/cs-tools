@@ -109,6 +109,13 @@ export function buildCaseSearchFilters(
       values: filters.engagementTypes,
     });
   }
+  if (filters.salesRegions.length > 0) {
+    fieldFilters.push({
+      field: "salesRegion",
+      op: "in",
+      values: filters.salesRegions,
+    });
+  }
   if (filters.projects.length > 0) {
     fieldFilters.push({ field: "projectId", op: "in", values: filters.projects });
   }
