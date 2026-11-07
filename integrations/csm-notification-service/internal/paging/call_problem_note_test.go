@@ -226,3 +226,54 @@ func TestWorkNote_HeadlineCountsRecipientsWithoutEmail(t *testing.T) {
 		t.Errorf("recipients without an email collapsed in the headline:\n%s", note)
 	}
 }
+
+func TestWorkNote_ChatOnlyFailureIsVisibleButNotACallProblem(t *testing.T) {
+	plan := callNotePlan(Recipient{Email: "no.phone@example.com"})
+	plan.Channel = ChannelChat
+	note := plan.WorkNote([]bool{true, false}, []string{"", "NO_CHAT_SPACE"}, nil, "")
+	t.Logf("note:\n%s", note)
+	if strings.Contains(note, "Call problems") {
+		t.Errorf("a chat failure triggered the call-problems headline:\n%s", note)
+	}
+	if !strings.Contains(note, "[LEVEL_1][ERROR][CALL_FAILED][no.phone@example.com][NO_CHAT_SPACE]") {
+		t.Errorf("the chat failure line must stay visible:\n%s", note)
+	}
+}
+
+func TestWorkNote_ChatFailureDoesNotAddToCallProblemCount(t *testing.T) {
+	// Entry 1 is a genuine call failure; entry 2 intends no call (held) and
+	// only its chat part failed. Only entry 1 is counted.
+	plan := callNotePlan(Recipient{Email: "held@example.com", Phone: "+15550100002"})
+	plan.Channel = ChannelBoth
+	plan.Calls[1].HoldCall = true
+	plan.Calls = append(plan.Calls, PlannedCall{Level: Level1, Ordinal: 1, At: triggerAt,
+		Recipient: Recipient{Email: "bad.call@example.com", Phone: "+15550100003"}})
+	note := plan.WorkNote([]bool{true, false, false}, []string{"", "NO_CHAT_SPACE", "REJECTED_400_21219"}, nil, "")
+	t.Logf("note:\n%s", note)
+	if !strings.Contains(note, callProblemsHeadline) {
+		t.Errorf("the genuine call failure must be counted once:\n%s", note)
+	}
+	if !strings.Contains(note, "[CALL_FAILED][held@example.com][NO_CHAT_SPACE]") {
+		t.Errorf("the chat failure line must stay visible:\n%s", note)
+	}
+}
+
+func TestWorkNote_CallPlusChatRungWithOnlyChatFailedIsNotACallProblem(t *testing.T) {
+	// The call went through; the card's error is recorded nowhere as a call
+	// failure (placeVia returns it as cardErr), so Failed is empty.
+	plan := callNotePlan(Recipient{Email: "john.roe@example.com", Phone: "+15550100001"})
+	plan.Channel = ChannelBoth
+	note := plan.WorkNote([]bool{true, true}, nil, nil, "")
+	if strings.Contains(note, "Call problems") || strings.Contains(note, "[ERROR]") {
+		t.Errorf("a delivered call was reported as a problem:\n%s", note)
+	}
+}
+
+func TestWorkNote_GenuineCallFailureStillCounts(t *testing.T) {
+	plan := callNotePlan(Recipient{Email: "bad.phone@example.com", Phone: "+15550100001"})
+	plan.Channel = ChannelBoth
+	note := plan.WorkNote([]bool{true, false}, []string{"", "REJECTED_400_21219"}, nil, "")
+	if !strings.Contains(note, callProblemsHeadline) {
+		t.Errorf("a genuine call failure must be counted:\n%s", note)
+	}
+}

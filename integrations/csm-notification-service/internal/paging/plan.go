@@ -697,7 +697,11 @@ func (p Plan) executionSummary(placed []bool, failed []string, cancelledAt *time
 				due.Format(stamp), b.level))
 			for _, c := range attempted {
 				if why := failureOf(failed, c); why != "" {
-					problems[problemKey(c.Recipient, fmt.Sprintf("call:%d", c.index))] = true
+					// A chat-only entry's failure (NO_CHAT_SPACE, a rejected
+					// card) stays listed below but is not a call problem.
+					if p.intendsCall(c) {
+						problems[problemKey(c.Recipient, fmt.Sprintf("call:%d", c.index))] = true
+					}
 					// No number to dial is the recipient's problem, not the
 					// provider's: same shape as the plan issue's NO_NUMBER line.
 					if isPhoneProblem(why) {
