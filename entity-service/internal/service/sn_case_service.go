@@ -4466,6 +4466,21 @@ func (s *snCaseService) SubmitCaseFeedback(ctx context.Context, id string, req d
 // against the same validXxx maps the top-level (AND-only) filters use,
 // mirroring that validation exactly (unrecognized values would otherwise be
 // silently dropped by domainStatesToSNIDs/etc's omitempty behavior).
+// rejectSalesRegionFilter refuses the salesRegion filter, top level or inside
+// an anyOf branch: the account sales region is only queryable on the
+// relational data source, and dropping the predicate here would answer with a
+// wider result set than the caller asked for.
+func rejectSalesRegionFilter(parsed domain.ParsedCaseFilters) error {
+	bad := len(parsed.SalesRegions) > 0
+	for _, g := range parsed.OrGroups {
+		bad = bad || len(g.SalesRegions) > 0
+	}
+	if bad {
+		return &apierror.ValidationError{Msg: `field "salesRegion" is not supported by this data source`}
+	}
+	return nil
+}
+
 func validateOrGroupEnums(i int, group domain.CaseFilterGroup) error {
 	for _, t := range group.Types {
 		if _, ok := snCaseTypeMap[t]; !ok {
@@ -4678,6 +4693,9 @@ func (s *snCaseService) SearchCases(ctx context.Context, req domain.SearchCasesR
 		return domain.SearchCasesResponse{}, err
 	}
 	if err := validateUUIDs("accountId", req.Parsed.ExcludeAccountIDs); err != nil {
+		return domain.SearchCasesResponse{}, err
+	}
+	if err := rejectSalesRegionFilter(req.Parsed); err != nil {
 		return domain.SearchCasesResponse{}, err
 	}
 
@@ -5002,6 +5020,9 @@ func (s *snCaseService) AggregateCases(ctx context.Context, req domain.Aggregate
 		return domain.AggregateResponse{}, err
 	}
 	if err := validateUUIDs("accountId", parsed.ExcludeAccountIDs); err != nil {
+		return domain.AggregateResponse{}, err
+	}
+	if err := rejectSalesRegionFilter(parsed); err != nil {
 		return domain.AggregateResponse{}, err
 	}
 	for _, t := range parsed.Types {

@@ -162,6 +162,37 @@ func TestCaseLikeStateLookupClause(t *testing.T) {
 	}
 }
 
+func TestCaseFieldPredicates_SalesRegions(t *testing.T) {
+	// One text[] arg, lower-cased, matched against the already-joined account.
+	preds, args, next, err := caseFieldPredicates(caseFieldSet{SalesRegions: []string{"EMEA", "Apac"}}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preds) != 1 || len(args) != 1 || next != 5 {
+		t.Fatalf("preds=%v args=%v next=%d, want one predicate, one arg, next 5", preds, args, next)
+	}
+	if want := "LOWER(BTRIM(a.sales_region)) = ANY($4::text[])"; preds[0] != want {
+		t.Errorf("pred = %q, want %q", preds[0], want)
+	}
+	got, ok := args[0].([]string)
+	if !ok || strings.Join(got, ",") != "emea,apac" {
+		t.Errorf("arg = %#v, want lower-cased [emea apac]", args[0])
+	}
+
+	// Unset: no predicate, so absent behaves exactly as before.
+	none, noArgs, idx, _ := caseFieldPredicates(caseFieldSet{}, 2)
+	if len(none) != 0 || len(noArgs) != 0 || idx != 2 {
+		t.Errorf("empty set produced %v %v %d", none, noArgs, idx)
+	}
+
+	// The anyOf branch builder carries the field across.
+	f := caseFieldSetFromGroup(domain.CaseFilterGroup{SalesRegions: []string{"EMEA"}})
+	branch, _, _, _ := caseFieldPredicates(f, 1)
+	if len(branch) != 1 || !strings.Contains(branch[0], "a.sales_region") {
+		t.Errorf("branch preds = %v, want the sales region predicate", branch)
+	}
+}
+
 func TestCaseFieldSetFromGroup(t *testing.T) {
 	f := caseFieldSetFromGroup(domain.CaseFilterGroup{
 		Types: []string{"case"}, EscalationLevels: []string{"1"}, Tags: []string{"patch"}, ExcludeTags: []string{"s_dip"},

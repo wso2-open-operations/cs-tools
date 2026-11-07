@@ -856,3 +856,62 @@ func TestParseCaseFieldFilterGroups_RejectsEmptyBranch(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCaseFieldFilters_SalesRegion(t *testing.T) {
+	now := time.Now().UTC()
+	p, err := ParseCaseFieldFilters([]domain.CaseFieldFilter{
+		{Field: "salesRegion", Op: "in", Values: []string{" EMEA ", "APAC"}},
+	}, "", nil, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(p.SalesRegions, ",") != "EMEA,APAC" {
+		t.Errorf("SalesRegions = %v, want trimmed [EMEA APAC]", p.SalesRegions)
+	}
+
+	// Absent: nothing parsed.
+	p, err = ParseCaseFieldFilters(nil, "", nil, now)
+	if err != nil || len(p.SalesRegions) != 0 {
+		t.Errorf("absent filter: %v, %v", p.SalesRegions, err)
+	}
+
+	for name, f := range map[string]domain.CaseFieldFilter{
+		"notIn op":    {Field: "salesRegion", Op: "notIn", Values: []string{"EMEA"}},
+		"eq op":       {Field: "salesRegion", Op: "eq", Values: []string{"EMEA"}},
+		"no values":   {Field: "salesRegion", Op: "in"},
+		"blank value": {Field: "salesRegion", Op: "in", Values: []string{"EMEA", "  "}},
+	} {
+		_, err := ParseCaseFieldFilters([]domain.CaseFieldFilter{f}, "", nil, now)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+	}
+}
+
+func TestParseCaseFieldFilterGroups_SalesRegion(t *testing.T) {
+	groups, err := ParseCaseFieldFilterGroups([]domain.CaseFilterBranch{
+		{Filters: []domain.CaseFieldFilter{{Field: "salesRegion", Op: "in", Values: []string{"EMEA"}}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(groups) != 1 || len(groups[0].SalesRegions) != 1 || groups[0].SalesRegions[0] != "EMEA" {
+		t.Errorf("groups = %+v, want one branch carrying EMEA", groups)
+	}
+}
+
+func TestRejectSalesRegionFilter(t *testing.T) {
+	if err := rejectSalesRegionFilter(domain.ParsedCaseFilters{}); err != nil {
+		t.Errorf("absent: %v", err)
+	}
+	for name, p := range map[string]domain.ParsedCaseFilters{
+		"top level": {SalesRegions: []string{"EMEA"}},
+		"in branch": {OrGroups: []domain.CaseFilterGroup{{}, {SalesRegions: []string{"EMEA"}}}},
+	} {
+		var ve *apierror.ValidationError
+		if err := rejectSalesRegionFilter(p); !errors.As(err, &ve) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+	}
+}
