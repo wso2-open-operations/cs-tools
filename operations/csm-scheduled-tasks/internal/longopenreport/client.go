@@ -47,6 +47,9 @@ const maxResponseBytes = 8 << 20
 // Report is the long-open cases report as entity-service returns it: two
 // tables, oldest first, each capped by entity-service.
 type Report struct {
+	// Variant is set by entity-service on a variant report (for example
+	// "open-before-yesterday") and empty on the default age-based report.
+	Variant       string    `json:"variant"`
 	GeneratedAt   time.Time `json:"generatedAt"`
 	OlderThanDays int       `json:"olderThanDays"`
 	CreatedBefore time.Time `json:"createdBefore"`
@@ -78,6 +81,8 @@ type Row struct {
 	AssignedEngineer string `json:"assignedEngineer"`
 	// CsTeam is the name of the CS team that owns the case's account.
 	CsTeam string `json:"csTeam"`
+	// AccountName is the name of the case's account; empty when absent.
+	AccountName string `json:"accountName"`
 }
 
 // Config is the entity-service connection: the same OAuth client credentials
@@ -127,7 +132,20 @@ func NewClient(cfg Config) (*Client, error) {
 func (c *Client) Report(ctx context.Context, olderThanDays int) (Report, error) {
 	q := url.Values{}
 	q.Set("olderThanDays", strconv.Itoa(olderThanDays))
+	return c.fetch(ctx, q)
+}
 
+// OpenBeforeYesterday fetches the "open-before-yesterday" variant: every case
+// still in the open state that was created before the start of yesterday, as
+// entity-service reckons the day (in the team's time zone). The cases are in
+// Report.Cases, oldest first; the variant has no onboarding table.
+func (c *Client) OpenBeforeYesterday(ctx context.Context) (Report, error) {
+	q := url.Values{}
+	q.Set("variant", "open-before-yesterday")
+	return c.fetch(ctx, q)
+}
+
+func (c *Client) fetch(ctx context.Context, q url.Values) (Report, error) {
 	endpoint := c.baseURL + "/reports/long-open-cases?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
