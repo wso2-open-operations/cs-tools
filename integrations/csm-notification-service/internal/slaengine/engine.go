@@ -1239,6 +1239,21 @@ func (e *Engine) sendBreachAlert(ctx context.Context, meta ClockMeta, caseID, cl
 		return
 	}
 
+	// Service requests breach their SLA against the account's default CRE
+	// team, not whichever team (often a different SRE group) is actually
+	// working the SR -- a real, reported false-signal problem. Rather than
+	// try to fix the routing, product direction was to drop the alert
+	// entirely for this one case type: an SR's SLA state is still fully
+	// visible in the portal UI (entity-service's sla/clock-state tables are
+	// unaffected by this), it just no longer pages a Chat space or inbox.
+	// The tier is still claimed/advanced and sla.tier_reached still
+	// publishes (processDueMember does both before this function is ever
+	// reached) -- only the Chat card and the two breach emails are skipped.
+	if meta.CaseType == "SERVICE_REQUEST" {
+		slog.InfoContext(ctx, "slaengine: service request SLA breach, UI-only, skipping chat and email alert", "caseId", caseID, "clockType", clockType, "tier", tier)
+		return
+	}
+
 	caseNumber := meta.CaseNumber
 	if caseNumber == "" {
 		caseNumber = caseID

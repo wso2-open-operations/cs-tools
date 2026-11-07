@@ -1071,6 +1071,27 @@ func TestDispatcher_Handle_CaseCreated_MalformedCreatedAt_SkipsRegistration(t *t
 	}
 }
 
+// TestDispatcher_Handle_CaseCreated_ServiceRequest_SkipsSLARegistration
+// guards the product decision that a service request's SLA state stays
+// UI-only (entity-service's own sla/clock-state tables already track it): a
+// breach alert here would route to the account's default CRE team, which is
+// often not the SRE group actually working the SR. Rather than register the
+// clock and suppress the alert only at send time, this case type is never
+// written into the SLA engine's Redis store at all.
+func TestDispatcher_Handle_CaseCreated_ServiceRequest_SkipsSLARegistration(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Need an upgrade","caseType":"SERVICE_REQUEST","createdAt":"2026-01-05T10:00:00Z","description":"desc","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(sla.registerCalls) != 0 {
+		t.Errorf("expected RegisterClocks to be skipped for a service request, got %d calls", len(sla.registerCalls))
+	}
+}
+
 // TestDispatcher_Handle_StatusChanged_AppliesSLAStateEffectsWhenConfigured
 // verifies handleStatusChanged calls slaEngine.ApplyStateEffects.
 func TestDispatcher_Handle_StatusChanged_AppliesSLAStateEffectsWhenConfigured(t *testing.T) {

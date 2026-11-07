@@ -1008,6 +1008,53 @@ func TestTick_BreachAlert_RealTeamAudienceIsNotRetargeted(t *testing.T) {
 	}
 }
 
+// TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor
+// guards the product decision that a service request's SLA breach stays
+// UI-only: the account's default CRE team (ClockMeta.Team) is often not the
+// SRE group actually working the SR, so a chat/email alert here was a
+// reported false-signal problem. The tier is still claimed, published and
+// advanced exactly as for any other case type -- only the Chat card and the
+// two breach emails are suppressed.
+func TestTick_ServiceRequestBreach_SkipsChatAndEmailButKeepsPublishAndCursor(t *testing.T) {
+	st := newFakeStore()
+	chat := &fakeChat{}
+	pub := &fakePublisher{}
+	email := &fakeEmail{}
+	e := newTestEngine(st, chat, pub)
+	e.email = email
+	past := time.Now().Add(-time.Minute)
+	e.entity = &fakeEntityClockStatus{states: map[string]clockState{
+		"case-1|response": {
+			Found: true, IsActive: true, Stage: "IN_PROGRESS", StartedOn: &past,
+			AssigneeName: "Jane Doe", AssigneeEmail: "jane@example.com",
+			TeamEmail: "team-nova@example.com", BusinessElapsedPercent: 50,
+		},
+	}}
+
+	st.clocks["case-1|response"] = ClockMeta{CaseNumber: "CS0001", Team: "Team Nova", CaseType: "SERVICE_REQUEST", StartedAt: past}
+	st.wake[wakeMember("case-1", "response", 50)] = past
+
+	if err := e.Tick(context.Background(), time.Now()); err != nil {
+		t.Fatalf("Tick() error = %v, want nil", err)
+	}
+	if len(chat.calls) != 0 {
+		t.Errorf("chat calls = %+v, want none for a service request", chat.calls)
+	}
+	if len(email.calls) != 0 {
+		t.Errorf("email calls = %+v, want none for a service request", email.calls)
+	}
+	if pub.calls != 1 {
+		t.Errorf("publish calls = %d, want 1 -- sla.tier_reached still publishes, the UI still reflects the breach", pub.calls)
+	}
+	if _, stillWaiting := st.wake[wakeMember("case-1", "response", 50)]; stillWaiting {
+		t.Error("wake entry not removed")
+	}
+	meta, _, _ := st.GetClock(context.Background(), "case-1", "response")
+	if meta.AlertedTier != 50 {
+		t.Errorf("AlertedTier = %d, want 50 -- bookkeeping is unaffected by the chat/email suppression", meta.AlertedTier)
+	}
+}
+
 // TestTick_SLANotificationsDisabled_SkipsChatButKeepsPublishAndCursor guards
 // SLA_EMAIL_SENDING_ENABLED=false: no Chat card, but verifyTierStillDue's
 // own entity-service lookup still happens (it runs in processDueMember,

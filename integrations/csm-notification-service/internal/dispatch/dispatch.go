@@ -1278,7 +1278,18 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// real publisher (see events.CaseCreatedPayload.CreatedAt); a value
 	// that fails to parse skips registration rather than guessing a
 	// fallback "now" that would start every clock from the wrong instant.
-	if d.slaEngine != nil {
+	//
+	// A service request's SLA state stays UI-only (entity-service's own
+	// sla/clock-state tables already track and expose it) -- a breach alert
+	// here would route to the account's default CRE team, which is often
+	// not the SRE group actually working the SR, a reported false-signal
+	// problem. Rather than register clocks here and suppress the alert
+	// later (slaengine.sendBreachAlert's own CaseType check still exists,
+	// purely as a backstop for a clock that was already registered before
+	// this skip existed), skip registration outright for this one case
+	// type: there is nothing for this engine to track or wake up for, so
+	// there is no reason to write it into Redis at all.
+	if d.slaEngine != nil && p.CaseType != "SERVICE_REQUEST" {
 		createdAt, err := time.Parse(time.RFC3339, p.CreatedAt)
 		if err != nil {
 			slog.WarnContext(ctx, "dispatch: case.created createdAt not RFC3339, sla clocks not registered", "caseId", p.CaseID, "createdAt", p.CreatedAt, "err", err)
