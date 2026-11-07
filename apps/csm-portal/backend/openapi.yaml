@@ -22366,6 +22366,7 @@ components:
             - accountEscalationActive
             - number
             - internalId
+            - salesRegion
         op:
           type: string
           enum: [eq, in, notIn, isEmpty, isNotEmpty, gte, lte]
@@ -22477,6 +22478,11 @@ components:
         - **internalId** (eq): a single WSO2 case id; matches exactly. Routed
           as a first-class filter rather than through the free-text
           searchQuery scan.
+        - **salesRegion** (in): one or more sales region names (e.g. "EMEA",
+          "APAC"). Matches cases whose parent account's sales region equals
+          any of the given values, compared case-insensitively on trimmed
+          values. Supported at the top level and inside an anyOf branch; eq,
+          notIn, empty and blank values are rejected.
 
     CaseSearchFilters:
       type: object
