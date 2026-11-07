@@ -123,7 +123,7 @@ const AUDIT_TIMESTAMP_VALUE_PATTERN =
  * human-readable text, so it passes through unchanged rather than becoming
  * "Unset".
  */
-function severityChangeLabel(value: string): string {
+export function severityChangeLabel(value: string): string {
   const upper = value.trim().toUpperCase();
   if (upper in SEVERITY_LABEL) return SEVERITY_LABEL[upper as Severity];
   const severity = severityFromBe(value);

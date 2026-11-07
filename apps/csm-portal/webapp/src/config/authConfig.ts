@@ -119,6 +119,13 @@ declare global {
        */
       CSM_MIGRATION_ONBOARDING_STATUS_ENABLED?: boolean | string;
       /**
+       * The SLA impact timeline beneath the SLA table on a case's SLA tab.
+       * On by default; only an explicit `false` (or the string `"false"`)
+       * hides it. The SLA table itself is unaffected. See
+       * `slaTimelineConfig.ts`.
+       */
+      CSM_PORTAL_SLA_TIMELINE_ENABLED?: boolean | string;
+      /**
        * Largest file, in megabytes, offered for upload (default 100, the
        * entity-service default). A number or numeric
        * string. See `attachmentLimitsConfig.ts`.

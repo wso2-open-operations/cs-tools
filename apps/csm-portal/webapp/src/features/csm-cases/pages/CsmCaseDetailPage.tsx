@@ -168,6 +168,7 @@ import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
+import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import { useGetWorkItemSlas } from "@features/csm-sla/api/useGetWorkItemSlas";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
@@ -3227,7 +3228,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
       )}
 
       {activeTab === "sla" && canViewSlaTab && caseId && (
-        <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+        <>
+          <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+          <SlaImpactTimeline
+            entries={activityAudit}
+            isLoading={isActivityLoading}
+            isError={isActivityError}
+            onRetry={() => void refetchActivities()}
+          />
+        </>
       )}
 
       {activeTab === "attachments" && (
