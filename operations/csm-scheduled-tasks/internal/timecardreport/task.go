@@ -122,6 +122,28 @@ func ResolveProject(ctx context.Context, src Source, key string) (timecards.Proj
 // left out deactivated memberships.
 func Recipients(contacts []timecards.Contact) []string {
 	var out []string
+	for _, c := range recipientContacts(contacts) {
+		out = append(out, strings.TrimSpace(c.Email))
+	}
+	return out
+}
+
+// RecipientIDs returns the user ids of the contacts Recipients would mail, in
+// the same order, for logging in place of their addresses. A contact with no
+// linked record has no id and is left out.
+func RecipientIDs(contacts []timecards.Contact) []string {
+	var out []string
+	for _, c := range recipientContacts(contacts) {
+		if c.ID != "" {
+			out = append(out, c.ID)
+		}
+	}
+	return out
+}
+
+// recipientContacts applies Recipients' filter and de-duplication.
+func recipientContacts(contacts []timecards.Contact) []timecards.Contact {
+	var out []timecards.Contact
 	seen := map[string]bool{}
 	for _, c := range contacts {
 		a := strings.TrimSpace(c.Email)
@@ -129,7 +151,7 @@ func Recipients(contacts []timecards.Contact) []string {
 			continue
 		}
 		seen[strings.ToLower(a)] = true
-		out = append(out, a)
+		out = append(out, c)
 	}
 	return out
 }
@@ -197,15 +219,17 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 	}
 
 	recipients := cfg.To
+	var recipientIDs []string // derived audience only; an explicit --to has no ids
 	if len(recipients) == 0 {
 		contacts, err := src.ProjectContacts(ctx, project.ID)
 		if err != nil {
 			return fmt.Errorf("fetch contacts: %w", err)
 		}
 		recipients = Recipients(contacts)
+		recipientIDs = RecipientIDs(contacts)
 		if len(recipients) == 0 {
 			slog.Warn("time card report project has no recipients; skipped",
-				"project", key, "contacts", len(contacts))
+				"projectId", project.ID, "contacts", len(contacts))
 			return nil
 		}
 	}
@@ -235,7 +259,7 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 	// The figures the mail carries, in minutes, so a log line alone shows what a
 	// project was sent. Counts only: no address, case or customer detail.
 	summary := []any{
-		"project", key, "from", from.Format(dateLayout), "to", to.Format(dateLayout),
+		"projectId", project.ID, "from", from.Format(dateLayout), "to", to.Format(dateLayout),
 		"cases", len(report.Cases),
 		"totalMinutes", report.Totals.TotalMinutes,
 		"billableMinutes", report.Totals.BillableMinutes,
@@ -243,7 +267,7 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 		"patchingMinutes", report.Totals.PatchingMinutes,
 	}
 	slog.Info("sending the time card report",
-		append(summary, "recipients", len(recipients), "cc", len(cfg.Cc), "mails", max(len(mails), 1))...)
+		append(summary, "recipients", len(recipients), "recipientIds", recipientIDs, "cc", len(cfg.Cc), "mails", max(len(mails), 1))...)
 
 	if len(cfg.To) > 0 {
 		if err := email.SendEmail(ctx, cfg.To, cfg.Cc, subject, body); err != nil {
@@ -256,7 +280,7 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 	for _, addr := range mails {
 		if err := email.SendEmail(ctx, []string{addr}, cfg.Cc, subject, body); err != nil {
 			sendFailures++
-			slog.Error("time card report mail failed", "project", key, "err", err)
+			slog.Error("time card report mail failed", "projectId", project.ID, "err", err)
 		}
 	}
 	slog.Info("sent the time card report",

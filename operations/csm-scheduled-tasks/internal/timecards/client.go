@@ -63,6 +63,8 @@ type Project struct {
 
 // Contact is the part of a project contact the report needs.
 type Contact struct {
+	// ID is the contact's user id; empty when the row has no contact record linked.
+	ID    string `json:"id"`
 	Email string `json:"email"`
 	// IsCsIntegrationUser marks a system-to-system user that never reads mail.
 	IsCsIntegrationUser bool   `json:"isCsIntegrationUser"`
