@@ -399,3 +399,25 @@ func TestSendReportsLogsProjectKeyAndSummary(t *testing.T) {
 		t.Errorf("log carries a recipient address:\n%s", out)
 	}
 }
+
+// An explicit-recipient run logs the same mail counts as a derived one.
+func TestSendReportsExplicitToLogsMailCounts(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	src := &fakeSource{
+		projects: map[string][]timecards.Project{"PRJ-1": {{ID: "id-1", Key: "PRJ-1", Name: "Acme Corp"}}},
+		reports:  map[string]timecards.Report{"id-1": report("id-1", "PRJ-1", "Acme Corp", oneCase)},
+	}
+	cfg := Config{ProjectKeys: []string{"PRJ-1"}, To: []string{"jane.doe@example.com"}}
+	if err := SendReports(src, &fakeMail{}, period, cfg, true)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sent the time card report", "mailsSent=1", "mailsFailed=0", "project=PRJ-1"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, buf.String())
+		}
+	}
+}

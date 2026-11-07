@@ -249,7 +249,7 @@ func sendProject(ctx context.Context, src Source, email EmailSender, key string,
 		if err := email.SendEmail(ctx, cfg.To, cfg.Cc, subject, body); err != nil {
 			return fmt.Errorf("send report: %w", err)
 		}
-		slog.Info("sent the time card report", append(summary, "mailsSent", 1)...)
+		slog.Info("sent the time card report", append(summary, "mailsSent", 1, "mailsFailed", 0)...)
 		return nil
 	}
 	sendFailures := 0
