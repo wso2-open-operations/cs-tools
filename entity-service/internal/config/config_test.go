@@ -29,13 +29,12 @@ import (
 // test only needs to override the field(s) under test.
 func baseValidConfig() Config {
 	return Config{
-		DataSource:           DataSourcePostgres,
-		SLADataSource:        SLADataSourcePostgres,
-		UsageReadMode:        UsageReadModePostgres,
-		AttachmentDataSource: AttachmentDataSourcePostgres,
-		DBUser:               "user",
-		DBPassword:           "password",
-		DBName:               "db",
+		DataSource:    DataSourcePostgres,
+		SLADataSource: SLADataSourcePostgres,
+		UsageReadMode: UsageReadModePostgres,
+		DBUser:        "user",
+		DBPassword:    "password",
+		DBName:        "db",
 		// Both ports carry their real defaults: Load always populates them,
 		// and Validate rejects the two being equal — which a zero-value
 		// Config would be.
@@ -395,7 +394,6 @@ func baseValidServiceNowConfig() Config {
 		DataSource:                               DataSourceServiceNow,
 		SLADataSource:                            SLADataSourcePostgres,
 		UsageReadMode:                            UsageReadModePostgres,
-		AttachmentDataSource:                     AttachmentDataSourcePostgres,
 		ServiceNowIntegrationServiceBaseURL:      "https://example.com",
 		ServiceNowIntegrationServiceTokenURL:     "https://example.com/token",
 		ServiceNowIntegrationServiceClientID:     "client-id",
@@ -1420,6 +1418,36 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 				t.Errorf("Validate() err = %v, want error %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestLoad_AttachmentSizeLimits(t *testing.T) {
+	for _, k := range []string{"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES"} {
+		t.Setenv(k, "")
+	}
+	c := Load()
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 || c.InlineImagesTotalMaxBytes != 25<<20 {
+		t.Errorf("size limits = %d / %d / %d, want 100 MiB / 25 MiB / 25 MiB", c.AttachmentMaxBytes, c.InlineImageMaxBytes, c.InlineImagesTotalMaxBytes)
+	}
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
+	if c = Load(); c.InlineImagesTotalMaxBytes != 2097152 {
+		t.Errorf("INLINE_IMAGES_TOTAL_MAX_BYTES override not read: %d", c.InlineImagesTotalMaxBytes)
+	}
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "")
+
+	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
+	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
+	c = Load()
+	if c.AttachmentMaxBytes != 52428800 || c.InlineImageMaxBytes != 1048576 {
+		t.Errorf("overrides not read: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
+	}
+
+	// A typo costs the override, not the service.
+	t.Setenv("ATTACHMENT_MAX_BYTES", "lots")
+	t.Setenv("INLINE_IMAGE_MAX_BYTES", "-5")
+	c = Load()
+	if c.AttachmentMaxBytes != 100<<20 || c.InlineImageMaxBytes != 25<<20 {
+		t.Errorf("bad values did not fall back to the defaults: %d / %d", c.AttachmentMaxBytes, c.InlineImageMaxBytes)
 	}
 }
 

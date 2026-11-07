@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -175,11 +176,23 @@ func TestCreateCase_BareSysIDProjectID_ForwardedDashed(t *testing.T) {
 	}
 }
 
+// decodeMessage returns the "message" field of an error response.
+func decodeMessage(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return body.Message
+}
+
 // createCaseJSONBody builds a valid CreateCaseRequest body of exactly
 // totalBytes whose single inline attachment carries the padding as its file.
 func createCaseJSONBody(totalBytes int) string {
-	const prefix = `{"projectId":"11111111-1111-1111-1111-111111111111","title":"Test Case","description":"Details","attachments":[{"name":"logs.txt","file":"`
-	const suffix = `"}]}`
+	const prefix = `{"projectId":"11111111-1111-1111-1111-111111111111","title":"Test Case","description":"`
+	const suffix = `"}`
 	padLen := totalBytes - len(prefix) - len(suffix)
 	if padLen < 0 {
 		padLen = 0
@@ -187,9 +200,9 @@ func createCaseJSONBody(totalBytes int) string {
 	return prefix + strings.Repeat("A", padLen) + suffix
 }
 
-// TestCreateCase_BodySizeLimit covers POST /cases with inline base64
-// attachments: a ~6 MB body (a 5 MB file) must not be rejected as too large,
-// while a body over 15 MiB must be rejected with 413.
+// TestCreateCase_BodySizeLimit covers POST /cases with a rich-text description
+// that embeds a large base64 image: a ~6 MB body must not be rejected as too
+// large, while a body over 15 MiB must be rejected with 413.
 func TestCreateCase_BodySizeLimit(t *testing.T) {
 	tests := map[string]struct {
 		bodySize   int
@@ -199,7 +212,7 @@ func TestCreateCase_BodySizeLimit(t *testing.T) {
 			bodySize:   (1 << 20) + 1024,
 			wantStatus: http.StatusCreated,
 		},
-		"6 MB body with an inline attachment succeeds": {
+		"6 MB body with an embedded image succeeds": {
 			bodySize:   6 * 1000 * 1000,
 			wantStatus: http.StatusCreated,
 		},

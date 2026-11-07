@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
 import {
   Box,
   Button,
@@ -1011,6 +1012,84 @@ export function TimeLogsWidget({
 // 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
 
+/** The bar along the bottom of an attachment row while it downloads (the row is `position: relative`). */
+function AttachmentDownloadBar({ id }: { id: string }) {
+  const progress = useAttachmentDownloadProgress(id);
+  if (progress === undefined) return null;
+  const known = progress >= 0;
+  return (
+    <LinearProgress
+      aria-hidden
+      variant={known ? "determinate" : "indeterminate"}
+      value={known ? progress : undefined}
+      sx={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4 }}
+    />
+  );
+}
+
+/** The Download button of an attachment row; while it downloads it shows the percentage. */
+function AttachmentDownloadButton({
+  attachment,
+  onDownload,
+}: {
+  attachment: CaseAttachment;
+  onDownload?: (attachment: CaseAttachment) => void;
+}) {
+  const progress = useAttachmentDownloadProgress(attachment.id);
+  const downloading = progress !== undefined;
+  const known = progress !== undefined && progress >= 0;
+  // Announced from beside the button: a disabled button is skipped by screen
+  // readers, so a status inside it would never be read. Every 10 percent only.
+  const announced = known ? Math.floor(progress / 10) * 10 : null;
+  return (
+    <>
+      <Box
+        component="span"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        sx={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {downloading
+          ? announced === null
+            ? `Downloading ${attachment.filename}`
+            : `Downloading ${attachment.filename}: ${announced}%`
+          : ""}
+      </Box>
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={
+          downloading ? (
+            <CircularProgress
+              size={14}
+              color="inherit"
+              variant={known ? "determinate" : "indeterminate"}
+              value={known ? progress : undefined}
+              aria-hidden
+            />
+          ) : (
+            <Download size={14} />
+          )
+        }
+        onClick={() => onDownload?.(attachment)}
+        disabled={!onDownload || downloading}
+        aria-busy={downloading || undefined}
+        aria-label={`Download ${attachment.filename}`}
+      >
+        {known ? `${progress}%` : downloading ? "Starting" : "Download"}
+      </Button>
+    </>
+  );
+}
+
 /**
  * Lists every attachment on the case in descending order of upload time, with
  * a "Download all" affordance. Downloads are surfaced through the parent's
@@ -1023,11 +1102,13 @@ export function AttachmentsWidget({
   onRetry,
   uploading = false,
   uploadProgress = null,
+  onCancelUpload,
   uploadError,
   onUpload,
   onDownloadAll,
   onDownload,
   onDelete,
+  canDeleteAttachment,
   deletingId,
   preview,
   onRefresh,
@@ -1043,12 +1124,14 @@ export function AttachmentsWidget({
   /** An upload is in flight. */
   uploading?: boolean;
   /**
-   * 0-100 while a direct-to-SFTPGo upload is in flight (see
+   * 0-100 while a chunked upload is in flight (see
    * `usePostCsmCaseAttachment`'s `uploadProgress`), `null`/omitted otherwise
-   * — including for the default upload path, which has no granular
+   * — including for the older base64 upload path, which has no granular
    * progress and falls back to an indeterminate bar.
    */
   uploadProgress?: number | null;
+  /** Stops the upload in flight; shows a Cancel button next to the progress bar. */
+  onCancelUpload?: () => void;
   /** Message shown when the last upload failed (size, network, 413, …). */
   uploadError?: string | null;
   onUpload?: (file: File) => void;
@@ -1056,6 +1139,11 @@ export function AttachmentsWidget({
   onDownload?: (attachment: CaseAttachment) => void;
   /** Delete an attachment. Omit to hide the per-row delete affordance. */
   onDelete?: (attachment: CaseAttachment) => void;
+  /**
+   * Per-row gate for the delete affordance, on top of `onDelete` being set (for
+   * example "only the uploader"). Omit to show it on every row, as before.
+   */
+  canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1160,11 +1248,19 @@ export function AttachmentsWidget({
           />
         )}
         {uploading && (
-          <LinearProgress
-            sx={{ mb: 1 }}
-            variant={uploadProgress != null ? "determinate" : "indeterminate"}
-            value={uploadProgress ?? undefined}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <LinearProgress
+              sx={{ flex: 1 }}
+              aria-label="Upload progress"
+              variant={uploadProgress != null ? "determinate" : "indeterminate"}
+              value={uploadProgress ?? undefined}
+            />
+            {onCancelUpload && (
+              <Button size="small" variant="text" color="inherit" onClick={onCancelUpload}>
+                Cancel
+              </Button>
+            )}
+          </Box>
         )}
         {uploadError && (
           <Typography variant="body2" color="error" sx={{ mb: 1 }}>
@@ -1203,6 +1299,8 @@ export function AttachmentsWidget({
                   borderRadius: 1,
                   border: 1,
                   borderColor: "divider",
+                  position: "relative",
+                  overflow: "hidden",
                   transition: "background-color 120ms, border-color 120ms",
                   "&:hover": {
                     borderColor: "primary.main",
@@ -1210,6 +1308,7 @@ export function AttachmentsWidget({
                   },
                 }}
               >
+                <AttachmentDownloadBar id={a.id} />
                 <Paperclip size={16} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   {onDownload ? (
@@ -1279,19 +1378,13 @@ export function AttachmentsWidget({
                   }
                 >
                   <Box component="span" sx={{ flexShrink: 0 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<Download size={14} />}
-                      onClick={() => onDownload?.(a)}
-                      disabled={!onDownload}
-                      aria-label={`Download ${a.filename}`}
-                    >
-                      Download
-                    </Button>
+                    <AttachmentDownloadButton
+                      attachment={a}
+                      onDownload={onDownload}
+                    />
                   </Box>
                 </Tooltip>
-                {onDelete && (
+                {onDelete && (canDeleteAttachment?.(a) ?? true) && (
                   <IconButton
                     size="small"
                     color="error"

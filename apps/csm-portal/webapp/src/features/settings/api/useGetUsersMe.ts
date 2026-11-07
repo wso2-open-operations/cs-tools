@@ -45,16 +45,6 @@ export interface UsersMeResponse {
     teamName: string;
     family?: string;
   };
-  /**
-   * Mirrors the backend's `SFTPGO_ATTACHMENT_STORAGE_ENABLED` runtime flag.
-   * Always present on a backend that knows this field (never omitted), so
-   * `undefined` here means either the profile hasn't loaded yet or the
-   * backend predates this field — both should be treated the same as "off".
-   * Gates the direct-to-SFTPGo upload/share attachment flows; see
-   * `usePostCsmCaseAttachment`, `useDownloadCsmCaseAttachment`, and
-   * `useResolvedInlineImageHtml`.
-   */
-  sftpgoAttachmentStorageEnabled?: boolean;
 }
 
 export function useGetUsersMe() {

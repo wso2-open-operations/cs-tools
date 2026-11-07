@@ -196,54 +196,6 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	return respBody, nil
 }
 
-// maxBinaryResponseBytes bounds attachment downloads specifically — larger
-// than maxResponseBodyBytes since attachments (documents, images) are
-// legitimately bigger than a typical JSON API response.
-const maxBinaryResponseBytes = 25 << 20 // 25 MiB
-
-// doBinary executes an authenticated GET request against entity-service and
-// returns the raw response body together with the upstream Content-Type
-// header. Use this instead of do for endpoints that return non-JSON binary
-// content (e.g. attachment downloads).
-func (c *Client) doBinary(ctx context.Context, path string) (body []byte, contentType string, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("entity: build request GET %s: %w", path, err)
-	}
-	if token := userIDTokenFromContext(ctx); token != "" {
-		req.Header.Set("x-user-id-token", token)
-	}
-	if id := correlationIDFromContext(ctx); id != "" {
-		req.Header.Set("X-CSM-Correlation-ID", id)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("entity: GET %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-
-	limited := io.LimitReader(resp.Body, maxBinaryResponseBytes+1)
-	respBody, err := io.ReadAll(limited)
-	if err != nil {
-		return nil, "", fmt.Errorf("entity: read response body: %w", err)
-	}
-	if len(respBody) > maxBinaryResponseBytes {
-		return nil, "", fmt.Errorf("entity: GET %s: response body exceeds %d bytes", path, maxBinaryResponseBytes)
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		err := apierror.NewUpstreamError(resp.StatusCode, respBody)
-		return nil, "", err
-	}
-
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
-	return respBody, ct, nil
-}
-
 // getJSON issues a GET request and decodes the JSON response into out.
 func (c *Client) getJSON(ctx context.Context, path string, out any) error {
 	body, err := c.do(ctx, http.MethodGet, path, nil)
@@ -286,18 +238,6 @@ func (c *Client) patchJSON(ctx context.Context, path string, reqBody, out any) e
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("entity: decode response for PATCH %s: %w", path, err)
-	}
-	return nil
-}
-
-// deleteJSON issues a DELETE request and decodes the JSON response into out.
-func (c *Client) deleteJSON(ctx context.Context, path string, out any) error {
-	body, err := c.do(ctx, http.MethodDelete, path, nil)
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("entity: decode response for DELETE %s: %w", path, err)
 	}
 	return nil
 }

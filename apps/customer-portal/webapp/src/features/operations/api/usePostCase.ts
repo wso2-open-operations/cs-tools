@@ -60,7 +60,6 @@ export function usePostCase(): UseMutationResult<
             ? `${body.description.slice(0, 80)}...`
             : undefined,
         variableCount: "variables" in body ? body.variables.length : undefined,
-        attachmentCount: body.attachments?.length ?? 0,
       });
 
       try {
@@ -77,7 +76,6 @@ export function usePostCase(): UseMutationResult<
         const sizeCheck = checkPayloadSize(
           serializedBody,
           MAX_CASE_REQUEST_BODY_BYTES,
-          body.attachments,
         );
         if (!sizeCheck.ok) {
           throw new Error(

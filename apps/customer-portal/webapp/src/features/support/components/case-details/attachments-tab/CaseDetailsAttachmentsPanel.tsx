@@ -25,10 +25,13 @@ import {
   flattenCaseAttachments,
 } from "@features/support/api/useGetCaseAttachments";
 import type { CaseAttachment } from "@features/support/types/cases";
-import type { PostAttachmentsVariables } from "@features/support/types/supportApi";
-import { useDeleteAttachment } from "@features/support/api/useDeleteAttachment";
-import { useGetAttachmentContent } from "@api/useGetAttachmentContent";
+import {
+  useStoredAttachmentDelete,
+  useStoredAttachmentDownload,
+  type StoredUploadVariables,
+} from "@api/useStoredAttachments";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 
 import UploadAttachmentModal from "@case-details-attachments/UploadAttachmentModal";
@@ -36,7 +39,6 @@ import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
 import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSkeleton";
 import UploadingAttachmentPlaceholder from "@case-details-attachments/UploadingAttachmentPlaceholder";
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
-import EditCaseAttachmentModal from "@case-details-attachments/EditCaseAttachmentModal";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
 
@@ -46,7 +48,7 @@ const SKELETON_MIN_DISPLAY_MS = 4000;
 
 /**
  * Renders the Attachments tab: upload button, modal, and list from GET /cases/:id/attachments.
- * Download uses GET /attachments/:id (authenticated) when inline content is absent.
+ * Download streams the file through the portal backend; delete is for the uploader only.
  * Uses infinite query with server-side pagination (10 items per page).
  *
  * @param {CaseDetailsAttachmentsPanelProps} props - caseId.
@@ -57,10 +59,11 @@ export default function CaseDetailsAttachmentsPanel({
   isCaseClosed = false,
 }: CaseDetailsAttachmentsPanelProps): JSX.Element {
   const { showError } = useErrorBanner();
+  const { showSuccess } = useSuccessBanner();
   const { data: userDetails } = useGetUserDetails();
   const currentUserEmail = userDetails?.email?.trim().toLowerCase() ?? "";
-  const { downloadAttachment, isDownloading, downloadingId } =
-    useGetAttachmentContent();
+  const storedDownload = useStoredAttachmentDownload();
+  const storedDelete = useStoredAttachmentDelete();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [minTimeElapsed, setMinTimeElapsed] = useState(false);
   const minTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,8 +80,6 @@ export default function CaseDetailsAttachmentsPanel({
   const [currentPage, setCurrentPage] = useState(1);
   const [attachmentToDelete, setAttachmentToDelete] =
     useState<CaseAttachment | null>(null);
-  const [attachmentToEdit, setAttachmentToEdit] =
-    useState<CaseAttachment | null>(null);
 
   const {
     data,
@@ -91,14 +92,12 @@ export default function CaseDetailsAttachmentsPanel({
     isFetchNextPageError,
   } = useGetCaseAttachments(caseId);
 
-  const deleteAttachment = useDeleteAttachment();
-
   const pendingUploads = useMutationState({
     filters: { mutationKey: ["postCaseAttachment"], status: "pending" },
     select: (mutation) =>
-      mutation.state.variables as PostAttachmentsVariables | undefined,
+      mutation.state.variables as StoredUploadVariables | undefined,
   }).filter(
-    (vars): vars is PostAttachmentsVariables => vars?.caseId === caseId,
+    (vars): vars is StoredUploadVariables => vars?.caseId === caseId,
   );
 
   const allAttachments = useMemo(() => flattenCaseAttachments(data), [data]);
@@ -149,11 +148,17 @@ export default function CaseDetailsAttachmentsPanel({
 
   const handleDownload = async (att: CaseAttachment) => {
     try {
-      await downloadAttachment({
+      await storedDownload.downloadStoredAttachment({
+        type: "work_item",
         id: att.id,
         name: att.name,
-        type: att.type,
-        downloadUrl: att.downloadUrl,
+        size: att.size,
+        onSaved: (outcome) =>
+          showSuccess(
+            outcome === "saved"
+              ? `Downloaded ${att.name}.`
+              : `Download of ${att.name} started.`,
+          ),
       });
     } catch (error) {
       const message =
@@ -168,27 +173,13 @@ export default function CaseDetailsAttachmentsPanel({
 
   const handleConfirmDelete = () => {
     if (!attachmentToDelete?.id) return;
-    deleteAttachment.mutate(
-      { attachmentId: attachmentToDelete.id, caseId },
+    storedDelete.mutate(
+      { type: "work_item", attachmentId: attachmentToDelete.id, caseId },
       {
         onSuccess: () => setAttachmentToDelete(null),
-        onError: (error) => {
-          showError(error.message);
-        },
+        onError: (error) => showError(error.message),
       },
     );
-  };
-
-  const handleEditClick = (att: CaseAttachment) => {
-    setAttachmentToEdit(att);
-  };
-
-  const handleEditSuccess = () => {
-    setAttachmentToEdit(null);
-  };
-
-  const handleEditError = (message: string) => {
-    showError(message);
   };
 
   if (!caseId) {
@@ -279,12 +270,15 @@ export default function CaseDetailsAttachmentsPanel({
                     key={att.id}
                     attachment={att}
                     onDownload={handleDownload}
-                    onDelete={handleDeleteClick}
+                    // A closed case offers no delete at all.
+                    onDelete={isCaseClosed ? undefined : handleDeleteClick}
                     deleteDisabled={deleteDisabled}
                     deleteTooltip={deleteTooltip}
-                    onEdit={isCaseClosed || !isOwner ? undefined : handleEditClick}
                     hideDescription
-                    isDownloadLoading={isDownloading && downloadingId === att.id}
+                    isDownloadLoading={
+                      storedDownload.isDownloadingId(att.id)
+                    }
+                    downloadProgress={storedDownload.downloadProgressOf(att.id)}
                   />
                 );
               })
@@ -312,16 +306,7 @@ export default function CaseDetailsAttachmentsPanel({
         attachmentName={attachmentToDelete?.name ?? null}
         onClose={() => setAttachmentToDelete(null)}
         onConfirm={handleConfirmDelete}
-        isDeleting={!!attachmentToDelete && deleteAttachment.isPending}
-      />
-
-      <EditCaseAttachmentModal
-        open={!!attachmentToEdit}
-        attachment={attachmentToEdit}
-        caseId={caseId}
-        onClose={() => setAttachmentToEdit(null)}
-        onSuccess={handleEditSuccess}
-        onError={handleEditError}
+        isDeleting={!!attachmentToDelete && storedDelete.isPending}
       />
     </>
   );

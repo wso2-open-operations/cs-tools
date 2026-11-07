@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import {
   Alert,
   Box,
@@ -100,6 +101,7 @@ import {
   pendingCustomerProposal,
 } from "@features/csm-operations/utils/changeRequests";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
+import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import { AttachmentsWidget, TagsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
@@ -1334,24 +1336,21 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      changeRequestId: id,
-                      bodyHtml,
-                      internal,
-                    });
-                  }
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId: id,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                      referenceType: "change_request",
-                    });
-                  }
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ changeRequestId: id, bodyHtml, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({
+                        caseId: id,
+                        file,
+                        name,
+                        uploadedBy: engineerName,
+                        referenceType: "change_request",
+                      }),
+                  });
                   setComposerOpen(false);
                 }}
               />
@@ -1384,6 +1383,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
           <AttachmentsWidget
             attachments={attachmentList}
             uploading={postAttachment.isPending}
+            uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
+            onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError
                 ? (postAttachment.error?.message ?? "Could not upload the attachment.")

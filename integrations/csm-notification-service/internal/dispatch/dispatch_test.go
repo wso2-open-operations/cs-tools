@@ -989,7 +989,7 @@ type mockSLAEngine struct {
 	pauseWorkaroundErr error
 	recalculateCalls   int
 	recalculateErr     error
-	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }
+	reviseCalls        []struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }
 }
 
 func (m *mockSLAEngine) RegisterClocks(_ context.Context, caseID, priority string, _ time.Time, caseNumber, _, _, _, _, _ string) {
@@ -1024,10 +1024,10 @@ func (m *mockSLAEngine) RecalculateFromEntity(_ context.Context) error {
 	return m.recalculateErr
 }
 
-func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+func (m *mockSLAEngine) ReviseClocks(_ context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team})
+	m.reviseCalls = append(m.reviseCalls, struct{ caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string }{caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType})
 }
 
 // TestDispatcher_Handle_CaseCreated_RegistersSLAClocksWhenConfigured verifies
@@ -1068,6 +1068,27 @@ func TestDispatcher_Handle_CaseCreated_MalformedCreatedAt_SkipsRegistration(t *t
 	}
 	if len(sla.registerCalls) != 0 {
 		t.Errorf("expected RegisterClocks to be skipped for a malformed createdAt, got %d calls", len(sla.registerCalls))
+	}
+}
+
+// TestDispatcher_Handle_CaseCreated_ServiceRequest_SkipsSLARegistration
+// guards the product decision that a service request's SLA state stays
+// UI-only (entity-service's own sla/clock-state tables already track it): a
+// breach alert here would route to the account's default CRE team, which is
+// often not the SRE group actually working the SR. Rather than register the
+// clock and suppress the alert only at send time, this case type is never
+// written into the SLA engine's Redis store at all.
+func TestDispatcher_Handle_CaseCreated_ServiceRequest_SkipsSLARegistration(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseNumber":"CS0001","caseTitle":"Need an upgrade","caseType":"SERVICE_REQUEST","createdAt":"2026-01-05T10:00:00Z","description":"desc","recipients":["test-recipient@example.com"]}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(sla.registerCalls) != 0 {
+		t.Errorf("expected RegisterClocks to be skipped for a service request, got %d calls", len(sla.registerCalls))
 	}
 }
 
@@ -1960,6 +1981,34 @@ func TestDispatcher_Handle_SeverityChanged_RevisesSLAClocks(t *testing.T) {
 	got := sla.reviseCalls[0]
 	if got.caseID != "CASE-1" || got.priority != "HIGH" || got.caseNumber != "CS0001001" || got.wso2CaseID != "WSO2-1000" || got.caseTitle != "Something broke" || got.product != "api-manager" || got.team != "Phoenix" {
 		t.Errorf("unexpected ReviseClocks args: %+v", got)
+	}
+	if got.newType != "" {
+		t.Errorf("newType = %q, want empty -- a severity change never changes the case's type", got.newType)
+	}
+}
+
+// TestDispatcher_Handle_CaseTypeChanged_RevisesSLAClocksWithNewType guards a
+// CodeRabbit-caught gap: handleCaseTypeChanged decoded the payload's own
+// NewType but never passed it through to ReviseClocks, so a case
+// transferring into a service request kept its stale pre-transfer CaseType
+// in this engine's own Redis metadata forever -- the breach-alert suppression
+// guard added for service requests could then never catch it.
+func TestDispatcher_Handle_CaseTypeChanged_RevisesSLAClocksWithNewType(t *testing.T) {
+	sla := &mockSLAEngine{}
+	d := newTestDispatcher(&mockEmailSender{}, &mockGoogleChatSender{}, &mockCallSender{}).WithSLAEngine(sla)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.type_changed","entityId":"CASE-1","payload":{"caseId":"CASE-1","caseNumber":"CS0001001","wso2CaseId":"WSO2-1000","caseTitle":"Need an upgrade","product":"api-manager","team":"Phoenix","previousType":"case","newType":"service_request"}}`)}
+
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+
+	if len(sla.reviseCalls) != 1 {
+		t.Fatalf("expected 1 ReviseClocks call, got %d", len(sla.reviseCalls))
+	}
+	got := sla.reviseCalls[0]
+	if got.caseID != "CASE-1" || got.newType != "service_request" {
+		t.Errorf("unexpected ReviseClocks args: %+v, want newType %q", got, "service_request")
 	}
 }
 

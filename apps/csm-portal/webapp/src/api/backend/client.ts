@@ -114,6 +114,20 @@ export interface BackendApi {
    * a 404 throws like any other error — there is no "null" body for a binary.
    */
   getBlob(path: string): Promise<Blob>;
+  /**
+   * Authenticated PUT of raw bytes (an upload chunk). Resolves when the server
+   * answers 2xx; any other status throws a {@link BackendApiError}.
+   */
+  putBinary(path: string, body: Blob, options?: BackendApiPostOptions): Promise<void>;
+  /**
+   * Authenticated GET that returns the response itself, so a large body can be
+   * read as a stream and a `Range` header sent. A non-2xx answer throws a
+   * {@link BackendApiError}.
+   */
+  getResponse(
+    path: string,
+    options?: { headers?: Record<string, string>; signal?: AbortSignal },
+  ): Promise<Response>;
 }
 
 /**
@@ -244,6 +258,32 @@ export function useBackendApi(): BackendApi {
         });
         if (!response.ok) throw await readError(response, correlationId);
         return await response.blob();
+      },
+      async putBinary(path: string, body: Blob, options?: BackendApiPostOptions): Promise<void> {
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            [CORRELATION_ID_HEADER]: correlationId,
+          },
+          body,
+          signal: options?.signal,
+        });
+        if (!response.ok) throw await readError(response, correlationId);
+      },
+      async getResponse(
+        path: string,
+        options?: { headers?: Record<string, string>; signal?: AbortSignal },
+      ): Promise<Response> {
+        const correlationId = newCorrelationId();
+        const response = await authFetch(buildUrl(path), {
+          method: "GET",
+          headers: { ...options?.headers, [CORRELATION_ID_HEADER]: correlationId },
+          signal: options?.signal,
+        });
+        if (!response.ok) throw await readError(response, correlationId);
+        return response;
       },
     }),
     [authFetch, buildUrl],

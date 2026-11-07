@@ -25,9 +25,20 @@ import {
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { usePostComment } from "@features/support/api/usePostComment";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useCustomerPermissions } from "@hooks/useCustomerPermissions";
 import { useAsgardeo } from "@asgardeo/react";
+import { useAuthApiClient } from "@/hooks/useAuthApiClient";
+import {
+  confirmStoredUpload,
+  uploadStoredAttachment,
+  UploadConfirmPendingError,
+} from "@api/storedAttachments";
+import {
+  blobImageSources,
+  hasBlobImageSource,
+  rewriteBlobImageSources,
+} from "@features/support/utils/inlineCommentImages";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { hasSubmittableEditorContent } from "@features/support/utils/support";
 import { usePiiGuard } from "@features/support/hooks/usePiiGuard";
@@ -42,7 +53,8 @@ import {
 } from "@features/support/constants/supportConstants";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageCountExceededMessage,
+  imageSizeExceededMessage,
 } from "@constants/common";
 import { formatBytes } from "@features/project-details/utils/projectDetails";
 
@@ -60,7 +72,7 @@ export default function ActivityCommentInput({
   const [value, setValue] = useState("");
   const [resetTrigger, setResetTrigger] = useState(0);
   const postComment = usePostComment();
-  const postAttachments = usePostAttachments();
+  const { upload: storedUpload } = useStoredAttachmentUpload();
   const { canCreateCase, isLoading: isPermissionsLoading } =
     useCustomerPermissions();
   const { isSignedIn, isLoading: isAuthLoading } = useAsgardeo();
@@ -84,6 +96,35 @@ export default function ActivityCommentInput({
   const attachmentIdCounterRef = useRef(0);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+
+  // Images pasted or inserted into the comment are shown from a local blob: URL and
+  // kept here; nothing is uploaded until the comment is sent, so an image that is removed or never posted leaves
+  // nothing on the server. Each finished upload's id is kept against that URL; the
+  // URLs are then replaced by `/<id>` references, so no image bytes travel with
+  // the comment.
+  const authFetch = useAuthApiClient();
+  const imageIdsRef = useRef<Map<string, string>>(new Map());
+  const queuedImagesRef = useRef<Map<string, File>>(new Map());
+  const previewUrlsRef = useRef<Set<string>>(new Set());
+  const [pendingImages, setPendingImages] = useState(0);
+
+  const releasePreviews = () => {
+    previewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrlsRef.current.clear();
+    imageIdsRef.current.clear();
+    queuedImagesRef.current.clear();
+  };
+  useEffect(() => {
+    const previewUrls = previewUrlsRef.current;
+    const imageIds = imageIdsRef.current;
+    const queued = queuedImagesRef.current;
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+      previewUrls.clear();
+      imageIds.clear();
+      queued.clear();
+    };
+  }, []);
 
   const isCaseClosed = caseStatus?.toLowerCase() === "closed";
 
@@ -110,9 +151,68 @@ export default function ActivityCommentInput({
     !isSignedIn ||
     isAuthLoading ||
     postComment.isPending ||
-    isUploadingAttachments;
+    isUploadingAttachments ||
+    pendingImages > 0;
 
   const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
+
+  // Keeps one image for the send. The editor shows it from its blob: URL; it is
+  // uploaded by uploadQueuedImages when the comment is sent.
+  const uploadInlineImage = async (file: File, previewUrl: string) => {
+    previewUrlsRef.current.add(previewUrl);
+    queuedImagesRef.current.set(previewUrl, file);
+  };
+
+  // Stores the images the comment still shows, one after another, through
+  // entity-service's upload flow. Resolves false after showing the error of the
+  // first one that fails; the ones already stored are kept, so sending again
+  // uploads only the rest.
+  const uploadQueuedImages = async (html: string): Promise<boolean> => {
+    // The same preview can appear more than once (a copied image): upload it once.
+    const toUpload = Array.from(new Set(blobImageSources(html))).filter(
+      (url) => !imageIdsRef.current.has(url) && queuedImagesRef.current.has(url),
+    );
+    if (toUpload.length === 0) return true;
+    setPendingImages(toUpload.length);
+    try {
+      for (const previewUrl of toUpload) {
+        const file = queuedImagesRef.current.get(previewUrl) as File;
+        const input = {
+          type: "comment" as const,
+          parentId: caseId,
+          file,
+          name: file.name || "image",
+        };
+        let id: string;
+        try {
+          id = (await uploadStoredAttachment(authFetch, input)).id;
+        } catch (error) {
+          // The file is already in place: finish the upload instead of repeating it.
+          if (!(error instanceof UploadConfirmPendingError)) throw error;
+          id = (
+            await confirmStoredUpload(authFetch, {
+              type: "comment",
+              attachmentId: error.attachmentId,
+              chunks: error.chunks,
+            })
+          ).id;
+        }
+        imageIdsRef.current.set(previewUrl, id);
+        queuedImagesRef.current.delete(previewUrl);
+        setPendingImages((n) => n - 1);
+      }
+      return true;
+    } catch (error) {
+      showError(
+        error instanceof Error && error.message
+          ? `${error.message} The comment was not sent; try again.`
+          : "Failed to upload the image. The comment was not sent; try again.",
+      );
+      return false;
+    } finally {
+      setPendingImages(0);
+    }
+  };
 
   const handleAttachmentClick = () => {
     setIsAttachmentModalOpen(true);
@@ -142,55 +242,52 @@ export default function ActivityCommentInput({
     });
   };
 
+  // Uploads each queued file as its own work_item attachment of the case, one
+  // after another, through the same chunked flow as the Attachments tab. One
+  // that fails does not stop the others; the result says which went through.
   const uploadAttachmentsFromSnapshot = async (
     attachmentsSnapshot: Array<{ id: string; file: File }>,
     namesSnapshot: Map<string, string>,
-  ): Promise<boolean> => {
-    if (attachmentsSnapshot.length === 0) return true;
+  ): Promise<{ uploadedIds: string[]; failures: string[] }> => {
+    const uploadedIds: string[] = [];
+    const failures: string[] = [];
+    if (attachmentsSnapshot.length === 0) return { uploadedIds, failures };
 
     setIsUploadingAttachments(true);
     try {
       for (const { id, file } of attachmentsSnapshot) {
         const attachmentName = namesSnapshot.get(id) || file.name;
-
-        await new Promise<void>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 =
-              typeof reader.result === "string" ? reader.result : "";
-            const commaIndex = base64.indexOf(",");
-            const content =
-              commaIndex >= 0 ? base64.slice(commaIndex + 1) : base64;
-
-            const body = {
-              name: attachmentName,
-              type: file.type || "application/octet-stream",
-              content,
-            };
-
-            postAttachments.mutate(
-              { caseId, body },
-              {
-                onSuccess: () => resolve(),
-                onError: (error) => reject(error),
-              },
-            );
-          };
-          reader.onerror = () => reject(new Error("Failed to read file"));
-          reader.readAsDataURL(file);
-        });
+        try {
+          await storedUpload.mutateAsync({
+            type: "work_item",
+            parentId: caseId,
+            caseId,
+            file,
+            body: { name: attachmentName },
+          });
+          uploadedIds.push(id);
+        } catch (error) {
+          failures.push(
+            `"${attachmentName}": ${
+              error instanceof Error && error.message
+                ? error.message
+                : "the upload failed"
+            }`,
+          );
+        }
       }
-      return true;
-    } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Failed to upload attachments. Please try again.";
-      showError(message);
-      return false;
     } finally {
       setIsUploadingAttachments(false);
     }
+    return { uploadedIds, failures };
+  };
+
+  // Takes the files that were stored out of the queue; a failed one stays so
+  // pressing Send again uploads only it.
+  const dropUploaded = (uploadedIds: string[]) => {
+    if (uploadedIds.length === 0) return;
+    uploadedIds.forEach((id) => attachmentNamesRef.current.delete(id));
+    setAttachments((prev) => prev.filter((a) => !uploadedIds.includes(a.id)));
   };
 
   const handleSend = async () => {
@@ -210,55 +307,85 @@ export default function ActivityCommentInput({
     const attachmentsSnapshot = [...currentAttachments];
     const attachmentNamesSnapshot = new Map(attachmentNamesRef.current);
 
-    const clearUI = () => {
+    const clearEditor = () => {
       setValue("");
       setResetTrigger((prev) => prev + 1);
-      setAttachments([]);
-      attachmentNamesRef.current.clear();
+      releasePreviews();
     };
 
     const performSend = async () => {
-      // Attachment-only: skip comment endpoint, upload directly
-      if (!hasText && hasAttachments) {
-        const ok = await uploadAttachmentsFromSnapshot(
-          attachmentsSnapshot,
-          attachmentNamesSnapshot,
+      // The comment's images are uploaded now; their `/<id>` references replace
+      // the preview URLs, and one that is left is an image that never uploaded and
+      // must not be sent.
+      let finalValue = currentValue;
+      if (hasText) {
+        if (!(await uploadQueuedImages(currentValue))) return;
+        finalValue = rewriteBlobImageSources(
+          currentValue,
+          imageIdsRef.current,
         );
-        if (ok) {
-          clearUI();
-          window.location.reload();
+        if (hasBlobImageSource(finalValue)) {
+          showError(
+            "An image in the comment could not be uploaded. Remove it and try again.",
+          );
+          return;
         }
-        return;
       }
 
-      // Text (with or without attachments): post comment first, then upload attachments
-      postComment.mutate(
-        {
-          caseId,
-          body: { content: currentValue.trim(), type: CommentType.COMMENT },
-        },
-        {
-          onSuccess: async () => {
-            clearUI();
-            if (attachmentsSnapshot.length > 0) {
-              const ok = await uploadAttachmentsFromSnapshot(
-                attachmentsSnapshot,
-                attachmentNamesSnapshot,
-              );
-              if (ok) {
-                window.location.reload();
-              }
-            }
-          },
-          onError: (error: unknown) => {
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : "Failed to post comment. Please try again.";
-            showError(message);
-          },
-        },
-      );
+      // The comment and the attachments are two separate requests, started
+      // together: a comment that fails does not hold the files back, and a file
+      // that fails does not lose the comment.
+      const commentResult: Promise<{ ok: true } | { ok: false; message: string }> =
+        hasText
+          ? new Promise((resolve) =>
+              postComment.mutate(
+                {
+                  caseId,
+                  body: { content: finalValue.trim(), type: CommentType.COMMENT },
+                },
+                {
+                  onSuccess: () => resolve({ ok: true }),
+                  onError: (error: unknown) =>
+                    resolve({
+                      ok: false,
+                      message:
+                        error instanceof Error && error.message
+                          ? error.message
+                          : "Failed to post comment. Please try again.",
+                    }),
+                },
+              ),
+            )
+          : Promise.resolve({ ok: true });
+      const [comment, uploads] = await Promise.all([
+        commentResult,
+        uploadAttachmentsFromSnapshot(
+          attachmentsSnapshot,
+          attachmentNamesSnapshot,
+        ),
+      ]);
+
+      if (hasText && comment.ok) clearEditor();
+      dropUploaded(uploads.uploadedIds);
+
+      const problems: string[] = [];
+      if (!comment.ok) {
+        problems.push(
+          `The comment was not posted (${comment.message}). It is still in the editor; press Send to try again.`,
+        );
+      }
+      if (uploads.failures.length > 0) {
+        problems.push(
+          `${uploads.failures.length === 1 ? "An attachment was" : "Some attachments were"} not uploaded: ${uploads.failures.join("; ")}. ${
+            uploads.failures.length === 1 ? "It is" : "They are"
+          } still attached; press Send to try again.`,
+        );
+      }
+      if (problems.length > 0) {
+        showError(problems.join(" "));
+        return;
+      }
+      if (attachmentsSnapshot.length > 0) window.location.reload();
     };
 
     // Warn about PII in the comment text before posting. Attachment-only
@@ -286,13 +413,16 @@ export default function ActivityCommentInput({
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             onAttachmentRemove={handleAttachmentRemove}
+            onImageUpload={uploadInlineImage}
             showKeyboardHint={true}
             maxHeight="310px"
             onPasteError={(reason) =>
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : reason === "count"
+                    ? imageCountExceededMessage()
+                    : imageSizeExceededMessage(),
               )
             }
             overlayElement={
@@ -300,7 +430,9 @@ export default function ActivityCommentInput({
                 title={
                   overSizeLimit && hasSubmittableEditorContent(value)
                     ? sizeError
-                    : "Send comment"
+                    : pendingImages > 0
+                      ? "Uploading image..."
+                      : "Send comment"
                 }
               >
                 <span>
@@ -309,6 +441,7 @@ export default function ActivityCommentInput({
                       (!hasSubmittableEditorContent(value) &&
                         attachments.length === 0) ||
                       (overSizeLimit && hasSubmittableEditorContent(value)) ||
+                      pendingImages > 0 ||
                       isDisabled
                     }
                     onClick={handleSend}
@@ -326,7 +459,9 @@ export default function ActivityCommentInput({
                       borderColor: "backgroundPaper",
                     }}
                   >
-                    {postComment.isPending || isUploadingAttachments ? (
+                    {postComment.isPending ||
+                    isUploadingAttachments ||
+                    pendingImages > 0 ? (
                       <CircularProgress color="inherit" size={18} />
                     ) : (
                       <ArrowUp size={18} />

@@ -96,11 +96,6 @@ type UsersHandler struct {
 	// registry, so it can only answer membership questions when this layer
 	// hands it the group names to ask about.
 	dir *directory.Directory
-	// sftpgoAttachmentStorageEnabled mirrors SFTPGO_ATTACHMENT_STORAGE_ENABLED
-	// (see cmd/server/main.go), surfaced on GET /users/me so the frontend can
-	// tell whether AttachmentStorageHandler's routes are reachable without
-	// probing them.
-	sftpgoAttachmentStorageEnabled bool
 	// timecardApproverRoleIDs are every real role ID (see
 	// handler.RoleIDsForKey) GET /users/time-card-approvers fetches via SCIM
 	// and merges. Configured once, out of band -- see that handler's own doc
@@ -140,20 +135,15 @@ func (h *UsersHandler) WithAccessGuard(g *AccessGuard) *UsersHandler {
 }
 
 // NewUsersHandler creates a UsersHandler backed by the given SCIM and entity
-// clients and the startup-resolved directory. sftpgoAttachmentStorageEnabled
-// mirrors the same runtime flag value main.go uses to decide whether to
-// register AttachmentStorageHandler's routes (SFTPGO_ATTACHMENT_STORAGE_ENABLED),
-// so GET /users/me can tell the frontend whether those routes are reachable.
-// timecardApproverRoleIDs is GetTimeCardApprovers' own config -- see that
+// clients and the startup-resolved directory. timecardApproverRoleIDs is GetTimeCardApprovers' own config -- see that
 // handler's doc comment; pass nil/empty when GET /users/time-card-approvers
 // is not registered (main.go only registers it once this is non-empty).
-func NewUsersHandler(scim scimClient, entity entityUserClient, dir *directory.Directory, sftpgoAttachmentStorageEnabled bool, timecardApproverRoleIDs []string) *UsersHandler {
+func NewUsersHandler(scim scimClient, entity entityUserClient, dir *directory.Directory, timecardApproverRoleIDs []string) *UsersHandler {
 	return &UsersHandler{
-		scim:                           scim,
-		entity:                         entity,
-		dir:                            dir,
-		sftpgoAttachmentStorageEnabled: sftpgoAttachmentStorageEnabled,
-		timecardApproverRoleIDs:        timecardApproverRoleIDs,
+		scim:                    scim,
+		entity:                  entity,
+		dir:                     dir,
+		timecardApproverRoleIDs: timecardApproverRoleIDs,
 	}
 }
 
@@ -175,12 +165,6 @@ type userMeResponse struct {
 	// read from the identity provider. Omitted when the record has none.
 	PhoneNumber *string           `json:"phoneNumber,omitempty"`
 	Team        *userTeamResponse `json:"team"`
-	// SftpgoAttachmentStorageEnabled mirrors the backend's
-	// SFTPGO_ATTACHMENT_STORAGE_ENABLED runtime flag. Always present (never
-	// omitted) so the frontend can distinguish "flag is off" from "field not
-	// yet known to this backend version" only by absence on an old backend —
-	// a new field an existing caller ignores, so this is backward compatible.
-	SftpgoAttachmentStorageEnabled bool `json:"sftpgoAttachmentStorageEnabled"`
 }
 
 // userTeamResponse is the caller's resolved ABT (Account-Based Team). Nil when
@@ -244,9 +228,8 @@ func (h *UsersHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := userMeResponse{
-		Email:                          user.Email,
-		SftpgoAttachmentStorageEnabled: h.sftpgoAttachmentStorageEnabled,
-		Roles:                          []string{},
+		Email: user.Email,
+		Roles: []string{},
 	}
 	if h.access != nil {
 		resp.Roles = h.access.RolesFor(user.Roles)

@@ -67,7 +67,7 @@ func TestGetUser_PassesPhoneThrough(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := NewUsersHandler(tc.scim, &mockEntityUserClient{
 				getUserFn: func(context.Context, string) ([]byte, error) { return []byte(tc.profile), nil },
-			}, testDirectory(t), false, nil)
+			}, testDirectory(t), nil)
 			if tc.guard {
 				h = h.WithAccessGuard(newAccessGuardForCSMRoles())
 			}
@@ -92,7 +92,7 @@ func TestGetUser_PassesPhoneThrough(t *testing.T) {
 			getUserFn: func(context.Context, string) ([]byte, error) {
 				return []byte(`{"id":"` + phoneTargetID + `","email":"user@example.com"}`), nil
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), nil)
 		r := withUser(httptest.NewRequest(http.MethodGet, "/users/"+phoneTargetID, nil))
 		r.SetPathValue("id", phoneTargetID)
 		w := httptest.NewRecorder()
@@ -137,7 +137,7 @@ func TestPatchMe_PhoneValidation(t *testing.T) {
 			called := false
 			h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{
 				patchUserMeFn: func(context.Context, []byte) ([]byte, error) { called = true; return []byte(`{}`), nil },
-			}, testDirectory(t), false, nil)
+			}, testDirectory(t), nil)
 			r := withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"`+in+`","timeZone":"UTC"}`)))
 			w := httptest.NewRecorder()
 			h.PatchMe(w, r)
@@ -153,7 +153,7 @@ func TestPatchMe_PhoneValidation(t *testing.T) {
 	}
 
 	t.Run("exact error body", func(t *testing.T) {
-		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), false, nil)
+		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{}, testDirectory(t), nil)
 		w := httptest.NewRecorder()
 		h.PatchMe(w, withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"12"}`))))
 		if got, want := strings.TrimSpace(w.Body.String()), `{"message":"phone must be in E.164 format, e.g. +14155552671"}`; got != want {
@@ -165,7 +165,7 @@ func TestPatchMe_PhoneValidation(t *testing.T) {
 		var body []byte
 		h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{
 			patchUserMeFn: func(_ context.Context, b []byte) ([]byte, error) { body = b; return []byte(`{}`), nil },
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), nil)
 		w := httptest.NewRecorder()
 		h.PatchMe(w, withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"timeZone":"UTC"}`))))
 		assertStatus(t, w, http.StatusOK)
@@ -180,7 +180,7 @@ func TestPatchMe_PhoneValidation(t *testing.T) {
 			patchUserMeFn: func(context.Context, []byte) ([]byte, error) {
 				return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"` + msg + `"}`}
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), nil)
 		w := httptest.NewRecorder()
 		h.PatchMe(w, withUser(httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"phoneNumber":"`+phoneValid+`"}`))))
 		assertStatus(t, w, http.StatusBadRequest)
@@ -202,7 +202,7 @@ func TestUpdateUser_PhoneValidation(t *testing.T) {
 			called := false
 			h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{
 				updateUserFn: func(context.Context, string, []byte) ([]byte, error) { called = true; return []byte(`{}`), nil },
-			}, testDirectory(t), false, nil)
+			}, testDirectory(t), nil)
 			w := patch(h, `{"phone":"`+in+`"}`)
 			assertStatus(t, w, http.StatusBadRequest)
 			assertErrorMessage(t, w, errMsgPhoneFormat)
@@ -223,7 +223,7 @@ func TestUpdateUser_PhoneValidation(t *testing.T) {
 			var body []byte
 			h := NewUsersHandler(&mockSCIMClient{}, &mockEntityUserClient{
 				updateUserFn: func(_ context.Context, _ string, b []byte) ([]byte, error) { body = b; return []byte(`{}`), nil },
-			}, testDirectory(t), false, nil)
+			}, testDirectory(t), nil)
 			assertStatus(t, patch(h, `{"phone":"`+tc.in+`"}`), http.StatusOK)
 			if string(body) != tc.want {
 				t.Errorf("entity body = %s, want %s", body, tc.want)
@@ -237,7 +237,7 @@ func TestUpdateUser_PhoneValidation(t *testing.T) {
 			updateUserFn: func(context.Context, string, []byte) ([]byte, error) {
 				return nil, &apierror.Error{StatusCode: http.StatusBadRequest, Body: `{"message":"` + msg + `"}`}
 			},
-		}, testDirectory(t), false, nil)
+		}, testDirectory(t), nil)
 		w := patch(h, `{"phone":"`+phoneValid+`"}`)
 		assertStatus(t, w, http.StatusBadRequest)
 		assertErrorMessage(t, w, msg)

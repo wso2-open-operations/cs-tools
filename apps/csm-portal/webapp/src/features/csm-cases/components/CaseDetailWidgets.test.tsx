@@ -831,7 +831,7 @@ describe("AttachmentsWidget — upload progress", () => {
     );
 
     // Rendering the list alone must never trigger a download resolution
-    // (e.g. a lazily-created SFTPGo share) — only an explicit click does.
+    // (e.g. a streamed file fetch) — only an explicit click does.
     expect(onDownload).not.toHaveBeenCalled();
 
     fireEvent.click(
@@ -1082,5 +1082,60 @@ describe("RequestDetailsWidget", () => {
     renderWithRouter(<RequestDetailsWidget variables={[]} />);
 
     expect(screen.getByText("No request details captured.")).toBeInTheDocument();
+  });
+});
+
+describe("AttachmentsWidget — per-row delete gate", () => {
+  const mine: CaseAttachment = {
+    id: "att-mine",
+    filename: "mine.txt",
+    size: 1,
+    contentType: "text/plain",
+    uploadedBy: "Me",
+    uploadedAt: "2026-01-01T00:00:00Z",
+  };
+  const theirs: CaseAttachment = { ...mine, id: "att-theirs", filename: "theirs.txt", uploadedBy: "Them" };
+
+  it("shows Delete on every row when no gate is given (unchanged behaviour)", () => {
+    renderWithRouter(<AttachmentsWidgetHarness attachments={[mine, theirs]} onDelete={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete theirs.txt" })).toBeInTheDocument();
+  });
+
+  it("hides Delete on the rows the gate refuses", () => {
+    renderWithRouter(
+      <AttachmentsWidgetHarness
+        attachments={[mine, theirs]}
+        onDelete={vi.fn()}
+        canDeleteAttachment={(a) => a.id === "att-mine"}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Delete mine.txt" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete theirs.txt" })).not.toBeInTheDocument();
+  });
+});
+
+describe("AttachmentsWidget — upload progress and cancel", () => {
+  it("shows a determinate bar, a disabled Upload button and a working Cancel while uploading", () => {
+    const onCancelUpload = vi.fn();
+    render(
+      <AttachmentsWidgetHarness
+        attachments={[]}
+        uploading
+        uploadProgress={42}
+        onUpload={vi.fn()}
+        onCancelUpload={onCancelUpload}
+      />,
+    );
+    const bar = screen.getByRole("progressbar", { name: "Upload progress" });
+    expect(bar).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("button", { name: /Uploading… 42%/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no Cancel when nothing is uploading", () => {
+    render(<AttachmentsWidgetHarness attachments={[]} onUpload={vi.fn()} onCancelUpload={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
 });
