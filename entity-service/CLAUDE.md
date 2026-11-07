@@ -1951,6 +1951,8 @@ that big too. Comment create (`commentService.CreateComment`,
 BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
 (the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
 (`mayHaveInlineImages`, one regexp).
+On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
+which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of

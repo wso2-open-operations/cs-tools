@@ -1450,7 +1450,7 @@ func (s *caseService) createCaseCommentAs(ctx context.Context, req domain.Create
 	// At most MaxInlineImagesPerContent images and the total size limit, checked
 	// before the comment is saved.
 	if s.imageLinker != nil && mayHaveInlineImages(req.Content) {
-		if err := s.imageLinker.ValidateCommentImages(ctx, req.CaseID, actorEmail, req.Content); err != nil {
+		if err := s.imageLinker.ValidateCommentImages(ctx, "", req.CaseID, actorEmail, req.Content); err != nil {
 			return domain.CreateCaseCommentResponse{}, err
 		}
 	}

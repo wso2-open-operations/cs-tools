@@ -71,7 +71,8 @@ type fakeStoredRepo struct {
 	abandoned    []domain.AbandonedUpload
 	abandonedAt  time.Time // the cutoff ListAbandoned was asked for
 	abandonedSys bool
-	linkWant     []string // ids LinkInlineImages will report as linked
+	linkWant     []string          // ids LinkInlineImages will report as linked
+	linkedTo     map[string]string // image id -> comment it is already linked to
 	linkCall     struct {
 		comment, workItem, email string
 		ids                      []string
@@ -172,6 +173,16 @@ func (f *fakeStoredRepo) LinkInlineImages(ctx context.Context, commentID, workIt
 	f.linkCall.comment, f.linkCall.workItem, f.linkCall.email, f.linkCall.ids = commentID, workItemID, email, ids
 	f.linkCall.sys = ok && scope.Unrestricted
 	return f.linkWant, nil
+}
+
+func (f *fakeStoredRepo) LinkedImageIDs(_ context.Context, commentID string, ids []string) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		if f.linkedTo[id] == commentID && commentID != "" {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeStoredRepo) GetProject(_ context.Context, id string) (domain.StoredAttachmentParent, error) {
@@ -693,7 +704,7 @@ func TestValidateCommentImages(t *testing.T) {
 		repo := newFakeStoredRepo()
 		var html string
 		repo.rows, html = build(5, 10)
-		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), saParentID, saEmail, html); err != nil {
+		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html); err != nil {
 			t.Errorf("err = %v", err)
 		}
 	})
@@ -701,7 +712,7 @@ func TestValidateCommentImages(t *testing.T) {
 		repo := newFakeStoredRepo()
 		var html string
 		repo.rows, html = build(6, 10)
-		err := newStoredSvc(repo).ValidateCommentImages(context.Background(), saParentID, saEmail, html)
+		err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html)
 		var verr *apierror.ValidationError
 		if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "at most 5") {
 			t.Errorf("err = %v, want the 5 image limit", err)
@@ -712,7 +723,7 @@ func TestValidateCommentImages(t *testing.T) {
 		var html string
 		repo.rows, html = build(2, 60)
 		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100})
-		err := svc.(InlineImageLinker).ValidateCommentImages(context.Background(), saParentID, saEmail, html)
+		err := svc.(InlineImageLinker).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html)
 		var verr *apierror.ValidationError
 		if !errors.As(err, &verr) || !strings.Contains(verr.Msg, "together") {
 			t.Errorf("err = %v, want the total limit", err)
@@ -733,12 +744,36 @@ func TestValidateCommentImages(t *testing.T) {
 			r.ParentID = "other-work-item"
 			repo.rows[id] = r
 		}
-		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), saParentID, saEmail, html); err != nil {
+		if err := newStoredSvc(repo).ValidateCommentImages(context.Background(), "", saParentID, saEmail, html); err != nil {
 			t.Errorf("err = %v, want nothing counted", err)
 		}
 	})
+	t.Run("an edit keeps images already on the comment even past the size limit", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(2, 60)
+		repo.linkedTo = map[string]string{idN(1): "c-1", idN(2): "c-1"}
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 100}).(InlineImageLinker)
+		if err := svc.ValidateCommentImages(context.Background(), "c-1", saParentID, saEmail, html); err != nil {
+			t.Errorf("err = %v, want retained images not counted", err)
+		}
+		// The same two images on another comment's edit are new there.
+		if err := svc.ValidateCommentImages(context.Background(), "c-2", saParentID, saEmail, html); err == nil {
+			t.Error("want the total limit for images the edit adds")
+		}
+	})
+	t.Run("an edit still limits what it adds", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		var html string
+		repo.rows, html = build(2, 60)
+		repo.linkedTo = map[string]string{idN(1): "c-1"}
+		svc := NewStoredAttachmentService(repo, StoredAttachmentLimits{MaxBytes: 1000, InlineTotalMaxBytes: 50}).(InlineImageLinker)
+		if err := svc.ValidateCommentImages(context.Background(), "c-1", saParentID, saEmail, html); err == nil {
+			t.Error("the new 60-byte image is over the 50-byte limit")
+		}
+	})
 	t.Run("no images costs no lookup", func(t *testing.T) {
-		if err := newStoredSvc(newFakeStoredRepo()).ValidateCommentImages(context.Background(), saParentID, saEmail, "plain"); err != nil {
+		if err := newStoredSvc(newFakeStoredRepo()).ValidateCommentImages(context.Background(), "", saParentID, saEmail, "plain"); err != nil {
 			t.Errorf("err = %v", err)
 		}
 	})

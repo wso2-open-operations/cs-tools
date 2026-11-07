@@ -1688,8 +1688,10 @@ type InlineImageLinker interface {
 	LinkFromContent(ctx context.Context, commentID, workItemID, authorEmail, content string)
 	// ValidateCommentImages refuses (a *apierror.ValidationError) a comment that
 	// shows more than MaxInlineImagesPerContent of its author's own images, or
-	// more than the total size limit together. Call it BEFORE saving.
-	ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error
+	// more than the total size limit together. Call it BEFORE saving. commentID is
+	// the comment being edited ("" for a new one): its images already stored are
+	// not counted against the size limit, only what the edit adds.
+	ValidateCommentImages(ctx context.Context, commentID, workItemID, authorEmail, content string) error
 	// ValidateEmbeddedImages refuses (a *apierror.ValidationError) content typed by
 	// a user (authorEmail not empty) that embeds more than MaxInlineImagesPerContent
 	// base64 images, or more than the total size limit together. Call it BEFORE

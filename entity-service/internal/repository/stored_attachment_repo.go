@@ -69,6 +69,8 @@ type StoredAttachmentRepository interface {
 	// linked (repeating the call for an already linked image returns it again).
 	// Meant for repository.WithSystemIdentity: UPDATE is internal-only.
 	LinkInlineImages(ctx context.Context, commentID, workItemID, email string, ids []string) ([]string, error)
+	// LinkedImageIDs returns those of ids that are already linked to the comment.
+	LinkedImageIDs(ctx context.Context, commentID string, ids []string) ([]string, error)
 	// GetProject returns the project a draft description image is uploaded to,
 	// as the caller may see it: an external caller must be a REGISTERED member,
 	// an internal one is unrestricted. A project that does not exist or that the
@@ -468,6 +470,32 @@ func (r *storedAttachmentRepo) LinkInlineImages(ctx context.Context, commentID, 
 		return nil, fmt.Errorf("iterate linked images: %w", err)
 	}
 	return linked, nil
+}
+
+// LinkedImageIDs implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) LinkedImageIDs(ctx context.Context, commentID string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT id::TEXT FROM comment_attachment
+		WHERE comment_id = $1 AND id = ANY($2::uuid[])`, commentID, ids)
+	if err != nil {
+		return nil, callerError(fmt.Errorf("get linked images: %w", err))
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked image id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate linked image ids: %w", err)
+	}
+	return out, nil
 }
 
 // ListUnlinkedImages implements StoredAttachmentRepository.
