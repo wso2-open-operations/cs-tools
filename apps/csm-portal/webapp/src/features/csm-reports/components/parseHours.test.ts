@@ -28,4 +28,11 @@ describe("parseHours", () => {
     expect(parseHours("30m")).toBe(0.5);
     expect(parseHours("")).toBe(0);
   });
+  it("parses a single leading sign as a negative balance", () => {
+    expect(parseHours("-1h 30m")).toBe(-1.5);
+    expect(parseHours("-45m")).toBe(-0.75);
+    expect(parseHours("-1h 0m")).toBe(-1);
+    expect(parseHours("-0m")).toBe(0);
+    expect(parseHours("-2.5")).toBe(-2.5);
+  });
 });

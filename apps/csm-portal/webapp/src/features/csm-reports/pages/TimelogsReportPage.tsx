@@ -445,6 +445,12 @@ export default function TimelogsReportPage(): JSX.Element {
 
   const { data, isLoading, isError, error, refetch, isPlaceholderData } = useGetTimelogsBreakdown(projectId, applied);
 
+  // Keep the toolbar once the report has loaded, and while the error state is
+  // shown, so a failed uncached period never strands the user without controls.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  if (data && !hasLoadedOnce) setHasLoadedOnce(true);
+  const showControls = Boolean(data) || hasLoadedOnce || isError;
+
   const cases = (isCustomerReport ? data?.cases.filter((c) => c.caseType === "Query") : data?.cases) ?? [];
   const timeCardCases = cases
     .map((caseItem) => ({
@@ -496,7 +502,7 @@ export default function TimelogsReportPage(): JSX.Element {
         </Box>
       )}
 
-      {data && (
+      {showControls && (
         <Box className="csm-print-hide" sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
           <ReportToggle isCustomerReport={isCustomerReport} onChange={setCustomerReport} />
           <PeriodControl mode={draft.mode} from={draft.from} to={draft.to} onChange={handlePeriodChange} />

@@ -14,15 +14,22 @@
 // specific language governing permissions and limitations
 // under the License.
 
-/** Parses "36h 36m", "30m" or a plain number of hours into hours. */
+/**
+ * Parses "36h 36m", "30m" or a plain number of hours into hours. A single
+ * leading "-" (a negative balance such as "-1h 30m" or "-45m") yields a
+ * negative number.
+ */
 export function parseHours(value: string): number {
   const trimmed = value.trim();
-  const clock = trimmed.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+  const negative = trimmed.startsWith("-");
+  const body = negative ? trimmed.slice(1).trim() : trimmed;
+  const sign = negative ? -1 : 1;
+  const clock = body.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
   if (clock) {
-    return parseInt(clock[1], 10) + parseInt(clock[2] || "0", 10) / 60;
+    return sign * (parseInt(clock[1], 10) + parseInt(clock[2] || "0", 10) / 60) || 0;
   }
-  const minutesOnly = trimmed.match(/^(\d+)\s*m$/i);
-  if (minutesOnly) return parseInt(minutesOnly[1], 10) / 60;
+  const minutesOnly = body.match(/^(\d+)\s*m$/i);
+  if (minutesOnly) return sign * (parseInt(minutesOnly[1], 10) / 60) || 0;
   const numeric = Number(trimmed);
   return Number.isFinite(numeric) ? numeric : 0;
 }

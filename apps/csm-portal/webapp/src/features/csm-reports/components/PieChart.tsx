@@ -17,7 +17,7 @@
 // Query-hours donut for the time report. Same oxygen donut as the CS report
 // charts, with the dashboard composition hues for consumed and remaining.
 import { Box, Typography } from "@wso2/oxygen-ui";
-import { parseHours } from "@features/csm-reports/components/parseHours";
+import { computeQueryHoursSlices } from "@features/csm-reports/components/queryHoursSlices";
 import { PieChart as HoursPie } from "@wso2/oxygen-ui-charts-react";
 import { paletteColor } from "@features/csm-dashboard/utils/paletteColor";
 import { CONSUMED_QUERY_HOURS, REAMAINING_QUERY_HOURS } from "../constants";
@@ -30,11 +30,7 @@ type PieChartProps = {
 const CHART_HEIGHT = 280;
 
 export default function PieChart({ remainingQueryHours, totalQueryHours }: PieChartProps) {
-  const total = parseHours(totalQueryHours);
-  const remaining = Math.min(parseHours(remainingQueryHours), total);
-  const consumed = Math.max(total - remaining, 0);
-  const consumedPct = total > 0 ? parseFloat(((consumed * 100) / total).toFixed(1)) : 0;
-  const remainingPct = total > 0 ? parseFloat(((remaining * 100) / total).toFixed(1)) : 0;
+  const { consumed, remaining, consumedPct, remainingPct } = computeQueryHoursSlices(remainingQueryHours, totalQueryHours);
   const rows = [
     { name: `${CONSUMED_QUERY_HOURS} (${consumedPct}%)`, value: consumed },
     { name: `${REAMAINING_QUERY_HOURS} (${remainingPct}%)`, value: remaining },

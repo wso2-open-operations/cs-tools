@@ -125,4 +125,45 @@ describe("TimelogsReportPage period", () => {
     expect(screen.getByLabelText("From")).toHaveAttribute("max", "2024-01-01");
     expect(screen.getByLabelText("To")).toHaveAttribute("min", "2025-01-01");
   });
+
+  it("keeps the period controls and a working retry after an uncached period fails", async () => {
+    get.mockImplementation((path: string) =>
+      path.includes("from=2025-01-01")
+        ? Promise.reject(new Error("boom"))
+        : Promise.resolve(response("2024-12-07", "2026-12-06")),
+    );
+    renderPage();
+    await screen.findByTestId("timelogs-period");
+
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2025-01-01" } });
+    expect(await screen.findByText("Could not load the time report.")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Report period" })).toBeInTheDocument();
+    expect(screen.getByLabelText("From")).toBeInTheDocument();
+
+    const calls = get.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "All time" }));
+    await waitFor(() => expect(lastPath()).toContain("allTime=true"));
+    expect(get.mock.calls.length).toBeGreaterThan(calls);
+    expect(await screen.findByTestId("timelogs-period")).toBeInTheDocument();
+  });
+
+  it("retry refetches the failed period", async () => {
+    let fail = true;
+    get.mockImplementation((path: string) =>
+      path.includes("from=2025-01-01") && fail
+        ? Promise.reject(new Error("boom"))
+        : Promise.resolve(response("2024-12-07", "2026-12-06")),
+    );
+    renderPage();
+    await screen.findByTestId("timelogs-period");
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2025-01-01" } });
+    await screen.findByText("Could not load the time report.");
+
+    fail = false;
+    const calls = get.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(calls));
+    expect(lastPath()).toContain("from=2025-01-01");
+    expect(await screen.findByTestId("timelogs-period")).toBeInTheDocument();
+  });
 });
