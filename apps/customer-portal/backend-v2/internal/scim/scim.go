@@ -22,17 +22,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 )
 
-// wso2EmailPattern matches WSO2-employee email addresses (applied to the
-// lowercased address).
-var wso2EmailPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*@wso2\.com$`)
-
 // isWso2Email reports whether email is a @wso2.com address.
 func isWso2Email(email string) bool {
-	return wso2EmailPattern.MatchString(strings.ToLower(email))
+	return strings.HasSuffix(strings.ToLower(email), "@wso2.com")
 }
 
 // orgForEmail returns the SCIM organization the user belongs to: "internal"

@@ -30,6 +30,7 @@ func TestOrgForEmail(t *testing.T) {
 	}{
 		{"jane.doe@wso2.com", "internal"},
 		{"Jane.Doe@WSO2.COM", "internal"},
+		{"jane.doe+tag@wso2.com", "internal"},
 		{"jane.doe@wso2.com.evil.io", "external"},
 		{"x@notwso2.com", "external"},
 		{"a@gmail.com", "external"},
