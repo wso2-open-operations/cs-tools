@@ -341,6 +341,21 @@ interface ActiveFilterChip {
 // mode now. Simple mode has no row list at all, so a chip stays the only
 // way to see/clear an Advanced-only value that arrived via URL/dashboard
 // click-through while looking at the Simple grid -- that part is unchanged.
+// Sales Region has a Simple-mode select only, and is deliberately absent from
+// the Advanced builder. With the Advanced panel open the regular chips are
+// suppressed, so these keep a selected region visible and individually
+// removable there.
+function buildSalesRegionChips(filters: CasesFilters): ActiveFilterChip[] {
+  return filters.salesRegions.map((region) => ({
+    key: `salesRegion-${region}`,
+    label: `Sales Region: ${region}`,
+    onRemove: (f) => ({
+      ...f,
+      salesRegions: f.salesRegions.filter((r) => r !== region),
+    }),
+  }));
+}
+
 function buildActiveFilterChips(
   filters: CasesFilters,
 ): ActiveFilterChip[] {
@@ -642,13 +657,12 @@ export default function CasesFilterBar({
   // value that arrives without a remount (e.g. an applied saved view)
   // doesn't sit chip-less behind a Simple grid that no longer matches
   // reality.
-  const activeFilterChips = useMemo(
-    () =>
-      effectiveMode === "simple" || !isFiltersOpen
-        ? buildActiveFilterChips(filters)
-        : [],
-    [filters, effectiveMode, isFiltersOpen],
-  );
+  const activeFilterChips = useMemo(() => {
+    if (effectiveMode === "simple" || !isFiltersOpen) {
+      return buildActiveFilterChips(filters);
+    }
+    return showSalesRegionFilter ? buildSalesRegionChips(filters) : [];
+  }, [filters, effectiveMode, isFiltersOpen, showSalesRegionFilter]);
 
   // A saved view is a name pointing at a serialized filter query string.
   // Applying one feeds the parsed filters back through onChange (which the

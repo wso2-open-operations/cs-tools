@@ -452,6 +452,26 @@ describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));
   });
+
+  // The region is not an Advanced-builder row, and the open Advanced panel
+  // suppresses the regular chips, so without these a selected region would
+  // filter results with nothing on screen showing it.
+  it("keeps a selected region visible as a chip while the Advanced panel is open", () => {
+    renderBar(
+      { ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] },
+      vi.fn(),
+      { showSalesRegionFilter: true },
+    );
+
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    expect(screen.getByText("Sales Region: EMEA")).toBeInTheDocument();
+  });
+
+  it("shows no region chip in Advanced mode on views without the control", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] });
+
+    expect(screen.queryByText("Sales Region: EMEA")).not.toBeInTheDocument();
+  });
 });
 
 // The tri-state include/exclude toggle (digiops-cs#2907) was removed —

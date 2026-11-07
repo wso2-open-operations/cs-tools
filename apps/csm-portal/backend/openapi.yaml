@@ -22482,7 +22482,9 @@ components:
           "APAC"). Matches cases whose parent account's sales region equals
           any of the given values, compared case-insensitively on trimmed
           values. Supported at the top level and inside an anyOf branch; eq,
-          notIn, empty and blank values are rejected.
+          notIn, empty and blank values are rejected. Only supported by the
+          relational data source: the other data source rejects the filter
+          with a validation error rather than ignoring it.
 
     CaseSearchFilters:
       type: object

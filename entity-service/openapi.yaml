@@ -25920,10 +25920,12 @@ components:
             ANDed with filters (if both are present). Only the fields both data
             sources support inside a branch are allowed there: type, state,
             severity, engagementType, issueType, workState, projectId,
-            deploymentId, assignedUserId, escalationLevel, tag. A branch
+            deploymentId, assignedUserId, escalationLevel, tag. salesRegion
+            is also allowed, but only on the relational data source: the other
+            data source rejects it with a validation error. A branch
             containing any other field (e.g. taskSLABusinessElapsedPercent,
-            createdOn) is rejected with a validation error. Supported by both
-            data sources.
+            createdOn) is rejected with a validation error. Otherwise
+            supported by both data sources.
 
     SearchCasesRequest:
       type: object

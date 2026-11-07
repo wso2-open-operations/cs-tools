@@ -289,10 +289,14 @@ export default function CsmIssuesView({
   columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo<CasesFilters>(
-    () => readCasesFiltersFromUrl(searchParams),
-    [searchParams],
-  );
+  const filters = useMemo<CasesFilters>(() => {
+    const parsed = readCasesFiltersFromUrl(searchParams);
+    // Sales Region only has a control on views that opt in. A value arriving
+    // through a shared URL or a saved view on any other list would filter
+    // results the user cannot see or clear, and the other data source rejects
+    // the filter outright, so it is dropped here for query and display alike.
+    return showSalesRegionFilter ? parsed : { ...parsed, salesRegions: [] };
+  }, [searchParams, showSalesRegionFilter]);
 
   // Writes `defaultCaseTypes` into the URL at most once per mount, the first
   // time it finds no `types` param at all. Done as a real URL write (in an
