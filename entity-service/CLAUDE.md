@@ -12142,6 +12142,28 @@ pool and not in the ServiceNow data source (there the two searches read ServiceN
 
 Tests: `product_catalog_service_test.go` (unit).
 
+## EOL product usage report (`GET /reports/eol-product-usage`)
+
+`EolProductUsageReportService` (`internal/service/eol_product_usage_report_service.go`) builds the monthly report
+`operations/csm-scheduled-tasks` mails to account managers, technical owners and CS leadership: customers running a
+product version past its EOL date in Primary Production. Internal callers only; reads under the system identity.
+
+- **Rows** (`eol_product_usage_report_repo.go`): an active (`COALESCE(active, true)`) deployed product of an active
+  `PRIMARY_PRODUCTION` deployment whose version's `support_eol_date` is before `asOf` (default today in Asia/Colombo),
+  listed once per (project, product version) however many such deployments run it.
+- **Customers who have left are not listed:** account `deleted_on` set, project `is_active = false` (NULL counts as
+  active), or project `wso2_closure_state = 'CLOSED'`. Read-only, restricted and suspended projects are listed: they
+  are still customers. `deployed_product.life_cycle_stage_status` is deliberately not used: every active product in
+  Primary Production on an EOL version is reported, whatever its ServiceNow lifecycle status says.
+- **Columns:** account `name`, `region`, `cre_team_id` (the CS ABT, a `group`), `account_manager_id` and
+  `technical_owner_id` (users); project `name`, `key`; product name, version, status and EOL date.
+- **Shape:** grouped by region (accounts with no region last; compared ignoring case, shown with the first spelling
+  met), then account, then project; versions oldest EOL first. Text a row lacks (region, CS ABT, project key) is
+  `null`, never `""`; a person's missing name or email is left out (`omitempty`). The timestamp is `generatedOn`.
+
+Tests: `eol_product_usage_report_service_test.go` (unit), `eol_product_usage_report_integration_test.go`
+(`ENTITY_TEST_DATABASE_URL`).
+
 ## Salesforce resync (`POST /salesforce/resync/preview`, `/apply`)
 
 An admin compares one account's or one project's Salesforce data with the database, sees a field-level diff per
