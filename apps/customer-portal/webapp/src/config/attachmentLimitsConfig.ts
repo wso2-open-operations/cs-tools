@@ -18,9 +18,9 @@
 const MIB = 1024 * 1024;
 
 /** Entity-service's own defaults (`ATTACHMENT_MAX_MB`, `INLINE_IMAGES_TOTAL_MAX_MB`). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
 /** Total size of the inline images in one comment or description. */
-export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 25;
+export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 1;
 /** @deprecated Kept for imports; the limit is now a total per comment or description. */
 export const DEFAULT_INLINE_IMAGE_MAX_MB = DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB;
 
@@ -55,7 +55,7 @@ export function entityAttachmentMaxBytes(): number {
 
 /**
  * Most the inline images of one comment or description may add up to, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 25). The older
+ * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 1). The older
  * `CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB` is read when the new key is not set.
  * Read at call time.
  */

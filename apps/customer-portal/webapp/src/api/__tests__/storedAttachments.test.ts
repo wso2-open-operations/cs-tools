@@ -49,6 +49,9 @@ describe("storedAttachments", () => {
     vi.stubGlobal("fetch", rawFetch);
     (window as unknown as { config: unknown }).config = {
       CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
+      // The limits a deployment sets (the built-in defaults are 10 MB / 1 MB).
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 25,
     };
   });
   afterEach(() => {
@@ -160,7 +163,7 @@ describe("storedAttachments", () => {
       }
     });
 
-    it("refuses a comment image over the 25 MB default before anything is sent", async () => {
+    it("refuses a comment image over the configured 25 MB limit before anything is sent", async () => {
       const big = { size: inlineImageMaxBytes() + 1, name: "p.png", type: "image/png" } as File;
       await expect(
         uploadStoredAttachment(authFetch, {
@@ -238,6 +241,7 @@ describe("storedAttachments", () => {
     const withMode = () => {
       (window as unknown as { config: unknown }).config = {
         CUSTOMER_PORTAL_BACKEND_BASE_URL: `${BASE}/`,
+        CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
       };
     };
     const started = { attachmentId: "att-1", maxBytes: 100 * 1024 * 1024 };
