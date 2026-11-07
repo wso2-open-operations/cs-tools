@@ -127,6 +127,10 @@ func (h *ReportsHandler) GenerateTimelogsBreakdownReport(w http.ResponseWriter, 
 			writeError(w, http.StatusNotFound, ErrMsgNotFound)
 			return
 		}
+		if errors.Is(err, viewer.ErrInvalidTimeLogPeriod) {
+			writeError(w, http.StatusBadRequest, "from must not be after to.")
+			return
+		}
 		slog.ErrorContext(r.Context(), "GetTimeLogBreakdown failed", "userID", user.UserID, "projectId", projectID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to generate timelogs breakdown report.")
 		return

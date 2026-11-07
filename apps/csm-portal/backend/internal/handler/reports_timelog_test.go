@@ -18,9 +18,12 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/viewer"
 )
 
 // timelogFixture builds an entity mock for one project with the given
@@ -79,11 +82,67 @@ func TestFormatMinutes(t *testing.T) {
 	for _, tc := range []struct {
 		min  float64
 		want string
-	}{{0, "0m"}, {1, "1m"}, {59, "59m"}, {60, "1h 0m"}, {90, "1h 30m"}, {365, "6h 5m"}} {
+	}{{0, "0m"}, {1, "1m"}, {59, "59m"}, {60, "1h 0m"}, {90, "1h 30m"}, {365, "6h 5m"},
+		{-90, "-1h 30m"}, {-1, "-1m"}, {-29.6, "-30m"}, {-0.4, "0m"}, {-60, "-1h 0m"}} {
 		if got := formatMinutes(tc.min); got != tc.want {
 			t.Errorf("formatMinutes(%v) = %q, want %q", tc.min, got, tc.want)
 		}
 	}
+}
+
+func TestFormatHoursMinutes_Signed(t *testing.T) {
+	for _, tc := range []struct {
+		hours float64
+		want  string
+	}{{-1.5, "-1h 30m"}, {36.6, "36h 36m"}, {0, "0m"}, {-0.5, "-30m"}} {
+		if got := formatHoursMinutes(tc.hours); got != tc.want {
+			t.Errorf("formatHoursMinutes(%v) = %q, want %q", tc.hours, got, tc.want)
+		}
+	}
+}
+
+func TestGetTimeLogBreakdown_InvertedEffectivePeriod(t *testing.T) {
+	proj := `{"id":"proj-uuid-1","key":"PRJ001","startDate":"2026-01-01","endDate":"2026-03-31"}`
+	get := func(p TimeLogPeriod) (viewer.TimeLogBreakdownDetails, error) {
+		return NewPostgresReportsClient(periodFixture(t, proj)).GetTimeLogBreakdown(context.Background(), "PRJ001", p)
+	}
+	for name, p := range map[string]TimeLogPeriod{
+		"only from after project end":  {From: "2026-04-15"},
+		"only to before project start": {To: "2025-12-15"},
+	} {
+		if _, err := get(p); !errors.Is(err, viewer.ErrInvalidTimeLogPeriod) {
+			t.Errorf("%s: err = %v, want ErrInvalidTimeLogPeriod", name, err)
+		}
+	}
+	for name, p := range map[string]TimeLogPeriod{
+		"only from within project":          {From: "2026-03-01"},
+		"only to within project":            {To: "2026-02-01"},
+		"from equals project end":           {From: "2026-03-31"},
+		"allTime with only from after end":  {From: "2026-04-15", AllTime: true},
+		"allTime with only to before start": {To: "2025-12-15", AllTime: true},
+	} {
+		if _, err := get(p); err != nil {
+			t.Errorf("%s: unexpected err %v", name, err)
+		}
+	}
+	// A project whose own dates are inverted, with no user bound, stays empty.
+	inv := `{"id":"proj-uuid-1","key":"PRJ001","startDate":"2026-05-01","endDate":"2026-03-31"}`
+	got, err := NewPostgresReportsClient(periodFixture(t, inv)).GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{})
+	if err != nil || len(got.Cases) != 0 {
+		t.Errorf("inverted project dates, no bounds: err=%v cases=%d, want nil/0", err, len(got.Cases))
+	}
+	// With a user bound the inverted effective range is rejected.
+	if _, err := NewPostgresReportsClient(periodFixture(t, inv)).GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{From: "2026-04-01"}); !errors.Is(err, viewer.ErrInvalidTimeLogPeriod) {
+		t.Errorf("inverted effective with user bound: err = %v", err)
+	}
+}
+
+func TestGenerateTimelogsBreakdownReport_InvalidEffectivePeriodIs400(t *testing.T) {
+	h := NewReportsHandler(&mockReportsClient{timelogsErr: viewer.ErrInvalidTimeLogPeriod}, viewerAccessGuard)
+	req := withCsEngineerUser(httptest.NewRequest(http.MethodGet, "/generate-timelogs-breakdown-report?projectId=ACME&from=2026-04-15", nil))
+	w := httptest.NewRecorder()
+	h.GenerateTimelogsBreakdownReport(w, req)
+	assertStatus(t, w, http.StatusBadRequest)
 }
 
 // Many small cards must sum as raw minutes: 100 x 0.4 min is 40m, whereas
@@ -196,6 +255,11 @@ func TestGetTimeLogBreakdown_ProjectCardDisplay(t *testing.T) {
 	got, _ := c.GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{})
 	if got.TotalQueryHours != "40h 0m" || got.RemainingQueryHours != "36h 36m" {
 		t.Errorf("card = %q / %q, want 40h 0m / 36h 36m", got.TotalQueryHours, got.RemainingQueryHours)
+	}
+	c = NewPostgresReportsClient(periodFixture(t, `{"id":"proj-uuid-1","key":"PRJ001","totalQueryHours":40,"remainingQueryHours":-1.5}`))
+	got, _ = c.GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{})
+	if got.RemainingQueryHours != "-1h 30m" {
+		t.Errorf("negative remaining = %q, want -1h 30m", got.RemainingQueryHours)
 	}
 	c = NewPostgresReportsClient(periodFixture(t, `{"id":"proj-uuid-1","key":"PRJ001"}`))
 	got, _ = c.GetTimeLogBreakdown(context.Background(), "PRJ001", TimeLogPeriod{})

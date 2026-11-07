@@ -28,6 +28,10 @@ var ErrAccountNotFound = errors.New("viewer: no account found for that id")
 // ErrProjectNotFound is returned when no project matches the given id.
 var ErrProjectNotFound = errors.New("viewer: no project found for the given id")
 
+// ErrInvalidTimeLogPeriod is returned when the effective time-log period, after
+// project-date defaults are applied, starts after it ends.
+var ErrInvalidTimeLogPeriod = errors.New("viewer: time-log period start is after its end")
+
 // GoLiveStatus is a project's go-live status badge.
 type GoLiveStatus struct {
 	Status string `json:"status"`

@@ -114,15 +114,25 @@ func formatHoursMinutes(hours float64) string {
 }
 
 // formatMinutes renders a duration given in minutes as "1h 2m"/"2m". Callers
-// sum raw minutes and format once, so rounding never accumulates.
+// sum raw minutes and format once, so rounding never accumulates. A negative
+// duration formats its magnitude behind a single "-" ("-1h 30m"); a value that
+// rounds to zero carries no sign.
 func formatMinutes(minutes float64) string {
+	sign := ""
+	if minutes < 0 {
+		minutes = -minutes
+		sign = "-"
+	}
 	totalMinutes := int(minutes + 0.5) // round to nearest minute
+	if totalMinutes == 0 {
+		sign = ""
+	}
 	h := totalMinutes / 60
 	m := totalMinutes % 60
 	if h == 0 {
-		return strconv.Itoa(m) + "m"
+		return sign + strconv.Itoa(m) + "m"
 	}
-	return strconv.Itoa(h) + "h " + strconv.Itoa(m) + "m"
+	return sign + strconv.Itoa(h) + "h " + strconv.Itoa(m) + "m"
 }
 
 // resolveProject resolves the report's projectId query parameter to
@@ -338,6 +348,12 @@ func (c *postgresReportsClient) GetTimeLogBreakdown(ctx context.Context, project
 		if to == "" {
 			to = dayOf(derefStr(project.EndDate))
 		}
+	}
+	// A project whose own dates are inverted yields an empty result when the
+	// caller gave no bound. Once the caller supplied a bound, an inverted
+	// effective range (the defaulted side crossing it) is a bad request.
+	if (period.From != "" || period.To != "") && from != "" && to != "" && from > to {
+		return viewer.TimeLogBreakdownDetails{}, viewer.ErrInvalidTimeLogPeriod
 	}
 
 	result := viewer.TimeLogBreakdownDetails{
