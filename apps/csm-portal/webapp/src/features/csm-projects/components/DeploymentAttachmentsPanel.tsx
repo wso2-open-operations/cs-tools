@@ -25,23 +25,18 @@ import {
   DialogContentText,
   DialogTitle,
   IconButton,
-  TextField,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
-import { Download, Pencil, Trash2 } from "@wso2/oxygen-ui-icons-react";
+import { Download, Trash2 } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX } from "react";
 import AttachmentsField from "@components/attachments/AttachmentsField";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import QueryErrorState from "@components/QueryErrorState";
 import { formatBytes } from "@utils/formatBytes";
 import { useSearchDeploymentAttachments } from "@features/csm-projects/api/useSearchDeploymentAttachments";
 import { useCreateDeploymentAttachment } from "@features/csm-projects/api/useCreateDeploymentAttachment";
-import { useUpdateDeploymentAttachment } from "@features/csm-projects/api/useUpdateDeploymentAttachment";
 import { useDeleteDeploymentAttachment } from "@features/csm-projects/api/useDeleteDeploymentAttachment";
 import { useDownloadDeploymentAttachment } from "@features/csm-projects/api/useDownloadDeploymentAttachment";
 import type { DeploymentAttachment } from "@features/csm-projects/types/csmProjects";
@@ -61,13 +56,13 @@ function formatUploadedOn(iso: string): string {
 }
 
 /**
- * Deployment-level attachments: upload, list, edit (name/description), and
- * delete files against the shared reference-generic `/attachments*`
- * endpoints scoped to `referenceType: "deployment"`.
+ * Deployment-level attachments: upload, list, download and delete files. Files
+ * are stored in Azure Blob Storage through the portal backend (attachment type
+ * `deployment`) and listed with `POST /attachments/search` scoped to
+ * `referenceType: "deployment"`.
  *
  * New files are staged locally via {@link AttachmentsField} (the shared
- * multi-file picker), then uploaded one at a time on "Upload" — matching the
- * BE's one-file-per-request `POST /attachments` contract.
+ * multi-file picker), then uploaded one at a time on "Upload".
  */
 export default function DeploymentAttachmentsPanel({
   deploymentId,
@@ -75,16 +70,12 @@ export default function DeploymentAttachmentsPanel({
   const { canWrite } = usePortalAccess();
   const { data, isLoading, isError, error } = useSearchDeploymentAttachments(deploymentId);
   const createAttachment = useCreateDeploymentAttachment();
-  const updateAttachment = useUpdateDeploymentAttachment();
   const deleteAttachment = useDeleteDeploymentAttachment();
   const downloadAttachment = useDownloadDeploymentAttachment();
 
-  const [pending, setPending] = useState<EncodedAttachment[]>([]);
+  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<DeploymentAttachment | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editDescription, setEditDescription] = useState("");
   const [deleting, setDeleting] = useState<DeploymentAttachment | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
@@ -93,63 +84,25 @@ export default function DeploymentAttachmentsPanel({
   const handleUploadPending = async (): Promise<void> => {
     if (pending.length === 0) return;
     setUploading(true);
-    let failed = 0;
+    const failed: string[] = [];
     for (const p of pending) {
       try {
         await createAttachment.mutateAsync({ deploymentId, file: p.raw, name: p.name });
       } catch {
-        failed += 1;
+        failed.push(p.name);
       }
     }
     setUploading(false);
-    setPending([]);
-    if (failed > 0) {
+    // Keep the files that failed, so the engineer can try them again.
+    setPending(pending.filter((p) => failed.includes(p.name)));
+    if (failed.length > 0) {
       setFeedback({
-        message: `${failed} of ${pending.length} file(s) failed to upload.`,
+        message: `${failed.length} of ${pending.length} file(s) failed to upload: ${failed.join(", ")}.`,
         severity: "error",
       });
     } else {
       setFeedback({ message: "Attachment(s) uploaded.", severity: "success" });
     }
-  };
-
-  const openEdit = (a: DeploymentAttachment): void => {
-    setEditing(a);
-    setEditName(a.name);
-    setEditDescription(a.description ?? "");
-  };
-
-  const handleSaveEdit = (): void => {
-    if (!editing) return;
-    const nameChanged = editName.trim() !== editing.name;
-    const descriptionChanged = editDescription.trim() !== (editing.description ?? "");
-    if (!nameChanged && !descriptionChanged) {
-      setEditing(null);
-      return;
-    }
-    updateAttachment.mutate(
-      {
-        deploymentId,
-        attachmentId: editing.id,
-        ...(nameChanged ? { name: editName.trim() } : {}),
-        ...(descriptionChanged
-          ? { description: editDescription.trim() ? editDescription.trim() : null }
-          : {}),
-      },
-      {
-        onSuccess: () => {
-          setEditing(null);
-          setFeedback({ message: "Attachment updated.", severity: "success" });
-        },
-        onError: (err) => {
-          setEditing(null);
-          setFeedback({
-            message: `Could not update the attachment: ${err.message}`,
-            severity: "error",
-          });
-        },
-      },
-    );
   };
 
   const handleConfirmDelete = (): void => {
@@ -209,7 +162,6 @@ export default function DeploymentAttachmentsPanel({
             attachments={pending}
             onChange={setPending}
             onError={(message) => setFeedback({ message, severity: "error" })}
-            maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
             disabled={uploading}
           />
           {pending.length > 0 && (
@@ -281,13 +233,6 @@ export default function DeploymentAttachmentsPanel({
               </Box>
               <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
                 {canWrite && (
-                  <Tooltip title="Edit">
-                    <IconButton size="small" aria-label={`Edit ${a.name}`} onClick={() => openEdit(a)}>
-                      <Pencil size={14} />
-                    </IconButton>
-                  </Tooltip>
-                )}
-                {canWrite && (
                   <Tooltip title="Delete">
                     <IconButton
                       size="small"
@@ -316,45 +261,6 @@ export default function DeploymentAttachmentsPanel({
             </Box>
           ))}
         </Box>
-      )}
-
-      {editing && (
-        <Dialog open onClose={() => setEditing(null)} maxWidth="sm" fullWidth>
-          <DialogTitle>Edit attachment</DialogTitle>
-          <DialogContent dividers>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
-              <TextField
-                label="Name"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                size="small"
-                fullWidth
-                autoFocus
-              />
-              <TextField
-                label="Description"
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                size="small"
-                fullWidth
-                multiline
-                minRows={2}
-              />
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setEditing(null)} disabled={updateAttachment.isPending}>
-              Cancel
-            </Button>
-            <Button
-              variant="contained"
-              disabled={updateAttachment.isPending || editName.trim() === ""}
-              onClick={handleSaveEdit}
-            >
-              Save changes
-            </Button>
-          </DialogActions>
-        </Dialog>
       )}
 
       <Dialog open={!!deleting} onClose={() => setDeleting(null)} maxWidth="xs" fullWidth>

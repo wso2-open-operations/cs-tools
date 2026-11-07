@@ -480,7 +480,6 @@ export type PatchCaseRequest = {
 
 // Request type for creating a support case.
 export type CreateCaseRequest = {
-  attachments?: Array<{ file: string; name: string }>;
   type?: string;
   deploymentId: string;
   description: string;

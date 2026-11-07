@@ -93,7 +93,7 @@ Upstream services this process calls, all with the same OAuth2 client-credential
 | Engineering entity service (files GitHub issues) | `internal/entity` | No |
 | Notification and integration services (health probe only today) | `internal/csmnotification`, `internal/csmintegration` | No |
 | Sales entity GraphQL service, Google Drive | `internal/entity`, `internal/googledrive` | No |
-| File-transfer service for direct attachment upload | `internal/sftpgo` | No |
+| Azure Blob Storage (attachment files) | `libs/azblobstore` | Yes |
 | Google Chat incoming webhooks | `internal/notifications` | No |
 
 ### Code layout
@@ -114,7 +114,6 @@ backend/
 │   ├── csmintegration/      # Integration-service client (health probe)
 │   ├── notifications/       # Google Chat and email notification channels
 │   ├── googledrive/         # Google Drive folder browsing
-│   ├── sftpgo/              # Direct-upload attachment storage client
 │   ├── risk/                # Customer-health risk tracking, over the entity client
 │   ├── dashboard/           # Dashboard definition registry (directory loader, presets, sections)
 │   ├── directory/           # Team registry, role allow-list, role-id mapping parsed from config
@@ -397,7 +396,8 @@ variables below it starts, but nobody can use it.
 
 The three timeouts must be greater than 0 or startup fails; no ordering is enforced, but keeping
 `ENTITY_SERVICE_TIMEOUT` below `REST_WRITE_TIMEOUT` lets a handler return a clean error. The 60 s
-defaults exist so large inline-attachment uploads are not cut off.
+defaults leave room for slow upstream calls. An attachment chunk or download extends its own
+deadline, so these timeouts do not bound a file transfer.
 
 ### Authentication
 
@@ -445,7 +445,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `time_cards_and_updates` | Time-card routes and update-level lookups. `cs_engineer`, `admin`, time-card approver |
 | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state`; checked inside the handler. Time-card approver and `admin` |
 | `escalate` | `POST /cases/{id}/escalations`; de-escalating also requires being one of the case's team leads |
-| `download_attachment` | `GET /attachments/{id}/content`, `POST /attachments/{id}/share` |
+| `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` |
 | `write` | Every other `POST`/`PATCH`/`DELETE` |
 | `admin` | Admin-only routes such as `POST /users`, `POST /users/{id}/roles`, `GET /roles/grantable`, knowledge-base administration |
 | `security_center` | `/products/vulnerabilities` routes. Security-report cases are gated inside the case handler |
@@ -505,7 +505,6 @@ Notes:
 | Variable | Default | Description |
 |---|---|---|
 | `CSM_MIGRATION_ONBOARDING_STATUS_ENABLED` | **on** | Registers `GET /projects/{id}/onboarding-steps` (per-contact onboarding status). Unlike the other flags, anything except `false` (case-insensitive, trimmed) leaves it **on**, including unset; set `false` to disable, in which case the path 404s. See the note below |
-| `SFTPGO_ATTACHMENT_STORAGE_ENABLED` | off | Enables direct-upload attachment storage; see [Attachment storage](#attachment-storage). Parsed with `strconv.ParseBool`; an unparseable non-empty value logs a warning and is treated as off |
 
 > The inline comments in `cmd/server/main.go` and `.env.example` describe
 > `CSM_MIGRATION_ONBOARDING_STATUS_ENABLED` as "off unless exactly `true`", but the implementation
@@ -577,16 +576,21 @@ and only `widgets`; any other field in a part file is a startup error.
 
 ### Attachment storage
 
-Off by default. When `SFTPGO_ATTACHMENT_STORAGE_ENABLED` is true, these are read and the
-direct-upload routes (`POST /cases/{id}/attachments/upload-token`,
-`POST /attachments/{id}/share`, `POST /cases/{caseId}/attachments/{attachmentId}/confirm`) and
-inline-image extraction on case comments are active. When off none of them are read, the three
-routes are not registered (404), and the streaming attachment routes are unaffected either way.
+Attachment files live in Azure Blob Storage. This service holds the Azure credentials and moves
+the bytes: an upload arrives in chunks and is written to the container, a download and a comment's
+inline image are streamed from it. entity-service keeps the access checks, the size and type rules
+and the storage key, and never touches a file. The service refuses to start unless the container
+is reachable.
 
 | Variable | Required | Default | Description | Example |
 |---|---|---|---|---|
-| `SFTPGO_BASE_URL` | When enabled | none | The file-transfer service's REST API base URL. `https`, a host, no userinfo, no path, no query or fragment | `https://files.example.com` |
-| `SFTPGO_PUBLIC_BASE_URL` | No | `SFTPGO_BASE_URL` | Public host used to build share links, if its share pages are fronted separately. Same URL rules | `https://share.example.com` |
+| `AZURE_STORAGE_ACCOUNT` | Yes | none | Storage account name | `csmattachments` |
+| `AZURE_STORAGE_CONTAINER` | Yes | none | Container that holds the files. Must already exist unless `AZURE_STORAGE_CREATE_CONTAINER` is `true` | `attachments` |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | One sign-in method is required | none | Sign in as an Entra app (recommended) holding "Storage Blob Data Contributor" on the container only. Keep the secret in the secret store | |
+| `AZURE_STORAGE_KEY` | One sign-in method is required | none | Sign in with the account key instead (full control of the account; development only) | |
+| `AZURE_STORAGE_CONNECTION_STRING` | One sign-in method is required | none | Connection string, for the Azurite emulator | |
+| `AZURE_STORAGE_ENDPOINT` | No | the account's blob endpoint | Blob endpoint override, for Azurite | `http://127.0.0.1:10000/devstoreaccount1` |
+| `AZURE_STORAGE_CREATE_CONTAINER` | No | `false` | `true` creates the container at startup. Needs account-level rights, so use it for Azurite and development only | |
 
 ### Embedded PLG module
 
@@ -630,7 +634,7 @@ main service plus the `/plg/*` routes). Main areas:
 |---|---|
 | Health | `GET /health` (liveness, always `200`, no dependency calls: use for restart probes), `GET /health/dependencies` (aggregates SCIM, updates, and the optional notification, integration and engineering services; `200`, or `503` if any checked dependency is down; do not use as a liveness probe). Neither requires a token |
 | Cases | `POST /cases`, `GET`/`PATCH /cases/{id}`, `POST /cases/search`, `/cases/aggregate`, `/cases/volume-trend`, comments, activities, escalations, call requests, tags, GitHub issues |
-| Attachments | `POST /attachments`, `POST /attachments/search`, `GET /attachments/{id}/content`, `DELETE /attachments/{id}` |
+| Attachments | `POST /attachments/search`, `POST /attachments/upload` with chunked upload, confirm, download and delete (see Attachment storage) |
 | Accounts, projects, products, deployments | `/accounts/*`, `/projects/*` (contacts, metadata), `/products/*`, `/deployments/*` and deployed products |
 | Operations | `/incidents`, `/change-requests` (including approvals), `/problems`, `/incident-tasks`, `/outages`, `/alerts`, `/smart-alerts` |
 | Time cards and updates | `/time-cards/*`, `/updates/product-update-levels`, `/updates/levels/search` |

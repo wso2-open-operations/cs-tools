@@ -84,11 +84,11 @@ import UploadAttachmentModal from "@features/support/components/case-details/att
 import { CaseCreationHeader } from "@features/support/components/case-creation-layout/header/CaseCreationHeader";
 import { BasicInformationSection } from "@features/support/components/case-creation-layout/form-sections/basic-information-section/BasicInformationSection";
 import { CaseType } from "@features/support/constants/supportConstants";
-import { usePostAttachments } from "@features/support/api/usePostAttachments";
+import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLogger } from "@hooks/useLogger";
+import { useInlineImageUploads } from "@features/support/hooks/useInlineImageUploads";
 import {
   uploadServiceRequestAttachments,
-  fileToBase64,
   ATTACHMENT_UPLOAD_WAIT_MS,
 } from "@features/operations/utils/serviceRequestAttachments";
 
@@ -211,7 +211,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const queryClient = useQueryClient();
   const authFetch = useAuthApiClient();
   const logger = useLogger();
-  const postAttachments = usePostAttachments();
+  const { upload: storedUpload } = useStoredAttachmentUpload();
   const { data: userDetails } = useGetUserDetails();
   const userTimeZone = userDetails?.timeZone?.trim() || resolveDisplayTimeZone();
 
@@ -229,6 +229,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const requestDetailsSectionRef = useRef<HTMLDivElement>(null);
   const [isAttachmentModalOpen, setIsAttachmentModalOpen] = useState(false);
   const [isNavigatingAfterCreate, setIsNavigatingAfterCreate] = useState(false);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   const [watchList, setWatchList] = useState<string[]>([]);
 
   const { data: projectDetails, isLoading: isProjectLoading } =
@@ -394,6 +395,9 @@ export default function CreateServiceRequestPage(): JSX.Element {
   );
 
   const { mutateAsync: postCase, isPending: isCreatePending } = usePostCase();
+  // Images in the description stay local previews until submit, when they are
+  // uploaded to the project before the service request is created.
+  const inlineImages = useInlineImageUploads({ projectId });
 
   const isInitialLoading = getCreateServiceRequestLoadingState(
     isProjectLoading,
@@ -521,7 +525,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (isNavigatingAfterCreate) return;
+    if (isNavigatingAfterCreate || inlineImages.isUploadingImages) return;
 
     const deploymentMatch = resolveDeploymentMatch(
       deployment,
@@ -565,13 +569,32 @@ export default function CreateServiceRequestPage(): JSX.Element {
       return;
     }
 
+    // The description's images go first: the request carries `/<id>`
+    // references to them. If one fails nothing is created and the form keeps
+    // its content; images that did upload are not sent again on a retry.
+    const descriptionValues: Record<string, string> = {};
+    for (const v of variables) {
+      if (isContextField(v.questionText ?? "")) continue;
+      if (!isDescriptionField(v.questionText ?? "")) continue;
+      const imageUpload = await inlineImages.uploadImages(
+        variableValues[v.id] ?? "",
+      );
+      if (!imageUpload.ok) {
+        showError(
+          `${imageUpload.message} The service request was not created; try again.`,
+        );
+        return;
+      }
+      descriptionValues[v.id] = imageUpload.html;
+    }
+
     const variablePayload = variables
       .filter((v) => !isContextField(v.questionText ?? ""))
       .map((v) => {
         const raw = variableValues[v.id] ?? "";
         let value: string;
         if (isDescriptionField(v.questionText ?? "")) {
-          value = raw.trim();
+          value = (descriptionValues[v.id] ?? raw).trim();
         } else if (isDateTimeField(v) && raw.trim()) {
           const utcMs = datetimeLocalWallTimeToUtcMs(raw.trim(), userTimeZone);
           value = utcMs != null ? new Date(utcMs).toISOString() : raw.trim();
@@ -599,12 +622,12 @@ export default function CreateServiceRequestPage(): JSX.Element {
       const srNumber = (data as { number?: string }).number;
 
       if (attachments.length > 0) {
+        setIsUploadingAttachments(true);
         const uploadPromise = uploadServiceRequestAttachments({
           caseId: data.id,
           attachments,
           attachmentNames: attachmentNamesRef.current,
-          uploadAttachment: postAttachments.mutateAsync,
-          encodeFile: fileToBase64,
+          uploadAttachment: storedUpload.mutateAsync,
           logger,
         });
         const timedOut = await Promise.race([
@@ -617,7 +640,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
           void uploadPromise.then((failed) => {
             if (failed.length > 0) {
               showError(
-                `Failed to upload: ${failed.join(", ")}. You can retry from the Attachments tab.`,
+                `The service request was created, but these files failed to upload: ${failed.join(", ")}. You can add them from the Attachments tab.`,
               );
             }
           });
@@ -625,11 +648,13 @@ export default function CreateServiceRequestPage(): JSX.Element {
           const failed = await uploadPromise;
           if (failed.length > 0) {
             showError(
-              `The service request was created, but ${failed.length} attachment${failed.length === 1 ? "" : "s"} failed to upload. You can retry from the Attachments tab.`,
+              `The service request was created, but these files failed to upload: ${failed.join(", ")}. You can add them from the Attachments tab.`,
             );
           }
         }
       }
+
+      setIsUploadingAttachments(false);
 
       if (projectId) {
         await triggerPostCreationApiCalls(
@@ -654,6 +679,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
       );
     } catch (error) {
       setIsNavigatingAfterCreate(false);
+      setIsUploadingAttachments(false);
       const msg =
         error instanceof Error && error.message.trim()
           ? error.message.trim()
@@ -671,7 +697,10 @@ export default function CreateServiceRequestPage(): JSX.Element {
     productId,
     selectedCatalogId,
     selectedCatalogItemId,
-    isCreatePending: isCreatePending || isNavigatingAfterCreate,
+    isCreatePending:
+      isCreatePending ||
+      isNavigatingAfterCreate ||
+      inlineImages.isUploadingImages,
   });
 
   if (
@@ -821,6 +850,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
               onAttachmentClick={handleAttachmentClick}
               onAttachmentRemove={handleAttachmentRemove}
               userTimeZone={userTimeZone}
+              onImageUpload={inlineImages.onImageUpload}
             />
           </div>
         )}
@@ -847,7 +877,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
             startIcon={<CircleCheck size={18} />}
             disabled={!canSubmit || isInitialLoading || deploymentProductsLoading}
           >
-            {isCreatePending
+            {inlineImages.isUploadingImages || isUploadingAttachments || isCreatePending
               ? "Creating..."
               : isNavigatingAfterCreate
                 ? "Opening request..."

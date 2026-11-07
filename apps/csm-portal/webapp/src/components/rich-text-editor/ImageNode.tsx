@@ -19,6 +19,7 @@
 import {
   DecoratorNode,
   $getNodeByKey,
+  $nodesOfType,
   type DOMConversionMap,
   type EditorConfig,
   type LexicalEditor,
@@ -28,7 +29,7 @@ import {
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import type { JSX } from "react";
-import { deriveAltFromFilename, sanitizeUrl } from "@components/rich-text-editor/richTextEditor";
+import { deriveAltFromFilename, sanitizeImageSrc } from "@components/rich-text-editor/richTextEditor";
 
 function ImageComponent({
   src,
@@ -50,7 +51,7 @@ function ImageComponent({
   return (
     <span style={{ position: "relative", display: "block" }}>
       <img
-        src={sanitizeUrl(src)}
+        src={sanitizeImageSrc(src)}
         alt={altText}
         style={{ maxWidth: "100%", borderRadius: "8px", display: "block" }}
       />
@@ -108,7 +109,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   // 1. How Lexical turns JSON back into a Class
   static importJSON(serializedNode: SerializedImageNode): ImageNode {
     const { src, altText } = serializedNode;
-    return $createImageNode(sanitizeUrl(src), altText);
+    return $createImageNode(sanitizeImageSrc(src), altText);
   }
 
   constructor(src: string, altText: string, key?: NodeKey) {
@@ -140,7 +141,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   exportDOM(editor: LexicalEditor): { element: HTMLElement | null } {
     void editor;
     const img = document.createElement("img");
-    img.setAttribute("src", sanitizeUrl(this.__src));
+    img.setAttribute("src", sanitizeImageSrc(this.__src));
     img.setAttribute("alt", this.__altText);
     img.style.maxWidth = "100%";
     img.style.borderRadius = "8px";
@@ -153,7 +154,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       img: () => ({
         conversion: (element: HTMLElement) => {
           const raw = element.getAttribute("src") ?? "";
-          const src = sanitizeUrl(raw);
+          const src = sanitizeImageSrc(raw);
           const alt =
             element.getAttribute("alt") ?? deriveAltFromFilename(raw);
           if (!src) return null;
@@ -176,5 +177,22 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 }
 
 export function $createImageNode(src: string, altText: string): ImageNode {
-  return new ImageNode(sanitizeUrl(src), altText);
+  return new ImageNode(sanitizeImageSrc(src), altText);
+}
+
+/** A `blob:` preview or a stored image's `/<uuid>`; what an upload-mode draft holds. */
+const UPLOADED_IMAGE_SRC =
+  /^(?:blob:|\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$)/i;
+
+/**
+ * How many images of the upload flow the editor's content holds now: `blob:`
+ * previews (uploading or done) and stored `/<uuid>` images. An image removed
+ * from the content is not counted.
+ */
+export function countUploadedImages(editor: LexicalEditor): number {
+  return editor
+    .getEditorState()
+    .read(() =>
+      $nodesOfType(ImageNode).filter((n) => UPLOADED_IMAGE_SRC.test(n.__src)).length,
+    );
 }

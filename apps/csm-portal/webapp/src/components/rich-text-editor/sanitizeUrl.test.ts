@@ -15,7 +15,7 @@
 // under the License.
 
 import { describe, expect, it } from "vitest";
-import { deriveAltFromFilename, sanitizeUrl } from "./richTextEditor";
+import { deriveAltFromFilename, sanitizeImageSrc, sanitizeUrl } from "./richTextEditor";
 
 describe("sanitizeUrl", () => {
   it("allows safe protocols and anchors", () => {
@@ -80,5 +80,29 @@ describe("deriveAltFromFilename", () => {
     expect(deriveAltFromFilename("/uploads/bad%E0%A4name.png")).toBe(
       "bad%E0%A4name",
     );
+  });
+});
+
+describe("sanitizeImageSrc", () => {
+  it("accepts everything sanitizeUrl does", () => {
+    expect(sanitizeImageSrc("/11111111-1111-4111-8111-111111111111")).toBe(
+      "/11111111-1111-4111-8111-111111111111",
+    );
+    expect(sanitizeImageSrc("data:image/png;base64,iVBORw0KGgo=")).toBe(
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+    expect(sanitizeImageSrc("javascript:alert(1)")).toBe("");
+  });
+
+  it("accepts a local blob: preview, which sanitizeUrl keeps out of links", () => {
+    const blob = "blob:https://csm.example.com/4f6c0f6e-1b1e-4c1d-9d34-2a6f7b6c1e11";
+    expect(sanitizeImageSrc(blob)).toBe(blob);
+    expect(sanitizeUrl(blob)).toBe("");
+  });
+
+  it("rejects a blob: URL that is not a plain http(s) object URL", () => {
+    expect(sanitizeImageSrc("blob:")).toBe("");
+    expect(sanitizeImageSrc("blob:javascript:alert(1)")).toBe("");
+    expect(sanitizeImageSrc('blob:https://x.example/a" onerror="alert(1)')).toBe("");
   });
 });

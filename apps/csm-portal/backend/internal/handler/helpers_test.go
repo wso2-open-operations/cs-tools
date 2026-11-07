@@ -323,58 +323,11 @@ func (m *mockEntityCaseClient) SearchDeployedProducts(ctx context.Context, body 
 	return []byte(`{"deployedProducts":[],"hasMore":false}`), nil
 }
 
-func (m *mockEntityCaseClient) CreateCaseAttachment(ctx context.Context, body []byte) ([]byte, error) {
-	if m.createCaseAttachmentFn != nil {
-		return m.createCaseAttachmentFn(ctx, body)
-	}
-	return []byte(`{}`), nil
-}
-
 func (m *mockEntityCaseClient) SearchCaseAttachments(ctx context.Context, body []byte) ([]byte, error) {
 	if m.searchCaseAttachmentsFn != nil {
 		return m.searchCaseAttachmentsFn(ctx, body)
 	}
 	return []byte(`{"attachments":[],"total":0,"limit":20,"offset":0,"hasMore":false}`), nil
-}
-
-func (m *mockEntityCaseClient) GetCaseAttachmentContent(ctx context.Context, attachmentID string) ([]byte, string, error) {
-	if m.getCaseAttachmentContentFn != nil {
-		return m.getCaseAttachmentContentFn(ctx, attachmentID)
-	}
-	return []byte(`fake-content`), "image/png", nil
-}
-
-func (m *mockEntityCaseClient) DeleteCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.deleteCaseAttachmentFn != nil {
-		return m.deleteCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{"message":"Attachment deleted successfully."}`), nil
-}
-
-func (m *mockEntityCaseClient) GetCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.getCaseAttachmentFn != nil {
-		return m.getCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{}`), nil
-}
-func (m *mockEntityCaseClient) GetAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.getAttachmentFn != nil {
-		return m.getAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{}`), nil
-}
-
-func (m *mockEntityCaseClient) ConfirmCaseAttachment(ctx context.Context, attachmentID string) ([]byte, error) {
-	if m.confirmCaseAttachmentFn != nil {
-		return m.confirmCaseAttachmentFn(ctx, attachmentID)
-	}
-	return []byte(`{"message":"Attachment confirmed successfully","attachment":{"id":"` + attachmentID + `","status":"complete"}}`), nil
-}
-func (m *mockEntityCaseClient) UpdateAttachment(ctx context.Context, attachmentID string, body []byte) ([]byte, error) {
-	if m.updateAttachmentFn != nil {
-		return m.updateAttachmentFn(ctx, attachmentID, body)
-	}
-	return []byte(`{}`), nil
 }
 
 func (m *mockEntityCaseClient) CreateCallRequest(ctx context.Context, body []byte) ([]byte, error) {

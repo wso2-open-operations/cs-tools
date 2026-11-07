@@ -21,7 +21,10 @@ import {
 } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
-import type { BeDeleteAttachmentResponse } from "@api/backend/types";
+import {
+  deleteEntityAttachment,
+  entityAttachmentErrorMessage,
+} from "@features/csm-cases/api/entityAttachments";
 
 export interface DeleteDeploymentAttachmentInput {
   /** Owning deployment id; used only to invalidate the right attachment list. */
@@ -30,9 +33,9 @@ export interface DeleteDeploymentAttachmentInput {
 }
 
 /**
- * Delete an attachment via `DELETE /attachments/{id}` (ServiceNow data source
- * only). On success the deployment's attachment list is invalidated so the
- * row drops.
+ * Delete a deployment attachment. Only the uploader may delete it: the backend
+ * answers 403 with the message to show. On success the deployment's attachment
+ * list is invalidated so the row drops.
  */
 export function useDeleteDeploymentAttachment(): UseMutationResult<
   void,
@@ -44,12 +47,16 @@ export function useDeleteDeploymentAttachment(): UseMutationResult<
 
   return useMutation<void, Error, DeleteDeploymentAttachmentInput>({
     mutationFn: async (input): Promise<void> => {
-      await api.del<BeDeleteAttachmentResponse>(
-        `/attachments/${encodeURIComponent(input.attachmentId)}`,
-      );
+      try {
+        await deleteEntityAttachment(api, { type: "deployment", id: input.attachmentId });
+      } catch (err) {
+        throw new Error(entityAttachmentErrorMessage(err, "Could not delete the attachment."), {
+          cause: err,
+        });
+      }
     },
     onSuccess: (_void, variables) => {
-      queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: [ApiQueryKeys.DEPLOYMENT_ATTACHMENTS, variables.deploymentId],
       });
     },

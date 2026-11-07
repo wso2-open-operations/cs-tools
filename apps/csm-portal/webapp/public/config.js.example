@@ -213,6 +213,30 @@ window.config = {
   // reads "Unavailable". Off means no column and no request.
   CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: true,
 
+  // Early size checks for attachments (stored in Azure Blob Storage by the
+  // portal backend), in megabytes. Optional:
+  // leave unset for the defaults below, which match the entity-service's own
+  // defaults. Set them to the same values as the entity-service's
+  // ATTACHMENT_MAX_BYTES and its inline image limit; the server stays the
+  // authority, these only refuse an oversized file before the upload starts.
+  // CSM_PORTAL_INLINE_IMAGE_MAX_MB is the most image megabytes one comment or
+  // description may hold in total (also the largest single image); each may
+  // hold at most 5 images.
+  // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+  // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
+
+  // How many 8 MiB ranges of one attachment download are fetched at the same
+  // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a
+  // time. A number or numeric string; anything else uses the default.
+  // CSM_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // Save a download straight to a file the person picks (the browser's save
+  // dialog), so a large attachment is not held whole in memory. Works in Chrome
+  // and Edge; other browsers keep the in-memory download. Files of 8 MiB or
+  // less skip the dialog. Optional: only the boolean false or the string "false"
+  // turns it off; true (or leaving it unset) keeps it on.
+  // CSM_PORTAL_DOWNLOAD_TO_DISK: true,
+
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded
   // Project Key = DCPSUB dry-run scoping). Defaults to "DCPSUB" itself when

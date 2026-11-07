@@ -51,6 +51,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useLocation } from "react-router";
 import { ApiQueryKeys } from "@constants/apiConstants";
+import { releaseInlineImages } from "@features/csm-cases/api/inlineImageUploads";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
@@ -92,6 +93,7 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
 } from "@features/csm-cases/components/CaseActionBar";
@@ -102,6 +104,7 @@ import ChangeCaseTypeDialog, {
   type CaseTypeTransferSubmission,
 } from "@features/csm-cases/components/ChangeCaseTypeDialog";
 import {
+  hasCommentContent,
   hasPublicComment,
   isGithubRaisedCaseNumber,
 } from "@features/csm-cases/utils/commentContent";
@@ -802,7 +805,15 @@ export default function CsmCaseDetailPage(): JSX.Element {
   >([]);
   const [draftInternal, setDraftInternal] = useState(false);
   const [draftSourceMode, setDraftSourceMode] = useState(false);
+  // Read by clearComposerDraft, which must not depend on the draft itself.
+  const draftHtmlRef = useRef(draftHtml);
+  useEffect(() => {
+    draftHtmlRef.current = draftHtml;
+  }, [draftHtml]);
   const clearComposerDraft = useCallback(() => {
+    // Free the draft's image previews and forget their running uploads, so a
+    // late result cannot come back for a draft that no longer exists.
+    releaseInlineImages(draftHtmlRef.current);
     setDraftHtml("");
     setDraftAttachments([]);
     setDraftInternal(false);
@@ -2302,6 +2313,19 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
+  // Only the person who uploaded a file may delete it, and not once the case is
+  // closed. The backend enforces the rule; this only hides a button that would
+  // fail.
+  const canDeleteAttachmentRow = useCallback(
+    (a: CaseAttachment): boolean => {
+      if (data?.state === "closed") return false;
+      const mine = (currentUser?.email || currentUserEmail)?.trim().toLowerCase();
+      const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
+      return !!mine && mine === uploader;
+    },
+    [currentUser?.email, currentUserEmail, data?.state],
+  );
+
   const onConfirmDeleteAttachment = useCallback(() => {
     if (!caseId || !pendingDelete) return;
     const target = pendingDelete;
@@ -2802,6 +2826,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
                 canResumeToUnlockPublicReply={canWrite && canResumeToUnlockPublicReply}
@@ -2819,33 +2844,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftSourceModeChange={setDraftSourceMode}
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
                   if (!caseId) return;
-                  // Post the comment only when there's text; an attachment-only
-                  // send skips the comment endpoint and just uploads the files.
-                  const hasText =
-                    bodyHtml
-                      .replace(/<[^>]*>/g, "")
-                      .replace(/&nbsp;/g, " ")
-                      .trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      caseId,
-                      bodyHtml,
-                      authorName: engineerName,
-                      internal,
-                    });
-                  }
-                  // Attachments are case-level (no comment linkage on the BE);
-                  // upload each sequentially so a failure surfaces clearly.
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                    });
-                  }
-                  // Collapse and clear the draft only on success; on error the
-                  // input keeps its draft + files and surfaces the failure.
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
+                    attachments: commentAttachments,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
+                  });
+                  // Collapse and clear the draft only when everything went through.
                   setComposerOpen(false);
                   clearComposerDraft();
                 }}
@@ -3234,6 +3242,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             refreshedAt={attachmentsUpdatedAt}
             uploading={isUploadingForThisCase}
             uploadProgress={isUploadingForThisCase ? postAttachment.uploadProgress : null}
+            onCancelUpload={isUploadingForThisCase ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError &&
               postAttachment.variables?.caseId === caseId
@@ -3245,6 +3254,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
             onDownloadAll={canDownloadAttachment ? onDownloadAllAttachments : undefined}
             onDownload={canDownloadAttachment ? onDownloadAttachment : undefined}
             onDelete={canWrite ? setPendingDelete : undefined}
+            canDeleteAttachment={canDeleteAttachmentRow}
             deletingId={deleteAttachment.isPending ? pendingDelete?.id : null}
             preview={
               canDownloadAttachment

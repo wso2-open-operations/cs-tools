@@ -216,20 +216,14 @@ func TestCaseTypeTransferIntegration_AttachmentsAreAvailableOnTheConvertedTicket
 	f.cleanupExtras(t)
 	cases := repository.NewCaseRepository(f.scoped)
 
-	portalKey := ctBulkMarker
-	fromPortal, err := cases.CreateCaseAttachment(f.ctx, domain.CreateAttachmentRequest{
-		ReferenceID: ctQueryID, ReferenceType: domain.ReferenceTypeCase, Name: "customer-logs.zip", Type: "application/zip",
-		StorageKey: &portalKey, SizeBytes: 2048, CreatedBy: f.userID, Status: domain.AttachmentStatusComplete,
-	})
-	if err != nil {
-		t.Fatalf("seed a portal attachment: %v", err)
-	}
-	fromSN, err := cases.CreateCaseAttachmentFromServiceNow(f.ctx, domain.CreateAttachmentRequest{
-		ReferenceID: ctQueryID, ReferenceType: domain.ReferenceTypeCase, Name: "config.xml", Type: "text/xml",
-	}, "92000000-0000-0000-0000-0000000000b1", 512, f.userID)
-	if err != nil {
-		t.Fatalf("seed a ServiceNow attachment: %v", err)
-	}
+	// One row written as the portal used to (with a storage key) and one as the
+	// ServiceNow sync did (no storage key); both are older case_attachment rows.
+	const fromPortalID = "92000000-0000-0000-0000-0000000000b2"
+	const fromSNID = "92000000-0000-0000-0000-0000000000b1"
+	f.exec(t, `INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, uploaded_by, status)
+		VALUES ($1, $2, $3, 'customer-logs.zip', 'application/zip', 2048, $4, 'complete')`, fromPortalID, ctQueryID, ctBulkMarker, f.userID)
+	f.exec(t, `INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, uploaded_by, status)
+		VALUES ($1, $2, NULL, 'config.xml', 'text/xml', 512, $3, 'complete')`, fromSNID, ctQueryID, f.userID)
 	f.exec(t, `INSERT INTO case_attachment (id, case_id, storage_key, filename, mime_type, size_bytes, uploaded_by, status)
 		VALUES (gen_random_uuid(), $1, $2, 'still-uploading.bin', 'application/octet-stream', 1, $3, 'pending')`, ctQueryID, ctBulkMarker, f.userID)
 
@@ -258,15 +252,17 @@ func TestCaseTypeTransferIntegration_AttachmentsAreAvailableOnTheConvertedTicket
 		t.Errorf("a pending upload must stay out of the list: total=%d names=%v", total, names)
 	}
 
-	for _, id := range []string{fromPortal.ID, fromSN.ID} {
-		got, err := cases.GetCaseAttachmentByID(f.ctx, id)
-		if err != nil || got.ReferenceID != ctQueryID {
-			t.Errorf("attachment %s cannot be opened on the converted ticket: %+v, %v", id, got, err)
+	// Each row now belongs to the converted ticket, and the one with no storage key
+	// did not gain one by being moved.
+	for _, id := range []string{fromPortalID, fromSNID} {
+		var caseID string
+		if err := f.scoped.QueryRow(f.ctx, `SELECT case_id::text FROM case_attachment WHERE id = $1`, id).Scan(&caseID); err != nil || caseID != ctQueryID {
+			t.Errorf("attachment %s is not on the converted ticket: %q, %v", id, caseID, err)
 		}
 	}
-	got, _ := cases.GetCaseAttachmentByID(f.ctx, fromSN.ID)
-	if got.StorageKey != nil {
-		t.Errorf("a ServiceNow attachment gained a storage key by being moved: %v", *got.StorageKey)
+	var storageKey *string
+	if err := f.scoped.QueryRow(f.ctx, `SELECT storage_key FROM case_attachment WHERE id = $1`, fromSNID).Scan(&storageKey); err != nil || storageKey != nil {
+		t.Errorf("an attachment with no storage key gained one by being moved: %v, %v", storageKey, err)
 	}
 }
 

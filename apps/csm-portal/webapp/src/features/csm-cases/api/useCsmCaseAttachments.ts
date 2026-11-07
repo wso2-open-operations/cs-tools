@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -26,26 +26,33 @@ import { ApiQueryKeys, BE_MAX_PAGE_LIMIT } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type {
   BeAttachment,
-  BeAttachmentConfirmResponse,
-  BeAttachmentCreatePayload,
-  BeAttachmentCreateResponse,
   BeAttachmentSearchPayload,
   BeAttachmentSearchResponse,
-  BeAttachmentShareResponse,
-  BeAttachmentUploadTokenRequest,
-  BeAttachmentUploadTokenResponse,
-  BeDeleteAttachmentResponse,
   BeReferenceType,
 } from "@api/backend/types";
 import { uiAttachmentFromBe } from "@api/backend/mappers";
-import { saveBlob } from "@utils/saveBlob";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import {
   isSafeAttachmentContentType,
   type AttachmentPreviewSource,
 } from "@features/csm-cases/utils/attachmentPreview";
-import { useCurrentUser } from "@context/current-user/CurrentUserContext";
-import { uploadFileViaTus } from "@features/csm-cases/api/attachmentStorageTus";
+import {
+  DOWNLOAD_STARTED,
+  downloadPercent,
+  isAttachmentDownloading,
+  setAttachmentDownloadProgress,
+} from "@features/csm-cases/api/attachmentDownloadProgress";
+import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
+import {
+  deleteEntityAttachment,
+  downloadEntityAttachment,
+  type DownloadSaveOutcome,
+  entityAttachmentErrorMessage,
+  WORK_ITEM_ATTACHMENT_TYPE,
+  fetchEntityAttachmentBlob,
+  type EntityAttachmentType,
+  uploadEntityAttachment,
+} from "@features/csm-cases/api/entityAttachments";
 
 /** Page size per request. Capped by the BE; see BE_MAX_PAGE_LIMIT. */
 const ATTACHMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
@@ -54,27 +61,6 @@ const ATTACHMENTS_PAGE_LIMIT = BE_MAX_PAGE_LIMIT;
  * only guards against an unbounded loop if the BE's `hasMore` were ever
  * wrong. Same convention as `useGetCsmCaseComments`'s `MAX_COMMENT_PAGES`. */
 const MAX_ATTACHMENT_PAGES = 200;
-
-/**
- * Max upload size in bytes. The BE caps the decoded file at 10 MB (the
- * request body itself is capped higher to allow base64 inflation). Validate
- * here so the user gets a clear message instead of a 413.
- */
-export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
-
-/** Read a File as a base64 data URI (`data:<mime>;base64,...`). */
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("Failed to read the file."));
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Failed to read the file."));
-    reader.readAsDataURL(file);
-  });
-}
 
 /**
  * Load *every* attachment on a reference entity. Calls `POST /attachments/search`
@@ -129,59 +115,48 @@ export interface PostCsmCaseAttachmentInput {
   file: File;
   /** Display name for the attachment; defaults to the file's own name. */
   name?: string;
-  /** Optional free-text note stored with the attachment. */
-  description?: string;
   /** Display name of the uploader (used by the mock; the BE sets its own). */
   uploadedBy: string;
-  /** Reference entity type. Defaults to `"case"` for existing call sites. */
+  /** Reference entity type, used to refresh the right attachment list. Defaults to `"case"`. */
   referenceType?: BeReferenceType;
+  /** Which attachment table the file goes in. Defaults to `"work_item"` (cases, incidents, change requests). */
+  type?: EntityAttachmentType;
 }
 
 /** Return type of {@link usePostCsmCaseAttachment}: the underlying mutation
- * plus upload progress for the SFTPGo direct-upload path. */
+ * plus upload progress. */
 export type PostCsmCaseAttachmentResult = UseMutationResult<
   CaseAttachment | null,
   Error,
   PostCsmCaseAttachmentInput
 > & {
   /**
-   * 0-100 while a direct-to-SFTPGo upload is in flight, `null` otherwise
-   * (including for the whole default base64-payload path, which has no
-   * granular progress). Only meaningful when
-   * `sftpgoAttachmentStorageEnabled` is on.
+   * 0-100 while an upload through the portal backend is in flight, `null`
+   * otherwise.
    */
   uploadProgress: number | null;
+  /**
+   * Stops the upload in flight (a large, chunked one; a small one-shot upload
+   * cannot be interrupted). The mutation then fails with "The upload was
+   * cancelled." and the half-made attachment is left to the server's cleanup.
+   */
+  cancelUpload: () => void;
 };
 
 /**
- * Upload a file attachment to a reference entity.
+ * Upload a file attachment to a reference entity. The file goes to the portal
+ * backend in chunks and is stored in Azure Blob Storage, with progress in
+ * `uploadProgress`.
  *
- * Two mutually exclusive paths, gated on the signed-in user's
- * `sftpgoAttachmentStorageEnabled` flag (`GET /users/me`) AND on
- * `referenceType`:
- *  - Off, or `referenceType` is `"change_request"`/`"incident"`: the file is
- *    sent as a base64 data URI in a single `POST /attachments`. Direct-upload
- *    storage only supports `"case"` today — the BE authorizes but then
- *    rejects change-request/incident mint requests with a deterministic 422,
- *    so those two reference types always take this path regardless of the
- *    flag.
- *  - On, and `referenceType` is `"case"` (or absent): `POST
- *    /cases/{id}/attachments/upload-token` registers the attachment's
- *    metadata (in "pending" status) and mints a write-scoped SFTPGo share;
- *    the file's bytes then go straight from the browser to SFTPGo via that
- *    share (mirroring `uploadProgress`); finally `POST
- *    /cases/{id}/attachments/{attachmentId}/confirm` transitions the row to
- *    "complete".
- *
- * The confirm/create response is a thin ack either way, so the list is
- * refetched on success to hydrate the new entry from search.
+ * The confirm response is a thin ack, so the list is refetched on success to
+ * hydrate the new entry from search.
  */
 export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
   const api = useBackendApi();
   const queryClient = useQueryClient();
-  const { user } = useCurrentUser();
-  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelUpload = useCallback(() => abortRef.current?.abort(), []);
 
   const mutation = useMutation<
     CaseAttachment | null,
@@ -189,72 +164,27 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
     PostCsmCaseAttachmentInput
   >({
     mutationFn: async (input): Promise<CaseAttachment | null> => {
-      if (input.file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      setUploadProgress(0);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        await uploadEntityAttachment(api, {
+          type: input.type ?? WORK_ITEM_ATTACHMENT_TYPE,
+          parentId: input.caseId,
+          file: input.file,
+          name: input.name,
+          onProgress: setUploadProgress,
+          signal: controller.signal,
+        });
+      } catch (err) {
         throw new Error(
-          `"${input.file.name}" is too large. The maximum attachment size is ${
-            MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)
-          } MB.`,
+          entityAttachmentErrorMessage(err, "Could not upload the attachment."),
+          { cause: err },
         );
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+        setUploadProgress(null);
       }
-
-      const referenceType = input.referenceType ?? "case";
-      const name = input.name?.trim() || input.file.name;
-      const type = input.file.type || "application/octet-stream";
-
-      // Direct-upload storage only supports "case" today; change-request and
-      // incident uploads always fall through to the legacy base64 path below,
-      // regardless of the flag.
-      if (sftpgoEnabled && referenceType === "case") {
-        setUploadProgress(0);
-        try {
-          const tokenRequest: BeAttachmentUploadTokenRequest = {
-            filename: name,
-            mimeType: type,
-            sizeBytes: input.file.size,
-            description: input.description?.trim() || null,
-            referenceType,
-          };
-          const tokenResponse = await api.post<
-            BeAttachmentUploadTokenRequest,
-            BeAttachmentUploadTokenResponse
-          >(
-            `/cases/${encodeURIComponent(input.caseId)}/attachments/upload-token`,
-            tokenRequest,
-          );
-
-          await uploadFileViaTus({
-            sftpgoBaseUrl: tokenResponse.sftpgoBaseUrl,
-            shareId: tokenResponse.shareId,
-            storageKey: tokenResponse.storageKey,
-            file: input.file,
-            onProgress: setUploadProgress,
-          });
-
-          await api.post<Record<string, never>, BeAttachmentConfirmResponse>(
-            `/cases/${encodeURIComponent(input.caseId)}/attachments/${encodeURIComponent(tokenResponse.id)}/confirm`,
-            {},
-          );
-        } finally {
-          setUploadProgress(null);
-        }
-        // The confirm response is a thin ack; refetch hydrates the full entry.
-        return null;
-      }
-
-      const dataUri = await readFileAsDataUrl(input.file);
-      const payload: BeAttachmentCreatePayload = {
-        referenceId: input.caseId,
-        referenceType,
-        name,
-        type,
-        file: dataUri,
-        description: input.description?.trim() || null,
-      };
-      await api.post<BeAttachmentCreatePayload, BeAttachmentCreateResponse>(
-        "/attachments",
-        payload,
-      );
-      // The create response is a thin ack; refetch hydrates the full entry.
       return null;
     },
     onSuccess: (_created, variables) => {
@@ -268,143 +198,94 @@ export function usePostCsmCaseAttachment(): PostCsmCaseAttachmentResult {
     },
   });
 
-  return { ...mutation, uploadProgress };
+  return { ...mutation, uploadProgress, cancelUpload };
 }
 
 /**
- * Returns a function that fetches an attachment's raw bytes via
- * `GET /attachments/{id}/content`. The content endpoint always responds with
- * `Content-Disposition: attachment` and streams behind auth, so it is fetched
- * as a `Blob` (a plain `<a href>`/`<img src>` would miss the auth headers and
- * would force a download instead of rendering inline). Shared by the download
- * action and the attachment preview dialog.
+ * Re-labels a fetched blob with the attachment's own metadata type, but only
+ * when that type is on the safe allowlist (see {@link isSafeAttachmentContentType}).
  *
- * The BE's response `Content-Type` is only forwarded as-is for an allowlist
- * of known-safe types (`safeAttachmentTypes` in the entity-service's
- * `case_handler.go`) — anything else, including every `video/*` type today,
- * is coerced to `application/octet-stream` to block a stored-XSS via a
- * crafted upstream type. That coercion is correct for the raw endpoint but
- * would make the fetched `Blob` un-renderable by `<img>`/the PDF iframe even
- * though the bytes are fine.
- *
- * The attachment's `contentType` from `/attachments/search` list metadata is
- * whatever the uploader claimed — the BE doesn't coerce it, but it also
- * doesn't verify it against the actual bytes, so it is uploader-controlled
- * and NOT automatically trustworthy. Re-labeling the blob with it would
- * re-enable exactly the coercion the backend allowlist is meant to block
- * (e.g. a file uploaded with a spoofed benign `contentType` but different
- * actual bytes). So the blob is only ever re-labeled when that metadata
- * `contentType` is itself a member of the same backend allowlist, mirrored
- * client-side as {@link isSafeAttachmentContentType} — for anything else the
- * blob is returned as-is (`application/octet-stream`, matching what the
- * backend already coerced it to), which is un-renderable by design.
+ * The backend serves every attachment as `application/octet-stream`, which would
+ * make the fetched `Blob` un-renderable by `<img>` or the PDF iframe even though
+ * the bytes are fine. The attachment's `contentType` from `/attachments/search`
+ * is whatever the uploader claimed and is not checked against the bytes, so it
+ * is NOT automatically trustworthy: re-labeling with any type would re-enable
+ * the stored-XSS the backend's coercion blocks. The blob is therefore only
+ * re-labeled when that type is on the same allowlist the backend uses; anything
+ * else stays as served, which is un-renderable by design.
  */
-export function useGetCsmCaseAttachmentContent(): (
-  attachment: CaseAttachment,
-) => Promise<Blob> {
-  const api = useBackendApi();
-
-  return useCallback(
-    async (attachment: CaseAttachment): Promise<Blob> => {
-      const blob = await api.getBlob(
-        `/attachments/${encodeURIComponent(attachment.id)}/content`,
-      );
-      if (!isSafeAttachmentContentType(attachment.contentType)) return blob;
-      return blob.type === attachment.contentType
-        ? blob
-        : blob.slice(0, blob.size, attachment.contentType);
-    },
-    [api],
-  );
-}
-
-/** Opens a URL for download in a new tab, rather than navigating the SPA away
- * from itself. Used for the SFTPGo share URL below, which is a plain public
- * link (not fetched as a `Blob` through this app's own auth) — a normal link
- * click, not a `fetch`, so cross-origin/CORS is a non-issue. */
-function openForDownload(url: string): void {
-  const a = document.createElement("a");
-  a.href = url;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+function labelBlob(blob: Blob, attachment: CaseAttachment): Blob {
+  if (!isSafeAttachmentContentType(attachment.contentType)) return blob;
+  return blob.type === attachment.contentType
+    ? blob
+    : blob.slice(0, blob.size, attachment.contentType);
 }
 
 /**
- * Returns a function that downloads an attachment, built on
- * {@link useGetCsmCaseAttachmentContent}.
- *
- * When `sftpgoAttachmentStorageEnabled` is on, this creates a share
- * (`POST /attachments/{id}/share`) for exactly the one attachment being
- * downloaded — never eagerly for a whole list, see
- * `AttachmentStorageHandler.CreateAttachmentShare`'s doc comment on the
- * backend — and opens the returned short-lived public URL directly, instead
- * of fetching the content as an authenticated `Blob`.
+ * Returns a function that downloads an attachment: it is streamed through the
+ * portal backend (which checks access) and saved under its own name.
  */
 export function useDownloadCsmCaseAttachment(): (
   attachment: CaseAttachment,
 ) => Promise<void> {
   const api = useBackendApi();
-  const getContent = useGetCsmCaseAttachmentContent();
-  const { user } = useCurrentUser();
-  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
+  const { showSuccess } = useSuccessBanner();
+  const notify = useCallback(
+    (name: string, outcome: DownloadSaveOutcome) =>
+      showSuccess(outcome === "saved" ? `Downloaded ${name}.` : `Download of ${name} started.`),
+    [showSuccess],
+  );
 
+  const download = useCallback(
+    async (attachment: CaseAttachment): Promise<void> => {
+      await downloadEntityAttachment(api, {
+        type: WORK_ITEM_ATTACHMENT_TYPE,
+        id: attachment.id,
+        name: attachment.filename,
+        size: attachment.size,
+        onSaved: (outcome) => notify(attachment.filename, outcome),
+        onProgress: (received, total) =>
+          setAttachmentDownloadProgress(attachment.id, downloadPercent(received, total)),
+      });
+    },
+    [api, notify],
+  );
+
+  // One download of an attachment at a time; its row shows how far it has got.
   return useCallback(
     async (attachment: CaseAttachment): Promise<void> => {
-      if (sftpgoEnabled) {
-        const { shareUrl } = await api.post<
-          Record<string, never>,
-          BeAttachmentShareResponse
-        >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
-        openForDownload(shareUrl);
-        return;
+      if (isAttachmentDownloading(attachment.id)) return;
+      setAttachmentDownloadProgress(attachment.id, DOWNLOAD_STARTED);
+      try {
+        await download(attachment);
+      } finally {
+        setAttachmentDownloadProgress(attachment.id, undefined);
       }
-      const blob = await getContent(attachment);
-      saveBlob(blob, attachment.filename);
     },
-    [api, getContent, sftpgoEnabled],
+    [download],
   );
 }
 
 /**
  * Returns a function that resolves a previewable {@link AttachmentPreviewSource}
- * for {@link AttachmentPreviewDialog}, mirroring the same
- * `sftpgoAttachmentStorageEnabled` branching {@link useDownloadCsmCaseAttachment}
- * already uses instead of always going through the authenticated content
- * endpoint (which the entity-service deliberately 503s for SFTPGo-backed
- * attachments — bytes for that data source are only reachable via a share
- * URL, never the raw content endpoint).
- *
- * When the flag is on, a read-scoped share (`POST /attachments/{id}/share`)
- * is minted and its `shareUrl` is returned as-is (`revoke: false`) — it is
- * already a directly usable public URL, so there is no reason to also fetch
- * it as a `Blob` just to re-wrap it in an object URL. Otherwise, falls back
- * to {@link useGetCsmCaseAttachmentContent} and wraps the resulting `Blob` in
- * an object URL (`revoke: true`); the caller is responsible for revoking it.
+ * for {@link AttachmentPreviewDialog}. The file is streamed through the portal
+ * backend into a `Blob` wrapped in an object URL (`revoke: true`) that the
+ * caller must revoke.
  */
 export function useGetCsmCaseAttachmentPreviewSource(): (
   attachment: CaseAttachment,
 ) => Promise<AttachmentPreviewSource> {
   const api = useBackendApi();
-  const getContent = useGetCsmCaseAttachmentContent();
-  const { user } = useCurrentUser();
-  const sftpgoEnabled = !!user?.sftpgoAttachmentStorageEnabled;
 
   return useCallback(
     async (attachment: CaseAttachment): Promise<AttachmentPreviewSource> => {
-      if (sftpgoEnabled) {
-        const { shareUrl } = await api.post<
-          Record<string, never>,
-          BeAttachmentShareResponse
-        >(`/attachments/${encodeURIComponent(attachment.id)}/share`, {});
-        return { url: shareUrl, revoke: false };
-      }
-      const blob = await getContent(attachment);
-      return { url: URL.createObjectURL(blob), revoke: true };
+      const blob = await fetchEntityAttachmentBlob(api, {
+        type: WORK_ITEM_ATTACHMENT_TYPE,
+        id: attachment.id,
+      });
+      return { url: URL.createObjectURL(labelBlob(blob, attachment)), revoke: true };
     },
-    [api, getContent, sftpgoEnabled],
+    [api],
   );
 }
 
@@ -417,9 +298,9 @@ export interface DeleteCsmCaseAttachmentInput {
 }
 
 /**
- * Delete an attachment via `DELETE /attachments/{id}` (ServiceNow data source
- * only). On success the owning entity's attachment list is invalidated so the
- * row drops.
+ * Delete an attachment. Only the uploader may delete, and not once the case is
+ * closed: the backend answers 403 / 409 with the message to show. On success the
+ * owning entity's attachment list is invalidated so the row drops.
  */
 export function useDeleteCsmCaseAttachment(): UseMutationResult<
   void,
@@ -431,9 +312,13 @@ export function useDeleteCsmCaseAttachment(): UseMutationResult<
 
   return useMutation<void, Error, DeleteCsmCaseAttachmentInput>({
     mutationFn: async (input): Promise<void> => {
-      await api.del<BeDeleteAttachmentResponse>(
-        `/attachments/${encodeURIComponent(input.attachmentId)}`,
-      );
+      try {
+        await deleteEntityAttachment(api, { type: WORK_ITEM_ATTACHMENT_TYPE, id: input.attachmentId });
+      } catch (err) {
+        throw new Error(entityAttachmentErrorMessage(err, "Could not delete the attachment."), {
+          cause: err,
+        });
+      }
     },
     onSuccess: (_void, variables) => {
       void queryClient.invalidateQueries({

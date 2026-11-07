@@ -25,6 +25,14 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import { createCommand, type LexicalCommand } from "lexical";
 
+/**
+ * Given to an editor that stores a pasted or picked image itself instead of
+ * embedding it as base64. Called with a file that has already passed the type
+ * and size checks; starts the upload and returns the `blob:` URL to show in the
+ * editor meanwhile. An editor without one embeds the image as before.
+ */
+export type ImageUploadHandler = (file: File) => string;
+
 /** Payload for `INSERT_IMAGE_COMMAND` in the shared rich text editor. */
 export type InsertImagePayload = {
   src: string;
@@ -90,6 +98,23 @@ const SAFE_URL_PATTERN =
 export function sanitizeUrl(url: string): string {
   const decoded = url.replace(/&amp;/g, "&").trim();
   return SAFE_URL_PATTERN.test(decoded) ? decoded : "";
+}
+
+/**
+ * A local preview of an image that is still being (or has just been) uploaded
+ * (see {@link ImageUploadHandler}): `blob:` plus the page's own origin. Only an
+ * image's `src` may be one of these, never a link, which is why it is not part
+ * of {@link sanitizeUrl}. It is only ever a preview: the comment input swaps it
+ * for the stored image's id before anything is sent.
+ */
+const BLOB_IMAGE_SRC_PATTERN = /^blob:https?:\/\/[^\s"'<>]+$/i;
+
+/** {@link sanitizeUrl} for an `<img>` `src`, which also accepts a local `blob:` preview. */
+export function sanitizeImageSrc(url: string): string {
+  const safe = sanitizeUrl(url);
+  if (safe) return safe;
+  const decoded = url.replace(/&amp;/g, "&").trim();
+  return BLOB_IMAGE_SRC_PATTERN.test(decoded) ? decoded : "";
 }
 
 /**
