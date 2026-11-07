@@ -41,9 +41,9 @@ const (
 	// may show. Beyond it the comment or record is refused (a 400).
 	MaxInlineImagesPerContent = 5
 	// DefaultInlineImagesTotalMaxBytes is the default total of all images in one
-	// comment or description (INLINE_IMAGES_TOTAL_MAX_MB), 25 MiB. It is also the
+	// comment or description (INLINE_IMAGES_TOTAL_MAX_MB), 1 MiB. It is also the
 	// most one image can be: there is no separate per-image limit.
-	DefaultInlineImagesTotalMaxBytes int64 = 25 << 20
+	DefaultInlineImagesTotalMaxBytes int64 = 1 << 20
 	// maxInlineLookupIDs bounds how many referenced ids one validation looks up;
 	// a comment naming more distinct ids than this is far over the limit anyway.
 	maxInlineLookupIDs = 200

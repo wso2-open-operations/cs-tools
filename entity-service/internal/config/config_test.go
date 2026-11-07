@@ -1437,8 +1437,8 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	}
 
 	clear()
-	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
-		t.Errorf("defaults = %v, want 100 / 25 MiB", g)
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("defaults = %v, want 10 / 1 MiB", g)
 	}
 
 	// The megabyte settings: a whole number or a decimal.
@@ -1469,7 +1469,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
-	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
 		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
 	}
 
@@ -1477,7 +1477,7 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
-	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
 		t.Errorf("bad values did not fall back to the defaults: %v", g)
 	}
 }

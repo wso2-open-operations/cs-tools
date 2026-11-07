@@ -809,13 +809,13 @@ type Config struct {
 	SalesEntityClientSecret string
 	SalesEntityScopes       string
 
-	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 100).
+	// AttachmentMaxBytes caps one uploaded file (ATTACHMENT_MAX_MB, default 10).
 	// The declared size is checked when an upload starts and the real size when
 	// it is confirmed. Provisional default, to be set from the real size
 	// distribution.
 	AttachmentMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
-	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 25), and so also one image.
+	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1), and so also one image.
 	// At most service.MaxInlineImagesPerContent (5) images per comment or
 	// description.
 	InlineImagesTotalMaxBytes int64
@@ -1071,8 +1071,8 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 100)
-	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 25)
+	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10)
+	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1)
 	cfg.applySREEventHubTopic()
 	return cfg
 }
