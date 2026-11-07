@@ -12941,7 +12941,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MigrationCaseReport'
         "400":
-          description: olderThanDays is not a whole number of days in range.
+          description: olderThanDays is not a whole number of days in range, variant is not a known value, or both are given.
           content:
             application/json:
               schema:
@@ -12991,6 +12991,22 @@ paths:
         5000 rows as a safeguard; `casesTotal` and `onboardingCasesTotal`
         always hold the full size, and the matching `...Truncated` flag is
         true when a table was cut. The caller supplies the recipients.
+
+
+        With `variant=open-before-yesterday` the report is instead the cases
+        still in exactly the open state that were created before the start of
+        yesterday in Asia/Colombo (a calendar day, not 24 hours; a case
+        created at or after that instant is not listed). Only plain cases are
+        listed; tags and ETAs are ignored. A case is listed when its project
+        type is one of the configured open-before-yesterday project types
+        (default Subscription, Managed Cloud Subscription), or one of the
+        configured product project types (default Cloud Support) and the case
+        has a product set. All matching cases are in `cases`, oldest first,
+        with `accountName` filled; `onboardingCases` is always empty with
+        `onboardingCasesTotal` 0 and `onboardingCasesTruncated` false.
+        `cases` is capped at 5000 rows with `casesTotal` and
+        `casesTruncated` as above. `olderThanDays` is 1 and `createdBefore`
+        is the start of yesterday; the response carries `variant`.
       operationId: getLongOpenCaseReport
       parameters:
         - name: olderThanDays
@@ -13001,7 +13017,19 @@ paths:
             minimum: 1
             maximum: 3650
             default: 30
-          description: The age a case must have reached to be listed.
+          description: >-
+            The age a case must have reached to be listed. Not allowed with
+            `variant`.
+        - name: variant
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [open-before-yesterday]
+          description: >-
+            Omit for the long-open cases report. `open-before-yesterday`
+            selects the report of cases still open that were created before
+            yesterday.
       responses:
         "200":
           description: The report.
@@ -13028,7 +13056,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: The report's project types are not configured on this deployment, or the caller's identity could not be checked.
+          description: The report's project types (for the requested variant) are not configured on this deployment, or the caller's identity could not be checked.
           content:
             application/json:
               schema:
@@ -33466,13 +33494,19 @@ components:
         generatedAt:
           type: string
           format: date-time
+        variant:
+          type: string
+          enum: [open-before-yesterday]
+          description: Echoes the requested variant. Absent from the default report.
         olderThanDays:
           type: integer
           description: The age every listed case has reached.
         createdBefore:
           type: string
           format: date-time
-          description: Every listed case was created on or before this instant.
+          description: >-
+            Every listed case was created on or before this instant (strictly
+            before it, in the open-before-yesterday variant).
         cases:
           type: array
           description: Long-open cases whose project is not being onboarded, oldest first.
@@ -33523,6 +33557,11 @@ components:
         csTeam:
           type: string
           description: Name of the CS team that owns the case's account, or empty.
+        accountName:
+          type: string
+          description: >-
+            Name of the case's account. Present only in the
+            open-before-yesterday variant (and omitted when empty).
     WorklogReport:
       type: object
       description: >-
