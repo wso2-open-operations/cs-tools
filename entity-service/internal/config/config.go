@@ -810,14 +810,14 @@ type Config struct {
 	SalesEntityScopes       string
 
 	// AttachmentMaxBytes and InlineImageMaxBytes cap one uploaded file
-	// (ATTACHMENT_MAX_BYTES, default 100 MiB) and one inline comment image
-	// (INLINE_IMAGE_MAX_BYTES, default 25 MiB). The declared size is checked
+	// (ATTACHMENT_MAX_MB, default 100) and one inline comment image
+	// (INLINE_IMAGE_MAX_MB, default 25). The declared size is checked
 	// when an upload starts and the real size when it is confirmed. Provisional
 	// defaults, to be set from the real size distribution.
 	AttachmentMaxBytes  int64
 	InlineImageMaxBytes int64
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
-	// together (INLINE_IMAGES_TOTAL_MAX_BYTES, default 25 MiB). At most
+	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 25). At most
 	// service.MaxInlineImagesPerContent (5) images per comment or description.
 	InlineImagesTotalMaxBytes int64
 
@@ -1072,9 +1072,9 @@ func Load() *Config {
 	cfg.RedisPassword = os.Getenv("REDIS_PASSWORD")
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
-	cfg.AttachmentMaxBytes = envPositiveInt64("ATTACHMENT_MAX_BYTES", 100<<20)
-	cfg.InlineImageMaxBytes = envPositiveInt64("INLINE_IMAGE_MAX_BYTES", 25<<20)
-	cfg.InlineImagesTotalMaxBytes = envPositiveInt64("INLINE_IMAGES_TOTAL_MAX_BYTES", 25<<20)
+	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 100)
+	cfg.InlineImageMaxBytes = envMegabytes("INLINE_IMAGE_MAX_MB", "INLINE_IMAGE_MAX_BYTES", 25)
+	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 25)
 	cfg.applySREEventHubTopic()
 	return cfg
 }
@@ -1699,6 +1699,22 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// envMegabytes reads a size in megabytes (1 MB = 1 MiB = 1048576 bytes; a
+// decimal such as 0.5 is allowed) from mbKey and returns it in bytes. When mbKey
+// is unset or not a positive number it falls back to the older bytes setting
+// bytesKey, then to defMB. A typo costs the override, it does not stop the
+// service starting (same posture as envPositiveInt64).
+func envMegabytes(mbKey, bytesKey string, defMB int64) int64 {
+	if v := strings.TrimSpace(os.Getenv(mbKey)); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f < float64(1<<43) {
+			if n := int64(f * (1 << 20)); n > 0 {
+				return n
+			}
+		}
+	}
+	return envPositiveInt64(bytesKey, defMB<<20)
 }
 
 // envPositiveInt64 reads a positive integer, falling back to def when unset,
