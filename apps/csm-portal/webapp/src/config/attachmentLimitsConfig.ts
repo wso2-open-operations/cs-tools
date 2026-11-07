@@ -17,7 +17,7 @@
 
 const BYTES_PER_MB = 1024 * 1024;
 
-/** Largest stored attachment (entity-service `ATTACHMENT_MAX_BYTES` default, 100 MiB). */
+/** Largest stored attachment (entity-service `ATTACHMENT_MAX_MB` default, 100 MiB). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
 
 /** Most inline-image bytes in one comment or description (25 MiB). */
@@ -36,7 +36,7 @@ function megabytes(raw: unknown, fallback: number): number {
  * Read from the runtime `window.config.CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB`
  * key (a number of megabytes, or a numeric string). A missing, unparseable, zero
  * or negative value gives {@link DEFAULT_ENTITY_ATTACHMENT_MAX_MB}. Keep it equal
- * to the entity-service's `ATTACHMENT_MAX_BYTES`: the server stays the authority,
+ * to the entity-service's `ATTACHMENT_MAX_MB`: the server stays the authority,
  * this only refuses an oversized file before the upload starts.
  *
  * Read at call time (not module load) so a test can set `window.config` per case.

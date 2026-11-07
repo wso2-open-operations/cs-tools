@@ -6911,7 +6911,7 @@ paths:
         If the description shows inline images (src="/<attachmentId>") they must
         be draft images uploaded to the request's project by the caller
         (POST /attachments/upload with projectId): at most 5, within
-        INLINE_IMAGES_TOTAL_MAX_BYTES together, none still a blob: URL; otherwise
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
         a 400 and nothing is created. They are linked to the new record right
         after it exists. data:image base64 images are still accepted as before.
       requestBody:
@@ -8507,7 +8507,7 @@ paths:
         If the description shows inline images (src="/<attachmentId>") they must
         be draft images uploaded to the request's project by the caller
         (POST /attachments/upload with projectId): at most 5, within
-        INLINE_IMAGES_TOTAL_MAX_BYTES together, none still a blob: URL; otherwise
+        INLINE_IMAGES_TOTAL_MAX_MB together, none still a blob: URL; otherwise
         a 400 and nothing is created. They are linked to the new record right
         after it exists. data:image base64 images are still accepted as before.
       requestBody:
@@ -39590,10 +39590,10 @@ components:
           format: int64
           minimum: 1
           description: >-
-            The file's size. Checked against ATTACHMENT_MAX_BYTES (type comment:
-            INLINE_IMAGE_MAX_BYTES, default 25 MiB), and the uploaded file must
+            The file's size. Checked against ATTACHMENT_MAX_MB (type comment:
+            INLINE_IMAGE_MAX_MB, default 25 MB), and the uploaded file must
             match it. One comment or description may show at most 5 images and
-            at most INLINE_IMAGES_TOTAL_MAX_BYTES (default 25 MiB) together; a
+            at most INLINE_IMAGES_TOTAL_MAX_MB (default 25 MB) together; a
             comment (create or edit) or a record whose description exceeds
             either is a 400 and nothing is saved.
 
