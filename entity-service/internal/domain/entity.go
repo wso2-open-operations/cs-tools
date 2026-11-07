@@ -3260,6 +3260,11 @@ type ParsedCaseFilters struct {
 	Severities        []CaseSeverity
 	IssueTypes        []CaseIssueType
 	EngagementTypes   []EngagementType
+	// SalesRegions filters to cases whose parent account's sales region is one of
+	// these values (optional). Matched case-insensitively on trimmed values. Only
+	// the relational data source supports it; the other backing data source
+	// rejects it rather than dropping the predicate and widening the result set.
+	SalesRegions      []string
 	ClosedStartDate   *time.Time
 	ClosedEndDate     *time.Time
 	ResolvedStartDate *time.Time
@@ -3395,6 +3400,10 @@ type CaseFilterGroup struct {
 	DeploymentIDs    []string
 	AssignedUserIDs  []string
 	EscalationLevels []string
+	// SalesRegions filters this branch to cases whose parent account's sales
+	// region is one of these values (optional). Same semantics as
+	// ParsedCaseFilters.SalesRegions, scoped to this OR branch.
+	SalesRegions []string
 	// Tags filters this branch to cases carrying at least one of these
 	// free-text tag labels (optional). Same semantics as
 	// ParsedCaseFilters.Tags, scoped to this OR branch.

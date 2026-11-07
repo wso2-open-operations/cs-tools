@@ -1070,6 +1070,8 @@ export type BeCaseFieldFilterField =
   | "projectType"
   | "creTeam"
   | "sreTeam"
+  /** `in` only: the account's sales region, matched case-insensitively. */
+  | "salesRegion"
   | "resolutionNotes"
   | "parentId"
   | "taskSLABusinessElapsedPercent"

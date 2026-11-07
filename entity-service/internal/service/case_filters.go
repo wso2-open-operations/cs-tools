@@ -45,7 +45,7 @@ var caseFilterFieldSet = map[string]bool{
 	"projectOnboardingStatus": true, "projectType": true, "creTeam": true, "sreTeam": true,
 	"resolutionNotes": true, "parentId": true, "taskSLABusinessElapsedPercent": true,
 	"escalationLevel": true, "escalation": true, "number": true, "internalId": true,
-	"accountId": true, "slaBreached": true, "accountEscalationActive": true,
+	"accountId": true, "salesRegion": true, "slaBreached": true, "accountEscalationActive": true,
 }
 
 // caseFilterOpSet is the exact set of CaseFieldFilter.Op values accepted by
@@ -304,6 +304,20 @@ func ParseCaseFieldFilters(filters []domain.CaseFieldFilter, callerEmail string,
 			}
 			for _, v := range f.Values {
 				p.EngagementTypes = append(p.EngagementTypes, domain.EngagementType(v))
+			}
+
+		case "salesRegion":
+			if f.Op != "in" {
+				return domain.ParsedCaseFilters{}, badCaseFilterCombo(f)
+			}
+			if err := requireCaseFilterValues(f); err != nil {
+				return domain.ParsedCaseFilters{}, err
+			}
+			for _, v := range f.Values {
+				if strings.TrimSpace(v) == "" {
+					return domain.ParsedCaseFilters{}, &apierror.ValidationError{Msg: "filters: salesRegion values must not be blank"}
+				}
+				p.SalesRegions = append(p.SalesRegions, strings.TrimSpace(v))
 			}
 
 		case "issueType":
@@ -729,6 +743,7 @@ func ParseCaseFieldFilterGroups(branches []domain.CaseFilterBranch) ([]domain.Ca
 			States:           parsed.States,
 			Severities:       parsed.Severities,
 			EngagementTypes:  parsed.EngagementTypes,
+			SalesRegions:     parsed.SalesRegions,
 			IssueTypes:       parsed.IssueTypes,
 			WorkStates:       parsed.WorkStates,
 			ProjectIDs:       parsed.ProjectIDs,

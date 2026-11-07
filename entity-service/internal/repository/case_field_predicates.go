@@ -38,6 +38,7 @@ type caseFieldSet struct {
 	Severities       []domain.CaseSeverity
 	IssueTypes       []domain.CaseIssueType
 	EngagementTypes  []domain.EngagementType
+	SalesRegions     []string
 	WorkStates       []domain.CaseWorkState
 	EscalationLevels []string
 	Tags             []string
@@ -275,6 +276,12 @@ func caseFieldPredicates(f caseFieldSet, argIdx int) ([]string, []any, int, erro
 		// engagement subtype table, not on "case".
 		add("eng.type = ANY($%d::engagement_type_enum[])", upper(len(f.EngagementTypes), func(i int) string { return string(f.EngagementTypes[i]) }))
 	}
+	if len(f.SalesRegions) > 0 {
+		// The parent account's sales region, on the "a" join caseSearchJoins
+		// already carries for every search (no extra join). Case-insensitive on
+		// trimmed values; the bound list is already trimmed by the filter parser.
+		add("LOWER(BTRIM(a.sales_region)) = ANY($%d::text[])", lowerAll(f.SalesRegions))
+	}
 	if len(f.WorkStates) > 0 {
 		// Every case-like type but announcement carries a work state (migration 0184).
 		add(caseLikeWorkStateColumn+" = ANY($%d::text[])", upper(len(f.WorkStates), func(i int) string { return string(f.WorkStates[i]) }))
@@ -307,7 +314,7 @@ func caseFieldSetFromGroup(g domain.CaseFilterGroup) caseFieldSet {
 	return caseFieldSet{
 		Types: g.Types, ProjectIDs: g.ProjectIDs, DeploymentIDs: g.DeploymentIDs,
 		AssignedUserIDs: g.AssignedUserIDs, States: g.States, Severities: g.Severities,
-		IssueTypes: g.IssueTypes, EngagementTypes: g.EngagementTypes, WorkStates: g.WorkStates,
+		IssueTypes: g.IssueTypes, EngagementTypes: g.EngagementTypes, SalesRegions: g.SalesRegions, WorkStates: g.WorkStates,
 		EscalationLevels: g.EscalationLevels, Tags: g.Tags, ExcludeTags: g.ExcludeTags,
 	}
 }

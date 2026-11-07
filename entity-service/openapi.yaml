@@ -25708,6 +25708,7 @@ components:
             - creTeam
             - sreTeam
             - accountId
+            - salesRegion
             - resolutionNotes
             - parentId
             - taskSLABusinessElapsedPercent
@@ -25826,6 +25827,14 @@ components:
           an anyOf branch, and not supported by the relational data source
           (accountId+in has no relational-data-source query support today
           either).
+        - **salesRegion** (in): the parent account's sales region (e.g.
+          "EMEA", "APAC"). Matches cases whose account's sales region equals
+          any of the given values, compared case-insensitively after trimming
+          surrounding whitespace; blank values are a validation error. A case
+          with no account, or an account with no sales region, never matches.
+          Supported inside an anyOf branch. Only supported by the relational
+          data source: the other data source rejects it with a validation error
+          rather than ignoring it.
         - **resolutionNotes** (isEmpty): values ignored; matches cases with
           empty resolution notes. isNotEmpty is not supported: false and
           omitted were always treated identically for this filter, so there
@@ -25911,10 +25920,12 @@ components:
             ANDed with filters (if both are present). Only the fields both data
             sources support inside a branch are allowed there: type, state,
             severity, engagementType, issueType, workState, projectId,
-            deploymentId, assignedUserId, escalationLevel, tag. A branch
+            deploymentId, assignedUserId, escalationLevel, tag. salesRegion
+            is also allowed, but only on the relational data source: the other
+            data source rejects it with a validation error. A branch
             containing any other field (e.g. taskSLABusinessElapsedPercent,
-            createdOn) is rejected with a validation error. Supported by both
-            data sources.
+            createdOn) is rejected with a validation error. Otherwise
+            supported by both data sources.
 
     SearchCasesRequest:
       type: object

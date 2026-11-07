@@ -3572,6 +3572,35 @@ func TestSearchCasesForwardsTagsFilter(t *testing.T) {
 	}
 }
 
+func TestSearchCasesForwardsSalesRegionFilter(t *testing.T) {
+	// The salesRegion field filter is forwarded through SearchCases verbatim,
+	// at the top level and inside an anyOf branch: no BFF-side whitelist.
+	bodies := map[string]string{
+		"top level": `{"filters":{"filters":[{"field":"type","op":"in","values":["engagement"]},{"field":"salesRegion","op":"in","values":["EMEA","APAC"]}]}}`,
+		"anyOf":     `{"filters":{"anyOf":[{"filters":[{"field":"salesRegion","op":"in","values":["EMEA"]}]},{"filters":[{"field":"salesRegion","op":"in","values":["APAC"]}]}]}}`,
+	}
+	for name, reqBody := range bodies {
+		t.Run(name, func(t *testing.T) {
+			var capturedBody []byte
+			client := &mockEntityCaseClient{
+				searchCasesFn: func(_ context.Context, body []byte) ([]byte, error) {
+					capturedBody = body
+					return []byte(`{"cases":[],"total":0}`), nil
+				},
+			}
+			h := NewCaseHandler(client)
+			r := withUser(httptest.NewRequest(http.MethodPost, "/cases/search", strings.NewReader(reqBody)))
+			w := httptest.NewRecorder()
+			h.SearchCases(w, r)
+
+			assertStatus(t, w, http.StatusOK)
+			if string(capturedBody) != reqBody {
+				t.Errorf("upstream received body %s, want %s (must forward verbatim)", capturedBody, reqBody)
+			}
+		})
+	}
+}
+
 func TestPatchCaseBestCaseFixEta(t *testing.T) {
 	// bestCaseFixEta is a pure pass-through single-field PATCH variant, same shape as
 	// the existing fixEta test. It does not trip the state/workState peek, so

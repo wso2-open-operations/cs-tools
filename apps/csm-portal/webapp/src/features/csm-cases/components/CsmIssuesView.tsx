@@ -143,6 +143,7 @@ const FILTER_PARAM_KEYS = [
   "workStates",
   "projects",
   "engagementTypes",
+  "salesRegions",
   "products",
   "csTeams",
   "sreTeams",
@@ -213,6 +214,8 @@ interface CsmIssuesViewProps {
   hideSreTeamFilter?: boolean;
   /** Show the engagement-type sub-filter (pass when the view is locked to engagement cases). */
   showEngagementTypeFilter?: boolean;
+  /** Show the Sales Region multi-select (opt-in; only the Engagements page passes it). */
+  showSalesRegionFilter?: boolean;
   /**
    * Force the Severity filter/column on or off, overriding the default
    * "only when `lockedFilters.caseTypes` is locked to `case`" rule below.
@@ -277,6 +280,7 @@ export default function CsmIssuesView({
   hideCreTeamFilter,
   hideSreTeamFilter,
   showEngagementTypeFilter,
+  showSalesRegionFilter,
   showSeverityFilter: showSeverityFilterOverride,
   detailBasePath,
   hideSeverityColumn,
@@ -285,10 +289,14 @@ export default function CsmIssuesView({
   columnsViewId,
 }: CsmIssuesViewProps): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
-  const filters = useMemo<CasesFilters>(
-    () => readCasesFiltersFromUrl(searchParams),
-    [searchParams],
-  );
+  const filters = useMemo<CasesFilters>(() => {
+    const parsed = readCasesFiltersFromUrl(searchParams);
+    // Sales Region only has a control on views that opt in. A value arriving
+    // through a shared URL or a saved view on any other list would filter
+    // results the user cannot see or clear, and the other data source rejects
+    // the filter outright, so it is dropped here for query and display alike.
+    return showSalesRegionFilter ? parsed : { ...parsed, salesRegions: [] };
+  }, [searchParams, showSalesRegionFilter]);
 
   // Writes `defaultCaseTypes` into the URL at most once per mount, the first
   // time it finds no `types` param at all. Done as a real URL write (in an
@@ -835,6 +843,7 @@ export default function CsmIssuesView({
         hideCreTeamFilter={hideCreTeamFilter}
         hideSreTeamFilter={hideSreTeamFilter}
         showEngagementTypeFilter={showEngagementTypeFilter}
+        showSalesRegionFilter={showSalesRegionFilter}
       />
 
       {canWrite && selectedRows.size > 0 && (

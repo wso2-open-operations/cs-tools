@@ -88,6 +88,21 @@ export const ENGAGEMENT_TYPE_LABEL: Record<BeEngagementType, string> = {
 export const ENGAGEMENT_TYPE_OPTIONS: { value: BeEngagementType; label: string }[] =
   ALL_ENGAGEMENT_TYPES.map((t) => ({ value: t, label: ENGAGEMENT_TYPE_LABEL[t] }));
 
+/**
+ * Sales-region options for the Engagements page filter. There is no endpoint
+ * listing region values, so this is a static list; values match the labels
+ * and are compared case-insensitively by the backend.
+ */
+export const SALES_REGION_OPTIONS: { value: string; label: string }[] = [
+  { value: "NA", label: "NA" },
+  { value: "LATAM", label: "LATAM" },
+  { value: "EU", label: "EU" },
+  { value: "EMEA", label: "EMEA" },
+  { value: "ME", label: "ME" },
+  { value: "AFRICA", label: "AFRICA" },
+  { value: "APAC", label: "APAC" },
+];
+
 export const ONBOARDING_STATUS_OPTIONS: { value: string; label: string }[] =
   ALL_ONBOARDING_STATUSES.map((value) => ({
     value,

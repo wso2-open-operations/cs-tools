@@ -434,6 +434,46 @@ describe("CasesFilterBar — 'SRE Team' control (mirrors 'CRE Team')", () => {
   });
 });
 
+describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
+  it("is not rendered unless showSalesRegionFilter is passed", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS });
+    expect(screen.queryByRole("combobox", { name: "Sales Region" })).not.toBeInTheDocument();
+  });
+
+  it("renders the static region options and writes the selection to salesRegions", async () => {
+    const { onChange } = renderBar({ ...DEFAULT_CASES_FILTERS }, vi.fn(), {
+      showSalesRegionFilter: true,
+    });
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Sales Region" }));
+    expect(await screen.findByRole("option", { name: "APAC" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "LATAM" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "EMEA" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));
+  });
+
+  // The region is not an Advanced-builder row, and the open Advanced panel
+  // suppresses the regular chips, so without these a selected region would
+  // filter results with nothing on screen showing it.
+  it("keeps a selected region visible as a chip while the Advanced panel is open", () => {
+    renderBar(
+      { ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] },
+      vi.fn(),
+      { showSalesRegionFilter: true },
+    );
+
+    expect(screen.getByText("Advanced filters")).toBeInTheDocument();
+    expect(screen.getByText("Sales Region: EMEA")).toBeInTheDocument();
+  });
+
+  it("shows no region chip in Advanced mode on views without the control", () => {
+    renderBar({ ...DEFAULT_CASES_FILTERS, escalationLevels: ["2"], salesRegions: ["EMEA"] });
+
+    expect(screen.queryByText("Sales Region: EMEA")).not.toBeInTheDocument();
+  });
+});
+
 // The tri-state include/exclude toggle (digiops-cs#2907) was removed —
 // Simple mode's "State" control is now a plain include-only multi-select,
 // same as every other Simple-mode field (Severity, Case type, ...).
