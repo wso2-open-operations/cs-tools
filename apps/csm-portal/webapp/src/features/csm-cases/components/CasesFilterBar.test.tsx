@@ -447,7 +447,7 @@ describe("CasesFilterBar — 'Sales Region' control (opt-in)", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "Sales Region" }));
     expect(await screen.findByRole("option", { name: "APAC" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Americas" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "LATAM" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: "EMEA" }));
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ salesRegions: ["EMEA"] }));

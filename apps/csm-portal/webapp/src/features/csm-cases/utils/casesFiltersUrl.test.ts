@@ -181,11 +181,11 @@ describe("op-awareness (regression: the widgetPreviewUrl field~op bug)", () => {
   it("`salesRegions` round-trips through the `salesRegions` param and counts as one active filter", () => {
     const filters: CasesFilters = {
       ...DEFAULT_CASES_FILTERS,
-      salesRegions: ["EMEA", "Americas"],
+      salesRegions: ["EMEA", "LATAM"],
     };
     const params = writeCasesFiltersToUrl(filters);
-    expect(params.get("salesRegions")).toBe("EMEA,Americas");
-    expect(readCasesFiltersFromUrl(params).salesRegions).toEqual(["EMEA", "Americas"]);
+    expect(params.get("salesRegions")).toBe("EMEA,LATAM");
+    expect(readCasesFiltersFromUrl(params).salesRegions).toEqual(["EMEA", "LATAM"]);
     expect(countActiveFilters(filters)).toBe(1);
   });
 

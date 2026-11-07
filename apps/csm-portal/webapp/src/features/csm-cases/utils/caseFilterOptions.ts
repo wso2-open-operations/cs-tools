@@ -94,9 +94,13 @@ export const ENGAGEMENT_TYPE_OPTIONS: { value: BeEngagementType; label: string }
  * and are compared case-insensitively by the backend.
  */
 export const SALES_REGION_OPTIONS: { value: string; label: string }[] = [
+  { value: "NA", label: "NA" },
+  { value: "LATAM", label: "LATAM" },
+  { value: "EU", label: "EU" },
   { value: "EMEA", label: "EMEA" },
+  { value: "ME", label: "ME" },
+  { value: "AFRICA", label: "AFRICA" },
   { value: "APAC", label: "APAC" },
-  { value: "Americas", label: "Americas" },
 ];
 
 export const ONBOARDING_STATUS_OPTIONS: { value: string; label: string }[] =
