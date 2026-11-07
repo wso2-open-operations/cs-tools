@@ -1828,12 +1828,30 @@ func (e *Engine) refreshAndReconcileClock(ctx context.Context, display activeSLA
 // events.SeverityChangedPayload carries (priority = NewSeverity) -- plain
 // strings, not the unexported activeSLAClock type itself, since
 // dispatch.slaEngineService (a different package) is this method's one real
-// caller. CaseType/State (which that payload doesn't carry, and
-// GetClockState doesn't either -- they're purely display fields, not
-// condition-sensitive) are instead read back per clock type from whatever
-// Redis already holds from before the revision, so a rebuilt clock's Chat
-// card still shows them correctly.
-func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string) {
+// caller. State (which neither payload carries, and GetClockState doesn't
+// either -- it's a purely display field, not condition-sensitive) is always
+// read back per clock type from whatever Redis already holds from before the
+// revision, so a rebuilt clock's Chat card still shows it correctly.
+//
+// newType is events.CaseTypeChangedPayload.NewType (entity-service's raw,
+// lowercase case type, e.g. "service_request") when this call is reacting to
+// a genuine case-type transfer (dispatch.handleCaseTypeChanged), or "" when
+// it's a plain severity change (dispatch.handleSeverityChanged, which never
+// changes the case's type at all) -- a CodeRabbit-caught gap: the type
+// transfer's own event was decoded but never actually passed through here,
+// so ReviseClocks always fell back to preserving the OLD CaseType from
+// Redis, same as it must still do for the severity-change caller. A case
+// that transferred INTO a service request kept its stale "CASE" metadata
+// forever, so sendBreachAlert's own CaseType=="SERVICE_REQUEST" guard never
+// caught it and this engine happily paged a team for an SR's SLA breach --
+// exactly the alert that guard exists to suppress. Uppercased to match the
+// convention every other CaseType value in this engine's Redis already
+// uses (RegisterClocks' own caseType parameter is entity-service's
+// strings.ToUpper(cv.Type), not the lowercase enum value the transfer API
+// itself stores) -- comparing a lowercase "service_request" against the
+// guard's uppercase "SERVICE_REQUEST" would silently never match, which is
+// just as wrong as never updating the type at all.
+func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string) {
 	if e.entity == nil {
 		return
 	}
@@ -1850,8 +1868,11 @@ func (e *Engine) ReviseClocks(ctx context.Context, caseID, priority, caseNumber,
 	for _, clockType := range clockTypesInOrder {
 		c := display
 		c.ClockType = clockType
+		c.CaseType = strings.ToUpper(newType)
 		if oldMeta, found, err := e.store.GetClock(ctx, caseID, clockType); err == nil && found {
-			c.CaseType = oldMeta.CaseType
+			if newType == "" {
+				c.CaseType = oldMeta.CaseType
+			}
 			c.State = oldMeta.State
 		}
 

@@ -2584,7 +2584,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForATerminalClock(t *testing
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockResponse, 50)]; stillThere {
 		t.Error("stale wake entry survived ReviseClocks for a clock that had already reached a terminal stage")
@@ -2624,7 +2624,7 @@ func TestEngine_ReviseClocks_RebuildsFromNewSeverity(t *testing.T) {
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2659,7 +2659,7 @@ func TestEngine_ReviseClocks_RemovesStaleWakeEntriesForAClockTypeNoLongerCovered
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "LOW", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	if _, stillThere := st.wake[wakeMember("case-1", ClockWorkaround, 50)]; stillThere {
 		t.Error("stale workaround wake entry survived ReviseClocks despite the new severity having no policy for it")
@@ -2682,7 +2682,7 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
 	e.entity = client
 
-	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix")
+	e.ReviseClocks(context.Background(), "case-1", "HIGH", "CS0001", "WSO2-1", "Something broke", "api-manager", "Phoenix", "")
 
 	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
 	if err != nil {
@@ -2693,6 +2693,42 @@ func TestEngine_ReviseClocks_PreservesDisplayFieldsFromExistingRedisMeta(t *test
 	}
 	if meta.CaseType != "CASE" || meta.State != "Work In Progress" {
 		t.Errorf("meta = %+v, want CaseType/State carried forward from the pre-revision hash", meta)
+	}
+}
+
+// TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata guards a
+// CodeRabbit-caught gap: ReviseClocks used to always preserve whatever
+// CaseType was already in Redis, which is correct for a plain severity
+// change (no type involved) but wrong for a genuine case-type transfer --
+// the clock kept its stale pre-transfer type forever, so sendBreachAlert's
+// own CaseType=="SERVICE_REQUEST" guard could never catch a case that
+// transferred INTO a service request, and this engine would happily page a
+// team for what is now an SR's SLA breach. newType ("service_request",
+// entity-service's own raw, lowercase case type) must override the old
+// Redis value, uppercased to match the convention every other CaseType
+// value in this engine already uses.
+func TestEngine_ReviseClocks_CaseTypeTransfer_UpdatesCaseTypeMetadata(t *testing.T) {
+	st := newFakeStore()
+	if err := st.SetClock(context.Background(), "case-1", ClockResponse, ClockMeta{CaseNumber: "CS0001", CaseType: "CASE", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("SetClock() error = %v", err)
+	}
+	client := &fakeActiveClocksClient{clocks: []activeSLAClock{
+		{CaseID: "case-1", ClockType: ClockResponse, StartedOn: timePtr(time.Now()), DurationSeconds: int64(time.Hour.Seconds())},
+	}}
+	e := newTestEngine(st, &fakeChat{}, &fakePublisher{})
+	e.entity = client
+
+	e.ReviseClocks(context.Background(), "case-1", "", "CS0001", "WSO2-1", "Need an upgrade", "api-manager", "Phoenix", "service_request")
+
+	meta, found, err := st.GetClock(context.Background(), "case-1", ClockResponse)
+	if err != nil {
+		t.Fatalf("GetClock() error = %v", err)
+	}
+	if !found {
+		t.Fatal("clock was not rebuilt")
+	}
+	if meta.CaseType != "SERVICE_REQUEST" {
+		t.Errorf("meta.CaseType = %q, want %q -- the transfer's own new type must override the stale pre-transfer value", meta.CaseType, "SERVICE_REQUEST")
 	}
 }
 

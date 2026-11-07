@@ -123,7 +123,7 @@ type slaEngineService interface {
 	RecalculateFromEntity(ctx context.Context) error
 	// ReviseClocks is called from handleSeverityChanged — see that method's
 	// own doc comment.
-	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team string)
+	ReviseClocks(ctx context.Context, caseID, priority, caseNumber, wso2CaseID, caseTitle, product, team, newType string)
 }
 
 // callSender abstracts notifications.TwilioClient's MakeCall for testability.
@@ -1887,7 +1887,7 @@ func (d *Dispatcher) handleCaseTypeChanged(ctx context.Context, raw json.RawMess
 		return fmt.Errorf("dispatch: decode case.type_changed payload: %w", err)
 	}
 	if d.slaEngine != nil {
-		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.Priority, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, p.NewType)
 	}
 	return nil
 }
@@ -1971,7 +1971,7 @@ func (d *Dispatcher) handleSeverityChanged(ctx context.Context, record eventbus.
 	// indefinitely. ReviseClocks re-syncs all three clock types with
 	// entity-service's current, post-revision state.
 	if d.slaEngine != nil {
-		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team)
+		d.slaEngine.ReviseClocks(ctx, p.CaseID, p.NewSeverity, p.CaseNumber, p.WSO2CaseID, p.CaseTitle, p.Product, p.Team, "")
 	}
 
 	// Registered before anything is claimed (see handleCaseCreated).
