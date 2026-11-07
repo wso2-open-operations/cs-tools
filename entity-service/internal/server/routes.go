@@ -739,7 +739,6 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 			storedAttachmentRepo,
 			service.StoredAttachmentLimits{
 				MaxBytes:            cfg.AttachmentMaxBytes,
-				InlineMaxBytes:      cfg.InlineImageMaxBytes,
 				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
 			},
 		)

@@ -1423,37 +1423,36 @@ func TestConfig_IncidentExtraAssignmentGroupIDs(t *testing.T) {
 
 func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	keys := []string{
-		"ATTACHMENT_MAX_MB", "INLINE_IMAGE_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_MB",
-		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGE_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES",
+		"ATTACHMENT_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_MB",
+		"ATTACHMENT_MAX_BYTES", "INLINE_IMAGES_TOTAL_MAX_BYTES",
 	}
 	clear := func() {
 		for _, k := range keys {
 			t.Setenv(k, "")
 		}
 	}
-	got := func() [3]int64 {
+	got := func() [2]int64 {
 		c := Load()
-		return [3]int64{c.AttachmentMaxBytes, c.InlineImageMaxBytes, c.InlineImagesTotalMaxBytes}
+		return [2]int64{c.AttachmentMaxBytes, c.InlineImagesTotalMaxBytes}
 	}
 
 	clear()
-	if g := got(); g != [3]int64{100 << 20, 25 << 20, 25 << 20} {
-		t.Errorf("defaults = %v, want 100 / 25 / 25 MiB", g)
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+		t.Errorf("defaults = %v, want 100 / 25 MiB", g)
 	}
 
 	// The megabyte settings: a whole number or a decimal.
 	t.Setenv("ATTACHMENT_MAX_MB", "50")
-	t.Setenv("INLINE_IMAGE_MAX_MB", "1")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0.5")
-	if g := got(); g != [3]int64{50 << 20, 1 << 20, 1 << 19} {
-		t.Errorf("MB settings = %v, want 50 MiB / 1 MiB / 512 KiB", g)
+	if g := got(); g != [2]int64{50 << 20, 1 << 19} {
+		t.Errorf("MB settings = %v, want 50 MiB / 512 KiB", g)
 	}
 
 	// The older bytes settings still work when the MB one is unset...
 	clear()
 	t.Setenv("ATTACHMENT_MAX_BYTES", "52428800")
 	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "2097152")
-	if g := got(); g != [3]int64{52428800, 25 << 20, 2097152} {
+	if g := got(); g != [2]int64{52428800, 2097152} {
 		t.Errorf("bytes fallback = %v", g)
 	}
 	// ...and the MB one wins when both are set.
@@ -1468,18 +1467,17 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
 	t.Setenv("ATTACHMENT_MAX_BYTES", "1048576")
-	t.Setenv("INLINE_IMAGE_MAX_MB", "0")
-	t.Setenv("INLINE_IMAGE_MAX_BYTES", "1048576")
-	if g := got(); g[0] != 100<<20 || g[1] != 25<<20 {
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "1048576")
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
 		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
 	}
 
 	// A typo costs the override, not the service.
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")
-	t.Setenv("INLINE_IMAGE_MAX_MB", "-5")
-	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "0")
-	if g := got(); g != [3]int64{100 << 20, 25 << 20, 25 << 20} {
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "-5")
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
 		t.Errorf("bad values did not fall back to the defaults: %v", g)
 	}
 }

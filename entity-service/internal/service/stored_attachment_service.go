@@ -40,11 +40,9 @@ const (
 	// MaxInlineImagesPerContent is the most images one comment or one description
 	// may show. Beyond it the comment or record is refused (a 400).
 	MaxInlineImagesPerContent = 5
-	// DefaultInlineImageMaxBytes is the default size limit of one inline image
-	// (INLINE_IMAGE_MAX_MB), and DefaultInlineImagesTotalMaxBytes the default
-	// total of all images in one comment or description
-	// (INLINE_IMAGES_TOTAL_MAX_MB). Both 25 MiB.
-	DefaultInlineImageMaxBytes       int64 = 25 << 20
+	// DefaultInlineImagesTotalMaxBytes is the default total of all images in one
+	// comment or description (INLINE_IMAGES_TOTAL_MAX_MB), 25 MiB. It is also the
+	// most one image can be: there is no separate per-image limit.
 	DefaultInlineImagesTotalMaxBytes int64 = 25 << 20
 	// maxInlineLookupIDs bounds how many referenced ids one validation looks up;
 	// a comment naming more distinct ids than this is far over the limit anyway.
@@ -80,11 +78,11 @@ var newInlineImageTypes = map[string]string{
 
 // StoredAttachmentLimits are the settings the service runs under.
 type StoredAttachmentLimits struct {
-	// MaxBytes caps one file; InlineMaxBytes caps one comment image.
-	MaxBytes       int64
-	InlineMaxBytes int64
+	// MaxBytes caps one file.
+	MaxBytes int64
 	// InlineTotalMaxBytes caps the images of ONE comment or description together
-	// (0 means DefaultInlineImagesTotalMaxBytes).
+	// (0 means DefaultInlineImagesTotalMaxBytes). One image can be at most this
+	// big too.
 	InlineTotalMaxBytes int64
 }
 
@@ -679,7 +677,7 @@ const closedParentDeleteMessage = "This case is closed, so attachments can't be 
 
 func (s *storedAttachmentService) limitFor(kind domain.StoredAttachmentKind) int64 {
 	if kind == domain.StoredAttachmentComment {
-		return s.limits.InlineMaxBytes
+		return s.limits.inlineTotalMax()
 	}
 	return s.limits.MaxBytes
 }

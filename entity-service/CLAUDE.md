@@ -65,8 +65,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_MB` / `INLINE_IMAGE_MAX_MB` | no | 100 / 25 | Largest uploaded file / comment or description image, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable or non-positive value falls back to the default. The older `ATTACHMENT_MAX_BYTES` / `INLINE_IMAGE_MAX_BYTES` (bytes) still work when the MB one is unset |
-| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 25 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`). Same fallback rule; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
+| `ATTACHMENT_MAX_MB` | no | 100 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable or non-positive value falls back to the default. The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 25 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1945,8 +1945,8 @@ record's description typed by a user is held to the same limits (`ValidateEmbedd
 the total size, decoded). A machine caller (no user) and an edit of an existing comment are not checked.
 
 **Limits per comment or description.** One comment or description shows at most 5 images
-(`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_MB` together; one image is at most
-`INLINE_IMAGE_MAX_MB` (25 MB). Comment create (`commentService.CreateComment`,
+(`MaxInlineImagesPerContent`) and at most `INLINE_IMAGES_TOTAL_MAX_MB` together (25 MB by default); one image is at most
+that big too. Comment create (`commentService.CreateComment`,
 `caseService.createCaseCommentAs`) and edit (`UpdateComment`) call `InlineImageLinker.ValidateCommentImages`
 BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
 (the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
