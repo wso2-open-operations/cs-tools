@@ -781,7 +781,7 @@ describe("storedAttachments", () => {
         click.mockRestore();
       });
 
-      it("asks for a save location even for a small file whose size is known", async () => {
+      it("skips the dialog for a small file whose size is known", async () => {
         withMode();
         const disk = fakeDisk();
         const { saved, click } = stubSave();
@@ -789,9 +789,8 @@ describe("storedAttachments", () => {
           new Response("0123456789", { status: 206, headers: { "Content-Range": "bytes 0-9/10" } }),
         );
         await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, name: "s.txt", size: 10 });
-        expect(disk.picker).toHaveBeenCalledTimes(1);
-        expect(disk.writes).toEqual([{ position: 0, size: 10, first: 48 }]);
-        expect(saved).toHaveLength(0);
+        expect(disk.picker).not.toHaveBeenCalled();
+        expect(saved).toHaveLength(1);
         click.mockRestore();
       });
 

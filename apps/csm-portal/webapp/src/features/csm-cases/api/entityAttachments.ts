@@ -265,7 +265,7 @@ async function downloadFromBackend(
   save: (blob: Blob, name: string) => void,
 ): Promise<boolean> {
   if (args.signal?.aborted) throw downloadCancelledError();
-  const target = await openDiskTarget(args.name || "attachment");
+  const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {

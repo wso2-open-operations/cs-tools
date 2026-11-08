@@ -23,6 +23,9 @@ import { downloadToDiskEnabled } from "@config/attachmentLimitsConfig";
  * the browser's memory. Browsers without it keep the in-memory path.
  */
 
+/** Largest download that is still saved through the in-memory path with no dialog. */
+export const SMALL_DOWNLOAD_BYTES = 15 * 1024 * 1024;
+
 interface WritableFile {
   write(chunk: { type: "write"; position: number; data: Blob }): Promise<void>;
   close(): Promise<void>;
@@ -49,7 +52,7 @@ export type DiskTarget =
   | { kind: "sink"; sink: DiskSink }
   /** The person closed the save dialog: nothing is downloaded and nothing is shown. */
   | { kind: "cancelled" }
-  /** No disk target (no API, switched off, dialog refused): use the in-memory path. */
+  /** No disk target (no API, switched off, small file, dialog refused): use the in-memory path. */
   | { kind: "unavailable" };
 
 export const DISK_WRITE_FAILED_MESSAGE = "The file could not be saved to disk. Please try again.";
@@ -63,11 +66,13 @@ function isDismissed(error: unknown): boolean {
 /**
  * Opens the save dialog for `name`. It must run before the first request of the
  * download, while the click is still fresh: a browser only allows the dialog
- * for a few seconds after the click.
+ * for a few seconds after the click. `size` is the file's size when the caller
+ * knows it; a file of {@link SMALL_DOWNLOAD_BYTES} or less skips the dialog.
  */
-export async function openDiskTarget(name: string): Promise<DiskTarget> {
+export async function openDiskTarget(name: string, size?: number): Promise<DiskTarget> {
   const picker = (window as unknown as { showSaveFilePicker?: ShowSaveFilePicker }).showSaveFilePicker;
   if (!downloadToDiskEnabled() || typeof picker !== "function") return { kind: "unavailable" };
+  if (size !== undefined && size <= SMALL_DOWNLOAD_BYTES) return { kind: "unavailable" };
 
   let writable: WritableFile;
   try {
