@@ -285,19 +285,33 @@ export function preprocessCommentBodyHtml(comment: CsmCaseComment): string {
 }
 
 /**
- * Replaces bare URLs in an HTML string (not already inside an href attribute)
- * with clickable anchor tags that open in a new tab.
+ * Replaces bare URLs in an HTML string with clickable anchor tags that open in
+ * a new tab. Only text between tags is touched: the markup is split into tags
+ * and text, because a URL inside a tag's attribute (`<img src="https://...">`,
+ * `<a href="...">`) is part of that tag, and wrapping it in an anchor breaks the
+ * tag and spills the rest of its markup into the page as visible text (a picture
+ * copied from a web page, whose `<img>` has an external `src`, rendered as a
+ * broken image followed by `" alt="..." style="...">`). Text already inside an
+ * `<a>` is left alone too, so a link's own visible URL is not wrapped twice.
+ * Same approach as `apps/customer-portal/webapp`'s `linkifyBareUrls`.
  */
 export function linkifyBareUrls(html: string): string {
-  // The lookahead is wrapped in `(?=(...))\1` (an atomic-group emulation)
-  // rather than matched directly, because a plain trailing negative lookahead
-  // lets the greedy URL quantifier backtrack to a shorter match that
-  // satisfies the lookahead — silently truncating the linkified URL (e.g.
-  // matching "example.co" instead of "example.com" right before `</a>`).
-  return html.replace(
-    /(?<!href=["'])(?=(https?:\/\/[^\s<>"']+))\1(?!["']?\s*<\/a>)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">$1</a>',
-  );
+  let anchorDepth = 0;
+  return html
+    .split(/(<[^>]*>)/)
+    .map((part) => {
+      if (part.startsWith("<")) {
+        if (/^<a[\s>]/i.test(part)) anchorDepth++;
+        else if (/^<\/a\s*>/i.test(part) && anchorDepth > 0) anchorDepth--;
+        return part;
+      }
+      if (anchorDepth > 0) return part;
+      return part.replace(
+        /(https?:\/\/[^\s<>"']+)/g,
+        '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline;word-break:break-all;">$1</a>',
+      );
+    })
+    .join("");
 }
 
 /**
