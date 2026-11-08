@@ -40,6 +40,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
+  downloadSizeOf,
   formatFileSize,
   getAttachmentFileCategory,
   getInitials,
@@ -204,6 +205,7 @@ export default function CommentBubble({
       type: "work_item",
       id: comment.id,
       name: comment.fileName ?? "attachment",
+      size: downloadSizeOf(comment.sizeBytes),
     });
   };
 

@@ -86,16 +86,16 @@ describe("UploadAttachmentModal (chunked upload to Azure Blob through the backen
     expect(screen.queryByLabelText(/description/i)).not.toBeInTheDocument();
   });
 
-  it("allows a file up to the 100 MB default and refuses one over it", () => {
+  it("allows a file up to the 10 MB default and refuses one over it", () => {
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 99 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 9 * 1024 * 1024 });
     pick(big);
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
     const tooBig = new File(["x"], "huge.bin");
-    Object.defineProperty(tooBig, "size", { value: 101 * 1024 * 1024 });
+    Object.defineProperty(tooBig, "size", { value: 11 * 1024 * 1024 });
     pick(tooBig);
-    expect(screen.getByText(/exceeds 100 MB limit/i)).toBeInTheDocument();
+    expect(screen.getByText(/exceeds 10 MB limit/i)).toBeInTheDocument();
   });
 
   it("uses the configured file size limit in the check and the message", () => {
@@ -142,15 +142,15 @@ describe("UploadAttachmentModal (chunked upload to Azure Blob through the backen
     expect(uploadMutate).toHaveBeenCalledTimes(1);
   });
 
-  it("passes an abort signal and a progress callback, and shows the GB limit", () => {
+  it("passes an abort signal and a progress callback, and shows the largest allowed limit", () => {
     (window as unknown as { config?: unknown }).config = {
-      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240,
+      CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
     };
     const { pick } = renderModal({ caseId: "case-1" });
     const big = new File(["x"], "big.bin");
-    Object.defineProperty(big, "size", { value: 101 * 1024 * 1024 * 1024 });
+    Object.defineProperty(big, "size", { value: 101 * 1024 * 1024 });
     pick(big);
-    expect(screen.getByText(/exceeds 10 GB limit/i)).toBeInTheDocument();
+    expect(screen.getByText(/exceeds 100 MB limit/i)).toBeInTheDocument();
     pick(new File(["hello"], "notes.txt", { type: "text/plain" }));
     fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
     const [vars] = uploadMutate.mock.calls[0];
