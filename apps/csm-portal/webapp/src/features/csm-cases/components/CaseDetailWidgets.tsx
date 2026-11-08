@@ -14,7 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
+import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
   Button,
@@ -1011,84 +1011,6 @@ export function TimeLogsWidget({
 // ---------------------------------------------------------------------------
 // 4b. Attachments (all files on the case, newest first)
 // ---------------------------------------------------------------------------
-
-/** The bar along the bottom of an attachment row while it downloads (the row is `position: relative`). */
-function AttachmentDownloadBar({ id }: { id: string }) {
-  const progress = useAttachmentDownloadProgress(id);
-  if (progress === undefined) return null;
-  const known = progress >= 0;
-  return (
-    <LinearProgress
-      aria-hidden
-      variant={known ? "determinate" : "indeterminate"}
-      value={known ? progress : undefined}
-      sx={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4 }}
-    />
-  );
-}
-
-/** The Download button of an attachment row; while it downloads it shows the percentage. */
-function AttachmentDownloadButton({
-  attachment,
-  onDownload,
-}: {
-  attachment: CaseAttachment;
-  onDownload?: (attachment: CaseAttachment) => void;
-}) {
-  const progress = useAttachmentDownloadProgress(attachment.id);
-  const downloading = progress !== undefined;
-  const known = progress !== undefined && progress >= 0;
-  // Announced from beside the button: a disabled button is skipped by screen
-  // readers, so a status inside it would never be read. Every 10 percent only.
-  const announced = known ? Math.floor(progress / 10) * 10 : null;
-  return (
-    <>
-      <Box
-        component="span"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        sx={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          overflow: "hidden",
-          clip: "rect(0 0 0 0)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {downloading
-          ? announced === null
-            ? `Downloading ${attachment.filename}`
-            : `Downloading ${attachment.filename}: ${announced}%`
-          : ""}
-      </Box>
-      <Button
-        size="small"
-        variant="outlined"
-        startIcon={
-          downloading ? (
-            <CircularProgress
-              size={14}
-              color="inherit"
-              variant={known ? "determinate" : "indeterminate"}
-              value={known ? progress : undefined}
-              aria-hidden
-            />
-          ) : (
-            <Download size={14} />
-          )
-        }
-        onClick={() => onDownload?.(attachment)}
-        disabled={!onDownload || downloading}
-        aria-busy={downloading || undefined}
-        aria-label={`Download ${attachment.filename}`}
-      >
-        {known ? `${progress}%` : downloading ? "Starting" : "Download"}
-      </Button>
-    </>
-  );
-}
 
 /**
  * Lists every attachment on the case in descending order of upload time, with
