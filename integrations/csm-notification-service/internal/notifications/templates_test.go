@@ -169,7 +169,7 @@ func TestSanitizeRichText_Images(t *testing.T) {
 		// The surrounding <br>s trimBoundaryBreaks would otherwise leave in
 		// place are stripped here because the image is the only content in
 		// this input — see the next subtest for the case where they survive.
-		want := `<img src="cid:` + img.ContentID + `" alt="screenshot" style="display:block;max-width:100%;height:auto;margin:8px 0;">`
+		want := `<img src="cid:` + img.ContentID + `" alt="screenshot" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;">`
 		if html != want {
 			t.Errorf("html = %q, want %q", html, want)
 		}
@@ -189,7 +189,7 @@ func TestSanitizeRichText_Images(t *testing.T) {
 		if len(images) != 1 {
 			t.Fatalf("got %d images, want 1", len(images))
 		}
-		want := `before<br><img src="cid:` + images[0].ContentID + `" alt="" style="display:block;max-width:100%;height:auto;margin:8px 0;"><br>after`
+		want := `before<br><img src="cid:` + images[0].ContentID + `" alt="" style="display:block;max-width:360px;max-height:240px;width:auto;height:auto;margin:8px 0;border:1px solid #e0e0e0;border-radius:4px;"><br>after`
 		if html != want {
 			t.Errorf("html = %q, want %q", html, want)
 		}
