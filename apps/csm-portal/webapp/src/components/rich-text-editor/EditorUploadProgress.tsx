@@ -41,8 +41,8 @@ export default function EditorUploadProgress({
     <>
       <Divider sx={{ my: 1.5 }} />
       <Box aria-live="polite" sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-        {uploads.map((upload) => (
-          <Box key={upload.name}>
+        {uploads.map((upload, index) => (
+          <Box key={`${upload.name}-${index}`}>
             <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.5 }}>
               <Typography variant="caption" noWrap sx={{ fontWeight: 500, minWidth: 0 }}>
                 Uploading {upload.name}
