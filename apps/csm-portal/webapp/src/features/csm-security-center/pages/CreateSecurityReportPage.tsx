@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Box,
   Button,
@@ -372,6 +373,7 @@ export default function CreateSecurityReportPage(): JSX.Element {
               onChange={setAttachments}
               onError={showError}
               required
+              maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               disabled={submitting}
             />
           </Grid>

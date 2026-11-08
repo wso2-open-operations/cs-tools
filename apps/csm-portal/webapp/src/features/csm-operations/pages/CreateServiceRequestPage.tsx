@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Alert,
   Box,
@@ -696,6 +697,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 attachments={attachments}
                 onChange={setAttachments}
                 onError={showError}
+                maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               />
             </Grid>
           )}

@@ -122,3 +122,6 @@ export function formatSizeLimit(bytes: number): string {
   }
   return formatMegabytes(bytes);
 }
+
+/** How many attachments a create form (case, service request, security report) takes. */
+export const CREATE_FORM_MAX_ATTACHMENTS = 1;

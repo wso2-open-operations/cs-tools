@@ -30,6 +30,8 @@ interface AttachmentsFieldProps {
   required?: boolean;
   /** Disables adding/removing files, e.g. while the parent form is submitting. */
   disabled?: boolean;
+  /** The most files the field takes. Unlimited when omitted. */
+  maxFiles?: number;
 }
 
 /**
@@ -43,10 +45,16 @@ export default function AttachmentsField({
   onError,
   required = false,
   disabled = false,
+  maxFiles,
 }: AttachmentsFieldProps): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const maxBytes = entityAttachmentMaxBytes();
+  const full = maxFiles !== undefined && attachments.length >= maxFiles;
+  const limitMessage = (): string =>
+    `Only ${maxFiles} attachment${maxFiles === 1 ? "" : "s"} can be added.${
+      maxFiles === 1 ? " Remove it to add a different one." : ""
+    }`;
 
   const onAddFiles = (e: ChangeEvent<HTMLInputElement>): void => {
     // Snapshot the FileList into a stable array BEFORE clearing the input —
@@ -57,14 +65,25 @@ export default function AttachmentsField({
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (list.length === 0) return;
 
-    const tooBig = list.find((f) => f.size > maxBytes);
+    // Take only as many as there is room for; say so when some are left out.
+    let picked = list;
+    if (maxFiles !== undefined) {
+      const room = Math.max(0, maxFiles - attachments.length);
+      if (list.length > room) {
+        onError(limitMessage());
+        picked = list.slice(0, room);
+      }
+      if (picked.length === 0) return;
+    }
+
+    const tooBig = picked.find((f) => f.size > maxBytes);
     if (tooBig) {
       onError(
         `"${tooBig.name}" is too large. The maximum attachment size is ${formatSizeLimit(maxBytes)}.`,
       );
       return;
     }
-    onChange([...attachments, ...list.map((f) => ({ name: f.name, size: f.size, raw: f }))]);
+    onChange([...attachments, ...picked.map((f) => ({ name: f.name, size: f.size, raw: f }))]);
   };
 
   const removeAt = (index: number): void => {
@@ -79,21 +98,23 @@ export default function AttachmentsField({
           variant="outlined"
           size="small"
           startIcon={<Upload size={16} />}
-          disabled={disabled}
+          disabled={disabled || full}
         >
-          Add attachments
+          {maxFiles === 1 ? "Add attachment" : "Add attachments"}
           <input
             ref={fileInputRef}
             type="file"
-            multiple
+            multiple={maxFiles !== 1}
             hidden
-            disabled={disabled}
+            disabled={disabled || full}
             onChange={onAddFiles}
           />
         </Button>
         <Typography variant="caption" color="text.secondary">
-          {required ? "At least one required" : "Optional"} · up to{" "}
-          {formatSizeLimit(maxBytes)} each
+          {required ? (maxFiles === 1 ? "Required" : "At least one required") : "Optional"} ·{" "}
+          {maxFiles === 1
+            ? `1 attachment, up to ${formatSizeLimit(maxBytes)}`
+            : `up to ${formatSizeLimit(maxBytes)} each`}
         </Typography>
       </Box>
 

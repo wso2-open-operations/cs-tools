@@ -159,7 +159,8 @@ describe("CreateSecurityReportPage — files are chosen in the form and uploaded
   it("shows the Attachments field as required, not optional", () => {
     render(<CreateSecurityReportPage />);
     expect(screen.getByText(/attachments \*/i)).toBeInTheDocument();
-    expect(screen.getByText(/at least one required/i)).toBeInTheDocument();
+    // One report file, and it is required.
+    expect(screen.getByText(/required · 1 attachment/i)).toBeInTheDocument();
   });
 
   it("enables Create once a file is chosen, creates the report without files, then uploads them to it", async () => {
