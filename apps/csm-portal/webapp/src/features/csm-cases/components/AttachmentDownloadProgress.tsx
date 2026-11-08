@@ -14,11 +14,79 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Button, CircularProgress, LinearProgress } from "@wso2/oxygen-ui";
-import { Download } from "@wso2/oxygen-ui-icons-react";
+import { Box, Button, CircularProgress, IconButton, LinearProgress, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { Download, X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
+import { cancelAttachmentDownload, useAttachmentDownloadProgress } from "@features/csm-cases/api/attachmentDownloadProgress";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
+
+/** The Cancel button of a running download: it stops it, saves nothing and shows no error. */
+export function AttachmentDownloadCancelButton({ id, name }: { id: string; name: string }): JSX.Element {
+  return (
+    <Tooltip title="Cancel download">
+      <IconButton
+        size="small"
+        aria-label={`Cancel download of ${name}`}
+        onClick={() => cancelAttachmentDownload(id)}
+      >
+        <X size={14} aria-hidden />
+      </IconButton>
+    </Tooltip>
+  );
+}
+
+/**
+ * An icon-only Download button (for rows with little room, like a deployment's
+ * files): while the file downloads it shows the ring and percentage, with a
+ * Cancel button beside it.
+ */
+export function AttachmentDownloadIconButton({
+  id,
+  name,
+  onDownload,
+}: {
+  id: string;
+  name: string;
+  onDownload: () => void;
+}): JSX.Element {
+  const progress = useAttachmentDownloadProgress(id);
+  const downloading = progress !== undefined;
+  const known = progress !== undefined && progress >= 0;
+  return (
+    <>
+      <Tooltip title={downloading ? "" : "Download"}>
+        <span>
+          <IconButton
+            size="small"
+            aria-label={`Download ${name}`}
+            aria-busy={downloading || undefined}
+            disabled={downloading}
+            onClick={onDownload}
+          >
+            {downloading ? (
+              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}>
+                <CircularProgress
+                  size={14}
+                  variant={known ? "determinate" : "indeterminate"}
+                  value={known ? progress : undefined}
+                  aria-hidden
+                />
+                {known && (
+                  <Typography variant="caption" sx={{ lineHeight: 1 }}>
+                    {progress}%
+                  </Typography>
+                )}
+              </Box>
+            ) : (
+              <Download size={14} />
+            )}
+          </IconButton>
+        </span>
+      </Tooltip>
+      {downloading && <AttachmentDownloadCancelButton id={id} name={name} />}
+    </>
+  );
+}
 
 /** The bar along the bottom of an attachment row while it downloads (the row is `position: relative`). */
 export function AttachmentDownloadBar({ id }: { id: string }): JSX.Element | null {
@@ -94,6 +162,7 @@ export function AttachmentDownloadButton({
       >
         {known ? `${progress}%` : downloading ? "Starting" : "Download"}
       </Button>
+      {downloading && <AttachmentDownloadCancelButton id={attachment.id} name={attachment.filename} />}
     </>
   );
 }

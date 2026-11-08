@@ -18,6 +18,7 @@ import { BackendApiError, type BackendApi } from "@api/backend/client";
 import { MAX_ENTITY_ATTACHMENT_MAX_MB, downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadToDisk";
+import { downloadCancelledError, isDownloadAbort } from "@features/csm-cases/api/downloadAbort";
 
 /**
  * Entity-service stored attachments, reached through the CSM portal backend,
@@ -201,7 +202,8 @@ interface RangeRead {
 /**
  * Asks for bytes `start` to `end` of the file and reads them in full. A dropped
  * connection or a short body is tried again, up to three times; a refusal from
- * the backend (a {@link BackendApiError}) is thrown at once.
+ * the backend (a {@link BackendApiError}) and a cancelled download (`signal`) are
+ * thrown at once.
  */
 async function readRange(
   api: BackendApi,
@@ -209,14 +211,18 @@ async function readRange(
   start: number,
   end: number,
   isWhole: (read: RangeRead) => boolean,
+  signal?: AbortSignal,
 ): Promise<RangeRead> {
   for (let attempt = 1; ; attempt += 1) {
+    if (signal?.aborted) throw downloadCancelledError();
     try {
-      const response = await api.getResponse(path, { headers: { Range: `bytes=${start}-${end}` } });
+      const response = await api.getResponse(path, { headers: { Range: `bytes=${start}-${end}` }, signal });
       const parts = await readParts(response);
       const read = { response, parts };
       if (isWhole(read)) return read;
     } catch (err) {
+      // A cancelled download is not tried again; neither is a refusal from the backend.
+      if (signal?.aborted || isDownloadAbort(err)) throw downloadCancelledError();
       if (err instanceof BackendApiError) throw err;
     }
     if (attempt >= DOWNLOAD_RANGE_ATTEMPTS) throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
@@ -249,13 +255,16 @@ export function fetchEntityAttachmentBlob(
  * file) throws with the backend's message and stops the other ranges. A closed
  * save dialog resolves `true` with nothing downloaded and never calls `onSaved`,
  * which runs once the download ends, saying whether it was written to the picked
- * file (`saved`) or handed to the browser (`started`).
+ * file (`saved`) or handed to the browser (`started`). `signal` cancels it: the
+ * requests in flight are aborted, a half-written picked file is removed, and an
+ * AbortError ({@link isDownloadAbort}) is thrown.
  */
 async function downloadFromBackend(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void,
 ): Promise<boolean> {
+  if (args.signal?.aborted) throw downloadCancelledError();
   const target = await openDiskTarget(args.name || "attachment", args.size);
   if (target.kind === "cancelled") return true;
   const sink = target.kind === "sink" ? target.sink : undefined;
@@ -282,6 +291,7 @@ async function readUntilEnd(
   api: BackendApi,
   path: string,
   store: (index: number, start: number, parts: Uint8Array[]) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
   const window = downloadParallelism();
   for (let next = 1; next < MAX_UNKNOWN_SIZE_RANGES; next += window) {
@@ -294,7 +304,7 @@ async function readUntilEnd(
             const length = partsLength(parts);
             const declared = response.headers.get("Content-Length");
             return response.status === 206 && length > 0 && length <= DOWNLOAD_RANGE_BYTES && (declared === null || Number(declared) === length);
-          });
+          }, signal);
           return { index, start, parts };
         } catch (err) {
           if (err instanceof BackendApiError && err.status === 416) return { index, start, parts: null };
@@ -323,7 +333,7 @@ async function readUntilEnd(
  */
 async function readAndStore(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
@@ -341,7 +351,7 @@ async function readAndStore(
         range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
         partsLength(parts) === range.end + 1
       );
-    });
+    }, args.signal);
   } catch (err) {
     if (err instanceof BackendApiError && err.status === 404) {
       await sink?.abort();
@@ -379,7 +389,7 @@ async function readAndStore(
             const range = parseContentRange(response.headers);
             // With Content-Range hidden the length and the 206 are all there is to check.
             return range === null || (range.start === start && range.end === end && range.total === total);
-          });
+          }, args.signal);
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
           received += end - start + 1;
@@ -396,7 +406,7 @@ async function readAndStore(
     await readUntilEnd(api, path, async (index, start, parts) => {
       if (sink) await sink.write(start, parts);
       else ranges[index] = parts;
-    });
+    }, args.signal);
   }
   if (sink) await sink.close();
   else save(new Blob(ranges.flat() as BlobPart[]), fileName);
@@ -410,7 +420,7 @@ async function readAndStore(
 export async function downloadEntityAttachment(
   api: BackendApi,
   /** `name` and `size` (bytes) are the attachment's own, when the caller has them: the name suggests the file name in the save dialog, a small size skips it. */
-  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
   save: (blob: Blob, name: string) => void = saveBlob,
 ): Promise<boolean> {
   return downloadFromBackend(api, args, save);

@@ -18,18 +18,23 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DOWNLOAD_STARTED,
+  setAttachmentDownloadAbort,
   setAttachmentDownloadProgress,
 } from "@features/csm-cases/api/attachmentDownloadProgress";
 import {
   AttachmentDownloadBar,
   AttachmentDownloadButton,
+  AttachmentDownloadIconButton,
 } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 
 const attachment = { id: "att-1", filename: "7mb.png" } as CaseAttachment;
 
 describe("AttachmentDownloadButton / AttachmentDownloadBar", () => {
-  afterEach(() => setAttachmentDownloadProgress("att-1", undefined));
+  afterEach(() => {
+    setAttachmentDownloadProgress("att-1", undefined);
+    setAttachmentDownloadAbort("att-1", undefined);
+  });
 
   it("shows Download when idle and calls onDownload", () => {
     const onDownload = vi.fn();
@@ -54,5 +59,32 @@ describe("AttachmentDownloadButton / AttachmentDownloadBar", () => {
     expect(container.querySelector('[role="progressbar"]')).toBeNull();
     act(() => setAttachmentDownloadProgress("att-1", 10));
     expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+  });
+
+  it("offers Cancel only while it downloads, and cancels that download", () => {
+    render(<AttachmentDownloadButton attachment={attachment} onDownload={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Cancel download of 7mb.png" })).toBeNull();
+    const controller = new AbortController();
+    act(() => {
+      setAttachmentDownloadAbort("att-1", controller);
+      setAttachmentDownloadProgress("att-1", 30);
+    });
+    screen.getByRole("button", { name: "Cancel download of 7mb.png" }).click();
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("the icon-only button shows the percentage and Cancel while it downloads", () => {
+    const onDownload = vi.fn();
+    render(<AttachmentDownloadIconButton id="att-1" name="7mb.png" onDownload={onDownload} />);
+    screen.getByRole("button", { name: "Download 7mb.png" }).click();
+    expect(onDownload).toHaveBeenCalledTimes(1);
+    const controller = new AbortController();
+    act(() => {
+      setAttachmentDownloadAbort("att-1", controller);
+      setAttachmentDownloadProgress("att-1", 55);
+    });
+    expect(screen.getByRole("button", { name: "Download 7mb.png" }).textContent).toContain("55%");
+    screen.getByRole("button", { name: "Cancel download of 7mb.png" }).click();
+    expect(controller.signal.aborted).toBe(true);
   });
 });
