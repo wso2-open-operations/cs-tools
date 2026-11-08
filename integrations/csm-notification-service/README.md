@@ -308,6 +308,8 @@ and service-request alerts, routed by event type. Off unless `SRE_EVENT_HUB_TOPI
 | `EMAIL_SCOPES` | No | none | Comma-separated OAuth2 scopes. | `scope-a,scope-b` |
 | `EMAIL_FROM_ADDRESS` | Yes unless `EMAIL_SENDING_ENABLED=false` | none | Fixed From address; startup exits if missing while sending is on. | `no-reply@example.com` |
 | `EMAIL_REPLY_TO` | No | built-in support address if unset; none if set to empty | Reply-To for onboarding emails. Comma-separated. | `support@example.com` |
+| `EMAIL_LOGO_DARK_URL` | No | built-in logo if unset | Dark-coloured logo, shown on the light header of most emails. Must be a publicly fetchable `https` URL (mail clients do not load `data:` images). | `https://example.com/logo.png` |
+| `EMAIL_LOGO_WHITE_URL` | No | built-in white logo if unset | White-coloured logo, shown on the dark header of the onboarding emails. | `https://example.com/logo-white.png` |
 | `EMAIL_SENDING_ENABLED` | No | `true` | Killswitch for case.* email. `false` logs instead of sending, regardless of debug mode. Does not affect Chat or calls. | `false` |
 | `EMAIL_DEBUG_MODE` | No | off (exact `true` to enable) | Redirect case.* email to `EMAIL_DEBUG_RECIPIENTS`. Links are still resolved from the real recipients. | `true` |
 | `EMAIL_DEBUG_RECIPIENTS` | No | none | Comma-separated test addresses. With debug on and this empty, the email is skipped. | `qa@example.com` |
