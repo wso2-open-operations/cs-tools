@@ -164,8 +164,7 @@ window.config = {
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK  (optional — default: true)
   //   Save a download straight to a file the person picks (the browser's save
   //   dialog), so a large attachment is not held whole in memory. Works in Chrome
-  //   and Edge; other browsers keep the in-memory download. Files of 8 MiB or
-  //   less skip the dialog. Only the boolean false or the string "false" turns it
+  //   and Edge; other browsers keep the in-memory download. Only the boolean false or the string "false" turns it
   //   off; true (or leaving it unset) keeps it on.
   // CUSTOMER_PORTAL_DOWNLOAD_TO_DISK: true,
 

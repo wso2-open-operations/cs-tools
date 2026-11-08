@@ -267,7 +267,7 @@ async function downloadFromBackend(
   input: { type: StoredAttachmentType; id: string; name?: string; size?: number; onSaved?: (outcome: DownloadSaveOutcome) => void; onProgress?: DownloadProgress; signal?: AbortSignal },
 ): Promise<void> {
   if (input.signal?.aborted) throw downloadCancelledError();
-  const target = await openDiskTarget(input.name || "attachment", input.size);
+  const target = await openDiskTarget(input.name || "attachment");
   if (target.kind === "cancelled") return;
   const sink = target.kind === "sink" ? target.sink : undefined;
   try {
