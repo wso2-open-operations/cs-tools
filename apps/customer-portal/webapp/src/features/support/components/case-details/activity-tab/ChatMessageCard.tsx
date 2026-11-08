@@ -284,12 +284,16 @@ export default function ChatMessageCard({
             fontSize: "0.8125rem",
             verticalAlign: "top",
           },
+          // Same thumbnail size as the CSM portal; a click opens the full image.
           "& img": {
             display: "block",
-            maxWidth: "100%",
-            maxHeight: 320,
+            maxWidth: "min(100%, 360px)",
+            maxHeight: 240,
+            width: "auto",
             height: "auto",
             objectFit: "contain",
+            borderRadius: 1,
+            cursor: "zoom-in",
             mt: 0.5,
             mb: 0.5,
           },

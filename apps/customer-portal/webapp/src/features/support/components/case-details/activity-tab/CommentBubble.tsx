@@ -407,10 +407,15 @@ export default function CommentBubble({
                   src={imageDataUrl}
                   alt={comment.fileName ?? "Image attachment"}
                   sx={{
-                    maxWidth: "100%",
+                    // Same thumbnail size as inline images; a click opens it full size.
+                    maxWidth: "min(100%, 360px)",
+                    maxHeight: 240,
+                    width: "auto",
+                    height: "auto",
+                    objectFit: "contain",
                     borderRadius: 1,
                     display: "block",
-                    cursor: "pointer",
+                    cursor: "zoom-in",
                   }}
                   onClick={() => onImageClick?.(imageDataUrl)}
                 />
