@@ -653,8 +653,10 @@ export default function CsmCaseCommentBubble({
             },
             "& a": { color: "primary.main" },
             // Same thumbnail size as the customer portal; a click opens the full image.
+            // The editor exports each image with an inline `max-width: 100%`, which
+            // beats a stylesheet rule, so the cap has to be `!important`.
             "& img": {
-              maxWidth: "min(100%, 360px)",
+              maxWidth: "min(100%, 360px) !important",
               maxHeight: 240,
               width: "auto",
               height: "auto",
