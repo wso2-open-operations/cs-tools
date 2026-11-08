@@ -53,6 +53,9 @@ func main() {
 	loadDotEnv(".env")
 	middleware.ConfigureLogger()
 
+	// Optional logo overrides for every email; unset keeps the built-in URLs.
+	notifications.SetLogoURLs(os.Getenv("EMAIL_LOGO_DARK_URL"), os.Getenv("EMAIL_LOGO_WHITE_URL"))
+
 	// Email is not yet configured for every deployment, so its config is read
 	// with os.Getenv (never mustEnv) — a missing or invalid configuration only
 	// surfaces as an error the first time a caller requests the email
