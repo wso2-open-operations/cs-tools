@@ -2922,6 +2922,12 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 		ORDER BY created_on DESC, id
 		LIMIT $2 OFFSET $3`
 
+	// The id names ANY work item, a change request included: one the caller may
+	// not see does not exist for them (same guard as the comments and activity).
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, caseID, "case not found"); err != nil {
+		return nil, 0, err
+	}
+
 	var total int
 	var attachments []domain.Attachment
 
