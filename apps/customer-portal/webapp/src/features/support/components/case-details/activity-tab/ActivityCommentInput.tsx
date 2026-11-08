@@ -18,7 +18,8 @@ import {
   COMMENT_MAX_ATTACHMENTS,
   CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
 } from "@config/attachmentLimitsConfig";
-import { useCaseUploads } from "@api/caseUploadProgress";
+import { cancelCaseUpload, useCaseUploads } from "@api/caseUploadProgress";
+import { isAbortError } from "@api/storedAttachments";
 import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
@@ -106,7 +107,7 @@ export default function ActivityCommentInput({
   // The uploads of this box's own comments, drawn inside the editor.
   const commentUploads = useCaseUploads(caseId)
     .filter((u) => u.inPlace)
-    .map((u) => ({ name: u.name, percent: u.percent }));
+    .map((u) => ({ name: u.name, percent: u.percent, onCancel: () => cancelCaseUpload(u.key) }));
 
   // Images pasted or inserted into the comment are shown from a local blob: URL and
   // kept here; nothing is uploaded until the comment is sent, so an image that is removed or never posted leaves
@@ -266,6 +267,7 @@ export default function ActivityCommentInput({
     attachmentsSnapshot: Array<{ id: string; file: File }>,
     namesSnapshot: Map<string, string>,
   ): Promise<{ uploadedIds: string[]; failures: string[] }> => {
+    // A file the person stopped counts as dealt with: it leaves the queue and is not an error.
     const uploadedIds: string[] = [];
     const failures: string[] = [];
     if (attachmentsSnapshot.length === 0) return { uploadedIds, failures };
@@ -286,6 +288,10 @@ export default function ActivityCommentInput({
           });
           uploadedIds.push(id);
         } catch (error) {
+          if (isAbortError(error)) {
+            uploadedIds.push(id);
+            continue;
+          }
           failures.push(
             `"${attachmentName}": ${
               error instanceof Error && error.message

@@ -15,9 +15,10 @@
 // under the License.
 
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { act, render, screen } from "@testing-library/react";
-import { trackCaseUpload, uploadPercent } from "@api/caseUploadProgress";
+import { cancelCaseUpload, trackCaseUpload, uploadPercent } from "@api/caseUploadProgress";
+import { fireEvent } from "@testing-library/react";
 import CaseUploadsStrip from "@features/support/components/case-details/CaseUploadsStrip";
 
 describe("uploadPercent", () => {
@@ -54,6 +55,32 @@ describe("CaseUploadsStrip", () => {
       other.finish();
     });
     expect(screen.queryByText("Uploading logs.zip")).toBeNull();
+  });
+
+  it("offers Cancel for an upload that can be stopped, and stops it", () => {
+    const cancel = vi.fn();
+    render(<CaseUploadsStrip caseId="c-4" />);
+    let upload!: ReturnType<typeof trackCaseUpload>;
+    act(() => {
+      upload = trackCaseUpload("c-4", "big.zip", { cancel });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload of big.zip" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    act(() => upload.finish());
+  });
+
+  it("shows no Cancel button when an upload cannot be stopped", () => {
+    render(<CaseUploadsStrip caseId="c-5" />);
+    let upload!: ReturnType<typeof trackCaseUpload>;
+    act(() => {
+      upload = trackCaseUpload("c-5", "fixed.zip");
+    });
+    expect(screen.queryByRole("button", { name: /cancel upload/i })).toBeNull();
+    act(() => upload.finish());
+  });
+
+  it("cancelCaseUpload ignores a key that is not running", () => {
+    expect(() => cancelCaseUpload(999999)).not.toThrow();
   });
 
   it("leaves out the uploads the comment box shows inside its own editor", () => {

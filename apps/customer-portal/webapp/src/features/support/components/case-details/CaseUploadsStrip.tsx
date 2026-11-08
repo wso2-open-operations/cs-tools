@@ -15,9 +15,10 @@
 // under the License.
 
 
-import { Box, LinearProgress, Paper, Stack, Typography } from "@wso2/oxygen-ui";
+import { Box, IconButton, LinearProgress, Paper, Stack, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
-import { useCaseUploads } from "@api/caseUploadProgress";
+import { cancelCaseUpload, useCaseUploads } from "@api/caseUploadProgress";
 
 /**
  * A strip on the case page for each file still uploading to the case, with its
@@ -39,9 +40,23 @@ export default function CaseUploadsStrip({ caseId }: { caseId: string }): JSX.El
             >
               Uploading {upload.name}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {upload.percent}%
-            </Typography>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
+              <Typography variant="caption" color="text.secondary">
+                {upload.percent}%
+              </Typography>
+              {upload.cancel && (
+                <Tooltip title="Cancel upload">
+                  <IconButton
+                    size="small"
+                    onClick={() => cancelCaseUpload(upload.key)}
+                    aria-label={`Cancel upload of ${upload.name}`}
+                    sx={{ p: 0.25 }}
+                  >
+                    <X size={14} />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
           </Box>
           <LinearProgress
             variant="determinate"

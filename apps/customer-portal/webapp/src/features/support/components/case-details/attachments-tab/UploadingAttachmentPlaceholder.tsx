@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, CircularProgress, LinearProgress, Paper, Typography } from "@wso2/oxygen-ui";
+import { Box, CircularProgress, IconButton, LinearProgress, Paper, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
 interface UploadingAttachmentPlaceholderProps {
   name: string;
   /** Percentage sent (0-100), when known. */
   percent?: number;
+  /** Stops the upload; no Cancel button without it. */
+  onCancel?: () => void;
 }
 
 /**
@@ -33,6 +36,7 @@ interface UploadingAttachmentPlaceholderProps {
 export default function UploadingAttachmentPlaceholder({
   name,
   percent,
+  onCancel,
 }: UploadingAttachmentPlaceholderProps): JSX.Element {
   return (
     <Paper
@@ -85,6 +89,13 @@ export default function UploadingAttachmentPlaceholder({
           />
         )}
       </Box>
+      {onCancel && (
+        <Tooltip title="Cancel upload">
+          <IconButton size="small" onClick={onCancel} aria-label={`Cancel upload of ${name}`}>
+            <X size={16} />
+          </IconButton>
+        </Tooltip>
+      )}
     </Paper>
   );
 }

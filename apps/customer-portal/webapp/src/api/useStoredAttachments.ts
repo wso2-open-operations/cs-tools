@@ -151,8 +151,16 @@ export function useStoredAttachmentUpload() {
   const upload = useMutation<StoredAttachmentConfirmed, Error, StoredUploadVariables>({
     mutationKey: ["postCaseAttachment"],
     mutationFn: async ({ type, parentId, file, body, caseId, onStep, signal, onProgress, progressInPlace }) => {
+      // The upload's own controller, so the progress row's Cancel can stop it as well
+      // as the caller's signal.
+      const controller = new AbortController();
+      if (signal?.aborted) controller.abort();
+      else signal?.addEventListener("abort", () => controller.abort(), { once: true });
       const tracked = caseId
-        ? trackCaseUpload(caseId, body.name, { inPlace: progressInPlace })
+        ? trackCaseUpload(caseId, body.name, {
+            inPlace: progressInPlace,
+            cancel: () => controller.abort(),
+          })
         : undefined;
       try {
         return await uploadStoredAttachment(authFetch, {
@@ -161,7 +169,7 @@ export function useStoredAttachmentUpload() {
           file,
           name: body.name,
           onStep,
-          signal,
+          signal: controller.signal,
           onProgress: (sent, total) => {
             tracked?.update(sent, total);
             onProgress?.(sent, total);

@@ -30,6 +30,8 @@ export interface CaseUpload {
   percent: number;
   /** Started from a form that shows its own progress (the comment box), so the page's strip leaves it out. */
   inPlace: boolean;
+  /** Stops the upload; absent when it cannot be stopped. */
+  cancel?: () => void;
 }
 
 let uploads: readonly CaseUpload[] = [];
@@ -53,10 +55,13 @@ export function uploadPercent(sent: number, total: number): number {
 export function trackCaseUpload(
   caseId: string,
   name: string,
-  options: { inPlace?: boolean } = {},
+  options: { inPlace?: boolean; cancel?: () => void } = {},
 ): { update: (sent: number, total: number) => void; finish: () => void } {
   const key = nextKey++;
-  publish([...uploads, { key, caseId, name, percent: 0, inPlace: options.inPlace === true }]);
+  publish([
+    ...uploads,
+    { key, caseId, name, percent: 0, inPlace: options.inPlace === true, cancel: options.cancel },
+  ]);
   return {
     update(sent, total) {
       const percent = uploadPercent(sent, total);
@@ -69,6 +74,11 @@ export function trackCaseUpload(
       publish(uploads.filter((u) => u.key !== key));
     },
   };
+}
+
+/** Stops the running upload with this key, if it can be stopped. */
+export function cancelCaseUpload(key: number): void {
+  uploads.find((u) => u.key === key)?.cancel?.();
 }
 
 /** The uploads running for `caseId`, oldest first. */

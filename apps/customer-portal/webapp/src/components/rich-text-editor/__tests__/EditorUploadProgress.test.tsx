@@ -14,8 +14,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 
@@ -38,5 +38,17 @@ describe("EditorUploadProgress", () => {
   it("says how many files are waiting behind the running one", () => {
     render(<EditorUploadProgress uploads={[{ name: "a.pdf", percent: 0 }]} waiting={1} />);
     expect(screen.getByText("1 more file waiting to upload")).toBeInTheDocument();
+  });
+
+  it("offers a Cancel button for an upload that can be stopped, and calls it", () => {
+    const onCancel = vi.fn();
+    render(<EditorUploadProgress uploads={[{ name: "a.pdf", percent: 5, onCancel }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload of a.pdf" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no Cancel button for an upload that cannot be stopped", () => {
+    render(<EditorUploadProgress uploads={[{ name: "a.pdf", percent: 5 }]} />);
+    expect(screen.queryByRole("button", { name: /cancel upload/i })).toBeNull();
   });
 });
