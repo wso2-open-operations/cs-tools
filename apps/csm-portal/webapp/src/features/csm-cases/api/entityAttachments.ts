@@ -157,6 +157,31 @@ function parseContentRange(headers: Headers): { start: number; end: number; tota
   return end >= start && total > end ? { start, end, total } : null;
 }
 
+/**
+ * The response headers a browser may hide. Content-Range and Content-Disposition
+ * are not readable by page scripts unless the backend (or the gateway in front
+ * of it) lists them in Access-Control-Expose-Headers; Content-Length and
+ * Content-Type always are. A download must work either way, so what those two
+ * headers would say is taken from the attachment itself when they are hidden:
+ * the file name from its record, the size from its metadata.
+ */
+function knownSizeOf(size: number | undefined): number | undefined {
+  return size !== undefined && Number.isSafeInteger(size) && size > 0 ? size : undefined;
+}
+
+/**
+ * Whether the first range is the whole of what it should be when its
+ * Content-Range cannot be read. With the size known it must be exactly the
+ * first 8 MiB, or the whole file when that is smaller; with no size, a body
+ * shorter than the 8 MiB asked for is the whole file. A Content-Length that
+ * disagrees with the bytes read is a broken connection either way.
+ */
+function firstRangeIsWhole(response: Response, length: number, size: number | undefined): boolean {
+  const declared = response.headers.get("Content-Length");
+  if (declared !== null && Number(declared) !== length) return false;
+  return size !== undefined ? length === Math.min(DOWNLOAD_RANGE_BYTES, size) : length > 0 && length < DOWNLOAD_RANGE_BYTES;
+}
+
 interface RangeRead {
   response: Response;
   parts: Uint8Array[];
@@ -235,18 +260,20 @@ async function downloadFromBackend(
 
 async function readAndStore(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; onProgress?: DownloadProgress },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
   const path = attachmentContentPath(args);
+  const knownSize = knownSizeOf(args.size);
   let first: RangeRead;
   try {
     first = await readRange(api, path, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
       if (response.status !== 206) return true; // the whole file, the range was ignored
       const range = parseContentRange(response.headers);
+      // Content-Range hidden from page scripts: fall back on the attachment's own size.
+      if (range === null) return firstRangeIsWhole(response, partsLength(parts), knownSize);
       return (
-        range !== null &&
         range.start === 0 &&
         range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
         partsLength(parts) === range.end + 1
@@ -259,8 +286,15 @@ async function readAndStore(
     }
     throw err;
   }
-  const fileName = fileNameFromDisposition(first.response.headers) || "attachment";
-  const total = first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
+  // The name the backend suggests, else the attachment's own: Content-Disposition may be hidden.
+  const fileName = fileNameFromDisposition(first.response.headers) || args.name || "attachment";
+  let total: number | undefined;
+  if (first.response.status === 206) {
+    total =
+      parseContentRange(first.response.headers)?.total ??
+      knownSize ??
+      (partsLength(first.parts) < DOWNLOAD_RANGE_BYTES ? partsLength(first.parts) : undefined);
+  }
   const ranges: Uint8Array[][] = [];
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
@@ -278,15 +312,10 @@ async function readAndStore(
         const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
         try {
           const { parts } = await readRange(api, path, start, end, ({ response, parts }) => {
+            if (response.status !== 206 || partsLength(parts) !== end - start + 1) return false;
             const range = parseContentRange(response.headers);
-            return (
-              response.status === 206 &&
-              range !== null &&
-              range.start === start &&
-              range.end === end &&
-              range.total === total &&
-              partsLength(parts) === end - start + 1
-            );
+            // With Content-Range hidden the length and the 206 are all there is to check.
+            return range === null || (range.start === start && range.end === end && range.total === total);
           });
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
