@@ -37,7 +37,7 @@ const (
 	testProject = "c1000000-0000-4000-8000-0000000000f1"
 )
 
-var testScope = Scope{WorkItemID: testParent, ProjectID: testProject}
+var testScope = Scope{WorkItemID: testParent}
 
 type fakeLocator struct {
 	locs  map[string]entity.InlineImageLocation
@@ -230,9 +230,9 @@ func TestResolve_RefusesAnImageOfAnotherRecord(t *testing.T) {
 	for name, l := range map[string]entity.InlineImageLocation{
 		"another work item": other,
 		"no owner named":    func() entity.InlineImageLocation { l := loc("k/a.png", "image/png", 4); l.ParentID = ""; return l }(),
-		"another project's draft": func() entity.InlineImageLocation {
+		"a draft of the same project": func() entity.InlineImageLocation {
 			l := loc("k/a.png", "image/png", 4)
-			l.Draft, l.ParentID = true, "c1000000-0000-4000-8000-0000000000f2"
+			l.Draft, l.ParentID = true, testProject
 			return l
 		}(),
 	} {
@@ -244,13 +244,11 @@ func TestResolve_RefusesAnImageOfAnotherRecord(t *testing.T) {
 	}
 }
 
-// A draft description image of the email's own project is allowed.
-func TestResolve_AllowsADraftOfTheSameProject(t *testing.T) {
-	l := loc("k/a.png", "image/png", 4)
-	l.Draft, l.ParentID = true, testProject
-	got := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{idA: l}},
-		&fakeReader{files: map[string][]byte{"k/a.png": []byte("abcd")}}).Resolve(context.Background(), `<img src="/`+idA+`">`, testScope)
-	if !strings.Contains(got, "data:image/png;base64,") {
-		t.Errorf("got %q", got)
+// Only an img's own src is rewritten, not data-src or similar attributes.
+func TestResolve_LeavesDataSrcAlone(t *testing.T) {
+	html := `<img data-src="/` + idA + `"><img xsrc="/` + idA + `">`
+	lc := &fakeLocator{locs: map[string]entity.InlineImageLocation{idA: loc("k/a.png", "image/png", 4)}}
+	if got := New(lc, &fakeReader{files: map[string][]byte{"k/a.png": []byte("abcd")}}).Resolve(context.Background(), html, testScope); got != html || lc.calls[idA] != 0 {
+		t.Errorf("got %q, lookups %d, want the tags untouched and no lookup", got, lc.calls[idA])
 	}
 }

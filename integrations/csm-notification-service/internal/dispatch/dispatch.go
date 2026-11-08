@@ -542,13 +542,26 @@ func (d *Dispatcher) WithInlineImages(r inlineImageResolver) *Dispatcher {
 }
 
 // withInlineImages returns html with its image references resolved, or html
-// itself when no resolver is configured. Called once per event, before the
-// per-recipient render, never once per group.
+// itself when no resolver is configured. Used where the body is rendered once
+// (the change request notice); see lazyInlineImages for the per-group handlers.
 func (d *Dispatcher) withInlineImages(ctx context.Context, html string, scope inlineimages.Scope) string {
 	if d.images == nil {
 		return html
 	}
 	return d.images.Resolve(ctx, html, scope)
+}
+
+// lazyInlineImages is withInlineImages deferred to the first call and done once
+// per event, not once per recipient group. The images are read only when an
+// email is actually rendered, so an event that sends nothing (sending disabled,
+// no recipient left, a group already claimed by a redelivery) reads no file.
+func (d *Dispatcher) lazyInlineImages(ctx context.Context, html string, scope inlineimages.Scope) func() string {
+	var once sync.Once
+	var out string
+	return func() string {
+		once.Do(func() { out = d.withInlineImages(ctx, html, scope) })
+		return out
+	}
 }
 
 // resolveFullCaseDescription returns the case's full, original description
@@ -1336,7 +1349,8 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// group. The Google Chat alert below deliberately keeps using p.Product/
 	// p.Team/etc. (not this) — it never reads Description/CaseComment at
 	// all, so it has nothing to recover here.
-	description := d.withInlineImages(ctx, d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID), inlineimages.Scope{WorkItemID: p.CaseID, ProjectID: p.ProjectID})
+	fullDescription := d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID)
+	description := d.lazyInlineImages(ctx, fullDescription, inlineimages.Scope{WorkItemID: p.CaseID})
 
 	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
 	if err != nil {
@@ -1355,7 +1369,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 				Priority:                  emailSeverityLabel(p.Priority),
 				Product:                   p.Product,
 				CreatedAt:                 p.CreatedAt,
-				Description:               description,
+				Description:               description(),
 				IncidentImpactDescription: p.IncidentImpactDescription,
 				CaseLink:                  caseLink,
 				CommentLink:               commentLinkFor(caseLink, ""),
@@ -1520,7 +1534,8 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	// text): frustration analysis works on the words, which survive
 	// stripping untouched — only the embedded image itself is gone — so it
 	// has no reason to pay for this fetch too.
-	caseComment := d.withInlineImages(ctx, d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID), inlineimages.Scope{WorkItemID: p.CaseID, ProjectID: p.ProjectID})
+	fullComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
+	caseComment := d.lazyInlineImages(ctx, fullComment, inlineimages.Scope{WorkItemID: p.CaseID})
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 		if p.IsInternalNote {
 			// See events.CommentAddedPayload.IsInternalNote's own doc
@@ -1528,9 +1543,9 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 			// as the case reference — this audience is always wso2.com
 			// staff, who recognize the internal reference, not ServiceNow's
 			// own case number.
-			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment, commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+			return notifications.RenderInternalNoteEmail(p.Name, displayInternalRef(p.WSO2CaseID, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 		}
-		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment, commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
+		return notifications.RenderCommentAddedEmail(p.Name, displayCaseRef(p.CaseNumber, p.CaseID), p.CaseTitle, caseComment(), commentLinkFor(caseLink, p.CommentID), caseLink, intendedFor)
 	})
 	if record.NoMoreRetries {
 		d.forgetEmailGroups(baseKey, slices.Collect(maps.Keys(groups)))
@@ -2701,7 +2716,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 		ActorName:        p.ActorName,
 		ProjectName:      p.ProjectName,
 		ShortDescription: p.ShortDescription,
-		Description:      d.withInlineImages(ctx, p.Description, inlineimages.Scope{WorkItemID: p.ChangeRequestID, ProjectID: p.ProjectID}),
+		Description:      d.withInlineImages(ctx, p.Description, inlineimages.Scope{WorkItemID: p.ChangeRequestID}),
 		Link:             d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
 		IntendedFor:      intendedFor,
 	})

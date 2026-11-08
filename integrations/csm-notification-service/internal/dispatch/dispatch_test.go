@@ -3328,8 +3328,8 @@ func TestDispatcher_Handle_CaseCreated_StoredImageReferenceBecomesAnInlinePictur
 	if len(res.seen) != 1 {
 		t.Fatalf("resolver called %d times, want once per event (not per recipient group)", len(res.seen))
 	}
-	if want := (inlineimages.Scope{WorkItemID: "CASE-1", ProjectID: "PROJ-1"}); res.scopes[0] != want {
-		t.Errorf("scope = %+v, want the case and project the event is about %+v", res.scopes[0], want)
+	if want := (inlineimages.Scope{WorkItemID: "CASE-1"}); res.scopes[0] != want {
+		t.Errorf("scope = %+v, want the case the event is about %+v", res.scopes[0], want)
 	}
 	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 1 {
 		t.Fatalf("calls = %d, want 1 email with 1 inline attachment", len(mock.calls))
@@ -3365,5 +3365,20 @@ func TestDispatcher_Handle_CaseCreated_StoredImageReferenceWithoutResolverIsDrop
 	}
 	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 0 || strings.Contains(mock.calls[0].htmlBody, "b1000000") {
 		t.Errorf("want 1 email, no attachment, no reference left: %+v", mock.calls)
+	}
+}
+
+// With sending disabled nothing is rendered, so no image is looked up or read.
+func TestDispatcher_Handle_CaseCreated_NoImageLookupWhenNothingIsSent(t *testing.T) {
+	mock := &mockEmailSender{}
+	res := &mockInlineImageResolver{ref: `src="/b1000000-0000-4000-8000-00000000000a"`, dataURI: `src="data:image/png;base64,aGVsbG8="`}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}).WithInlineImages(res)
+	d.emailSendingEnabled = false
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"CASE","priority":"HIGH","product":"api-manager","createdAt":"2026-01-01","description":"<p>see below</p><img src=\"/b1000000-0000-4000-8000-00000000000a\">","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(res.seen) != 0 || len(mock.calls) != 0 {
+		t.Errorf("resolver called %d times, emails %d; want neither", len(res.seen), len(mock.calls))
 	}
 }

@@ -51,7 +51,7 @@ const (
 	// body full of unreadable references costs a few lookups, not one per image.
 	maxLookups = 10
 	// resolveTimeout bounds the whole of one Resolve call.
-	resolveTimeout = 30 * time.Second
+	resolveTimeout = 10 * time.Second
 )
 
 // Locator finds where an inline image's file is (entity-service).
@@ -66,22 +66,16 @@ type Locator interface {
 type Scope struct {
 	// WorkItemID is the case or change request the email is about.
 	WorkItemID string
-	// ProjectID is its project; a description image that has no record yet is
-	// held under the project.
-	ProjectID string
 }
 
-// allows reports whether the located image belongs to the scope. An answer that
-// names no owner (an entity-service older than the check) is refused.
+// allows reports whether the located image belongs to the scope. A draft image
+// (a description image whose record does not exist yet, held under the project
+// and visible only to its uploader) is never allowed: by the time an email about
+// a record is sent its images are linked to it, so a draft is someone else's
+// unsent work. An answer that names no owner (an entity-service older than the
+// check) is refused too.
 func (sc Scope) allows(loc entity.InlineImageLocation) bool {
-	switch {
-	case loc.ParentID == "":
-		return false
-	case loc.Draft:
-		return sc.ProjectID != "" && strings.EqualFold(loc.ParentID, sc.ProjectID)
-	default:
-		return sc.WorkItemID != "" && strings.EqualFold(loc.ParentID, sc.WorkItemID)
-	}
+	return !loc.Draft && loc.ParentID != "" && sc.WorkItemID != "" && strings.EqualFold(loc.ParentID, sc.WorkItemID)
 }
 
 // Reader reads a file from storage (azblobstore.Store).
@@ -101,7 +95,7 @@ func New(locator Locator, reader Reader) *Resolver {
 }
 
 // imgSrc finds an <img> tag's src attribute.
-var imgSrc = regexp.MustCompile(`(?i)(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']*)(["'])`)
+var imgSrc = regexp.MustCompile(`(?i)(<img\b[^>]*?\ssrc\s*=\s*)(["'])([^"']*)(["'])`)
 
 // refID reads the attachment id out of an image reference: src="/<id>" (also
 // with the .iix suffix migrated comments use) or a URL ending
@@ -128,8 +122,9 @@ func (r *Resolver) Resolve(ctx context.Context, html string, scope Scope) string
 	defer cancel()
 
 	seen := map[string]string{} // attachment id -> data URI, "" when it could not be read
+	capLogged := false
 	resolved, total, lookups := 0, 0, 0
-	return imgSrc.ReplaceAllStringFunc(html, func(tag string) string {
+	out := imgSrc.ReplaceAllStringFunc(html, func(tag string) string {
 		m := imgSrc.FindStringSubmatch(tag)
 		id := refID.FindStringSubmatch(m[3])
 		if id == nil {
@@ -139,6 +134,11 @@ func (r *Resolver) Resolve(ctx context.Context, html string, scope Scope) string
 		uri, done := seen[key]
 		if !done {
 			if resolved >= maxImages || lookups >= maxLookups {
+				if !capLogged {
+					capLogged = true
+					slog.WarnContext(ctx, "inlineimages: more images than one email takes; the rest are left out",
+						"resolved", resolved, "lookups", lookups)
+				}
 				return tag
 			}
 			lookups++
@@ -155,6 +155,11 @@ func (r *Resolver) Resolve(ctx context.Context, html string, scope Scope) string
 		}
 		return m[1] + m[2] + uri + m[4]
 	})
+	if ctx.Err() != nil {
+		slog.WarnContext(ctx, "inlineimages: the time budget ran out; some images are left out of the email",
+			"budget", resolveTimeout.String())
+	}
+	return out
 }
 
 // dataURI reads one image and returns it as a data: URI and its size, or "" when
