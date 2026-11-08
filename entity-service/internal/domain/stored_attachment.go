@@ -163,6 +163,11 @@ type DeleteStoredAttachmentRequest struct {
 	// on its own.
 	Kind StoredAttachmentKind `json:"type"`
 	ID   string               `json:"id"`
+	// AsAdmin is set by the CSM portal backend, and only by it, when the person
+	// deleting holds the portal's admin role: they may then delete an attachment
+	// they did not upload. Any other caller that sets it is refused, so a browser
+	// or the customer portal cannot use it.
+	AsAdmin bool `json:"asAdmin,omitempty"`
 }
 
 // StoredAttachmentParent is what an attachment hangs from, as the caller is

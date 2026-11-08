@@ -1925,8 +1925,13 @@ in the upload, locate and delete paths. The three tables have no row-level id de
    `GET /attachments/inline/{id}/location` is the same for an inline image (comment row first, then a
    migrated work-item image; `410 attachment_removed`). Not charged.
 5. Delete: `POST /attachments/delete` marks the row `DELETED` (soft delete; `deleted_on`/`deleted_by`,
-   migration 0249). Only the person who uploaded it may delete (403 otherwise), never once the work item
-   is closed (409), an image embedded in a comment is not deleted on its own (400), and a repeated
+   migration 0249). Only the person who uploaded it may delete (403 otherwise), **or a portal admin through
+   the CSM portal backend**: the backend sets `asAdmin: true` in the body when the caller's token roles give
+   `PermAdmin`, and this service honours it only when the caller's client id is `CSM_PORTAL_BACKEND_CLIENT_ID`
+   (`WithStoredAttachmentAdminDelete`, like portal banners: the admin decision is made once, in the backend, not
+   against a second `AUTH_ADMIN_ROLES` list here; from any other caller the flag is ignored and the 403 stands;
+   the audit line carries `adminOverride`). Never once the work item
+   is closed (409), even for an admin, an image embedded in a comment is not deleted on its own (400), and a repeated
    delete answers 204. It **does not remove the file**: the backend removes it afterwards, so it
    should `locate` first to get the key. A `DELETED` attachment has no file to download, and the case
    attachment lists and the activity feed skip it (`listedStoredAttachmentSQL`, which also hides

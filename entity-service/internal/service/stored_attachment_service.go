@@ -102,6 +102,23 @@ type storedAttachmentService struct {
 	limits StoredAttachmentLimits
 	now    func() time.Time
 	shares *shareLimiter
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for an admin delete (DeleteStoredAttachmentRequest.AsAdmin).
+	csmPortalClientID string
+}
+
+// WithStoredAttachmentAdminDelete lets the CSM portal backend (the caller with
+// this client id) delete an attachment on behalf of a portal admin. Who is an
+// admin is decided once, in that backend, from the person's token roles; this
+// service only trusts the caller, like portal banners do, rather than keeping a
+// second AUTH_ADMIN_ROLES list that could disagree. Applied after construction
+// so the constructor's callers keep compiling; a service it does not recognise
+// is returned unchanged.
+func WithStoredAttachmentAdminDelete(svc StoredAttachmentService, csmPortalClientID string) StoredAttachmentService {
+	if s, ok := svc.(*storedAttachmentService); ok {
+		s.csmPortalClientID = csmPortalClientID
+	}
+	return svc
 }
 
 // NewStoredAttachmentService constructs a StoredAttachmentService.
@@ -609,8 +626,9 @@ func (s *storedAttachmentService) LinkFromContent(ctx context.Context, commentID
 //
 // Who may delete is decided here, not by row-level security: UPDATE on these
 // tables is internal-only, so the soft delete runs as the system after the checks
-// below. For now only the person who uploaded an attachment may delete it, and
-// never once the work item is closed. Only the row is marked here; the portal
+// below. Only the person who uploaded an attachment may delete it, or a portal
+// admin through the CSM portal backend (req.AsAdmin), and never once the work
+// item is closed. Only the row is marked here; the portal
 // backend removes the file afterwards.
 func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req domain.DeleteStoredAttachmentRequest) error {
 	if err := validateStoredAttachmentKind(req.Kind); err != nil {
@@ -636,8 +654,12 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 		return &apierror.NotFoundError{Msg: "attachment not found"}
 	}
 	row := rows[0]
+	adminOverride := false
 	if !strings.EqualFold(row.CreatedBy, email) {
-		return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+		if !s.mayDeleteAsAdmin(ctx, req) {
+			return &apierror.ForbiddenError{Msg: "Only the person who uploaded an attachment can delete it."}
+		}
+		adminOverride = true
 	}
 
 	switch row.Status {
@@ -674,8 +696,19 @@ func (s *storedAttachmentService) DeleteAttachment(ctx context.Context, req doma
 	slog.InfoContext(ctx, "attachment deleted",
 		"audit", true, "action", "delete", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
-		"attachmentId", row.ID, "path", path)
+		"attachmentId", row.ID, "path", path, "adminOverride", adminOverride)
 	return nil
+}
+
+// mayDeleteAsAdmin is whether this delete may skip the "only the uploader" rule:
+// the request says the person is a portal admin AND the caller is the CSM portal
+// backend, which is where that is decided. A request that sets the flag from any
+// other caller is not an admin delete, so it gets the ordinary refusal.
+func (s *storedAttachmentService) mayDeleteAsAdmin(ctx context.Context, req domain.DeleteStoredAttachmentRequest) bool {
+	if !req.AsAdmin || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
 }
 
 // formatByteLimit renders a size limit for a message: "100 MB", or "512 KB"
