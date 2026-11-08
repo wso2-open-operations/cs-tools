@@ -445,7 +445,7 @@ describe("CsmCaseCommentInput — emptying once the comment is posted", () => {
 
   it("puts a file that did not upload back after the editor was emptied, so Send repeats only it", async () => {
     const onSubmit = vi.fn(
-      async (_html: string, _internal: boolean, files: unknown[], controls: { commentSettled: () => void }) => {
+      async (_html: string, _internal: boolean, _files: unknown[], controls: { commentSettled: () => void }) => {
         controls.commentSettled();
         throw new PartialSendError('"big.zip": the upload failed', true, []);
       },
