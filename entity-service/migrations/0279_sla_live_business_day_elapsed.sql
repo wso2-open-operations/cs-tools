@@ -42,7 +42,10 @@
 -- result set. So the fix has to move into sla_live's own SQL instead of
 -- adding a fourth Go-side correction layer: see business_seconds_elapsed
 -- below and the view change that uses it.
-BEGIN;
+--
+-- No BEGIN/COMMIT here -- this repo's migrations are applied with plain
+-- autocommit, never wrapped in an explicit transaction (CREATE OR REPLACE
+-- FUNCTION/VIEW are each already safe to re-run on their own).
 
 -- business_seconds_elapsed mirrors internal/businessdays.Elapsed exactly: a
 -- straight, line-by-line SQL port of that Go function's own day-stepping
@@ -140,11 +143,28 @@ $$;
 -- live-bumped to BREACHED here -- a row whose stage is already stored as
 -- 'BREACHED' keeps whatever s.has_breached/s.stage already say, exactly as
 -- before.
+--
+-- bd.elapsed_seconds::numeric in the percentage branch below, not bare --
+-- a CodeRabbit-caught, migration-breaking bug: business_seconds_elapsed
+-- returns DOUBLE PRECISION, but live_elapsed_percentage's existing column
+-- type (inherited from migration 0272's own EXTRACT(EPOCH FROM ...)
+-- arithmetic, NUMERIC on Postgres 12+) is NUMERIC. An uncast
+-- COALESCE(double precision, numeric-valued expression) resolves to double
+-- precision, silently changing this view column's own output type --
+-- which CREATE OR REPLACE VIEW categorically refuses (a view's column
+-- types must match exactly; changing one needs DROP + CREATE, which
+-- migration 0272's own doc comment explicitly avoided). The cast is only
+-- needed here: live_business_duration/live_remaining_business_duration
+-- feed the same COALESCE into make_interval(secs => ...), whose own
+-- double-precision parameter coerces either type at the call boundary, and
+-- live_has_breached/live_stage only ever use the COALESCE inside a boolean
+-- comparison, which compares numeric and double precision directly with no
+-- output-type consequence.
 CREATE OR REPLACE VIEW sla_live AS
 SELECT s.*,
     CASE
         WHEN s.stage IN ('IN_PROGRESS', 'BREACHED') AND s.start_on IS NOT NULL AND sp.duration IS NOT NULL
-        THEN COALESCE(bd.elapsed_seconds, GREATEST(0, EXTRACT(EPOCH FROM (NOW() - s.start_on - COALESCE(s.pause_duration, INTERVAL '0')))))
+        THEN COALESCE(bd.elapsed_seconds::numeric, GREATEST(0, EXTRACT(EPOCH FROM (NOW() - s.start_on - COALESCE(s.pause_duration, INTERVAL '0')))))
              / NULLIF(EXTRACT(EPOCH FROM sp.duration), 0) * 100
         ELSE s.business_elapsed_percentage
     END AS live_elapsed_percentage,
@@ -176,5 +196,3 @@ LEFT JOIN LATERAL (
     SELECT GREATEST(0, business_seconds_elapsed(s.start_on, NOW()) - COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0)) AS elapsed_seconds
     WHERE sp.schedule = 'WSO2 Business days' AND s.stage IN ('IN_PROGRESS', 'BREACHED') AND s.start_on IS NOT NULL
 ) bd ON TRUE;
-
-COMMIT;

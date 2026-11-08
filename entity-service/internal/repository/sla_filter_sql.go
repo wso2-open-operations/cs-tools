@@ -33,26 +33,26 @@ import (
 // restricting to work items with (breached) or without (!breached) a
 // currently-breached SLA record.
 //
-// Restricted to bs.is_active IS TRUE AND bs.stage = 'IN_PROGRESS' -- a real,
-// reported defect: without this, a long-finished (COMPLETED/ACHIEVED/
-// CANCELLED) clock whose frozen has_breached happened to be true kept
-// matching forever, and a PAUSED clock's own live_has_breached (frozen
-// correctly at pause time, same reasoning as slaPercentPredicate's own
-// comment below) was being live-recomputed here for no reason. bs.stage is
-// the row's RAW, pre-live-correction stage -- not bs.live_stage, which
-// migration 0279's own view change can bump from IN_PROGRESS to BREACHED at
-// read time; restricting to the raw IN_PROGRESS value (matching
-// ServiceNow's own "violated" search, which has no stage condition of its
-// own beyond active=true but is checking its own always-IN_PROGRESS live
-// recompute) is what actually asks live_has_breached's live correction the
-// question it exists to answer: has an otherwise-still-open clock's real
-// elapsed time now exceeded its duration.
+// Restricted to bs.is_active IS TRUE -- a real, reported defect: without
+// this, a long-finished (COMPLETED/ACHIEVED/CANCELLED) clock whose frozen
+// has_breached happened to be true kept matching forever. No further stage
+// restriction, by design: is_active alone already leaves exactly
+// IN_PROGRESS/PAUSED/BREACHED, and bs.live_has_breached is correct for all
+// three -- live-recomputed (migration 0279) for a raw IN_PROGRESS row, and
+// already the right, frozen value for a raw BREACHED or PAUSED row (set at
+// the real past moment it became true, same reasoning slaPercentPredicate's
+// own comment below gives for trusting a PAUSED row's frozen percentage).
+// An earlier version of this restricted further to bs.stage = 'IN_PROGRESS'
+// -- a real, CodeRabbit-caught bug: that silently excluded an
+// already-BREACHED-staged row from breached=true (and wrongly matched it
+// under breached=false), the exact kind of clock a "breached" search most
+// needs to find.
 func slaBreachedPredicate(workItemID string, breached bool) string {
 	not := ""
 	if !breached {
 		not = "NOT "
 	}
-	return fmt.Sprintf(" AND %sEXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = %s AND bs.is_active IS TRUE AND bs.stage = 'IN_PROGRESS' AND bs.live_has_breached IS TRUE)", not, workItemID)
+	return fmt.Sprintf(" AND %sEXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = %s AND bs.is_active IS TRUE AND bs.live_has_breached IS TRUE)", not, workItemID)
 }
 
 // slaPercentPredicate returns an " AND EXISTS (...)" fragment (and appends its
