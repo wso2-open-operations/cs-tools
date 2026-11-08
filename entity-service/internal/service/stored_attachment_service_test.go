@@ -61,6 +61,10 @@ type fakeStoredRepo struct {
 	inserted     []domain.StoredAttachmentInsert
 	insertErr    error
 
+	keyUpdates []struct {
+		id, from, to string
+		sys          bool
+	}
 	deleted      map[string]string // id -> deleted_by
 	deleteCtx    []bool            // whether each MarkDeleted ran as the system
 	deleteOK     bool
@@ -158,6 +162,15 @@ func (f *fakeStoredRepo) MarkDeleted(ctx context.Context, _ domain.StoredAttachm
 		return false, nil
 	}
 	f.deleted[id] = by
+	return true, nil
+}
+
+func (f *fakeStoredRepo) UpdateStorageKey(ctx context.Context, _ domain.StoredAttachmentKind, id, from, to string) (bool, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	f.keyUpdates = append(f.keyUpdates, struct {
+		id, from, to string
+		sys          bool
+	}{id, from, to, ok && scope.Unrestricted})
 	return true, nil
 }
 

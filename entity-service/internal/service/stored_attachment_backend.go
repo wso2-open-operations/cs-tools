@@ -244,9 +244,78 @@ func (s *storedAttachmentService) LocateInlineImage(ctx context.Context, id stri
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(img.kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
+	relocateTo, err := s.relocationFor(ctx, img)
+	if err != nil {
+		return domain.AttachmentLocation{}, err
+	}
 	return domain.AttachmentLocation{
 		ID: row.ID, Number: row.Number, Name: row.Name,
 		ContentType: &contentType, SizeBytes: row.SizeBytes,
-		Available: true, StorageKey: *row.StorageKey,
+		Available: true, StorageKey: *row.StorageKey, RelocateTo: relocateTo,
 	}, nil
+}
+
+// draftKeyMarker is what a description image's key contains while its file is
+// still where it was uploaded, before its record existed.
+var draftKeyMarker = "/" + "workitems" + "/" + draftFolder + "/"
+
+// relocationFor returns the key a linked description image's file belongs under,
+// or "" when it is already there (or is not such an image). A description image is
+// uploaded to the project's drafts folder because its record has no number yet;
+// once it is linked to a work item it belongs with that work item's files.
+func (s *storedAttachmentService) relocationFor(ctx context.Context, img inlineImage) (string, error) {
+	row := img.row
+	if img.kind != domain.StoredAttachmentComment || row.Draft || row.StorageKey == nil ||
+		!strings.Contains(*row.StorageKey, draftKeyMarker) {
+		return "", nil
+	}
+	parent, err := s.repo.GetParent(ctx, img.kind, row.ParentID)
+	if err != nil {
+		return "", err
+	}
+	key := storageKeyFor(img.kind, row, parent)
+	if key == *row.StorageKey {
+		return "", nil
+	}
+	return key, nil
+}
+
+// InlineImageRelocated implements StoredAttachmentService.
+//
+// The backend has copied the file to the key LocateInlineImage named and removed
+// the old one; this makes the row point at it. Only the key this service itself
+// computes is accepted, so a caller cannot point an image at some other file. It
+// runs as the system after the checks (UPDATE is internal-only), and a repeated
+// call answers the same.
+func (s *storedAttachmentService) InlineImageRelocated(ctx context.Context, id string, req domain.InlineImageRelocatedRequest) error {
+	img, err := s.findInlineImage(ctx, id)
+	if err != nil {
+		return err
+	}
+	want, err := s.relocationFor(ctx, img)
+	if err != nil {
+		return err
+	}
+	if want == "" {
+		// Already moved (a repeated call), or not an image that moves.
+		if img.row.StorageKey != nil && *img.row.StorageKey == req.StorageKey {
+			return nil
+		}
+		return &apierror.ConflictError{Msg: "this image does not need to be moved"}
+	}
+	if req.StorageKey != want {
+		return &apierror.ValidationError{Msg: "storageKey is not where this image belongs"}
+	}
+	from := *img.row.StorageKey
+	ok, err := s.repo.UpdateStorageKey(repository.WithSystemIdentity(ctx), img.kind, img.row.ID, from, want)
+	if err != nil {
+		return err
+	}
+	if ok {
+		slog.InfoContext(ctx, "inline image relocated",
+			"audit", true, "action", "relocate", "callerId", auditCaller(ctx),
+			"correlationId", middleware.CorrelationIDFromContext(ctx),
+			"attachmentId", img.row.ID, "from", from, "path", want)
+	}
+	return nil
 }

@@ -1666,6 +1666,9 @@ type StoredAttachmentService interface {
 	// LocateInlineImage finds a comment's inline image for a caller who may see it
 	// (a removed image is a GoneError) and returns the key to stream from.
 	LocateInlineImage(ctx context.Context, id string) (domain.AttachmentLocation, error)
+	// InlineImageRelocated records that the backend moved an inline image's file
+	// to storageKey (the RelocateTo of LocateInlineImage). Any other key is refused.
+	InlineImageRelocated(ctx context.Context, id string, req domain.InlineImageRelocatedRequest) error
 }
 
 // AttachmentUploadCleanupService clears out uploads that were started and never

@@ -1961,7 +1961,12 @@ before its case exists. `POST /attachments/upload` with `type: "comment"` takes 
 member of the project (internal callers unrestricted, an unseen project is 404; `repo.GetProject`, since
 `project` has no RLS); same PNG/JPEG/WebP rule and per-image limit. A draft's storage key is
 `csm/projects/<project>/workitems/drafts/inline_attachments/<number>_<name>` (`storageKeyFor`, `draftFolder`);
-it is stored at confirm and stays valid after linking. Authorize/confirm resolve the parent through
+it is stored at confirm. Once the image is linked to a record, the next time a portal backend reads it
+`GET /attachments/inline/{id}/location` returns `relocateTo` (`csm/projects/<project>/workitems/<work item>/inline_attachments/<number>_<name>`,
+the same folder as a comment's images; the number tells them apart); the backend copies the file there, removes the draft copy and
+calls `POST /attachments/inline/{id}/relocated` with that key, which makes the row point at it (only the key this service computes is
+accepted; `UpdateStorageKey` is guarded on the old key, so a repeat is harmless). Until then, and if the backend cannot move it,
+the draft key stays valid. Authorize/confirm resolve the parent through
 `parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
 member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
 visible to anyone who can see the work item's project, except a CHANGE REQUEST's (internal-only: the customer-visibility rule cannot be restated in RLS); an external INSERT of a draft must be PENDING, no

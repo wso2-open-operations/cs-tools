@@ -60,6 +60,10 @@ type StoredAttachmentRepository interface {
 	// and when. It reports false when the row is no longer COMPLETE (already
 	// deleted by another request). Meant for repository.WithSystemIdentity.
 	MarkDeleted(ctx context.Context, kind domain.StoredAttachmentKind, id, deletedBy string) (bool, error)
+	// UpdateStorageKey changes the stored key of a COMPLETE attachment from `from`
+	// to `to`, and reports whether it did (false when the row no longer has the key
+	// `from`, so a repeated call is harmless). Meant for repository.WithSystemIdentity.
+	UpdateStorageKey(ctx context.Context, kind domain.StoredAttachmentKind, id, from, to string) (bool, error)
 	// ListAbandoned returns up to limit uploads, across the three tables, that
 	// are still PENDING and were created before olderThan. Meant for
 	// repository.WithSystemIdentity.
@@ -407,6 +411,22 @@ func (r *storedAttachmentRepo) MarkDeleted(ctx context.Context, kind domain.Stor
 		WHERE id = $1 AND status = 'COMPLETE'`, id, deletedBy)
 	if err != nil {
 		return false, fmt.Errorf("mark attachment deleted: %w", err)
+	}
+	return ct.RowsAffected() == 1, nil
+}
+
+// UpdateStorageKey implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) UpdateStorageKey(ctx context.Context, kind domain.StoredAttachmentKind, id, from, to string) (bool, error) {
+	t, err := storedAttachmentTableFor(kind)
+	if err != nil {
+		return false, err
+	}
+	ct, err := r.db.Exec(ctx, `
+		UPDATE `+t.table+`
+		SET storage_key = $3, updated_on = now()
+		WHERE id = $1 AND status = 'COMPLETE' AND storage_key = $2`, id, from, to)
+	if err != nil {
+		return false, fmt.Errorf("update storage key: %w", err)
 	}
 	return ct.RowsAffected() == 1, nil
 }
