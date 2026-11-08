@@ -31,6 +31,10 @@ type InlineImageLocation struct {
 	ContentType *string `json:"contentType"`
 	SizeBytes   *int64  `json:"sizeBytes"`
 	StorageKey  string  `json:"storageKey"`
+	// ParentID is the work item the image belongs to, or the project while Draft
+	// is true. Empty from an entity-service that does not send it yet.
+	ParentID string `json:"parentId"`
+	Draft    bool   `json:"draft"`
 }
 
 // LocateInlineImage calls GET /attachments/inline/{id}/location as this

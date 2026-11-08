@@ -59,6 +59,31 @@ type Locator interface {
 	LocateInlineImage(ctx context.Context, id string) (entity.InlineImageLocation, error)
 }
 
+// Scope names the record an email is about. An image is put into the email only
+// when entity-service says it belongs to that record: this service looks images
+// up as an internal caller, which no access rule filters, so without the check a
+// reference to another customer's image would be read and sent.
+type Scope struct {
+	// WorkItemID is the case or change request the email is about.
+	WorkItemID string
+	// ProjectID is its project; a description image that has no record yet is
+	// held under the project.
+	ProjectID string
+}
+
+// allows reports whether the located image belongs to the scope. An answer that
+// names no owner (an entity-service older than the check) is refused.
+func (sc Scope) allows(loc entity.InlineImageLocation) bool {
+	switch {
+	case loc.ParentID == "":
+		return false
+	case loc.Draft:
+		return sc.ProjectID != "" && strings.EqualFold(loc.ParentID, sc.ProjectID)
+	default:
+		return sc.WorkItemID != "" && strings.EqualFold(loc.ParentID, sc.WorkItemID)
+	}
+}
+
 // Reader reads a file from storage (azblobstore.Store).
 type Reader interface {
 	Open(ctx context.Context, key string, rng *azblobstore.Range) (*azblobstore.Object, error)
@@ -90,11 +115,12 @@ var allowedTypes = map[string]string{
 }
 
 // Resolve returns html with each referenced image replaced by a data: URI. An
+// image that does not belong to scope is treated like one that cannot be read. An
 // image that cannot be read (removed, too big, not an image, storage down) is
 // left as a reference, which the sanitizer then drops, so a failure only costs
 // that one picture and never the email. Content with no reference is returned
 // unchanged without any lookup.
-func (r *Resolver) Resolve(ctx context.Context, html string) string {
+func (r *Resolver) Resolve(ctx context.Context, html string, scope Scope) string {
 	if r == nil || !strings.Contains(strings.ToLower(html), "<img") {
 		return html
 	}
@@ -117,7 +143,7 @@ func (r *Resolver) Resolve(ctx context.Context, html string) string {
 			}
 			lookups++
 			var n int
-			uri, n = r.dataURI(ctx, key, maxTotalBytes-total)
+			uri, n = r.dataURI(ctx, key, maxTotalBytes-total, scope)
 			seen[key] = uri
 			if uri != "" {
 				resolved++
@@ -133,10 +159,14 @@ func (r *Resolver) Resolve(ctx context.Context, html string) string {
 
 // dataURI reads one image and returns it as a data: URI and its size, or "" when
 // it cannot be used. room is how many more bytes this body may add.
-func (r *Resolver) dataURI(ctx context.Context, id string, room int) (string, int) {
+func (r *Resolver) dataURI(ctx context.Context, id string, room int, scope Scope) (string, int) {
 	loc, err := r.locator.LocateInlineImage(ctx, id)
 	if err != nil || !loc.Available || loc.StorageKey == "" {
 		slog.WarnContext(ctx, "inlineimages: image not available for the email", "attachmentId", id)
+		return "", 0
+	}
+	if !scope.allows(loc) {
+		slog.WarnContext(ctx, "inlineimages: image does not belong to the record the email is about", "attachmentId", id)
 		return "", 0
 	}
 	contentType := ""

@@ -34,6 +34,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/inlineimages"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/recipientlinks"
 )
@@ -3303,10 +3304,12 @@ func TestDispatcher_Handle_IncidentAssignedIsANoOp(t *testing.T) {
 type mockInlineImageResolver struct {
 	ref, dataURI string
 	seen         []string
+	scopes       []inlineimages.Scope
 }
 
-func (m *mockInlineImageResolver) Resolve(_ context.Context, html string) string {
+func (m *mockInlineImageResolver) Resolve(_ context.Context, html string, scope inlineimages.Scope) string {
 	m.seen = append(m.seen, html)
+	m.scopes = append(m.scopes, scope)
 	return strings.ReplaceAll(html, m.ref, m.dataURI)
 }
 
@@ -3324,6 +3327,9 @@ func TestDispatcher_Handle_CaseCreated_StoredImageReferenceBecomesAnInlinePictur
 	}
 	if len(res.seen) != 1 {
 		t.Fatalf("resolver called %d times, want once per event (not per recipient group)", len(res.seen))
+	}
+	if want := (inlineimages.Scope{WorkItemID: "CASE-1", ProjectID: "PROJ-1"}); res.scopes[0] != want {
+		t.Errorf("scope = %+v, want the case and project the event is about %+v", res.scopes[0], want)
 	}
 	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 1 {
 		t.Fatalf("calls = %d, want 1 email with 1 inline attachment", len(mock.calls))

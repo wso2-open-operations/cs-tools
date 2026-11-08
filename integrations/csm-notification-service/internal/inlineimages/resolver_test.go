@@ -32,7 +32,12 @@ import (
 const (
 	idA = "b1000000-0000-4000-8000-00000000000a"
 	idB = "b1000000-0000-4000-8000-00000000000b"
+
+	testParent  = "c1000000-0000-4000-8000-000000000001"
+	testProject = "c1000000-0000-4000-8000-0000000000f1"
 )
+
+var testScope = Scope{WorkItemID: testParent, ProjectID: testProject}
 
 type fakeLocator struct {
 	locs  map[string]entity.InlineImageLocation
@@ -70,7 +75,7 @@ func (f *fakeReader) Open(_ context.Context, key string, _ *azblobstore.Range) (
 }
 
 func loc(key, ct string, size int64) entity.InlineImageLocation {
-	return entity.InlineImageLocation{Available: true, StorageKey: key, ContentType: &ct, SizeBytes: &size}
+	return entity.InlineImageLocation{Available: true, StorageKey: key, ContentType: &ct, SizeBytes: &size, ParentID: testParent}
 }
 
 func dataURI(ct string, b []byte) string {
@@ -89,7 +94,7 @@ func TestResolve_ReplacesAReferenceWithTheImage(t *testing.T) {
 		"upper case id":        "/" + strings.ToUpper(idA),
 		"migrated .iix suffix": "/" + idA + ".iix",
 	} {
-		got := r.Resolve(context.Background(), `<p>hi</p><img alt="x" src="`+src+`">`)
+		got := r.Resolve(context.Background(), `<p>hi</p><img alt="x" src="`+src+`">`, testScope)
 		want := `<p>hi</p><img alt="x" src="` + dataURI("image/png", png) + `">`
 		if got != want {
 			t.Errorf("%s: got %q, want %q", name, got, want)
@@ -108,7 +113,7 @@ func TestResolve_LeavesOtherContentAlone(t *testing.T) {
 		`<img src="data:image/png;base64,AAAA">`,
 		`<a href="/` + idA + `">link</a><img src="x.png">`,
 	} {
-		if got := r.Resolve(context.Background(), html); got != html {
+		if got := r.Resolve(context.Background(), html, testScope); got != html {
 			t.Errorf("changed %q to %q", html, got)
 		}
 	}
@@ -134,7 +139,7 @@ func TestResolve_AnUnreadableImageIsLeftAsAReference(t *testing.T) {
 		"file missing":         {loc: loc("k/none.png", "image/png", 5)},
 	} {
 		r := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{idA: tc.loc}, err: tc.err}, &fakeReader{files: tc.files})
-		if got := r.Resolve(context.Background(), html); got != html {
+		if got := r.Resolve(context.Background(), html, testScope); got != html {
 			t.Errorf("%s: got %q, want the reference kept", name, got)
 		}
 	}
@@ -146,7 +151,7 @@ func TestResolve_AFileLargerThanItsDeclaredSizeIsRefused(t *testing.T) {
 	r := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{idA: loc("k/a.png", "image/png", 4)}},
 		&fakeReader{files: map[string][]byte{"k/a.png": huge}})
 	html := `<img src="/` + idA + `">`
-	if got := r.Resolve(context.Background(), html); got != html {
+	if got := r.Resolve(context.Background(), html, testScope); got != html {
 		t.Errorf("a file over the cap was embedded")
 	}
 }
@@ -155,7 +160,7 @@ func TestResolve_TheSameImageIsReadOnce(t *testing.T) {
 	lc := &fakeLocator{locs: map[string]entity.InlineImageLocation{idA: loc("k/a.png", "image/png", 3)}}
 	rd := &fakeReader{files: map[string][]byte{"k/a.png": []byte("abc")}}
 	html := `<img src="/` + idA + `"><br><img src="/` + idA + `">`
-	got := New(lc, rd).Resolve(context.Background(), html)
+	got := New(lc, rd).Resolve(context.Background(), html, testScope)
 	if strings.Count(got, "data:image/png;base64,") != 2 || lc.calls[idA] != 1 || rd.opens != 1 {
 		t.Errorf("got %q, lookups %d, opens %d", got, lc.calls[idA], rd.opens)
 	}
@@ -171,7 +176,7 @@ func TestResolve_StopsAtTheImageCountAndTheTotalSize(t *testing.T) {
 		files["k/"+id] = []byte("0123456789")
 		html.WriteString(`<img src="/` + id + `">`)
 	}
-	got := New(&fakeLocator{locs: locs}, &fakeReader{files: files}).Resolve(context.Background(), html.String())
+	got := New(&fakeLocator{locs: locs}, &fakeReader{files: files}).Resolve(context.Background(), html.String(), testScope)
 	if n := strings.Count(got, "data:image/png;base64,"); n != maxImages {
 		t.Errorf("%d images resolved, want %d", n, maxImages)
 	}
@@ -181,7 +186,7 @@ func TestResolve_StopsAtTheImageCountAndTheTotalSize(t *testing.T) {
 	two := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{
 		idA: loc("k/a", "image/png", int64(len(five))), idB: loc("k/b", "image/png", int64(len(five))),
 	}}, &fakeReader{files: map[string][]byte{"k/a": five, "k/b": five}})
-	got = two.Resolve(context.Background(), `<img src="/`+idA+`"><img src="/`+idB+`">`)
+	got = two.Resolve(context.Background(), `<img src="/`+idA+`"><img src="/`+idB+`">`, testScope)
 	if n := strings.Count(got, "data:image/png;base64,"); n != 1 {
 		t.Errorf("%d images resolved, want 1 within the total cap", n)
 	}
@@ -190,7 +195,7 @@ func TestResolve_StopsAtTheImageCountAndTheTotalSize(t *testing.T) {
 func TestResolve_NilResolverIsANoOp(t *testing.T) {
 	var r *Resolver
 	html := `<img src="/` + idA + `">`
-	if got := r.Resolve(context.Background(), html); got != html {
+	if got := r.Resolve(context.Background(), html, testScope); got != html {
 		t.Errorf("got %q", got)
 	}
 }
@@ -204,7 +209,7 @@ func TestResolve_BoundsLookupsOfUnreadableImages(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		fmt.Fprintf(&b, `<img src="/%08x-0000-0000-0000-000000000000">`, i)
 	}
-	r.Resolve(context.Background(), b.String())
+	r.Resolve(context.Background(), b.String(), testScope)
 	if loc.calls != maxLookups {
 		t.Fatalf("lookups = %d, want %d", loc.calls, maxLookups)
 	}
@@ -215,4 +220,37 @@ type countingLocator struct{ calls int }
 func (c *countingLocator) LocateInlineImage(context.Context, string) (entity.InlineImageLocation, error) {
 	c.calls++
 	return entity.InlineImageLocation{}, errors.New("gone")
+}
+
+// An image of another record is not put into the email, however valid its id.
+func TestResolve_RefusesAnImageOfAnotherRecord(t *testing.T) {
+	other := loc("k/a.png", "image/png", 4)
+	other.ParentID = "c1000000-0000-4000-8000-000000000002"
+	html := `<img src="/` + idA + `">`
+	for name, l := range map[string]entity.InlineImageLocation{
+		"another work item": other,
+		"no owner named":    func() entity.InlineImageLocation { l := loc("k/a.png", "image/png", 4); l.ParentID = ""; return l }(),
+		"another project's draft": func() entity.InlineImageLocation {
+			l := loc("k/a.png", "image/png", 4)
+			l.Draft, l.ParentID = true, "c1000000-0000-4000-8000-0000000000f2"
+			return l
+		}(),
+	} {
+		rd := &fakeReader{files: map[string][]byte{"k/a.png": []byte("abcd")}}
+		got := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{idA: l}}, rd).Resolve(context.Background(), html, testScope)
+		if got != html || rd.opens != 0 {
+			t.Errorf("%s: got %q, opens %d, want the reference left and no file read", name, got, rd.opens)
+		}
+	}
+}
+
+// A draft description image of the email's own project is allowed.
+func TestResolve_AllowsADraftOfTheSameProject(t *testing.T) {
+	l := loc("k/a.png", "image/png", 4)
+	l.Draft, l.ParentID = true, testProject
+	got := New(&fakeLocator{locs: map[string]entity.InlineImageLocation{idA: l}},
+		&fakeReader{files: map[string][]byte{"k/a.png": []byte("abcd")}}).Resolve(context.Background(), `<img src="/`+idA+`">`, testScope)
+	if !strings.Contains(got, "data:image/png;base64,") {
+		t.Errorf("got %q", got)
+	}
 }
