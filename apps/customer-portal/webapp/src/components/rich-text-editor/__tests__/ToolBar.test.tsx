@@ -85,10 +85,10 @@ describe("ToolBar", () => {
     renderToolbar({
       onAttachmentClick,
       attachDisabledReason:
-        "You can attach one file here. To use a different one, please remove the current file first.",
+        "Only one file allowed.",
     });
     const button = screen.getByRole("button", {
-      name: /you can attach one file here/i,
+      name: /only one file allowed/i,
     });
     expect(button).toBeDisabled();
     button.click();
