@@ -531,7 +531,13 @@ func (s *storedAttachmentService) ValidateEmbeddedImages(_ context.Context, auth
 // on its work item, of no more than the total limit together. Images that are not
 // the author's, or not on this work item, are not counted: they are never linked
 // to the comment (LinkFromContent), so they do not weigh on it.
-func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, workItemID, authorEmail, content string) error {
+//
+// commentID is the comment being edited, or "" for a new one. Images already
+// linked to that comment are kept as they are: they count toward the number of
+// images but not toward the size limit, which then applies to what the edit
+// adds. Otherwise lowering the limit would make every older comment with large
+// images impossible to edit.
+func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, commentID, workItemID, authorEmail, content string) error {
 	if !mayHaveInlineImages(content) || authorEmail == "" {
 		return nil
 	}
@@ -543,6 +549,16 @@ func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, wor
 	if err != nil {
 		return err
 	}
+	retained := map[string]bool{}
+	if commentID != "" {
+		linked, err := s.repo.LinkedImageIDs(ctx, commentID, ids)
+		if err != nil {
+			return err
+		}
+		for _, id := range linked {
+			retained[strings.ToLower(id)] = true
+		}
+	}
 	var count int
 	var total int64
 	for _, r := range rows {
@@ -550,7 +566,9 @@ func (s *storedAttachmentService) ValidateCommentImages(ctx context.Context, wor
 			continue
 		}
 		count++
-		total += sizeOrZero(r.SizeBytes)
+		if !retained[strings.ToLower(r.ID)] {
+			total += sizeOrZero(r.SizeBytes)
+		}
 	}
 	if count > MaxInlineImagesPerContent {
 		return &apierror.ValidationError{Msg: fmt.Sprintf("A comment can show at most %d images.", MaxInlineImagesPerContent)}

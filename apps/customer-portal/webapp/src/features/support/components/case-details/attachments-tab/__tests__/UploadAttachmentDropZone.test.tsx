@@ -57,7 +57,7 @@ describe("UploadAttachmentDropZone", () => {
 
     it("shows the portal default when nothing is configured", () => {
       renderZone();
-      expect(screen.getByText("Maximum file size: 100 MB.")).toBeInTheDocument();
+      expect(screen.getByText("Maximum file size: 10 MB.")).toBeInTheDocument();
     });
 
     it("shows the configured limit", () => {

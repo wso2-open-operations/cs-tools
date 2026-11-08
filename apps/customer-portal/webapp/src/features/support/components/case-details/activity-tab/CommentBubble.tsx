@@ -30,7 +30,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import {
   Download,
   File,
@@ -40,6 +40,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
+  downloadSizeOf,
   formatFileSize,
   getAttachmentFileCategory,
   getInitials,
@@ -204,6 +205,7 @@ export default function CommentBubble({
       type: "work_item",
       id: comment.id,
       name: comment.fileName ?? "attachment",
+      size: downloadSizeOf(comment.sizeBytes),
     });
   };
 
@@ -407,12 +409,26 @@ export default function CommentBubble({
                   src={imageDataUrl}
                   alt={comment.fileName ?? "Image attachment"}
                   sx={{
-                    maxWidth: "100%",
+                    // Same thumbnail size as inline images; a click opens it full size.
+                    maxWidth: "min(100%, 360px)",
+                    maxHeight: 240,
+                    width: "auto",
+                    height: "auto",
+                    objectFit: "contain",
                     borderRadius: 1,
                     display: "block",
-                    cursor: "pointer",
+                    cursor: "zoom-in",
                   }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${comment.fileName ?? "image attachment"} full size`}
                   onClick={() => onImageClick?.(imageDataUrl)}
+                  onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onImageClick?.(imageDataUrl);
+                    }
+                  }}
                 />
               ) : isImagePreviewError ? (
                 <Box>

@@ -1032,7 +1032,7 @@ startup on an ambiguous pair.
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
 | `GET /attachments/download/{id}/content?type=` | read | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
-| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline |
+| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline A description image still in the project's drafts folder comes back with `relocateTo`: the first read after its case exists copies the file to the work item's `inline_attachments` folder, calls entity-service `POST /attachments/inline/{id}/relocated`, then removes the draft copy (`relocateInlineImage`); on any failure the draft file is read instead and nothing is lost. |
 | `POST /attachments/delete` `{type, id}` | create (the module's delete is admin only; entity-service enforces uploader-only) | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
 
 - **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no

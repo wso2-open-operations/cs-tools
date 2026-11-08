@@ -526,6 +526,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/inline/{id}/relocated:
+    post:
+      summary: >-
+        Record that a portal backend moved an inline image's file to the key
+        GET /attachments/inline/{id}/location named in relocateTo. Only that key is
+        accepted (anything else is 400); a repeated call, once the row has the key,
+        is 204; an image that has nothing to move is 409. The file is moved by the
+        backend: this service never touches one.
+      operationId: postInlineImageRelocated
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [storageKey]
+              properties:
+                storageKey:
+                  type: string
+                  description: The key the file was moved to; must equal relocateTo.
+      responses:
+        "204":
+          description: The image now points at the new key.
+        "400":
+          description: The id is not a UUID, or storageKey is not where this image belongs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Not found, not visible to the caller, not stored, or the route is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: This image does not need to be moved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: The image was deleted or removed (errorCode attachment_removed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/uploads/cleanup:
     post:
       summary: >-
@@ -39727,6 +39785,14 @@ components:
         storageKey:
           type: string
           description: Where the file is stored. Absent when available is false.
+        relocateTo:
+          type: string
+          description: >-
+            Only on an inline image location, and only for a description image whose
+            file still sits in the project's drafts folder. The key it belongs under
+            now that it has a work item. The backend copies the file there, removes
+            the old one, then calls POST /attachments/inline/{id}/relocated. Internal,
+            like storageKey.
 
     ConfirmAttachmentUploadResponse:
       type: object

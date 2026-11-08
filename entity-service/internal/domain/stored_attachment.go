@@ -142,6 +142,19 @@ type AttachmentLocation struct {
 	Available   bool    `json:"available"`
 	Reason      string  `json:"reason,omitempty"`
 	StorageKey  string  `json:"storageKey,omitempty"`
+	// RelocateTo is set only for an inline image whose file still sits in the
+	// drafts folder it was uploaded to (a description image, uploaded before its
+	// record existed): the key it belongs under now that it has a work item. The
+	// backend copies the file there, removes the old one, then calls
+	// POST /attachments/inline/{id}/relocated.
+	RelocateTo string `json:"relocateTo,omitempty"`
+}
+
+// InlineImageRelocatedRequest is the body of POST /attachments/inline/{id}/relocated.
+type InlineImageRelocatedRequest struct {
+	// StorageKey is the key the backend moved the file to; it must be the one
+	// RelocateTo named.
+	StorageKey string `json:"storageKey"`
 }
 
 // DeleteStoredAttachmentRequest is the body of POST /attachments/delete.

@@ -39,6 +39,7 @@ import AttachmentListItem from "@case-details-attachments/AttachmentListItem";
 import AttachmentsListSkeleton from "@case-details-attachments/AttachmentsListSkeleton";
 import UploadingAttachmentPlaceholder from "@case-details-attachments/UploadingAttachmentPlaceholder";
 import DeleteAttachmentModal from "@case-details-attachments/DeleteAttachmentModal";
+import { downloadSizeOf } from "@features/support/utils/support";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import ApiErrorState from "@components/error/ApiErrorState";
 
@@ -152,7 +153,7 @@ export default function CaseDetailsAttachmentsPanel({
         type: "work_item",
         id: att.id,
         name: att.name,
-        size: att.size,
+        size: downloadSizeOf(att.size ?? att.sizeBytes),
         onSaved: (outcome) =>
           showSuccess(
             outcome === "saved"

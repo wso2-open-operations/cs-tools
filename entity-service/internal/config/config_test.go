@@ -1473,6 +1473,26 @@ func TestLoad_AttachmentSizeLimits(t *testing.T) {
 		t.Errorf("invalid MB with a bytes setting = %v, want the defaults", g)
 	}
 
+	// Above the ceiling (100 MB file, 25 MB images) is as unusable as a typo:
+	// the default is used. The ceiling itself is accepted.
+	clear()
+	t.Setenv("ATTACHMENT_MAX_MB", "100.5")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "26")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("above the ceiling = %v, want the defaults", g)
+	}
+	t.Setenv("ATTACHMENT_MAX_MB", "100")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_MB", "25")
+	if g := got(); g != [2]int64{100 << 20, 25 << 20} {
+		t.Errorf("at the ceiling = %v, want 100 / 25 MiB", g)
+	}
+	clear()
+	t.Setenv("ATTACHMENT_MAX_BYTES", "209715200")
+	t.Setenv("INLINE_IMAGES_TOTAL_MAX_BYTES", "52428800")
+	if g := got(); g != [2]int64{10 << 20, 1 << 20} {
+		t.Errorf("bytes above the ceiling = %v, want the defaults", g)
+	}
+
 	// A typo costs the override, not the service.
 	clear()
 	t.Setenv("ATTACHMENT_MAX_MB", "lots")

@@ -65,8 +65,8 @@ The server loads `.env` automatically on startup (silently ignored if absent). P
 | `SALES_ENTITY_CLIENT_ID` | no* | — | Choreo connection client id |
 | `SALES_ENTITY_CLIENT_SECRET` | no* | — | Choreo connection client secret |
 | `SALES_ENTITY_SCOPES` | no | — | Optional space-separated OAuth2 scopes for REST `sales/sales-entity-service` |
-| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable or non-positive value falls back to the default. The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
-| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
+| `ATTACHMENT_MAX_MB` | no | 10 | Largest uploaded file, in megabytes (1 MB = 1 MiB; a decimal is allowed). Provisional. An unparseable, non-positive or above-100 value falls back to the default (hard ceiling 100 MB). The older `ATTACHMENT_MAX_BYTES` (bytes) still works when the MB one is unset |
+| `INLINE_IMAGES_TOTAL_MAX_MB` | no | 1 | Total size of all images in ONE comment or description, in megabytes (at most 5 images, `service.MaxInlineImagesPerContent`); one image can be at most that big too, there is no separate per-image setting. Same fallback rule, hard ceiling 25 MB; the older `INLINE_IMAGES_TOTAL_MAX_BYTES` still works |
 | `CSM_MIGRATION_MEMBERSHIP_REGISTRATION_ENABLED` | no | `false` | Must be `"true"` for `POST /users/me/memberships/register` to be registered at all (see "Membership registration" below). Off = the route 404s and nothing on that path can write to Salesforce |
 | `CSM_MIGRATION_SALESFORCE_MEMBERSHIP_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Project_Contact__c`/`Contact` envelopes, the Contact writer included (see "Salesforce membership ingest" and "The Contact writer" below). The Account branch is unaffected |
 | `CSM_MIGRATION_SALESFORCE_ACCOUNT_INGEST_ENABLED` | no | `false` | Must be `"true"` for `POST /salesforce/events` to act on `Account` envelopes; off, they are acknowledged and ignored. Keep it off while the ServiceNow sync still writes `account`. The upsert resolves the row by `sf_id` (not unique since migration 0095), then links a same-`number` row with no `sf_id`, then inserts; the SE-1 columns are kept when Salesforce sends none; see "Salesforce Account ingest" for the full column set |
@@ -1951,6 +1951,8 @@ that big too. Comment create (`commentService.CreateComment`,
 BEFORE saving and answer a 400 in words; only the author's own images on the comment's work item are counted
 (the same rule `LinkFromContent` links by). The check costs nothing for content with no image reference
 (`mayHaveInlineImages`, one regexp).
+On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
+which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
@@ -1959,7 +1961,12 @@ before its case exists. `POST /attachments/upload` with `type: "comment"` takes 
 member of the project (internal callers unrestricted, an unseen project is 404; `repo.GetProject`, since
 `project` has no RLS); same PNG/JPEG/WebP rule and per-image limit. A draft's storage key is
 `csm/projects/<project>/workitems/drafts/inline_attachments/<number>_<name>` (`storageKeyFor`, `draftFolder`);
-it is stored at confirm and stays valid after linking. Authorize/confirm resolve the parent through
+it is stored at confirm. Once the image is linked to a record, the next time a portal backend reads it
+`GET /attachments/inline/{id}/location` returns `relocateTo` (`csm/projects/<project>/workitems/<work item>/inline_attachments/<number>_<name>`,
+the same folder as a comment's images; the number tells them apart); the backend copies the file there, removes the draft copy and
+calls `POST /attachments/inline/{id}/relocated` with that key, which makes the row point at it (only the key this service computes is
+accepted; `UpdateStorageKey` is guarded on the old key, so a repeat is harmless). Until then, and if the backend cannot move it,
+the draft key stays valid. Authorize/confirm resolve the parent through
 `parentOf` (the project for a draft). RLS (100027): a draft is visible only to its uploader while a project
 member; a LINKED description image (`comment_id` NULL, `description_image` true, `work_item_id` set) is
 visible to anyone who can see the work item's project, except a CHANGE REQUEST's (internal-only: the customer-visibility rule cannot be restated in RLS); an external INSERT of a draft must be PENDING, no

@@ -385,7 +385,7 @@ type recordingLinker struct {
 	descLinks          []struct{ workItem, project, author, html string }
 }
 
-func (r *recordingLinker) ValidateCommentImages(_ context.Context, _, _, content string) error {
+func (r *recordingLinker) ValidateCommentImages(_ context.Context, _, _, _, content string) error {
 	r.commentChecks = append(r.commentChecks, content)
 	return r.validateCommentErr
 }

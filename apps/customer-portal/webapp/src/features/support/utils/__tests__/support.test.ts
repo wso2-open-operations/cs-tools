@@ -16,6 +16,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  downloadSizeOf,
   collapseCodeBlockWhitespace,
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
@@ -668,5 +669,18 @@ describe("withSystemAuthor", () => {
     const input = { createdBy: null };
     withSystemAuthor(input);
     expect(input.createdBy).toBeNull();
+  });
+});
+
+describe("downloadSizeOf", () => {
+  it("reads a number or a numeric string of bytes", () => {
+    expect(downloadSizeOf(2400000)).toBe(2400000);
+    expect(downloadSizeOf("2400000")).toBe(2400000);
+  });
+
+  it("is undefined when the size is not known", () => {
+    for (const v of [undefined, null, "", "abc", 0, -5, Number.NaN]) {
+      expect(downloadSizeOf(v)).toBeUndefined();
+    }
   });
 });
