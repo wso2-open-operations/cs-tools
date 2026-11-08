@@ -122,10 +122,12 @@ async function postJson(
   authFetch: AuthFetch,
   path: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<Response> {
   const response = await authFetch(`${getBackendBaseUrl()}${path}`, {
     method: "POST",
     body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
   });
   if (!response.ok) throw await toApiError(response);
   return response;
@@ -409,6 +411,8 @@ export async function startStoredUpload(
     name: string;
     contentType?: string;
     sizeBytes: number;
+    /** Cancels the request. */
+    signal?: AbortSignal;
   },
 ): Promise<StoredAttachmentUploadStart> {
   const response = await postJson(authFetch, "/attachments/upload", {
@@ -418,7 +422,7 @@ export async function startStoredUpload(
     name: input.name,
     ...(input.contentType ? { contentType: input.contentType } : {}),
     sizeBytes: input.sizeBytes,
-  });
+  }, input.signal);
   return (await response.json()) as StoredAttachmentUploadStart;
 }
 
@@ -605,14 +609,21 @@ export async function uploadStoredAttachment(
     );
   }
   onStep?.("preparing");
-  const start = await startStoredUpload(authFetch, {
-    type,
-    parentId,
-    projectId,
-    name,
-    contentType: file.type || undefined,
-    sizeBytes: file.size,
-  });
+  let start: StoredAttachmentUploadStart;
+  try {
+    start = await startStoredUpload(authFetch, {
+      type,
+      parentId,
+      projectId,
+      name,
+      contentType: file.type || undefined,
+      sizeBytes: file.size,
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError();
+    throw error;
+  }
   if (start.maxBytes > 0 && file.size > start.maxBytes) {
     throw new Error(
       `File size exceeds the ${formatLimit(start.maxBytes)} limit.`,

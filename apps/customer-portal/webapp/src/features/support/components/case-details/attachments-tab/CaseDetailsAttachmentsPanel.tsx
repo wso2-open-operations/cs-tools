@@ -251,7 +251,13 @@ export default function CaseDetailsAttachmentsPanel({
         ) : (
           <Stack spacing={2}>
             {pendingUploads.map((vars, index) => {
-              const running = runningUploads.find((u) => u.name === vars.body.name);
+              // Same-named files: the n-th placeholder of a name takes the n-th running upload of it.
+              const sameNameBefore = pendingUploads
+                .slice(0, index)
+                .filter((p) => p.body.name === vars.body.name).length;
+              const running = runningUploads.filter((u) => u.name === vars.body.name)[
+                sameNameBefore
+              ];
               return (
                 <UploadingAttachmentPlaceholder
                   key={`pending-upload-${index}`}

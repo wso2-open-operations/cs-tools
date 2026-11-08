@@ -56,7 +56,12 @@ export function trackCaseUpload(
   caseId: string,
   name: string,
   options: { inPlace?: boolean; cancel?: () => void } = {},
-): { update: (sent: number, total: number) => void; finish: () => void } {
+): {
+  update: (sent: number, total: number) => void;
+  /** Takes the Cancel away: the file is already sent and the upload is being finished. */
+  lockCancel: () => void;
+  finish: () => void;
+} {
   const key = nextKey++;
   publish([
     ...uploads,
@@ -68,6 +73,10 @@ export function trackCaseUpload(
       const current = uploads.find((u) => u.key === key);
       if (!current || current.percent === percent) return;
       publish(uploads.map((u) => (u.key === key ? { ...u, percent } : u)));
+    },
+    lockCancel() {
+      if (!uploads.some((u) => u.key === key && u.cancel)) return;
+      publish(uploads.map((u) => (u.key === key ? { ...u, cancel: undefined } : u)));
     },
     finish() {
       if (!uploads.some((u) => u.key === key)) return;

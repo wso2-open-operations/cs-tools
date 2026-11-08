@@ -266,11 +266,12 @@ export default function ActivityCommentInput({
   const uploadAttachmentsFromSnapshot = async (
     attachmentsSnapshot: Array<{ id: string; file: File }>,
     namesSnapshot: Map<string, string>,
-  ): Promise<{ uploadedIds: string[]; failures: string[] }> => {
+  ): Promise<{ uploadedIds: string[]; cancelledIds: string[]; failures: string[] }> => {
     // A file the person stopped counts as dealt with: it leaves the queue and is not an error.
     const uploadedIds: string[] = [];
+    const cancelledIds: string[] = [];
     const failures: string[] = [];
-    if (attachmentsSnapshot.length === 0) return { uploadedIds, failures };
+    if (attachmentsSnapshot.length === 0) return { uploadedIds, cancelledIds, failures };
 
     setIsUploadingAttachments(true);
     try {
@@ -289,7 +290,7 @@ export default function ActivityCommentInput({
           uploadedIds.push(id);
         } catch (error) {
           if (isAbortError(error)) {
-            uploadedIds.push(id);
+            cancelledIds.push(id);
             continue;
           }
           failures.push(
@@ -305,7 +306,7 @@ export default function ActivityCommentInput({
       setIsUploadingAttachments(false);
       setWaitingUploads(0);
     }
-    return { uploadedIds, failures };
+    return { uploadedIds, cancelledIds, failures };
   };
 
   // Takes the files that were stored out of the queue; a failed one stays so
@@ -401,11 +402,14 @@ export default function ActivityCommentInput({
       }
 
       const uploads = await uploadsJob;
-      dropUploaded(uploads.uploadedIds);
+      // A cancelled file leaves the queue like a sent one, but is not a success.
+      dropUploaded([...uploads.uploadedIds, ...uploads.cancelledIds]);
       if (commentSettled) {
         // A file that did not upload comes back, to be sent again.
         const failedItems = attachmentsSnapshot.filter(
-          (a) => !uploads.uploadedIds.includes(a.id),
+          (a) =>
+            !uploads.uploadedIds.includes(a.id) &&
+            !uploads.cancelledIds.includes(a.id),
         );
         if (failedItems.length > 0) {
           setAttachments((prev) => [
@@ -432,7 +436,7 @@ export default function ActivityCommentInput({
         showError(problems.join(" "));
         return;
       }
-      if (attachmentsSnapshot.length > 0) window.location.reload();
+      if (uploads.uploadedIds.length > 0) window.location.reload();
     };
 
     // Warn about PII in the comment text before posting. Attachment-only

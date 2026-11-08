@@ -168,7 +168,11 @@ export function useStoredAttachmentUpload() {
           parentId,
           file,
           name: body.name,
-          onStep,
+          onStep: (step) => {
+            // Once the file is sent, the upload is being finished: too late to cancel.
+            if (step === "finishing") tracked?.lockCancel();
+            onStep?.(step);
+          },
           signal: controller.signal,
           onProgress: (sent, total) => {
             tracked?.update(sent, total);
