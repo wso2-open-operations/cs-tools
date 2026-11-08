@@ -49,7 +49,7 @@ import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
 import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
 import {
-  ATTACHMENT_LIMIT_MESSAGE,
+  attachmentLimitMessage,
   COMMENT_MAX_ATTACHMENTS,
   entityAttachmentMaxBytes,
 } from "@config/attachmentLimitsConfig";
@@ -302,7 +302,7 @@ export default function CsmCaseCommentInput({
     // A reply takes one attachment: say so instead of opening a picker whose
     // file would be refused.
     if (attachments.length >= COMMENT_MAX_ATTACHMENTS) {
-      setError(ATTACHMENT_LIMIT_MESSAGE);
+      setError(attachmentLimitMessage(COMMENT_MAX_ATTACHMENTS));
       return;
     }
     setAttachModalOpen(true);
@@ -409,7 +409,7 @@ export default function CsmCaseCommentInput({
             maxBytes,
           )}.`
         : overLimit
-          ? ATTACHMENT_LIMIT_MESSAGE
+          ? attachmentLimitMessage(COMMENT_MAX_ATTACHMENTS)
           : null,
     );
   }, [attachments, setAttachments]);
@@ -530,8 +530,9 @@ export default function CsmCaseCommentInput({
     setSubmitting(true);
     const sentAttachments = attachments;
     let emptied = false;
-    // Empties the editor and its file list once the comment is posted; a file
-    // that fails to upload is put back below.
+    // The one way the editor and its file list are emptied, once the comment is
+    // posted (called early by the sender, or here after a send that went through).
+    // Safe to call twice. A file that fails to upload is put back below.
     const emptyEditor = () => {
       if (emptied) return;
       emptied = true;
@@ -548,13 +549,9 @@ export default function CsmCaseCommentInput({
         commentSettled: emptyEditor,
         waiting: setWaitingUploads,
       });
-      releaseInlineImages(html);
-      failedWarnedHtmlRef.current = null;
-      setHtml("");
-      setAttachments([]);
-      resetTriggerRef.current += 1;
-      setResetTrigger(resetTriggerRef.current);
-      setEditorMountKey((k) => k + 1);
+      // Everything went through. A sender that never said the comment was posted
+      // has not emptied the editor yet; emptyEditor does nothing the second time.
+      emptyEditor();
     } catch (e) {
       if (e instanceof PartialSendError) {
         if (e.commentPosted) emptyEditor();

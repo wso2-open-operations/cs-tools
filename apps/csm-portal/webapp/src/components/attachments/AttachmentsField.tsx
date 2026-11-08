@@ -18,7 +18,11 @@ import { Box, Button, IconButton, Typography } from "@wso2/oxygen-ui";
 import { Paperclip, Upload, X } from "@wso2/oxygen-ui-icons-react";
 import { useRef, type ChangeEvent, type JSX } from "react";
 import { formatBytes } from "@utils/formatBytes";
-import { entityAttachmentMaxBytes, formatSizeLimit } from "@config/attachmentLimitsConfig";
+import {
+  attachmentLimitMessage,
+  entityAttachmentMaxBytes,
+  formatSizeLimit,
+} from "@config/attachmentLimitsConfig";
 import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 
 interface AttachmentsFieldProps {
@@ -51,10 +55,6 @@ export default function AttachmentsField({
 
   const maxBytes = entityAttachmentMaxBytes();
   const full = maxFiles !== undefined && attachments.length >= maxFiles;
-  const limitMessage = (): string =>
-    `Only ${maxFiles} attachment${maxFiles === 1 ? "" : "s"} can be added.${
-      maxFiles === 1 ? " Remove it to add a different one." : ""
-    }`;
 
   const onAddFiles = (e: ChangeEvent<HTMLInputElement>): void => {
     // Snapshot the FileList into a stable array BEFORE clearing the input —
@@ -70,7 +70,7 @@ export default function AttachmentsField({
     if (maxFiles !== undefined) {
       const room = Math.max(0, maxFiles - attachments.length);
       if (list.length > room) {
-        onError(limitMessage());
+        onError(attachmentLimitMessage(maxFiles));
         picked = list.slice(0, room);
       }
       if (picked.length === 0) return;

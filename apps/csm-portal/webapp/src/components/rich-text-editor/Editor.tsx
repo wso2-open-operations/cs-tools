@@ -70,7 +70,7 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
-import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -695,7 +695,7 @@ const Editor = ({
               onAttachmentClick={onAttachmentClick}
               attachDisabledReason={
                 maxAttachments !== undefined && attachments.length >= maxAttachments
-                  ? `Only ${maxAttachments} attachment${maxAttachments === 1 ? "" : "s"} can be added. Remove it to add a different one.`
+                  ? attachmentLimitMessage(maxAttachments)
                   : undefined
               }
               disabled={disabled}
