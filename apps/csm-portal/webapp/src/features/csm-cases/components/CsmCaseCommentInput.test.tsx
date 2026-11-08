@@ -217,7 +217,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     expect(screen.queryByText("Attach a file")).not.toBeInTheDocument();
   });
 
-  it("attaches every file from a multi-file drop", () => {
+  it("keeps only the first file of a multi-file drop, since a reply takes one attachment, and says so", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     const composer = screen.getByTestId("csm-comment-composer");
 
@@ -226,7 +226,31 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
       fileDrop([makeFile("a.txt", 100), makeFile("b.txt", 200), makeFile("c.txt", 300)]),
     );
 
-    expect(screen.getByTestId("attachment-count")).toHaveTextContent("3");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+  });
+
+  it("adds nothing more to a reply that already has its attachment", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    fireEvent.drop(composer, fileDrop([makeFile("a.txt", 100)]));
+    fireEvent.drop(composer, fileDrop([makeFile("b.txt", 200)]));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+  });
+
+  it("does not call the file already attached a second attachment", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    const same = makeFile("a.txt", 100);
+    fireEvent.drop(composer, fileDrop([same]));
+    fireEvent.drop(composer, fileDrop([same]));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.queryByText(/Only 1 attachment can be added/)).toBeNull();
   });
 
   describe("size limit", () => {

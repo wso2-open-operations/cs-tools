@@ -48,7 +48,11 @@ import Editor from "@components/rich-text-editor/Editor";
 import { formatBytes } from "@utils/formatBytes";
 import { useBackendApi } from "@api/backend/client";
 import { imagePasteRefusalMessage, type ImagePasteRefusal } from "@components/rich-text-editor/inlineImageLimits";
-import { entityAttachmentMaxBytes } from "@config/attachmentLimitsConfig";
+import {
+  ATTACHMENT_LIMIT_MESSAGE,
+  COMMENT_MAX_ATTACHMENTS,
+  entityAttachmentMaxBytes,
+} from "@config/attachmentLimitsConfig";
 import {
   dropFailedImages,
   hasBlobSource,
@@ -294,9 +298,18 @@ export default function CsmCaseCommentInput({
   );
   const [attachModalOpen, setAttachModalOpen] = useState(false);
 
-  const onAttachmentClick = useCallback(() => setAttachModalOpen(true), []);
+  const onAttachmentClick = useCallback(() => {
+    // A reply takes one attachment: say so instead of opening a picker whose
+    // file would be refused.
+    if (attachments.length >= COMMENT_MAX_ATTACHMENTS) {
+      setError(ATTACHMENT_LIMIT_MESSAGE);
+      return;
+    }
+    setAttachModalOpen(true);
+  }, [attachments.length]);
   const onSelectAttachment = useCallback((file: File, name: string) => {
     setAttachments((prev) => {
+      if (prev.length >= COMMENT_MAX_ATTACHMENTS) return prev;
       // Dedupe re-picked files by identity (the chosen name may still differ).
       if (prev.some((a) => fileSignature(a.file) === fileSignature(file))) {
         return prev;
@@ -368,10 +381,21 @@ export default function CsmCaseCommentInput({
     const tooLarge = incoming.find((f) => f.size > maxBytes);
     const accepted = incoming.filter((f) => f.size <= maxBytes);
 
-    if (accepted.length > 0) {
+    // A reply takes one attachment, so a drop adds only what there is room for
+    // (a file already attached is not a new one).
+    const fresh = accepted.filter(
+      (file, i) =>
+        !attachments.some((a) => fileSignature(a.file) === fileSignature(file)) &&
+        accepted.findIndex((f) => fileSignature(f) === fileSignature(file)) === i,
+    );
+    const room = Math.max(0, COMMENT_MAX_ATTACHMENTS - attachments.length);
+    const overLimit = fresh.length > room;
+    const taken = fresh.slice(0, room);
+    if (taken.length > 0) {
       setAttachments((prev) => {
         const next = [...prev];
-        for (const file of accepted) {
+        for (const file of taken) {
+          if (next.length >= COMMENT_MAX_ATTACHMENTS) break;
           // Same dedupe rule as the modal-driven path.
           if (next.some((a) => fileSignature(a.file) === fileSignature(file))) continue;
           next.push({ file, name: file.name });
@@ -384,9 +408,11 @@ export default function CsmCaseCommentInput({
         ? `"${tooLarge.name}" is too large. The maximum attachment size is ${formatBytes(
             maxBytes,
           )}.`
-        : null,
+        : overLimit
+          ? ATTACHMENT_LIMIT_MESSAGE
+          : null,
     );
-  }, [setAttachments]);
+  }, [attachments, setAttachments]);
 
   const onDrop = useCallback(
     (e: DragEvent) => {
@@ -772,6 +798,7 @@ export default function CsmCaseCommentInput({
           enterToSubmit={false}
           onAttachmentClick={attachmentsDisabled ? undefined : onAttachmentClick}
           attachments={attachments.map((a) => a.file)}
+          maxAttachments={COMMENT_MAX_ATTACHMENTS}
           onAttachmentRemove={onAttachmentRemove}
           onSubmitKeyDown={() => {
             void submit();
