@@ -227,7 +227,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     );
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+    expect(screen.getByText(/You can attach one file here/)).toBeInTheDocument();
   });
 
   it("adds nothing more to a reply that already has its attachment", () => {
@@ -238,7 +238,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     fireEvent.drop(composer, fileDrop([makeFile("b.txt", 200)]));
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+    expect(screen.getByText(/You can attach one file here/)).toBeInTheDocument();
   });
 
   it("does not call the file already attached a second attachment", () => {
@@ -250,7 +250,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     fireEvent.drop(composer, fileDrop([same]));
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.queryByText(/Only 1 attachment can be added/)).toBeNull();
+    expect(screen.queryByText(/You can attach one file here/)).toBeNull();
   });
 
   describe("size limit", () => {
