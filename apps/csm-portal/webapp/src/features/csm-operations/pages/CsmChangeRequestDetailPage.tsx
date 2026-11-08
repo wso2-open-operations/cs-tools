@@ -103,6 +103,7 @@ import {
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import { hasCommentContent } from "@features/csm-cases/utils/commentContent";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import { AttachmentsWidget, TagsWidget } from "@features/csm-cases/components/CaseDetailWidgets";
 import {
@@ -1332,6 +1333,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!id}
+                uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={changeRequestCommentGateReason(cr.state)}
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {

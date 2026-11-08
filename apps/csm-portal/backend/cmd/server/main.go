@@ -469,7 +469,7 @@ func main() {
 	// inline image are streamed through it (so they are PermDownloadAttachment);
 	// upload, confirm and delete are PermWrite.
 	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
-	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore)
+	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore).WithAccessGuard(accessGuard)
 	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
 	route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
 	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)

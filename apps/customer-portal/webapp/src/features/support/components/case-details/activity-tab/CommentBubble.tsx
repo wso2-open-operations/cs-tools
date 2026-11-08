@@ -61,6 +61,7 @@ import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
 import { useStoredAttachmentDownload } from "@api/useStoredAttachments";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
 import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
 import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
@@ -98,7 +99,12 @@ export default function CommentBubble({
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadStoredAttachment, isDownloadingId, downloadProgressOf } =
+  const {
+    downloadStoredAttachment,
+    isDownloadingId,
+    downloadProgressOf,
+    cancelDownload,
+  } =
     useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
@@ -348,6 +354,12 @@ export default function CommentBubble({
                   </IconButton>
                 </span>
               </Tooltip>
+              {isDownloadingId(comment.id) && (
+                <DownloadCancelButton
+                  name={comment.fileName ?? "attachment"}
+                  onCancel={() => cancelDownload(comment.id)}
+                />
+              )}
             </Box>
             <Stack
               direction="row"

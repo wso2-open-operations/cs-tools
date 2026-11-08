@@ -713,8 +713,8 @@ paths:
         Delete an attachment (soft delete). Marks the attachment DELETED; the row
         stays, with who deleted it and when, and no list includes it afterwards.
         The file is not removed here: the portal backend removes it. Only the person
-        who uploaded the attachment can delete it, and not once its work item is
-        closed. Repeating a delete that already succeeded answers the same. An image
+        who uploaded the attachment can delete it, or a portal admin through the CSM
+        portal backend (asAdmin), and not once its work item is closed. Repeating a delete that already succeeded answers the same. An image
         embedded in a comment cannot be deleted on its own.
       operationId: deleteStoredAttachment
       security:
@@ -39685,6 +39685,13 @@ components:
           type: string
           format: uuid
           description: The attachment's id.
+        asAdmin:
+          type: boolean
+          description: >-
+            Set by the CSM portal backend, and only by it, when the person deleting
+            holds the portal's admin role: they may then delete an attachment they
+            did not upload. From any other caller the flag is ignored and the
+            uploader-only rule applies (403).
 
     ConfirmAttachmentUploadRequest:
       type: object

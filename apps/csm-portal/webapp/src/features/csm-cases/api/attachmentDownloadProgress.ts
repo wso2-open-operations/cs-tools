@@ -59,6 +59,19 @@ export function useAttachmentDownloadProgress(id: string): number | undefined {
   );
 }
 
+const aborts = new Map<string, AbortController>();
+
+/** Remembers the controller of an attachment's running download so it can be cancelled; `undefined` forgets it. */
+export function setAttachmentDownloadAbort(id: string, controller: AbortController | undefined): void {
+  if (controller) aborts.set(id, controller);
+  else aborts.delete(id);
+}
+
+/** Cancels an attachment's running download, if there is one. Nothing is saved and no error is shown. */
+export function cancelAttachmentDownload(id: string): void {
+  aborts.get(id)?.abort();
+}
+
 /** A percentage from bytes received and the total. */
 export function downloadPercent(received: number, total: number): number {
   return total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0;

@@ -433,6 +433,72 @@ func TestDeleteAttachment_SomeoneElseCannotDeleteIt(t *testing.T) {
 	}
 }
 
+// adminDeleteCtx is a delete by `email`, made by the caller with `clientID`.
+func adminDeleteCtx(t *testing.T, email, clientID string) context.Context {
+	t.Helper()
+	return auth.WithIdentity(saCtx(t, email), auth.Identity{ClientID: clientID})
+}
+
+const csmPortalClient = "csm-portal-backend-client"
+
+func adminDeleteReq() domain.DeleteStoredAttachmentRequest {
+	r := deleteReq()
+	r.AsAdmin = true
+	return r
+}
+
+func TestDeleteAttachment_AnAdminThroughTheCSMPortalMayDeleteSomeoneElses(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+	if err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq()); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if len(repo.deleted) != 1 {
+		t.Errorf("deleted = %d, want 1", len(repo.deleted))
+	}
+}
+
+func TestDeleteAttachment_TheAdminFlagFromAnyOtherCallerIsRefused(t *testing.T) {
+	for name, clientID := range map[string]string{"another client": "customer-portal-client", "no client": ""} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeStoredRepo()
+			storedRow(repo)
+			svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+			err := svc.DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", clientID), adminDeleteReq())
+			var ferr *apierror.ForbiddenError
+			if !errors.As(err, &ferr) {
+				t.Fatalf("err = %v, want ForbiddenError", err)
+			}
+			if len(repo.deleted) != 0 {
+				t.Error("an attachment was deleted on a forged admin flag")
+			}
+		})
+	}
+}
+
+func TestDeleteAttachment_TheAdminFlagDoesNothingWhenNoClientIsConfigured(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	err := newStoredSvc(repo).DeleteAttachment(adminDeleteCtx(t, "someone.else@example.com", ""), adminDeleteReq())
+	var ferr *apierror.ForbiddenError
+	if !errors.As(err, &ferr) {
+		t.Fatalf("err = %v, want ForbiddenError", err)
+	}
+}
+
+func TestDeleteAttachment_AnAdminStillCannotDeleteFromAClosedWorkItem(t *testing.T) {
+	repo := newFakeStoredRepo()
+	storedRow(repo)
+	repo.parent.Closed = true
+	svc := WithStoredAttachmentAdminDelete(newStoredSvc(repo), csmPortalClient)
+	err := svc.DeleteAttachment(adminDeleteCtx(t, "admin@wso2.com", csmPortalClient), adminDeleteReq())
+	var cerr *apierror.ConflictError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("err = %v, want ConflictError", err)
+	}
+}
+
 func TestDeleteAttachment_TheEmailMatchIgnoresCase(t *testing.T) {
 	repo := newFakeStoredRepo()
 	storedRow(repo)

@@ -1111,7 +1111,8 @@ paths:
     post:
       summary: >-
         Delete a stored attachment (soft delete; the file is removed from storage). Only
-        the person who uploaded it may, and not once the work item is closed.
+        the person who uploaded it may, or a portal admin, and not once the work item
+        is closed.
       operationId: postStoredAttachmentsDelete
       requestBody:
         required: true

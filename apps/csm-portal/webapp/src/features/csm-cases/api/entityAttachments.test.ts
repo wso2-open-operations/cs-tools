@@ -28,6 +28,7 @@ vi.mock("@api/backend/client", () => {
 });
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
+import { isDownloadAbort } from "@features/csm-cases/api/downloadAbort";
 import {
   confirmEntityAttachment,
   deleteEntityAttachment,
@@ -487,6 +488,75 @@ describe("chunked upload and streamed download", () => {
       downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
     expect(save).not.toHaveBeenCalled();
+  });
+
+  describe("cancelling a download", () => {
+    const hiddenForCancel = (size: number) => rangeServer(size, () => 0, true);
+    /** The browser's own behaviour: a fetch whose signal is aborted rejects with an AbortError. */
+    const abortable = (server: ReturnType<typeof rangeServer>, onCall: (n: number) => void = () => {}) => {
+      let calls = 0;
+      return vi.fn(async (path: string, options?: { headers?: Record<string, string>; signal?: AbortSignal }) => {
+        if (options?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+        calls += 1;
+        onCall(calls);
+        if (options?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+        return server.getResponse(path, options);
+      });
+    };
+
+    it("stops, saves nothing and throws an AbortError when cancelled part-way, without retrying", async () => {
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES * 4);
+      const controller = new AbortController();
+      const getResponse = abortable(server, (n) => n === 2 && controller.abort());
+      const save = vi.fn();
+      const outcome = await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), getResponse),
+        { type: "work_item", id: ID, signal: controller.signal },
+        save,
+      ).catch((e: unknown) => e);
+      expect(isDownloadAbort(outcome)).toBe(true);
+      expect(save).not.toHaveBeenCalled();
+      // The cancelled request is not tried again, and no further ranges are asked for.
+      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + 8);
+    });
+
+    it("does not send a request when it is already cancelled", async () => {
+      const getResponse = vi.fn();
+      const controller = new AbortController();
+      controller.abort();
+      const outcome = await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), getResponse),
+        { type: "work_item", id: ID, signal: controller.signal },
+        vi.fn(),
+      ).catch((e: unknown) => e);
+      expect(isDownloadAbort(outcome)).toBe(true);
+      expect(getResponse).not.toHaveBeenCalled();
+    });
+
+    it("never calls onSaved for a cancelled download", async () => {
+      const server = rangeServer(DOWNLOAD_RANGE_BYTES * 2);
+      const controller = new AbortController();
+      const onSaved = vi.fn();
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), abortable(server, (n) => n === 2 && controller.abort())),
+        { type: "work_item", id: ID, onSaved, signal: controller.signal },
+        vi.fn(),
+      ).catch(() => {});
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+
+    it("cancels a download of unknown size that is being read to its end", async () => {
+      const server = hiddenForCancel(DOWNLOAD_RANGE_BYTES * 4);
+      const controller = new AbortController();
+      const save = vi.fn();
+      const outcome = await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), abortable(server, (n) => n === 2 && controller.abort())),
+        { type: "work_item", id: ID, signal: controller.signal },
+        save,
+      ).catch((e: unknown) => e);
+      expect(isDownloadAbort(outcome)).toBe(true);
+      expect(save).not.toHaveBeenCalled();
+    });
   });
 
   describe("when the browser hides Content-Range and Content-Disposition", () => {

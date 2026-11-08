@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import CaseUploadsStrip from "@features/support/components/case-details/CaseUploadsStrip";
 import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
@@ -264,6 +265,7 @@ export default function ActivityCommentInput({
             caseId,
             file,
             body: { name: attachmentName },
+            progressInPlace: true,
           });
           uploadedIds.push(id);
         } catch (error) {
@@ -472,6 +474,7 @@ export default function ActivityCommentInput({
             }
           />
         </Box>
+        <CaseUploadsStrip caseId={caseId} inPlace />
       </Box>
 
       <UploadAttachmentModal

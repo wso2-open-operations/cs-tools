@@ -742,6 +742,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				InlineTotalMaxBytes: cfg.InlineImagesTotalMaxBytes,
 			},
 		)
+		// A portal admin may delete an attachment they did not upload, asked
+		// for by the CSM portal backend alone.
+		storedAttachmentSvc = service.WithStoredAttachmentAdminDelete(storedAttachmentSvc, cfg.CSMPortalBackendClientID)
 		// Comments created or edited from here on attach the images they show.
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).

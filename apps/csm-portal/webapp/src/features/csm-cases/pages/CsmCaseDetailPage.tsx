@@ -93,6 +93,8 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { canDeleteAttachment } from "@features/csm-cases/utils/canDeleteAttachment";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
@@ -444,6 +446,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     canUseOperations,
     canUseTimeCardsAndUpdates,
     canViewSlaTab,
+    isAdmin,
   } = usePortalAccess();
   // A worknote_creator without full write may still add an internal work
   // note -- and nothing else on this page. The composer is locked to
@@ -2314,17 +2317,18 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
-  // Only the person who uploaded a file may delete it, and not once the case is
-  // closed. The backend enforces the rule; this only hides a button that would
-  // fail.
+  // Only the person who uploaded a file, or an admin, may delete it, and not
+  // once the case is closed (not even an admin). The backend enforces the rule;
+  // this only hides a button that would fail.
   const canDeleteAttachmentRow = useCallback(
-    (a: CaseAttachment): boolean => {
-      if (data?.state === "closed") return false;
-      const mine = (currentUser?.email || currentUserEmail)?.trim().toLowerCase();
-      const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
-      return !!mine && mine === uploader;
-    },
-    [currentUser?.email, currentUserEmail, data?.state],
+    (a: CaseAttachment): boolean =>
+      canDeleteAttachment({
+        caseClosed: data?.state === "closed",
+        isAdmin,
+        myEmail: currentUser?.email || currentUserEmail,
+        uploaderEmail: a.uploadedByUser?.email || a.uploadedByEmail,
+      }),
+    [currentUser?.email, currentUserEmail, data?.state, isAdmin],
   );
 
   const onConfirmDeleteAttachment = useCallback(() => {
@@ -2827,6 +2831,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                uploadProgress={commentUploadProgress(postAttachment)}
                 imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}

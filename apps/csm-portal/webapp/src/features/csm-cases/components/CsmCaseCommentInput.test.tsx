@@ -43,6 +43,7 @@ vi.mock("@features/csm-cases/api/entityAttachments", () => ({
 }));
 
 import { uploadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -551,5 +552,32 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 
     expect(await screen.findByText(/could not be uploaded/)).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("upload progress while a comment is sent", () => {
+  it("shows the file's name and percentage as a bar under the editor", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} uploadProgress={{ name: "10mb.pdf", percent: 42 }} />);
+    expect(screen.getByText("Uploading 10mb.pdf")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Uploading 10mb.pdf" }).getAttribute("aria-valuenow")).toBe("42");
+  });
+
+  it("shows nothing when no upload runs", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    expect(screen.queryByText(/^Uploading /)).toBeNull();
+  });
+});
+
+describe("commentUploadProgress", () => {
+  it("is the running upload's name and percent, and null otherwise", () => {
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 7, variables: { name: "a.zip" } }),
+    ).toEqual({ name: "a.zip", percent: 7 });
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 0, variables: { file: new File([], "f.txt") } }),
+    ).toEqual({ name: "f.txt", percent: 0 });
+    expect(commentUploadProgress({ isPending: false, uploadProgress: 7 })).toBeNull();
+    expect(commentUploadProgress({ isPending: true, uploadProgress: null })).toBeNull();
   });
 });
