@@ -22,6 +22,7 @@ import { useNavigate } from "react-router";
 
 import { useOrganizations, useProducts } from "@features/plg/api/hooks";
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, StatusChip } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import {
   LIFECYCLE_STAGES,
   SUBSCRIPTION_TIERS,
@@ -116,7 +117,7 @@ export default function OrganizationsPage() {
             <TextField
               fullWidth
               size="small"
-              label="Search by organisation or email"
+              label="Search by company id, organisation or email"
               value={query}
               onChange={(e) => resetTo(setQuery)(e.target.value)}
             />
@@ -228,6 +229,7 @@ export default function OrganizationsPage() {
                   <TableCell>Registered</TableCell>
                   <TableCell>PLG CS owner</TableCell>
                   <TableCell>Registered email</TableCell>
+                  <TableCell padding="checkbox" aria-label="Reveal" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -239,14 +241,7 @@ export default function OrganizationsPage() {
                     onClick={() => navigate(`/plg/organizations/${org.id}`)}
                   >
                     <TableCell>
-                      <Typography variant="body2" fontWeight={600}>
-                        {org.organizationName}
-                      </Typography>
-                      {org.registeredName ? (
-                        <Typography variant="caption" color="text.secondary">
-                          {org.registeredName}
-                        </Typography>
-                      ) : null}
+                      <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} fontWeight={600} />
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
@@ -275,9 +270,10 @@ export default function OrganizationsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2" color="text.secondary">
-                        {org.registeredEmail}
-                      </Typography>
+                      <MaskedEmail organizationId={org.id} />
+                    </TableCell>
+                    <TableCell padding="checkbox">
+                      <RevealButton organizationId={org.id} />
                     </TableCell>
                   </TableRow>
                 ))}

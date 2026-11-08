@@ -26,6 +26,8 @@ import type {
   UserRef,
   WorkQueueQuery,
   WorkQueueResponse,
+  CompanyIdentity,
+  ResolveCompaniesResponse,
 } from "./types";
 
 /**
@@ -48,6 +50,7 @@ export const queryKeys = {
   playbook: (id: string) => ["playbook", id] as const,
   dashboard: (from?: string, to?: string) => ["dashboard", from ?? "", to ?? ""] as const,
   workQueue: (q: WorkQueueQuery) => ["work-queue", q] as const,
+  company: (orgId: string) => ["plg", "company", orgId] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -390,4 +393,56 @@ export function useWorkQueue(query: WorkQueueQuery): UseQueryResult<WorkQueueRes
     },
     placeholderData: (previous) => previous,
   });
+}
+
+// ---------------------------------------------------------------------------
+// The reveal
+// ---------------------------------------------------------------------------
+
+export interface CompanyReveal {
+  /** The revealed identity, once asked for; undefined while hidden. */
+  identity: CompanyIdentity | undefined;
+  /** True when the organisation no longer exists (it was not in the answer). */
+  notFound: boolean;
+  isFetching: boolean;
+  error: Error | null;
+  reveal: () => void;
+  hide: () => void;
+}
+
+/**
+ * The reveal for one organisation. Fetches only on reveal(); a row's cells share
+ * one entry, so they change together. hide() masks them again.
+ */
+export function useCompanyReveal(organizationId: string): CompanyReveal {
+  const api = usePlgApi();
+  const client = useQueryClient();
+  const key = queryKeys.company(organizationId);
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async () => {
+      const res = await api.post<ResolveCompaniesResponse>("/companies/resolve", {
+        organizationIds: [organizationId],
+      });
+      return res.identities.find((i) => i.organizationId === organizationId) ?? null;
+    },
+    enabled: false,
+    // Never cached: the Cloud Directory API forbids keeping names and emails.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+  return {
+    identity: query.data ?? undefined,
+    notFound: query.data === null,
+    isFetching: query.isFetching,
+    error: query.error,
+    reveal: () => {
+      void query.refetch();
+    },
+    // reset, not remove, so mounted cells mask again.
+    hide: () => {
+      void client.resetQueries({ queryKey: key, exact: true });
+    },
+  };
 }

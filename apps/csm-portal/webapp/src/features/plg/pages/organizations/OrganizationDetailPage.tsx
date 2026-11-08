@@ -16,7 +16,6 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
 
-
 import { useOrganization, useSetOrganizationOwner } from "@features/plg/api/hooks";
 import type { UserRef } from "@features/plg/api/types";
 import {
@@ -28,6 +27,7 @@ import {
   SectionCard,
   StatusChip,
 } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { formatDate } from "@features/plg/utils/format";
 import { ProductTab } from "./ProductTab";
 import { CSUserSelect } from "@features/plg/components/CSUserSelect";
@@ -130,9 +130,11 @@ export default function OrganizationDetailPage() {
         All organisations
       </Button>
 
+      {/* The company id, never the name: the name and email stay hidden until
+          an engineer reveals them, on the Registration details card below. */}
       <PageHeader
-        title={org.organizationName}
-        subtitle={`Registered ${formatDate(org.createdOn)} by ${org.registeredName ?? org.registeredEmail}`}
+        title={org.moesifCompanyId ?? "No company id"}
+        subtitle={`Registered ${formatDate(org.createdOn)}`}
       />
 
       <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
@@ -190,12 +192,22 @@ function OverviewTab({ organizationId }: { organizationId: string }) {
     <Grid container spacing={2}>
       <Grid size={{ xs: 12, md: 5 }}>
         <SectionCard fill title="Registration details">
-          <Field label="Registered email" value={org.registeredEmail} />
-          <Field label="Registered by" value={org.registeredName ?? "—"} />
+          {/* The company id with the eye; revealing replaces it with the
+              organisation's name and the stars with its email. The registrant's
+              name and the company name from the email domain identify the
+              customer just as the name does, so they are not shown at all. */}
+          <Field
+            label="Organisation"
+            value={
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CompanyName organizationId={org.id} companyId={org.moesifCompanyId} />
+                <RevealButton organizationId={org.id} />
+              </Stack>
+            }
+          />
+          <Field label="Registered email" value={<MaskedEmail organizationId={org.id} />} />
           <Field label="Registered on" value={formatDate(org.createdOn)} />
-          <Field label="Company name from domain" value={org.companyNameFromDomain ?? "—"} />
           <Field label="Country" value={org.countryName ?? "—"} />
-          <Field label="Company id" value={org.moesifCompanyId ?? "—"} />
 
           {org.fieldsInherited ? (
             <Tooltip title="The source sent only the mandatory fields for this organisation. The rest are shown from the same person's earlier registration and are not stored here.">

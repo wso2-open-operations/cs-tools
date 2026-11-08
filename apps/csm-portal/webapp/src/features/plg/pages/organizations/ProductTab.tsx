@@ -46,6 +46,7 @@ import {
   SectionCard,
   StatusChip,
 } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { useMe } from "@features/plg/api/hooks";
 import { formatDate, formatDateTime, humanizeEnum } from "@features/plg/utils/format";
 import { PlaybookRuns } from "./PlaybookRuns";
@@ -203,7 +204,16 @@ export function ProductTab({
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 5 }}>
           <SectionCard fill title="Registration">
-            <Field label="Registered email" value={detail.registeredEmail} />
+            <Field
+              label="Organisation"
+              value={
+                <Stack direction="row" spacing={1} alignItems="center">
+                <CompanyName organizationId={organizationId} companyId={detail.moesifCompanyId} />
+                <RevealButton organizationId={organizationId} />
+              </Stack>
+              }
+            />
+            <Field label="Registered email" value={<MaskedEmail organizationId={organizationId} />} />
             <Field label="Registered on" value={formatDate(detail.registeredOn)} />
             <Field
               label="Acknowledged"

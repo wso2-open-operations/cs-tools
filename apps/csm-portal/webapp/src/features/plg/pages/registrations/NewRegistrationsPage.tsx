@@ -24,6 +24,7 @@ import { useNavigate } from "react-router";
 
 import { useAcknowledge, useProducts, useRegistrations } from "@features/plg/api/hooks";
 import { EmptyState, ErrorBlock, LoadingBlock, PageHeader, StatusChip } from "@features/plg/components/common";
+import { CompanyName, MaskedEmail, RevealButton } from "@features/plg/components/CompanyIdentity";
 import { formatDate, formatRelative } from "@features/plg/utils/format";
 import { selectLabelProps } from "@features/plg/components/selectLabelProps";
 
@@ -139,6 +140,7 @@ export default function NewRegistrationsPage() {
                   <TableCell>Registered</TableCell>
                   <TableCell>Stage</TableCell>
                   <TableCell align="right">Action</TableCell>
+                  <TableCell padding="checkbox" aria-label="Reveal" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -148,12 +150,14 @@ export default function NewRegistrationsPage() {
                       sx={{ cursor: "pointer" }}
                       onClick={() => navigate(`/plg/organizations/${item.organizationId}/${item.product.code}`)}
                     >
-                      <Typography variant="body2" fontWeight={600}>
-                        {item.organizationName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {item.registeredEmail}
-                      </Typography>
+                      <Stack>
+                        <CompanyName
+                          organizationId={item.organizationId}
+                          companyId={item.moesifCompanyId}
+                          fontWeight={600}
+                        />
+                        <MaskedEmail organizationId={item.organizationId} />
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Chip size="small" variant="outlined" label={item.product.name} />
@@ -186,6 +190,9 @@ export default function NewRegistrationsPage() {
                           Open
                         </Button>
                       </Stack>
+                    </TableCell>
+                    <TableCell padding="checkbox">
+                      <RevealButton organizationId={item.organizationId} />
                     </TableCell>
                   </TableRow>
                 ))}
