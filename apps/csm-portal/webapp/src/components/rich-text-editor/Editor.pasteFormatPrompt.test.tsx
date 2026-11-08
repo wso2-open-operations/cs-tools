@@ -76,17 +76,18 @@ beforeAll(() => {
   }
 });
 
-function fakeClipboardData(data: Record<string, string>): DataTransfer {
+function fakeClipboardData(data: Record<string, string>, itemTypes: string[] = []): DataTransfer {
   return {
     getData: (type: string) => data[type] ?? "",
+    items: itemTypes.map((type) => ({ kind: "file", type, getAsFile: () => null })),
   } as unknown as DataTransfer;
 }
 
-function paste(target: Element, data: Record<string, string>): void {
+function paste(target: Element, data: Record<string, string>, itemTypes: string[] = []): void {
   const event = new ClipboardEvent("paste", {
     bubbles: true,
     cancelable: true,
-    clipboardData: fakeClipboardData(data),
+    clipboardData: fakeClipboardData(data, itemTypes),
   } as ClipboardEventInit & { clipboardData: DataTransfer });
   // The paste handler's `setPendingPaste` (React state, for the dialog) is
   // triggered synchronously from this dispatch but outside any React event
@@ -180,5 +181,34 @@ describe("Editor paste-format prompt", () => {
     expect(
       screen.queryByText("Paste formatted content?"),
     ).not.toBeInTheDocument();
+  });
+
+  describe("a picture copied from a web page", () => {
+    const IMG_ONLY = `<meta charset='utf-8'><img src="https://example.com/a.png" alt="A | B" style="max-width: 100%;">`;
+
+    it("pastes only the image, not a second hot-linked copy from its HTML", async () => {
+      const onChange = vi.fn();
+      render(<Editor autoFocus showToolbar={false} onChange={onChange} />);
+      paste(getEditable(), { "text/html": IMG_ONLY }, ["text/html", "image/png"]);
+
+      expect(screen.queryByText("Paste formatted content?")).not.toBeInTheDocument();
+      expect(onChange.mock.calls.some(([html]) => String(html).includes("example.com"))).toBe(false);
+    });
+
+    it("still asks about HTML that has text beside the image", async () => {
+      render(<Editor autoFocus showToolbar={false} onChange={() => {}} />);
+      paste(
+        getEditable(),
+        { "text/html": `<p>Look</p>${IMG_ONLY}`, "text/plain": "Look" },
+        ["text/html", "image/png"],
+      );
+      expect(await screen.findByText("Paste formatted content?")).toBeInTheDocument();
+    });
+
+    it("still asks about an image's HTML when the clipboard has no image file", async () => {
+      render(<Editor autoFocus showToolbar={false} onChange={() => {}} />);
+      paste(getEditable(), { "text/html": IMG_ONLY }, ["text/html"]);
+      expect(await screen.findByText("Paste formatted content?")).toBeInTheDocument();
+    });
   });
 });
