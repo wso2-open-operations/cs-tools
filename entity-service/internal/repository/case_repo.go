@@ -2879,8 +2879,11 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 //
 // Returns the case's attachments from work_item_attachment, ordered newest first
 // with the id as a stable tiebreaker. The older case_attachment table is not
-// read: nothing writes it any more. Both queries read the same SELECT, so the
-// total and the page rows always agree.
+// read: nothing writes it any more, so a file that exists only there is not
+// listed. Before this runs against a database, check that no complete
+// case_attachment row lacks a work_item_attachment row of the same id (the SQL
+// is in the pull request), and copy any that do. Both queries read the same
+// SELECT, so the total and the page rows always agree.
 //
 // A row is skipped while PENDING, and when it is failed, deleted or still
 // uploading (listedStoredAttachmentSQL).
