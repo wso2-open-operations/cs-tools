@@ -116,6 +116,8 @@ export interface StoredUploadVariables {
   onStep?: (step: StoredUploadStep) => void;
   /** Cancels the upload. */
   signal?: AbortSignal;
+  /** The caller shows this upload's progress itself, so the case page's strip leaves it out. */
+  progressInPlace?: boolean;
   /** Bytes sent so far. */
   onProgress?: (bytesSent: number, bytesTotal: number) => void;
 }
@@ -148,8 +150,10 @@ export function useStoredAttachmentUpload() {
 
   const upload = useMutation<StoredAttachmentConfirmed, Error, StoredUploadVariables>({
     mutationKey: ["postCaseAttachment"],
-    mutationFn: async ({ type, parentId, file, body, caseId, onStep, signal, onProgress }) => {
-      const tracked = caseId ? trackCaseUpload(caseId, body.name) : undefined;
+    mutationFn: async ({ type, parentId, file, body, caseId, onStep, signal, onProgress, progressInPlace }) => {
+      const tracked = caseId
+        ? trackCaseUpload(caseId, body.name, { inPlace: progressInPlace })
+        : undefined;
       try {
         return await uploadStoredAttachment(authFetch, {
           type,

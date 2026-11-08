@@ -28,6 +28,8 @@ export interface CaseUpload {
   name: string;
   /** 0-100. */
   percent: number;
+  /** Started from a form that shows its own progress (the comment box), so the page's strip leaves it out. */
+  inPlace: boolean;
 }
 
 let uploads: readonly CaseUpload[] = [];
@@ -51,9 +53,10 @@ export function uploadPercent(sent: number, total: number): number {
 export function trackCaseUpload(
   caseId: string,
   name: string,
+  options: { inPlace?: boolean } = {},
 ): { update: (sent: number, total: number) => void; finish: () => void } {
   const key = nextKey++;
-  publish([...uploads, { key, caseId, name, percent: 0 }]);
+  publish([...uploads, { key, caseId, name, percent: 0, inPlace: options.inPlace === true }]);
   return {
     update(sent, total) {
       const percent = uploadPercent(sent, total);

@@ -24,11 +24,18 @@ import { useCaseUploads } from "@api/caseUploadProgress";
  * percentage: files that outlasted the create-case page's wait, or any upload
  * the person started. It shows nothing when no upload runs.
  */
-export default function CaseUploadsStrip({ caseId }: { caseId: string }): JSX.Element | null {
-  const uploads = useCaseUploads(caseId);
+export default function CaseUploadsStrip({
+  caseId,
+  inPlace = false,
+}: {
+  caseId: string;
+  /** Show the uploads a form tracks for itself (the comment box) instead of the page's others. */
+  inPlace?: boolean;
+}): JSX.Element | null {
+  const uploads = useCaseUploads(caseId).filter((u) => u.inPlace === inPlace);
   if (uploads.length === 0) return null;
   return (
-    <Stack spacing={1} sx={{ px: 2, pt: 2 }} aria-live="polite">
+    <Stack spacing={1} sx={{ px: inPlace ? 0 : 2, pt: inPlace ? 1 : 2 }} aria-live="polite">
       {uploads.map((upload) => (
         <Paper key={upload.key} variant="outlined" sx={{ p: 1.5, minWidth: 0 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.75 }}>
