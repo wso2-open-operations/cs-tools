@@ -470,7 +470,9 @@ const Editor = ({
               onAttachmentClick={onAttachmentClick}
               attachDisabledReason={
                 maxAttachments !== undefined && attachments.length >= maxAttachments
-                  ? `Only ${maxAttachments} attachment${maxAttachments === 1 ? "" : "s"} can be added. Remove it to add a different one.`
+                  ? maxAttachments === 1
+                    ? "You can attach one file here. To use a different one, please remove the current file first."
+                    : `You can attach up to ${maxAttachments} files here.`
                   : undefined
               }
               disabled={disabled}
