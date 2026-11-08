@@ -82,4 +82,58 @@ describe("sendCommentWithAttachments", () => {
     expect(error.uploaded).toEqual([b]);
     expect(error.message).toContain('"a.txt": The upload was interrupted.');
   });
+
+  describe("telling the composer while it sends", () => {
+    it("says the comment is posted while a file is still uploading", async () => {
+      let finishUpload!: () => void;
+      const events: string[] = [];
+      const done = sendCommentWithAttachments({
+        hasComment: true,
+        postComment: vi.fn().mockResolvedValue(undefined),
+        attachments: [file("a.txt")],
+        uploadAttachment: () => new Promise<void>((resolve) => (finishUpload = resolve)),
+        onCommentSettled: () => events.push("settled"),
+      }).then(() => events.push("done"));
+      await vi.waitFor(() => expect(events).toEqual(["settled"]));
+      finishUpload();
+      await done;
+      expect(events).toEqual(["settled", "done"]);
+    });
+
+    it("does not say it when the comment failed", async () => {
+      const onCommentSettled = vi.fn();
+      await sendCommentWithAttachments({
+        hasComment: true,
+        postComment: vi.fn().mockRejectedValue(new Error("Case is closed.")),
+        attachments: [file("a.txt")],
+        uploadAttachment: vi.fn().mockResolvedValue(undefined),
+        onCommentSettled,
+      }).catch(() => undefined);
+      expect(onCommentSettled).not.toHaveBeenCalled();
+    });
+
+    it("says it at once for an attachment-only send, which has no comment to wait for", async () => {
+      const onCommentSettled = vi.fn();
+      await sendCommentWithAttachments({
+        hasComment: false,
+        postComment: vi.fn(),
+        attachments: [file("a.txt")],
+        uploadAttachment: vi.fn().mockResolvedValue(undefined),
+        onCommentSettled,
+      });
+      expect(onCommentSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports how many files wait behind each one, then none", async () => {
+      const waiting: number[] = [];
+      await sendCommentWithAttachments({
+        hasComment: false,
+        postComment: vi.fn(),
+        attachments: [file("a.txt"), file("b.txt"), file("c.txt")],
+        uploadAttachment: vi.fn().mockResolvedValue(undefined),
+        onWaiting: (n) => waiting.push(n),
+      });
+      expect(waiting).toEqual([2, 1, 0, 0]);
+    });
+  });
 });

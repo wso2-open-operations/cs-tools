@@ -51,17 +51,30 @@ export async function sendCommentWithAttachments(args: {
   postComment: () => Promise<unknown>;
   attachments: CommentAttachmentDraft[];
   uploadAttachment: (attachment: CommentAttachmentDraft) => Promise<unknown>;
+  /**
+   * Called once the comment is posted, or at the start when there is no comment
+   * to post, while the files may still be uploading: nothing is left in the
+   * composer to protect, so it can empty itself and let the upload progress show.
+   * Not called when the comment failed.
+   */
+  onCommentSettled?: () => void;
+  /** Called before each file with how many are queued behind it. */
+  onWaiting?: (waiting: number) => void;
 }): Promise<void> {
   const commentJob: Promise<string | undefined> = args.hasComment
     ? args.postComment().then(
-        () => undefined,
+        () => {
+          args.onCommentSettled?.();
+          return undefined;
+        },
         (error: unknown) => messageOf(error, "Failed to post comment."),
       )
-    : Promise.resolve(undefined);
+    : Promise.resolve(args.onCommentSettled?.()).then(() => undefined);
   const uploadJob = (async () => {
     const uploaded: CommentAttachmentDraft[] = [];
     const failures: string[] = [];
-    for (const attachment of args.attachments) {
+    for (const [index, attachment] of args.attachments.entries()) {
+      args.onWaiting?.(args.attachments.length - index - 1);
       try {
         await args.uploadAttachment(attachment);
         uploaded.push(attachment);
@@ -69,6 +82,7 @@ export async function sendCommentWithAttachments(args: {
         failures.push(`"${attachment.name}": ${messageOf(error, "the upload failed")}`);
       }
     }
+    args.onWaiting?.(0);
     return { uploaded, failures };
   })();
   const [commentError, { uploaded, failures }] = await Promise.all([commentJob, uploadJob]);

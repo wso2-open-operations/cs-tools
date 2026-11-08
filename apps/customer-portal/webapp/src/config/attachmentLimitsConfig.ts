@@ -148,3 +148,18 @@ export function downloadToDiskEnabled(): boolean {
   if (typeof raw === "string") return raw.trim().toLowerCase() !== "false";
   return raw !== false;
 }
+
+/** How many attachments a create form (case, service request, security report) takes. */
+export const CREATE_FORM_MAX_ATTACHMENTS = 1;
+
+/** How many attachments one comment takes. */
+export const COMMENT_MAX_ATTACHMENTS = 1;
+
+/** Shown when a create form or a comment already has its one attachment. */
+export const CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE =
+  "Only 1 attachment can be added. Remove it to add a different one.";
+
+/** Whether a create form holding `count` attachments takes no more. */
+export function createFormAttachmentsFull(count: number): boolean {
+  return count >= CREATE_FORM_MAX_ATTACHMENTS;
+}

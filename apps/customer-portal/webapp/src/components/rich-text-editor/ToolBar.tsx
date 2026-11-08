@@ -114,6 +114,7 @@ export type ToolbarVariant = "full" | "describeIssue";
 
 const Toolbar = ({
   onAttachmentClick,
+  attachDisabledReason,
   disabled = false,
   variant = "full",
   showKeyboardHint = false,
@@ -122,6 +123,8 @@ const Toolbar = ({
   onPasteError,
 }: {
   onAttachmentClick?: () => void;
+  /** Why attaching is off (the form is full): the button is disabled and says so. */
+  attachDisabledReason?: string;
   disabled?: boolean;
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
@@ -872,17 +875,21 @@ const Toolbar = ({
               </Tooltip>
 
               {onAttachmentClick && (
-                <Tooltip title="Attach File">
-                  <ToggleButton
-                    size="small"
-                    value="attachment"
-                    onClick={() => {
-                      focusEditor();
-                      onAttachmentClick();
-                    }}
-                  >
-                    <Paperclip size={16} />
-                  </ToggleButton>
+                <Tooltip title={attachDisabledReason ?? "Attach File"}>
+                  <span>
+                    <ToggleButton
+                      size="small"
+                      value="attachment"
+                      disabled={!!attachDisabledReason}
+                      aria-label={attachDisabledReason ?? "Attach File"}
+                      onClick={() => {
+                        focusEditor();
+                        onAttachmentClick();
+                      }}
+                    >
+                      <Paperclip size={16} />
+                    </ToggleButton>
+                  </span>
                 </Tooltip>
               )}
             </>

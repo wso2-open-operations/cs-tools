@@ -2848,7 +2848,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftInternalChange={setDraftInternal}
                 draftSourceMode={draftSourceMode}
                 onDraftSourceModeChange={setDraftSourceMode}
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!caseId) return;
                   // Comment and files are separate requests, sent together.
                   await sendCommentWithAttachments({
@@ -2856,6 +2856,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                     postComment: () =>
                       postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
                     attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
                     uploadAttachment: ({ file, name }) =>
                       postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
                   });

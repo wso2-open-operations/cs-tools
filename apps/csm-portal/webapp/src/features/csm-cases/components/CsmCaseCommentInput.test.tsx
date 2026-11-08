@@ -44,6 +44,7 @@ vi.mock("@features/csm-cases/api/entityAttachments", () => ({
 
 import { uploadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
 import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
+import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -216,7 +217,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     expect(screen.queryByText("Attach a file")).not.toBeInTheDocument();
   });
 
-  it("attaches every file from a multi-file drop", () => {
+  it("keeps only the first file of a multi-file drop, since a reply takes one attachment, and says so", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     const composer = screen.getByTestId("csm-comment-composer");
 
@@ -225,7 +226,31 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
       fileDrop([makeFile("a.txt", 100), makeFile("b.txt", 200), makeFile("c.txt", 300)]),
     );
 
-    expect(screen.getByTestId("attachment-count")).toHaveTextContent("3");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+  });
+
+  it("adds nothing more to a reply that already has its attachment", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    fireEvent.drop(composer, fileDrop([makeFile("a.txt", 100)]));
+    fireEvent.drop(composer, fileDrop([makeFile("b.txt", 200)]));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+  });
+
+  it("does not call the file already attached a second attachment", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    const same = makeFile("a.txt", 100);
+    fireEvent.drop(composer, fileDrop([same]));
+    fireEvent.drop(composer, fileDrop([same]));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.queryByText(/Only 1 attachment can be added/)).toBeNull();
   });
 
   describe("size limit", () => {
@@ -398,6 +423,80 @@ describe("CsmCaseCommentInput — lifted draft state survives unmount/remount", 
 
     await screen.findByText("Ctrl/Cmd + Enter to send.");
     expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+  });
+});
+
+describe("CsmCaseCommentInput — emptying once the comment is posted", () => {
+  const sendWithFile = () => {
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see the file" } });
+    fireEvent.drop(
+      screen.getByTestId("csm-comment-composer"),
+      fileDrop([makeFile("big.zip", 1024, "application/zip")]),
+    );
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+  };
+
+  it("empties the editor and its file list when the sender says the comment is posted, while the upload goes on", async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(
+      (_html: string, _internal: boolean, _files: unknown, controls: { commentSettled: () => void }) =>
+        new Promise<void>((resolve) => {
+          controls.commentSettled();
+          finish = resolve;
+        }),
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    await waitFor(() => expect(screen.getByLabelText("comment-editor")).toHaveValue(""));
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("0");
+    // Still sending: the upload has not ended.
+    expect(screen.getByRole("button", { name: /Sending/ })).toBeInTheDocument();
+    finish();
+    await screen.findByRole("button", { name: /Send to customer/ });
+  });
+
+  it("keeps the comment and the file when the comment was not posted", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new PartialSendError("The comment was not posted.", false, []));
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    expect(await screen.findByText("The comment was not posted.")).toBeInTheDocument();
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("see the file");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+  });
+
+  it("puts a file that did not upload back after the editor was emptied, so Send repeats only it", async () => {
+    const onSubmit = vi.fn(
+      async (_html: string, _internal: boolean, _files: unknown[], controls: { commentSettled: () => void }) => {
+        controls.commentSettled();
+        throw new PartialSendError('"big.zip": the upload failed', true, []);
+      },
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    expect(await screen.findByText(/"big\.zip": the upload failed/)).toBeInTheDocument();
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+  });
+
+  it("says how many files are waiting behind the one uploading", async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(
+      (_h: string, _i: boolean, _f: unknown, controls: { waiting: (n: number) => void }) =>
+        new Promise<void>((resolve) => {
+          controls.waiting(2);
+          finish = resolve;
+        }),
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} uploadProgress={{ name: "a.zip", percent: 10 }} />);
+    sendWithFile();
+
+    expect(await screen.findByText("2 more files waiting to upload")).toBeInTheDocument();
+    finish();
+    await waitFor(() => expect(screen.queryByText(/waiting to upload/)).toBeNull());
   });
 });
 

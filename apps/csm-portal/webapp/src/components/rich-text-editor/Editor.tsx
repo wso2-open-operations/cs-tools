@@ -70,7 +70,7 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
-import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -540,6 +540,7 @@ const DEFAULT_EDITOR_CONFIG = {
 const Editor = ({
   onAttachmentClick,
   attachments = [],
+  maxAttachments,
   onAttachmentRemove,
   disabled = false,
   value,
@@ -563,6 +564,8 @@ const Editor = ({
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
+  /** The most attachments the editor takes; the attach button is off once it holds that many. */
+  maxAttachments?: number;
   onAttachmentRemove?: (index: number) => void;
   disabled?: boolean;
   value?: string;
@@ -690,6 +693,11 @@ const Editor = ({
           <>
             <Toolbar
               onAttachmentClick={onAttachmentClick}
+              attachDisabledReason={
+                maxAttachments !== undefined && attachments.length >= maxAttachments
+                  ? attachmentLimitMessage(maxAttachments)
+                  : undefined
+              }
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}

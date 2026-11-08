@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_DOWNLOAD_PARALLELISM,
   downloadParallelism,
+  attachmentLimitMessage,
   downloadToDiskEnabled,
   entityAttachmentMaxBytes,
   formatMegabytes,
@@ -137,5 +138,15 @@ describe("downloadToDiskEnabled", () => {
       setConfig({ CSM_PORTAL_DOWNLOAD_TO_DISK: off });
       expect(downloadToDiskEnabled()).toBe(false);
     }
+  });
+});
+
+describe("attachmentLimitMessage", () => {
+  it("says to remove the file when the limit is one", () => {
+    expect(attachmentLimitMessage(1)).toBe("Only 1 attachment can be added. Remove it to add a different one.");
+  });
+
+  it("uses the plural, without the removal advice, above one", () => {
+    expect(attachmentLimitMessage(3)).toBe("Only 3 attachments can be added.");
   });
 });

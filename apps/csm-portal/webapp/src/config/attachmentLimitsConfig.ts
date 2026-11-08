@@ -122,3 +122,20 @@ export function formatSizeLimit(bytes: number): string {
   }
   return formatMegabytes(bytes);
 }
+
+/** How many attachments a create form (case, service request, security report) takes. */
+export const CREATE_FORM_MAX_ATTACHMENTS = 1;
+
+/** How many attachments one comment or reply takes. */
+export const COMMENT_MAX_ATTACHMENTS = 1;
+
+/**
+ * The message shown when a form, comment or editor already holds the most
+ * attachments it takes: "Only 1 attachment can be added. Remove it to add a
+ * different one." for a limit of one, "Only 3 attachments can be added." above it.
+ */
+export function attachmentLimitMessage(limit: number): string {
+  return `Only ${limit} attachment${limit === 1 ? "" : "s"} can be added.${
+    limit === 1 ? " Remove it to add a different one." : ""
+  }`;
+}

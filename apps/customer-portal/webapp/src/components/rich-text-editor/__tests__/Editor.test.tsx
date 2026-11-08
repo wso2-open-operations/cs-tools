@@ -55,6 +55,25 @@ describe("Editor", () => {
     expect(screen.getByTestId("case-description-editor")).toBeInTheDocument();
   });
 
+  describe("attachment limit", () => {
+    const file = (name: string) => new File(["content"], name, { type: "text/plain" });
+
+    it("keeps the attach button on while the editor holds fewer than maxAttachments", () => {
+      renderEditor({ onAttachmentClick: () => {}, attachments: [], maxAttachments: 1 });
+      expect(screen.getByRole("button", { name: "Attach File" })).not.toBeDisabled();
+    });
+
+    it("turns the attach button off once the editor holds maxAttachments, and says why", () => {
+      renderEditor({ onAttachmentClick: () => {}, attachments: [file("a.txt")], maxAttachments: 1 });
+      expect(screen.getByRole("button", { name: /only 1 attachment can be added/i })).toBeDisabled();
+    });
+
+    it("has no limit when maxAttachments is not given", () => {
+      renderEditor({ onAttachmentClick: () => {}, attachments: [file("a.txt"), file("b.txt")] });
+      expect(screen.getByRole("button", { name: "Attach File" })).not.toBeDisabled();
+    });
+  });
+
   it("renders attachments section when attachments provided", () => {
     const file = new File(["content"], "test.txt", { type: "text/plain" });
     renderEditor({ attachments: [file] });
