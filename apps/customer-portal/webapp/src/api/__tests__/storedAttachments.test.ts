@@ -21,11 +21,13 @@ import {
   DOWNLOAD_RANGE_BYTES,
   downloadStoredAttachment,
   fetchInlineImageBlob,
+  isAbortError,
   toHyphenatedUuid,
   uploadStoredAttachment,
   UploadConfirmPendingError,
 } from "@api/storedAttachments";
 import {
+  downloadParallelism,
   entityAttachmentMaxBytes,
   inlineImageMaxBytes,
 } from "@config/attachmentLimitsConfig";
@@ -517,6 +519,66 @@ describe("storedAttachments", () => {
       expect(authFetch).toHaveBeenCalledTimes(4); // first range, a break, a short body, the good one
       expect(saved[0].size).toBe(size);
       click.mockRestore();
+    });
+
+    describe("cancelling a download", () => {
+      /** The browser's own behaviour: a fetch whose signal is aborted rejects with an AbortError. */
+      const abortable = (server: ReturnType<typeof rangeServer>, onRange: (index: number) => void = () => {}) => {
+        let calls = 0;
+        return async (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => {
+          if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+          calls += 1;
+          onRange(calls);
+          if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+          return server.fetchRange(url, init);
+        };
+      };
+
+      it("stops, saves nothing and throws an AbortError when cancelled part-way", async () => {
+        withMode();
+        const size = DOWNLOAD_RANGE_BYTES * 3;
+        const server = rangeServer(size);
+        const controller = new AbortController();
+        // The person cancels as the second range is being asked for.
+        authFetch.mockImplementation(abortable(server, (n) => n === 2 && controller.abort()));
+        const { saved, click } = stubSave();
+        const outcome = await downloadStoredAttachment(authFetch, {
+          type: "work_item",
+          id: ID,
+          signal: controller.signal,
+        }).catch((e: unknown) => e);
+        expect(isAbortError(outcome)).toBe(true);
+        expect(saved).toHaveLength(0);
+        expect(click).not.toHaveBeenCalled();
+        // A cancelled range is not tried again, and the remaining ranges are not asked for.
+        expect(authFetch.mock.calls.length).toBeLessThanOrEqual(1 + downloadParallelism());
+        click.mockRestore();
+      });
+
+      it("does not start when already cancelled", async () => {
+        withMode();
+        const controller = new AbortController();
+        controller.abort();
+        const outcome = await downloadStoredAttachment(authFetch, {
+          type: "work_item",
+          id: ID,
+          signal: controller.signal,
+        }).catch((e: unknown) => e);
+        expect(isAbortError(outcome)).toBe(true);
+        expect(authFetch).not.toHaveBeenCalled();
+      });
+
+      it("never calls onSaved for a cancelled download", async () => {
+        withMode();
+        const server = rangeServer(DOWNLOAD_RANGE_BYTES * 2);
+        const controller = new AbortController();
+        authFetch.mockImplementation(abortable(server, (n) => n === 2 && controller.abort()));
+        const onSaved = vi.fn();
+        const { click } = stubSave();
+        await downloadStoredAttachment(authFetch, { type: "work_item", id: ID, onSaved, signal: controller.signal }).catch(() => {});
+        expect(onSaved).not.toHaveBeenCalled();
+        click.mockRestore();
+      });
     });
 
     it("gives up with an interruption error after three failed attempts at a range", async () => {

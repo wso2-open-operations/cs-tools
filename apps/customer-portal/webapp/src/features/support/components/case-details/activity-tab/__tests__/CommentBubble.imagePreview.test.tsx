@@ -66,6 +66,7 @@ describe("CommentBubble image attachment preview", () => {
       downloadStoredAttachment: vi.fn(),
       isDownloadingId: () => false,
       downloadProgressOf: () => null,
+      cancelDownload: vi.fn(),
     });
     previewHook.mockReset();
     previewHook.mockReturnValue({
@@ -124,11 +125,30 @@ describe("CommentBubble image attachment preview", () => {
       downloadStoredAttachment: vi.fn(),
       isDownloadingId: (id: string) => id === "att-1",
       downloadProgressOf: () => 37,
+      cancelDownload: vi.fn(),
     });
     renderBubble();
     expect(screen.getByRole("progressbar", { name: "Downloading" })).toHaveAttribute("aria-valuenow", "37");
     expect(screen.getByText("37%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Download attachment" })).toBeDisabled();
+  });
+
+  it("offers Cancel while it downloads, and cancels that attachment's download", () => {
+    const cancelDownload = vi.fn();
+    downloadHook.mockReturnValue({
+      downloadStoredAttachment: vi.fn(),
+      isDownloadingId: (id: string) => id === "att-1",
+      downloadProgressOf: () => 12,
+      cancelDownload,
+    });
+    renderBubble();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel download of screenshot.png" }));
+    expect(cancelDownload).toHaveBeenCalledWith("att-1");
+  });
+
+  it("shows no Cancel button when nothing downloads", () => {
+    renderBubble();
+    expect(screen.queryByRole("button", { name: /cancel download/i })).not.toBeInTheDocument();
   });
 
   it("shows the plain download icon when nothing downloads", () => {

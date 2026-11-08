@@ -280,6 +280,7 @@ export default function CaseDetailsAttachmentsPanel({
                       storedDownload.isDownloadingId(att.id)
                     }
                     downloadProgress={storedDownload.downloadProgressOf(att.id)}
+                    onCancelDownload={(a) => storedDownload.cancelDownload(a.id)}
                   />
                 );
               })

@@ -15,13 +15,14 @@
 // under the License.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import {
   confirmStoredUpload,
   deleteStoredAttachment,
   downloadStoredAttachment,
+  isAbortError,
   uploadStoredAttachment,
   type DownloadSaveOutcome,
   type StoredAttachmentConfirmed,
@@ -52,8 +53,12 @@ export function useStoredAttachmentDownload(): {
   isDownloadingId: (id: string) => boolean;
   /** Percentage (0-100) of this attachment's download, or null while it is not known yet or it is not downloading. */
   downloadProgressOf: (id: string) => number | null;
+  /** Cancels this attachment's running download: nothing is saved, and it ends quietly (no error). */
+  cancelDownload: (id: string) => void;
 } {
   const authFetch = useAuthApiClient();
+  // The controller of each running download, so one can be cancelled on its own.
+  const controllers = useRef(new Map<string, AbortController>());
   // One entry per running download, so two at once do not overwrite each other.
   const [downloads, setDownloads] = useState<Record<string, number | null>>({});
   const setProgress = (id: string, percent: number | null): void =>
@@ -61,15 +66,26 @@ export function useStoredAttachmentDownload(): {
       id in previous && previous[id] === percent ? previous : { ...previous, [id]: percent },
     );
   const mutation = useMutation<void, Error, StoredAttachmentDownloadInput>({
-    mutationFn: (input) =>
-      downloadStoredAttachment(authFetch, {
-        ...input,
-        onProgress: (received, total) =>
-          setProgress(
-            input.id,
-            total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null,
-          ),
-      }),
+    mutationFn: async (input) => {
+      const controller = new AbortController();
+      controllers.current.set(input.id, controller);
+      try {
+        await downloadStoredAttachment(authFetch, {
+          ...input,
+          signal: controller.signal,
+          onProgress: (received, total) =>
+            setProgress(
+              input.id,
+              total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : null,
+            ),
+        });
+      } catch (error) {
+        // Cancelled by the person: nothing was saved, and that is not a failure to report.
+        if (!isAbortError(error)) throw error;
+      } finally {
+        if (controllers.current.get(input.id) === controller) controllers.current.delete(input.id);
+      }
+    },
     onMutate: (input) => setProgress(input.id, null),
     onSettled: (_data, _error, input) =>
       setDownloads((previous) => {
@@ -83,6 +99,7 @@ export function useStoredAttachmentDownload(): {
     isDownloading: Object.keys(downloads).length > 0,
     isDownloadingId: (id) => id in downloads,
     downloadProgressOf: (id) => downloads[id] ?? null,
+    cancelDownload: (id) => controllers.current.get(id)?.abort(),
   };
 }
 
