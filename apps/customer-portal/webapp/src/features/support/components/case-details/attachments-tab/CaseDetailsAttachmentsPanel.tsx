@@ -20,6 +20,7 @@ import ListPagination from "@components/list-view/ListPagination";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useMutationState } from "@tanstack/react-query";
+import { useCaseUploads } from "@api/caseUploadProgress";
 import {
   useGetCaseAttachments,
   flattenCaseAttachments,
@@ -100,6 +101,8 @@ export default function CaseDetailsAttachmentsPanel({
   }).filter(
     (vars): vars is StoredUploadVariables => vars?.caseId === caseId,
   );
+
+  const runningUploads = useCaseUploads(caseId);
 
   const allAttachments = useMemo(() => flattenCaseAttachments(data), [data]);
 
@@ -251,6 +254,7 @@ export default function CaseDetailsAttachmentsPanel({
               <UploadingAttachmentPlaceholder
                 key={`pending-upload-${index}`}
                 name={vars.body.name}
+                percent={runningUploads.find((u) => u.name === vars.body.name)?.percent}
               />
             ))}
             {isFetchingNextPage && paginatedAttachments.length === 0 ? (

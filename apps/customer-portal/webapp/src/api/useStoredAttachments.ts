@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { trackCaseUpload } from "@api/caseUploadProgress";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useAuthApiClient } from "@/hooks/useAuthApiClient";
@@ -147,16 +148,25 @@ export function useStoredAttachmentUpload() {
 
   const upload = useMutation<StoredAttachmentConfirmed, Error, StoredUploadVariables>({
     mutationKey: ["postCaseAttachment"],
-    mutationFn: ({ type, parentId, file, body, onStep, signal, onProgress }) =>
-      uploadStoredAttachment(authFetch, {
-        type,
-        parentId,
-        file,
-        name: body.name,
-        onStep,
-        signal,
-        onProgress,
-      }),
+    mutationFn: async ({ type, parentId, file, body, caseId, onStep, signal, onProgress }) => {
+      const tracked = caseId ? trackCaseUpload(caseId, body.name) : undefined;
+      try {
+        return await uploadStoredAttachment(authFetch, {
+          type,
+          parentId,
+          file,
+          name: body.name,
+          onStep,
+          signal,
+          onProgress: (sent, total) => {
+            tracked?.update(sent, total);
+            onProgress?.(sent, total);
+          },
+        });
+      } finally {
+        tracked?.finish();
+      }
+    },
     onSuccess: (_data, vars) => invalidate(vars),
   });
 
