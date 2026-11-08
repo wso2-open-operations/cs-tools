@@ -3928,8 +3928,7 @@ func humanizeSnakeCase(value string) string {
 // from PostgreSQL only; the files are in Azure Blob Storage and are read by the
 // portal backends.
 //
-// referenceType "case" reads case_attachment (older uploads) and the
-// work_item_attachment rows of the same case as one deduplicated list (see
+// referenceType "case" reads the case's work_item_attachment rows (see
 // caseRepo.SearchCaseAttachments). "change_request", "incident" and
 // "conversation" are work_item subtypes and read work_item_attachment through
 // CaseRepository.SearchWorkItemAttachments; "deployment" reads

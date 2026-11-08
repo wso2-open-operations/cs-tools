@@ -23,7 +23,7 @@ import (
 // StoredAttachmentKind says which attachment table a request is about. These
 // are the three whose files live in Azure Blob Storage: work_item_attachment,
 // comment_attachment (the images embedded in a comment) and
-// deployment_attachment. case_attachment is a separate, older flow.
+// deployment_attachment. case_attachment is an older table that nothing writes or lists any more.
 type StoredAttachmentKind string
 
 const (
