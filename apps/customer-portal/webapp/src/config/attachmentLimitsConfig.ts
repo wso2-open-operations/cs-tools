@@ -19,6 +19,9 @@ const MIB = 1024 * 1024;
 
 /** Entity-service's own defaults (`ATTACHMENT_MAX_MB`, `INLINE_IMAGES_TOTAL_MAX_MB`). */
 export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
+/** Ceilings: a configured value above one is ignored and the default is used. */
+export const MAX_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const MAX_INLINE_IMAGES_TOTAL_MAX_MB = 25;
 /** Total size of the inline images in one comment or description. */
 export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 1;
 /** @deprecated Kept for imports; the limit is now a total per comment or description. */
@@ -27,16 +30,16 @@ export const DEFAULT_INLINE_IMAGE_MAX_MB = DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB;
 /**
  * A size in MB from `window.config`. Platform config injection often turns
  * numbers into strings, so both are accepted; anything that is not a positive
- * finite number falls back to the default.
+ * finite number, or is above `max`, falls back to the default.
  */
-function configuredMb(value: unknown, fallback: number): number {
+function configuredMb(value: unknown, fallback: number, max: number): number {
   const parsed =
     typeof value === "number"
       ? value
       : typeof value === "string" && value.trim() !== ""
         ? Number(value)
         : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
 }
 
 /**
@@ -49,13 +52,14 @@ export function entityAttachmentMaxBytes(): number {
     configuredMb(
       window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB,
       DEFAULT_ENTITY_ATTACHMENT_MAX_MB,
+      MAX_ENTITY_ATTACHMENT_MAX_MB,
     ) * MIB,
   );
 }
 
 /**
  * Most the inline images of one comment or description may add up to, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 1). The older
+ * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 1, at most 25). The older
  * `CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB` is read when the new key is not set.
  * Read at call time.
  */
@@ -66,7 +70,9 @@ export function inlineImagesTotalMaxBytes(): number {
     configuredMb(
       config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
       DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB,
+      MAX_INLINE_IMAGES_TOTAL_MAX_MB,
     ),
+    MAX_INLINE_IMAGES_TOTAL_MAX_MB,
   );
   return Math.floor(mb * MIB);
 }
