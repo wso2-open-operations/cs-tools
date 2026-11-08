@@ -3232,8 +3232,6 @@ export default function CsmCaseDetailPage(): JSX.Element {
           error={githubIssueError}
           createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
-          defaultTitle={c.subject}
-          defaultDescription={c.description}
           showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           onClose={() => {
             setGithubIssueOpen(false);

@@ -11451,12 +11451,18 @@ components:
           type: boolean
           default: false
           description: Whether a hotfix is required; appended to the issue body.
-        issueTypeLabel:
+        hotFixReason:
           type: string
-          description: Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident").
+          description: Why a hotfix is required; only meaningful when hotFixRequired is true.
+        reproducingSteps:
+          type: string
+          description: Steps to reproduce the problem.
+        priorityJustification:
+          type: string
+          description: Justification for the priority (expected for P1/P2).
         priorityLevel:
           type: string
-          description: Priority label to apply when issueTypeLabel is "Type/Incident".
+          description: Priority label to apply on GitHub. Every issue is filed with the fixed "Type/Incident" issue-type label, set server-side.
 
     CaseGithubIssueDetail:
       type: object

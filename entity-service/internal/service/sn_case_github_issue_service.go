@@ -46,6 +46,13 @@ var caseGithubIssueActionableStates = map[domain.CaseState]struct{}{
 	domain.CaseStateReopened:       {},
 }
 
+// caseGithubIssueTypeLabel is the GitHub issue-type label applied to every
+// issue filed from a case. Every issue is raised as a discussion, which reuses
+// the existing Type/Incident label rather than introducing a new label type
+// (and is the type for which SN applies the priority label). It is fixed here
+// rather than accepted from the caller.
+const caseGithubIssueTypeLabel = "Type/Incident"
+
 // snCaseGithubIssueRepoOverride mirrors CaseGithubIssueRepoOverride in the SN integration service payload.
 type snCaseGithubIssueRepoOverride struct {
 	Owner string `json:"owner"`
@@ -62,8 +69,12 @@ type snCaseGithubIssueCreatePayload struct {
 	PublicIssueURL *string                        `json:"publicIssueUrl,omitempty"`
 	Regression     bool                           `json:"regression,omitempty"`
 	HotFixRequired bool                           `json:"hotFixRequired,omitempty"`
-	IssueTypeLabel *string                        `json:"issueTypeLabel,omitempty"`
+	IssueTypeLabel string                         `json:"issueTypeLabel"`
 	PriorityLevel  *string                        `json:"priorityLevel,omitempty"`
+
+	HotFixReason          *string `json:"hotFixReason,omitempty"`
+	ReproducingSteps      *string `json:"reproducingSteps,omitempty"`
+	PriorityJustification *string `json:"priorityJustification,omitempty"`
 }
 
 // snCaseGithubIssueCreateResponse mirrors the SN integration service POST /cases/{id}/github-issues response.
@@ -130,8 +141,12 @@ func (s *snCaseGithubIssueService) CreateCaseGithubIssue(ctx context.Context, re
 		PublicIssueURL: req.PublicIssueURL,
 		Regression:     req.Regression,
 		HotFixRequired: req.HotFixRequired,
-		IssueTypeLabel: req.IssueTypeLabel,
+		IssueTypeLabel: caseGithubIssueTypeLabel,
 		PriorityLevel:  req.PriorityLevel,
+
+		HotFixReason:          req.HotFixReason,
+		ReproducingSteps:      req.ReproducingSteps,
+		PriorityJustification: req.PriorityJustification,
 	}
 	if req.RepoOverride != nil {
 		payload.RepoOverride = &snCaseGithubIssueRepoOverride{

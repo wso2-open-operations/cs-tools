@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -209,4 +210,49 @@ func TestSNCaseGithubIssueService_CreateCaseGithubIssue_StateGate(t *testing.T) 
 			t.Fatalf("expected lookup error to propagate, got %T: %v", err, err)
 		}
 	})
+}
+
+func TestSNCaseGithubIssueService_CreateCaseGithubIssue_ForwardsDialogFieldsAndTypeIncidentLabel(t *testing.T) {
+	var got map[string]any
+	client := newTestSNClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode SN payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"ok","issue":{"url":"u","number":1,"repo":"r"}}`))
+	}))
+	svc := NewServiceNowCaseGithubIssueService(client, &fakeCaseServiceForGithubIssue{state: domain.CaseStateOpen})
+
+	priority, why, steps, hotfix := "P2", "Production outage", "1. Call the endpoint", "Customer-requested hotfix"
+	_, err := svc.CreateCaseGithubIssue(contextWithUserIDToken("token"), domain.CreateCaseGithubIssueRequest{
+		CaseID:        "11111111-1111-1111-1111-111111111111",
+		Reason:        domain.CaseGithubIssueReasonDefault,
+		Title:         "t",
+		Description:   "d",
+		PriorityLevel: &priority,
+
+		PriorityJustification: &why,
+		ReproducingSteps:      &steps,
+		HotFixRequired:        true,
+		HotFixReason:          &hotfix,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got["issueTypeLabel"] != "Type/Incident" {
+		t.Fatalf("issueTypeLabel = %v, want Type/Incident", got["issueTypeLabel"])
+	}
+	if got["priorityLevel"] != "P2" {
+		t.Fatalf("priorityLevel = %v, want P2", got["priorityLevel"])
+	}
+	for k, want := range map[string]any{
+		"priorityJustification": "Production outage",
+		"reproducingSteps":      "1. Call the endpoint",
+		"hotFixRequired":        true,
+		"hotFixReason":          "Customer-requested hotfix",
+	} {
+		if got[k] != want {
+			t.Fatalf("%s = %v, want %v", k, got[k], want)
+		}
+	}
 }

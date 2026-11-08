@@ -2241,10 +2241,14 @@ export interface BeCreateCaseGithubIssuePayload {
   regression?: boolean;
   /** When true: appends "Hotfix Required : Yes" to the issue body. */
   hotFixRequired?: boolean;
-  /** Issue-type label to apply on GitHub (e.g. "Type/Patch", "Type/Incident"). */
-  issueTypeLabel?: string;
-  /** Priority label, applied only when `issueTypeLabel` is "Type/Incident". */
+  /** Why a hotfix is needed; sent only when `hotFixRequired` is true. */
+  hotFixReason?: string;
+  /** Steps to reproduce the problem. */
+  reproducingSteps?: string;
+  /** Priority: "P1" | "P2" | "P3". */
   priorityLevel?: string;
+  /** Why the priority is P1/P2; sent only for those priorities. */
+  priorityJustification?: string;
 }
 
 /** `POST /cases/{id}/github-issues` response. */

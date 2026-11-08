@@ -11908,12 +11908,19 @@ components:
         hotFixRequired:
           type: boolean
           description: Whether a hot fix is required.
-        issueTypeLabel:
+        hotFixReason:
           type: string
-          description: GitHub label for the issue type.
+          description: Why a hot fix is required; sent only when hotFixRequired is true.
+        reproducingSteps:
+          type: string
+          description: Steps to reproduce the problem.
         priorityLevel:
           type: string
+          enum: [P1, P2, P3]
           description: Priority level for the issue.
+        priorityJustification:
+          type: string
+          description: Justification for the priority; sent only for P1/P2.
 
     CreateCaseGithubIssueResponse:
       type: object

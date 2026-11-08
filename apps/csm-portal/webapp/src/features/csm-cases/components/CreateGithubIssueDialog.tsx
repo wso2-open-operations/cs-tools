@@ -41,26 +41,20 @@ import { useGetGithubIssueRepoOptions } from "@features/csm-cases/api/useGetGith
 
 // ---------------------------------------------------------------------------
 // Option lists. Every select starts unset ("" → "-- Select --") and omits its
-// field from the payload when left unset. Values mirror the legacy SN "Open Git
-// Issue" form: Type is a GitHub label string, priority is only meaningful for
-// incidents (the SN side applies it as a label only when Type is Incident).
+// field from the payload when left unset.
 // ---------------------------------------------------------------------------
 
 const UNSET = "";
 const SELECT_PLACEHOLDER = "-- Select --";
 
-type IssueTypeValue = "" | "Type/Query" | "Type/Incident" | "Type/Patch";
-
-const TYPE_OPTIONS: Array<{ value: IssueTypeValue; label: string }> = [
-  { value: "Type/Query", label: "Query" },
-  { value: "Type/Incident", label: "Incident" },
-  { value: "Type/Patch", label: "Patch" },
+const PRIORITY_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "P1", label: "P1" },
+  { value: "P2", label: "P2" },
+  { value: "P3", label: "P3" },
 ];
 
-const SEVERITY_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "P1", label: "P1 - Critical" },
-  { value: "P2", label: "P2 - High" },
-  { value: "P3", label: "P3 - Medium" },
+const HOTFIX_REASON_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "Customer-requested hotfix", label: "Customer-requested hotfix" },
 ];
 
 // Cloud-case repositories. Fetched from GET /metadata's
@@ -84,10 +78,6 @@ export interface CreateGithubIssueDialogProps {
   createdIssue?: BeCreateCaseGithubIssueResponse | null;
   /** Prefill for the update-level field, taken from the case's product context. */
   defaultUpdateLevel?: string;
-  /** Prefill for the Subject field, taken from the case's subject. */
-  defaultTitle?: string;
-  /** Prefill for the Description field, taken from the case's description. */
-  defaultDescription?: string;
   /** Show the repository field only for cloud subscription / cloud
    * evaluation subscription projects — other project types route by
    * product unit on the SN side and have no repo to choose. Conversely,
@@ -109,17 +99,14 @@ export interface CreateGithubIssueDialogProps {
 // ---------------------------------------------------------------------------
 
 /**
- * Form for filing an internal GitHub issue from a case (ISSU-020). Mirrors the
- * legacy ServiceNow "Open Git Issue" form. Subject + Description are always
- * required; Type is required too and drives which other fields are shown/
- * required (per review on #1085):
- *   - Query: Severity and Hotfix Required are hidden.
- *   - Incident: Severity is required; Hotfix Required is hidden.
- *   - Patch: Severity is hidden; Update Level, Public Git Issue, and Hotfix
- *     Required are all required.
- * Reason is fixed to `default` (the migration / R&D-ticket variants were
- * separate SN actions). Repo selection is offered for cloud cases; when unset
- * the SN side routes by the case's product unit.
+ * Form for filing an internal GitHub issue from a case (ISSU-020). Subject,
+ * Description and Priority are always required (Subject/Description start
+ * empty — they are deliberately not prefilled from the case). Priority
+ * Justification appears, and is required, only for P1/P2. Hotfix Reason
+ * appears, and is required, only when Hotfix Required is on. Reproducing
+ * Steps, Update Level and Public Git Issue are optional. Reason is fixed to
+ * `default`. Repo selection is offered for cloud cases; when unset the SN side
+ * routes by the case's product unit.
  */
 export function CreateGithubIssueDialog({
   open,
@@ -127,22 +114,21 @@ export function CreateGithubIssueDialog({
   error,
   createdIssue,
   defaultUpdateLevel,
-  defaultTitle,
-  defaultDescription,
   showRepoField,
   onClose,
   onSubmit,
   onOpenConfirm,
 }: CreateGithubIssueDialogProps): JSX.Element {
-  const [type, setType] = useState<IssueTypeValue>(UNSET);
-  const [title, setTitle] = useState(defaultTitle ?? "");
-  const [description, setDescription] = useState(defaultDescription ?? "");
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [reproducingSteps, setReproducingSteps] = useState("");
   const [updateLevel, setUpdateLevel] = useState(defaultUpdateLevel ?? "");
   const [publicIssueUrl, setPublicIssueUrl] = useState("");
   const [priorityLevel, setPriorityLevel] = useState<string>(UNSET);
+  const [priorityJustification, setPriorityJustification] = useState("");
   const [repo, setRepo] = useState<string>(UNSET);
   const [hotFix, setHotFix] = useState(false);
-  const [regression, setRegression] = useState(false);
+  const [hotFixReason, setHotFixReason] = useState<string>(UNSET);
   // Set once the user clicks "Create issue" on the form; holds the built
   // payload until they confirm on the follow-up step below. Filing this issue
   // is a real write to an external GitHub repo, so it gets an explicit
@@ -175,39 +161,30 @@ export function CreateGithubIssueDialog({
     label: o.displayLabel,
   }));
 
-  // Type drives which fields apply — see the component doc comment above.
-  const showSeverity = type === "Type/Incident";
-  const requireSeverity = type === "Type/Incident";
-  const showHotFix = type === "Type/Patch";
-  // Update Level / Public Git Issue apply to non-cloud projects only — cloud
-  // projects route via the repo field instead (see showRepoField).
-  const showUpdateLevelAndIssueUrl = !showRepoField;
-  const requireUpdateLevel =
-    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
-  const requirePublicIssueUrl =
-    type === "Type/Patch" && showUpdateLevelAndIssueUrl;
+  const showPriorityJustification =
+    priorityLevel === "P1" || priorityLevel === "P2";
 
   const resetAndClose = () => {
-    setType(UNSET);
-    setTitle(defaultTitle ?? "");
-    setDescription(defaultDescription ?? "");
+    setTitle("");
+    setDescription("");
+    setReproducingSteps("");
     setUpdateLevel(defaultUpdateLevel ?? "");
     setPublicIssueUrl("");
     setPriorityLevel(UNSET);
+    setPriorityJustification("");
     setRepo(UNSET);
     setHotFix(false);
-    setRegression(false);
+    setHotFixReason(UNSET);
     setConfirmPayload(null);
     onClose();
   };
 
   const canSubmit =
-    !!type &&
     title.trim().length > 0 &&
     description.trim().length > 0 &&
-    (!requireSeverity || !!priorityLevel) &&
-    (!requireUpdateLevel || updateLevel.trim().length > 0) &&
-    (!requirePublicIssueUrl || publicIssueUrl.trim().length > 0) &&
+    !!priorityLevel &&
+    (!showPriorityJustification || priorityJustification.trim().length > 0) &&
+    (!hotFix || !!hotFixReason) &&
     !repoOptionsUnavailable;
 
   const selectedRepoOption = repoOptions.find((o) => o.value === repo);
@@ -219,21 +196,28 @@ export function CreateGithubIssueDialog({
       reason: "default",
       title: title.trim(),
       description: description.trim(),
-      issueTypeLabel: type,
+      priorityLevel,
     };
+    if (reproducingSteps.trim()) {
+      payload.reproducingSteps = reproducingSteps.trim();
+    }
+    // Only P1/P2 show the justification field; never send a stale value
+    // typed before the priority was switched to P3.
+    if (showPriorityJustification) {
+      payload.priorityJustification = priorityJustification.trim();
+    }
     if (updateLevel.trim()) payload.updateLevel = updateLevel.trim();
     if (publicIssueUrl.trim()) payload.publicIssueUrl = publicIssueUrl.trim();
-    // Priority only carries meaning for incidents on the SN side; send it
-    // whenever the user picked one and let the SN side decide to apply it.
-    if (priorityLevel) payload.priorityLevel = priorityLevel;
     if (selectedRepoOption) {
       payload.repoOverride = {
         owner: selectedRepoOption.owner,
         repo: selectedRepoOption.repo,
       };
     }
-    if (showHotFix && hotFix) payload.hotFixRequired = true;
-    if (regression) payload.regression = true;
+    if (hotFix) {
+      payload.hotFixRequired = true;
+      payload.hotFixReason = hotFixReason;
+    }
 
     onOpenConfirm?.();
     setConfirmPayload(payload);
@@ -290,8 +274,6 @@ export function CreateGithubIssueDialog({
             </Typography>
           )}
 
-          {renderSelect("ghi-type", "Type", type, setType, TYPE_OPTIONS, true)}
-
           <TextField
             label="Subject"
             value={title}
@@ -315,64 +297,80 @@ export function CreateGithubIssueDialog({
             helperText="Case number, product and reporter are appended to the issue body automatically."
           />
 
-          {showSeverity &&
-            renderSelect(
-              "ghi-severity",
-              "Severity",
-              priorityLevel,
-              setPriorityLevel,
-              SEVERITY_OPTIONS,
-              requireSeverity,
-            )}
+          <TextField
+            label="Reproducing Steps"
+            multiline
+            minRows={3}
+            value={reproducingSteps}
+            onChange={(e) => setReproducingSteps(e.target.value)}
+            fullWidth
+            disabled={submitting}
+          />
 
-          {showUpdateLevelAndIssueUrl && (
+          {renderSelect(
+            "ghi-priority",
+            "Priority",
+            priorityLevel,
+            setPriorityLevel,
+            PRIORITY_OPTIONS,
+            true,
+          )}
+
+          {showPriorityJustification && (
             <TextField
-              label="Update Level"
-              value={updateLevel}
-              onChange={(e) => setUpdateLevel(e.target.value)}
-              disabled={submitting}
-              required={requireUpdateLevel}
-              size="small"
+              label="Priority Justification"
+              multiline
+              minRows={2}
+              value={priorityJustification}
+              onChange={(e) => setPriorityJustification(e.target.value)}
               fullWidth
+              required
+              disabled={submitting}
             />
           )}
 
-          {showUpdateLevelAndIssueUrl && (
-            <TextField
-              label="Public Git Issue or Security Internal JIRA"
-              value={publicIssueUrl}
-              onChange={(e) => setPublicIssueUrl(e.target.value)}
-              disabled={submitting}
-              required={requirePublicIssueUrl}
-              size="small"
-              fullWidth
-              placeholder="https://github.com/… or JIRA link"
-            />
-          )}
+          <TextField
+            label="Update Level"
+            value={updateLevel}
+            onChange={(e) => setUpdateLevel(e.target.value)}
+            disabled={submitting}
+            size="small"
+            fullWidth
+          />
 
-          {showHotFix && (
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={hotFix}
-                  onChange={(e) => setHotFix(e.target.checked)}
-                  disabled={submitting}
-                />
-              }
-              label="Hotfix Required"
-            />
-          )}
+          <TextField
+            label="Public Git Issue"
+            value={publicIssueUrl}
+            onChange={(e) => setPublicIssueUrl(e.target.value)}
+            disabled={submitting}
+            size="small"
+            fullWidth
+            placeholder="https://github.com/…"
+          />
 
           <FormControlLabel
             control={
               <Switch
-                checked={regression}
-                onChange={(e) => setRegression(e.target.checked)}
+                checked={hotFix}
+                onChange={(e) => {
+                  setHotFix(e.target.checked);
+                  if (!e.target.checked) setHotFixReason(UNSET);
+                }}
                 disabled={submitting}
               />
             }
-            label="Regression"
+            label="Hotfix Required"
           />
+
+          {hotFix &&
+            renderSelect(
+              "ghi-hotfix-reason",
+              "Hotfix Reason",
+              hotFixReason,
+              setHotFixReason,
+              HOTFIX_REASON_OPTIONS,
+              true,
+            )}
 
           {showRepoField &&
             renderSelect(

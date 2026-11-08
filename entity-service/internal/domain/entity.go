@@ -2702,8 +2702,13 @@ type CreateCaseGithubIssueRequest struct {
 	PublicIssueURL *string                      `json:"publicIssueUrl,omitempty"`
 	Regression     bool                         `json:"regression,omitempty"`
 	HotFixRequired bool                         `json:"hotFixRequired,omitempty"`
-	IssueTypeLabel *string                      `json:"issueTypeLabel,omitempty"`
-	PriorityLevel  *string                      `json:"priorityLevel,omitempty"`
+	// HotFixReason explains why a hotfix is needed; only meaningful with HotFixRequired.
+	HotFixReason *string `json:"hotFixReason,omitempty"`
+	// ReproducingSteps are the steps to reproduce the problem.
+	ReproducingSteps *string `json:"reproducingSteps,omitempty"`
+	PriorityLevel    *string `json:"priorityLevel,omitempty"`
+	// PriorityJustification explains a P1/P2 priority.
+	PriorityJustification *string `json:"priorityJustification,omitempty"`
 }
 
 // CaseGithubIssueDetail holds the result of filing a GitHub issue from a case.
