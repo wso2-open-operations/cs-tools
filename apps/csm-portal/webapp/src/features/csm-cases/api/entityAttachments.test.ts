@@ -349,25 +349,30 @@ describe("chunked upload and streamed download", () => {
     });
 
   /** A file of `size` bytes where byte i is the letter for floor(i / RANGE), served by Range. */
-  const rangeServer = (size: number, delay: (start: number) => number = () => 0) => {
+  const rangeServer = (size: number, delay: (start: number) => number = () => 0, hideHeaders = false) => {
     const byteAt = (i: number) => 65 + Math.floor(i / DOWNLOAD_RANGE_BYTES);
     let inFlight = 0;
     let peak = 0;
     const getResponse = vi.fn(async (_path: string, options?: { headers?: Record<string, string> }) => {
       const match = /bytes=(\d+)-(\d+)/.exec(options?.headers?.Range ?? "");
       const start = Number(match?.[1] ?? 0);
+      if (start >= size) throw apiError(416, "Range Not Satisfiable"); // past the end of the file
       const end = Math.min(Number(match?.[2] ?? size - 1), size - 1);
       inFlight += 1;
       peak = Math.max(peak, inFlight);
       await new Promise((r) => setTimeout(r, delay(start)));
       inFlight -= 1;
       const body = new Uint8Array(end - start + 1).map((_, i) => byteAt(start + i));
+      // A cross-origin response without Access-Control-Expose-Headers: the browser hands page
+      // scripts neither Content-Range nor Content-Disposition (Content-Length is always readable).
       return new Response(body, {
         status: 206,
-        headers: {
-          "Content-Range": `bytes ${start}-${end}/${size}`,
-          "Content-Disposition": 'attachment; filename="big.bin"',
-        },
+        headers: hideHeaders
+          ? { "Content-Length": String(body.length) }
+          : {
+              "Content-Range": `bytes ${start}-${end}/${size}`,
+              "Content-Disposition": 'attachment; filename="big.bin"',
+            },
       });
     });
     return { getResponse, peak: () => peak };
@@ -482,6 +487,110 @@ describe("chunked upload and streamed download", () => {
       downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
     ).rejects.toThrow("The download was interrupted.");
     expect(save).not.toHaveBeenCalled();
+  });
+
+  describe("when the browser hides Content-Range and Content-Disposition", () => {
+    const hidden = (size: number) => rangeServer(size, () => 0, true);
+
+    it("saves a small file under the attachment's own name, using its known size", async () => {
+      const server = hidden(1_100_144);
+      const save = vi.fn();
+      const done = await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "1mb.pdf", size: 1_100_144 },
+        save,
+      );
+      expect(done).toBe(true);
+      expect(server.getResponse).toHaveBeenCalledTimes(1); // no retries
+      expect((save.mock.calls[0][0] as Blob).size).toBe(1_100_144);
+      expect(save.mock.calls[0][1]).toBe("1mb.pdf");
+    });
+
+    it("takes a body shorter than the range asked for as the whole file when no size is known", async () => {
+      const server = hidden(1000);
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+      expect(server.getResponse).toHaveBeenCalledTimes(1);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(1000);
+      expect(save.mock.calls[0][1]).toBe("attachment");
+    });
+
+    it("fetches a large file as ranges, the total taken from the known size", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 2 + 7;
+      const server = hidden(size);
+      const save = vi.fn();
+      const progress = vi.fn();
+      await downloadEntityAttachment(
+        apiWith(vi.fn(), vi.fn(), server.getResponse),
+        { type: "work_item", id: ID, name: "big.bin", size, onProgress: progress },
+        save,
+      );
+      expect(server.getResponse).toHaveBeenCalledTimes(3);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+      expect(progress).toHaveBeenLastCalledWith(size, size);
+    });
+
+    it("still rejects a first range whose length is not what the known size allows", async () => {
+      const server = hidden(1000);
+      const save = vi.fn();
+      await expect(
+        downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID, size: 5000 }, save),
+      ).rejects.toThrow("The download was interrupted.");
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("reads on until the file ends when no size is known and the first range is full", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 2 + 11;
+      const server = hidden(size);
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+    });
+
+    it("stops on the refusal past the end when the file is an exact multiple of the range", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 2;
+      const server = hidden(size);
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+    });
+
+    it("gives up on a backend that never ends the file, instead of reading for ever", async () => {
+      // Every range is full, however far on: there is no end to find.
+      const getResponse = vi.fn(
+        async (_path: string, options?: { headers?: Record<string, string> }) => {
+          const start = Number(/bytes=(\d+)-/.exec(options?.headers?.Range ?? "")?.[1] ?? 0);
+          const body = new Uint8Array(DOWNLOAD_RANGE_BYTES);
+          return new Response(body, { status: 206, headers: { "Content-Length": String(body.length), "X-Start": String(start) } });
+        },
+      );
+      const save = vi.fn();
+      await expect(
+        downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
+      ).rejects.toThrow("The download was interrupted.");
+      expect(save).not.toHaveBeenCalled();
+      // The 100 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
+      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(100 / 8) + 1 + 8);
+    });
+
+    it("reads a range again, rather than ending the file, when its body is cut short of its Content-Length", async () => {
+      const size = DOWNLOAD_RANGE_BYTES + 50;
+      const server = hidden(size);
+      let cut = true;
+      const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+        const response = await server.getResponse(path, options);
+        if (cut && /bytes=\d+-/.exec(options?.headers?.Range ?? "")?.[0] !== "bytes=0-") {
+          cut = false;
+          // The connection dropped half-way: Content-Length promises more than arrives.
+          const full = new Uint8Array(await response.arrayBuffer());
+          return new Response(full.slice(0, 10), { status: 206, headers: { "Content-Length": String(full.length) } });
+        }
+        return response;
+      });
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+    });
   });
 
   it("rejects a later range whose Content-Range is not the one asked for", async () => {

@@ -171,6 +171,19 @@ describe("linkifyBareUrls", () => {
     expect(out).toContain('href="https://example.com"');
   });
 
+  it("never rewrites a URL inside a tag attribute, e.g. an <img> pasted from a web page", () => {
+    const input =
+      '<p><img src="https://png.pngtree.com/a.png" alt="Emoji | Pngtree" style="max-width: 100%; display: block;"></p>';
+    expect(linkifyBareUrls(input)).toBe(input);
+  });
+
+  it("still links a bare URL that sits next to such an image", () => {
+    const out = linkifyBareUrls('<img src="https://a.test/x.png"> source: https://a.test/page');
+    expect(out).toContain('<img src="https://a.test/x.png">');
+    expect(out).toContain('<a href="https://a.test/page"');
+    expect((out.match(/<a /g) ?? []).length).toBe(1);
+  });
+
   it("does not produce a nested anchor when the URL is already an anchor's visible text", () => {
     const input = '<a href="https://example.com">https://example.com</a>';
     const out = linkifyBareUrls(input);

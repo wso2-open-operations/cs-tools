@@ -30,7 +30,15 @@ export function useDownloadDeploymentAttachment(): (
 
   return useCallback(
     async (attachment: DeploymentAttachment): Promise<void> => {
-      await downloadEntityAttachment(api, { type: "deployment", id: attachment.id });
+      // The name and size are the attachment's own: they name the saved file and give the
+      // total size even when the browser hides the response's Content-Disposition and
+      // Content-Range, and a small size skips the save dialog.
+      await downloadEntityAttachment(api, {
+        type: "deployment",
+        id: attachment.id,
+        name: attachment.name,
+        size: attachment.sizeBytes,
+      });
     },
     [api],
   );

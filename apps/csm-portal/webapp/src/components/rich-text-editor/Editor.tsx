@@ -356,6 +356,13 @@ const ClipboardImagePlugin = ({
  *   (clipboard has `text/plain` but no `text/html`) is unaffected and always
  *   goes straight to the plain-text path with no prompt.
  */
+/** True when `html` holds at least one `<img>` and no text at all. */
+function isImageOnlyHtml(html: string): boolean {
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
+}
+
 const PasteNormalizationPlugin = (): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
@@ -373,6 +380,20 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
         const html = clipboardData.getData("text/html");
         const text = clipboardData.getData("text/plain");
+
+        // A picture copied from a web page carries the image itself AND an
+        // `<img src="https://...">` as its HTML. The image is stored by
+        // ClipboardImagePlugin (or refused with its own message); pasting the
+        // HTML as well would add a second, hot-linked copy of the same picture.
+        // Only when the HTML is nothing but images: Word/Docs content with
+        // text keeps going through the format prompt.
+        const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
+          item.type.startsWith("image/"),
+        );
+        if (hasImageFile && isImageOnlyHtml(html)) {
+          event.preventDefault();
+          return true;
+        }
 
         if (html.trim()) {
           event.preventDefault();

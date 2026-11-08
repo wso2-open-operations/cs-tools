@@ -15,7 +15,7 @@
 // under the License.
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
-import { downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
+import { MAX_ENTITY_ATTACHMENT_MAX_MB, downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadToDisk";
 
@@ -135,6 +135,14 @@ function attachmentContentPath(args: { type: EntityAttachmentType; id: string })
 
 const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
 
+/**
+ * The most ranges a file of unknown size is read for: the hard ceiling on an
+ * attachment's size (what no upload can exceed) in 8 MiB ranges, plus one so a
+ * file right at that ceiling can still end on its refusal past the end. A
+ * backend that never stops answering is thus cut off, not read for ever.
+ */
+const MAX_UNKNOWN_SIZE_RANGES = Math.ceil((MAX_ENTITY_ATTACHMENT_MAX_MB * 1024 * 1024) / DOWNLOAD_RANGE_BYTES) + 1;
+
 /** Reads a response body to the end, keeping the pieces as they arrive. */
 async function readParts(response: Response): Promise<Uint8Array[]> {
   const reader = response.body?.getReader();
@@ -155,6 +163,34 @@ function parseContentRange(headers: Headers): { start: number; end: number; tota
   if (!match) return null;
   const [start, end, total] = [Number(match[1]), Number(match[2]), Number(match[3])];
   return end >= start && total > end ? { start, end, total } : null;
+}
+
+/**
+ * The response headers a browser may hide. Content-Range and Content-Disposition
+ * are not readable by page scripts unless the backend (or the gateway in front
+ * of it) lists them in Access-Control-Expose-Headers; Content-Length and
+ * Content-Type always are. A download must work either way, so what those two
+ * headers would say is taken from the attachment itself when they are hidden:
+ * the file name from its record, the size from its metadata.
+ */
+function knownSizeOf(size: number | undefined): number | undefined {
+  return size !== undefined && Number.isSafeInteger(size) && size > 0 ? size : undefined;
+}
+
+/**
+ * Whether the first range is the whole of what it should be when its
+ * Content-Range cannot be read. With the size known it must be exactly the
+ * first 8 MiB, or the whole file when that is smaller; with no size, any body up
+ * to the 8 MiB asked for. A Content-Length that disagrees with the bytes read is
+ * a broken connection either way.
+ */
+function firstRangeIsWhole(response: Response, length: number, size: number | undefined): boolean {
+  const declared = response.headers.get("Content-Length");
+  if (declared !== null && Number(declared) !== length) return false;
+  if (size !== undefined) return length === Math.min(DOWNLOAD_RANGE_BYTES, size);
+  // No size: the rest is found by reading on until the file ends ({@link readUntilEnd}).
+  // A body cut short by a dropped connection disagrees with its Content-Length, checked above.
+  return length > 0 && length <= DOWNLOAD_RANGE_BYTES;
 }
 
 interface RangeRead {
@@ -233,20 +269,74 @@ async function downloadFromBackend(
   }
 }
 
+/**
+ * Reads the rest of a file whose size is not known, because Content-Range is
+ * hidden and the caller gave none: ranges after the first are asked for
+ * `parallelism` at a time, in order, until one comes back short or is refused as
+ * past the end (416). The most that is wasted is the ranges asked for beyond the
+ * end, each a cheap refusal. A range's body is checked against its own
+ * Content-Length, so a connection that dropped is read again instead of being
+ * taken for the end of the file.
+ */
+async function readUntilEnd(
+  api: BackendApi,
+  path: string,
+  store: (index: number, start: number, parts: Uint8Array[]) => Promise<void>,
+): Promise<void> {
+  const window = downloadParallelism();
+  for (let next = 1; next < MAX_UNKNOWN_SIZE_RANGES; next += window) {
+    const results = await Promise.all(
+      Array.from({ length: window }, async (_, offset) => {
+        const index = next + offset;
+        const start = index * DOWNLOAD_RANGE_BYTES;
+        try {
+          const { parts } = await readRange(api, path, start, start + DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
+            const length = partsLength(parts);
+            const declared = response.headers.get("Content-Length");
+            return response.status === 206 && length > 0 && length <= DOWNLOAD_RANGE_BYTES && (declared === null || Number(declared) === length);
+          });
+          return { index, start, parts };
+        } catch (err) {
+          if (err instanceof BackendApiError && err.status === 416) return { index, start, parts: null };
+          throw err;
+        }
+      }),
+    );
+    for (const { index, start, parts } of results) {
+      if (parts === null) return; // past the end of the file
+      if (index >= MAX_UNKNOWN_SIZE_RANGES) throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
+      await store(index, start, parts);
+      if (partsLength(parts) < DOWNLOAD_RANGE_BYTES) return; // the last, short range
+    }
+  }
+  // Still going after the largest file there can be: something is wrong.
+  throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
+}
+
+/**
+ * Reads one attachment's ranges and hands them to `sink` (a file the person
+ * picked) or, with none, keeps them in order and saves one Blob under `args.name`
+ * or the name the response suggests. The first range decides the file's total
+ * size from its Content-Range, else from `args.size`, else (a short body, or by
+ * reading on with {@link readUntilEnd}); later ranges are fetched
+ * {@link downloadParallelism} at a time. Resolves `false` on a 404.
+ */
 async function readAndStore(
   api: BackendApi,
-  args: { type: EntityAttachmentType; id: string; onProgress?: DownloadProgress },
+  args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress },
   save: (blob: Blob, name: string) => void,
   sink: DiskSink | undefined,
 ): Promise<boolean> {
   const path = attachmentContentPath(args);
+  const knownSize = knownSizeOf(args.size);
   let first: RangeRead;
   try {
     first = await readRange(api, path, 0, DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
       if (response.status !== 206) return true; // the whole file, the range was ignored
       const range = parseContentRange(response.headers);
+      // Content-Range hidden from page scripts: fall back on the attachment's own size.
+      if (range === null) return firstRangeIsWhole(response, partsLength(parts), knownSize);
       return (
-        range !== null &&
         range.start === 0 &&
         range.end === Math.min(DOWNLOAD_RANGE_BYTES, range.total) - 1 &&
         partsLength(parts) === range.end + 1
@@ -259,8 +349,15 @@ async function readAndStore(
     }
     throw err;
   }
-  const fileName = fileNameFromDisposition(first.response.headers) || "attachment";
-  const total = first.response.status === 206 ? parseContentRange(first.response.headers)?.total : undefined;
+  // The name the backend suggests, else the attachment's own: Content-Disposition may be hidden.
+  const fileName = fileNameFromDisposition(first.response.headers) || args.name || "attachment";
+  let total: number | undefined;
+  if (first.response.status === 206) {
+    total =
+      parseContentRange(first.response.headers)?.total ??
+      knownSize ??
+      (partsLength(first.parts) < DOWNLOAD_RANGE_BYTES ? partsLength(first.parts) : undefined);
+  }
   const ranges: Uint8Array[][] = [];
   if (sink) await sink.write(0, first.parts);
   else ranges[0] = first.parts;
@@ -278,15 +375,10 @@ async function readAndStore(
         const end = Math.min(start + DOWNLOAD_RANGE_BYTES, total) - 1;
         try {
           const { parts } = await readRange(api, path, start, end, ({ response, parts }) => {
+            if (response.status !== 206 || partsLength(parts) !== end - start + 1) return false;
             const range = parseContentRange(response.headers);
-            return (
-              response.status === 206 &&
-              range !== null &&
-              range.start === start &&
-              range.end === end &&
-              range.total === total &&
-              partsLength(parts) === end - start + 1
-            );
+            // With Content-Range hidden the length and the 206 are all there is to check.
+            return range === null || (range.start === start && range.end === end && range.total === total);
           });
           if (sink) await sink.write(start, parts);
           else ranges[index] = parts;
@@ -299,6 +391,12 @@ async function readAndStore(
     };
     await Promise.all(Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker));
     if (failure) throw failure.error;
+  } else if (total === undefined && first.response.status === 206 && partsLength(first.parts) === DOWNLOAD_RANGE_BYTES) {
+    // A full first range and no way to learn the size: read on until the file ends.
+    await readUntilEnd(api, path, async (index, start, parts) => {
+      if (sink) await sink.write(start, parts);
+      else ranges[index] = parts;
+    });
   }
   if (sink) await sink.close();
   else save(new Blob(ranges.flat() as BlobPart[]), fileName);

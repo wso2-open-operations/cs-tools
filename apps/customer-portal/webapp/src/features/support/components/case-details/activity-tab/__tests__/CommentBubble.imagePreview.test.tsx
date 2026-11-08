@@ -26,6 +26,11 @@ vi.mock("@api/useAttachmentPreview", () => ({
   useAttachmentPreview: (...args: unknown[]) => previewHook(...args),
 }));
 
+const downloadHook = vi.fn();
+vi.mock("@api/useStoredAttachments", () => ({
+  useStoredAttachmentDownload: () => downloadHook(),
+}));
+
 const attached: CaseComment = {
   id: "att-1",
   content: "",
@@ -56,6 +61,12 @@ function renderBubble(comment: CaseComment = attached, onImageClick?: (src: stri
 
 describe("CommentBubble image attachment preview", () => {
   beforeEach(() => {
+    downloadHook.mockReset();
+    downloadHook.mockReturnValue({
+      downloadStoredAttachment: vi.fn(),
+      isDownloadingId: () => false,
+      downloadProgressOf: () => null,
+    });
     previewHook.mockReset();
     previewHook.mockReturnValue({
       data: undefined,
@@ -106,6 +117,24 @@ describe("CommentBubble image attachment preview", () => {
     fireEvent.click(thumb);
     expect(onImageClick).toHaveBeenCalledTimes(3);
     expect(onImageClick).toHaveBeenCalledWith("data:image/png;base64,AAAA");
+  });
+
+  it("shows the download's progress and disables the button while it runs", () => {
+    downloadHook.mockReturnValue({
+      downloadStoredAttachment: vi.fn(),
+      isDownloadingId: (id: string) => id === "att-1",
+      downloadProgressOf: () => 37,
+    });
+    renderBubble();
+    expect(screen.getByRole("progressbar", { name: "Downloading" })).toHaveAttribute("aria-valuenow", "37");
+    expect(screen.getByText("37%")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download attachment" })).toBeDisabled();
+  });
+
+  it("shows the plain download icon when nothing downloads", () => {
+    renderBubble();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download attachment" })).toBeEnabled();
   });
 
   it("offers Try again when the preview could not be loaded", () => {

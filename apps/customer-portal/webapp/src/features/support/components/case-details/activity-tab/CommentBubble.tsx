@@ -21,7 +21,6 @@ import {
   Button,
   IconButton,
   Paper,
-  CircularProgress,
   Skeleton,
   Stack,
   Tooltip,
@@ -62,6 +61,8 @@ import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
 import { useStoredAttachmentDownload } from "@api/useStoredAttachments";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { stripThinkingBlocks } from "@features/support/utils/chat";
@@ -97,7 +98,7 @@ export default function CommentBubble({
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadStoredAttachment, isDownloadingId } =
+  const { downloadStoredAttachment, isDownloadingId, downloadProgressOf } =
     useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
@@ -323,16 +324,24 @@ export default function CommentBubble({
               </Typography>
               <Tooltip title="Download attachment">
                 <span>
+                  <DownloadProgressStatus
+                    name={comment.fileName ?? "attachment"}
+                    downloading={isDownloadingId(comment.id)}
+                    progress={downloadProgressOf(comment.id)}
+                  />
                   <IconButton
                     size="small"
                     aria-label="Download attachment"
+                    aria-busy={isDownloadingId(comment.id) || undefined}
                     onClick={() => {
                       void handleAttachmentDownload();
                     }}
                     disabled={isDownloadingId(comment.id)}
                   >
                     {isDownloadingId(comment.id) ? (
-                      <CircularProgress size={16} />
+                      <DownloadProgressIndicator
+                        progress={downloadProgressOf(comment.id)}
+                      />
                     ) : (
                       <Download size={16} />
                     )}
