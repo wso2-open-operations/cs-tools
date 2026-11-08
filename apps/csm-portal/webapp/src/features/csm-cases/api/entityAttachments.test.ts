@@ -356,6 +356,7 @@ describe("chunked upload and streamed download", () => {
     const getResponse = vi.fn(async (_path: string, options?: { headers?: Record<string, string> }) => {
       const match = /bytes=(\d+)-(\d+)/.exec(options?.headers?.Range ?? "");
       const start = Number(match?.[1] ?? 0);
+      if (start >= size) throw apiError(416, "Range Not Satisfiable"); // past the end of the file
       const end = Math.min(Number(match?.[2] ?? size - 1), size - 1);
       inFlight += 1;
       peak = Math.max(peak, inFlight);
@@ -538,13 +539,39 @@ describe("chunked upload and streamed download", () => {
       expect(save).not.toHaveBeenCalled();
     });
 
-    it("cannot tell a full first range from a cut-off file without a size, so it gives up rather than guess", async () => {
-      const server = hidden(DOWNLOAD_RANGE_BYTES * 2);
+    it("reads on until the file ends when no size is known and the first range is full", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 2 + 11;
+      const server = hidden(size);
       const save = vi.fn();
-      await expect(
-        downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save),
-      ).rejects.toThrow("The download was interrupted.");
-      expect(save).not.toHaveBeenCalled();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+    });
+
+    it("stops on the refusal past the end when the file is an exact multiple of the range", async () => {
+      const size = DOWNLOAD_RANGE_BYTES * 2;
+      const server = hidden(size);
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), server.getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
+    });
+
+    it("reads a range again, rather than ending the file, when its body is cut short of its Content-Length", async () => {
+      const size = DOWNLOAD_RANGE_BYTES + 50;
+      const server = hidden(size);
+      let cut = true;
+      const getResponse = vi.fn(async (path: string, options?: { headers?: Record<string, string> }) => {
+        const response = await server.getResponse(path, options);
+        if (cut && /bytes=\d+-/.exec(options?.headers?.Range ?? "")?.[0] !== "bytes=0-") {
+          cut = false;
+          // The connection dropped half-way: Content-Length promises more than arrives.
+          const full = new Uint8Array(await response.arrayBuffer());
+          return new Response(full.slice(0, 10), { status: 206, headers: { "Content-Length": String(full.length) } });
+        }
+        return response;
+      });
+      const save = vi.fn();
+      await downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save);
+      expect((save.mock.calls[0][0] as Blob).size).toBe(size);
     });
   });
 

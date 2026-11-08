@@ -172,14 +172,17 @@ function knownSizeOf(size: number | undefined): number | undefined {
 /**
  * Whether the first range is the whole of what it should be when its
  * Content-Range cannot be read. With the size known it must be exactly the
- * first 8 MiB, or the whole file when that is smaller; with no size, a body
- * shorter than the 8 MiB asked for is the whole file. A Content-Length that
- * disagrees with the bytes read is a broken connection either way.
+ * first 8 MiB, or the whole file when that is smaller; with no size, any body up
+ * to the 8 MiB asked for. A Content-Length that disagrees with the bytes read is
+ * a broken connection either way.
  */
 function firstRangeIsWhole(response: Response, length: number, size: number | undefined): boolean {
   const declared = response.headers.get("Content-Length");
   if (declared !== null && Number(declared) !== length) return false;
-  return size !== undefined ? length === Math.min(DOWNLOAD_RANGE_BYTES, size) : length > 0 && length < DOWNLOAD_RANGE_BYTES;
+  if (size !== undefined) return length === Math.min(DOWNLOAD_RANGE_BYTES, size);
+  // No size: the rest is found by reading on until the file ends ({@link readUntilEnd}).
+  // A body cut short by a dropped connection disagrees with its Content-Length, checked above.
+  return length > 0 && length <= DOWNLOAD_RANGE_BYTES;
 }
 
 interface RangeRead {
@@ -258,6 +261,47 @@ async function downloadFromBackend(
   }
 }
 
+/**
+ * Reads the rest of a file whose size is not known, because Content-Range is
+ * hidden and the caller gave none: ranges after the first are asked for
+ * `parallelism` at a time, in order, until one comes back short or is refused as
+ * past the end (416). The most that is wasted is the ranges asked for beyond the
+ * end, each a cheap refusal. A range's body is checked against its own
+ * Content-Length, so a connection that dropped is read again instead of being
+ * taken for the end of the file.
+ */
+async function readUntilEnd(
+  api: BackendApi,
+  path: string,
+  store: (index: number, start: number, parts: Uint8Array[]) => Promise<void>,
+): Promise<void> {
+  const window = downloadParallelism();
+  for (let next = 1; ; next += window) {
+    const results = await Promise.all(
+      Array.from({ length: window }, async (_, offset) => {
+        const index = next + offset;
+        const start = index * DOWNLOAD_RANGE_BYTES;
+        try {
+          const { parts } = await readRange(api, path, start, start + DOWNLOAD_RANGE_BYTES - 1, ({ response, parts }) => {
+            const length = partsLength(parts);
+            const declared = response.headers.get("Content-Length");
+            return response.status === 206 && length > 0 && length <= DOWNLOAD_RANGE_BYTES && (declared === null || Number(declared) === length);
+          });
+          return { index, start, parts };
+        } catch (err) {
+          if (err instanceof BackendApiError && err.status === 416) return { index, start, parts: null };
+          throw err;
+        }
+      }),
+    );
+    for (const { index, start, parts } of results) {
+      if (parts === null) return; // past the end of the file
+      await store(index, start, parts);
+      if (partsLength(parts) < DOWNLOAD_RANGE_BYTES) return; // the last, short range
+    }
+  }
+}
+
 async function readAndStore(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress },
@@ -328,6 +372,12 @@ async function readAndStore(
     };
     await Promise.all(Array.from({ length: Math.min(downloadParallelism(), count - 1) }, worker));
     if (failure) throw failure.error;
+  } else if (total === undefined && first.response.status === 206 && partsLength(first.parts) === DOWNLOAD_RANGE_BYTES) {
+    // A full first range and no way to learn the size: read on until the file ends.
+    await readUntilEnd(api, path, async (index, start, parts) => {
+      if (sink) await sink.write(start, parts);
+      else ranges[index] = parts;
+    });
   }
   if (sink) await sink.close();
   else save(new Blob(ranges.flat() as BlobPart[]), fileName);
