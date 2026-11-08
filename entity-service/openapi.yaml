@@ -39793,6 +39793,17 @@ components:
             now that it has a work item. The backend copies the file there, removes
             the old one, then calls POST /attachments/inline/{id}/relocated. Internal,
             like storageKey.
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            Only on an inline image location: the work item the image belongs to, or
+            the project while draft is true.
+        draft:
+          type: boolean
+          description: >-
+            Only on an inline image location: true for a description image whose
+            record does not exist yet (parentId is then the project).
 
     ConfirmAttachmentUploadResponse:
       type: object

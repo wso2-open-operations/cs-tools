@@ -256,6 +256,7 @@ func (s *storedAttachmentService) LocateInlineImage(ctx context.Context, id stri
 		ID: row.ID, Number: row.Number, Name: row.Name,
 		ContentType: &contentType, SizeBytes: row.SizeBytes,
 		Available: true, StorageKey: *row.StorageKey, RelocateTo: relocateTo,
+		ParentID: row.ParentID, Draft: row.Draft,
 	}, nil
 }
 

@@ -148,6 +148,13 @@ type AttachmentLocation struct {
 	// backend copies the file there, removes the old one, then calls
 	// POST /attachments/inline/{id}/relocated.
 	RelocateTo string `json:"relocateTo,omitempty"`
+	// ParentID and Draft are set only on an inline image location. ParentID is the
+	// work item the image belongs to, or the project while Draft is true (a
+	// description image whose record does not exist yet). The notification service
+	// reads the file as an internal caller, which no access rule filters, so it
+	// uses these to check the image belongs to the case it is emailing about.
+	ParentID string `json:"parentId,omitempty"`
+	Draft    bool   `json:"draft,omitempty"`
 }
 
 // InlineImageRelocatedRequest is the body of POST /attachments/inline/{id}/relocated.
