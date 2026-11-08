@@ -848,15 +848,16 @@ describe("chunked upload and streamed download", () => {
       expect((save.mock.calls[0][0] as Blob).size).toBe(DOWNLOAD_RANGE_BYTES + 5);
     });
 
-    it("skips the dialog for a small file whose size is known", async () => {
+    it("asks for a save location even for a small file whose size is known", async () => {
       const disk = fakeDisk();
       const save = vi.fn();
       const small = vi.fn().mockResolvedValue(
         new Response("0123456789", { status: 200, headers: { "Content-Disposition": 'attachment; filename="s.txt"' } }),
       );
       await run(small, save, { size: 10 });
-      expect(disk.picker).not.toHaveBeenCalled();
-      expect(save).toHaveBeenCalledTimes(1);
+      expect(disk.picker).toHaveBeenCalledTimes(1);
+      expect(disk.writes).toEqual([{ position: 0, size: 10, first: 48 }]);
+      expect(save).not.toHaveBeenCalled();
     });
 
     it("asks for a save location when the size is not known", async () => {
