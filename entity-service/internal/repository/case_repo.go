@@ -2896,11 +2896,12 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
 	const combined = `
-		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
-		       COALESCE(wa.size_bytes, 0)::bigint, NULL::text,
-		       COALESCE(su.id::text, ''), COALESCE(wa.created_by, ''),
-		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), ''),
-		       wa.created_on, NULL::text, 'complete'
+		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
+		       COALESCE(wa.content_type, '') AS content_type,
+		       COALESCE(wa.size_bytes, 0)::bigint AS size_bytes, NULL::text AS description,
+		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
+		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
+		       wa.created_on, NULL::text AS storage_key, 'complete' AS status
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
