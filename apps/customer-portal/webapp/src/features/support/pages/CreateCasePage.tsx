@@ -43,6 +43,7 @@ import {
   usePostDeploymentProductsSearchInfinite,
 } from "@features/project-details/api/usePostDeploymentProductsSearch";
 import { usePostCase } from "@features/operations/api/usePostCase";
+import { isAbortError } from "@api/storedAttachments";
 import { useStoredAttachmentUpload } from "@api/useStoredAttachments";
 import { useLoader } from "@context/linear-loader/LoaderContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -1171,6 +1172,8 @@ export default function CreateCasePage(): JSX.Element {
                 body: { name: attachmentName },
               });
             } catch (error) {
+              // Stopped by the person: that is not a failure to report.
+              if (isAbortError(error)) continue;
               logger.error(
                 `Failed to upload attachment ${attachmentName}`,
                 error,

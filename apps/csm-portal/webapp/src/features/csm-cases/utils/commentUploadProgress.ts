@@ -18,6 +18,8 @@
 export interface CommentUploadProgress {
   name: string;
   percent: number;
+  /** Stops the upload; no Cancel button without it. */
+  onCancel?: () => void;
 }
 
 /**
@@ -28,10 +30,12 @@ export function commentUploadProgress(upload: {
   isPending: boolean;
   uploadProgress: number | null;
   variables?: { name?: string; file?: File };
+  cancelUpload?: () => void;
 }): CommentUploadProgress | null {
   if (!upload.isPending || upload.uploadProgress === null) return null;
   return {
     name: upload.variables?.name || upload.variables?.file?.name || "attachment",
     percent: upload.uploadProgress,
+    onCancel: upload.cancelUpload,
   };
 }

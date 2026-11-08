@@ -37,6 +37,22 @@ describe("sendCommentWithAttachments", () => {
     expect(uploadAttachment).toHaveBeenCalledTimes(2);
   });
 
+  it("treats a file the person cancelled as dealt with, not as a failure", async () => {
+    const cancelled = Object.assign(new Error("The upload was cancelled."), { name: "AbortError" });
+    const wrapped = new Error("Could not upload the attachment.", { cause: cancelled });
+    const a = file("a.txt");
+    const b = file("b.txt");
+    const uploadAttachment = vi.fn().mockRejectedValueOnce(wrapped).mockResolvedValueOnce(undefined);
+    // Resolves: no error to report, and the next file still goes.
+    await sendCommentWithAttachments({
+      hasComment: true,
+      postComment: vi.fn().mockResolvedValue(undefined),
+      attachments: [a, b],
+      uploadAttachment,
+    });
+    expect(uploadAttachment).toHaveBeenCalledTimes(2);
+  });
+
   it("skips the comment for an attachment-only send", async () => {
     const postComment = vi.fn();
     await sendCommentWithAttachments({

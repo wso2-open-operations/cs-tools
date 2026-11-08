@@ -18,7 +18,8 @@ import {
   COMMENT_MAX_ATTACHMENTS,
   CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
 } from "@config/attachmentLimitsConfig";
-import { useCaseUploads } from "@api/caseUploadProgress";
+import { cancelCaseUpload, useCaseUploads } from "@api/caseUploadProgress";
+import { isAbortError } from "@api/storedAttachments";
 import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
@@ -106,7 +107,7 @@ export default function ActivityCommentInput({
   // The uploads of this box's own comments, drawn inside the editor.
   const commentUploads = useCaseUploads(caseId)
     .filter((u) => u.inPlace)
-    .map((u) => ({ name: u.name, percent: u.percent }));
+    .map((u) => ({ name: u.name, percent: u.percent, onCancel: () => cancelCaseUpload(u.key) }));
 
   // Images pasted or inserted into the comment are shown from a local blob: URL and
   // kept here; nothing is uploaded until the comment is sent, so an image that is removed or never posted leaves
@@ -265,10 +266,12 @@ export default function ActivityCommentInput({
   const uploadAttachmentsFromSnapshot = async (
     attachmentsSnapshot: Array<{ id: string; file: File }>,
     namesSnapshot: Map<string, string>,
-  ): Promise<{ uploadedIds: string[]; failures: string[] }> => {
+  ): Promise<{ uploadedIds: string[]; cancelledIds: string[]; failures: string[] }> => {
+    // A file the person stopped counts as dealt with: it leaves the queue and is not an error.
     const uploadedIds: string[] = [];
+    const cancelledIds: string[] = [];
     const failures: string[] = [];
-    if (attachmentsSnapshot.length === 0) return { uploadedIds, failures };
+    if (attachmentsSnapshot.length === 0) return { uploadedIds, cancelledIds, failures };
 
     setIsUploadingAttachments(true);
     try {
@@ -286,6 +289,10 @@ export default function ActivityCommentInput({
           });
           uploadedIds.push(id);
         } catch (error) {
+          if (isAbortError(error)) {
+            cancelledIds.push(id);
+            continue;
+          }
           failures.push(
             `"${attachmentName}": ${
               error instanceof Error && error.message
@@ -299,7 +306,7 @@ export default function ActivityCommentInput({
       setIsUploadingAttachments(false);
       setWaitingUploads(0);
     }
-    return { uploadedIds, failures };
+    return { uploadedIds, cancelledIds, failures };
   };
 
   // Takes the files that were stored out of the queue; a failed one stays so
@@ -395,11 +402,14 @@ export default function ActivityCommentInput({
       }
 
       const uploads = await uploadsJob;
-      dropUploaded(uploads.uploadedIds);
+      // A cancelled file leaves the queue like a sent one, but is not a success.
+      dropUploaded([...uploads.uploadedIds, ...uploads.cancelledIds]);
       if (commentSettled) {
         // A file that did not upload comes back, to be sent again.
         const failedItems = attachmentsSnapshot.filter(
-          (a) => !uploads.uploadedIds.includes(a.id),
+          (a) =>
+            !uploads.uploadedIds.includes(a.id) &&
+            !uploads.cancelledIds.includes(a.id),
         );
         if (failedItems.length > 0) {
           setAttachments((prev) => [
@@ -426,7 +436,7 @@ export default function ActivityCommentInput({
         showError(problems.join(" "));
         return;
       }
-      if (attachmentsSnapshot.length > 0) window.location.reload();
+      if (uploads.uploadedIds.length > 0) window.location.reload();
     };
 
     // Warn about PII in the comment text before posting. Attachment-only

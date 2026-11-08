@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, Divider, LinearProgress, Typography } from "@wso2/oxygen-ui";
+import { Box, Divider, IconButton, LinearProgress, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
 /** A file still uploading and how far it has got (0-100). */
 export interface EditorUpload {
   name: string;
   percent: number;
+  /** Stops this upload; no Cancel button without it. */
+  onCancel?: () => void;
 }
 
 /**
@@ -47,9 +50,23 @@ export default function EditorUploadProgress({
               <Typography variant="caption" noWrap sx={{ fontWeight: 500, minWidth: 0 }}>
                 Uploading {upload.name}
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {upload.percent}%
-              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {upload.percent}%
+                </Typography>
+                {upload.onCancel && (
+                  <Tooltip title="Cancel upload">
+                    <IconButton
+                      size="small"
+                      onClick={upload.onCancel}
+                      aria-label={`Cancel upload of ${upload.name}`}
+                      sx={{ p: 0.25 }}
+                    >
+                      <X size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Box>
             </Box>
             <LinearProgress
               variant="determinate"

@@ -20,7 +20,7 @@ import ListPagination from "@components/list-view/ListPagination";
 import { Paperclip } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { useMutationState } from "@tanstack/react-query";
-import { useCaseUploads } from "@api/caseUploadProgress";
+import { cancelCaseUpload, useCaseUploads } from "@api/caseUploadProgress";
 import {
   useGetCaseAttachments,
   flattenCaseAttachments,
@@ -250,13 +250,23 @@ export default function CaseDetailsAttachmentsPanel({
           </Stack>
         ) : (
           <Stack spacing={2}>
-            {pendingUploads.map((vars, index) => (
-              <UploadingAttachmentPlaceholder
-                key={`pending-upload-${index}`}
-                name={vars.body.name}
-                percent={runningUploads.find((u) => u.name === vars.body.name)?.percent}
-              />
-            ))}
+            {pendingUploads.map((vars, index) => {
+              // Same-named files: the n-th placeholder of a name takes the n-th running upload of it.
+              const sameNameBefore = pendingUploads
+                .slice(0, index)
+                .filter((p) => p.body.name === vars.body.name).length;
+              const running = runningUploads.filter((u) => u.name === vars.body.name)[
+                sameNameBefore
+              ];
+              return (
+                <UploadingAttachmentPlaceholder
+                  key={`pending-upload-${index}`}
+                  name={vars.body.name}
+                  percent={running?.percent}
+                  onCancel={running?.cancel ? () => cancelCaseUpload(running.key) : undefined}
+                />
+              );
+            })}
             {isFetchingNextPage && paginatedAttachments.length === 0 ? (
               <AttachmentsListSkeleton />
             ) : (
