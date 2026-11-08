@@ -18,14 +18,13 @@ import {
   COMMENT_MAX_ATTACHMENTS,
   CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
 } from "@config/attachmentLimitsConfig";
-import CaseUploadsStrip from "@features/support/components/case-details/CaseUploadsStrip";
+import { useCaseUploads } from "@api/caseUploadProgress";
 import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
   Box,
   CircularProgress,
   IconButton,
   Tooltip,
-  Typography,
   colors,
 } from "@wso2/oxygen-ui";
 import { ArrowUp } from "@wso2/oxygen-ui-icons-react";
@@ -104,6 +103,10 @@ export default function ActivityCommentInput({
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
   // Files of a sent comment still queued behind the one uploading now.
   const [waitingUploads, setWaitingUploads] = useState(0);
+  // The uploads of this box's own comments, drawn inside the editor.
+  const commentUploads = useCaseUploads(caseId)
+    .filter((u) => u.inPlace)
+    .map((u) => ({ name: u.name, percent: u.percent }));
 
   // Images pasted or inserted into the comment are shown from a local blob: URL and
   // kept here; nothing is uploaded until the comment is sent, so an image that is removed or never posted leaves
@@ -451,6 +454,8 @@ export default function ActivityCommentInput({
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
             maxAttachments={COMMENT_MAX_ATTACHMENTS}
+            uploads={commentUploads}
+            uploadsWaiting={waitingUploads}
             onAttachmentRemove={handleAttachmentRemove}
             onImageUpload={uploadInlineImage}
             showKeyboardHint={true}
@@ -511,12 +516,6 @@ export default function ActivityCommentInput({
             }
           />
         </Box>
-        <CaseUploadsStrip caseId={caseId} inPlace />
-        {waitingUploads > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", pt: 0.5 }}>
-            {waitingUploads} more {waitingUploads === 1 ? "file" : "files"} waiting to upload
-          </Typography>
-        )}
       </Box>
 
       <UploadAttachmentModal

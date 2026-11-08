@@ -56,19 +56,13 @@ describe("CaseUploadsStrip", () => {
     expect(screen.queryByText("Uploading logs.zip")).toBeNull();
   });
 
-  it("keeps the uploads a form shows itself out of the page's strip, and shows them in place", () => {
-    render(
-      <>
-        <CaseUploadsStrip caseId="c-3" />
-        <CaseUploadsStrip caseId="c-3" inPlace />
-      </>,
-    );
+  it("leaves out the uploads the comment box shows inside its own editor", () => {
+    render(<CaseUploadsStrip caseId="c-3" />);
     let own!: ReturnType<typeof trackCaseUpload>;
     act(() => {
       own = trackCaseUpload("c-3", "mine.pdf", { inPlace: true });
     });
-    // Shown once: by the in-place strip, not by the page's.
-    expect(screen.getAllByText("Uploading mine.pdf")).toHaveLength(1);
+    expect(screen.queryByText("Uploading mine.pdf")).toBeNull();
     act(() => own.finish());
   });
 });
