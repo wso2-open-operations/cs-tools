@@ -63,7 +63,7 @@ describe("AttachmentsField with a file limit", () => {
     pick(container, fileOf("a.txt"), fileOf("b.txt"));
     expect(screen.getByText("a.txt")).toBeInTheDocument();
     expect(screen.queryByText("b.txt")).toBeNull();
-    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/Only 1 attachment can be added/));
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/Only one file allowed/));
   });
 
   it("adds nothing and says so when the field is already full", () => {

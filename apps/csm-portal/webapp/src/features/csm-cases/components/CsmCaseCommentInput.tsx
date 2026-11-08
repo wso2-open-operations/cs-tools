@@ -20,7 +20,6 @@ import {
   Button,
   FormControlLabel,
   IconButton,
-  LinearProgress,
   Link,
   Switch,
   TextField,
@@ -796,6 +795,8 @@ export default function CsmCaseCommentInput({
           onAttachmentClick={attachmentsDisabled ? undefined : onAttachmentClick}
           attachments={attachments.map((a) => a.file)}
           maxAttachments={COMMENT_MAX_ATTACHMENTS}
+          uploads={uploadProgress ? [uploadProgress] : []}
+          uploadsWaiting={waitingUploads}
           onAttachmentRemove={onAttachmentRemove}
           onSubmitKeyDown={() => {
             void submit();
@@ -803,29 +804,6 @@ export default function CsmCaseCommentInput({
           onPasteError={onPasteError}
           onImageUpload={onImageUpload}
         />
-      )}
-
-      {uploadProgress && (
-        <Box aria-live="polite">
-          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.5 }}>
-            <Typography variant="caption" noWrap sx={{ fontWeight: 500 }}>
-              Uploading {uploadProgress.name}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {uploadProgress.percent}%
-            </Typography>
-          </Box>
-          <LinearProgress
-            variant="determinate"
-            value={uploadProgress.percent}
-            aria-label={`Uploading ${uploadProgress.name}`}
-          />
-          {waitingUploads > 0 && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-              {waitingUploads} more {waitingUploads === 1 ? "file" : "files"} waiting to upload
-            </Typography>
-          )}
-        </Box>
       )}
 
       {/* Naming picker driven by the editor toolbar's attach button. */}

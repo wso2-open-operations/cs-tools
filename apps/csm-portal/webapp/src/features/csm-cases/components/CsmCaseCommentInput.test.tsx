@@ -18,6 +18,7 @@ import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 
 // The real client reads runtime config at module load, which isn't present
 // under vitest (same approach as CaseActivitiesFeed.test.tsx). Pulled in
@@ -58,16 +59,21 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     value,
     onChange,
     attachments,
+    uploads = [],
+    uploadsWaiting = 0,
     onImageUpload,
     onPasteError,
   }: {
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
+    uploads?: { name: string; percent: number }[];
+    uploadsWaiting?: number;
     onImageUpload?: (file: File) => string;
     onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
     <div data-testid="editor-stub">
+      <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
       {onPasteError && (
         <button type="button" onClick={() => onPasteError("count")}>
           paste-too-many
@@ -227,7 +233,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     );
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+    expect(screen.getByText(/Only one file allowed/)).toBeInTheDocument();
   });
 
   it("adds nothing more to a reply that already has its attachment", () => {
@@ -238,7 +244,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     fireEvent.drop(composer, fileDrop([makeFile("b.txt", 200)]));
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/Only 1 attachment can be added/)).toBeInTheDocument();
+    expect(screen.getByText(/Only one file allowed/)).toBeInTheDocument();
   });
 
   it("does not call the file already attached a second attachment", () => {
@@ -250,7 +256,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     fireEvent.drop(composer, fileDrop([same]));
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.queryByText(/Only 1 attachment can be added/)).toBeNull();
+    expect(screen.queryByText(/Only one file allowed/)).toBeNull();
   });
 
   describe("size limit", () => {
@@ -655,7 +661,7 @@ describe("CsmCaseCommentInput — images added to the comment", () => {
 });
 
 describe("upload progress while a comment is sent", () => {
-  it("shows the file's name and percentage as a bar under the editor", () => {
+  it("shows the file's name and percentage as a bar inside the editor", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} uploadProgress={{ name: "10mb.pdf", percent: 42 }} />);
     expect(screen.getByText("Uploading 10mb.pdf")).toBeInTheDocument();
     expect(screen.getByText("42%")).toBeInTheDocument();

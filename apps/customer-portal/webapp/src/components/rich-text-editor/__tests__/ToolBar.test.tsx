@@ -85,10 +85,10 @@ describe("ToolBar", () => {
     renderToolbar({
       onAttachmentClick,
       attachDisabledReason:
-        "Only 1 attachment can be added. Remove it to add a different one.",
+        "Only one file allowed.",
     });
     const button = screen.getByRole("button", {
-      name: /only 1 attachment can be added/i,
+      name: /only one file allowed/i,
     });
     expect(button).toBeDisabled();
     button.click();

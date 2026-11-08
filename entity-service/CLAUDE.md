@@ -1855,8 +1855,8 @@ create.
 ## Attachment files held by the portal backends (Azure Blob Storage)
 
 Work item, comment-image and deployment attachment files (`work_item_attachment`,
-`comment_attachment`, `deployment_attachment`; `case_attachment` is the older flow: nothing writes it any
-more, existing rows are only listed and moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
+`comment_attachment`, `deployment_attachment`; `case_attachment` is an older table: nothing writes it and
+nothing lists it any more, existing rows are only moved with their ticket) are read and written by the portal backends (`apps/customer-portal/backend-v2`,
 `apps/csm-portal/backend`) in Azure Blob Storage, through `libs/azblobstore`. **This service never
 touches a file**: it has no file store and needs no storage setting. It keeps the access checks (the
 caller's own row-level security), the three attachment tables, the size and type rules, and the
@@ -4453,7 +4453,7 @@ changed.
   empty — nothing has asked for it on that path, this only wires up the
   search filter.
 - **Case activities** (`CaseRepository.SearchCaseActivities`): merges
-  `comment` and complete `case_attachment` rows into one newest-first feed
+  `comment` and `work_item_attachment` rows into one newest-first feed
   via a `UNION ALL` CTE — was previously an unconditional
   `ServiceUnavailableError` stub. There is no field-change audit table in
   this schema, so `req.IncludeFieldChanges` has no effect on this data

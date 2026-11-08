@@ -157,7 +157,7 @@ export const COMMENT_MAX_ATTACHMENTS = 1;
 
 /** Shown when a create form or a comment already has its one attachment. */
 export const CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE =
-  "Only 1 attachment can be added. Remove it to add a different one.";
+  "Only one file allowed.";
 
 /** Whether a create form holding `count` attachments takes no more. */
 export function createFormAttachmentsFull(count: number): boolean {

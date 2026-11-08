@@ -267,7 +267,7 @@ describe("ActivityCommentInput", () => {
 
       // A second attempt shows the reason instead of a picker.
       fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
-      expect(screen.getByText(/Only 1 attachment can be added/)).toBeTruthy();
+      expect(screen.getByText(/Only one file allowed/)).toBeTruthy();
       expect(screen.getByTestId("editor-files").textContent).toBe("1");
     });
   });
