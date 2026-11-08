@@ -34,6 +34,12 @@ export class PartialSendError extends Error {
   }
 }
 
+/** Whether the person stopped the upload (the upload hook wraps the abort as the error's cause). */
+function isCancelled(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || (error.cause instanceof Error && error.cause.name === "AbortError");
+}
+
 function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -79,6 +85,11 @@ export async function sendCommentWithAttachments(args: {
         await args.uploadAttachment(attachment);
         uploaded.push(attachment);
       } catch (error) {
+        // Stopped by the person: the file leaves the queue and is not an error to report.
+        if (isCancelled(error)) {
+          uploaded.push(attachment);
+          continue;
+        }
         failures.push(`"${attachment.name}": ${messageOf(error, "the upload failed")}`);
       }
     }

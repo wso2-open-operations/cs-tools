@@ -668,6 +668,18 @@ describe("upload progress while a comment is sent", () => {
     expect(screen.getByRole("progressbar", { name: "Uploading 10mb.pdf" }).getAttribute("aria-valuenow")).toBe("42");
   });
 
+  it("offers Cancel and stops the upload when pressed", () => {
+    const cancel = vi.fn();
+    render(
+      <CsmCaseCommentInput
+        onSubmit={vi.fn()}
+        uploadProgress={{ name: "10mb.pdf", percent: 42, onCancel: cancel }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload of 10mb.pdf" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it("shows nothing when no upload runs", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     expect(screen.queryByText(/^Uploading /)).toBeNull();
@@ -678,10 +690,14 @@ describe("commentUploadProgress", () => {
   it("is the running upload's name and percent, and null otherwise", () => {
     expect(
       commentUploadProgress({ isPending: true, uploadProgress: 7, variables: { name: "a.zip" } }),
-    ).toEqual({ name: "a.zip", percent: 7 });
+    ).toEqual({ name: "a.zip", percent: 7, onCancel: undefined });
+    const stop = vi.fn();
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 7, variables: { name: "a.zip" }, cancelUpload: stop })?.onCancel,
+    ).toBe(stop);
     expect(
       commentUploadProgress({ isPending: true, uploadProgress: 0, variables: { file: new File([], "f.txt") } }),
-    ).toEqual({ name: "f.txt", percent: 0 });
+    ).toEqual({ name: "f.txt", percent: 0, onCancel: undefined });
     expect(commentUploadProgress({ isPending: false, uploadProgress: 7 })).toBeNull();
     expect(commentUploadProgress({ isPending: true, uploadProgress: null })).toBeNull();
   });
