@@ -76,6 +76,7 @@ func registerPLGRoutes(mux *http.ServeMux, db *pgxpool.Pool) {
 
 	// --- organisations -------------------------------------------------------
 	mux.HandleFunc("POST /plg/organizations/search", organizationHandler.SearchOrganizations)
+	mux.HandleFunc("POST /plg/organizations/identities", organizationHandler.Identities)
 	mux.HandleFunc("GET /plg/organizations/{organizationId}", organizationHandler.GetOrganization)
 	mux.HandleFunc("PATCH /plg/organizations/{organizationId}", organizationHandler.PatchOrganization)
 

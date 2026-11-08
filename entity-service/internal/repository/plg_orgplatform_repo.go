@@ -88,6 +88,7 @@ func (r *orgPlatformRepository) LocatePairing(ctx context.Context, orgPlatformID
 func (r *orgPlatformRepository) Get(ctx context.Context, orgID, productCode string) (*domain.ProductDetail, error) {
 	const q = `
 		SELECT v.org_platform_id, v.organization_id, v.organization_name,
+		       (SELECT o.moesif_company_id FROM plg_organization o WHERE o.id = v.organization_id),
 		       v.product_id, v.product_code, v.product_name,
 		       v.lifecycle_stage::TEXT, v.lifecycle_stage_name, v.stage_entered_on,
 		       v.health_state::TEXT, v.health_entered_on,
@@ -119,7 +120,7 @@ func (r *orgPlatformRepository) Get(ctx context.Context, orgID, productCode stri
 		sID, sEmail, sName         *string
 	)
 	err := r.db.QueryRow(ctx, q, orgID, productCode).Scan(
-		&d.OrgPlatformID, &d.OrganizationID, &d.OrganizationName,
+		&d.OrgPlatformID, &d.OrganizationID, &d.OrganizationName, &d.MoesifCompanyID,
 		&prodID, &prodCode, &prodName,
 		&d.LifecycleStage, &d.StageName, &d.StageEnteredOn,
 		&d.HealthState, &d.HealthEnteredOn, &hID, &hEmail, &hName,
@@ -1102,6 +1103,7 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 
 	q := `
 		SELECT v.org_platform_id, v.organization_id, v.organization_name,
+		       (SELECT o.moesif_company_id FROM plg_organization o WHERE o.id = v.organization_id),
 		       v.product_id, v.product_code, v.product_name,
 		       v.registered_email, v.registered_name, v.registered_on,
 		       v.lifecycle_stage::TEXT, v.lifecycle_stage_name,
@@ -1126,7 +1128,7 @@ func (r *orgPlatformRepository) SearchRegistrations(ctx context.Context, req dom
 			prodID, prodCode, prodName     string
 			ownerID, ownerEmail, ownerName *string
 		)
-		if err := rows.Scan(&it.OrgPlatformID, &it.OrganizationID, &it.OrganizationName,
+		if err := rows.Scan(&it.OrgPlatformID, &it.OrganizationID, &it.OrganizationName, &it.MoesifCompanyID,
 			&prodID, &prodCode, &prodName,
 			&it.RegisteredEmail, &it.RegisteredName, &it.RegisteredOn,
 			&it.LifecycleStage, &it.StageName, &ownerID, &ownerEmail, &ownerName, &total); err != nil {

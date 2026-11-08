@@ -18,6 +18,7 @@ type OrganizationRepository interface {
 	Search(ctx context.Context, req domain.SearchOrganizationsRequest) ([]domain.OrganizationSummary, int, error)
 	Get(ctx context.Context, id string) (*domain.OrganizationDetail, error)
 	Patch(ctx context.Context, req domain.PatchOrganizationRequest, actorID string) error
+	Identities(ctx context.Context, ids []string) ([]domain.OrganizationIdentity, error)
 }
 
 type organizationRepository struct{ db *pgxpool.Pool }
@@ -38,8 +39,10 @@ func buildConditions(f *domain.OrganizationSearchFilters, b *argBuilder) []strin
 
 	if q := strings.TrimSpace(f.Query); q != "" {
 		p := b.add("%" + strings.ToLower(q) + "%")
+		// The company id too: a cloud organisation has no name to search by.
 		conds = append(conds, `(LOWER(v.organization_name) LIKE `+p+
-			` OR LOWER(v.registered_email) LIKE `+p+`)`)
+			` OR LOWER(v.registered_email) LIKE `+p+
+			` OR LOWER(v.moesif_company_id) LIKE `+p+`)`)
 	}
 	if v := strings.TrimSpace(f.OrganizationName); v != "" {
 		conds = append(conds, `LOWER(v.organization_name) LIKE `+b.add("%"+strings.ToLower(v)+"%"))
@@ -99,7 +102,8 @@ func (r *organizationRepository) Search(ctx context.Context, req domain.SearchOr
 	offset := b.add(req.Pagination.Offset)
 
 	q := `
-		SELECT v.organization_id, v.organization_name, v.registered_email, v.registered_name,
+		SELECT v.organization_id, v.organization_name, v.moesif_company_id,
+		       v.registered_email, v.registered_name,
 		       v.created_on,
 		       v.plg_cs_owner::TEXT, v.plg_cs_owner_email, v.plg_cs_owner_name,
 		       COUNT(*) OVER() AS total
@@ -124,7 +128,7 @@ func (r *organizationRepository) Search(ctx context.Context, req domain.SearchOr
 			s                              domain.OrganizationSummary
 			ownerID, ownerEmail, ownerName *string
 		)
-		if err := rows.Scan(&s.ID, &s.OrganizationName, &s.RegisteredEmail, &s.RegisteredName,
+		if err := rows.Scan(&s.ID, &s.OrganizationName, &s.MoesifCompanyID, &s.RegisteredEmail, &s.RegisteredName,
 			&s.RegisteredOn, &ownerID, &ownerEmail, &ownerName, &total); err != nil {
 			return nil, 0, fmt.Errorf("scan organization: %w", err)
 		}
@@ -294,4 +298,31 @@ func (r *organizationRepository) Patch(ctx context.Context, req domain.PatchOrga
 		return &apierror.NotFoundError{Msg: "organization not found"}
 	}
 	return nil
+}
+
+// Identities returns what is stored to identify each existing organisation in ids.
+func (r *organizationRepository) Identities(ctx context.Context, ids []string) ([]domain.OrganizationIdentity, error) {
+	const q = `
+		SELECT v.organization_id::TEXT, v.moesif_company_id, v.organization_name, v.registered_email,
+		       o.owner_user_id::TEXT
+		FROM   plg_organization_v v
+		JOIN   plg_organization o ON o.id = v.organization_id
+		WHERE  v.organization_id::TEXT = ANY($1::TEXT[])`
+
+	rows, err := r.db.Query(ctx, q, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load organization identities: %w", err)
+	}
+	defer rows.Close()
+
+	out := []domain.OrganizationIdentity{}
+	for rows.Next() {
+		var it domain.OrganizationIdentity
+		if err := rows.Scan(&it.OrganizationID, &it.MoesifCompanyID, &it.OrganizationName, &it.RegisteredEmail,
+			&it.OwnerUserID); err != nil {
+			return nil, fmt.Errorf("scan organization identity: %w", err)
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
 }

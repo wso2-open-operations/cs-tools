@@ -268,6 +268,7 @@ func (r *analyticsRepository) WorkQueue(ctx context.Context, f domain.WorkQueueF
 
 	q := `
 		SELECT w.org_platform_id::TEXT, w.organization_id::TEXT, w.organization_name,
+		       (SELECT o.moesif_company_id FROM plg_organization o WHERE o.id = w.organization_id),
 		       w.product_id::TEXT, w.product_code, w.product_name,
 		       w.lifecycle_stage::TEXT, w.lifecycle_stage_name, w.reason,
 		       w.run_active::INT, w.run_total::INT,
@@ -309,7 +310,7 @@ func (r *analyticsRepository) WorkQueue(ctx context.Context, f domain.WorkQueueF
 			ownerID, ownerEmail, ownerName *string
 			ackID, ackEmail, ackName       *string
 		)
-		if err := rows.Scan(&it.OrgPlatformID, &it.OrganizationID, &it.OrganizationName,
+		if err := rows.Scan(&it.OrgPlatformID, &it.OrganizationID, &it.OrganizationName, &it.MoesifCompanyID,
 			&prodID, &prodCode, &prodName,
 			&it.CurrentStage, &it.StageName, &it.Reason,
 			&it.RunActive, &it.RunTotal,

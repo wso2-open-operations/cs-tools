@@ -69,3 +69,17 @@ func (h *PlgOrganizationHandler) PatchOrganization(w http.ResponseWriter, r *htt
 	}
 	writeOK(w, org)
 }
+
+// Identities serves POST /plg/organizations/identities, for the reveal.
+func (h *PlgOrganizationHandler) Identities(w http.ResponseWriter, r *http.Request) {
+	var req domain.OrganizationIdentitiesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.svc.Identities(r.Context(), req)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	writeOK(w, res)
+}

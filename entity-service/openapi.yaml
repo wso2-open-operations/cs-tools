@@ -19657,6 +19657,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /plg/organizations/identities:
+    post:
+      summary: What is stored to identify each organisation.
+      description: >-
+        For the CSM portal's reveal: company id, name, email and owner per organisation.
+        Name and email are null for a cloud organisation. Unknown ids are absent.
+      operationId: plgOrganizationIdentities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgOrganizationIdentitiesRequest"
+      responses:
+        "200":
+          description: The organisations found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgOrganizationIdentitiesResponse"
+        "400":
+          description: Bad request — no ids, more than 50, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -40918,8 +40956,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -40977,11 +41021,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -41054,7 +41100,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -41090,6 +41141,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -41277,7 +41329,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -41289,6 +41346,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -41628,7 +41686,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -41855,6 +41918,42 @@ components:
               type: integer
             offset:
               type: integer
+    PlgOrganizationIdentitiesRequest:
+      type: object
+      required: [organizationIds]
+      properties:
+        organizationIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    PlgOrganizationIdentitiesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            type: object
+            properties:
+              organizationId:
+                type: string
+                format: uuid
+              moesifCompanyId:
+                nullable: true
+                type: string
+              organizationName:
+                nullable: true
+                type: string
+              registeredEmail:
+                nullable: true
+                type: string
+              ownerUserId:
+                nullable: true
+                type: string
+                format: uuid
+                description: The owner's WSO2 Cloud user id; resolves a cloud organisation's email.
     PlgPatchOrganizationRequest:
       type: object
       required:
@@ -42148,18 +42247,15 @@ components:
     PlgIngestRegistration:
       type: object
       description: >-
-        One registration, already in the portal's own terms. The caller — the
-        webhook-queue service — has resolved the analytics source's field names
-        and platform words through its source map before sending this, so
-        `initiatedPlatform` must already be a `plg_product.code` and not
-        whatever the source calls it.
-      required:
-        - organizationName
-        - registeredEmail
+        One registration. Moesif: initiatedPlatform plus a stored name and email.
+        WSO2 Cloud: initiatingProduct, companyId and userId; nothing identifying
+        is stored.
       properties:
         organizationName:
           type: string
-          description: Unique. A redelivered registration is a no-op because of it.
+          description: >-
+            Unique. A redelivered registration is a no-op because of it.
+            Ignored for a WSO2 Cloud signup.
         registeredEmail:
           type: string
           format: email
@@ -42176,12 +42272,23 @@ components:
             matching no `plg_product.code` rejects the whole registration, the
             organisation included, because they land in one transaction.
           example: IAM
+        initiatingProduct:
+          type: string
+          description: >-
+            A Cloud signup's entry point, case-insensitive: wso2cloud, agent-manager,
+            api-platform, integration-platform or core. Makes the registration a Cloud
+            one. Unknown, or naming another product than initiatedPlatform, fails it.
+          example: api-platform
         countryName:
           type: string
         companyNameFromDomain:
           type: string
         companyId:
           type: string
+        userId:
+          type: string
+          format: uuid
+          description: The owner's WSO2 Cloud user UUID; the first one sent is kept. Optional.
         firstName:
           type: string
         lastName:
