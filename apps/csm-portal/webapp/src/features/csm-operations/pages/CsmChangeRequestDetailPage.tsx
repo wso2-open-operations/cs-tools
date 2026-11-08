@@ -1336,7 +1336,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                 uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={changeRequestCommentGateReason(cr.state)}
                 autoFocus
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!id) return;
                   // Comment and files are separate requests, sent together.
                   await sendCommentWithAttachments({
@@ -1344,6 +1344,8 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
                     postComment: () =>
                       postComment.mutateAsync({ changeRequestId: id, bodyHtml, internal }),
                     attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
                     uploadAttachment: ({ file, name }) =>
                       postAttachment.mutateAsync({
                         caseId: id,

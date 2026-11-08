@@ -69,11 +69,24 @@ export interface CommentAttachmentDraft {
   name: string;
 }
 
+/**
+ * What a sender tells the composer while it sends, so the composer can empty
+ * itself once the comment is posted instead of holding its text and files until
+ * the last upload ends (the upload progress shows under it meanwhile).
+ */
+export interface CommentSendControls {
+  /** The comment is posted, or there is none: empty the editor now. */
+  commentSettled: () => void;
+  /** How many files are queued behind the one uploading. */
+  waiting: (waiting: number) => void;
+}
+
 interface CsmCaseCommentInputProps {
   onSubmit: (
     html: string,
     internal: boolean,
     attachments: CommentAttachmentDraft[],
+    controls: CommentSendControls,
   ) => Promise<unknown> | void;
   disabled?: boolean;
   /**
@@ -255,6 +268,8 @@ export default function CsmCaseCommentInput({
   const imageStatus = useInlineImageStatus(html);
   const uploadingImages = imageStatus.pending > 0;
   const [submitting, setSubmitting] = useState(false);
+  // Files of a sent comment still queued behind the one uploading now.
+  const [waitingUploads, setWaitingUploads] = useState(0);
   const [error, setError] = useState<string | null>(null);
   // The draft for which the failed-image notice was shown (see the send handler).
   const failedWarnedHtmlRef = useRef<string | null>(null);
@@ -487,8 +502,26 @@ export default function CsmCaseCommentInput({
     }
     setError(null);
     setSubmitting(true);
+    const sentAttachments = attachments;
+    let emptied = false;
+    // Empties the editor and its file list once the comment is posted; a file
+    // that fails to upload is put back below.
+    const emptyEditor = () => {
+      if (emptied) return;
+      emptied = true;
+      releaseInlineImages(html);
+      failedWarnedHtmlRef.current = null;
+      setHtml("");
+      setAttachments([]);
+      resetTriggerRef.current += 1;
+      setResetTrigger(resetTriggerRef.current);
+      setEditorMountKey((k) => k + 1);
+    };
     try {
-      await onSubmit(body, internal, attachments);
+      await onSubmit(body, internal, sentAttachments, {
+        commentSettled: emptyEditor,
+        waiting: setWaitingUploads,
+      });
       releaseInlineImages(html);
       failedWarnedHtmlRef.current = null;
       setHtml("");
@@ -498,19 +531,19 @@ export default function CsmCaseCommentInput({
       setEditorMountKey((k) => k + 1);
     } catch (e) {
       if (e instanceof PartialSendError) {
-        if (e.commentPosted) {
-          releaseInlineImages(html);
-          failedWarnedHtmlRef.current = null;
-          setHtml("");
-          resetTriggerRef.current += 1;
-          setResetTrigger(resetTriggerRef.current);
-          setEditorMountKey((k) => k + 1);
-        }
-        setAttachments((prev) => prev.filter((a) => !e.uploaded.includes(a)));
+        if (e.commentPosted) emptyEditor();
+        // The files that did not upload stay (or come back, when the editor was
+        // already emptied), so pressing Send again repeats only them.
+        const failed = sentAttachments.filter((a) => !e.uploaded.includes(a));
+        setAttachments((prev) => [
+          ...failed.filter((f) => !prev.includes(f)),
+          ...prev.filter((a) => !sentAttachments.includes(a) || failed.includes(a)),
+        ]);
       }
       setError(e instanceof Error ? e.message : "Failed to post comment.");
     } finally {
       setSubmitting(false);
+      setWaitingUploads(0);
     }
   }, [
     disabled,
@@ -763,6 +796,11 @@ export default function CsmCaseCommentInput({
             value={uploadProgress.percent}
             aria-label={`Uploading ${uploadProgress.name}`}
           />
+          {waitingUploads > 0 && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+              {waitingUploads} more {waitingUploads === 1 ? "file" : "files"} waiting to upload
+            </Typography>
+          )}
         </Box>
       )}
 
