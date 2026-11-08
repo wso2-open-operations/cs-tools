@@ -38,7 +38,7 @@ const attached: CaseComment = {
   isEscalated: false,
 };
 
-function renderBubble(comment: CaseComment = attached) {
+function renderBubble(comment: CaseComment = attached, onImageClick?: (src: string) => void) {
   const queryClient = new QueryClient();
   return render(
     <QueryClientProvider client={queryClient}>
@@ -47,6 +47,7 @@ function renderBubble(comment: CaseComment = attached) {
           comment={comment}
           isCurrentUser={false}
           primaryBg="rgba(250,123,63,0.1)"
+          onImageClick={onImageClick}
         />
       </ThemeProvider>
     </QueryClientProvider>,
@@ -85,6 +86,26 @@ describe("CommentBubble image attachment preview", () => {
       "data:image/png;base64,AAAA",
     );
     expect(screen.queryByRole("button", { name: /^preview$/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the full image from the keyboard as well as the mouse", () => {
+    const onImageClick = vi.fn();
+    renderBubble(attached, onImageClick);
+    previewHook.mockReturnValue({
+      data: "data:image/png;base64,AAAA",
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
+    const thumb = screen.getByRole("button", { name: /open screenshot.png full size/i });
+    expect(thumb).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(thumb, { key: "Enter" });
+    fireEvent.keyDown(thumb, { key: " " });
+    fireEvent.keyDown(thumb, { key: "a" });
+    fireEvent.click(thumb);
+    expect(onImageClick).toHaveBeenCalledTimes(3);
+    expect(onImageClick).toHaveBeenCalledWith("data:image/png;base64,AAAA");
   });
 
   it("offers Try again when the preview could not be loaded", () => {

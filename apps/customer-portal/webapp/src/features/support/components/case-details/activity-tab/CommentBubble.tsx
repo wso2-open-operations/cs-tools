@@ -30,7 +30,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import {
   Download,
   File,
@@ -419,7 +419,16 @@ export default function CommentBubble({
                     display: "block",
                     cursor: "zoom-in",
                   }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${comment.fileName ?? "image attachment"} full size`}
                   onClick={() => onImageClick?.(imageDataUrl)}
+                  onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onImageClick?.(imageDataUrl);
+                    }
+                  }}
                 />
               ) : isImagePreviewError ? (
                 <Box>

@@ -63,6 +63,15 @@ describe("attachment size limits", () => {
     expect(inlineImagesTotalMaxBytes()).toBe(5 * MIB);
   });
 
+  it("gives the default, not the older key's value, for a new key over the ceiling", () => {
+    setConfig({
+      CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB: 26,
+      CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB: 5,
+    });
+    expect(inlineImagesTotalMaxBytes()).toBe(1 * MIB);
+    expect(inlineImageMaxBytes()).toBe(1 * MIB);
+  });
+
   it("ignores a value above the 100 MB / 25 MB ceilings and accepts the ceilings", () => {
     setConfig({
       CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 101,

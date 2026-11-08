@@ -285,9 +285,11 @@ export default function ChatMessageCard({
             verticalAlign: "top",
           },
           // Same thumbnail size as the CSM portal; a click opens the full image.
+          // The editor exports each image with an inline `max-width: 100%`, which
+          // beats a stylesheet rule, so the cap has to be `!important`.
           "& img": {
             display: "block",
-            maxWidth: "min(100%, 360px)",
+            maxWidth: "min(100%, 360px) !important",
             maxHeight: 240,
             width: "auto",
             height: "auto",

@@ -33,13 +33,17 @@ export const DEFAULT_INLINE_IMAGE_MAX_MB = DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB;
  * finite number, or is above `max`, falls back to the default.
  */
 function configuredMb(value: unknown, fallback: number, max: number): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && value.trim() !== ""
-        ? Number(value)
-        : NaN;
+  const parsed = parsedMb(value);
   return Number.isFinite(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
+}
+
+/** A configured MB value as a number, NaN when it is not one. */
+function parsedMb(value: unknown): number {
+  return typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim() !== ""
+      ? Number(value)
+      : NaN;
 }
 
 /**
@@ -65,15 +69,22 @@ export function entityAttachmentMaxBytes(): number {
  */
 export function inlineImagesTotalMaxBytes(): number {
   const config = window.config;
-  const mb = configuredMb(
-    config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB,
-    configuredMb(
-      config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
-      DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB,
-      MAX_INLINE_IMAGES_TOTAL_MAX_MB,
-    ),
-    MAX_INLINE_IMAGES_TOTAL_MAX_MB,
-  );
+  const primary = parsedMb(config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB);
+  // A usable number that is over the ceiling is a mistake in the new key: it gets
+  // the default, not the older key's value. The older key is read only when the
+  // new one is unset or not a number.
+  const mb =
+    Number.isFinite(primary) && primary > MAX_INLINE_IMAGES_TOTAL_MAX_MB
+      ? DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB
+      : configuredMb(
+          config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB,
+          configuredMb(
+            config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
+            DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB,
+            MAX_INLINE_IMAGES_TOTAL_MAX_MB,
+          ),
+          MAX_INLINE_IMAGES_TOTAL_MAX_MB,
+        );
   return Math.floor(mb * MIB);
 }
 
