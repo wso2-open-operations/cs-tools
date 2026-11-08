@@ -258,6 +258,20 @@ describe("ActivityCommentInput", () => {
     });
   });
 
+  describe("a comment takes one attachment", () => {
+    it("refuses to open the picker once a file is attached, and says why", () => {
+      renderInput("case-001");
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      fireEvent.click(screen.getByRole("button", { name: "pick file" }));
+      expect(screen.getByTestId("editor-files").textContent).toBe("1");
+
+      // A second attempt shows the reason instead of a picker.
+      fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));
+      expect(screen.getByText(/Only 1 attachment can be added/)).toBeTruthy();
+      expect(screen.getByTestId("editor-files").textContent).toBe("1");
+    });
+  });
+
   describe("the comment and the attached files are sent separately", () => {
     const attachAndType = (html: string) => {
       fireEvent.click(screen.getByRole("button", { name: "open attachment dialog" }));

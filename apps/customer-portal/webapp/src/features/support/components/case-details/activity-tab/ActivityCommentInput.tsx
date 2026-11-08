@@ -14,6 +14,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import {
+  COMMENT_MAX_ATTACHMENTS,
+  CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
+} from "@config/attachmentLimitsConfig";
 import CaseUploadsStrip from "@features/support/components/case-details/CaseUploadsStrip";
 import type { ActivityCommentInputProps } from "@features/support/types/supportComponents";
 import {
@@ -219,6 +223,12 @@ export default function ActivityCommentInput({
   };
 
   const handleAttachmentClick = () => {
+    // A comment takes one attachment: say so instead of opening a picker whose
+    // file would be refused.
+    if (attachments.length >= COMMENT_MAX_ATTACHMENTS) {
+      showError(CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE);
+      return;
+    }
     setIsAttachmentModalOpen(true);
   };
 
@@ -227,7 +237,7 @@ export default function ActivityCommentInput({
       const isDuplicate = prev.some(
         (a) => fileSignature(a.file) === fileSignature(file),
       );
-      if (isDuplicate) return prev;
+      if (isDuplicate || prev.length >= COMMENT_MAX_ATTACHMENTS) return prev;
       const uniqueId = `att-${++attachmentIdCounterRef.current}-${Date.now()}`;
       if (attachmentName?.trim()) {
         attachmentNamesRef.current.set(uniqueId, attachmentName.trim());
@@ -440,6 +450,7 @@ export default function ActivityCommentInput({
             enterToSubmit={false}
             onAttachmentClick={handleAttachmentClick}
             attachments={attachments.map((a) => a.file)}
+            maxAttachments={COMMENT_MAX_ATTACHMENTS}
             onAttachmentRemove={handleAttachmentRemove}
             onImageUpload={uploadInlineImage}
             showKeyboardHint={true}
