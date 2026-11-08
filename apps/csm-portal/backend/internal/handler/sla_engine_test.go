@@ -85,14 +85,14 @@ func TestSLAEngineHandler_SearchActiveSLAStatusesManage_ForwardsFilters(t *testi
 	h := NewSLAEngineHandler(client)
 	rec := httptest.NewRecorder()
 	req := withUser(httptest.NewRequest(http.MethodGet,
-		"/sla-status/manage?severity=critical&caseType=case&search=CS0001&elapsedBucket=over100", nil))
+		"/sla-status/manage?severity=critical&caseType=case&search=CS0001&elapsedBucket=over100&status=breached", nil))
 
 	h.SearchActiveSLAStatusesManage(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	want := entity.SLAStatusManageFilters{Severity: "critical", CaseType: "case", Search: "CS0001", ElapsedBucket: "over100"}
+	want := entity.SLAStatusManageFilters{Severity: "critical", CaseType: "case", Search: "CS0001", ElapsedBucket: "over100", Status: "breached"}
 	if client.searchFilters != want {
 		t.Errorf("filters forwarded = %+v, want %+v", client.searchFilters, want)
 	}

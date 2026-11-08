@@ -8769,12 +8769,42 @@ type SearchSLAStatusResponse struct {
 // named ranges rather than an open gte/lte pair (unlike the unrelated,
 // generic taskSLABusinessElapsedPercent case-search filter in
 // internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
-// offers exactly these four buckets, not an arbitrary range.
+// offers exactly these eleven buckets, not an arbitrary range. Ten percent
+// wide each (0-10, 10-20, ... 90-100), plus a final open-ended "over100" for
+// an already-breached clock whose elapsed time keeps climbing past its own
+// duration -- replaced the original four coarser buckets (under50/50to75/
+// 75to100/over100) at explicit request for finer-grained filtering. Each
+// bucket's own lower bound is inclusive, its upper bound exclusive, except
+// the final 90to100 bucket (inclusive of exactly 100%) and over100 (strictly
+// greater than 100%) -- same boundary convention the original four buckets
+// already used, just applied at every ten-point step instead of only three.
 const (
-	SLAElapsedBucketUnder50 = "under50"
-	SLAElapsedBucket50To75  = "50to75"
-	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketUnder10 = "under10"
+	SLAElapsedBucket10To20  = "10to20"
+	SLAElapsedBucket20To30  = "20to30"
+	SLAElapsedBucket30To40  = "30to40"
+	SLAElapsedBucket40To50  = "40to50"
+	SLAElapsedBucket50To60  = "50to60"
+	SLAElapsedBucket60To70  = "60to70"
+	SLAElapsedBucket70To80  = "70to80"
+	SLAElapsedBucket80To90  = "80to90"
+	SLAElapsedBucket90To100 = "90to100"
 	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLA status/stage filter keys -- GET /sla-status's own status query param,
+// and SLAStatusFilters.Stage's accepted values. Named after the same three
+// states the CSM Portal's SLA Engine table already renders as status chips
+// (scanSLAStatus's own IsPaused/HasBreached fields) rather than the raw
+// sla_stage_enum label: a clock can be IsPaused AND HasBreached at once (a
+// clock paused after its own wall-clock time ran out), which the UI already
+// shows as both chips together -- StatusPaused/StatusBreached are therefore
+// not mutually exclusive filter matches against the same row, same as the
+// chips aren't mutually exclusive display states.
+const (
+	SLAStatusInProgress = "in_progress"
+	SLAStatusPaused     = "paused"
+	SLAStatusBreached   = "breached"
 )
 
 // SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
@@ -8797,12 +8827,18 @@ type SLAStatusFilters struct {
 	// product, or any other field: this is a case-identity lookup, not a
 	// general-purpose search box.
 	Search string
-	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
-	// "" for no bucket filter. Applied AFTER the same business-day
-	// correction scanSLAStatus already applies to BusinessElapsedPercent --
-	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
-	// why this can't be a plain SQL WHERE/HAVING clause.
+	// ElapsedBucket is one of the SLAElapsedBucket* constants above, or ""
+	// for no bucket filter. Applied AFTER the same business-day correction
+	// scanSLAStatus already applies to BusinessElapsedPercent -- see
+	// SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for why
+	// this can't be a plain SQL WHERE/HAVING clause.
 	ElapsedBucket string
+	// Stage is one of the SLAStatus* constants above, or "" for no status
+	// filter. Matched against IsPaused/HasBreached, not the raw sla_stage_enum
+	// column, for the same reason ElapsedBucket isn't matched against the
+	// raw business_elapsed_percentage column -- see SearchActiveSLAStatuses'
+	// own doc comment.
+	Stage string
 }
 
 // SLAClockState is GET /sla-status/clock-state's response — the full,
