@@ -164,8 +164,8 @@ func TestIncidentWhereClause_SLAFilters(t *testing.T) {
 		nil, nil, nil, nil, nil, boolPtr(true), nil, nil)
 
 	for _, want := range []string{
-		"AND EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = wi.id AND bs.live_has_breached IS TRUE)",
-		"AND EXISTS (SELECT 1 FROM sla_live tsla WHERE tsla.work_item_id = wi.id AND tsla.live_elapsed_percentage >= $1::numeric AND tsla.live_elapsed_percentage <= $2::numeric)",
+		"AND EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = wi.id AND bs.is_active IS TRUE AND bs.stage = 'IN_PROGRESS' AND bs.live_has_breached IS TRUE)",
+		"AND EXISTS (SELECT 1 FROM sla_live tsla WHERE tsla.work_item_id = wi.id AND tsla.is_active IS TRUE AND tsla.live_elapsed_percentage >= $1::numeric AND tsla.live_elapsed_percentage <= $2::numeric)",
 	} {
 		if !strings.Contains(where, want) {
 			t.Errorf("where %q missing %q", where, want)
@@ -184,12 +184,12 @@ func TestIncidentWhereClause_SLAFilters(t *testing.T) {
 // The shared predicates must produce exactly what the case search used to
 // inline, with the work-item id expression the only variable.
 func TestSLAPredicates_WorkItemIDIsParameter(t *testing.T) {
-	if got, want := slaBreachedPredicate("x.id", false), " AND NOT EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = x.id AND bs.live_has_breached IS TRUE)"; got != want {
+	if got, want := slaBreachedPredicate("x.id", false), " AND NOT EXISTS (SELECT 1 FROM sla_live bs WHERE bs.work_item_id = x.id AND bs.is_active IS TRUE AND bs.stage = 'IN_PROGRESS' AND bs.live_has_breached IS TRUE)"; got != want {
 		t.Errorf("breached = %q, want %q", got, want)
 	}
 	zero := 0
 	clause, args, next := slaPercentPredicate("x.id", &domain.TaskSLAFilter{MaxBusinessElapsedPercent: &zero}, []any{"a"}, 2)
-	if clause != " AND EXISTS (SELECT 1 FROM sla_live tsla WHERE tsla.work_item_id = x.id AND tsla.live_elapsed_percentage <= $2::numeric)" || len(args) != 2 || next != 3 {
+	if clause != " AND EXISTS (SELECT 1 FROM sla_live tsla WHERE tsla.work_item_id = x.id AND tsla.is_active IS TRUE AND tsla.live_elapsed_percentage <= $2::numeric)" || len(args) != 2 || next != 3 {
 		t.Errorf("percent = %q %v %d", clause, args, next)
 	}
 	if clause, _, next := slaPercentPredicate("x.id", nil, nil, 5); clause != "" || next != 5 {
