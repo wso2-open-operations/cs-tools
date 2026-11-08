@@ -222,6 +222,8 @@ window.config = {
   // CSM_PORTAL_INLINE_IMAGE_MAX_MB is the most image megabytes one comment or
   // description may hold in total (also the largest single image); each may
   // hold at most 5 images.
+  // Values above 100 (file) or 25 (images), zero, negative or text are ignored
+  // and the default (10 / 1) is used.
   // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
   // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
 

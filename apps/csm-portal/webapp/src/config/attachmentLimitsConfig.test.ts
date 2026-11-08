@@ -91,9 +91,15 @@ describe("formatSizeLimit", () => {
     expect(formatSizeLimit(1536 * MB)).toBe("1.5 GB");
   });
 
-  it("formats the configured limit of 10240 MB as 10 GB", () => {
+  it("ignores a configured limit above the 100 MB ceiling", () => {
     setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 10240 });
-    expect(formatSizeLimit(entityAttachmentMaxBytes())).toBe("10 GB");
+    expect(entityAttachmentMaxBytes()).toBe(10 * MB);
+    setConfig({ CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100 });
+    expect(entityAttachmentMaxBytes()).toBe(100 * MB);
+    setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: 26 });
+    expect(inlineImageMaxBytes()).toBe(1 * MB);
+    setConfig({ CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25 });
+    expect(inlineImageMaxBytes()).toBe(25 * MB);
   });
 });
 
