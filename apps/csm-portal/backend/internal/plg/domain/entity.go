@@ -422,10 +422,14 @@ type PlatformStage struct {
 
 // OrganizationSummary is one row of the organisation list — the five columns the
 // requirement names, plus what the row needs to be clickable.
+//
+// OrganizationName and RegisteredEmail are nil for a cloud organisation, here
+// and on every read type.
 type OrganizationSummary struct {
 	ID               string          `json:"id"`
-	OrganizationName string          `json:"organizationName"`
-	RegisteredEmail  string          `json:"registeredEmail"`
+	OrganizationName *string         `json:"organizationName"`
+	MoesifCompanyID  *string         `json:"moesifCompanyId"`
+	RegisteredEmail  *string         `json:"registeredEmail"`
 	RegisteredName   *string         `json:"registeredName"`
 	RegisteredOn     time.Time       `json:"registeredOn"`
 	PlatformStages   []PlatformStage `json:"platformStages"`
@@ -464,9 +468,9 @@ type PlatformCard struct {
 // says when that happened, so the UI can mark them.
 type OrganizationDetail struct {
 	ID                    string    `json:"id"`
-	OrganizationName      string    `json:"organizationName"`
+	OrganizationName      *string   `json:"organizationName"`
 	CreatedOn             time.Time `json:"createdOn"`
-	RegisteredEmail       string    `json:"registeredEmail"`
+	RegisteredEmail       *string   `json:"registeredEmail"`
 	RegisteredName        *string   `json:"registeredName"`
 	Owner                 *UserRef  `json:"owner"`
 	CountryName           *string   `json:"countryName"`
@@ -476,6 +480,30 @@ type OrganizationDetail struct {
 	MoesifCompanyID *string        `json:"moesifCompanyId"`
 	FieldsInherited bool           `json:"fieldsInherited"`
 	PlatformCards   []PlatformCard `json:"platformCards"`
+}
+
+// ---------------------------------------------------------------------------
+// Identities — the reveal
+// ---------------------------------------------------------------------------
+
+// OrganizationIdentitiesRequest asks what is stored to identify organisations.
+type OrganizationIdentitiesRequest struct {
+	OrganizationIDs []string `json:"organizationIds"`
+}
+
+// OrganizationIdentity is what the database holds to identify one organisation.
+type OrganizationIdentity struct {
+	OrganizationID   string  `json:"organizationId"`
+	MoesifCompanyID  *string `json:"moesifCompanyId"`
+	OrganizationName *string `json:"organizationName"`
+	RegisteredEmail  *string `json:"registeredEmail"`
+	// OwnerUserID resolves a cloud organisation's email.
+	OwnerUserID *string `json:"ownerUserId"`
+}
+
+// OrganizationIdentitiesResponse lists the organisations that exist; unknown ids are absent.
+type OrganizationIdentitiesResponse struct {
+	Identities []OrganizationIdentity `json:"identities"`
 }
 
 // PatchOrganizationRequest is the body of PATCH /organizations/{id}.
@@ -709,7 +737,8 @@ type LifecycleEntry struct {
 type ProductDetail struct {
 	OrgPlatformID    string     `json:"orgPlatformId"`
 	OrganizationID   string     `json:"organizationId"`
-	OrganizationName string     `json:"organizationName"`
+	OrganizationName *string    `json:"organizationName"`
+	MoesifCompanyID  *string    `json:"moesifCompanyId"`
 	Product          ProductRef `json:"product"`
 
 	// The lifecycle diagram — both axes.
@@ -738,7 +767,7 @@ type ProductDetail struct {
 
 	// The registration metadata tile.
 	RegisteredOn    time.Time `json:"registeredOn"`
-	RegisteredEmail string    `json:"registeredEmail"`
+	RegisteredEmail *string   `json:"registeredEmail"`
 
 	// The third axis, with the provenance the other two carry. Nil until
 	// somebody records a tier — there is no subscription feed, so absent means
@@ -846,9 +875,10 @@ type CreateNoteRequest struct {
 type RegistrationItem struct {
 	OrgPlatformID    string         `json:"orgPlatformId"`
 	OrganizationID   string         `json:"organizationId"`
-	OrganizationName string         `json:"organizationName"`
+	OrganizationName *string        `json:"organizationName"`
+	MoesifCompanyID  *string        `json:"moesifCompanyId"`
 	Product          ProductRef     `json:"product"`
-	RegisteredEmail  string         `json:"registeredEmail"`
+	RegisteredEmail  *string        `json:"registeredEmail"`
 	RegisteredName   *string        `json:"registeredName"`
 	RegisteredOn     time.Time      `json:"registeredOn"`
 	LifecycleStage   LifecycleStage `json:"lifecycleStage"`
@@ -928,7 +958,8 @@ type WorkQueueItem struct {
 
 	OrgPlatformID    string         `json:"orgPlatformId"`
 	OrganizationID   string         `json:"organizationId"`
-	OrganizationName string         `json:"organizationName"`
+	OrganizationName *string        `json:"organizationName"`
+	MoesifCompanyID  *string        `json:"moesifCompanyId"`
 	Product          ProductRef     `json:"product"`
 	CurrentStage     LifecycleStage `json:"currentStage"`
 	StageName        string         `json:"stageName"`
@@ -1261,4 +1292,41 @@ type RunTaskShape struct {
 type PairingLocation struct {
 	OrganizationID string `json:"organizationId"`
 	ProductCode    string `json:"productCode"`
+}
+
+// ---------------------------------------------------------------------------
+// Company identity — the portal's reveal (BFF only; not mirrored)
+// ---------------------------------------------------------------------------
+
+// IdentitySource says where a revealed name and email came from.
+type IdentitySource string
+
+const (
+	// IdentityFromDatabase is a name and email stored at ingest (Moesif).
+	IdentityFromDatabase IdentitySource = "DATABASE"
+	// IdentityFromCloud is a name and email read from the Cloud API.
+	IdentityFromCloud IdentitySource = "CLOUD"
+	// IdentityUnresolved: no company id, or the cloud has no such organisation.
+	IdentityUnresolved IdentitySource = "UNRESOLVED"
+	// IdentityFailed: the cloud could not be asked; retry.
+	IdentityFailed IdentitySource = "FAILED"
+)
+
+// ResolveCompaniesRequest asks for the identity of up to 50 organisations.
+type ResolveCompaniesRequest struct {
+	OrganizationIDs []string `json:"organizationIds"`
+}
+
+// CompanyIdentity is one organisation's revealed identity.
+type CompanyIdentity struct {
+	OrganizationID   string         `json:"organizationId"`
+	CompanyID        *string        `json:"companyId"`
+	OrganizationName *string        `json:"organizationName"`
+	Email            *string        `json:"email"`
+	Source           IdentitySource `json:"source"`
+}
+
+// ResolveCompaniesResponse lists the organisations that exist; unknown ids are absent.
+type ResolveCompaniesResponse struct {
+	Identities []CompanyIdentity `json:"identities"`
 }

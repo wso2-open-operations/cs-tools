@@ -2,7 +2,7 @@
 //
 // ONE CALL IS ALL csm-portal's main.go NEEDS. Everything PLG requires — its
 // config, its entity-service client, its services, its handlers, its identity
-// middleware and its 26 routes — is assembled here. The merge adds files; it
+// middleware and its 25 routes — is assembled here. The merge adds files; it
 // does not edit csm-portal's own.
 //
 // WHAT CHANGED FROM THE STANDALONE BFF:
@@ -47,6 +47,7 @@ import (
 	"golang.org/x/oauth2/clientcredentials"
 
 	csmhandler "github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/handler"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/cloudclient"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/config"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/entityclient"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/plg/handler"
@@ -109,13 +110,28 @@ func Mount(
 		HTTPClient: entityHTTPClient(cfg.Entity.OAuth, timeout),
 	})
 
+	// Optional: without it, stored names still reveal. Own OAuth2 client.
+	var cloud service.CloudLookup
+	if cfg.Cloud.Enabled() {
+		cloudTimeout := time.Duration(cfg.Cloud.TimeoutSeconds) * time.Second
+		cloud = cloudclient.New(cloudclient.Config{
+			BaseURL:       cfg.Cloud.BaseURL,
+			OrgPath:       cfg.Cloud.OrgPath,
+			UserEmailPath: cfg.Cloud.UserEmailPath,
+			Timeout:       cloudTimeout,
+			HTTPClient:    entityHTTPClient(cfg.Cloud.OAuth, cloudTimeout),
+		})
+	} else {
+		slog.Warn("plg: CLOUD_API_BASE_URL is not set; cloud-platform organisations cannot be revealed")
+	}
+
 	handlers := handler.NewHandlers(
 		service.NewReferenceService(entityclient.ReferenceRepo{Client: entity}),
 		service.NewOrganizationService(entityclient.OrganizationRepo{Client: entity}),
 		service.NewOrgPlatformService(entityclient.OrgPlatformRepo{Client: entity}),
 		service.NewPlaybookService(entityclient.PlaybookRepo{Client: entity}),
 		service.NewAnalyticsService(entityclient.AnalyticsRepo{Client: entity}),
-	)
+	).WithCompanyResolver(service.NewCompanyResolver(entity, cloud))
 
 	// PLG's routes carry one extra middleware of their own: the identity
 	// resolver, which turns the validated caller into the "user".id every PLG
@@ -196,6 +212,9 @@ func register(
 	add("POST /plg/organizations/search", csmhandler.PermUsePlg, h.SearchOrganizations)
 	add("GET /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.GetOrganization)
 	add("PATCH /plg/organizations/{organizationId}", csmhandler.PermUsePlg, h.PatchOrganization)
+
+	// The reveal: an organisation's name and email, hidden until asked.
+	add("POST /plg/companies/resolve", csmhandler.PermUsePlg, h.ResolveCompanies)
 
 	// The product tab — one organisation, one platform.
 	add("GET /plg/organizations/{organizationId}/products/{product}", csmhandler.PermUsePlg, h.GetProduct)

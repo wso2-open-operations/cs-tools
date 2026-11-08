@@ -388,3 +388,13 @@ func (c *Client) WorkQueue(ctx context.Context, f domain.WorkQueueFilters) (*dom
 	}
 	return &out, nil
 }
+
+// Identities reads what is stored to identify each organisation; unknown ids are absent.
+func (c *Client) Identities(ctx context.Context, ids []string) ([]domain.OrganizationIdentity, error) {
+	var out domain.OrganizationIdentitiesResponse
+	if err := c.post(ctx, "/plg/organizations/identities",
+		domain.OrganizationIdentitiesRequest{OrganizationIDs: ids}, &out); err != nil {
+		return nil, err
+	}
+	return out.Identities, nil
+}

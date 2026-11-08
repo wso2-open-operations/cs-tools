@@ -127,3 +127,41 @@ func clearPLGEnv(t *testing.T) {
 		}
 	}
 }
+
+// The Cloud Directory API is reached as its own machine client on the WSO2
+// Cloud identity platform, not as the shared OAuth2 application, so none of
+// the shared credentials may leak into it.
+func TestCloudGrantIsNotInherited(t *testing.T) {
+	clearPLGEnv(t)
+	for _, k := range []string{"CLOUD_API_TOKEN_URL", "CLOUD_API_CLIENT_ID", "CLOUD_API_CLIENT_SECRET", "CLOUD_API_SCOPES"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CLOUD_API_BASE_URL", "https://cloud.example/directory")
+
+	cfg, err := LoadWith("does-not-exist.json", EntityDefaults{
+		BaseURL:      "https://entity.example",
+		TokenURL:     "https://sts.example/token",
+		ClientID:     "csm-app",
+		ClientSecret: "s3cret",
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Cloud.OAuth.Enabled() {
+		t.Errorf("the cloud grant inherited the shared credentials: %+v", cfg.Cloud.OAuth)
+	}
+	if cfg.Cloud.OrgPath != "/orgs/{orgId}" || cfg.Cloud.UserEmailPath != "/users/{userId}/email" {
+		t.Errorf("paths = %q, %q", cfg.Cloud.OrgPath, cfg.Cloud.UserEmailPath)
+	}
+
+	t.Setenv("CLOUD_API_TOKEN_URL", "https://accounts.cloud.example/oauth2/token")
+	t.Setenv("CLOUD_API_CLIENT_ID", "CSM_PORTAL")
+	t.Setenv("CLOUD_API_CLIENT_SECRET", "cloud-secret")
+	cfg, err = LoadWith("does-not-exist.json", EntityDefaults{BaseURL: "https://entity.example"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Cloud.OAuth.ClientID != "CSM_PORTAL" || cfg.Redacted().Cloud.OAuth.ClientSecret != "********" {
+		t.Errorf("cloud grant = %+v", cfg.Redacted().Cloud.OAuth)
+	}
+}

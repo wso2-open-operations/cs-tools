@@ -18,6 +18,15 @@ type Handlers struct {
 	pairings  service.OrgPlatformService
 	playbooks service.PlaybookService
 	analytics service.AnalyticsService
+
+	// companies answers the reveal; nil answers 503.
+	companies *service.CompanyResolver
+}
+
+// WithCompanyResolver wires the reveal.
+func (h *Handlers) WithCompanyResolver(r *service.CompanyResolver) *Handlers {
+	h.companies = r
+	return h
 }
 
 // NewHandlers wires the HTTP layer over the services.
@@ -136,6 +145,28 @@ func (h *Handlers) GetOrganization(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchOrganization serves PATCH /organizations/{organizationId}.
+// ResolveCompanies serves POST /plg/companies/resolve, the reveal. Audited
+// with ids only, never what was revealed.
+func (h *Handlers) ResolveCompanies(w http.ResponseWriter, r *http.Request) {
+	if h.companies == nil {
+		writeServiceError(w, r, &apierror.ServiceUnavailableError{Msg: "company reveal is not configured"})
+		return
+	}
+	var req domain.ResolveCompaniesRequest
+	if !decodeRequest(w, r, &req) {
+		return
+	}
+	res, err := h.companies.Resolve(r.Context(), req)
+	if err != nil {
+		auditWrite(r, "reveal identity", err, "organizationIds", strings.Join(req.OrganizationIDs, ","))
+		writeServiceError(w, r, err)
+		return
+	}
+	auditWrite(r, "reveal identity", nil, "organizationIds", strings.Join(req.OrganizationIDs, ","),
+		"revealed", len(res.Identities))
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (h *Handlers) PatchOrganization(w http.ResponseWriter, r *http.Request) {
 	var req domain.PatchOrganizationRequest
 	if !decodeRequest(w, r, &req) {

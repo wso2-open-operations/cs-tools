@@ -10990,6 +10990,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorPayload"
+  /plg/companies/resolve:
+    post:
+      summary: Reveal organisations' names and emails.
+      description: >-
+        Reveals the name and email behind each organisation's company id: stored values
+        first, else the Cloud Directory API. Unknown ids are left out. Nothing is cached
+        or logged. source is DATABASE, CLOUD, UNRESOLVED or FAILED.
+      operationId: plgResolveCompanies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlgResolveCompaniesRequest"
+      responses:
+        "200":
+          description: The organisations found, revealed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlgResolveCompaniesResponse"
+        "400":
+          description: Bad request — no ids, more than 50, or an id that is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "401":
+          description: Unauthorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "403":
+          description: Forbidden — needs the PLG permission (CS engineer or admin).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
+        "503":
+          description: The reveal is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorPayload"
   /plg/organizations/search:
     post:
       summary: Search organisations.
@@ -30449,11 +30500,13 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
         createdOn:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         registeredName:
           nullable: true
@@ -30528,8 +30581,14 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -30590,7 +30649,12 @@ components:
           type: string
           format: uuid
         organizationName:
+          nullable: true
           type: string
+        moesifCompanyId:
+          nullable: true
+          type: string
+          description: The company id.
         product:
           type: object
           properties:
@@ -30626,6 +30690,7 @@ components:
           type: string
           format: date-time
         registeredEmail:
+          nullable: true
           type: string
         subscriptionTier:
           type: string
@@ -31002,7 +31067,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -31093,7 +31163,12 @@ components:
                 type: string
                 format: uuid
               organizationName:
+                nullable: true
                 type: string
+              moesifCompanyId:
+                nullable: true
+                type: string
+                description: The company id.
               product:
                 type: object
                 properties:
@@ -31105,6 +31180,7 @@ components:
                   name:
                     type: string
               registeredEmail:
+                nullable: true
                 type: string
               registeredName:
                 nullable: true
@@ -31252,6 +31328,40 @@ components:
               type: integer
             offset:
               type: integer
+    PlgResolveCompaniesRequest:
+      type: object
+      required: [organizationIds]
+      properties:
+        organizationIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    PlgResolveCompaniesResponse:
+      type: object
+      properties:
+        identities:
+          type: array
+          items:
+            type: object
+            properties:
+              organizationId:
+                type: string
+                format: uuid
+              companyId:
+                nullable: true
+                type: string
+              organizationName:
+                nullable: true
+                type: string
+              email:
+                nullable: true
+                type: string
+              source:
+                type: string
+                enum: [DATABASE, CLOUD, UNRESOLVED, FAILED]
     PlgPatchOrganizationRequest:
       type: object
       required:

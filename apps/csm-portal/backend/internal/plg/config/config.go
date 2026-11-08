@@ -98,9 +98,29 @@ type Config struct {
 	// Entity is where the data lives. The BFF has no database of its own — it
 	// reaches entity-service over HTTP, so this is a base URL.
 	Entity  EntityConfig  `json:"entity"`
+	Cloud   CloudConfig   `json:"cloud"`
 	Server  ServerConfig  `json:"server"`
 	Logging LoggingConfig `json:"logging"`
 }
+
+// CloudConfig points the reveal at the WSO2 Cloud Directory API. Optional:
+// without BaseURL, stored names still reveal and cloud ones report FAILED.
+type CloudConfig struct {
+	// BaseURL is the Cloud API's root. CLOUD_API_BASE_URL.
+	BaseURL string `json:"baseUrl"`
+	// OrgPath: CLOUD_API_ORG_PATH, default /orgs/{orgId}.
+	OrgPath string `json:"orgPath"`
+	// UserEmailPath: CLOUD_API_USER_EMAIL_PATH, default /users/{userId}/email.
+	UserEmailPath string `json:"userEmailPath"`
+	// OAuth is the API's own client (CSM_PORTAL), never the shared one:
+	// CLOUD_API_TOKEN_URL, _CLIENT_ID, _CLIENT_SECRET, _SCOPES.
+	OAuth OAuth2Config `json:"oauth2"`
+	// TimeoutSeconds bounds one call. Defaults to 10.
+	TimeoutSeconds int `json:"timeoutSeconds"`
+}
+
+// Enabled reports whether the Cloud API is configured.
+func (c CloudConfig) Enabled() bool { return strings.TrimSpace(c.BaseURL) != "" }
 
 // EntityConfig points the BFF at entity-service.
 //
@@ -226,6 +246,15 @@ func applyDefaults(c *Config) {
 	if c.Entity.TimeoutSeconds == 0 {
 		c.Entity.TimeoutSeconds = 20
 	}
+	if c.Cloud.OrgPath == "" {
+		c.Cloud.OrgPath = "/orgs/{orgId}"
+	}
+	if c.Cloud.UserEmailPath == "" {
+		c.Cloud.UserEmailPath = "/users/{userId}/email"
+	}
+	if c.Cloud.TimeoutSeconds == 0 {
+		c.Cloud.TimeoutSeconds = 10
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8090
 	}
@@ -255,6 +284,15 @@ func applyEnvOverrides(c *Config) {
 	setString(&c.Entity.OAuth.ClientSecret, "PLG_ENTITY_OAUTH_CLIENT_SECRET")
 	setString(&c.Entity.OAuth.Scope, "PLG_ENTITY_SCOPES")
 	setInt(&c.Entity.TimeoutSeconds, "PLG_ENTITY_TIMEOUT_SECONDS")
+	// The Cloud API, for the reveal.
+	setString(&c.Cloud.BaseURL, "CLOUD_API_BASE_URL")
+	setString(&c.Cloud.OAuth.TokenURL, "CLOUD_API_TOKEN_URL")
+	setString(&c.Cloud.OAuth.ClientID, "CLOUD_API_CLIENT_ID")
+	setString(&c.Cloud.OAuth.ClientSecret, "CLOUD_API_CLIENT_SECRET")
+	setString(&c.Cloud.OAuth.Scope, "CLOUD_API_SCOPES")
+	setString(&c.Cloud.OrgPath, "CLOUD_API_ORG_PATH")
+	setString(&c.Cloud.UserEmailPath, "CLOUD_API_USER_EMAIL_PATH")
+	setInt(&c.Cloud.TimeoutSeconds, "CLOUD_API_TIMEOUT_SECONDS")
 	setInt(&c.Server.Port, "PLG_SERVER_PORT")
 	// The only config.json key that had no environment override. It mattered
 	// because Choreo deploys from environment variables alone: the value was
@@ -296,6 +334,20 @@ func (c *Config) Validate() error {
 	if !strings.HasPrefix(c.Entity.BaseURL, "http://") && !strings.HasPrefix(c.Entity.BaseURL, "https://") {
 		return fmt.Errorf("entity.baseUrl %q must be an absolute http(s) URL", c.Entity.BaseURL)
 	}
+	if c.Cloud.Enabled() {
+		if !strings.HasPrefix(c.Cloud.BaseURL, "http://") && !strings.HasPrefix(c.Cloud.BaseURL, "https://") {
+			return fmt.Errorf("cloud.baseUrl %q must be an absolute http(s) URL", c.Cloud.BaseURL)
+		}
+		if !strings.Contains(c.Cloud.OrgPath, "{orgId}") {
+			return fmt.Errorf("cloud.orgPath %q must contain {orgId}", c.Cloud.OrgPath)
+		}
+		if !strings.Contains(c.Cloud.UserEmailPath, "{userId}") {
+			return fmt.Errorf("cloud.userEmailPath %q must contain {userId}", c.Cloud.UserEmailPath)
+		}
+		if err := c.Cloud.OAuth.validateNamed("cloud.oauth2"); err != nil {
+			return err
+		}
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port %d is out of range", c.Server.Port)
 	}
@@ -325,6 +377,9 @@ func (c *Config) Redacted() Config {
 	cp := *c
 	if cp.Entity.OAuth.ClientSecret != "" {
 		cp.Entity.OAuth.ClientSecret = "********"
+	}
+	if cp.Cloud.OAuth.ClientSecret != "" {
+		cp.Cloud.OAuth.ClientSecret = "********"
 	}
 	return cp
 }

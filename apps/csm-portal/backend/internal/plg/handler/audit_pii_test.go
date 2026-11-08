@@ -87,6 +87,7 @@ var writeHandlers = map[string]string{
 	"patch note": "PatchNote", "acknowledge": "Acknowledge",
 	"create playbook": "CreatePlaybook", "patch playbook": "PatchPlaybook",
 	"replace tasks": "ReplacePlaybookTasks", "delete playbook": "DeletePlaybook",
+	"reveal identity": "ResolveCompanies",
 }
 
 // TestAuditLogsSitInTheRightHandler pins which handler each operation is logged
