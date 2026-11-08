@@ -756,3 +756,23 @@ func TestBackend_DescriptionImageRelocation(t *testing.T) {
 		}
 	})
 }
+
+// An inline image's location names the record it belongs to, so a caller that
+// reads files as an internal caller can check it against the case it is about.
+func TestBackend_InlineImageLocationNamesItsParent(t *testing.T) {
+	png := "image/png"
+	key := "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
+	repo := newFakeStoredRepo()
+	repo.parent = domain.StoredAttachmentParent{ID: saParentID, Number: "CS0001", ProjectNumber: "PRJ-9"}
+	repo.rows[saAttID] = domain.StoredAttachmentRow{
+		ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE",
+		StorageKey: &key, ParentID: saParentID,
+	}
+	loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+	if err != nil {
+		t.Fatalf("LocateInlineImage: %v", err)
+	}
+	if loc.ParentID != saParentID || loc.Draft {
+		t.Errorf("parent = %q draft = %v, want %q and false", loc.ParentID, loc.Draft, saParentID)
+	}
+}
