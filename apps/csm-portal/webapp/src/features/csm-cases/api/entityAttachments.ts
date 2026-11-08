@@ -15,7 +15,7 @@
 // under the License.
 
 import { BackendApiError, type BackendApi } from "@api/backend/client";
-import { downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
+import { MAX_ENTITY_ATTACHMENT_MAX_MB, downloadParallelism, formatSizeLimit } from "@config/attachmentLimitsConfig";
 import { saveBlob } from "@utils/saveBlob";
 import { openDiskTarget, type DiskSink } from "@features/csm-cases/api/downloadToDisk";
 
@@ -134,6 +134,14 @@ function attachmentContentPath(args: { type: EntityAttachmentType; id: string })
 }
 
 const DOWNLOAD_INTERRUPTED_MESSAGE = "The download was interrupted. Please try again.";
+
+/**
+ * The most ranges a file of unknown size is read for: the hard ceiling on an
+ * attachment's size (what no upload can exceed) in 8 MiB ranges, plus one so a
+ * file right at that ceiling can still end on its refusal past the end. A
+ * backend that never stops answering is thus cut off, not read for ever.
+ */
+const MAX_UNKNOWN_SIZE_RANGES = Math.ceil((MAX_ENTITY_ATTACHMENT_MAX_MB * 1024 * 1024) / DOWNLOAD_RANGE_BYTES) + 1;
 
 /** Reads a response body to the end, keeping the pieces as they arrive. */
 async function readParts(response: Response): Promise<Uint8Array[]> {
@@ -276,7 +284,7 @@ async function readUntilEnd(
   store: (index: number, start: number, parts: Uint8Array[]) => Promise<void>,
 ): Promise<void> {
   const window = downloadParallelism();
-  for (let next = 1; ; next += window) {
+  for (let next = 1; next < MAX_UNKNOWN_SIZE_RANGES; next += window) {
     const results = await Promise.all(
       Array.from({ length: window }, async (_, offset) => {
         const index = next + offset;
@@ -296,12 +304,23 @@ async function readUntilEnd(
     );
     for (const { index, start, parts } of results) {
       if (parts === null) return; // past the end of the file
+      if (index >= MAX_UNKNOWN_SIZE_RANGES) throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
       await store(index, start, parts);
       if (partsLength(parts) < DOWNLOAD_RANGE_BYTES) return; // the last, short range
     }
   }
+  // Still going after the largest file there can be: something is wrong.
+  throw new Error(DOWNLOAD_INTERRUPTED_MESSAGE);
 }
 
+/**
+ * Reads one attachment's ranges and hands them to `sink` (a file the person
+ * picked) or, with none, keeps them in order and saves one Blob under `args.name`
+ * or the name the response suggests. The first range decides the file's total
+ * size from its Content-Range, else from `args.size`, else (a short body, or by
+ * reading on with {@link readUntilEnd}); later ranges are fetched
+ * {@link downloadParallelism} at a time. Resolves `false` on a 404.
+ */
 async function readAndStore(
   api: BackendApi,
   args: { type: EntityAttachmentType; id: string; name?: string; size?: number; onProgress?: DownloadProgress },

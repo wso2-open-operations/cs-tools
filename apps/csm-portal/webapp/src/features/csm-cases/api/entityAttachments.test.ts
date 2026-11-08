@@ -555,6 +555,24 @@ describe("chunked upload and streamed download", () => {
       expect((save.mock.calls[0][0] as Blob).size).toBe(size);
     });
 
+    it("gives up on a backend that never ends the file, instead of reading for ever", async () => {
+      // Every range is full, however far on: there is no end to find.
+      const getResponse = vi.fn(
+        async (_path: string, options?: { headers?: Record<string, string> }) => {
+          const start = Number(/bytes=(\d+)-/.exec(options?.headers?.Range ?? "")?.[1] ?? 0);
+          const body = new Uint8Array(DOWNLOAD_RANGE_BYTES);
+          return new Response(body, { status: 206, headers: { "Content-Length": String(body.length), "X-Start": String(start) } });
+        },
+      );
+      const save = vi.fn();
+      await expect(
+        downloadEntityAttachment(apiWith(vi.fn(), vi.fn(), getResponse), { type: "work_item", id: ID }, save),
+      ).rejects.toThrow("The download was interrupted.");
+      expect(save).not.toHaveBeenCalled();
+      // The 100 MB ceiling in 8 MiB ranges, plus the one for the refusal, then it stops.
+      expect(getResponse.mock.calls.length).toBeLessThanOrEqual(1 + Math.ceil(100 / 8) + 1 + 8);
+    });
+
     it("reads a range again, rather than ending the file, when its body is cut short of its Content-Length", async () => {
       const size = DOWNLOAD_RANGE_BYTES + 50;
       const server = hidden(size);

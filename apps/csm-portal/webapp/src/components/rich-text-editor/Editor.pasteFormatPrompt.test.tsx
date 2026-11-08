@@ -76,18 +76,24 @@ beforeAll(() => {
   }
 });
 
-function fakeClipboardData(data: Record<string, string>, itemTypes: string[] = []): DataTransfer {
+/** A fake clipboard: its text formats, and one item per type (an `image/*` item yields `file`). */
+function fakeClipboardData(data: Record<string, string>, itemTypes: string[] = [], file: File | null = null): DataTransfer {
   return {
     getData: (type: string) => data[type] ?? "",
-    items: itemTypes.map((type) => ({ kind: "file", type, getAsFile: () => null })),
+    items: itemTypes.map((type) => ({
+      kind: type.startsWith("image/") ? "file" : "string",
+      type,
+      getAsFile: () => (type.startsWith("image/") ? file : null),
+    })),
   } as unknown as DataTransfer;
 }
 
-function paste(target: Element, data: Record<string, string>, itemTypes: string[] = []): void {
+/** Dispatches a paste of `data` (and `itemTypes`, with `file` as the image item) on `target`. */
+function paste(target: Element, data: Record<string, string>, itemTypes: string[] = [], file: File | null = null): void {
   const event = new ClipboardEvent("paste", {
     bubbles: true,
     cancelable: true,
-    clipboardData: fakeClipboardData(data, itemTypes),
+    clipboardData: fakeClipboardData(data, itemTypes, file),
   } as ClipboardEventInit & { clipboardData: DataTransfer });
   // The paste handler's `setPendingPaste` (React state, for the dialog) is
   // triggered synchronously from this dispatch but outside any React event
@@ -186,13 +192,21 @@ describe("Editor paste-format prompt", () => {
   describe("a picture copied from a web page", () => {
     const IMG_ONLY = `<meta charset='utf-8'><img src="https://example.com/a.png" alt="A | B" style="max-width: 100%;">`;
 
-    it("pastes only the image, not a second hot-linked copy from its HTML", async () => {
+    it("pastes only the stored image, not a second hot-linked copy from its HTML", async () => {
       const onChange = vi.fn();
-      render(<Editor autoFocus showToolbar={false} onChange={onChange} />);
-      paste(getEditable(), { "text/html": IMG_ONLY }, ["text/html", "image/png"]);
+      const onImageUpload = vi.fn(() => "blob:http://localhost/stored-1");
+      const file = new File([new Uint8Array(100)], "a.png", { type: "image/png" });
+      render(<Editor autoFocus showToolbar={false} onChange={onChange} onImageUpload={onImageUpload} />);
+      paste(getEditable(), { "text/html": IMG_ONLY }, ["text/html", "image/png"], file);
 
+      await waitFor(() => expect(onImageUpload).toHaveBeenCalledTimes(1));
+      expect(onImageUpload).toHaveBeenCalledWith(file);
+      await waitFor(() => expect(onChange.mock.calls.some(([html]) => String(html).includes("stored-1"))).toBe(true));
+      const html = String(onChange.mock.calls.at(-1)?.[0]);
+      expect(html.match(/<img /g)).toHaveLength(1);
+      expect(html).toContain("blob:http://localhost/stored-1");
+      expect(html).not.toContain("example.com");
       expect(screen.queryByText("Paste formatted content?")).not.toBeInTheDocument();
-      expect(onChange.mock.calls.some(([html]) => String(html).includes("example.com"))).toBe(false);
     });
 
     it("still asks about HTML that has text beside the image", async () => {
