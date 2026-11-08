@@ -14,11 +14,13 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type { CommentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import {
   Box,
   Button,
   FormControlLabel,
   IconButton,
+  LinearProgress,
   Link,
   Switch,
   TextField,
@@ -133,6 +135,11 @@ interface CsmCaseCommentInputProps {
   onDraftInternalChange?: (internal: boolean) => void;
   draftSourceMode?: boolean;
   onDraftSourceModeChange?: (sourceMode: boolean) => void;
+  /**
+   * The file being uploaded while the comment is sent (name and 0-100), shown as
+   * a bar under the editor; `null`/omitted when none is.
+   */
+  uploadProgress?: CommentUploadProgress | null;
 }
 
 /** Stable identity for an attached File, used to dedupe re-picked files. */
@@ -236,6 +243,7 @@ export default function CsmCaseCommentInput({
   onDraftInternalChange,
   draftSourceMode,
   onDraftSourceModeChange,
+  uploadProgress = null,
 }: CsmCaseCommentInputProps): JSX.Element {
   const [html, setHtml] = useDraftState(draftHtml, onDraftHtmlChange, "");
   const api = useBackendApi();
@@ -738,6 +746,24 @@ export default function CsmCaseCommentInput({
           onPasteError={onPasteError}
           onImageUpload={onImageUpload}
         />
+      )}
+
+      {uploadProgress && (
+        <Box aria-live="polite">
+          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mb: 0.5 }}>
+            <Typography variant="caption" noWrap sx={{ fontWeight: 500 }}>
+              Uploading {uploadProgress.name}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {uploadProgress.percent}%
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={uploadProgress.percent}
+            aria-label={`Uploading ${uploadProgress.name}`}
+          />
+        </Box>
       )}
 
       {/* Naming picker driven by the editor toolbar's attach button. */}

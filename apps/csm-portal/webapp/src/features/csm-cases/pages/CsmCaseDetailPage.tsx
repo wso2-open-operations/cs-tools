@@ -93,6 +93,7 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
@@ -2826,6 +2827,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                uploadProgress={commentUploadProgress(postAttachment)}
                 imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}

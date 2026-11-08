@@ -84,6 +84,7 @@ import {
 } from "@features/csm-operations/utils/incidents";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import {
   AttachmentsWidget,
   WatchersWidget,
@@ -942,6 +943,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!id}
+                uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={incidentCommentGateReason(incident.state)}
                 autoFocus
                 onSubmit={async (bodyHtml, internal, commentAttachments) => {
