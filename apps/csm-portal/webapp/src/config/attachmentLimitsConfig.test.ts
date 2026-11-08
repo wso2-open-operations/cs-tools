@@ -142,11 +142,11 @@ describe("downloadToDiskEnabled", () => {
 });
 
 describe("attachmentLimitMessage", () => {
-  it("asks politely to remove the file when the limit is one", () => {
-    expect(attachmentLimitMessage(1)).toBe("You can attach one file here. To use a different one, please remove the current file first.");
+  it("says only one file is allowed when the limit is one", () => {
+    expect(attachmentLimitMessage(1)).toBe("Only one file allowed.");
   });
 
-  it("uses the plural, without the removal request, above one", () => {
-    expect(attachmentLimitMessage(3)).toBe("You can attach up to 3 files here.");
+  it("uses the plural above one", () => {
+    expect(attachmentLimitMessage(3)).toBe("Only 3 files allowed.");
   });
 });

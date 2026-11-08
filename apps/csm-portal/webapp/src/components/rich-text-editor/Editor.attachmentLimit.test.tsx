@@ -39,7 +39,7 @@ describe("Editor attachment limit", () => {
 
   it("turns the attach button off once the editor holds maxAttachments, and says why", () => {
     render(<Editor onAttachmentClick={() => {}} attachments={[file("a.txt")]} maxAttachments={1} />);
-    expect(screen.getByRole("button", { name: /you can attach one file here/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /only one file allowed/i })).toBeDisabled();
   });
 
   it("has no limit when maxAttachments is not given", () => {

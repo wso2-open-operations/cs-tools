@@ -131,12 +131,9 @@ export const COMMENT_MAX_ATTACHMENTS = 1;
 
 /**
  * The message shown when a form, comment or editor already holds the most
- * attachments it takes: "You can attach one file here. To use a different one,
- * please remove the current file first." for a limit of one, "You can attach up
- * to 3 files here." above it.
+ * attachments it takes: "Only one file allowed." for a limit of one,
+ * "Only 3 files allowed." above it.
  */
 export function attachmentLimitMessage(limit: number): string {
-  return limit === 1
-    ? "You can attach one file here. To use a different one, please remove the current file first."
-    : `You can attach up to ${limit} files here.`;
+  return limit === 1 ? "Only one file allowed." : `Only ${limit} files allowed.`;
 }
