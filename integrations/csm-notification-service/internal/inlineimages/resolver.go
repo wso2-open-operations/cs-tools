@@ -47,6 +47,9 @@ const (
 	// maxTotalBytes bounds all images of one body, so a body is not read in full
 	// only for the sanitizer to drop the excess.
 	maxTotalBytes = 8 << 20
+	// maxLookups bounds how many distinct images of one body are looked up, so a
+	// body full of unreadable references costs a few lookups, not one per image.
+	maxLookups = 10
 	// resolveTimeout bounds the whole of one Resolve call.
 	resolveTimeout = 30 * time.Second
 )
@@ -99,7 +102,7 @@ func (r *Resolver) Resolve(ctx context.Context, html string) string {
 	defer cancel()
 
 	seen := map[string]string{} // attachment id -> data URI, "" when it could not be read
-	resolved, total := 0, 0
+	resolved, total, lookups := 0, 0, 0
 	return imgSrc.ReplaceAllStringFunc(html, func(tag string) string {
 		m := imgSrc.FindStringSubmatch(tag)
 		id := refID.FindStringSubmatch(m[3])
@@ -109,9 +112,10 @@ func (r *Resolver) Resolve(ctx context.Context, html string) string {
 		key := strings.ToLower(id[1])
 		uri, done := seen[key]
 		if !done {
-			if resolved >= maxImages {
+			if resolved >= maxImages || lookups >= maxLookups {
 				return tag
 			}
+			lookups++
 			var n int
 			uri, n = r.dataURI(ctx, key, maxTotalBytes-total)
 			seen[key] = uri

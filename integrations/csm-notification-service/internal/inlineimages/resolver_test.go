@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -192,4 +193,26 @@ func TestResolve_NilResolverIsANoOp(t *testing.T) {
 	if got := r.Resolve(context.Background(), html); got != html {
 		t.Errorf("got %q", got)
 	}
+}
+
+// A body of unreadable references stops after maxLookups lookups, and leaves the
+// rest as references.
+func TestResolve_BoundsLookupsOfUnreadableImages(t *testing.T) {
+	loc := &countingLocator{}
+	r := New(loc, nil)
+	var b strings.Builder
+	for i := 0; i < 30; i++ {
+		fmt.Fprintf(&b, `<img src="/%08x-0000-0000-0000-000000000000">`, i)
+	}
+	r.Resolve(context.Background(), b.String())
+	if loc.calls != maxLookups {
+		t.Fatalf("lookups = %d, want %d", loc.calls, maxLookups)
+	}
+}
+
+type countingLocator struct{ calls int }
+
+func (c *countingLocator) LocateInlineImage(context.Context, string) (entity.InlineImageLocation, error) {
+	c.calls++
+	return entity.InlineImageLocation{}, errors.New("gone")
 }
