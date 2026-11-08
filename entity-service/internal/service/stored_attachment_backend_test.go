@@ -690,6 +690,23 @@ func TestBackend_DescriptionImageRelocation(t *testing.T) {
 		}
 	})
 
+	t.Run("a failed lookup of where it belongs still shows the image where it is", func(t *testing.T) {
+		repo := setup()
+		repo.parentErr = errors.New("database down")
+		loc, err := newBackendSvc(repo).LocateInlineImage(saCtx(t, saEmail), saAttID)
+		if err != nil {
+			t.Fatalf("LocateInlineImage: %v, want the location without relocateTo", err)
+		}
+		if !loc.Available || loc.StorageKey != drafts || loc.RelocateTo != "" {
+			t.Errorf("location = %+v", loc)
+		}
+		// Recording a move still reports the failure.
+		err = newBackendSvc(repo).InlineImageRelocated(saCtx(t, saEmail), saAttID, domain.InlineImageRelocatedRequest{StorageKey: canonical})
+		if err == nil {
+			t.Error("InlineImageRelocated hid the lookup failure")
+		}
+	})
+
 	t.Run("an image already under its work item is not moved", func(t *testing.T) {
 		repo := setup()
 		repo.rows[saAttID] = domain.StoredAttachmentRow{ID: saAttID, Number: "CIA1", Name: "pic.png", ContentType: &png, Status: "COMPLETE", StorageKey: &canonical, ParentID: saParentID}

@@ -244,9 +244,13 @@ func (s *storedAttachmentService) LocateInlineImage(ctx context.Context, id stri
 		"audit", true, "action", "view", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(img.kind),
 		"attachmentId", row.ID, "path", *row.StorageKey)
+	// Moving the file is an extra: a failed lookup of where it belongs must not
+	// stop the image being shown from where it is, so it is logged and left out.
 	relocateTo, err := s.relocationFor(ctx, img)
 	if err != nil {
-		return domain.AttachmentLocation{}, err
+		slog.WarnContext(ctx, "could not work out where an inline image should move to; serving it where it is",
+			"attachmentId", row.ID, "correlationId", middleware.CorrelationIDFromContext(ctx), "error", err)
+		relocateTo = ""
 	}
 	return domain.AttachmentLocation{
 		ID: row.ID, Number: row.Number, Name: row.Name,
