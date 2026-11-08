@@ -165,6 +165,13 @@ type fullContentFetcher interface {
 	GetCommentContent(ctx context.Context, commentID string) (string, error)
 }
 
+// inlineImageResolver rewrites the image references in a comment's or
+// description's HTML to the images themselves (see internal/inlineimages), so
+// the email can show them. Satisfied by *inlineimages.Resolver.
+type inlineImageResolver interface {
+	Resolve(ctx context.Context, html string) string
+}
+
 // onboardingStepRecorder abstracts entity.CustomerEntityClient's
 // RecordOnboardingStep for testability — the one write this dispatcher
 // makes back to entity-service.
@@ -261,6 +268,9 @@ type Dispatcher struct {
 	// a best-effort enrichment of the email body, never a reason to fail or
 	// delay the notification.
 	fullContent fullContentFetcher
+	// images is set via WithInlineImages; nil leaves an image reference as it is
+	// (the email sanitizer drops it).
+	images inlineImageResolver
 
 	// emailSendingEnabled (EMAIL_SENDING_ENABLED, the disable-entirely
 	// `!= "false"` convention CALL_SENDING_ENABLED below also uses) is
@@ -519,6 +529,25 @@ func (d *Dispatcher) WithDurableDedup(client durableDedup) *Dispatcher {
 func (d *Dispatcher) WithFullContentFetcher(f fullContentFetcher) *Dispatcher {
 	d.fullContent = f
 	return d
+}
+
+// WithInlineImages configures the resolution of image references in an email's
+// description or comment (see inlineImageResolver) and returns d for chaining.
+// Optional per deployment: without it the email shows no image that is stored
+// as an attachment.
+func (d *Dispatcher) WithInlineImages(r inlineImageResolver) *Dispatcher {
+	d.images = r
+	return d
+}
+
+// withInlineImages returns html with its image references resolved, or html
+// itself when no resolver is configured. Called once per event, before the
+// per-recipient render, never once per group.
+func (d *Dispatcher) withInlineImages(ctx context.Context, html string) string {
+	if d.images == nil {
+		return html
+	}
+	return d.images.Resolve(ctx, html)
 }
 
 // resolveFullCaseDescription returns the case's full, original description
@@ -1306,7 +1335,7 @@ func (d *Dispatcher) handleCaseCreated(ctx context.Context, record eventbus.Reco
 	// group. The Google Chat alert below deliberately keeps using p.Product/
 	// p.Team/etc. (not this) — it never reads Description/CaseComment at
 	// all, so it has nothing to recover here.
-	description := d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID)
+	description := d.withInlineImages(ctx, d.resolveFullCaseDescription(ctx, p.DescriptionTruncated, p.Description, p.CaseID))
 
 	groups, groupUserIDs, err := d.groupByLink(ctx, p.Recipients, p.ProjectID, p.CaseID)
 	if err != nil {
@@ -1490,7 +1519,7 @@ func (d *Dispatcher) handleCommentAdded(ctx context.Context, record eventbus.Rec
 	// text): frustration analysis works on the words, which survive
 	// stripping untouched — only the embedded image itself is gone — so it
 	// has no reason to pay for this fetch too.
-	caseComment := d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID)
+	caseComment := d.withInlineImages(ctx, d.resolveFullCommentContent(ctx, p.CaseCommentTruncated, p.CaseComment, p.CommentID))
 	owned, sendErr := d.sendPerGroup(ctx, baseKey, groups, groupUserIDs, subject, d.links.CSMLink(p.CaseID), func(caseLink, intendedFor string) (string, []notifications.InlineImage) {
 		if p.IsInternalNote {
 			// See events.CommentAddedPayload.IsInternalNote's own doc
@@ -2671,7 +2700,7 @@ func (d *Dispatcher) handleCRPlanDateNotice(ctx context.Context, record eventbus
 		ActorName:        p.ActorName,
 		ProjectName:      p.ProjectName,
 		ShortDescription: p.ShortDescription,
-		Description:      p.Description,
+		Description:      d.withInlineImages(ctx, p.Description),
 		Link:             d.links.ChangeRequestLink(p.Audience, p.ChangeRequestID, p.ProjectID),
 		IntendedFor:      intendedFor,
 	})

@@ -3297,3 +3297,67 @@ func TestDispatcher_Handle_IncidentAssignedIsANoOp(t *testing.T) {
 		t.Fatalf("dispatcher placed %d call(s) for incident.assigned", len(call.calls))
 	}
 }
+
+// mockInlineImageResolver stands in for *inlineimages.Resolver: it swaps one
+// known reference for a data: image and records every body it was given.
+type mockInlineImageResolver struct {
+	ref, dataURI string
+	seen         []string
+}
+
+func (m *mockInlineImageResolver) Resolve(_ context.Context, html string) string {
+	m.seen = append(m.seen, html)
+	return strings.ReplaceAll(html, m.ref, m.dataURI)
+}
+
+// A description or comment whose image is a stored attachment (a reference, not
+// a data: URI) must still reach the email as an inline picture, once the
+// resolver has put the image in.
+func TestDispatcher_Handle_CaseCreated_StoredImageReferenceBecomesAnInlinePicture(t *testing.T) {
+	mock := &mockEmailSender{}
+	res := &mockInlineImageResolver{ref: `src="/b1000000-0000-4000-8000-00000000000a"`, dataURI: `src="data:image/png;base64,aGVsbG8="`}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}).WithInlineImages(res)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"CASE","priority":"HIGH","product":"api-manager","createdAt":"2026-01-01","description":"<p>see below</p><img src=\"/b1000000-0000-4000-8000-00000000000a\">","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(res.seen) != 1 {
+		t.Fatalf("resolver called %d times, want once per event (not per recipient group)", len(res.seen))
+	}
+	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 1 {
+		t.Fatalf("calls = %d, want 1 email with 1 inline attachment", len(mock.calls))
+	}
+	att := mock.calls[0].attachments[0]
+	if !att.Inline || string(att.Attachment) != "hello" || !strings.Contains(mock.calls[0].htmlBody, "cid:"+att.ContentID) {
+		t.Errorf("image not embedded as an inline picture: %+v", att)
+	}
+}
+
+func TestDispatcher_Handle_CommentAdded_StoredImageReferenceBecomesAnInlinePicture(t *testing.T) {
+	mock := &mockEmailSender{}
+	res := &mockInlineImageResolver{ref: `src="/b1000000-0000-4000-8000-00000000000a"`, dataURI: `src="data:image/png;base64,aGVsbG8="`}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{}).WithInlineImages(res)
+
+	record := eventbus.Record{Value: []byte(`{"type":"case.comment_added","entityId":"CASE-1","payload":{"name":"Commenter","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseComment":"<p>see attached<img src=\"/b1000000-0000-4000-8000-00000000000a\"></p>","commentId":"C-1","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 1 || !mock.calls[0].attachments[0].Inline {
+		t.Fatalf("want 1 email with 1 inline attachment, got %+v", mock.calls)
+	}
+}
+
+// With no resolver configured an image reference is dropped, exactly as before,
+// and the email is still sent.
+func TestDispatcher_Handle_CaseCreated_StoredImageReferenceWithoutResolverIsDropped(t *testing.T) {
+	mock := &mockEmailSender{}
+	d := newTestDispatcher(mock, &mockGoogleChatSender{}, &mockCallSender{})
+	record := eventbus.Record{Value: []byte(`{"type":"case.created","entityId":"CASE-1","payload":{"reporterName":"Reporter","projectName":"Proj","projectId":"PROJ-1","caseId":"CASE-1","caseTitle":"Something broke","caseType":"CASE","priority":"HIGH","product":"api-manager","createdAt":"2026-01-01","description":"<p>see below</p><img src=\"/b1000000-0000-4000-8000-00000000000a\">","recipients":["test-recipient@example.com"]}}`)}
+	if err := d.Handle(context.Background(), record); err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if len(mock.calls) != 1 || len(mock.calls[0].attachments) != 0 || strings.Contains(mock.calls[0].htmlBody, "b1000000") {
+		t.Errorf("want 1 email, no attachment, no reference left: %+v", mock.calls)
+	}
+}
