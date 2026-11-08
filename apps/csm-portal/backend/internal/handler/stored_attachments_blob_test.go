@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
@@ -42,6 +43,8 @@ type fakeBlobEntity struct {
 	authBody       string
 	confirmBody    string
 	deleteCalls    int
+	deleteBody     string
+	locateBody     string
 
 	relocatedBody string
 	relocateErr   error
@@ -56,7 +59,8 @@ func (f *fakeBlobEntity) AuthorizeStoredAttachmentUpload(_ context.Context, _ st
 	f.authBody = string(b)
 	return []byte(f.target), f.authErr
 }
-func (f *fakeBlobEntity) LocateStoredAttachment(context.Context, []byte) ([]byte, error) {
+func (f *fakeBlobEntity) LocateStoredAttachment(_ context.Context, b []byte) ([]byte, error) {
+	f.locateBody = string(b)
 	return []byte(f.locate), f.locateErr
 }
 func (f *fakeBlobEntity) LocateInlineImage(context.Context, string) ([]byte, error) {
@@ -66,7 +70,8 @@ func (f *fakeBlobEntity) ConfirmStoredAttachmentUpload(_ context.Context, _ stri
 	f.confirmBody = string(b)
 	return []byte(`{"id":"x"}`), f.confirmErr
 }
-func (f *fakeBlobEntity) DeleteStoredAttachment(context.Context, []byte) error {
+func (f *fakeBlobEntity) DeleteStoredAttachment(_ context.Context, b []byte) error {
+	f.deleteBody = string(b)
 	f.deleteCalls++
 	return f.deleteErr
 }
@@ -318,6 +323,70 @@ func TestBlobDelete_RemovesTheFileAfterEntityDeletesTheRow(t *testing.T) {
 	rec = serveBlob(&fakeBlobEntity{locate: loc, deleteErr: &apierror.Error{StatusCode: 403}}, s, http.MethodPost, "/attachments/delete", strings.NewReader(body), nil, true)
 	if rec.Code != 403 || len(s.deleted) != 0 {
 		t.Errorf("forbidden: %d %v", rec.Code, s.deleted)
+	}
+}
+
+// deleteAs sends a delete with `body` as a caller holding `roles`, through a
+// handler wired with the test access guard, and returns what entity-service got.
+func deleteAs(t *testing.T, roles []string, body string) (*fakeBlobEntity, int) {
+	t.Helper()
+	e := &fakeBlobEntity{locate: `{"available":true,"storageKey":"` + blobSecretKey + `"}`}
+	h := NewBlobAttachmentHandler(e, &fakeBlobStore{}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+	r := httptest.NewRequest(http.MethodPost, "/attachments/delete", strings.NewReader(body))
+	r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{UserID: "u", Roles: roles}))
+	rec := httptest.NewRecorder()
+	h.DeleteAttachment(rec, r)
+	return e, rec.Code
+}
+
+func TestBlobDelete_AnAdminsDeleteCarriesTheAdminFlag(t *testing.T) {
+	body := `{"type":"work_item","id":"` + storedAttID + `"}`
+	e, code := deleteAs(t, []string{"test-admin"}, body)
+	if code != 204 {
+		t.Fatalf("code = %d", code)
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(e.deleteBody), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent["asAdmin"] != true || sent["id"] != storedAttID || sent["type"] != "work_item" {
+		t.Errorf("sent = %v", sent)
+	}
+	// Locate does not know the field, and strict decoding there would refuse it.
+	if strings.Contains(e.locateBody, "asAdmin") {
+		t.Errorf("locate body = %s", e.locateBody)
+	}
+}
+
+func TestBlobDelete_ANonAdminNeverGetsTheAdminFlag_EvenIfTheBrowserSendsIt(t *testing.T) {
+	for name, body := range map[string]string{
+		"plain":      `{"type":"work_item","id":"` + storedAttID + `"}`,
+		"forged":     `{"type":"work_item","id":"` + storedAttID + `","asAdmin":true}`,
+		"other case": `{"type":"work_item","id":"` + storedAttID + `","ASADMIN":true,"asadmin":true}`,
+	} {
+		for _, roles := range [][]string{{"test-cs-engineer"}, {"test-viewer"}, nil} {
+			e, code := deleteAs(t, roles, body)
+			if code != 204 {
+				t.Fatalf("%s %v: code = %d", name, roles, code)
+			}
+			if strings.Contains(strings.ToLower(e.deleteBody), "asadmin") {
+				t.Errorf("%s %v: entity-service got %s", name, roles, e.deleteBody)
+			}
+		}
+	}
+}
+
+func TestBlobDelete_AnAdminsOwnFlagIsOneTrueValue_NotWhateverTheBrowserSent(t *testing.T) {
+	e, _ := deleteAs(t, []string{"test-admin"}, `{"type":"work_item","id":"`+storedAttID+`","asAdmin":false,"ASADMIN":"no"}`)
+	if strings.Count(strings.ToLower(e.deleteBody), "asadmin") != 1 || !strings.Contains(e.deleteBody, `"asAdmin":true`) {
+		t.Errorf("entity-service got %s", e.deleteBody)
+	}
+}
+
+func TestBlobDelete_ABodyThatIsNotAnObjectIsABadRequest(t *testing.T) {
+	_, code := deleteAs(t, []string{"test-admin"}, `[1,2]`)
+	if code != http.StatusBadRequest {
+		t.Errorf("code = %d", code)
 	}
 }
 
