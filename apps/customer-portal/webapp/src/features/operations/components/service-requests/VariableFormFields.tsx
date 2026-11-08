@@ -40,6 +40,7 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
 import type { ImageUploadHandler } from "@components/rich-text-editor/localImageUpload";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
@@ -402,6 +403,7 @@ export default function VariableFormFields({
             toolbarVariant="full"
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
+            maxAttachments={CREATE_FORM_MAX_ATTACHMENTS}
             onAttachmentRemove={onAttachmentRemove}
             onImageUpload={onImageUpload}
             onPasteError={(reason) =>

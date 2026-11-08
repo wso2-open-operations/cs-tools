@@ -14,13 +14,14 @@
 // permissions and limitations under the License.
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import Toolbar from "@components/rich-text-editor/ToolBar";
+import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
 import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import { LinkNode } from "@lexical/link";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
@@ -29,22 +30,38 @@ import { ListItemNode, ListNode } from "@lexical/list";
 
 const initialConfig = {
   namespace: "ToolBarTest",
-  nodes: [ListNode, ListItemNode, ImageNode, CodeNode, LinkNode, HeadingNode, QuoteNode],
+  nodes: [
+    ListNode,
+    ListItemNode,
+    ImageNode,
+    CodeNode,
+    LinkNode,
+    HeadingNode,
+    QuoteNode,
+  ],
   onError: () => {},
   editable: true,
 };
 
-function renderToolbar(props: { onAttachmentClick?: () => void; disabled?: boolean } = {}) {
+function renderToolbar(
+  props: {
+    onAttachmentClick?: () => void;
+    attachDisabledReason?: string;
+    disabled?: boolean;
+  } = {},
+) {
   return render(
     <ThemeProvider theme={createTheme()}>
-      <LexicalComposer initialConfig={initialConfig}>
-        <RichTextPlugin
-          contentEditable={<ContentEditable data-testid="editable" />}
-          placeholder={null}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <Toolbar {...props} />
-      </LexicalComposer>
+      <ErrorBannerProvider>
+        <LexicalComposer initialConfig={initialConfig}>
+          <RichTextPlugin
+            contentEditable={<ContentEditable data-testid="editable" />}
+            placeholder={null}
+            ErrorBoundary={LexicalErrorBoundary}
+          />
+          <Toolbar {...props} />
+        </LexicalComposer>
+      </ErrorBannerProvider>
     </ThemeProvider>,
   );
 }
@@ -58,7 +75,25 @@ describe("ToolBar", () => {
   it("renders attachment button when onAttachmentClick is provided", () => {
     const onAttachmentClick = () => {};
     renderToolbar({ onAttachmentClick });
-    expect(screen.getByRole("button", { name: /attach file/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /attach file/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("turns the attachment button off, saying why, when attaching is not allowed", () => {
+    const onAttachmentClick = vi.fn();
+    renderToolbar({
+      onAttachmentClick,
+      attachDisabledReason:
+        "Only 1 attachment can be added. Remove it to add a different one.",
+    });
+    const button = screen.getByRole("button", {
+      name: /only 1 attachment can be added/i,
+    });
+    expect(button).toBeDisabled();
+    button.click();
+    expect(onAttachmentClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Attach File" })).toBeNull();
   });
 
   it("renders when disabled", () => {

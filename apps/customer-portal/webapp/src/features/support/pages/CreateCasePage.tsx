@@ -15,6 +15,10 @@
 // under the License.
 
 /* eslint-disable react-hooks/set-state-in-effect -- the effects below keep form state aligned with the loaded deployments, products and relatedCase; the rule only started reporting them once this file stopped using try/finally, which the React Compiler cannot analyze */
+import {
+  CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE,
+  createFormAttachmentsFull,
+} from "@config/attachmentLimitsConfig";
 import { Box, Button, Grid } from "@wso2/oxygen-ui";
 import { CircleCheck } from "@wso2/oxygen-ui-icons-react";
 import {
@@ -993,6 +997,12 @@ export default function CreateCasePage(): JSX.Element {
   };
 
   const handleAttachmentClick = () => {
+    // A create form takes one attachment: say so instead of opening a picker
+    // whose file would be refused.
+    if (createFormAttachmentsFull(attachments.length)) {
+      showError(CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE);
+      return;
+    }
     setIsAttachmentModalOpen(true);
   };
 
@@ -1003,7 +1013,7 @@ export default function CreateCasePage(): JSX.Element {
       const isDuplicate = prev.some(
         (a) => fileSignature(a.file) === fileSignature(file),
       );
-      if (isDuplicate) return prev;
+      if (isDuplicate || createFormAttachmentsFull(prev.length)) return prev;
       const uniqueId = `att-${++attachmentIdCounterRef.current}-${Date.now()}`;
       if (attachmentName?.trim()) {
         attachmentNamesRef.current.set(uniqueId, attachmentName.trim());
