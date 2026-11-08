@@ -51,9 +51,9 @@ func NewSLAEngineHandler(entity entitySLAEngineClient) *SLAEngineHandler {
 
 // SearchActiveSLAStatusesManage handles GET /sla-status/manage -- what the
 // admin page polls to show which clocks are currently running, typically
-// right after RequestRecalculation. severity/caseType/search/elapsedBucket
-// are the admin table's own optional filters, forwarded to entity-service
-// as-is (it validates each) -- see entity.SLAStatusManageFilters.
+// right after RequestRecalculation. severity/caseType/search/elapsedBucket/
+// status are the admin table's own optional filters, forwarded to
+// entity-service as-is (it validates each) -- see entity.SLAStatusManageFilters.
 func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if middleware.UserInfoFromContext(r.Context()) == nil {
@@ -66,6 +66,7 @@ func (h *SLAEngineHandler) SearchActiveSLAStatusesManage(w http.ResponseWriter, 
 		CaseType:      q.Get("caseType"),
 		Search:        q.Get("search"),
 		ElapsedBucket: q.Get("elapsedBucket"),
+		Status:        q.Get("status"),
 	}
 	result, err := h.entity.SearchActiveSLAStatusesManage(r.Context(), q.Get("limit"), q.Get("offset"), filters)
 	if err != nil {

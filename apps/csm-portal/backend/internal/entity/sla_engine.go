@@ -32,6 +32,7 @@ type SLAStatusManageFilters struct {
 	CaseType      string
 	Search        string
 	ElapsedBucket string
+	Status        string
 }
 
 // SearchActiveSLAStatusesManage calls GET /sla-status?admin=true on the
@@ -63,6 +64,9 @@ func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context
 	}
 	if filters.ElapsedBucket != "" {
 		q.Set("elapsedBucket", filters.ElapsedBucket)
+	}
+	if filters.Status != "" {
+		q.Set("status", filters.Status)
 	}
 	return c.do(ctx, http.MethodGet, "/sla-status?"+q.Encode(), nil)
 }
