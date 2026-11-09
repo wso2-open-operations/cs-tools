@@ -22,6 +22,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp"
 )
@@ -37,6 +38,9 @@ type acpSettings struct {
 	ExcludedProjectIDs     map[string]bool
 	// DailyLimit is ACP_DAILY_LIMIT as set, parsed by acpConfig.
 	DailyLimit string
+	// Screening is ACP_SCREENING and FullSweepWeekday ACP_SCREENING_FULL_SWEEP_WEEKDAY
+	// as set, parsed by acpConfig.
+	Screening, FullSweepWeekday string
 
 	AlertsEnabled    bool
 	EmailBaseURL     string
@@ -58,6 +62,8 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 		TestProjectID:          strings.TrimSpace(os.Getenv("ACP_TEST_PROJECT_ID")),
 		ExcludedProjectIDs:     acp.ParseProjectIDs(os.Getenv("ACP_EXCLUDED_PROJECT_IDS")),
 		DailyLimit:             strings.TrimSpace(os.Getenv("ACP_DAILY_LIMIT")),
+		Screening:              strings.TrimSpace(os.Getenv("ACP_SCREENING")),
+		FullSweepWeekday:       strings.TrimSpace(os.Getenv("ACP_SCREENING_FULL_SWEEP_WEEKDAY")),
 		AlertsEnabled:          alertsEnabled,
 		EmailBaseURL:           emailBaseURL,
 		EmailFromAddress:       strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS")),
@@ -93,6 +99,10 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 // crossed the 15- and 7-day windows meanwhile gets neither, and one whose end
 // date passed gets the day-0 notice and is suspended in the same run.
 //
+// ACP_SCREENING (on or off, default on) and ACP_SCREENING_FULL_SWEEP_WEEKDAY
+// (Mon to Sun, default Monday) configure hybrid evaluation; anything else is
+// refused.
+//
 // ACP_DAILY_LIMIT caps the projects one run acts on (acp.Config.DailyLimit); a
 // malformed or negative value is refused.
 //
@@ -113,6 +123,12 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 		return acp.Config{}, nil, err
 	}
 	cfg.DailyLimit = limit
+	if cfg.Screening, err = parseACPScreening(s.Screening); err != nil {
+		return acp.Config{}, nil, err
+	}
+	if cfg.FullSweepWeekday, err = parseACPWeekday(s.FullSweepWeekday); err != nil {
+		return acp.Config{}, nil, err
+	}
 	var warnings []string
 	if s.Tryout && !cfg.DryRun && cfg.TestProjectID == "" {
 		warnings = append(warnings, "TRYOUT_TASK is acp_closure without ACP_TEST_PROJECT_ID: running as a dry run, nothing will be written; set ACP_DRY_RUN=true explicitly to silence this")
@@ -153,4 +169,31 @@ func parseACPDailyLimit(v string) (int, error) {
 		return 0, fmt.Errorf("ACP_DAILY_LIMIT=%q must be a non-negative integer (0 = no cap)", v)
 	}
 	return n, nil
+}
+
+// parseACPScreening reads ACP_SCREENING: "on" (the default, also when unset
+// or empty) or "off", any case.
+func parseACPScreening(v string) (bool, error) {
+	switch strings.ToLower(v) {
+	case "", "on":
+		return true, nil
+	case "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("ACP_SCREENING=%q must be off or on", v)
+}
+
+// parseACPWeekday reads ACP_SCREENING_FULL_SWEEP_WEEKDAY: Mon to Sun (or the
+// full day name), any case; unset is Monday.
+func parseACPWeekday(v string) (time.Weekday, error) {
+	if v == "" {
+		return time.Monday, nil
+	}
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		name := strings.ToLower(d.String())
+		if l := strings.ToLower(v); l == name || l == name[:3] {
+			return d, nil
+		}
+	}
+	return 0, fmt.Errorf("ACP_SCREENING_FULL_SWEEP_WEEKDAY=%q must be Mon, Tue, Wed, Thu, Fri, Sat or Sun", v)
 }

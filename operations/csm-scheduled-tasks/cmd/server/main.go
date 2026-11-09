@@ -1464,7 +1464,7 @@ func acpTask(entityServiceBaseURL, oauthTokenURL, oauthClientID, oauthClientSecr
 		Schedule:     scheduleFor(scheduleOverrides, acpTaskName, "0 4 * * 1-5"),
 		Handler:      acp.Run(clients, cfg),
 		RunNowNarrow: runNowNarrow,
-		RunNowFlags:  []string{"--dry-run", "--limit"},
+		RunNowFlags:  []string{"--dry-run", "--limit", "--full-sweep"},
 		RetryBackoff: acpRetryBackoff,
 		MaxAttempts:  acpMaxAttempts,
 		To:           to,

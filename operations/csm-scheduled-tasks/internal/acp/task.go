@@ -88,6 +88,34 @@ type Config struct {
 	// recorded, or a suspension attempted), most overdue first; 0 is no cap.
 	// ACP_DAILY_LIMIT.
 	DailyLimit int
+	// Screening turns on hybrid evaluation: projects CSM's copy of the
+	// Salesforce data shows cannot be acted on are skipped before any live
+	// read (sweep.screen). ACP_SCREENING, default on.
+	Screening bool
+	// FullSweepWeekday is the Colombo weekday on which a screening run
+	// evaluates every project live. ACP_SCREENING_FULL_SWEEP_WEEKDAY, default
+	// Monday.
+	FullSweepWeekday time.Weekday
+	// FullSweep forces every project live for this run (--run-now
+	// --full-sweep). It can only widen the live scope.
+	FullSweep bool
+}
+
+// screeningApplies reports whether this run screens, and when it does not
+// although ACP_SCREENING is on, why. A run scoped to one test project is
+// always live.
+func screeningApplies(cfg Config, now time.Time) (apply bool, whyNot string) {
+	switch {
+	case !cfg.Screening:
+		return false, ""
+	case cfg.TestProjectID != "":
+		return false, "a single-project run is always live"
+	case cfg.FullSweep:
+		return false, "--full-sweep"
+	case now.In(operationsZone).Weekday() == cfg.FullSweepWeekday:
+		return false, "the weekly full sweep weekday"
+	}
+	return true, ""
 }
 
 // Run returns the acp_closure handler. A sweep that could not list the
@@ -106,6 +134,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"testProjectID", cfg.TestProjectID,
 			"excludedProjectIDs", sortedKeys(cfg.ExcludedProjectIDs),
 			"dailyLimit", cfg.DailyLimit,
+			"screening", cfg.Screening,
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
@@ -146,8 +175,13 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			}
 		}
 
+		screening, whyNot := screeningApplies(cfg, now)
+		if whyNot != "" {
+			slog.InfoContext(ctx, "acp: screening is on but this run evaluates every project live", "runID", runID, "reason", whyNot)
+		}
 		ctx = entity.WithCorrelationID(ctx, runID)
-		result, err := sweep.Run(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs, cfg.DailyLimit)
+		result, err := sweep.RunWith(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
+			sweep.Options{Limit: cfg.DailyLimit, Screening: screening})
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,
@@ -156,6 +190,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"projectsEvaluated", result.ProjectsEvaluated,
 			"projectsExcluded", result.ProjectsExcluded,
 			"projectsActed", result.ProjectsActed,
+			"projectsScreenedOut", result.ProjectsScreenedOut,
 			"projectsNotEvaluatedByLimit", result.NotEvaluatedByLimit,
 			"projectsSkipped", len(result.Skipped),
 			"failureCount", len(result.Failures),
