@@ -559,6 +559,71 @@ One known limitation: the alert is meant to name the team's own lead, but
 that information is not currently available to this part of the service, so
 the alert only shows the team name.
 
+#### 3.2.1 When an SLA alert fires, and what is checked before it is sent
+
+(Where the clocks themselves are stored and how they pause, resume and
+breach: the core entity service's SLA document, `entity-service/docs/sla.md`.)
+
+**Alert points.** Each clock is alerted at 50%, 75% and 100% of its duration.
+This service keeps its own schedule of those moments in Redis rather than
+polling the entity service: a per-clock record (display details, a paused
+flag, the highest alert already sent), one time-ordered list of upcoming
+alerts, and a short-lived claim per alert so only one replica sends it.
+
+**What drives the schedule.** The service's single event consumer calls the
+SLA tracker on four events:
+
+- case created: read each clock's real duration from the entity service and
+  schedule its three alerts;
+- status changed: pause or resume according to that clock's own policy (asked
+  from the entity service), and complete every clock when the case is closed;
+- a customer-facing reply from a support engineer: complete the response
+  clock;
+- workaround provided: complete the workaround clock.
+
+A ticker (every 5 minutes by default) picks up whatever has become due. At
+startup the tracker rebuilds its Redis state from the entity service's active
+clocks; alerts for points already passed are marked as sent, never re-sent.
+
+**Pause and resume.** A paused clock's due alerts are left waiting, not
+dropped. On resume, the entity service's recorded pause length pushes every
+not-yet-sent alert later by that amount, so a breach is never alerted early.
+Business-day clocks use business-day arithmetic for their due times.
+
+**Steps before a Chat card or email goes out**, for each due alert:
+
+1. Read the clock from Redis (retried briefly). If Redis stays unavailable the
+   alert simply waits for the next tick; a degraded alert is never sent.
+2. Drop it if the clock is gone or that point has already been alerted.
+3. Leave it waiting if the clock is paused.
+4. Claim it. If another replica already has, stop.
+5. Re-check the clock with the entity service. If the check fails, finds no
+   record, or finds a different (replaced) clock, the alert goes ahead. If the
+   clock is already achieved, cancelled or completed without a breach, no
+   alert is sent (the point is still marked done). If the entity service
+   shows it paused, or its own timing puts this point in the future, the
+   alert is held back and rescheduled. A clock that really breached before it
+   was completed still alerts.
+6. Publish an "SLA point reached" event (a record only, not a notification).
+   If that fails, the claim is released and it is retried next tick.
+7. Send nothing if SLA sending is switched off, or the case is a service
+   request (those are shown in the portal only).
+8. Work out the Chat space(s) as described in section 2.1.3 and post one card
+   per space. A failed post is logged and not retried, so one broken space
+   cannot cause repeated duplicates elsewhere.
+9. Email the case assignee and the team group, using the addresses fetched in
+   step 5. In debug mode the mail goes to the debug recipients instead, with
+   the intended recipient shown in the body.
+10. Mark the point as alerted and remove it from the schedule.
+
+**If Redis is lost.** Which points have already been alerted is held only in
+Redis, not in the entity service. At the next startup the tracker rebuilds every
+active clock from the entity service and marks each point whose due time has
+already passed as alerted, without sending anything, so a Redis loss does not
+cause duplicate alerts. Only points still in the future are scheduled. The
+trade-off is that a point that fell due while Redis was down is treated as
+already alerted and is not sent late.
+
 ### 3.3 Incidents
 
 Incident alerts and the escalation chain use the assignment-group-mapped

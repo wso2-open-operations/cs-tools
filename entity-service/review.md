@@ -1,6 +1,6 @@
 # Pre-PR self-review checklist — entity-service
 
-Run this against the diff before opening or updating a PR touching this app. Check every item
+Run this against the staged diff before every commit (and again before opening or updating a PR) touching this app. Check every item
 below and call out anything that matches as a finding before proceeding to open the PR — don't
 just silently fix and move on, say what was found and why.
 
@@ -21,7 +21,7 @@ failure class turns up during review that isn't on this list, add it here in the
       check if the route is shared across audiences. Don't assume the route floor alone is enough.
 - [ ] New behavior has a test exercising it, not just a happy-path smoke test.
 - [ ] If this diff introduces a new convention/pattern/gotcha, `CLAUDE.md` is updated in the same
-      PR — don't leave the next reader to rediscover it.
+      PR — don't leave the next reader to rediscover it. Keep the addition short.
 - [ ] `gosec -fmt=text ./...` and `govulncheck ./...` both clean before opening the PR (`GOTOOLCHAIN=auto`
       for gosec; bump `go.mod`'s `go` directive to the latest `1.26.x` patch if the only finding is
       a stdlib CVE tied to the toolchain version).
@@ -32,6 +32,18 @@ failure class turns up during review that isn't on this list, add it here in the
 - [ ] No real name/email/URL/org-specific identifier copied from a screenshot, pasted log, or API
       response into code, tests, docs, or commit/PR text — use a generic placeholder.
 - [ ] No ticket/issue number or repo name cited in a code comment — explain the why directly.
+
+## API design and naming
+
+- [ ] New endpoint: name/shape checked against GitHub's REST API conventions
+      (https://docs.github.com/en/rest) — plural-noun resources, nesting for ownership, the HTTP
+      verb carries the action (no verbs in paths), consistent query-param names.
+- [ ] Before adding an endpoint, checked whether an existing one can serve it (an optional
+      filter/field). Reuse only if existing callers' behavior and response shape stay unchanged.
+- [ ] Non-breaking for others: existing routes, request/response fields, status codes, enum values and
+      columns are unchanged or only added to. A removal/rename/tightening needs a stated migration plan.
+- [ ] Methods, variables and types are named for what they mean (`caseID`, `fetchOpenCases` — not
+      `id2`, `doStuff`) and follow Go idiom (MixedCaps, no package-name stutter).
 
 ## Nullability / scanning
 

@@ -1,6 +1,6 @@
 # Pre-PR self-review checklist — csm-scheduled-tasks
 
-Run this against the diff before opening or updating a PR touching this app. Check every item
+Run this against the staged diff before every commit (and again before opening or updating a PR) touching this app. Check every item
 below and call out anything that matches as a finding before proceeding to open the PR — don't
 just silently fix and move on, say what was found and why.
 
@@ -16,14 +16,23 @@ catches it too.
 - [ ] No PII in a log line — IDs and sanitized summaries only.
 - [ ] New behavior has a test exercising it, not just a happy-path smoke test.
 - [ ] If this diff introduces a new convention/pattern/gotcha, `CLAUDE.md` is updated in the same
-      PR — don't leave the next reader to rediscover it.
+      PR — don't leave the next reader to rediscover it. Keep the addition short.
 - [ ] `go vet ./...` and `go test -race ./...` both clean before opening the PR.
+- [ ] `gosec -fmt=text ./...` and `govulncheck ./...` both clean (`GOTOOLCHAIN=auto` for gosec; bump
+      `go.mod`'s `go` directive if the only finding is a stdlib CVE tied to the toolchain version).
 - [ ] Commits/PR carry this session's attribution lines, not an older convention from memory.
 - [ ] `git fetch upstream main` + `git merge-tree --write-tree HEAD upstream/main` checked clean
       before pushing — don't trust a merge that was clean an hour ago.
 - [ ] No real name/email/URL/org-specific identifier copied from a screenshot, pasted log, or API
       response into code, tests, docs, or commit/PR text — use a generic placeholder.
 - [ ] No ticket/issue number or repo name cited in a code comment — explain the why directly.
+
+## API design and naming
+
+- [ ] Non-breaking for others: existing routes, request/response fields, status codes, enum values and
+      columns are unchanged or only added to. A removal/rename/tightening needs a stated migration plan.
+- [ ] Methods, variables and types are named for what they mean (`caseID`, `fetchOpenCases` — not
+      `id2`, `doStuff`) and follow Go idiom (MixedCaps, no package-name stutter).
 
 ## `cmd/` — the single-main-package rule
 
