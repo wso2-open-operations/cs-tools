@@ -620,7 +620,7 @@ func TestUpdateProject(t *testing.T) {
 	t.Run("closureState: case-insensitive key spelling still requires PermAdmin", func(t *testing.T) {
 		// entity-service's own JSON decoding (encoding/json) matches a key to
 		// a struct field without regard to case, so this guard must catch a
-		// differently-cased spelling too -- see projectUpdateTargetsClosureState's
+		// differently-cased spelling too -- see projectUpdateAdminOnlyField's
 		// own doc comment.
 		called := false
 		h := NewProjectHandler(&mockEntityProjectClient{
@@ -759,8 +759,17 @@ func withProjectCaller(r *http.Request, roles ...string) *http.Request {
 // encoding/json matches keys with Unicode simple folding, so the key checks
 // must too: a long-s spelling still names the protected field to the decoder.
 func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
-	if !projectUpdateTargetsClosureState([]byte(`{"closureſtate":"CLOSED"}`)) {
+	if projectUpdateAdminOnlyField([]byte(`{"closureſtate":"CLOSED"}`)) == "" {
 		t.Error("long-s spelling of closureState must be detected")
+	}
+	if projectUpdateAdminOnlyField([]byte(`{"SUSPENSIONPROCESSOVERRIDDEN":null}`)) == "" {
+		t.Error("upper-case spelling of suspensionProcessOverridden must be detected")
+	}
+	if projectUpdateAdminOnlyField([]byte(`{"suspenſionProceſſOverridden":true}`)) == "" {
+		t.Error("long-s spelling of suspensionProcessOverridden must be detected")
+	}
+	if got := projectUpdateAdminOnlyField([]byte(`{"hasAgent":true,"suspensionProcessState":{}}`)); got != "" {
+		t.Errorf("unrelated keys must not be admin-only, got %q", got)
 	}
 	onb, other := projectUpdateTargets([]byte(`{"onboardingſtatus":"In-Progress"}`))
 	if !onb || other {
@@ -776,4 +785,100 @@ func TestProjectUpdateKeyChecksFoldLikeDecoder(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"closureſtate":"CLOSED"}`), &req); err != nil || req.ClosureState != "CLOSED" {
 		t.Fatalf("premise: decoder should fold long-s (got %q, err %v)", req.ClosureState, err)
 	}
+	var flag struct {
+		Overridden *bool `json:"suspensionProcessOverridden"`
+	}
+	if err := json.Unmarshal([]byte(`{"suspenſionProceſſOverridden":true}`), &flag); err != nil || flag.Overridden == nil || !*flag.Overridden {
+		t.Fatalf("premise: decoder should fold long-s in suspensionProcessOverridden (got %v, err %v)", flag.Overridden, err)
+	}
+}
+
+// suspensionProcessOverridden is admin-only exactly like closureState: any body
+// that names the key (even null, any spelling the decoder folds to it) needs
+// PermAdmin, and a refusal is decided before anything reaches entity-service.
+func TestUpdateProject_SuspensionProcessOverriddenRequiresAdmin(t *testing.T) {
+	const projectID = "11111111-1111-1111-1111-111111111111"
+	const upstream = `{"message":"Project updated.","project":{"id":"` + projectID + `","updatedBy":"u","updatedOn":"2026-01-01T00:00:00Z","suspensionProcessOverridden":true}}`
+
+	do := func(role, body string) (code int, called bool, got []byte, resp string) {
+		h := NewProjectHandler(&mockEntityProjectClient{
+			updateProjectFn: func(_ context.Context, _ string, b []byte) ([]byte, error) {
+				called = true
+				got = b
+				return []byte(upstream), nil
+			},
+		}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+		r := withProjectCaller(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(body)), role)
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		return w.Code, called, got, w.Body.String()
+	}
+
+	t.Run("admin may set it: forwarded and echoed verbatim", func(t *testing.T) {
+		const body = `{"suspensionProcessOverridden":true}`
+		code, called, got, resp := do("test-admin", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+		if strings.TrimSpace(resp) != upstream {
+			t.Errorf("response %q, want upstream verbatim %q", resp, upstream)
+		}
+	})
+
+	refused := []struct{ name, body string }{
+		{"true", `{"suspensionProcessOverridden":true}`},
+		{"false", `{"suspensionProcessOverridden":false}`},
+		{"explicit null", `{"suspensionProcessOverridden":null}`},
+		{"unusual casing", `{"SuspensionProcessOVERRIDDEN":true}`},
+		{"all upper case", `{"SUSPENSIONPROCESSOVERRIDDEN":true}`},
+		{"long-s look-alike", `{"suspenſionProceſſOverridden":true}`},
+		{"mixed with a permitted field", `{"hasAgent":true,"suspensionProcessOverridden":true}`},
+		{"mixed with closureState", `{"closureState":"SUSPENDED","suspensionProcessOverridden":true}`},
+	}
+	for _, c := range refused {
+		t.Run("non-admin refused before forwarding: "+c.name, func(t *testing.T) {
+			code, called, _, _ := do("test-cs-engineer", c.body)
+			if code != http.StatusForbidden {
+				t.Fatalf("code = %d, want 403", code)
+			}
+			if called {
+				t.Fatal("entity service must not be called for a denied suspensionProcessOverridden update")
+			}
+		})
+	}
+
+	t.Run("admin mixed closureState and flag body forwarded verbatim", func(t *testing.T) {
+		const body = `{"closureState":"SUSPENDED","suspensionProcessOverridden":true}`
+		code, called, got, _ := do("test-admin", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+	})
+
+	t.Run("non-admin body without the key still passes", func(t *testing.T) {
+		const body = `{"hasAgent":true,"suspensionProcessState":{"a":1}}`
+		code, called, got, _ := do("test-cs-engineer", body)
+		if code != http.StatusOK || !called || string(got) != body {
+			t.Fatalf("code=%d called=%v forwarded=%q", code, called, got)
+		}
+	})
+
+	t.Run("no guard wired fails closed", func(t *testing.T) {
+		called := false
+		h := NewProjectHandler(&mockEntityProjectClient{
+			updateProjectFn: func(context.Context, string, []byte) ([]byte, error) {
+				called = true
+				return []byte(`{}`), nil
+			},
+		})
+		r := withProjectCaller(httptest.NewRequest(http.MethodPatch, "/projects/"+projectID, strings.NewReader(`{"suspensionProcessOverridden":true}`)), "test-admin")
+		r.SetPathValue("id", projectID)
+		w := httptest.NewRecorder()
+		h.UpdateProject(w, r)
+		assertStatus(t, w, http.StatusForbidden)
+		if called {
+			t.Fatal("entity service must not be called when no guard is wired")
+		}
+	})
 }
