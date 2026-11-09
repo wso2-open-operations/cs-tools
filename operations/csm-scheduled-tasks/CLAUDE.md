@@ -646,6 +646,24 @@ both places.
   `POST /salesforce/events`, `HandleEvent` never calls `ResolveScope`). Not repaired, because the copy
   cannot be matched or read: the opportunity's stage and EULA and link existence (CSM's rows carry no
   Salesforce id), the account's status and primary partner (CSM's account read does not return them).
+- **Running without sales-entity-service reads (`ACP_SALES_ENTITY_READS`, `on` default, `off`).** With `off`
+  ACP makes **no** sales-entity-service read (project, customer, contacts, linked opportunities, opportunities,
+  invoices) and decides only from CSM's copy through entity-service (`sweep.CSMOnlyDetails`, the CSM client's
+  existing reads: project dates and account, `GET /accounts/{id}` for the people and `hasPrimaryPartner`,
+  project and account contacts, links, opportunities, invoices). The account life cycle is not in any
+  account read, so the Customer accounts are listed once per run (`POST /accounts/search`,
+  `filters.lifeCycle=Customer`, exact match; `csmOnlyDetails.prepare`): an account outside the list is "not
+  Customer" (`ProjectsFilteredStatus`), a project with no account has no status (`ProjectsFilteredNoStatus`),
+  and a list that cannot be read in full (error, page cap, fewer distinct accounts than reported) stops the
+  run before anything is evaluated, fail closed. Primary-partner presence is entity-service's approximation
+  (any partner link in `account_relationship`; no "primary" marker), which can only make a suspend date
+  later, never earlier. **There is no live confirmation: the decision is only as good as the CSM copy**, so a
+  stale invoice, end date or partner flag can cause a wrong notice or suspension. Screening, the weekly
+  full sweep and the repair are off in this mode (nothing live to compare), logged at startup. The filters
+  keep working from the CSM data. The `State__c` write of a suspension is a write and stays: the
+  `ACP_SALES_ENTITY_*` settings are required for a real run (startup error if missing) and not for a dry
+  run, where no sales-entity-service client is built at all. `acp.Clients.SalesEntity` is an interface so a
+  test can prove a whole run makes zero reads and exactly one `State__c` write.
 - **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
   (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
   - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
@@ -1004,6 +1022,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
 | `ACP_SCREENING` / `ACP_SCREENING_FULL_SWEEP_WEEKDAY` | No (defaults `on` / `Mon`) | Hybrid evaluation of `acp_closure` (on unless `off`) and the weekday it evaluates every project live; anything malformed refuses to start — see "ACP closure" above |
+| `ACP_SALES_ENTITY_READS` | No (default `on`) | `off` makes `acp_closure` read nothing from sales-entity-service and decide only from CSM's copy (no live confirmation; screening, full sweep and repair off); anything but `on`/`off` refuses to start. `ACP_SALES_ENTITY_*` are then needed only for a real run (the suspension write) — see "ACP closure" above |
 | `ACP_REPAIR` / `ACP_REPAIR_MAX_EVENTS` | No (defaults `on` / `200`) | Repair of CSM's copy by synthetic Salesforce events during a live pass; `off` or `0` posts nothing; malformed refuses to start — see "ACP closure" above |
 | `ACP_DAILY_LIMIT` | No (default `0` = no cap) | Most projects one `acp_closure` run acts on, most overdue first; malformed or negative refuses to start — see "ACP closure" above |
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
