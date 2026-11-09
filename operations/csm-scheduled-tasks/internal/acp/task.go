@@ -84,6 +84,10 @@ type Config struct {
 	// someone trying it out on a weekend must not read an empty run as "no
 	// projects due".
 	RunOnWeekends bool
+	// DailyLimit caps how many projects one run acts on (a notice sent or
+	// recorded, or a suspension attempted), most overdue first; 0 is no cap.
+	// ACP_DAILY_LIMIT.
+	DailyLimit int
 }
 
 // Run returns the acp_closure handler. A sweep that could not list the
@@ -101,6 +105,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"emailEnabled", cfg.EmailEnabled,
 			"testProjectID", cfg.TestProjectID,
 			"excludedProjectIDs", sortedKeys(cfg.ExcludedProjectIDs),
+			"dailyLimit", cfg.DailyLimit,
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
@@ -142,7 +147,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 		}
 
 		ctx = entity.WithCorrelationID(ctx, runID)
-		result, err := sweep.Run(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs)
+		result, err := sweep.Run(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs, cfg.DailyLimit)
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,
@@ -150,6 +155,8 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"stoppedEarly", err != nil,
 			"projectsEvaluated", result.ProjectsEvaluated,
 			"projectsExcluded", result.ProjectsExcluded,
+			"projectsActed", result.ProjectsActed,
+			"projectsNotEvaluatedByLimit", result.NotEvaluatedByLimit,
 			"projectsSkipped", len(result.Skipped),
 			"failureCount", len(result.Failures),
 		)

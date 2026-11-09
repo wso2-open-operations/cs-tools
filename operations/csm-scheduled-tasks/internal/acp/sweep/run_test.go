@@ -40,7 +40,7 @@ func TestRun_SinglePageEvaluatesAllProjects(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -82,7 +82,7 @@ func TestRun_MultiPagePaginatesUntilHasMoreFalse(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -116,7 +116,7 @@ func TestRun_StopsWhenPageReturnsZeroProjects(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -158,7 +158,7 @@ func TestRun_BoundsIterationsByTotalWhenHasMoreNeverFalse(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -194,7 +194,7 @@ func TestRun_OneProjectFailureDoesNotBlockTheRest(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -221,7 +221,7 @@ func TestRun_PageFetchFailureIsFatal(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
@@ -249,7 +249,7 @@ func TestRun_ScopedToProjectIDFetchesOnlyThatProject(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), testProjectID, nil)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), testProjectID, nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -278,7 +278,7 @@ func TestRun_ScopedProjectFetchFailureIsFatal(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	ntf := &mockNotifier{}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "00000000-0000-4000-8000-000000000001", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), "00000000-0000-4000-8000-000000000001", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want non-nil")
 	}
@@ -317,7 +317,7 @@ func TestRun_SkipsExcludedProjectsInBroadSweep(t *testing.T) {
 	ntf := &mockNotifier{}
 	excluded := map[string]bool{"p2": true}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", excluded)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, now, "", excluded, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -350,7 +350,7 @@ func TestRun_ScopedToProjectIDSkipsExcludedProjectWithoutFetching(t *testing.T) 
 	ntf := &mockNotifier{}
 	excluded := map[string]bool{excludedID: true}
 
-	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), excludedID, excluded)
+	result, err := Run(context.Background(), reader, CSMDetails(reader), updater, ntf, time.Now(), excludedID, excluded, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -377,7 +377,7 @@ func TestRun_StopsAtMaxProjectPagesWhenUpstreamNeverEnds(t *testing.T) {
 		},
 	}
 
-	_, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	_, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want an error when the page cap is reached")
 	}
@@ -437,7 +437,7 @@ func TestRun_SuspensionsDoNotMakeTheSweepSkipProjects(t *testing.T) {
 	}
 	details := suspendingDetails{open: &open, seen: map[string]int{}}
 
-	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
@@ -467,7 +467,7 @@ func TestRun_APageFetchFailureEvaluatesNothing(t *testing.T) {
 	}
 	details := suspendingDetails{open: &[]string{}, seen: map[string]int{}}
 
-	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil)
+	result, err := Run(context.Background(), reader, details, &mockProjectUpdater{}, &mockNotifier{}, time.Now(), "", nil, 0)
 	if err == nil {
 		t.Fatal("Run() error = nil, want the page fetch failure")
 	}

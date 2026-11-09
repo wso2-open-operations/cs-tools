@@ -57,7 +57,7 @@ func TestSuspend_WritesSalesforceBeforeCSM(t *testing.T) {
 		return nil
 	}
 
-	err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
+	_, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -73,7 +73,7 @@ func TestSuspendInvoice_WritesSalesforce(t *testing.T) {
 	updater := &mockProjectUpdater{}
 	proj := project{ID: "p1", SfID: strPtr("a0dSF1"), Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
 
-	err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, &mockNotifier{}, now, proj)
+	_, err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, &mockNotifier{}, now, proj)
 	if err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
@@ -102,7 +102,7 @@ func TestSuspend_CSMFailureFailsTheProject(t *testing.T) {
 		updateProjectFn: func(context.Context, string, []byte) ([]byte, error) { return nil, errors.New("csm down") },
 	}
 
-	err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
+	_, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
 	if err == nil {
 		t.Fatal("processProject() error = nil, want the CSM failure")
 	}
@@ -121,7 +121,7 @@ func TestSuspend_SalesforceFailureFailsTheProject(t *testing.T) {
 		sfSuspendFn: func(context.Context, string) error { return errors.New("sales-entity down") },
 	}
 
-	err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
+	_, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, day0Project(strPtr("a0dSF1")))
 	if err == nil || !strings.Contains(err.Error(), "sales-entity down") {
 		t.Fatalf("processProject() error = %v, want the Salesforce failure", err)
 	}
@@ -140,7 +140,7 @@ func TestSuspend_AlreadySuspendedSkipsSalesforce(t *testing.T) {
 	proj := day0Project(strPtr("a0dSF1"))
 	proj.EndDateClosureState = strPtr("Closed")
 
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 	if len(updater.sfSuspendCalls) != 0 {
@@ -157,7 +157,7 @@ func TestNoticeOnly_SkipsSalesforce(t *testing.T) {
 	proj.EndDate = &endDate
 	proj.SuspensionProcessState = nil
 
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, &mockNotifier{}, day0Now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 	if len(updater.calls) == 0 {
@@ -240,7 +240,7 @@ func TestSuspend_HalfDoneSuspensionLeavesNoSuspendRecord(t *testing.T) {
 		sfSuspendFn: func(context.Context, string) error { return errors.New("sales-entity down") },
 	}
 	ntf := &mockNotifier{}
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now, proj); err == nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now, proj); err == nil {
 		t.Fatal("processProject() error = nil, want the Salesforce failure")
 	}
 	if len(ntf.sent) == 0 {
@@ -263,7 +263,7 @@ func TestSuspend_HalfDoneSuspensionLeavesNoSuspendRecord(t *testing.T) {
 	proj.SuspensionProcessState = first.State
 	updater = &mockProjectUpdater{}
 	ntf = &mockNotifier{}
-	if err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now.AddDate(0, 0, 1), proj); err != nil {
+	if _, err := processProject(context.Background(), &mockEntityReader{}, updater, ntf, day0Now.AddDate(0, 0, 1), proj); err != nil {
 		t.Fatalf("retry: processProject() error = %v", err)
 	}
 	if len(ntf.sent) != 0 {
@@ -292,7 +292,7 @@ func TestSuspendInvoice_RecordGoesWithTheClosureState(t *testing.T) {
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	updater := &mockProjectUpdater{}
 	proj := project{ID: "p1", SfID: strPtr("a0dSF1"), Name: "Test Project", Account: &projectAccountRef{ID: "a1"}}
-	if err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, &mockNotifier{}, now, proj); err != nil {
+	if _, err := processProject(context.Background(), invoiceLinkedReader(t, now), updater, &mockNotifier{}, now, proj); err != nil {
 		t.Fatalf("processProject() error = %v, want nil", err)
 	}
 	for _, c := range updater.calls {

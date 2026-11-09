@@ -89,7 +89,13 @@ const (
 // bugs — a project excluded here produces zero log signal about whatever
 // might be wrong with it, which is the opposite of what you want for an
 // actual bug. nil is equivalent to an empty set (nothing excluded).
-func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool) (Result, error) {
+//
+// limit (ACP_DAILY_LIMIT) caps how many projects a run acts on (see
+// Result.ProjectsActed); 0 is no cap. The list is most overdue first, so the
+// cap takes those. Once it is reached the remaining projects are not
+// evaluated, which is not a failure. A dry run counts the same way, so it
+// shows what a capped real run would do.
+func Run(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, limit int) (Result, error) {
 	var result Result
 
 	if projectID != "" {
@@ -123,6 +129,14 @@ func Run(ctx context.Context, reader sweepReader, details DetailSource, updater 
 	for i, listed := range projects {
 		if skipExcluded(ctx, listed.ID, excludedProjectIDs, &result) {
 			continue
+		}
+
+		if limit > 0 && result.ProjectsActed >= limit {
+			result.NotEvaluatedByLimit = len(projects) - i
+			slog.InfoContext(ctx, "acp: daily limit reached, remaining projects not evaluated",
+				"limit", limit, "projectsActed", result.ProjectsActed,
+				"projectsEvaluated", result.ProjectsEvaluated, "projectsNotEvaluated", result.NotEvaluatedByLimit)
+			break
 		}
 
 		result.ProjectsEvaluated++
@@ -238,7 +252,11 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
 	if err == nil {
-		err = processProject(ctx, reader, updater, ntf, now, full)
+		var acted bool
+		acted, err = processProject(ctx, reader, updater, ntf, now, full)
+		if acted {
+			result.ProjectsActed++
+		}
 	} else {
 		err = fmt.Errorf("read project details: %w", err)
 	}
