@@ -1343,15 +1343,21 @@ export function AttachmentsWidget({
                   borderRadius: 1,
                   border: 1,
                   borderColor: "divider",
+                  bgcolor: "action.disabledBackground",
+                  cursor: "not-allowed",
                 }}
               >
-                <Paperclip size={16} />
-                <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Box
+                  sx={{ display: "flex", color: "text.disabled", opacity: 0.8 }}
+                >
+                  <Paperclip size={16} />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0, opacity: 0.7 }}>
                   <Typography
                     variant="body2"
                     noWrap
-                    color="text.secondary"
-                    sx={{ fontWeight: 500, textDecoration: "line-through" }}
+                    color="text.disabled"
+                    sx={{ fontWeight: 500 }}
                   >
                     {a.filename}
                   </Typography>
