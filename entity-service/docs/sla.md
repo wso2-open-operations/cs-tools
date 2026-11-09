@@ -1,7 +1,7 @@
 # SLA clocks — storage, pause/resume, breach
 
 How entity-service stores and drives SLA clocks. Breach *alerting* (Chat/email) is not done here; see
-[csm-notification-service spec, section 3.2.1](../../integrations/csm-notification-service/docs/csm-notification-service-spec.md).
+[csm-notification-service spec, section 3.2.1](../../integrations/csm-notification-service/docs/spec.md).
 
 ## Storage
 
@@ -32,7 +32,7 @@ shared, has-account, created date). An unknown field never matches and never pan
 | Case created | Every active policy whose `start_condition` matches registers a clock (`RegisterClock`; unique per work item + policy). |
 | Severity / case-type change | Existing clocks are cancelled and fresh ones registered (`ReviseClocks`) — a new `start_on`. |
 | State change or field change | Each open clock is evaluated against its **own** policy, in this order: `stop_condition` true → complete; cancel rule → cancel; `pause_condition` true → pause; resume rule → resume. Then any policy that newly matches is registered. |
-| Case closed | Every open clock is force-completed, as a safety net on top of the stop condition. |
+| Case closed | Every open clock is force-completed, as a safety net on top of the stop condition, unless a matching cancel rule cancels it first. |
 | Qualifying CS-engineer comment | Completes the RESPONSE clock. |
 
 Cancel rule (`when_to_cancel`): `CANCEL_CONDITIONS_ARE_MET` (default) cancels when `cancel_condition` is true;

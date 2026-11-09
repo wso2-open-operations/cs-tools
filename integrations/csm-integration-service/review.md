@@ -1,7 +1,8 @@
 # Pre-PR self-review checklist — csm-integration-service
 
-Run this against the staged diff before every commit (and again before opening or updating a PR) touching this app. Check every item
-below and call out anything that matches as a finding before proceeding to open the PR — don't
+Run this against the staged diff before every commit, and against the branch diff versus the target branch before opening or updating a PR
+(after a commit the staged diff is empty), touching this app. Check every item
+below and call out anything that matches as a finding before proceeding to commit or open the PR — don't
 just silently fix and move on, say what was found and why.
 
 Every item here comes from this codebase's own documented failure history (`CLAUDE.md` has dozens

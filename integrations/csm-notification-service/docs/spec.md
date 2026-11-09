@@ -537,8 +537,9 @@ conditions that pause, resume, cancel or complete them, come from whichever
 real policy definition matches the case's own type, severity and project at
 the moment it's evaluated. A case can match more than one policy for the
 same clock type at once (confirmed real: a case can legitimately run two
-separate Resolution clocks side by side), in which case this service alerts
-on each independently. Most clocks run on ordinary continuous time, but a
+separate Resolution clocks side by side). The alert schedule here is kept one
+per case and clock type, though, so two policies of the same type share one
+schedule and one set of alerts rather than alerting independently. Most clocks run on ordinary continuous time, but a
 clock can instead run on a Monday-to-Friday business-day calendar (skipping
 weekends entirely) when its policy says so — this changes how "50%
 elapsed"/"breached" is calculated and when the alert actually fires, but
@@ -568,10 +569,12 @@ breach: the core entity service's SLA document, `entity-service/docs/sla.md`.)
 This service keeps its own schedule of those moments in Redis rather than
 polling the entity service: a per-clock record (display details, a paused
 flag, the highest alert already sent), one time-ordered list of upcoming
-alerts, and a short-lived claim per alert so only one replica sends it.
+alerts, and a short-lived claim per alert so only one replica sends it. These
+are kept per case and clock type, so two policies of the same type on one case
+share them.
 
 **What drives the schedule.** The service's single event consumer calls the
-SLA tracker on four events:
+SLA tracker on these events:
 
 - case created: read each clock's real duration from the entity service and
   schedule its three alerts;
@@ -579,7 +582,13 @@ SLA tracker on four events:
   from the entity service), and complete every clock when the case is closed;
 - a customer-facing reply from a support engineer: complete the response
   clock;
-- workaround provided: complete the workaround clock.
+- workaround provided: pause the workaround clock (it is not completed, so a
+  later recall can resume it);
+- severity changed, or case type changed: re-sync all three clocks with the
+  entity service, which has already cancelled and re-registered them (clearing
+  a clock the new facts no longer cover, rebuilding one they still do);
+- the portal's "Recalculate SLA" admin request: rebuild the schedule from the
+  entity service's active clocks, in the background.
 
 A ticker (every 5 minutes by default) picks up whatever has become due. At
 startup the tracker rebuilds its Redis state from the entity service's active
@@ -587,8 +596,10 @@ clocks; alerts for points already passed are marked as sent, never re-sent.
 
 **Pause and resume.** A paused clock's due alerts are left waiting, not
 dropped. On resume, the entity service's recorded pause length pushes every
-not-yet-sent alert later by that amount, so a breach is never alerted early.
-Business-day clocks use business-day arithmetic for their due times.
+not-yet-sent alert later by that amount. If that lookup or the Redis update
+fails the schedule is left unshifted, and an alert can then go out early if the
+re-check in step 5 also fails. Business-day clocks use business-day arithmetic
+for their due times.
 
 **Steps before a Chat card or email goes out**, for each due alert:
 
@@ -601,9 +612,10 @@ Business-day clocks use business-day arithmetic for their due times.
    record, or finds a different (replaced) clock, the alert goes ahead. If the
    clock is already achieved, cancelled or completed without a breach, no
    alert is sent (the point is still marked done). If the entity service
-   shows it paused, or its own timing puts this point in the future, the
-   alert is held back and rescheduled. A clock that really breached before it
-   was completed still alerts.
+   shows it paused and not breached, or its own timing puts this point in the
+   future, the alert is held back (for a paused clock Redis is corrected; for
+   timing the wake is rescheduled). A clock that already breached still alerts
+   even if paused or later completed.
 6. Publish an "SLA point reached" event (a record only, not a notification).
    If that fails, the claim is released and it is retried next tick.
 7. Send nothing if SLA sending is switched off, or the case is a service
@@ -612,8 +624,10 @@ Business-day clocks use business-day arithmetic for their due times.
    per space. A failed post is logged and not retried, so one broken space
    cannot cause repeated duplicates elsewhere.
 9. Email the case assignee and the team group, using the addresses fetched in
-   step 5. In debug mode the mail goes to the debug recipients instead, with
-   the intended recipient shown in the body.
+   step 5. A recipient with no address (for example when that lookup failed) is
+   skipped, and nothing is sent if no email client is configured. In debug
+   mode the mail goes to the debug recipients instead, with the intended
+   recipient shown in the body.
 10. Mark the point as alerted and remove it from the schedule.
 
 **If Redis is lost.** Which points have already been alerted is held only in
