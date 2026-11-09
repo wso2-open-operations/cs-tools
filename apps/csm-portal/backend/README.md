@@ -93,7 +93,7 @@ Upstream services this process calls, all with the same OAuth2 client-credential
 | Engineering entity service (files GitHub issues) | `internal/entity` | No |
 | Notification and integration services (health probe only today) | `internal/csmnotification`, `internal/csmintegration` | No |
 | Sales entity GraphQL service, Google Drive | `internal/entity`, `internal/googledrive` | No |
-| Azure Blob Storage (attachment files) | `libs/azblobstore` | Yes |
+| Attachment files | entity-service (`/attachments/...`) | Yes |
 | Google Chat incoming webhooks | `internal/notifications` | No |
 
 ### Code layout
@@ -578,21 +578,13 @@ and only `widgets`; any other field in a part file is a startup error.
 
 ### Attachment storage
 
-Attachment files live in Azure Blob Storage. This service holds the Azure credentials and moves
-the bytes: an upload arrives in chunks and is written to the container, a download and a comment's
-inline image are streamed from it. entity-service keeps the access checks, the size and type rules
-and the storage key, and never touches a file. The service refuses to start unless the container
-is reachable.
+Attachment files live in Azure Blob Storage, and entity-service is the only service that talks to it.
+An upload arrives here in chunks and each chunk is forwarded to entity-service; a download and a
+comment's inline image are streamed from entity-service back to the browser. This service holds no
+storage credential and never sees a storage key. entity-service keeps the access checks, the size and
+type rules and the files.
 
-| Variable | Required | Default | Description | Example |
-|---|---|---|---|---|
-| `AZURE_STORAGE_ACCOUNT` | Yes | none | Storage account name | `csmattachments` |
-| `AZURE_STORAGE_CONTAINER` | Yes | none | Container that holds the files. Must already exist unless `AZURE_STORAGE_CREATE_CONTAINER` is `true` | `attachments` |
-| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | One sign-in method is required | none | Sign in as an Entra app (recommended) holding "Storage Blob Data Contributor" on the container only. Keep the secret in the secret store | |
-| `AZURE_STORAGE_KEY` | One sign-in method is required | none | Sign in with the account key instead (full control of the account; development only) | |
-| `AZURE_STORAGE_CONNECTION_STRING` | One sign-in method is required | none | Connection string, for the Azurite emulator | |
-| `AZURE_STORAGE_ENDPOINT` | No | the account's blob endpoint | Blob endpoint override, for Azurite | `http://127.0.0.1:10000/devstoreaccount1` |
-| `AZURE_STORAGE_CREATE_CONTAINER` | No | `false` | `true` creates the container at startup. Needs account-level rights, so use it for Azurite and development only | |
+This service has no storage settings of its own: the `AZURE_STORAGE_*` variables belong to entity-service.
 
 ### Embedded PLG module
 

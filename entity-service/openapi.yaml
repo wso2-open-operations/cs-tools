@@ -349,9 +349,9 @@ paths:
         Start an upload. Checks the caller may add a file to the parent (a
         REGISTERED member of its project, or internal), that the work item is not
         closed (refused for every caller), and the size and type. Records a
-        PENDING attachment and returns its id: the portal backend holds the file,
-        so the browser sends it there in chunks (the backend calls authorize for
-        each chunk), then the backend confirms. expiresAt is when an unconfirmed
+        PENDING attachment and returns its id: the browser then sends the file in
+        chunks through its portal backend, which forwards each to PUT
+        /attachments/upload/{id}/chunks/{index}, and the backend confirms. expiresAt is when an unconfirmed
         upload may be cleaned up. A comment image (type comment) may only be a
         PNG, JPEG or WebP; it is uploaded against the work item before its
         comment exists. The response is never cacheable.
@@ -415,17 +415,176 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /attachments/upload/{id}/chunks/{index}:
+    put:
+      summary: >-
+        Store one chunk of a started upload. The request body is the chunk's bytes
+        (at most 8 MiB, with a Content-Length). This service is the only one that
+        reads or writes the attachment files in Azure Blob Storage: the portal
+        backend forwards what the browser sent, and the caller's access is checked
+        again for every chunk (the upload must be theirs, still PENDING, and its
+        work item open). A chunk may be sent again (a retry overwrites the same
+        block), in any order, and a few at a time. Nothing is visible until the upload
+        is confirmed. A chunk over the transfer limit is refused with a 429 and
+        should be retried.
+      operationId: putAttachmentChunk
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "The attachmentId returned by the upload start."
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: "The chunk was stored."
+        "400":
+          description: "The type, id or index is invalid, the chunk has no length or is too long, or the upload would be larger than allowed."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "x-user-id-token is missing."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such upload, it is not the caller's, or its parent is not visible to the caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The upload was already confirmed or rejected, or the work item is closed."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: "Too many file transfers are in progress; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: "File storage is unavailable or not configured; try again."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/upload/{id}/chunks:
+    get:
+      summary: >-
+        The chunks already stored for a started upload, so an interrupted upload can
+        carry on where it stopped. Same access check as storing a chunk.
+      operationId: listAttachmentChunks
+      security:
+        - clientAssertion: []
+          userIdToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "The attachmentId returned by the upload start."
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+      responses:
+        "200":
+          description: "The stored chunks and the chunk size the browser must use."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [chunkBytes, chunks]
+                properties:
+                  chunkBytes:
+                    type: integer
+                    example: 8388608
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+                      required: [index, size]
+                      properties:
+                        index: {type: integer}
+                        size: {type: integer, format: int64}
+        "400":
+          description: "The type or id is invalid."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: "x-user-id-token is missing."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: "No such upload, it is not the caller's, or its parent is not visible to the caller."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: "The upload was already confirmed or rejected, or the work item is closed."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: "File storage is unavailable or not configured; try again."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /attachments/upload/{id}/confirm:
     post:
       summary: >-
-        Finish an upload. This service cannot look at the file, so the portal
-        backend that committed it says what it stored (sizeBytes, required, and for
-        a comment image the contentType it found by reading the file). Both are
-        checked against what the upload declared and the limits, and the work item
+        Finish an upload. The body names how many chunks were sent. This service
+        assembles them into the file, reads its real size, and checks that size
+        against what the upload declared and the limits (for a comment image it
+        also reads the bytes to find the type: PNG, JPEG or WebP). The work item
         must still be open. The attachment is marked COMPLETE. Only the person who
-        started the upload can confirm it. A rejected upload is recorded FAILED and
-        cannot be confirmed again; the backend then removes the file it committed.
-        Repeating a confirm that already succeeded answers the same.
+        started the upload can confirm it. A rejected upload is recorded FAILED,
+        its file is removed here, and it cannot be confirmed again. A failure that
+        may pass (storage, a rate limit, a concurrent confirm) keeps the file so the
+        confirm can be retried. Repeating a confirm that already succeeded answers
+        the same.
       operationId: confirmAttachmentUpload
       security:
         - clientAssertion: []
@@ -437,28 +596,28 @@ paths:
           schema:
             type: string
             format: uuid
-          description: The attachmentId returned by the upload start.
+          description: "The attachmentId returned by the upload start."
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConfirmAttachmentUploadRequest'
+              $ref: '#/components/schemas/CompleteAttachmentUploadRequest'
       responses:
         "200":
-          description: The stored attachment.
+          description: "The stored attachment."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConfirmAttachmentUploadResponse'
         "400":
-          description: 'The upload was rejected: no file or more than one, wrong size, over the limit, or not an image.'
+          description: "The upload was rejected: chunks out of range, wrong size, over the limit, or not an image."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: x-user-id-token is missing.
+          description: "x-user-id-token is missing."
           content:
             application/json:
               schema:
@@ -470,34 +629,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "409":
-          description: The work item is closed, the upload was already rejected, or it was confirmed concurrently.
+          description: "Some chunks have not been uploaded, the work item is closed, the upload was already rejected, or it was confirmed concurrently."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "503":
-          description: File storage is unavailable; confirm can be retried.
+          description: "File storage is unavailable; confirm can be retried."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "500":
-          description: Internal server error.
+          description: "Internal server error."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/upload/{id}/authorize:
-    post:
+  /attachments/download/{id}/content:
+    get:
       summary: >-
-        Authorize receiving data for a started upload. The portal backends hold the
-        files: the backend calls it for every chunk it receives, so the caller's
-        access is checked again each time. Checks, as the caller, that the upload is theirs,
-        still PENDING and its work item still open, and returns the storage key to
-        write to. The key is internal: it is for the calling backend and must never
-        be sent to a browser. The response is never cacheable.
-      operationId: authorizeAttachmentUpload
+        Stream an attachment's file as a download, after checking the caller may see
+        the attachment. It is always sent as an attachment of the opaque type
+        application/octet-stream (with nosniff and a sandboxing CSP), and a single
+        Range is honoured so a break can resume. The response is never cached.
+        Charged one unit of the per-caller allowance.
+      operationId: downloadAttachmentContent
       security:
         - clientAssertion: []
           userIdToken: []
@@ -508,208 +666,145 @@ paths:
           schema:
             type: string
             format: uuid
-          description: The attachmentId returned by the upload start.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AuthorizeAttachmentUploadRequest'
+          description: "The attachmentId returned by the upload start."
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [work_item, comment, deployment]
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+          description: "A single 'bytes=a-b', 'bytes=a-' or 'bytes=-n' range."
       responses:
         "200":
-          description: Where the file is written.
+          description: "The whole file."
           content:
-            application/json:
+            application/octet-stream:
               schema:
-                $ref: '#/components/schemas/AttachmentUploadTarget'
+                type: string
+                format: binary
+        "206":
+          description: "The requested range of the file."
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
         "400":
-          description: The type or id is invalid.
+          description: "The type or id is invalid."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: x-user-id-token is missing.
+          description: "x-user-id-token is missing."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: No such upload, it is not the caller's, its parent is not visible to the caller, or the route is not registered.
+          description: "The attachment does not exist, the caller may not see it, or it has no stored file."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: The upload was already confirmed or rejected, or the work item is closed.
+        "410":
+          description: "The attachment was deleted (errorCode attachment_removed)."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
+        "416":
+          description: "The range is not satisfiable; Content-Range says the file's size."
+        "429":
+          description: "The caller is over their allowance, or too many file transfers are in progress; retry shortly."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "503":
+          description: "File storage is unavailable or not configured; try again."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /attachments/locate:
-    post:
+  /attachments/inline/{id}/content:
+    get:
       summary: >-
-        Find where an attachment's file is, for a portal backend that will read it.
-        Checks, as the caller, that they
-        may see the attachment and returns its storage key, or a reason there is no
-        file (available false, reason NOT_STORED, FAILED or DELETED). An attachment
-        the caller cannot see is 404. The key is internal: it is for the calling
-        backend and must never be sent to a browser. Counts against the caller's
-        per-minute allowance (60). The response is never cacheable.
-      operationId: locateAttachment
+        Stream a comment's inline image, after checking the caller may see it. Shown
+        in the page only as PNG, JPEG, GIF or WebP, otherwise as octet-stream. A
+        description image still in the project's drafts folder is moved to its work
+        item's folder on the first read after its case exists; if that fails it is
+        read where it is. With workItemId the image is returned only when it is
+        linked to that record, never when it is another record's or a draft: this is
+        how an internal caller with no access rules of its own (the notification
+        service, building an email about one case) is kept from reading another
+        customer's image. Not charged against the per-caller allowance.
+      operationId: getInlineImageContent
       security:
         - clientAssertion: []
           userIdToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/LocateAttachmentRequest'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: "The attachmentId returned by the upload start."
+        - name: workItemId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: "The case or change request the image must belong to."
       responses:
         "200":
-          description: The attachment's location, or why it has none.
+          description: "The image."
           content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentLocation'
+            image/png: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/gif: {schema: {type: string, format: binary}}
+            image/webp: {schema: {type: string, format: binary}}
+            application/octet-stream: {schema: {type: string, format: binary}}
         "400":
-          description: The type or id is invalid.
+          description: "The id is invalid."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "401":
-          description: x-user-id-token is missing.
+          description: "x-user-id-token is missing."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "404":
-          description: No such attachment, or the caller may not see it, or the route is not registered.
+          description: "The image does not exist, the caller may not see it, or (with workItemId) it is not that record's."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "410":
+          description: "The image was deleted or removed (errorCode attachment_removed)."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         "429":
-          description: The caller asked for too many locations in a minute; retry shortly.
+          description: "Too many file transfers are in progress; retry shortly."
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        "500":
-          description: Internal server error.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /attachments/inline/{id}/location:
-    get:
-      summary: >-
-        Find where a comment's inline image is stored, for a portal backend that
-        will stream it. An image the caller cannot see or that is not stored is 404, one the caller can see that was
-        deleted is 410 (errorCode attachment_removed), and a work item file that is
-        not an image is 404. The key is internal: it is for the calling backend and
-        must never be sent to a browser. Not charged against the caller's
-        allowance. The response is never cacheable.
-      operationId: getInlineImageLocation
-      security:
-        - clientAssertion: []
-          userIdToken: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Where the image is stored. contentType is only ever one of the four image types, else application/octet-stream.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AttachmentLocation'
-        "400":
-          description: The id is not a UUID.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Not found, not visible to the caller, not stored, or the route is not registered.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "410":
-          description: The image was deleted or removed (errorCode attachment_removed).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /attachments/inline/{id}/relocated:
-    post:
-      summary: >-
-        Record that a portal backend moved an inline image's file to the key
-        GET /attachments/inline/{id}/location named in relocateTo. Only that key is
-        accepted (anything else is 400); a repeated call, once the row has the key,
-        is 204; an image that has nothing to move is 409. The file is moved by the
-        backend: this service never touches one.
-      operationId: postInlineImageRelocated
-      security:
-        - clientAssertion: []
-          userIdToken: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [storageKey]
-              properties:
-                storageKey:
-                  type: string
-                  description: The key the file was moved to; must equal relocateTo.
-      responses:
-        "204":
-          description: The image now points at the new key.
-        "400":
-          description: The id is not a UUID, or storageKey is not where this image belongs.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "404":
-          description: Not found, not visible to the caller, not stored, or the route is not registered.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "409":
-          description: This image does not need to be moved.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        "410":
-          description: The image was deleted or removed (errorCode attachment_removed).
+        "503":
+          description: "File storage is unavailable or not configured; try again."
           content:
             application/json:
               schema:
@@ -722,8 +817,10 @@ paths:
         PENDING after 24 hours is marked FAILED (lists hide it and a later confirm
         refuses it), at most 200 per run, and the comment images never linked to a
         comment, and the security report files never linked to a case (25 hours old),
-        are returned in orphans for the caller to remove. Internal callers
-        only. Meant to be called on a schedule.
+        are removed from storage here and their rows marked DELETED; a file that
+        cannot be removed now is tried again on a later run. Only when no storage is
+        configured are they returned in orphans for the caller to remove and
+        acknowledge. Internal callers only. Meant to be called on a schedule.
       operationId: cleanupAttachmentUploads
       security:
         - clientAssertion: []
@@ -27628,7 +27725,7 @@ components:
           nullable: true
           description: >
             Reference to the file's location in Azure Blob Storage. Null for a row with no file of
-            its own recorded. Entity-service never reads the file; the portal backends do.
+            its own recorded. Only entity-service reads and writes the file; no other service uses this key.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
 
@@ -43004,124 +43101,26 @@ components:
             did not upload. From any other caller the flag is ignored and the
             uploader-only rule applies (403).
 
-    ConfirmAttachmentUploadRequest:
+    CompleteAttachmentUploadRequest:
       type: object
-      required: [type]
+      description: >-
+        Body of POST /attachments/upload/{id}/confirm. Entity-service now holds the files, so
+        this replaces the earlier confirm body, and the authorize, locate and inline
+        location and relocated operations were removed with it. There is no compatibility
+        period: deploy entity-service first (with the AZURE_STORAGE_* settings), then the
+        CSM portal backend, the customer portal backend and the notification service in the
+        same release. An older backend calls operations that no longer exist.
+      required: [type, chunks]
       additionalProperties: false
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
-        sizeBytes:
+        chunks:
           type: integer
-          format: int64
           minimum: 1
           description: >-
-            Required: the size of the file the portal backend committed.
-        contentType:
-          type: string
-          description: >-
-            For type comment: the type the portal backend found by reading the
-            file's leading bytes; it must be image/png, image/jpeg or image/webp.
-
-    AuthorizeAttachmentUploadRequest:
-      type: object
-      required: [type]
-      additionalProperties: false
-      properties:
-        type:
-          $ref: '#/components/schemas/StoredAttachmentKind'
-
-    AttachmentUploadTarget:
-      type: object
-      required: [attachmentId, number, name, contentType, sizeBytes, maxBytes, storageKey]
-      description: >-
-        Where the portal backend may write an upload it has been authorized to
-        receive. storageKey is internal: it must never be sent to a browser.
-      properties:
-        attachmentId:
-          type: string
-          format: uuid
-        number:
-          type: string
-        name:
-          type: string
-        contentType:
-          type: string
-          description: The type declared when the upload started.
-        sizeBytes:
-          type: integer
-          format: int64
-          description: The size declared when the upload started.
-        maxBytes:
-          type: integer
-          format: int64
-          description: The most a file of this kind may be.
-        storageKey:
-          type: string
-          description: Where to write the file, for example csm/projects/<project>/workitems/<n>/attachments/<number>_<name>.
-
-    LocateAttachmentRequest:
-      type: object
-      required: [type, id]
-      additionalProperties: false
-      properties:
-        type:
-          $ref: '#/components/schemas/StoredAttachmentKind'
-        id:
-          type: string
-          format: uuid
-          description: The attachment's id.
-
-    AttachmentLocation:
-      type: object
-      required: [id, number, name, available]
-      description: >-
-        Where an attachment's file is, once the caller's access has been checked.
-        storageKey is internal: it must never be sent to a browser.
-      properties:
-        id:
-          type: string
-          format: uuid
-        number:
-          type: string
-        name:
-          type: string
-        contentType:
-          type: string
-          nullable: true
-        sizeBytes:
-          type: integer
-          format: int64
-          nullable: true
-        available:
-          type: boolean
-          description: True when storageKey names a file that can be read.
-        reason:
-          type: string
-          enum: [NOT_STORED, FAILED, DELETED]
-          description: Why there is no file when available is false.
-        storageKey:
-          type: string
-          description: Where the file is stored. Absent when available is false.
-        relocateTo:
-          type: string
-          description: >-
-            Only on an inline image location, and only for a description image whose
-            file still sits in the project's drafts folder. The key it belongs under
-            now that it has a work item. The backend copies the file there, removes
-            the old one, then calls POST /attachments/inline/{id}/relocated. Internal,
-            like storageKey.
-        parentId:
-          type: string
-          format: uuid
-          description: >-
-            Only on an inline image location: the work item the image belongs to, or
-            the project while draft is true.
-        draft:
-          type: boolean
-          description: >-
-            Only on an inline image location: true for a description image whose
-            record does not exist yet (parentId is then the project).
+            How many chunks were sent (chunks 0 to chunks-1). At most the number the
+            largest file allowed needs.
 
     ConfirmAttachmentUploadResponse:
       type: object

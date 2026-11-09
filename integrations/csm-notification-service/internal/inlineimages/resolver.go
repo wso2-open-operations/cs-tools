@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/entity"
-	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
 const (
@@ -54,44 +53,32 @@ const (
 	resolveTimeout = 10 * time.Second
 )
 
-// Locator finds where an inline image's file is (entity-service).
-type Locator interface {
-	LocateInlineImage(ctx context.Context, id string) (entity.InlineImageLocation, error)
+// Source reads an inline image's file. Entity-service is the only service that
+// touches the file store, and it returns the image only when it is linked to
+// workItemID.
+type Source interface {
+	ReadInlineImage(ctx context.Context, id, workItemID string) (*entity.InlineImage, error)
 }
 
 // Scope names the record an email is about. An image is put into the email only
-// when entity-service says it belongs to that record: this service looks images
-// up as an internal caller, which no access rule filters, so without the check a
-// reference to another customer's image would be read and sent.
+// when entity-service says it is linked to that record: this service reads images
+// as an internal caller, which no access rule filters, so without the check a
+// reference to another customer's image would be read and sent. A draft image (a
+// description image whose record does not exist yet, visible only to its uploader)
+// is never returned for a record.
 type Scope struct {
 	// WorkItemID is the case or change request the email is about.
 	WorkItemID string
 }
 
-// allows reports whether the located image belongs to the scope. A draft image
-// (a description image whose record does not exist yet, held under the project
-// and visible only to its uploader) is never allowed: by the time an email about
-// a record is sent its images are linked to it, so a draft is someone else's
-// unsent work. An answer that names no owner (an entity-service older than the
-// check) is refused too.
-func (sc Scope) allows(loc entity.InlineImageLocation) bool {
-	return !loc.Draft && loc.ParentID != "" && sc.WorkItemID != "" && strings.EqualFold(loc.ParentID, sc.WorkItemID)
-}
-
-// Reader reads a file from storage (azblobstore.Store).
-type Reader interface {
-	Open(ctx context.Context, key string, rng *azblobstore.Range) (*azblobstore.Object, error)
-}
-
 // Resolver rewrites image references to data: URIs.
 type Resolver struct {
-	locator Locator
-	reader  Reader
+	source Source
 }
 
 // New builds a Resolver.
-func New(locator Locator, reader Reader) *Resolver {
-	return &Resolver{locator: locator, reader: reader}
+func New(source Source) *Resolver {
+	return &Resolver{source: source}
 }
 
 // imgSrc finds an <img> tag's src attribute.
@@ -165,36 +152,30 @@ func (r *Resolver) Resolve(ctx context.Context, html string, scope Scope) string
 // dataURI reads one image and returns it as a data: URI and its size, or "" when
 // it cannot be used. room is how many more bytes this body may add.
 func (r *Resolver) dataURI(ctx context.Context, id string, room int, scope Scope) (string, int) {
-	loc, err := r.locator.LocateInlineImage(ctx, id)
-	if err != nil || !loc.Available || loc.StorageKey == "" {
+	// Without a record there is nothing to check the image against, and entity-service
+	// would not filter at all: refuse before asking.
+	if scope.WorkItemID == "" {
+		slog.WarnContext(ctx, "inlineimages: no record to check the image against; leaving it out", "attachmentId", id)
+		return "", 0
+	}
+	img, err := r.source.ReadInlineImage(ctx, id, scope.WorkItemID)
+	if err != nil {
 		slog.WarnContext(ctx, "inlineimages: image not available for the email", "attachmentId", id)
 		return "", 0
 	}
-	if !scope.allows(loc) {
-		slog.WarnContext(ctx, "inlineimages: image does not belong to the record the email is about", "attachmentId", id)
-		return "", 0
-	}
-	contentType := ""
-	if loc.ContentType != nil {
-		contentType = strings.ToLower(strings.TrimSpace(strings.SplitN(*loc.ContentType, ";", 2)[0]))
-	}
+	defer img.Body.Close()
+	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(img.ContentType, ";", 2)[0]))
 	mediaType, ok := allowedTypes[contentType]
 	if !ok {
 		slog.WarnContext(ctx, "inlineimages: not an image type the email accepts", "attachmentId", id)
 		return "", 0
 	}
 	limit := min(maxImageBytes, room)
-	if limit <= 0 || (loc.SizeBytes != nil && *loc.SizeBytes > int64(limit)) {
+	if limit <= 0 || img.ContentLength > int64(limit) {
 		slog.WarnContext(ctx, "inlineimages: image too large for the email", "attachmentId", id)
 		return "", 0
 	}
-	obj, err := r.reader.Open(ctx, loc.StorageKey, nil)
-	if err != nil {
-		slog.WarnContext(ctx, "inlineimages: cannot read the image file", "attachmentId", id)
-		return "", 0
-	}
-	defer obj.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(obj.Body, int64(limit)+1))
+	data, err := io.ReadAll(io.LimitReader(img.Body, int64(limit)+1))
 	if err != nil || len(data) == 0 || len(data) > limit {
 		slog.WarnContext(ctx, "inlineimages: image could not be read in full or is too large", "attachmentId", id)
 		return "", 0

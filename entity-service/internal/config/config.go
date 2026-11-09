@@ -844,6 +844,29 @@ type Config struct {
 	// it is confirmed. Provisional default, to be set from the real size
 	// distribution.
 	AttachmentMaxBytes int64
+	// Azure Blob Storage, where attachment files are kept. This service is the only
+	// one that talks to it: the portal backends and the notification service send
+	// and read files through its routes. AZURE_STORAGE_ACCOUNT and
+	// AZURE_STORAGE_CONTAINER, plus how to sign in: an Entra app (AZURE_TENANT_ID,
+	// AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, recommended, with the role "Storage Blob
+	// Data Contributor" on the container only), or AZURE_STORAGE_KEY, or
+	// AZURE_STORAGE_CONNECTION_STRING (Azurite). Optional AZURE_STORAGE_ENDPOINT
+	// (Azurite). AZURE_STORAGE_CREATE_CONTAINER=true creates the container at startup
+	// (development only). Unset, the file routes answer 503 and nothing else changes.
+	AzureStorageAccount          string
+	AzureStorageContainer        string
+	AzureTenantID                string
+	AzureClientID                string
+	AzureClientSecret            string
+	AzureStorageKey              string
+	AzureStorageConnectionString string
+	AzureStorageEndpoint         string
+	AzureStorageCreateContainer  bool
+	// AttachmentMaxConcurrentTransfers bounds the file chunks and downloads this
+	// service moves at once (ATTACHMENT_MAX_CONCURRENT_TRANSFERS, default 32), so a
+	// burst of large uploads cannot take every connection from the rest of the API.
+	// A transfer over the limit is refused with a 429 and retried by the portal.
+	AttachmentMaxConcurrentTransfers int
 	// InlineImagesTotalMaxBytes caps all the images of ONE comment or description
 	// together (INLINE_IMAGES_TOTAL_MAX_MB, default 1, at most 25), and so also one image.
 	// At most service.MaxInlineImagesPerContent (5) images per comment or
@@ -1104,9 +1127,25 @@ func Load() *Config {
 	cfg.UserCacheTTL = envDuration("USER_CACHE_TTL", 10*time.Minute)
 	cfg.VulnerabilityMetaCacheTTL = envDuration("PRODUCT_VULNERABILITY_META_CACHE_TTL", 24*time.Hour)
 	cfg.AttachmentMaxBytes = envMegabytes("ATTACHMENT_MAX_MB", "ATTACHMENT_MAX_BYTES", 10, maxAttachmentMB)
+	cfg.AzureStorageAccount = strings.TrimSpace(os.Getenv("AZURE_STORAGE_ACCOUNT"))
+	cfg.AzureStorageContainer = strings.TrimSpace(os.Getenv("AZURE_STORAGE_CONTAINER"))
+	cfg.AzureTenantID = strings.TrimSpace(os.Getenv("AZURE_TENANT_ID"))
+	cfg.AzureClientID = strings.TrimSpace(os.Getenv("AZURE_CLIENT_ID"))
+	cfg.AzureClientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+	cfg.AzureStorageKey = os.Getenv("AZURE_STORAGE_KEY")
+	cfg.AzureStorageConnectionString = os.Getenv("AZURE_STORAGE_CONNECTION_STRING")
+	cfg.AzureStorageEndpoint = strings.TrimSpace(os.Getenv("AZURE_STORAGE_ENDPOINT"))
+	cfg.AzureStorageCreateContainer = strings.EqualFold(strings.TrimSpace(os.Getenv("AZURE_STORAGE_CREATE_CONTAINER")), "true")
+	cfg.AttachmentMaxConcurrentTransfers = envPositiveInt("ATTACHMENT_MAX_CONCURRENT_TRANSFERS", 32)
 	cfg.InlineImagesTotalMaxBytes = envMegabytes("INLINE_IMAGES_TOTAL_MAX_MB", "INLINE_IMAGES_TOTAL_MAX_BYTES", 1, maxInlineImagesTotalMB)
 	cfg.applySREEventHubTopic()
 	return cfg
+}
+
+// HasAttachmentStorage reports whether Azure Blob Storage is configured for the
+// attachment files: a container, and an account or a connection string to reach it.
+func (c *Config) HasAttachmentStorage() bool {
+	return c.AzureStorageContainer != "" && (c.AzureStorageAccount != "" || c.AzureStorageConnectionString != "")
 }
 
 // HasRedis reports whether a Redis connection is configured, which turns on
@@ -1264,6 +1303,12 @@ func (c *Config) HasDatabase() bool {
 func (c *Config) Validate() error {
 	if c.loadErr != nil {
 		return c.loadErr
+	}
+	// Azure Blob Storage is all-or-nothing: a container with no account (or the
+	// other way round) would start cleanly and then fail every file transfer.
+	if anyAzure := c.AzureStorageAccount != "" || c.AzureStorageContainer != "" || c.AzureStorageConnectionString != "" ||
+		c.AzureStorageKey != "" || c.AzureTenantID != "" || c.AzureClientID != "" || c.AzureClientSecret != ""; anyAzure && !c.HasAttachmentStorage() {
+		return fmt.Errorf("AZURE_STORAGE_CONTAINER and AZURE_STORAGE_ACCOUNT (or AZURE_STORAGE_CONNECTION_STRING) must be set together")
 	}
 	for _, t := range []struct {
 		name string

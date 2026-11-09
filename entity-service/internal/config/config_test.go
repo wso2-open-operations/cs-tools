@@ -1533,6 +1533,37 @@ func TestLoad_LongOpenCasesReportSets(t *testing.T) {
 	}
 }
 
+// TestConfig_Validate_AzureStorageAllOrNothing verifies the attachment storage
+// settings come together: a container with no account (or an account with no
+// container) would start cleanly and then fail every file transfer.
+func TestConfig_Validate_AzureStorageAllOrNothing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		set     func(*Config)
+		wantErr bool
+		wantOn  bool
+	}{
+		"none":                  {func(*Config) {}, false, false},
+		"account and container": {func(c *Config) { c.AzureStorageAccount, c.AzureStorageContainer = "acct", "files" }, false, true},
+		"connection string and container": {func(c *Config) {
+			c.AzureStorageConnectionString, c.AzureStorageContainer = "UseDevelopmentStorage=true", "files"
+		}, false, true},
+		"container only":         {func(c *Config) { c.AzureStorageContainer = "files" }, true, false},
+		"account only":           {func(c *Config) { c.AzureStorageAccount = "acct" }, true, false},
+		"secret with no account": {func(c *Config) { c.AzureClientSecret = "s" }, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := baseValidConfig()
+			tc.set(&c)
+			if err := c.Validate(); (err != nil) != tc.wantErr {
+				t.Errorf("Validate() = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got := c.HasAttachmentStorage(); got != tc.wantOn {
+				t.Errorf("HasAttachmentStorage() = %v, want %v", got, tc.wantOn)
+			}
+		})
+	}
+}
+
 // TestConfig_Validate_ServiceRequestDefaultSeverity: unset means S4 and is
 // valid; S1-S4 (any case, surrounding space ignored) are valid; anything else,
 // S0 included, refuses to start.

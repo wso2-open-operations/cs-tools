@@ -815,6 +815,9 @@ func formatByteLimit(n int64) string {
 	return fmt.Sprintf("%d KB", n>>10)
 }
 
+// alreadyConfirmedMessage is the conflict for an upload that is already COMPLETE.
+const alreadyConfirmedMessage = "this upload was already confirmed"
+
 // closedParentMessage is shown when a file is added to a closed work item.
 const closedParentMessage = "This case is closed, so new attachments can't be added."
 

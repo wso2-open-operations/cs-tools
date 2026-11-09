@@ -17,7 +17,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,106 +27,75 @@ import (
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/entity"
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/middleware"
-	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
-const blobSecretKey = "csm/projects/p/workitems/1/attachments/ATT1_secret.pdf"
-
+// fakeBlobEntity is the entity-service side of the file routes: it records what
+// this backend forwarded and answers as configured.
 type fakeBlobEntity struct {
-	target, locate string
-	authErr        error
-	locateErr      error
-	confirmErr     error
-	deleteErr      error
-	authBody       string
-	confirmBody    string
-	deleteCalls    int
-	deleteBody     string
-	locateBody     string
+	putErr, listErr, confirmErr, deleteErr, fileErr error
 
-	relocatedBody string
-	relocateErr   error
+	put struct {
+		id, kind string
+		index    int
+		size     int64
+		data     string
+	}
+	chunks      string
+	confirmBody string
+	deleteCalls int
+	deleteBody  string
+
+	// file is what a download or an inline read returns.
+	file       *entity.FileResponse
+	rangeAsked string
+	kindAsked  string
+	idAsked    string
 }
 
-func (f *fakeBlobEntity) InlineImageRelocated(_ context.Context, _ string, b []byte) error {
-	f.relocatedBody = string(b)
-	return f.relocateErr
+func (f *fakeBlobEntity) PutStoredAttachmentChunk(_ context.Context, id, kind string, index int, size int64, body io.Reader) error {
+	b, _ := io.ReadAll(body)
+	f.put.id, f.put.kind, f.put.index, f.put.size, f.put.data = id, kind, index, size, string(b)
+	return f.putErr
 }
 
-func (f *fakeBlobEntity) AuthorizeStoredAttachmentUpload(_ context.Context, _ string, b []byte) ([]byte, error) {
-	f.authBody = string(b)
-	return []byte(f.target), f.authErr
+func (f *fakeBlobEntity) ListStoredAttachmentChunks(context.Context, string, string) ([]byte, error) {
+	return []byte(f.chunks), f.listErr
 }
-func (f *fakeBlobEntity) LocateStoredAttachment(_ context.Context, b []byte) ([]byte, error) {
-	f.locateBody = string(b)
-	return []byte(f.locate), f.locateErr
-}
-func (f *fakeBlobEntity) LocateInlineImage(context.Context, string) ([]byte, error) {
-	return []byte(f.locate), f.locateErr
-}
+
 func (f *fakeBlobEntity) ConfirmStoredAttachmentUpload(_ context.Context, _ string, b []byte) ([]byte, error) {
 	f.confirmBody = string(b)
-	return []byte(`{"id":"x"}`), f.confirmErr
+	return []byte(`{"id":"` + storedAttID + `","status":"COMPLETE"}`), f.confirmErr
 }
+
 func (f *fakeBlobEntity) DeleteStoredAttachment(_ context.Context, b []byte) error {
-	f.deleteBody = string(b)
 	f.deleteCalls++
+	f.deleteBody = string(b)
 	return f.deleteErr
 }
 
-type fakeBlobStore struct {
-	blocks   map[int][]byte
-	data     []byte
-	putKey   string
-	commits  int
-	deleted  []string
-	commitEr error
-	opened   *azblobstore.Range
+func (f *fakeBlobEntity) DownloadStoredAttachment(_ context.Context, kind, id, rangeHeader string) (*entity.FileResponse, error) {
+	f.kindAsked, f.idAsked, f.rangeAsked = kind, id, rangeHeader
+	return f.file, f.fileErr
 }
 
-func (s *fakeBlobStore) PutBlock(_ context.Context, key string, i int, body io.Reader, size int64) error {
-	b, _ := io.ReadAll(body)
-	if int64(len(b)) != size {
-		return azblobstore.ErrBlockSize
-	}
-	if s.blocks == nil {
-		s.blocks = map[int][]byte{}
-	}
-	s.putKey, s.blocks[i] = key, b
-	return nil
-}
-func (s *fakeBlobStore) UncommittedBlocks(context.Context, string) ([]azblobstore.Block, error) {
-	var out []azblobstore.Block
-	for i := 0; i < len(s.blocks); i++ {
-		out = append(out, azblobstore.Block{Index: i, Size: int64(len(s.blocks[i]))})
-	}
-	return out, nil
-}
-func (s *fakeBlobStore) Commit(context.Context, string, int, string) error {
-	s.commits++
-	return s.commitEr
-}
-func (s *fakeBlobStore) Stat(context.Context, string) (azblobstore.Info, error) {
-	return azblobstore.Info{Size: int64(len(s.data)), ContentType: "application/pdf"}, nil
-}
-func (s *fakeBlobStore) Open(_ context.Context, _ string, rng *azblobstore.Range) (*azblobstore.Object, error) {
-	s.opened = rng
-	if rng == nil {
-		return &azblobstore.Object{Body: io.NopCloser(bytes.NewReader(s.data)), ContentLength: int64(len(s.data))}, nil
-	}
-	part := s.data[rng.Offset : rng.Offset+rng.Length]
-	return &azblobstore.Object{Body: io.NopCloser(bytes.NewReader(part)), ContentLength: rng.Length, Partial: true, ContentRange: "bytes 0-0/0"}, nil
-}
-func (s *fakeBlobStore) Delete(_ context.Context, key string) error {
-	s.deleted = append(s.deleted, key)
-	return nil
+func (f *fakeBlobEntity) InlineImageContent(_ context.Context, id string) (*entity.FileResponse, error) {
+	f.idAsked = id
+	return f.file, f.fileErr
 }
 
-const blobTarget = `{"attachmentId":"` + storedAttID + `","name":"a.pdf","contentType":"application/pdf","sizeBytes":40000000,"maxBytes":104857600,"storageKey":"` + blobSecretKey + `"}`
+// fileOf builds a streamed response with the headers entity-service sends.
+func fileOf(status int, body string, hdr map[string]string) *entity.FileResponse {
+	h := http.Header{}
+	for k, v := range hdr {
+		h.Set(k, v)
+	}
+	return &entity.FileResponse{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body))}
+}
 
-func serveBlob(e *fakeBlobEntity, s *fakeBlobStore, method, target string, body io.Reader, hdr map[string]string, user bool) *httptest.ResponseRecorder {
-	h := NewBlobAttachmentHandler(e, s)
+func serveBlob(e *fakeBlobEntity, method, target string, body io.Reader, hdr map[string]string, user bool) *httptest.ResponseRecorder {
+	h := NewBlobAttachmentHandler(e)
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", h.PutChunk)
 	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
@@ -149,180 +117,200 @@ func serveBlob(e *fakeBlobEntity, s *fakeBlobStore, method, target string, body 
 
 // Every kind entity-service stores works the same way here: the type is only
 // relayed to entity-service, which decides who may add what to which parent.
-func TestBlobPutChunk_AcceptsEveryStoredAttachmentType(t *testing.T) {
+func TestBlobPutChunk_ForwardsTheBytesAndTheTypeToEntity(t *testing.T) {
 	for _, kind := range []string{"work_item", "comment", "deployment"} {
-		e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}
-		rec := serveBlob(e, s, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type="+kind, strings.NewReader("hello"), nil, true)
-		if rec.Code != http.StatusNoContent || !strings.Contains(e.authBody, `"`+kind+`"`) {
-			t.Errorf("%s: status %d, authorize body %s", kind, rec.Code, e.authBody)
+		e := &fakeBlobEntity{}
+		rec := serveBlob(e, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/2?type="+kind, strings.NewReader("hello"), nil, true)
+		if rec.Code != 204 || rec.Body.Len() != 0 {
+			t.Fatalf("%s: %d %q", kind, rec.Code, rec.Body.String())
 		}
-	}
-	rec := serveBlob(&fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type=case", strings.NewReader("x"), nil, true)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("an unknown type gave %d, want 400", rec.Code)
-	}
-}
-
-func TestBlobPutChunk_StoresUnderTheKeyEntityGave(t *testing.T) {
-	e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{}
-	rec := serveBlob(e, s, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/1?type=work_item", strings.NewReader("hello"), nil, true)
-	if rec.Code != http.StatusNoContent || s.putKey != blobSecretKey || string(s.blocks[1]) != "hello" {
-		t.Fatalf("got %d key=%q blocks=%v", rec.Code, s.putKey, s.blocks)
-	}
-	if !strings.Contains(e.authBody, `"work_item"`) {
-		t.Errorf("authorize body = %s", e.authBody)
-	}
-	if strings.Contains(rec.Body.String(), "secret") {
-		t.Error("the key leaked")
+		if e.put.id != storedAttID || e.put.kind != kind || e.put.index != 2 || e.put.size != 5 || e.put.data != "hello" {
+			t.Errorf("%s: forwarded %+v", kind, e.put)
+		}
 	}
 }
 
 func TestBlobPutChunk_Refusals(t *testing.T) {
-	for name, tc := range map[string]struct {
-		target string
-		path   string
-		body   string
-		authEr error
-		user   bool
-		want   int
-	}{
-		"no user":         {blobTarget, "/0?type=work_item", "x", nil, false, 401},
-		"bad type":        {blobTarget, "/0?type=nope", "x", nil, true, 400},
-		"bad index":       {blobTarget, "/x?type=work_item", "x", nil, true, 400},
-		"past largest":    {blobTarget, "/99?type=work_item", "x", nil, true, 400},
-		"entity refuses":  {blobTarget, "/0?type=work_item", "x", &apierror.Error{StatusCode: 403}, true, 403},
-		"no key returned": {`{"attachmentId":"a"}`, "/0?type=work_item", "x", nil, true, 503},
-		"chunk past max":  {strings.Replace(blobTarget, "104857600", "3", 1), "/0?type=work_item", "xxxx", nil, true, 413},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e, s := &fakeBlobEntity{target: tc.target, authErr: tc.authEr}, &fakeBlobStore{}
-			rec := serveBlob(e, s, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks"+tc.path, strings.NewReader(tc.body), nil, tc.user)
-			if rec.Code != tc.want || len(s.blocks) != 0 {
-				t.Errorf("got %d (want %d), stored %d blocks", rec.Code, tc.want, len(s.blocks))
-			}
-		})
+	url := "/attachments/upload/" + storedAttID + "/chunks/0?type=work_item"
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPut, url, strings.NewReader("x"), nil, false); rec.Code != 401 {
+		t.Errorf("no user: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPut, "/attachments/upload/nope/chunks/0?type=work_item", strings.NewReader("x"), nil, true); rec.Code != 400 {
+		t.Errorf("bad id: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/-1?type=work_item", strings.NewReader("x"), nil, true); rec.Code != 400 {
+		t.Errorf("bad index: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type=case", strings.NewReader("x"), nil, true); rec.Code != 400 {
+		t.Errorf("bad type: %d", rec.Code)
+	}
+	// A chunk that declares no length, or one over 8 MiB, never reaches entity-service.
+	e := &fakeBlobEntity{}
+	r := httptest.NewRequest(http.MethodPut, url, io.NopCloser(strings.NewReader("x")))
+	r.ContentLength = -1
+	rec := httptest.NewRecorder()
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", NewBlobAttachmentHandler(e).PutChunk)
+	mux.ServeHTTP(rec, withUser(r))
+	if rec.Code != http.StatusLengthRequired || e.put.id != "" {
+		t.Errorf("no length: %d, forwarded %+v", rec.Code, e.put)
+	}
+	big := httptest.NewRequest(http.MethodPut, url, strings.NewReader("x"))
+	big.ContentLength = ChunkBytes + 1
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, withUser(big))
+	if rec.Code != http.StatusRequestEntityTooLarge || e.put.id != "" {
+		t.Errorf("too big: %d, forwarded %+v", rec.Code, e.put)
 	}
 }
 
-func TestBlobConfirm_CommitsThenAsksEntityWithTheStoredSize(t *testing.T) {
-	e, s := &fakeBlobEntity{target: blobTarget}, &fakeBlobStore{data: make([]byte, 1234)}
-	rec := serveBlob(e, s, http.MethodPost, "/attachments/upload/"+storedAttID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":3}`), nil, true)
-	if rec.Code != http.StatusOK || s.commits != 1 {
-		t.Fatalf("got %d commits=%d", rec.Code, s.commits)
+func TestBlobPutChunk_EntityRefusalsReachTheBrowser(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want int
+	}{
+		"hidden or not theirs": {&apierror.Error{StatusCode: 404}, 404},
+		"closed item":          {&apierror.Error{StatusCode: 409, Body: `{"message":"This case is closed."}`}, 409},
+		"too busy":             {&apierror.Error{StatusCode: 429, Body: `{"message":"try again"}`}, 429},
+		"storage down":         {&apierror.Error{StatusCode: 503}, 503},
+		"entity broke":         {&apierror.Error{StatusCode: 500}, 500},
+	} {
+		rec := serveBlob(&fakeBlobEntity{putErr: tc.err}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type=work_item", strings.NewReader("x"), nil, true)
+		if rec.Code != tc.want {
+			t.Errorf("%s: %d, want %d", name, rec.Code, tc.want)
+		}
+	}
+	rec := serveBlob(&fakeBlobEntity{putErr: &apierror.Error{StatusCode: 409, Body: `{"message":"This case is closed."}`}}, http.MethodPut, "/attachments/upload/"+storedAttID+"/chunks/0?type=work_item", strings.NewReader("x"), nil, true)
+	if !strings.Contains(rec.Body.String(), "This case is closed.") {
+		t.Errorf("body = %s, want entity's own words", rec.Body.String())
+	}
+}
+
+func TestBlobConfirm_ForwardsOnlyTypeAndChunks(t *testing.T) {
+	e := &fakeBlobEntity{}
+	rec := serveBlob(e, http.MethodPost, "/attachments/upload/"+storedAttID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":3,"sizeBytes":1,"asAdmin":true}`), nil, true)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"COMPLETE"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	var sent map[string]any
 	_ = json.Unmarshal([]byte(e.confirmBody), &sent)
-	if sent["sizeBytes"] != float64(1234) || sent["contentType"] != "application/pdf" || sent["storageKey"] != nil {
-		t.Errorf("confirm body to entity = %s", e.confirmBody)
+	if len(sent) != 2 || sent["type"] != "work_item" || sent["chunks"] != float64(3) {
+		t.Errorf("entity got %v, want only type and chunks (a size the browser claims is never forwarded)", sent)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
 }
 
-func TestBlobConfirm_RefusalDeletesTheFileButARetryableFailureKeepsIt(t *testing.T) {
-	for name, tc := range map[string]struct {
-		code    int
-		wantDel bool
-	}{
-		"refused": {400, true}, "forbidden": {403, true},
-		"rate": {429, false}, "conflict": {409, false}, "upstream": {503, false},
-		"unauthorized": {401, false}, "timeout": {408, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			e, s := &fakeBlobEntity{target: blobTarget, confirmErr: &apierror.Error{StatusCode: tc.code}}, &fakeBlobStore{data: []byte("x")}
-			rec := serveBlob(e, s, http.MethodPost, "/attachments/upload/"+storedAttID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":1}`), nil, true)
-			if (len(s.deleted) == 1) != tc.wantDel {
-				t.Errorf("code=%d deleted=%v", rec.Code, s.deleted)
-			}
-		})
+func TestBlobConfirm_BadInputAndRefusals(t *testing.T) {
+	url := "/attachments/upload/" + storedAttID + "/confirm"
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPost, url, strings.NewReader(`{"type":"nope","chunks":1}`), nil, true); rec.Code != 400 {
+		t.Errorf("bad type: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPost, "/attachments/upload/x/confirm", strings.NewReader(`{"type":"work_item","chunks":1}`), nil, true); rec.Code != 400 {
+		t.Errorf("bad id: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodPost, url, strings.NewReader(`{"type":"work_item","chunks":1}`), nil, false); rec.Code != 401 {
+		t.Errorf("no user: %d", rec.Code)
+	}
+	for _, status := range []int{400, 403, 409, 429} {
+		e := &fakeBlobEntity{confirmErr: &apierror.Error{StatusCode: status, Body: `{"message":"entity words"}`}}
+		rec := serveBlob(e, http.MethodPost, url, strings.NewReader(`{"type":"work_item","chunks":1}`), nil, true)
+		if rec.Code != status || !strings.Contains(rec.Body.String(), "entity words") {
+			t.Errorf("%d: got %d %s", status, rec.Code, rec.Body.String())
+		}
 	}
 }
 
-func TestBlobConfirm_MissingChunksAndBadCounts(t *testing.T) {
-	e := &fakeBlobEntity{target: blobTarget}
-	rec := serveBlob(e, &fakeBlobStore{commitEr: azblobstore.ErrMissingBlocks}, http.MethodPost, "/attachments/upload/"+storedAttID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":2}`), nil, true)
-	if rec.Code != http.StatusConflict {
-		t.Errorf("missing chunks = %d", rec.Code)
-	}
-	// 100 MiB is 13 chunks of 8 MiB: 13 is the most, 14 is refused.
-	rec = serveBlob(e, &fakeBlobStore{}, http.MethodPost, "/attachments/upload/"+storedAttID+"/confirm", strings.NewReader(`{"type":"work_item","chunks":14}`), nil, true)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("too many chunks = %d", rec.Code)
-	}
-}
-
-func TestBlobDownload_StreamsAsAnOpaqueAttachmentAndNeverShowsTheKey(t *testing.T) {
-	loc := `{"id":"` + storedAttID + `","name":"re\"port\r\n.html","contentType":"text/html","available":true,"storageKey":"` + blobSecretKey + `"}`
-	s := &fakeBlobStore{data: []byte("0123456789")}
-	rec := serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodGet, "/attachments/download/"+storedAttID+"/content?type=work_item", nil, nil, true)
+func TestBlobDownload_StreamsEntitysFileAndAddsTheSafetyHeaders(t *testing.T) {
+	e := &fakeBlobEntity{file: fileOf(200, "0123456789", map[string]string{
+		"Content-Type": "application/octet-stream", "Content-Length": "10", "Accept-Ranges": "bytes",
+		"Content-Disposition": `attachment; filename=report.pdf`, "Cache-Control": "private, no-store",
+		"Set-Cookie": "leak=1", "X-Storage-Key": "csm/projects/p/secret",
+	})}
+	rec := serveBlob(e, http.MethodGet, "/attachments/download/"+storedAttID+"/content?type=work_item", nil, nil, true)
 	if rec.Code != 200 || rec.Body.String() != "0123456789" {
-		t.Fatalf("got %d %q", rec.Code, rec.Body.String())
+		t.Fatalf("%d %q", rec.Code, rec.Body.String())
 	}
 	h := rec.Header()
-	if h.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(h.Get("Content-Disposition"), "attachment") ||
-		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Accept-Ranges") != "bytes" {
+	if h.Get("Content-Type") != "application/octet-stream" || h.Get("X-Content-Type-Options") != "nosniff" ||
+		h.Get("Content-Security-Policy") != "default-src 'none'; sandbox" || h.Get("Content-Length") != "10" ||
+		!strings.HasPrefix(h.Get("Content-Disposition"), "attachment;") {
 		t.Errorf("headers = %v", h)
 	}
-	if strings.ContainsAny(h.Get("Content-Disposition"), "\r\n") {
-		t.Error("header injection")
+	// Only the file's own headers are passed on; nothing else entity-service sent.
+	if h.Get("Set-Cookie") != "" || h.Get("X-Storage-Key") != "" || strings.Contains(rec.Body.String(), "secret") {
+		t.Errorf("an entity header leaked: %v", h)
 	}
-	for k, v := range h {
-		if strings.Contains(strings.Join(v, ""), "secret") {
-			t.Errorf("key in header %s", k)
-		}
+	if e.kindAsked != "work_item" || e.idAsked != storedAttID {
+		t.Errorf("asked %q %q", e.kindAsked, e.idAsked)
 	}
 }
 
-func TestBlobDownload_RangeAndUnavailable(t *testing.T) {
-	loc := `{"id":"a","name":"a.bin","available":true,"storageKey":"` + blobSecretKey + `"}`
+func TestBlobDownload_RangeAndRefusals(t *testing.T) {
 	url := "/attachments/download/" + storedAttID + "/content?type=work_item"
-	s := &fakeBlobStore{data: []byte("0123456789")}
-	rec := serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodGet, url, nil, map[string]string{"Range": "bytes=2-5"}, true)
-	if rec.Code != http.StatusPartialContent || rec.Body.String() != "2345" || s.opened == nil || s.opened.Offset != 2 || s.opened.Length != 4 {
-		t.Errorf("range: %d %q %+v", rec.Code, rec.Body.String(), s.opened)
+	e := &fakeBlobEntity{file: fileOf(206, "234", map[string]string{"Content-Range": "bytes 2-4/10", "Content-Length": "3"})}
+	rec := serveBlob(e, http.MethodGet, url, nil, map[string]string{"Range": "bytes=2-4"}, true)
+	if rec.Code != 206 || rec.Header().Get("Content-Range") != "bytes 2-4/10" || e.rangeAsked != "bytes=2-4" || rec.Body.String() != "234" {
+		t.Errorf("%d %v asked %q", rec.Code, rec.Header(), e.rangeAsked)
 	}
-	rec = serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodGet, url, nil, map[string]string{"Range": "bytes=50-"}, true)
+
+	rec = serveBlob(&fakeBlobEntity{fileErr: &entity.RangeNotSatisfiableError{ContentRange: "bytes */10"}}, http.MethodGet, url, nil, nil, true)
 	if rec.Code != http.StatusRequestedRangeNotSatisfiable || rec.Header().Get("Content-Range") != "bytes */10" {
-		t.Errorf("past the end: %d %v", rec.Code, rec.Header())
+		t.Errorf("416: %d %v", rec.Code, rec.Header())
 	}
-	for reason, want := range map[string]int{"DELETED": 410, "STORAGE_UNAVAILABLE": 503, "NOT_STORED": 404, "FAILED": 404} {
-		rec = serveBlob(&fakeBlobEntity{locate: `{"available":false,"reason":"` + reason + `"}`}, s, http.MethodGet, url, nil, nil, true)
-		if rec.Code != want {
-			t.Errorf("%s -> %d, want %d", reason, rec.Code, want)
-		}
+	rec = serveBlob(&fakeBlobEntity{fileErr: &apierror.Error{StatusCode: 410}}, http.MethodGet, url, nil, nil, true)
+	if rec.Code != 410 || !strings.Contains(rec.Body.String(), "attachment_removed") {
+		t.Errorf("gone: %d %s", rec.Code, rec.Body.String())
 	}
-	rec = serveBlob(&fakeBlobEntity{locateErr: &apierror.Error{StatusCode: 404}}, s, http.MethodGet, url, nil, nil, true)
-	if rec.Code != 404 {
-		t.Errorf("entity 404 = %d", rec.Code)
+	if rec := serveBlob(&fakeBlobEntity{fileErr: &apierror.Error{StatusCode: 404}}, http.MethodGet, url, nil, nil, true); rec.Code != 404 {
+		t.Errorf("not found: %d", rec.Code)
 	}
-	rec = serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodGet, url, nil, nil, false)
-	if rec.Code != 401 {
-		t.Errorf("no user = %d", rec.Code)
+	if rec := serveBlob(&fakeBlobEntity{fileErr: &apierror.Error{StatusCode: 503}}, http.MethodGet, url, nil, nil, true); rec.Code != 503 {
+		t.Errorf("storage down: %d", rec.Code)
 	}
-}
-
-func TestBlobInlineImage_OnlyImageTypesAreShown(t *testing.T) {
-	s := &fakeBlobStore{data: []byte("img")}
-	for ct, want := range map[string]string{"image/png": "image/png", "text/html": "application/octet-stream", "image/svg+xml": "application/octet-stream"} {
-		loc := `{"available":true,"contentType":"` + ct + `","storageKey":"` + blobSecretKey + `"}`
-		rec := serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
-		if rec.Code != 200 || rec.Header().Get("Content-Type") != want || rec.Header().Get("Content-Disposition") != "inline" {
-			t.Errorf("%s -> %d %v", ct, rec.Code, rec.Header())
-		}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodGet, url, nil, nil, false); rec.Code != 401 {
+		t.Errorf("no user: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodGet, "/attachments/download/x/content?type=work_item", nil, nil, true); rec.Code != 400 {
+		t.Errorf("bad id: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodGet, "/attachments/download/"+storedAttID+"/content?type=case", nil, nil, true); rec.Code != 400 {
+		t.Errorf("bad type: %d", rec.Code)
 	}
 }
 
-func TestBlobDelete_RemovesTheFileAfterEntityDeletesTheRow(t *testing.T) {
-	loc := `{"available":true,"storageKey":"` + blobSecretKey + `"}`
+func TestBlobInlineImage_StreamsWhatEntityShowsAsAnImage(t *testing.T) {
+	e := &fakeBlobEntity{file: fileOf(200, "png", map[string]string{
+		"Content-Type": "image/png", "Content-Disposition": "inline", "Cache-Control": "private, max-age=300",
+	})}
+	rec := serveBlob(e, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
+	h := rec.Header()
+	if rec.Code != 200 || rec.Body.String() != "png" || h.Get("Content-Type") != "image/png" || h.Get("Content-Disposition") != "inline" || h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("%d %v", rec.Code, h)
+	}
+	if e.idAsked != storedAttID {
+		t.Errorf("asked %q", e.idAsked)
+	}
+	if rec := serveBlob(&fakeBlobEntity{}, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, false); rec.Code != 401 {
+		t.Errorf("no user: %d", rec.Code)
+	}
+	if rec := serveBlob(&fakeBlobEntity{fileErr: &apierror.Error{StatusCode: 410}}, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true); rec.Code != 410 {
+		t.Errorf("removed: %d", rec.Code)
+	}
+}
+
+func TestBlobDelete_EntityDoesTheWholeDelete(t *testing.T) {
 	body := `{"type":"work_item","id":"` + storedAttID + `"}`
-	s := &fakeBlobStore{}
-	rec := serveBlob(&fakeBlobEntity{locate: loc}, s, http.MethodPost, "/attachments/delete", strings.NewReader(body), nil, true)
-	if rec.Code != 204 || len(s.deleted) != 1 || s.deleted[0] != blobSecretKey {
-		t.Errorf("%d %v", rec.Code, s.deleted)
+	e := &fakeBlobEntity{}
+	rec := serveBlob(e, http.MethodPost, "/attachments/delete", strings.NewReader(body), nil, true)
+	if rec.Code != 204 || e.deleteCalls != 1 {
+		t.Errorf("%d, %d calls", rec.Code, e.deleteCalls)
 	}
-	// Someone who may not delete it leaves the file alone.
-	s = &fakeBlobStore{}
-	rec = serveBlob(&fakeBlobEntity{locate: loc, deleteErr: &apierror.Error{StatusCode: 403}}, s, http.MethodPost, "/attachments/delete", strings.NewReader(body), nil, true)
-	if rec.Code != 403 || len(s.deleted) != 0 {
-		t.Errorf("forbidden: %d %v", rec.Code, s.deleted)
+	// Someone who may not delete it gets entity's refusal.
+	rec = serveBlob(&fakeBlobEntity{deleteErr: &apierror.Error{StatusCode: 403, Body: `{"message":"Only the uploader."}`}}, http.MethodPost, "/attachments/delete", strings.NewReader(body), nil, true)
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "Only the uploader.") {
+		t.Errorf("forbidden: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -330,8 +318,8 @@ func TestBlobDelete_RemovesTheFileAfterEntityDeletesTheRow(t *testing.T) {
 // handler wired with the test access guard, and returns what entity-service got.
 func deleteAs(t *testing.T, roles []string, body string) (*fakeBlobEntity, int) {
 	t.Helper()
-	e := &fakeBlobEntity{locate: `{"available":true,"storageKey":"` + blobSecretKey + `"}`}
-	h := NewBlobAttachmentHandler(e, &fakeBlobStore{}).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+	e := &fakeBlobEntity{}
+	h := NewBlobAttachmentHandler(e).WithAccessGuard(NewAccessGuard(testAccessConfig()))
 	r := httptest.NewRequest(http.MethodPost, "/attachments/delete", strings.NewReader(body))
 	r = r.WithContext(middleware.WithUserInfo(r.Context(), &middleware.UserInfo{UserID: "u", Roles: roles}))
 	rec := httptest.NewRecorder()
@@ -351,10 +339,6 @@ func TestBlobDelete_AnAdminsDeleteCarriesTheAdminFlag(t *testing.T) {
 	}
 	if sent["asAdmin"] != true || sent["id"] != storedAttID || sent["type"] != "work_item" {
 		t.Errorf("sent = %v", sent)
-	}
-	// Locate does not know the field, and strict decoding there would refuse it.
-	if strings.Contains(e.locateBody, "asAdmin") {
-		t.Errorf("locate body = %s", e.locateBody)
 	}
 }
 
@@ -391,83 +375,20 @@ func TestBlobDelete_ABodyThatIsNotAnObjectIsABadRequest(t *testing.T) {
 }
 
 func TestBlobListChunks(t *testing.T) {
-	s := &fakeBlobStore{blocks: map[int][]byte{0: []byte("ab"), 1: []byte("c")}}
-	rec := serveBlob(&fakeBlobEntity{target: blobTarget}, s, http.MethodGet, "/attachments/upload/"+storedAttID+"/chunks?type=work_item", nil, nil, true)
+	e := &fakeBlobEntity{chunks: `{"chunkBytes":8388608,"chunks":[{"index":0,"size":2},{"index":1,"size":1}]}`}
+	rec := serveBlob(e, http.MethodGet, "/attachments/upload/"+storedAttID+"/chunks?type=work_item", nil, nil, true)
 	var out struct {
 		ChunkBytes int `json:"chunkBytes"`
 		Chunks     []struct{ Index, Size int }
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
-	if rec.Code != 200 || out.ChunkBytes != ChunkBytes || len(out.Chunks) != 2 {
+	if rec.Code != 200 || out.ChunkBytes != ChunkBytes || len(out.Chunks) != 2 || out.Chunks[1].Size != 1 {
 		t.Errorf("%d %s", rec.Code, rec.Body.String())
 	}
-}
-
-func TestParseRange(t *testing.T) {
-	for _, tc := range []struct {
-		h     string
-		off   int64
-		len   int64
-		ok    bool
-		unsat bool
-	}{
-		{"bytes=0-3", 0, 4, true, false},
-		{"bytes=5-", 5, 5, true, false},
-		{"bytes=-3", 7, 3, true, false},
-		{"bytes=8-100", 8, 2, true, false},
-		{"bytes=10-", 0, 0, false, true},
-		{"bytes=0-1,4-5", 0, 0, false, false},
-		{"bytes=5-2", 0, 0, false, false},
-		{"items=0-1", 0, 0, false, false},
-		{"bytes=abc", 0, 0, false, false},
-	} {
-		r, ok, un := parseRange(tc.h, 10)
-		if ok != tc.ok || un != tc.unsat || (ok && (r.Offset != tc.off || r.Length != tc.len)) {
-			t.Errorf("%q = %+v ok=%v unsat=%v", tc.h, r, ok, un)
-		}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q", rec.Header().Get("Cache-Control"))
 	}
-}
-
-const relocateTo = "csm/projects/prj_9/workitems/cs0001/inline_attachments/cia1_pic.png"
-
-func TestBlobInlineImage_MovesADescriptionImageToItsWorkItemFolder(t *testing.T) {
-	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `","relocateTo":"` + relocateTo + `"}`
-	s := &fakeBlobStore{data: []byte("img")}
-	ent := &fakeBlobEntity{locate: loc}
-	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
-	if rec.Code != 200 || rec.Body.String() != "img" {
-		t.Fatalf("response = %d %q", rec.Code, rec.Body.String())
-	}
-	if s.putKey != relocateTo || string(s.blocks[0]) != "img" || s.commits != 1 {
-		t.Errorf("copy: key %q blocks %v commits %d", s.putKey, s.blocks, s.commits)
-	}
-	if ent.relocatedBody != `{"storageKey":"`+relocateTo+`"}` {
-		t.Errorf("entity told %q", ent.relocatedBody)
-	}
-	if len(s.deleted) != 1 || s.deleted[0] != blobSecretKey {
-		t.Errorf("old file removal = %v, want only %q", s.deleted, blobSecretKey)
-	}
-}
-
-func TestBlobInlineImage_AFailedMoveKeepsTheOldFile(t *testing.T) {
-	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `","relocateTo":"` + relocateTo + `"}`
-	s := &fakeBlobStore{data: []byte("img")}
-	ent := &fakeBlobEntity{locate: loc, relocateErr: errors.New("entity down")}
-	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
-	if rec.Code != 200 || rec.Body.String() != "img" {
-		t.Fatalf("the image must still be served: %d %q", rec.Code, rec.Body.String())
-	}
-	if len(s.deleted) != 0 {
-		t.Errorf("the old file was removed although entity-service did not accept the new key: %v", s.deleted)
-	}
-}
-
-func TestBlobInlineImage_NoMoveWithoutRelocateTo(t *testing.T) {
-	loc := `{"available":true,"contentType":"image/png","storageKey":"` + blobSecretKey + `"}`
-	s := &fakeBlobStore{data: []byte("img")}
-	ent := &fakeBlobEntity{locate: loc}
-	rec := serveBlob(ent, s, http.MethodGet, "/attachments/inline/"+storedAttID+"/content", nil, nil, true)
-	if rec.Code != 200 || s.commits != 0 || len(s.deleted) != 0 || ent.relocatedBody != "" {
-		t.Errorf("unexpected move: %d commits %d deleted %v told %q", rec.Code, s.commits, s.deleted, ent.relocatedBody)
+	if rec := serveBlob(&fakeBlobEntity{listErr: errors.New("down")}, http.MethodGet, "/attachments/upload/"+storedAttID+"/chunks?type=work_item", nil, nil, true); rec.Code != 500 {
+		t.Errorf("a failed list: %d", rec.Code)
 	}
 }

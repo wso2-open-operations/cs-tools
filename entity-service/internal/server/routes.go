@@ -774,8 +774,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		storedAttachmentSvc = service.WithStoredAttachmentAdminDelete(storedAttachmentSvc, cfg.CSMPortalBackendClientID)
 		// Comments created or edited from here on attach the images they show.
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
+		// This service is the only one that talks to Azure Blob Storage: the portal
+		// backends and the notification service send and read files through it.
+		attachmentStore := newAttachmentFileStore(cfg)
+		attachmentFiles := service.NewStoredAttachmentFileService(storedAttachmentSvc, attachmentStore, cfg.AttachmentMaxConcurrentTransfers)
+		// With the file store the cleanup removes unlinked files itself.
+		uploadCleanup := service.WithFileStore(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc), attachmentStore)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
-			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc))
+			WithFiles(attachmentFiles).
+			WithUploadCleanup(uploadCleanup)
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND
@@ -2116,11 +2123,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("POST /attachments/upload/{id}/confirm", storedAttachmentHandler.ConfirmUpload)
 		mux.HandleFunc("POST /attachments/delete", storedAttachmentHandler.DeleteAttachment)
 		mux.HandleFunc("POST /attachments/uploads/cleanup", storedAttachmentHandler.CleanupUploads)
-		// The portal backends hold the files: they ask which key to use and read.
-		mux.HandleFunc("POST /attachments/upload/{id}/authorize", storedAttachmentHandler.AuthorizeUpload)
-		mux.HandleFunc("POST /attachments/locate", storedAttachmentHandler.LocateAttachment)
-		mux.HandleFunc("GET /attachments/inline/{id}/location", storedAttachmentHandler.InlineImageLocation)
-		mux.HandleFunc("POST /attachments/inline/{id}/relocated", storedAttachmentHandler.InlineImageRelocated)
+		// The files themselves: this service is the only one that reads or writes
+		// Azure Blob Storage. The portal backends forward a browser's bytes here and
+		// stream the answer back; the notification service reads an email's images.
+		mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", storedAttachmentHandler.PutChunk)
+		mux.HandleFunc("GET /attachments/upload/{id}/chunks", storedAttachmentHandler.ListChunks)
+		mux.HandleFunc("GET /attachments/download/{id}/content", storedAttachmentHandler.DownloadAttachment)
+		mux.HandleFunc("GET /attachments/inline/{id}/content", storedAttachmentHandler.InlineImageContent)
 		mux.HandleFunc("POST /attachments/uploads/cleanup/acknowledge", storedAttachmentHandler.AcknowledgeOrphans)
 	}
 
@@ -2916,7 +2925,7 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 						// with no cached identity, ResolveScope runs two database
 						// queries on the request context, and they must share the
 						// same deadline as the handler instead of running unbounded.
-						middleware.Timeout(cfg.RequestTimeout)(
+						middleware.TimeoutWith(cfg.RequestTimeout, attachmentRequestTimeout)(
 							callerIdentityMiddleware(accessSvc)(mux),
 						),
 					),

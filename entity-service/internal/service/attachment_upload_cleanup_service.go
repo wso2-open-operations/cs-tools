@@ -18,6 +18,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -27,6 +28,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
+	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 )
 
 const (
@@ -57,6 +59,39 @@ type attachmentUploadCleanupService struct {
 	repo   repository.StoredAttachmentRepository
 	access AccessService
 	now    func() time.Time
+	// store removes a file this service owns. Nil (no storage configured) means an
+	// unlinked file is handed to the caller in Orphans instead.
+	store FileStore
+}
+
+// WithFileStore lets the cleanup remove an unlinked file from storage itself and mark
+// the row DELETED in the same run, so no caller has to delete files and acknowledge
+// them. A file that cannot be removed now keeps its row COMPLETE and goes to the back
+// of the queue, so the next run tries it again. Without a store the cleanup hands the
+// file over in Orphans, as before.
+func WithFileStore(c AttachmentUploadCleanupService, store FileStore) AttachmentUploadCleanupService {
+	if s, ok := c.(*attachmentUploadCleanupService); ok && store != nil {
+		s.store = store
+	}
+	return c
+}
+
+// removeFile deletes an unlinked file from storage and marks its row DELETED. It
+// reports whether the row is done: false means the file could not be removed now
+// (the row stays COMPLETE and is tried again on a later run).
+func (s *attachmentUploadCleanupService) removeFile(ctx, sys context.Context, kind domain.StoredAttachmentKind, id, key, by string) bool {
+	if err := s.store.Delete(ctx, key); err != nil && !errors.Is(err, azblobstore.ErrNotFound) {
+		slog.WarnContext(ctx, "could not remove an unlinked file from storage", "attachmentId", id, "error", err)
+		s.deferRetry(ctx, sys, kind, id)
+		return false
+	}
+	// A file that is already gone counts as removed: the row is then simply marked.
+	if _, err := s.repo.MarkDeleted(sys, kind, id, by); err != nil {
+		slog.WarnContext(ctx, "could not mark a removed file's row deleted", "attachmentId", id, "error", err)
+		s.deferRetry(ctx, sys, kind, id)
+		return false
+	}
+	return true
 }
 
 // NewAttachmentUploadCleanupService constructs an AttachmentUploadCleanupService.
@@ -100,6 +135,14 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 	}
 	for _, img := range unlinked {
 		hasFile := img.StorageKey != nil && *img.StorageKey != ""
+		if hasFile && s.store != nil {
+			if s.removeFile(ctx, sys, domain.StoredAttachmentComment, img.ID, *img.StorageKey, "inline-image-cleanup") {
+				res.ImagesRemoved++
+			} else {
+				res.ImagesFailed++
+			}
+			continue
+		}
 		if hasFile {
 			// Not marked DELETED here: this service cannot remove the file, and a
 			// DELETED row is never listed again, so a key in a lost response would be
@@ -123,6 +166,14 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		return res, err
 	}
 	for _, d := range drafts {
+		if d.StorageKey != nil && *d.StorageKey != "" && s.store != nil {
+			if s.removeFile(ctx, sys, domain.StoredAttachmentWorkItem, d.ID, *d.StorageKey, "report-draft-cleanup") {
+				res.ReportDraftsRemoved++
+			} else {
+				res.ReportDraftsFailed++
+			}
+			continue
+		}
 		if d.StorageKey != nil && *d.StorageKey != "" {
 			res.Orphans = append(res.Orphans, domain.OrphanedImage{ID: d.ID, Type: domain.StoredAttachmentWorkItem, StorageKey: *d.StorageKey})
 			continue

@@ -211,15 +211,6 @@ func main() {
 	})
 	notificationHandler := handler.NewNotificationHandler(googleChatClient, os.Getenv("CSM_PORTAL_WEB_BASE_URL"))
 
-	// Attachment files live in Azure Blob Storage and this service holds the
-	// credentials and moves the bytes; entity-service keeps the access checks.
-	// Without a reachable container there is nothing to serve, so refuse to start.
-	attachmentStore, err := newAttachmentStore(os.Getenv)
-	if err != nil {
-		slog.Error("could not set up attachment storage", "err", err)
-		os.Exit(1)
-	}
-
 	// One guard authorises every route below (including /spl/*) and also
 	// backs the permissions GET /users/me reports, so the two cannot drift
 	// apart. Built before the SPL block below since its SPL handlers need
@@ -460,12 +451,12 @@ func main() {
 	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
-	// access decision. This backend holds the Azure Blob Storage credentials and
-	// moves the bytes: an upload arrives in chunks, a download and a comment's
-	// inline image are streamed through it (so they are PermDownloadAttachment);
+	// access decision and holds the files in Azure Blob Storage. This backend holds
+	// no storage credential: it forwards an upload's chunks and streams a download
+	// or a comment's inline image back (so those are PermDownloadAttachment);
 	// upload, confirm and delete are PermWrite.
 	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
-	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient, attachmentStore).WithAccessGuard(accessGuard)
+	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient).WithAccessGuard(accessGuard)
 	route("POST /attachments/upload", handler.PermWrite, storedAttachmentHandler.InitiateUpload)
 	route("PUT /attachments/upload/{id}/chunks/{index}", handler.PermWrite, blobAttachmentHandler.PutChunk)
 	route("GET /attachments/upload/{id}/chunks", handler.PermWrite, blobAttachmentHandler.ListChunks)
