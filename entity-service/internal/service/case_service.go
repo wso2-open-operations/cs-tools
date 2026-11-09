@@ -38,8 +38,11 @@ import (
 )
 
 type caseService struct {
-	repo     repository.CaseRepository
-	userRepo repository.UserRepository
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for deleted attachments in a list (SearchAttachmentsRequest.IncludeDeleted).
+	csmPortalClientID string
+	repo              repository.CaseRepository
+	userRepo          repository.UserRepository
 	// projectContactRepo backs updateCaseWatchList's project-membership
 	// validation (see that method's own doc comment) — never nil for a
 	// Postgres-backed caseService (routes.go always constructs and passes
@@ -223,6 +226,25 @@ func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 // in routes.go) keeps working completely unchanged. slaEngine may itself be
 // nil (config.CSMSLAEngineEnabled == false, or no database configured at
 // all) -- that's the normal "engine turned off" case, not an error.
+func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID string) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.csmPortalClientID = csmPortalClientID
+	}
+	return svc
+}
+
+// mayListDeletedAttachments is whether this search may include deleted
+// attachments: the request asks AND the caller is the CSM portal backend, which
+// sets the flag only for a portal admin (decided from the person's token roles
+// there, the same trust the admin delete uses). Any other caller's request for
+// it is ignored.
+func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
+	if !req.IncludeDeleted || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
+}
+
 func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
 	if cs, ok := svc.(*caseService); ok {
 		cs.slaEngine = slaEngine
@@ -3982,6 +4004,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 		total       int
 		err         error
 	)
+	if s.mayListDeletedAttachments(ctx, req) {
+		ctx = repository.WithDeletedAttachments(ctx)
+	}
 	if isCase {
 		attachments, total, err = s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
 	} else {
