@@ -39640,19 +39640,21 @@ components:
           type: string
           format: uuid
           description: >-
-            Types comment and work_item only, instead of parentId. For a work_item it
-            is a draft report: the file is private to its uploader, listed nowhere,
-            and linked to the case by `POST /cases` with `attachmentIds` (its key is
-            csm/projects/<project>/workitems/drafts/attachments/...). The project the draft
-            description image is uploaded to. The caller must be a REGISTERED
-            member of it (internal callers are unrestricted); a project the
-            caller cannot see is a 404. The image is private to its uploader
-            until the record is created: the create request's description then
-            refers to it as src="/<attachmentId>" and entity-service links it
-            (work_item_id set, description_image true) when the record exists.
-            Its storage key is csm/projects/<project>/workitems/drafts/inline_attachments/...
-            and stays valid after linking. Draft images never linked within 24
-            hours are removed by the upload cleanup; linked ones never are.
+            Types comment and work_item only, instead of parentId. The project the draft
+            is uploaded to. The caller must be a REGISTERED member of it (internal callers
+            are unrestricted); a project the caller cannot see is a 404. A draft is private
+            to its uploader until the record it belongs to is created.
+
+            - work_item: a security report's file. It is listed nowhere and linked to the
+              case by `POST /cases` with `attachmentIds`. Its key is
+              csm/projects/<project>/workitems/drafts/attachments/... and stays valid
+              after linking.
+            - comment: a description image. The create request's description then refers
+              to it as src="/<attachmentId>" and entity-service links it (work_item_id
+              set, description_image true) when the record exists. Its key is
+              csm/projects/<project>/workitems/drafts/inline_attachments/... and stays
+              valid after linking. Draft images never linked within 24 hours are removed
+              by the upload cleanup; linked ones never are.
         name:
           type: string
           maxLength: 255
