@@ -28,8 +28,8 @@ let savePending = false;
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
-    payload?: { message?: string };
-    constructor(status: number, message: string, payload?: { message?: string }) {
+    payload?: { message?: string; errorCode?: string };
+    constructor(status: number, message: string, payload?: { message?: string; errorCode?: string }) {
       super(message);
       this.status = status;
       this.payload = payload;
@@ -307,7 +307,7 @@ describe("GenerateDashboardPage: the chat", () => {
     [503, "The AI assistant has reached its usage limit. Try again later."],
     [504, "The AI assistant took too long to answer. Try again."],
   ])("shows the backend's message for a %d", async (status, message) => {
-    generateMock.mockRejectedValueOnce(new BackendApiError(status, message, { message }));
+    generateMock.mockRejectedValueOnce(new BackendApiError(status, message, { message, errorCode: "generate_call_failed" }));
     renderPage();
 
     await sendMessage("My cases", message);
@@ -319,7 +319,7 @@ describe("GenerateDashboardPage: the chat", () => {
     const message = "The AI assistant has reached its usage limit. Try again later.";
     generateMock
       .mockResolvedValueOnce({ dashboard: dashboard("My Cases"), reply: "Here it is." })
-      .mockRejectedValueOnce(new BackendApiError(503, message, { message }));
+      .mockRejectedValueOnce(new BackendApiError(503, message, { message, errorCode: "generate_usage_limit" }));
     renderPage();
     await sendMessage("My cases", "Here it is.");
 

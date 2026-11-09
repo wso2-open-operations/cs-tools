@@ -650,13 +650,16 @@ never that the user's input did not work when the failure was elsewhere:
   filter by): "The dashboard cannot be generated from the input." ("This dashboard cannot be modified
   with your input." with a draft on screen), not the backend's sentence (the model's reason stays in the
   backend's response and logs).
-- **The backend's own message** (its JSON body's `message`, `BackendApiError.payload.message`) for 400
+- **The backend's own message** (its JSON body's `message`, `BackendApiError.payload.message`), only
+  when the body's `errorCode` starts with `generate_` (the backend puts one on every generate failure it
+  words; a proxy or gateway can answer JSON with a `message` of its own, which is never shown), for 400
   (the prompt or draft), 413 (the draft too large), 429 (the user's own per-minute / per-day limit), 502 (an
   unusable or cut-off reply, or the AI assistant unreachable), 503 (generation unavailable, or the AI
   side's usage limit: the model gateway's 429, which the backend sends as 503 so 429 always means the
   user's own limit) and 504 (too slow).
-- **No backend message**, worded by where it failed: a proxy's own 504 page "took too long", its own
-  502 / 503 "can't be reached right now"; no answer at all (fetch threw: offline, or the connection was
+- **No backend message** (none, or no `generate_` code), worded by where it failed: a proxy's own 504
+  "took too long", its own 502 / 503 "can't be reached right now", its own 429 "Too many requests right
+  now", its own 413 the backend's draft-too-large words; no answer at all (fetch threw: offline, or the connection was
   dropped, which a proxy does when its timeout is shorter than the model call's 45 s; the local
   `gateway-shim`'s 30 s write timeout did exactly that) "The portal didn't get an answer"; a 500 or
   anything else "Something went wrong while creating the dashboard" ("changing" with a draft on screen).

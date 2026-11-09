@@ -22,8 +22,8 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@api/backend/client", () => ({
   BackendApiError: class BackendApiError extends Error {
     status: number;
-    payload?: { message?: string };
-    constructor(status: number, message: string, payload?: { message?: string }) {
+    payload?: { message?: unknown; errorCode?: unknown };
+    constructor(status: number, message: string, payload?: { message?: unknown; errorCode?: unknown }) {
       super(message);
       this.status = status;
       this.payload = payload;
@@ -32,11 +32,13 @@ vi.mock("@api/backend/client", () => ({
 }));
 
 import { BackendApiError } from "@api/backend/client";
+import type { BeErrorPayload } from "@api/backend/types";
 import { generateErrorMessage } from "@features/csm-custom-dashboards/utils/generateErrorMessage";
 
-/** A failure as the backend answers it: its message in the JSON body. */
-function backend(status: number, message: string): BackendApiError {
-  return new BackendApiError(status, message, { message });
+/** A failure as the backend answers it: its message in the JSON body, marked
+ * by its own errorCode. */
+function backend(status: number, message: string, errorCode = "generate_call_failed"): BackendApiError {
+  return new BackendApiError(status, message, { message, errorCode });
 }
 
 describe("generateErrorMessage", () => {
@@ -102,6 +104,35 @@ describe("generateErrorMessage", () => {
     const err = backend(500, "Internal error");
     expect(generateErrorMessage(err, false)).toBe("Something went wrong while creating the dashboard. Try again.");
     expect(generateErrorMessage(err, true)).toBe("Something went wrong while changing the dashboard. Try again.");
+  });
+
+  it.each([
+    ["a top-level message", { message: "Runtime Error" }],
+    ["a nested message", { error: { code: "ServiceUnavailable", message: "upstream connect error" } }],
+    ["a message and a code of its own", { message: "no healthy upstream", errorCode: "UPSTREAM_DOWN" }],
+    ["a message that is not text", { message: { text: "Runtime Error" }, errorCode: "generate_call_failed" }],
+  ])("never shows a gateway's own 503 JSON (%s)", (_name, payload) => {
+    // Any JSON at run time, whatever the payload's type says.
+    const err = new BackendApiError(503, "Service Unavailable", payload as unknown as BeErrorPayload);
+    expect(generateErrorMessage(err, false)).toBe(
+      "The AI assistant can't be reached right now. Try again in a few minutes.",
+    );
+  });
+
+  it("words a message without the backend's errorCode (an older backend) by its status", () => {
+    const err = new BackendApiError(503, "x", { message: "The AI assistant has reached its usage limit. Try again later." });
+    expect(generateErrorMessage(err, false)).toBe(
+      "The AI assistant can't be reached right now. Try again in a few minutes.",
+    );
+  });
+
+  it("never shows a gateway's own JSON for a 502 or 504 either", () => {
+    expect(generateErrorMessage(new BackendApiError(502, "Bad Gateway", { message: "Runtime Error" }), false)).toBe(
+      "The AI assistant can't be reached right now. Try again in a few minutes.",
+    );
+    expect(generateErrorMessage(new BackendApiError(504, "Gateway Timeout", { message: "upstream timed out" }), false)).toBe(
+      "The AI assistant took too long to answer. Try again.",
+    );
   });
 
   it("never shows a message the backend sent with a status it does not word for users", () => {

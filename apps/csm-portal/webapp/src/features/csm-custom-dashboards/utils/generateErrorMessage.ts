@@ -24,6 +24,11 @@ import { BackendApiError } from "@api/backend/client";
  * generateErrorMessage). */
 const BACKEND_MESSAGE_STATUSES: ReadonlySet<number> = new Set([400, 413, 429, 502, 503, 504]);
 
+/** The start of every `errorCode` the backend puts on a generate failure it
+ * words itself. A proxy or gateway in front of it can answer JSON with a
+ * `message` too; without this mark, that is not the backend's message. */
+const BACKEND_ERROR_CODE_PREFIX = "generate_";
+
 /**
  * What the generate chat answers when a message did not give a dashboard.
  *
@@ -33,9 +38,10 @@ const BACKEND_MESSAGE_STATUSES: ReadonlySet<number> = new Set([400, 413, 429, 50
  * "cannot be modified with your input"), not the model's sentence.
  *
  * Otherwise the backend's own message when it sent one (its JSON body's
- * `message`): that says what went wrong and what to do. Without one, the
- * failure is worded by where it happened, never as the user's input not
- * working:
+ * `message`, marked as the backend's by an `errorCode` starting `generate_`):
+ * that says what went wrong and what to do. Without one (a proxy's or
+ * gateway's own body, JSON or not), the failure is worded by where it
+ * happened, never as the user's input not working:
  *
  * - a proxy in front of the backend answering its own 504 (its error page,
  *   no JSON): too slow; its own 502 / 503: the AI assistant unreachable;
@@ -57,7 +63,11 @@ export function generateErrorMessage(err: unknown, editing: boolean): string {
       ? "This dashboard cannot be modified with your input."
       : "The dashboard cannot be generated from the input.";
   }
-  const backendMessage = BACKEND_MESSAGE_STATUSES.has(err.status) ? err.payload?.message : undefined;
+  const fromBackend =
+    BACKEND_MESSAGE_STATUSES.has(err.status) &&
+    typeof err.payload?.errorCode === "string" &&
+    err.payload.errorCode.startsWith(BACKEND_ERROR_CODE_PREFIX);
+  const backendMessage = fromBackend && typeof err.payload?.message === "string" ? err.payload.message : undefined;
   if (backendMessage) {
     return backendMessage;
   }
