@@ -173,6 +173,14 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		"correlationId", middleware.CorrelationIDFromContext(ctx), "kind", string(req.Kind),
 		"attachmentId", row.ID, "path", key, "sizeBytes", size)
 
+	// Only here, on the confirm that completed the upload: a repeated confirm
+	// ("already COMPLETE") returns earlier and must not replay the move, which
+	// could undo a later staff move back to Awaiting Info. Best-effort: the
+	// attachment is committed, so a failure is logged by the rule, never returned.
+	if req.Kind == domain.StoredAttachmentWorkItem && s.caseStates != nil {
+		s.caseStates.ApplyCustomerAttachmentStateTransition(ctx, row.ParentID)
+	}
+
 	row.Status = "COMPLETE"
 	return confirmResponse(row, size), nil
 }

@@ -105,6 +105,29 @@ type storedAttachmentService struct {
 	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
 	// ask for an admin delete (DeleteStoredAttachmentRequest.AsAdmin).
 	csmPortalClientID string
+	// caseStates applies the customer-attachment state rule to a case once a work
+	// item attachment is COMPLETE. nil leaves a case's state alone. Set with
+	// WithStoredAttachmentCaseStates.
+	caseStates customerAttachmentStateMover
+}
+
+// customerAttachmentStateMover is the part of the case service a stored work item attachment needs.
+type customerAttachmentStateMover interface {
+	ApplyCustomerAttachmentStateTransition(ctx context.Context, caseID string)
+}
+
+// WithStoredAttachmentCaseStates lets a customer's completed work item attachment move its case from Awaiting
+// Info or Solution Proposed to Waiting on WSO2, by the same rule as a customer's comment. Applied after
+// construction because the case service is built later. A no-op unless both sides are the Postgres services.
+func WithStoredAttachmentCaseStates(svc StoredAttachmentService, cases CaseService) StoredAttachmentService {
+	s, ok := svc.(*storedAttachmentService)
+	if !ok {
+		return svc
+	}
+	if m, ok := cases.(customerAttachmentStateMover); ok {
+		s.caseStates = m
+	}
+	return svc
 }
 
 // WithStoredAttachmentAdminDelete lets the CSM portal backend (the caller with
