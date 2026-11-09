@@ -38,7 +38,7 @@ What every task inherits from the engine:
 |---|---|
 | Period key | The task's most recent cron firing. Every tick between two firings derives the same key, so retries land on one ledger row |
 | Retry | A failed attempt is retried on the first tick after its retry time, which defaults to `DRIVER_INTERVAL` after the failure. There is no cap by default |
-| Attempt cap | `MaxAttempts` is set on three tasks only: `time_card_report`, `acp_reopen_check` and `acp_closure` (2 each: one retry, because a retry can repeat something outward) |
+| Attempt cap | `MaxAttempts` is set on three tasks only: `time_card_report`, `acp_reopen_check` and `acp_closure` (2 each: one retry, because a retry can repeat something outward). The cap is checked only after a handler returns an error: a crash, or a failure to record the result, leaves a stale claim that can run again beyond the cap and repeat emails |
 | Abandonment | When the next period comes due while the old one is still unresolved, entity-service marks the old row superseded and only the new period is chased |
 | Stale claims | The engine passes entity-service a stale-claim threshold of twice `DRIVER_INTERVAL`, after which a claimed attempt that never reported can be claimed again |
 | Failure alerts | Every failed attempt emails the task's own `to` plus `ALERT_RECIPIENTS`, with the task's `cc`. `ALERTS_ENABLED=false` silences it |
@@ -90,7 +90,7 @@ Three audiences exist, and they are not the same thing:
 | Audience | Source | Applies to |
 |---|---|---|
 | Failure alerts | `ALERT_RECIPIENTS`, plus the task's `SUB_CRON_RECIPIENTS` `to` and `cc` | Every task. Tasks that leave the ledger `to` empty by design (the migration scan, both CS worklogs reports, both query hour tasks, the three regression reports) alert `ALERT_RECIPIENTS` only, so a business-unit mail group is not told every hour that entity-service is down |
-| Report readers | The task's own `SUB_CRON_RECIPIENTS` `to` and `cc`, sometimes merged with a derived list | The report tasks (sections 4 to 8) |
+| Report readers | The task's own `SUB_CRON_RECIPIENTS` `to` and `cc`, sometimes merged with a derived list | The report tasks (sections 4 to 8). For `stale_cases_report`, `open_cases_report` and `unresolved_products_digest` the same list also receives failure alerts. For `time_card_report` the configured `to` and `cc` are the failure-alert audience only, and the project contacts receive the report |
 | People on the rota or the account | Derived from entity-service data | The rota reminders, query hour notices, ACP notices and the time card report |
 
 A report task with no `to` skips its entity-service query and succeeds, except
@@ -179,8 +179,8 @@ recompute walks every opportunity in service and every project linked to each.
 - **Triggers:** hourly at minute 15.
 - **Does:** `POST /query-hours/recompute`, which stores fresh figures and returns only the projects whose threshold state **rose** (to 75, 90 or 100 percent). The task mails one message per crossing to that account's manager and technical owner (internal addresses), Cc from `SUB_CRON_RECIPIENTS`.
 - **Decision logic:** there is no stored per-project state on this side, so crossings are detected in process from the recompute's own response. An account with no internal owner is logged and skipped, not routed elsewhere. One failed mail does not stop the rest; the errors are joined.
-- **Failure and idempotency:** the recompute writes before the mails go out, so a crossing whose mail failed is, from reading the code, not re-derived by the retry. That is an inference from the doc comments, not a tested behaviour. Treat a repeat run as non-idempotent.
-- **Config:** `QUERY_HOURS_RECIPIENT_OVERRIDE` replaces every derived audience (for testing against real data without mailing real owners).
+- **Failure and idempotency:** the recompute writes before the mails go out, so a crossing whose mail failed is, from reading the code, not re-derived by the retry. That is an inference from the doc comments, not a tested behaviour. Treat a repeat run as non-idempotent. With `ALERTS_ENABLED=false` the recompute still runs before the switch is checked, so crossings are recorded without notices and may never be sent after the switch is turned back on.
+- **Config:** `QUERY_HOURS_RECIPIENT_OVERRIDE` replaces every derived audience and drops the Cc (for testing against real data without mailing real owners). It also replaces the weekly report's audience below.
 
 ### `query_hours_weekly_report`
 
@@ -195,7 +195,7 @@ recompute walks every opportunity in service and every project linked to each.
 ### `product_regression_report_apim`, `_iam`, `_integration`
 
 - **Triggers:** the 1st of the month at 03:30 (09:00 in India), each.
-- **Reads:** `GET /reports/product-regressions?products=...`. The tag filter and the month window live in entity-service, which decides the month in `Asia/Colombo`, so a late retry still reports the same month.
+- **Reads:** `GET /reports/product-regressions?products=...`. The tag filter and the month window live in entity-service, which decides the month in `Asia/Colombo` from the instant of the call. The request carries no period key, so a retry that lands after the month boundary in Colombo, while the old ledger period is still active, can report a different month.
 - **Sends:** one email per report, grouped by product, to that task's own `to` and `cc` only. A month with no regression cases sends nothing.
 - **Why three tasks:** one handler constructor runs over a variant (key, label, product list), registered three times so each report keeps its own schedule and recipients entry by exact name.
 - **Fails when:** the fetch or send errors. With no `to` it skips.
@@ -309,7 +309,7 @@ day (`MaxAttempts` 2).
 - **Triggers:** daily at 03:30 (09:00 in Colombo), every day including weekends, half an hour before `acp_closure`.
 - **Does:** `POST /acp/reopen-check` page by page (5 projects a page, a 2-minute timeout per page) while the answer says more remain. entity-service reopens suspended projects whose renewal or payment an event missed, and finishes ones a person set back to Open. This task decides nothing and writes nothing itself; whether anything is written is entity-service's own dry-run setting.
 - **Fails when:** a project in a page failed (the error names at most 20 project ids), a page errors or makes no progress, or more than 2,000 pages are needed.
-- **Pairing:** turn it on together with entity-service's live reopen. With one side off, either a missed reopen is never retried or every run fails.
+- **Pairing:** turn it on together with entity-service's live reopen. With one side off, either a missed reopen is never retried or every run fails. entity-service needs both its reopen enabled and its reopen dry run off, or suspended projects are not reopened.
 
 ### `acp_closure`
 
@@ -322,11 +322,11 @@ day (`MaxAttempts` 2).
 
 Two mechanisms exist, both documented in the [README](../README.md#debug-mail-mode-and-tryouts):
 
-- **Tryout** (`TRYOUT_TASK`): runs one task's handler once, outside the ledger, and refuses unless that task has a `debug` list so nothing reaches the real audience.
+- **Tryout** (`TRYOUT_TASK`): runs one task's handler once, outside the ledger, and refuses unless that task has a `debug` list. The `debug` list redirects only the report tasks and `acp_closure` (and `case_autoclosure` is forced to a dry run). It is not a safe sandbox for every task: the rota handlers get the raw email client, so a rota tryout with a `debug` list and no `ROTA_REMINDER_REDIRECT_TO` can reach the real audience, and tasks that write elsewhere really write.
 - **Run-now:** runs one registered task once and exits, also without the ledger. Every report task accepts a replacement audience, the two worklog reports accept a window, and `time_card_report` accepts a project key and an explicit `to`.
 
 Because neither writes a ledger row, the scheduled run for the same period still
 fires. That is safe for tasks that are idempotent by design (the recompute triggers,
 the rollups, `publish_scheduled_announcements`, `cloud_status_webhooks`,
 `case_autoclosure`, the ACP tasks) and sends mail again for every report, digest and
-`time_card_report`. When unsure, treat a task as not idempotent.
+`time_card_report`. The ACP claim needs a qualifier: if a notice email is sent but its CSM record write fails, a retry or run-now sends it again. A run-now of `query_hours_usage_notifications` with replacement recipients also stores the recomputed thresholds, so the scheduled run will not send those crossings to the real owners later. When unsure, treat a task as not idempotent.

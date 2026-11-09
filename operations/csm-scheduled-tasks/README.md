@@ -117,7 +117,7 @@ audience sees it:
 - `TRYOUT_TASK=<task name>` runs that one task's handler once, right now, and exits. The schedule
   is ignored, the ledger is not touched (the run is neither recorded nor retried), and the engine
   never ticks. It refuses to start unless that task has a `debug` list: a tryout is for checking,
-  and checking must never reach the real audience. The task names are the ones in the table above.
+  and checking should not reach the real audience. The `debug` list covers the report tasks and `acp_closure` only: the rota handlers use the raw email client, so a rota tryout without `ROTA_REMINDER_REDIRECT_TO` can reach the real audience, and tasks that write elsewhere really write. The task names are the ones in the table above.
 
 The intended routine in Choreo: add the task's `debug` list, set `TRYOUT_TASK`, run the scheduled
 task once by hand, confirm the mail in the debug inbox, then remove both. Leaving a `debug` list in
@@ -199,8 +199,10 @@ can mail a period that was already sent. Details: CLAUDE.md, "Monthly time card 
 
 - `ALERT_RECIPIENTS` is a standing audience emailed on every failed attempt of every task.
 - A task's own `to`/`cc` in `SUB_CRON_RECIPIENTS` is added to the failure alert for that task (its
-  `to` is merged into the same To line). For the report tasks, that `to`/`cc` instead is the
-  actual report audience.
+  `to` is merged into the same To line). For `stale_cases_report`, `open_cases_report` and `unresolved_products_digest`, that `to`/`cc` is
+  also the report audience. The migration, worklogs, query hour and regression reports leave it
+  out of failure alerts, and for `time_card_report` it is the failure-alert audience only (the
+  project contacts receive the report).
 - A task's failures send no email only when both lists are empty. The failure is still recorded
   and retried.
 - `ALERTS_ENABLED=false` is a global kill switch for every email the component sends, including

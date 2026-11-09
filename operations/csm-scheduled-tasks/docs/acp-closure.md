@@ -77,7 +77,7 @@ Only invoices that count are considered (`invoice_resolve.go`):
 - The invoice has a due date, is unpaid, is not an excluded classification, is not
   the `Auto Created PS` placeholder, and is due on or after the project's start date.
 
-The suspend date (`decide_invoice.go`):
+The cascade is driven by the one eligible invoice with the **earliest due date**, not the earliest suspend date. With differing grace periods another invoice can have an earlier suspend date and still not drive the cascade. The suspend date of that invoice (`decide_invoice.go`):
 
 | Case | Suspend date |
 |---|---|
@@ -209,6 +209,7 @@ notice there as a `[Test copy]`.
 - **A project with an unusable record** (no Salesforce id, one Salesforce does not
   have, an unparseable date) is **skipped** with a warning and does not fail the
   run. No retry can fix it, and failing would alert every weekday.
+- **A customer-window notice can half-succeed.** At 15, 7 and 0 days the internal notice and the customer notice are separate sends. If the internal one is delivered and the customer one fails, the record write is never attempted, so a retry sends the internal notice again.
 - **Any other failure** makes the run return an error naming the run id and at
   most 20 project ids (never their errors, which can hold customer data). The
   engine alerts and retries after 4 hours, at most once a day (`MaxAttempts` 2).
@@ -216,14 +217,16 @@ notice there as a `[Test copy]`.
   while its record write failed, which is sent again.
 - **Weekends.** The schedule is weekdays only. The handler also succeeds without
   doing anything on a Colombo Saturday or Sunday (for a retry that lands there),
-  logging a warning. Monday's run catches up, because windows and suspension are
+  logging a warning. The one exception is `TRYOUT_TASK=acp_closure`, which bypasses
+  the guard; with `ACP_TEST_PROJECT_ID` set and `ACP_DRY_RUN=false` a weekend tryout
+  can write and suspend that project. Monday's run catches up, because windows and suspension are
   thresholds.
 
 ## 8. Reopening is a separate piece
 
 `acp_closure` never reopens a project. A renewed or paid project stays suspended
 until entity-service's ACP reopen (PR #3124) does it, driven by the
-`acp_reopen_check` task, or someone does it by hand. entity-service keeps a copy of
+`acp_reopen_check` task, or someone does it by hand. That reopen only acts when entity-service has `CSM_ACP_REOPEN_ENABLED=true` and its reopen dry run (`CSM_ACP_REOPEN_DRY_RUN`) off; otherwise suspended projects are not reopened. entity-service keeps a copy of
 the date and invoice rules, so a rule changed here must change there too:
 `closure/rules_parity_test.go` and `sweep/rules_parity_test.go` run both over the
 shared cases in `entity-service/internal/service/testdata/acp_rules_parity.json`.
