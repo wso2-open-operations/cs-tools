@@ -79,10 +79,10 @@ type WorklogTimeRow struct {
 //     customer allocations are recorded as ALLO_EXT. Matching ENG alone
 //     meant the exclusion never fired for a single team in scope.
 //
-// The remaining ALLOCATION kinds -- RnD, Migration, ALLO_INT -- are NOT
-// excluded: they are internal work, not a customer engagement, so they
-// have no counterpart in either ServiceNow mechanism, and blanking them
-// would understate everyone who does that work. We hold no
+// Which ALLOCATION kinds are excluded is the tag's own
+// excludes_from_timesheet (ENG, ALLO_EXT and ALLO_INT among the built-in
+// ones; see worklogLeaveQuery). RnD and Migration are not: they are working
+// time, and blanking them would understate everyone who does that work. We hold no
 // utilization figure, so every ENG absence is treated as a full
 // allocation; ServiceNow would keep a member allocated at less than 100%.
 type WorklogLeaveRow struct {
@@ -319,14 +319,17 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 //
 // WHICH ALLOCATION KINDS REMOVE SOMEBODY FROM THE REPORT.
 //
-// ALLO_INT and ALLO_EXT are a pair -- "Allocated — internal" and
-// "Allocated — external" (migration 0154) -- and ENG is the customer
-// engagement added by 0215. Someone allocated is not available for
-// support either way, so all three count. Listing EXT without INT was an
-// oversight: it inflated every team's member count and its average's
-// divisor, which is what the CS leads reported against the 27 Oct mail.
+// The ones whose tag says so: excludes_from_timesheet (migration 0281). A
+// lead sets it when adding a tag (an SRE rotation tag does, a work-from-home
+// tag does not), and 0281 set it on the three kinds this report used to name
+// by code: ALLO_INT and ALLO_EXT, a pair -- "Allocated — internal" and
+// "Allocated — external" (migration 0154) -- and ENG, the customer
+// engagement added by 0215. Someone allocated is not available for support
+// either way, so all three count. Listing EXT without INT was an oversight:
+// it inflated every team's member count and its average's divisor, which is
+// what the CS leads reported against the 27 Oct mail.
 //
-// The other active ALLOCATION kinds are deliberately NOT here:
+// The other built-in ALLOCATION kinds deliberately do not have it:
 //
 //	MIGRATION  -- the CS Migrations Team's own work. The delivered mail
 //	              lists those people with real approved hours, so
@@ -359,7 +362,7 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
       FROM team_schedule_absence a
       JOIN team_schedule_absence_kind k ON k.id = a.kind_id
      WHERE (k.bucket IN ('LEAVE', 'EXCLUDED')
-            OR (k.bucket = 'ALLOCATION' AND k.code IN ('ENG', 'ALLO_EXT', 'ALLO_INT')))
+            OR (k.bucket = 'ALLOCATION' AND k.excludes_from_timesheet))
        AND a.starts_on <= $2
        AND (a.ends_on IS NULL OR a.ends_on >= $1)
     UNION ALL

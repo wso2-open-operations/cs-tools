@@ -646,13 +646,13 @@ func (s *scheduleService) DeleteAbsenceKind(ctx context.Context, code string) er
 	if err != nil {
 		return err
 	}
-	// A rota admin deletes only their own family's tags; a lead who is none
-	// may delete any custom tag, as before.
-	admin, err := s.rotaAdminFamilies(ctx)
+	// A rota admin or lead deletes only their own family's tags; a portal
+	// admin who runs no rota may delete any custom tag.
+	families, err := s.tagFamilies(ctx)
 	if err != nil {
 		return err
 	}
-	return s.repo.DeleteAbsenceKind(ctx, code, email, admin)
+	return s.repo.DeleteAbsenceKind(ctx, code, email, families)
 }
 
 // requireAnyTeamLead is the gate for the shared tag catalogue: an internal
@@ -744,6 +744,7 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	req.Label = strings.TrimSpace(req.Label)
 	req.Bucket = strings.ToUpper(strings.TrimSpace(req.Bucket))
 	req.ColourToken = strings.ToUpper(strings.TrimSpace(req.ColourToken))
+	req.Description = strings.TrimSpace(req.Description)
 	switch {
 	case req.ShortCode == "" || utf8.RuneCountInString(req.ShortCode) > 12:
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "shortCode is required and at most 12 characters"}
@@ -752,6 +753,12 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	// EXCLUDED -- off the rota entirely -- is not a lead's to invent more of.
 	case req.Bucket != "LEAVE" && req.Bucket != "ALLOCATION":
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "bucket must be LEAVE or ALLOCATION"}
+	// Leave shows on the timesheet as leave; only an allocation takes
+	// somebody off it.
+	case req.ExcludesFromTimesheet && req.Bucket != "ALLOCATION":
+		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "only an allocation tag can exclude people from the timesheet; leave shows on it as leave"}
+	case utf8.RuneCountInString(req.Description) > 300:
+		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: "description is at most 300 characters"}
 	case !absenceKindColours[req.ColourToken]:
 		return domain.ScheduleAbsenceKind{}, &apierror.ValidationError{Msg: fmt.Sprintf("colourToken %q is not one the rota can draw", req.ColourToken)}
 	}
@@ -764,13 +771,18 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}
-	// A rota admin's tag is their family's; a lead who is no rota admin adds
-	// a shared one, as before.
-	admin, err := s.rotaAdminFamilies(ctx)
+	// A tag belongs to its creator's family -- a rota admin's family, or the
+	// family of the team a lead leads -- and only that family's rosters offer
+	// it. A portal admin who runs no rota names the family, or adds a shared
+	// tag.
+	families, err := s.tagFamilies(ctx)
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}
-	family, err := kindFamilyFor(admin, req.Family)
+	if len(families) == 0 {
+		families = portalAdminTagFamily(req.Family)
+	}
+	family, err := kindFamilyFor(families, req.Family)
 	if err != nil {
 		return domain.ScheduleAbsenceKind{}, err
 	}

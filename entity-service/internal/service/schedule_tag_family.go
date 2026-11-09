@@ -45,6 +45,27 @@ func (s *scheduleService) rotaAdminFamilies(ctx context.Context) ([]string, erro
 	return admin, nil
 }
 
+// tagFamilies is the families whose tags the caller adds and deletes: a rota
+// admin's own families, else the families of the rota teams they lead. A tag
+// belongs to one family (a CRE ABT lead's tag is CRE's), so it is offered only
+// on that family's rosters. None for a portal admin who neither runs nor leads
+// a rota.
+func (s *scheduleService) tagFamilies(ctx context.Context) ([]string, error) {
+	admin, err := s.rotaAdminFamilies(ctx)
+	if err != nil || len(admin) > 0 {
+		return admin, err
+	}
+	email := auth.IdentityFromContext(ctx).UserEmail
+	if email == "" {
+		return nil, nil
+	}
+	led, err := s.repo.LeadFamiliesFor(ctx, email)
+	if err != nil || len(led) == 0 {
+		return nil, err
+	}
+	return led, nil
+}
+
 // kindFamilyFor is the family a new absence kind is stored under: none (shared)
 // for a caller who is no rota admin, else the admin's family -- the requested
 // one, which must be theirs, or their only one.
@@ -64,4 +85,15 @@ func kindFamilyFor(admin []string, requested string) (*string, error) {
 	}
 	f := strings.ToUpper(admin[0])
 	return &f, nil
+}
+
+// portalAdminTagFamily is what a caller who neither runs nor leads a rota (a
+// portal admin) may add a tag for: the family they name, when it is one, else
+// none (a shared tag).
+func portalAdminTagFamily(requested string) []string {
+	switch f := strings.ToUpper(strings.TrimSpace(requested)); f {
+	case "CRE", "SRE", "SME":
+		return []string{f}
+	}
+	return nil
 }

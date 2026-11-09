@@ -78,6 +78,8 @@ type fakeScheduleRepo struct {
 	// absence tag writes were given.
 	adminFamilies  []string
 	gotKindFamily  *string
+	gotKindReq     domain.CreateScheduleAbsenceKindRequest
+	leadFamilies   []string // families of the teams the caller leads
 	gotKindAllowed []string
 	markers        []domain.ScheduleEditMarker
 	// gotImport is the write an import handed the repository, nil until one does.
@@ -167,6 +169,7 @@ func (f *fakeScheduleRepo) DeleteAbsence(_ context.Context, id, actor string, _ 
 
 func (f *fakeScheduleRepo) CreateAbsenceKind(_ context.Context, code string, req domain.CreateScheduleAbsenceKindRequest, family *string, actor string) (domain.ScheduleAbsenceKind, error) {
 	f.called, f.gotKindCode, f.gotActorEml, f.gotKindFamily = true, code, actor, family
+	f.gotKindReq = req
 	return domain.ScheduleAbsenceKind{Code: code, ShortCode: req.ShortCode, Label: req.Label, Bucket: req.Bucket, ColourToken: req.ColourToken}, f.err
 }
 
@@ -199,6 +202,10 @@ func (f *fakeScheduleRepo) MovedToTeamOver(_ context.Context, _ string, teamKey,
 
 func (f *fakeScheduleRepo) TeamsShareRota(context.Context, string, string) (bool, error) {
 	return f.shareRota, f.err
+}
+
+func (f *fakeScheduleRepo) LeadFamiliesFor(context.Context, string) ([]string, error) {
+	return f.leadFamilies, f.err
 }
 
 func (f *fakeScheduleRepo) LeadTeamsFor(context.Context, string) ([]string, error) {
@@ -940,6 +947,19 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 		}
 	})
 
+	t.Run("an allocation tag may exclude from the timesheet, with a description", func(t *testing.T) {
+		repo := &fakeScheduleRepo{leadsTeam: true}
+		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+		req := ok
+		req.ExcludesFromTimesheet, req.Description = true, "  Off support while on the SRE rotation  "
+		if _, err := svc.CreateAbsenceKind(leadCtx("castor.01@example.com"), req); err != nil {
+			t.Fatalf("CreateAbsenceKind: %v", err)
+		}
+		if !repo.gotKindReq.ExcludesFromTimesheet || repo.gotKindReq.Description != "Off support while on the SRE rotation" {
+			t.Fatalf("stored %+v, want the flag kept and the description trimmed", repo.gotKindReq)
+		}
+	})
+
 	t.Run("somebody who leads nothing is refused", func(t *testing.T) {
 		repo := &fakeScheduleRepo{leadsTeam: false}
 		svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
@@ -959,6 +979,10 @@ func TestANewTagIsDerivedAndChecked(t *testing.T) {
 		"label with no letters":     func(r *domain.CreateScheduleAbsenceKindRequest) { r.Label = "— —" },
 		"excluded is not for leads": func(r *domain.CreateScheduleAbsenceKindRequest) { r.Bucket = "EXCLUDED" },
 		"a colour the rota lacks":   func(r *domain.CreateScheduleAbsenceKindRequest) { r.ColourToken = "TZ1" },
+		"a leave tag that excludes": func(r *domain.CreateScheduleAbsenceKindRequest) {
+			r.Bucket, r.ExcludesFromTimesheet = "LEAVE", true
+		},
+		"a description over 300": func(r *domain.CreateScheduleAbsenceKindRequest) { r.Description = strings.Repeat("a", 301) },
 	}
 	for name, mutate := range bad {
 		t.Run(name, func(t *testing.T) {

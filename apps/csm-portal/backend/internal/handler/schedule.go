@@ -640,6 +640,20 @@ func mapScheduleWriteError(w http.ResponseWriter, err error, fallbackMsg string)
 	mapUpstreamErrorGeneric(w, err, fallbackMsg)
 }
 
+// mapAbsenceKindWriteError is mapScheduleWriteError plus the 400: entity-service
+// refuses a new tag in words written for the lead who typed it (the name is
+// taken or too long, a leave tag cannot exclude from the timesheet, which
+// family the tag is for), and the form can only show what is wrong if it gets
+// that reason. Read only from the JSON envelope, never a raw body.
+func mapAbsenceKindWriteError(w http.ResponseWriter, err error, fallbackMsg string) {
+	var apiErr *apierror.Error
+	if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+		writeError(w, apiErr.StatusCode, upstreamErrorMessageStrict(apiErr.Body, fallbackMsg))
+		return
+	}
+	mapScheduleWriteError(w, err, fallbackMsg)
+}
+
 // ApplyScheduleRange handles POST /team-schedule/assignments/apply.
 func (h *ScheduleHandler) ApplyScheduleRange(w http.ResponseWriter, r *http.Request) {
 	body, userID, ok := readScheduleBody(w, r)
@@ -703,7 +717,7 @@ func (h *ScheduleHandler) CreateScheduleAbsenceKind(w http.ResponseWriter, r *ht
 	result, err := h.entity.CreateScheduleAbsenceKind(r.Context(), body)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity CreateScheduleAbsenceKind failed", "userID", userID, "err", err)
-		mapUpstreamErrorGeneric(w, err, "Failed to add the tag.")
+		mapAbsenceKindWriteError(w, err, "Failed to add the tag.")
 		return
 	}
 

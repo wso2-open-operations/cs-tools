@@ -71,13 +71,20 @@ func TestAbsenceKinds_ARotaAdminsAreTheirFamilys(t *testing.T) {
 			t.Errorf("family = %v, want SME", repo.gotKindFamily)
 		}
 	})
-	t.Run("a lead who is no rota admin adds a shared kind, as before", func(t *testing.T) {
-		repo := &fakeScheduleRepo{leadsTeam: true}
-		if _, err := NewScheduleService(repo, alwaysUnrestrictedAccess{}).CreateAbsenceKind(scheduleCaller("lead@example.com"), req); err != nil {
+	t.Run("a lead's new kind is the family of the team they lead, not shared", func(t *testing.T) {
+		repo := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
+		other := req
+		other.Family = "SRE" // what the form sends is not theirs to pick
+		_, err := NewScheduleService(repo, alwaysUnrestrictedAccess{}).CreateAbsenceKind(scheduleCaller("cre.abt.lead@example.com"), other)
+		var forbidden *apierror.ForbiddenError
+		if !errors.As(err, &forbidden) || repo.called {
+			t.Fatalf("a CRE lead adding an SRE tag: want ForbiddenError and no write, got %v", err)
+		}
+		if _, err := NewScheduleService(repo, alwaysUnrestrictedAccess{}).CreateAbsenceKind(scheduleCaller("cre.abt.lead@example.com"), req); err != nil {
 			t.Fatal(err)
 		}
-		if repo.gotKindFamily != nil {
-			t.Errorf("family = %q, want none (shared)", *repo.gotKindFamily)
+		if repo.gotKindFamily == nil || *repo.gotKindFamily != "CRE" {
+			t.Errorf("family = %v, want CRE", repo.gotKindFamily)
 		}
 	})
 	t.Run("a rota admin cannot add another family's kind", func(t *testing.T) {
@@ -106,12 +113,24 @@ func TestAbsenceKinds_ARotaAdminsAreTheirFamilys(t *testing.T) {
 		if len(repo.gotKindAllowed) != 1 || repo.gotKindAllowed[0] != "SME" {
 			t.Errorf("allowed families = %v, want [SME]", repo.gotKindAllowed)
 		}
-		lead := &fakeScheduleRepo{leadsTeam: true}
+		lead := &fakeScheduleRepo{leadsTeam: true, leadFamilies: []string{"CRE"}}
 		if err := NewScheduleService(lead, alwaysUnrestrictedAccess{}).DeleteAbsenceKind(scheduleCaller("lead@example.com"), "SME_TRAINING"); err != nil {
 			t.Fatal(err)
 		}
-		if lead.gotKindAllowed != nil {
-			t.Errorf("allowed families for a lead = %v, want none (any custom kind)", lead.gotKindAllowed)
+		if len(lead.gotKindAllowed) != 1 || lead.gotKindAllowed[0] != "CRE" {
+			t.Errorf("allowed families for a CRE lead = %v, want [CRE]", lead.gotKindAllowed)
 		}
 	})
+}
+
+func TestPortalAdminTagFamily(t *testing.T) {
+	for in, want := range map[string]string{"sre": "SRE", " CRE ": "CRE", "SME": "SME", "": "", "OPS": ""} {
+		got := portalAdminTagFamily(in)
+		if want == "" && got != nil {
+			t.Errorf("portalAdminTagFamily(%q) = %v, want none (shared)", in, got)
+		}
+		if want != "" && (len(got) != 1 || got[0] != want) {
+			t.Errorf("portalAdminTagFamily(%q) = %v, want [%s]", in, got, want)
+		}
+	}
 }

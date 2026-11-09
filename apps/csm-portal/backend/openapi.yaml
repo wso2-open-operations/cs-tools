@@ -16919,7 +16919,10 @@ paths:
       summary: Add a leave or allocation tag to the catalogue.
       operationId: createTeamScheduleAbsenceKind
       description: >
-        Body forwarded unchanged.
+        Body forwarded unchanged: shortCode, label, bucket (LEAVE or ALLOCATION),
+        colourToken, optional family, optional excludesFromTimesheet (allocation
+        tags only: the tag's days take people off the worklog timesheet) and an
+        optional description (at most 300 characters, shown on hover).
       requestBody:
         required: true
         content:

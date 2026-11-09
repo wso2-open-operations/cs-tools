@@ -3553,3 +3553,96 @@
   display: block;
   color: var(--faint);
 }
+
+/* A tag whose days take people off the timesheet says so under its name in
+   the picker, so nobody has to hover to find out. */
+.csm-ts .pk-c .pk-l .pk-off {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The New tag form's two choices, Tag type and Timesheet, are labelled
+   dropdowns with a line under each saying what the choice does. */
+.csm-ts .tf .tf-pick select {
+  flex: 1;
+  height: 30px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.csm-ts .tf .tf-pick select:disabled {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+.csm-ts .tf label > span {
+  min-width: 72px;
+}
+.csm-ts .tf .tf-help {
+  margin: -4px 0 0 80px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The New tag form in two titled groups -- what the roster shows, and how the
+   tag counts -- then a preview of the tag as it will look. */
+.csm-ts .tf .tf-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+.csm-ts .tf .tf-group legend {
+  padding: 0 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-row > span {
+  min-width: 72px;
+}
+.csm-ts .tf .tf-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.csm-ts .tf .tf-preview-h {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.csm-ts .tf .tf-preview-d {
+  color: var(--ink-2);
+}
+.csm-ts .tf .tf-preview-t {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--muted);
+}

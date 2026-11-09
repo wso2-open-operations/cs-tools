@@ -28466,6 +28466,23 @@ components:
         colourToken:
           type: string
           enum: [AL, LL, MAT, PAT, RND, EXT, INT, BR, MIG, ONB, EXC, IND]
+        family:
+          type: string
+          enum: [CRE, SRE, SME]
+          description: >-
+            The family the tag is for; only that family's rosters offer it. A rota admin's
+            or team lead's tag is always their own family's (this picks one when they run or
+            lead more than one; another family is a 403). A portal admin who runs no rota
+            may name one, else the tag is shared.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            Take people off the worklog timesheet on the tag's days (an SRE rotation, say).
+            Allocation tags only; a leave tag with it is a 400 (leave shows as leave).
+        description:
+          type: string
+          maxLength: 300
+          description: Optional; shown when hovering the tag.
     ScheduleAbsenceKind:
       type: object
       description: Why someone is out of the rota.
@@ -28489,6 +28506,14 @@ components:
           description: >-
             True for a kind no longer offered. Still served so the days already
             marked with it keep their label; a client must not offer it.
+        excludesFromTimesheet:
+          type: boolean
+          description: >-
+            True when the tag's days take a person off the worklog timesheet. The
+            built-in ENG, ALLO_EXT and ALLO_INT carry it; leave kinds never do.
+        description:
+          type: string
+          description: What the tag is for, shown on hover; absent when it has none.
     ScheduleCatalogue:
       type: object
       properties:

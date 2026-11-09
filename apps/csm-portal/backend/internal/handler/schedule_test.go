@@ -200,6 +200,48 @@ func (m *mockEntityScheduleClient) GetScheduleOnDuty(ctx context.Context, at str
 	return []byte(`{"assignments":[],"count":0}`), nil
 }
 
+// A new tag refused by entity-service shows the lead the reason, written for
+// them there (which family it is for, a name taken); a server fault stays
+// generic.
+func TestCreateScheduleAbsenceKindPassesTheReason(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+		wantMsg  string
+	}{
+		{"400 keeps its reason", &apierror.Error{StatusCode: http.StatusBadRequest,
+			Body: `{"message":"you run more than one family's rota: say which family the tag is for (family)"}`},
+			http.StatusBadRequest, "you run more than one family's rota: say which family the tag is for (family)"},
+		{"409 keeps its reason", &apierror.Error{StatusCode: http.StatusConflict,
+			Body: `{"message":"a tag named SRE already exists"}`},
+			http.StatusConflict, "a tag named SRE already exists"},
+		{"500 stays generic", &apierror.Error{StatusCode: http.StatusInternalServerError,
+			Body: `{"message":"pq: relation does not exist"}`},
+			http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewScheduleHandler(&mockEntityScheduleClient{
+				createKindFn: func(context.Context, []byte) ([]byte, error) { return nil, tc.err },
+			})
+			r := withUser(httptest.NewRequest(http.MethodPost, "/team-schedule/absence-kinds",
+				strings.NewReader(`{"shortCode":"SRE","label":"SRE","bucket":"ALLOCATION","colourToken":"INT"}`)))
+			w := httptest.NewRecorder()
+			h.CreateScheduleAbsenceKind(w, r)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status %d, want %d (%s)", w.Code, tc.wantCode, w.Body.String())
+			}
+			if tc.wantMsg != "" && !strings.Contains(w.Body.String(), tc.wantMsg) {
+				t.Fatalf("body %s, want the reason %q", w.Body.String(), tc.wantMsg)
+			}
+			if tc.wantMsg == "" && strings.Contains(w.Body.String(), "pq:") {
+				t.Fatalf("body %s leaks the upstream detail", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestSearchScheduleAssignments(t *testing.T) {
 	t.Run("requires an authenticated user", func(t *testing.T) {
 		h := NewScheduleHandler(&mockEntityScheduleClient{})

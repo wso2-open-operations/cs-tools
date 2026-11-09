@@ -324,25 +324,156 @@ describe("CellPicker: adding a tag", () => {
     const onCreateKind = vi.fn(() => Promise.resolve());
     renderWithCreate(onCreateKind);
     fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
-    fireEvent.change(screen.getByLabelText("Tag short code"), { target: { value: " Trn " } });
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "External training" } });
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: " Trn " } });
     fireEvent.click(screen.getByRole("radio", { name: "Colour MIG" }));
     fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    // One name: it is both the chip the roster draws and the tag's name.
     expect(onCreateKind).toHaveBeenCalledWith({
       shortCode: "Trn",
-      label: "External training",
+      label: "Trn",
       bucket: "ALLOCATION",
       colourToken: "MIG",
+      excludesFromTimesheet: false,
+      description: "",
     });
     expect(await screen.findByRole("button", { name: "+ New tag" })).toBeInTheDocument();
   });
 
-  it("refuses a short code another tag already draws, without asking the server", () => {
+  it("asks the tag type and the timesheet as labelled dropdowns, an allocation kept on the timesheet by default", () => {
+    renderWithCreate(vi.fn(() => Promise.resolve()));
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    expect(screen.getByRole("combobox", { name: "Tag type" })).toHaveValue("ALLOCATION");
+    expect(screen.getByRole("combobox", { name: "Timesheet" })).toHaveValue("INCLUDE");
+    expect(screen.getByText(/working on something else/)).toBeInTheDocument();
+    expect(screen.getByText(/stay on the timesheet as usual/)).toBeInTheDocument();
+  });
+
+  it("creates an exclude-from-timesheet tag with its description", () => {
     const onCreateKind = vi.fn(() => Promise.resolve());
     renderWithCreate(onCreateKind);
     fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
-    fireEvent.change(screen.getByLabelText("Tag short code"), { target: { value: "al" } });
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "Another leave" } });
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "SRE" } });
+    fireEvent.change(screen.getByLabelText("Tag description"), { target: { value: "  On the SRE rota for the span  " } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Timesheet" }), { target: { value: "EXCLUDE" } });
+    expect(screen.getByText(/left off the timesheet on those days/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shortCode: "SRE",
+        bucket: "ALLOCATION",
+        excludesFromTimesheet: true,
+        description: "On the SRE rota for the span",
+      }),
+    );
+  });
+
+  it("never sends a leave tag as excluded: leave shows on the timesheet as leave", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Timesheet" }), { target: { value: "EXCLUDE" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Tag type" }), { target: { value: "LEAVE" } });
+    const timesheet = screen.getByRole("combobox", { name: "Timesheet" });
+    expect(timesheet).toBeDisabled();
+    expect(timesheet).toHaveValue("LEAVE");
+    expect(screen.getByText("Leave days show on the timesheet as leave.")).toBeInTheDocument();
+    expect(screen.getByText(/the person is away/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "Vac" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
+    expect(onCreateKind).toHaveBeenCalledWith(expect.objectContaining({ bucket: "LEAVE", excludesFromTimesheet: false }));
+  });
+
+  it("shows a custom tag's description beside its chip, never its name twice", () => {
+    render(
+      <CellPicker
+        target={target()}
+        shifts={[REGULAR]}
+        awayKinds={[
+          ANNUAL_LEAVE,
+          { ...RND, code: "SRE", shortCode: "SRE", label: "SRE", custom: true, description: "On the SRE rota" },
+        ]}
+        onApply={vi.fn()}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const mark = screen.getByText("On the SRE rota").closest("button");
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe("SREOn the SRE rota");
+  });
+
+  it("marks a tag that takes people off the timesheet in the list, and shows its description on hover", () => {
+    render(
+      <CellPicker
+        target={target()}
+        shifts={[REGULAR]}
+        awayKinds={[
+          ANNUAL_LEAVE,
+          { ...RND, excludesFromTimesheet: true, description: "On the SRE rota" },
+        ]}
+        onApply={vi.fn()}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const mark = screen.getByText("Not on the timesheet").closest("button");
+    expect(mark).not.toBeNull();
+    expect(mark?.getAttribute("title")).toContain("On the SRE rota");
+    expect(mark?.getAttribute("title")).toContain("Not on the timesheet");
+  });
+
+  it("says the new tag is for the roster's family only", () => {
+    render(
+      <CellPicker
+        target={target()}
+        shifts={[REGULAR]}
+        awayKinds={[ANNUAL_LEAVE, RND]}
+        onApply={vi.fn()}
+        onMarkAway={vi.fn()}
+        onClear={vi.fn()}
+        onCreateKind={vi.fn(() => Promise.resolve())}
+        tagFamily="CRE"
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    expect(screen.getByText("For the CRE family only: only CRE rosters will offer this tag.")).toBeInTheDocument();
+    expect(screen.queryByText("Shared with every team once added.")).not.toBeInTheDocument();
+  });
+
+  it("keeps Add tag off until a name is typed, and previews the tag as it will look", () => {
+    renderWithCreate(vi.fn(() => Promise.resolve()));
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    const add = screen.getByRole("button", { name: "Add tag" });
+    expect(add).toBeDisabled();
+    const preview = screen.getByLabelText("Preview of the new tag");
+    expect(preview).toHaveTextContent("Type a name to see the tag");
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "SRE" } });
+    fireEvent.change(screen.getByLabelText("Tag description"), { target: { value: "SRE rotation" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Timesheet" }), { target: { value: "EXCLUDE" } });
+    expect(add).toBeEnabled();
+    expect(preview).toHaveTextContent("SRE");
+    expect(preview).toHaveTextContent("SRE rotation");
+    expect(preview).toHaveTextContent("Allocation · not on the timesheet");
+    expect(screen.getByRole("group", { name: "What the roster shows" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "How it counts" })).toBeInTheDocument();
+  });
+
+  it("has no short code field: one name of at most 10 characters, explained in the description", () => {
+    renderWithCreate(vi.fn(() => Promise.resolve()));
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    expect(screen.queryByLabelText("Tag short code")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Tag name")).toHaveAttribute("maxLength", "10");
+    expect(screen.getByText(/up to 10 characters\. Explain it in the description/)).toBeInTheDocument();
+  });
+
+  it("refuses a name another tag already draws, without asking the server", () => {
+    const onCreateKind = vi.fn(() => Promise.resolve());
+    renderWithCreate(onCreateKind);
+    fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "al" } });
     fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
     expect(onCreateKind).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("already a tag");
@@ -351,8 +482,7 @@ describe("CellPicker: adding a tag", () => {
   it("shows why the server refused it", async () => {
     renderWithCreate(() => Promise.reject(new Error("A tag with that name or short code already exists.")));
     fireEvent.click(screen.getByRole("button", { name: "+ New tag" }));
-    fireEvent.change(screen.getByLabelText("Tag short code"), { target: { value: "Xyz" } });
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "Something" } });
+    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "Xyz" } });
     fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
     expect(await screen.findByText(/already exists/)).toBeInTheDocument();
   });
