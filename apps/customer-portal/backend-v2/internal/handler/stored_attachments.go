@@ -29,7 +29,7 @@ import (
 
 // maxStoredAttachmentBodyBytes bounds the JSON bodies of the stored-attachment
 // routes: they carry ids and metadata, never file content (the file goes from
-// the browser to the backend, which stores it in Azure Blob Storage).
+// the browser through this backend to entity-service, which stores it in Azure Blob Storage).
 const maxStoredAttachmentBodyBytes = 64 << 10
 
 // storedAttachmentEntityClient is the entity-service surface of the stored
@@ -217,11 +217,6 @@ func (h *StoredAttachmentHandler) DeleteAttachment(w http.ResponseWriter, r *htt
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// inlineImageTypes are the only types an inline comment image is ever sent as.
-var inlineImageTypes = map[string]bool{
-	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
 }
 
 // writeStoredAttachmentJSON relays entity-service's JSON, which must never be
