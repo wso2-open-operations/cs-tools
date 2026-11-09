@@ -753,10 +753,13 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		inlineImageLinker, _ = storedAttachmentSvc.(service.InlineImageLinker)
 		// This service is the only one that talks to Azure Blob Storage: the portal
 		// backends and the notification service send and read files through it.
-		attachmentFiles := service.NewStoredAttachmentFileService(storedAttachmentSvc, newAttachmentFileStore(cfg), cfg.AttachmentMaxConcurrentTransfers)
+		attachmentStore := newAttachmentFileStore(cfg)
+		attachmentFiles := service.NewStoredAttachmentFileService(storedAttachmentSvc, attachmentStore, cfg.AttachmentMaxConcurrentTransfers)
+		// With the file store the cleanup removes unlinked files itself.
+		uploadCleanup := service.WithFileStore(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc), attachmentStore)
 		storedAttachmentHandler = handler.NewStoredAttachmentHandler(storedAttachmentSvc).
 			WithFiles(attachmentFiles).
-			WithUploadCleanup(service.NewAttachmentUploadCleanupService(storedAttachmentRepo, accessSvc))
+			WithUploadCleanup(uploadCleanup)
 	}
 
 	// The portal-driven membership writes. Gated on a pool AND

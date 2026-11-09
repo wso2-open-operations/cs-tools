@@ -103,8 +103,12 @@ func (b *fakeBlob) Open(_ context.Context, key string, rng *azblobstore.Range) (
 
 func (b *fakeBlob) Delete(_ context.Context, key string) error {
 	b.deleted = append(b.deleted, key)
+	_, had := b.committed[key]
 	delete(b.committed, key)
 	delete(b.staged, key)
+	if !had {
+		return azblobstore.ErrNotFound
+	}
 	return nil
 }
 
