@@ -44,13 +44,30 @@ func TestRecalculateCasePauseTotals_NoActivityHistory_HasHistoryFalse(t *testing
 	}
 }
 
-func TestRecalculateCasePauseTotals_PausedClock_Skipped(t *testing.T) {
+func TestRecalculateCasePauseTotals_PausedClock_CorrectsFrozenSnapshot(t *testing.T) {
 	repo := newFakeFullSLAEngineRepo()
+	now := time.Now()
+	startOn := now.Add(-10 * time.Hour)
+	pause1 := now.Add(-9 * time.Hour)
+	resume1 := now.Add(-7 * time.Hour) // 1st pause span: 2h, completed
+	pause2 := now.Add(-2 * time.Hour)  // currently still paused since here
+
 	repo.activityEventsByCase["case-1"] = []repository.CaseActivityEvent{
-		{FieldName: "state", OldValue: "NEW", NewValue: "WORK_IN_PROGRESS", CreatedOn: time.Now().Add(-time.Hour)},
+		{FieldName: "state", OldValue: "NEW", NewValue: "WORK_IN_PROGRESS", CreatedOn: startOn.Add(-time.Minute)},
+		{FieldName: "state", OldValue: "WORK_IN_PROGRESS", NewValue: "AWAITING_INFO", CreatedOn: pause1},
+		{FieldName: "state", OldValue: "AWAITING_INFO", NewValue: "WORK_IN_PROGRESS", CreatedOn: resume1},
+		{FieldName: "state", OldValue: "WORK_IN_PROGRESS", NewValue: "AWAITING_INFO", CreatedOn: pause2},
 	}
 	repo.activeClocksByCase["case-1"] = []repository.ActiveClockForRecalc{
-		{PolicyID: "pol-1", Target: "RESOLUTION", Schedule: "24 x 7", Stage: "PAUSED", StartOn: time.Now().Add(-2 * time.Hour)},
+		{
+			PolicyID: "pol-1", Target: "RESOLUTION", Schedule: "24 x 7", Stage: "PAUSED", StartOn: startOn,
+			PauseCondition:  "state=AWAITING_INFO",
+			ResumeCondition: "state=WORK_IN_PROGRESS",
+			// Deliberately wrong -- this is what the recalculation must correct.
+			PauseSeconds:    0,
+			PausedOn:        &pause2,
+			DurationSeconds: int64((12 * time.Hour).Seconds()),
+		},
 	}
 	svc := NewSLAEngineService(repo)
 
@@ -58,14 +75,69 @@ func TestRecalculateCasePauseTotals_PausedClock_Skipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !report.HasHistory {
-		t.Fatal("HasHistory = false, want true")
+	if len(report.Clocks) != 1 {
+		t.Fatalf("Clocks = %+v, want exactly one", report.Clocks)
+	}
+	got := report.Clocks[0]
+	if got.Skipped {
+		t.Fatalf("Skipped = true (%q), want a corrected result", got.SkipReason)
+	}
+	wantSeconds := int64((2 * time.Hour).Seconds())
+	if got.NewPauseSeconds != wantSeconds {
+		t.Errorf("NewPauseSeconds = %d, want %d -- only the completed pause1->resume1 span, never the still-open pause2->now span", got.NewPauseSeconds, wantSeconds)
+	}
+	if !got.Updated {
+		t.Error("Updated = false, want true (stored total was 0, real total is 2h)")
+	}
+	if len(repo.pauseUpdates) != 0 {
+		t.Errorf("pauseUpdates = %v, want no plain UpdateClockPauseTotals write for a PAUSED clock -- it must go through UpdateClockPausedSnapshot instead", repo.pauseUpdates)
+	}
+	if len(repo.pausedSnapshotUpdates) != 1 {
+		t.Fatalf("pausedSnapshotUpdates = %v, want exactly one write", repo.pausedSnapshotUpdates)
+	}
+	// elapsed = pausedOn.Sub(startOn) - pauseSeconds = 8h - 2h = 6h; duration
+	// = 12h, so remaining = 6h and percent = 50%.
+	want := "case-1|pol-1|7200|-|50.0000|21600|21600"
+	if repo.pausedSnapshotUpdates[0] != want {
+		t.Errorf("pausedSnapshotUpdates[0] = %q, want %q", repo.pausedSnapshotUpdates[0], want)
+	}
+}
+
+func TestRecalculateCasePauseTotals_PausedClockReplayDisagrees_Skipped(t *testing.T) {
+	repo := newFakeFullSLAEngineRepo()
+	now := time.Now()
+	startOn := now.Add(-3 * time.Hour)
+	pauseAt := startOn.Add(30 * time.Minute)
+	resumeAt := startOn.Add(time.Hour)
+
+	// History's last transition leaves the case running again -- but the
+	// live engine still tracks this clock as PAUSED. A real disagreement the
+	// recalculation must not paper over.
+	repo.activityEventsByCase["case-1"] = []repository.CaseActivityEvent{
+		{FieldName: "state", OldValue: "NEW", NewValue: "WORK_IN_PROGRESS", CreatedOn: startOn.Add(-time.Minute)},
+		{FieldName: "state", OldValue: "WORK_IN_PROGRESS", NewValue: "AWAITING_INFO", CreatedOn: pauseAt},
+		{FieldName: "state", OldValue: "AWAITING_INFO", NewValue: "WORK_IN_PROGRESS", CreatedOn: resumeAt},
+	}
+	repo.activeClocksByCase["case-1"] = []repository.ActiveClockForRecalc{
+		{
+			PolicyID: "pol-1", Target: "RESOLUTION", Schedule: "24 x 7", Stage: "PAUSED", StartOn: startOn,
+			PauseCondition:  "state=AWAITING_INFO",
+			ResumeCondition: "state=WORK_IN_PROGRESS",
+			PausedOn:        &pauseAt,
+			DurationSeconds: int64((12 * time.Hour).Seconds()),
+		},
+	}
+	svc := NewSLAEngineService(repo)
+
+	report, err := svc.RecalculateCasePauseTotals(context.Background(), "case-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(report.Clocks) != 1 || !report.Clocks[0].Skipped {
 		t.Fatalf("Clocks = %+v, want exactly one skipped result", report.Clocks)
 	}
-	if len(repo.pauseUpdates) != 0 {
-		t.Errorf("pauseUpdates = %v, want no writes for a PAUSED clock", repo.pauseUpdates)
+	if len(repo.pauseUpdates) != 0 || len(repo.pausedSnapshotUpdates) != 0 {
+		t.Errorf("pauseUpdates = %v, pausedSnapshotUpdates = %v, want no writes on a genuine disagreement", repo.pauseUpdates, repo.pausedSnapshotUpdates)
 	}
 }
 

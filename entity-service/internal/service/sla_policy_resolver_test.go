@@ -66,6 +66,9 @@ func (f *fakeCandidatePolicyRepo) ListActiveClocksForRecalc(context.Context, str
 func (f *fakeCandidatePolicyRepo) UpdateClockPauseTotals(context.Context, string, string, int64, *int64) error {
 	panic("not implemented")
 }
+func (f *fakeCandidatePolicyRepo) UpdateClockPausedSnapshot(context.Context, string, string, int64, *int64, float64, int64, int64) error {
+	panic("not implemented")
+}
 func (f *fakeCandidatePolicyRepo) CompleteClock(context.Context, string, string) (bool, error) {
 	panic("not implemented")
 }

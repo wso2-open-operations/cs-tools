@@ -51,12 +51,25 @@ type ActiveClockForRecalc struct {
 	WhenToResume    string
 	StartOn         time.Time
 	// Stage is the row's raw sla_stage_enum label -- RecalculateCasePauseTotals
-	// only ever corrects a clock currently IN_PROGRESS; see that method's
-	// own doc comment for why PAUSED/terminal clocks are out of scope for
-	// this first pass.
+	// only ever corrects a clock currently IN_PROGRESS or PAUSED; a
+	// terminal clock is out of scope (see that method's own doc comment).
 	Stage                string
 	PauseSeconds         int64
 	BusinessPauseSeconds int64
+	// PausedOn is non-nil only when Stage is "PAUSED" -- the instant this
+	// clock's own currently-open pause segment began, and so the instant
+	// its frozen BusinessElapsedPercent/BusinessDuration/
+	// RemainingBusinessDuration were computed as of (see setPausedFlat/
+	// setPausedBusinessDays' own freeze formula, which
+	// RecalculateCasePauseTotals mirrors when correcting a PAUSED clock).
+	PausedOn *time.Time
+	// DurationSeconds is this clock's own bound policy's resolved duration
+	// -- needed, alongside PausedOn, to recompute a PAUSED clock's frozen
+	// percentage/remaining-duration snapshot; an IN_PROGRESS clock's
+	// correction never reads it (sla_live recomputes that live, from
+	// sla_policy.duration directly, for every reader -- see that view's own
+	// migration history).
+	DurationSeconds int64
 }
 
 // ListCaseActivityEvents implements SLAEngineRepository.
@@ -94,9 +107,10 @@ func (r *slaEngineRepo) ListActiveClocksForRecalc(ctx context.Context, workItemI
 		       COALESCE(sp.resume_condition, ''), COALESCE(sp.cancel_condition, ''),
 		       COALESCE(sp.when_to_cancel::TEXT, 'CANCEL_CONDITIONS_ARE_MET'),
 		       COALESCE(sp.when_to_resume::TEXT, 'RESUME_CONDITIONS_ARE_MET'),
-		       s.start_on, s.stage::TEXT,
+		       s.start_on, s.stage::TEXT, s.paused_on,
 		       COALESCE(EXTRACT(EPOCH FROM s.pause_duration), 0)::BIGINT,
-		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0)::BIGINT
+		       COALESCE(EXTRACT(EPOCH FROM s.business_pause_duration), 0)::BIGINT,
+		       COALESCE(EXTRACT(EPOCH FROM sp.duration), 0)::BIGINT
 		FROM sla s
 		JOIN sla_policy sp ON sp.id = s.sla_policy_id
 		WHERE s.work_item_id = $1::uuid AND s.is_active IS TRUE
@@ -114,8 +128,8 @@ func (r *slaEngineRepo) ListActiveClocksForRecalc(ctx context.Context, workItemI
 			&c.PolicyID, &c.Target, &c.Schedule, &c.Source,
 			&c.StopCondition, &c.PauseCondition, &c.ResumeCondition, &c.CancelCondition,
 			&c.WhenToCancel, &c.WhenToResume,
-			&c.StartOn, &c.Stage,
-			&c.PauseSeconds, &c.BusinessPauseSeconds,
+			&c.StartOn, &c.Stage, &c.PausedOn,
+			&c.PauseSeconds, &c.BusinessPauseSeconds, &c.DurationSeconds,
 		); err != nil {
 			return nil, fmt.Errorf("list active clocks for recalc: scan: %w", err)
 		}
@@ -139,6 +153,34 @@ func (r *slaEngineRepo) UpdateClockPauseTotals(ctx context.Context, workItemID, 
 		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid`
 	if _, err := r.db.Exec(ctx, query, workItemID, policyID, pauseSeconds, businessPauseSeconds, sqlActorLiteral); err != nil {
 		return fmt.Errorf("update clock pause totals: %w", err)
+	}
+	return nil
+}
+
+// UpdateClockPausedSnapshot implements SLAEngineRepository. Unlike
+// UpdateClockPauseTotals, this also overwrites business_elapsed_percentage/
+// business_duration/remaining_business_duration together with the pause
+// totals -- see that field's own doc comment for why a PAUSED clock's
+// correction can't touch pause_duration/business_pause_duration alone: all
+// five columns were written together, frozen at the moment this clock
+// paused, from the exact same formula setPausedFlat/setPausedBusinessDays
+// already use (see those functions' own doc comments) -- correcting the
+// pause total without also recomputing what it froze would leave the row
+// disagreeing with itself.
+func (r *slaEngineRepo) UpdateClockPausedSnapshot(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error {
+	query := `
+		UPDATE sla
+		SET pause_duration = make_interval(secs => $3::DOUBLE PRECISION),
+		    business_pause_duration = CASE WHEN $4::BIGINT IS NULL THEN business_pause_duration
+		                                   ELSE make_interval(secs => $4::DOUBLE PRECISION)
+		                              END,
+		    business_elapsed_percentage = $5::NUMERIC,
+		    business_duration = make_interval(secs => $6::DOUBLE PRECISION),
+		    remaining_business_duration = make_interval(secs => $7::DOUBLE PRECISION),
+		    updated_on = NOW(), updated_by = $8
+		WHERE work_item_id = $1::uuid AND sla_policy_id = $2::uuid`
+	if _, err := r.db.Exec(ctx, query, workItemID, policyID, pauseSeconds, businessPauseSeconds, elapsedPercent, elapsedSeconds, remainingSeconds, sqlActorLiteral); err != nil {
+		return fmt.Errorf("update clock paused snapshot: %w", err)
 	}
 	return nil
 }

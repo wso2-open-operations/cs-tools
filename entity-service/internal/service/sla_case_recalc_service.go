@@ -98,12 +98,17 @@ const recalcScheduleWSO2BusinessDays = "WSO2 Business days"
 // finding one means this row is either stale or something else is
 // inconsistent, so it's reported and skipped, never corrected.
 //
-// Why only IN_PROGRESS clocks: a PAUSED or terminal clock's own
-// percentage/duration snapshot was frozen using its CURRENT pause total at
-// the moment it was written (setPaused/completeClock); correcting
-// pause_duration underneath a frozen clock without also recomputing that
-// snapshot would leave it internally inconsistent. Out of scope for this
-// first pass -- re-run once such a clock resumes.
+// IN_PROGRESS and PAUSED clocks are both corrected; a terminal clock
+// (COMPLETED/ACHIEVED/CANCELLED/BREACHED) is not -- its own figures are
+// final, not something "elapsed time so far" even means for it. A PAUSED
+// clock's own frozen business_elapsed_percentage/business_duration/
+// remaining_business_duration were computed using its CURRENT pause total
+// at the moment it was written (setPausedFlat/setPausedBusinessDays) --
+// correcting pause_duration underneath it without also recomputing that
+// snapshot would leave it internally inconsistent, so this recomputes and
+// overwrites all of them together (UpdateClockPausedSnapshot), using the
+// exact same freeze formula those two functions already use, anchored on
+// this clock's own paused_on instant instead of NOW().
 func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseID string) (CaseSLAPauseRecalcReport, error) {
 	events, err := s.repo.ListCaseActivityEvents(ctx, caseID, []string{"state", "severity", "type"})
 	if err != nil {
@@ -140,9 +145,9 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 			OldBusinessPauseSeconds: clock.BusinessPauseSeconds,
 		}
 
-		if clock.Stage != "IN_PROGRESS" {
+		if clock.Stage != "IN_PROGRESS" && clock.Stage != "PAUSED" {
 			result.Skipped = true
-			result.SkipReason = "clock is not currently IN_PROGRESS (stage=" + clock.Stage + "); re-run once it resumes or completes"
+			result.SkipReason = "clock is not currently open (stage=" + clock.Stage + "); nothing to recalculate"
 			report.Clocks = append(report.Clocks, result)
 			continue
 		}
@@ -154,7 +159,8 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 			continue
 		}
 
-		pauseSeconds, businessPauseSeconds, ok, reason := replayClockPauseHistory(clock, stateEvents, facts, now)
+		isPaused := clock.Stage == "PAUSED"
+		pauseSeconds, businessPauseSeconds, ok, reason := replayClockPauseHistory(clock, stateEvents, facts, now, isPaused)
 		if !ok {
 			result.Skipped = true
 			result.SkipReason = reason
@@ -176,10 +182,17 @@ func (s *slaEngineService) RecalculateCasePauseTotals(ctx context.Context, caseI
 		}
 
 		if needsUpdate {
-			if err := s.repo.UpdateClockPauseTotals(ctx, caseID, clock.PolicyID, pauseSeconds, businessPauseArg); err != nil {
-				slog.ErrorContext(ctx, "sla engine: recalculate case pause totals: update failed", "caseId", caseID, "target", clock.Target, "err", err)
+			var writeErr error
+			if isPaused {
+				elapsedPercent, elapsedSeconds, remainingSeconds := frozenPausedSnapshot(clock, pauseSeconds, businessPauseSeconds, businessDays)
+				writeErr = s.repo.UpdateClockPausedSnapshot(ctx, caseID, clock.PolicyID, pauseSeconds, businessPauseArg, elapsedPercent, elapsedSeconds, remainingSeconds)
+			} else {
+				writeErr = s.repo.UpdateClockPauseTotals(ctx, caseID, clock.PolicyID, pauseSeconds, businessPauseArg)
+			}
+			if writeErr != nil {
+				slog.ErrorContext(ctx, "sla engine: recalculate case pause totals: update failed", "caseId", caseID, "target", clock.Target, "err", writeErr)
 				result.Skipped = true
-				result.SkipReason = "recomputed a correction but failed to write it: " + err.Error()
+				result.SkipReason = "recomputed a correction but failed to write it: " + writeErr.Error()
 				report.Clocks = append(report.Clocks, result)
 				continue
 			}
@@ -210,6 +223,42 @@ func abs64(v int64) int64 {
 	return v
 }
 
+// frozenPausedSnapshot recomputes a PAUSED clock's own frozen
+// business_elapsed_percentage/business_duration/remaining_business_duration
+// using exactly setPausedFlat/setPausedBusinessDays' own freeze formula
+// (see this file's package doc comment), anchored at clock.PausedOn rather
+// than NOW() -- the newly-replayed pause totals substituted in place of the
+// stored ones those two functions would otherwise have trusted. clock.PausedOn
+// is only nil if the DB row itself is inconsistent (Stage == "PAUSED" with no
+// paused_on); that can't happen through the live engine's own write paths, so
+// this falls back to clock.StartOn rather than panicking.
+func frozenPausedSnapshot(clock repository.ActiveClockForRecalc, pauseSeconds, businessPauseSeconds int64, businessDays bool) (elapsedPercent float64, elapsedSeconds, remainingSeconds int64) {
+	pausedOn := clock.StartOn
+	if clock.PausedOn != nil {
+		pausedOn = *clock.PausedOn
+	}
+
+	var elapsed time.Duration
+	if businessDays {
+		elapsed = businessdays.Elapsed(clock.StartOn, pausedOn) - time.Duration(businessPauseSeconds)*time.Second
+	} else {
+		elapsed = pausedOn.Sub(clock.StartOn) - time.Duration(pauseSeconds)*time.Second
+	}
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	duration := time.Duration(clock.DurationSeconds) * time.Second
+	remaining := duration - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	if clock.DurationSeconds > 0 {
+		elapsedPercent = elapsed.Seconds() / float64(clock.DurationSeconds) * 100
+	}
+	return elapsedPercent, int64(elapsed.Seconds()), int64(remaining.Seconds())
+}
+
 // replayClockPauseHistory walks clock's real state-change history from its
 // own start to now, applying decidePauseTransition's own stop/cancel/pause/
 // resume decision order against the state in effect at each point in time,
@@ -219,10 +268,17 @@ func abs64(v int64) int64 {
 //
 // ok is false (nothing to apply) when the replay concludes the clock
 // should have stopped or been cancelled partway through its own history, or
-// that it should currently be paused -- both a genuine disagreement with
-// the live engine's own tracked state that needs a person to look at, never
-// a guess.
-func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents []repository.CaseActivityEvent, currentFacts repository.CaseFacts, now time.Time) (pauseSeconds, businessPauseSeconds int64, ok bool, reason string) {
+// that its paused/running state at the end of the replay disagrees with
+// expectPaused (clock.Stage == "PAUSED") -- both a genuine disagreement
+// with the live engine's own tracked state that needs a person to look at,
+// never a guess.
+//
+// When expectPaused is true, the trailing segment from the last known event
+// up to now is never folded into the returned total: that segment is the
+// clock's own still-open pause, not a completed one, so including it would
+// double count once the clock eventually resumes and the live engine's own
+// resume handling adds its own elapsed-since-paused_on span on top.
+func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents []repository.CaseActivityEvent, currentFacts repository.CaseFacts, now time.Time, expectPaused bool) (pauseSeconds, businessPauseSeconds int64, ok bool, reason string) {
 	policy := repository.SLAPolicyRef{
 		ID:              clock.PolicyID,
 		Target:          clock.Target,
@@ -285,10 +341,15 @@ func replayClockPauseHistory(clock repository.ActiveClockForRecalc, stateEvents 
 		paused = newPaused
 	}
 
-	if paused {
-		return 0, 0, false, "history concludes this clock should currently be paused, but it is tracked as IN_PROGRESS -- needs manual review"
+	if paused != expectPaused {
+		if paused {
+			return 0, 0, false, "history concludes this clock should currently be paused, but it is tracked as IN_PROGRESS -- needs manual review"
+		}
+		return 0, 0, false, "history concludes this clock should currently be running, but it is tracked as PAUSED -- needs manual review"
 	}
-	accumulate(lastEventTime, now)
+	if !expectPaused {
+		accumulate(lastEventTime, now)
+	}
 
 	return int64(flatTotal.Seconds()), int64(businessTotal.Seconds()), true, ""
 }

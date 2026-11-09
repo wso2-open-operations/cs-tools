@@ -626,6 +626,20 @@ type SLAEngineRepository interface {
 	// this leaves the stored column completely untouched rather than
 	// writing a number nothing will ever read.
 	UpdateClockPauseTotals(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64) error
+
+	// UpdateClockPausedSnapshot is UpdateClockPauseTotals' counterpart for a
+	// currently PAUSED clock: it overwrites pause_duration/
+	// business_pause_duration the same way, and ALSO overwrites
+	// business_elapsed_percentage/business_duration/
+	// remaining_business_duration together with them, recomputed as of this
+	// clock's own paused_on instant -- the same formula setPausedFlat/
+	// setPausedBusinessDays already freeze these at, just fed the newly
+	// corrected pause total instead of trusting whatever was stored at the
+	// moment this clock actually paused. elapsedSeconds/remainingSeconds
+	// are the schedule-appropriate (flat or business-day) elapsed/remaining
+	// time as of paused_on; elapsedPercent is that same elapsed time over
+	// the policy's own duration, as a percentage.
+	UpdateClockPausedSnapshot(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error
 }
 
 type slaEngineRepo struct {

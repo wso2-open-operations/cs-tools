@@ -62,6 +62,9 @@ type fakeFullSLAEngineRepo struct {
 	activeClocksByCase   map[string][]repository.ActiveClockForRecalc
 	pauseUpdates         []string // "caseID|policyID|pauseSeconds|businessPauseSeconds(or '-')"
 	updatePauseErr       error
+	// pausedSnapshotUpdates: "caseID|policyID|pauseSeconds|businessPauseSeconds(or '-')|elapsedPercent|elapsedSeconds|remainingSeconds"
+	pausedSnapshotUpdates   []string
+	updatePausedSnapshotErr error
 }
 
 func newFakeFullSLAEngineRepo() *fakeFullSLAEngineRepo {
@@ -151,6 +154,18 @@ func (r *fakeFullSLAEngineRepo) UpdateClockPauseTotals(_ context.Context, workIt
 		bp = fmt.Sprintf("%d", *businessPauseSeconds)
 	}
 	r.pauseUpdates = append(r.pauseUpdates, fmt.Sprintf("%s|%s|%d|%s", workItemID, policyID, pauseSeconds, bp))
+	return nil
+}
+
+func (r *fakeFullSLAEngineRepo) UpdateClockPausedSnapshot(_ context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error {
+	if r.updatePausedSnapshotErr != nil {
+		return r.updatePausedSnapshotErr
+	}
+	bp := "-"
+	if businessPauseSeconds != nil {
+		bp = fmt.Sprintf("%d", *businessPauseSeconds)
+	}
+	r.pausedSnapshotUpdates = append(r.pausedSnapshotUpdates, fmt.Sprintf("%s|%s|%d|%s|%.4f|%d|%d", workItemID, policyID, pauseSeconds, bp, elapsedPercent, elapsedSeconds, remainingSeconds))
 	return nil
 }
 
