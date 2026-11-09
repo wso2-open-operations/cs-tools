@@ -27,7 +27,6 @@ import (
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/engine"
-	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
@@ -627,8 +626,12 @@ func (fakeStale) Report(context.Context, int) (longopenreport.Report, error) {
 
 type fakeOpen struct{}
 
-func (fakeOpen) SearchCasesInStateCreatedBeforeYesterday(context.Context, string) ([]entitycases.Case, error) {
-	return nil, nil
+// fakeOpen returns one case so the report is not empty (an empty report is
+// not sent at all).
+func (fakeOpen) OpenBeforeYesterday(context.Context) (longopenreport.Report, error) {
+	return longopenreport.Report{
+		Cases: []longopenreport.Row{{Number: "CS0000001", State: "open"}}, CasesTotal: 1,
+	}, nil
 }
 
 type fakeMigration struct{}

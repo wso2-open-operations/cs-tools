@@ -54,6 +54,12 @@ type LongOpenCaseReportConfig struct {
 	// ExcludedTags are tag names (compared ignoring case) that remove a
 	// case from the report.
 	ExcludedTags []string
+	// OpenBeforeYesterdayProjectTypes are the project type names that put a
+	// case in the open-before-yesterday report whatever its product.
+	OpenBeforeYesterdayProjectTypes []string
+	// OpenBeforeYesterdayProductProjectTypes are the project type names that
+	// put a case in that report only when the case has a product set.
+	OpenBeforeYesterdayProductProjectTypes []string
 }
 
 type longOpenCaseReportService struct {
@@ -74,6 +80,14 @@ func NewLongOpenCaseReportService(repo repository.LongOpenCaseReportRepository, 
 }
 
 func (s *longOpenCaseReportService) BuildReport(ctx context.Context, req domain.LongOpenCaseReportRequest) (domain.LongOpenCaseReport, error) {
+	switch req.Variant {
+	case "":
+	case domain.LongOpenCaseReportVariantOpenBeforeYesterday:
+		return s.buildOpenBeforeYesterday(ctx, req)
+	default:
+		return domain.LongOpenCaseReport{}, &apierror.ValidationError{
+			Msg: "variant must be omitted or " + domain.LongOpenCaseReportVariantOpenBeforeYesterday}
+	}
 	days := req.OlderThanDays
 	if days == 0 {
 		days = LongOpenCaseReportDefaultOlderThanDays
@@ -118,6 +132,49 @@ func (s *longOpenCaseReportService) BuildReport(ctx context.Context, req domain.
 	}
 	if report.OnboardingCases == nil {
 		report.OnboardingCases = []domain.LongOpenCaseReportRow{}
+	}
+	return report, nil
+}
+
+// buildOpenBeforeYesterday builds the report of cases still in the open state
+// that were created before the start of yesterday in the report's timezone.
+// It is a single table: every matching case is in Cases and the onboarding
+// table is empty.
+func (s *longOpenCaseReportService) buildOpenBeforeYesterday(ctx context.Context, req domain.LongOpenCaseReportRequest) (domain.LongOpenCaseReport, error) {
+	if req.OlderThanDays != 0 {
+		return domain.LongOpenCaseReport{}, &apierror.ValidationError{
+			Msg: "olderThanDays cannot be combined with variant " + domain.LongOpenCaseReportVariantOpenBeforeYesterday}
+	}
+	projectTypes := nonBlank(s.cfg.OpenBeforeYesterdayProjectTypes)
+	productProjectTypes := nonBlank(s.cfg.OpenBeforeYesterdayProductProjectTypes)
+	if len(projectTypes) == 0 && len(productProjectTypes) == 0 {
+		return domain.LongOpenCaseReport{}, &apierror.ServiceUnavailableError{
+			Msg: "the open-before-yesterday report's project types are not configured"}
+	}
+	now := req.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	// The start of yesterday: a calendar day back, not 24 hours.
+	createdBefore := MigrationCaseCutoff(now, 1, s.loc)
+
+	ctx = repository.WithSystemIdentity(ctx)
+	data, err := s.repo.ListOpenCasesBefore(ctx, createdBefore, projectTypes, productProjectTypes, LongOpenCaseReportMaxRowsPerTable)
+	if err != nil {
+		return domain.LongOpenCaseReport{}, err
+	}
+	report := domain.LongOpenCaseReport{
+		GeneratedAt:     now,
+		Variant:         domain.LongOpenCaseReportVariantOpenBeforeYesterday,
+		OlderThanDays:   1,
+		CreatedBefore:   createdBefore,
+		Cases:           data.Cases,
+		OnboardingCases: []domain.LongOpenCaseReportRow{},
+		CasesTotal:      data.CasesTotal,
+		CasesTruncated:  data.CasesTotal > len(data.Cases),
+	}
+	if report.Cases == nil {
+		report.Cases = []domain.LongOpenCaseReportRow{}
 	}
 	return report, nil
 }

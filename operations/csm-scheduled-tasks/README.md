@@ -74,7 +74,7 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 |---|---|---|---|
 | `housekeeping_cleanup` | `0 3 * * *` | Always | Deletes resolved (succeeded or superseded) ledger rows older than `HOUSEKEEPING_RETENTION_DAYS`. Open or failed rows are never deleted. |
 | `stale_cases_report` | `0 7 * * *` | Always | Emails the long-open cases report from entity-service (`GET /reports/long-open-cases`, deploy entity-service first): cases open for more than 30 days (fixed window), in two tables, "Ongoing cases" and "Ongoing cases on onboarding projects". Sends nothing and still succeeds when both tables are empty or the task has no `to` recipients. |
-| `open_cases_report` | `0 8 * * *` | Always | Emails a report of cases still in the `open` state that were created before the start of yesterday (UTC calendar-day boundary). Does nothing and still succeeds if the task has no `to` recipients. |
+| `open_cases_report` | `30 3 * * *` | Always | Emails the open-before-yesterday report from entity-service (`GET /reports/long-open-cases?variant=open-before-yesterday`, deploy entity-service first): cases still in the `open` state that were created before the start of yesterday. entity-service computes that day boundary in Asia/Colombo and caps the list; a cut list says so in the mail with the full total. 03:30 UTC is 09:00 Asia/Colombo, when the original report sends. Sends nothing and still succeeds when there are no such cases or the task has no `to` recipients. |
 | `migration_case_report` | `30 22 * * 0` | Always | Emails the weekly migration case scan: migration engagements still open after `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS`, in three tables (customer asked to hold, waiting on the accounts team, neither). Sent to the mail groups of the teams entity-service is configured with (`MIGRATION_CASE_REPORT_TEAM_KEYS` there) plus this task's own `to`/`cc`; fails the run when that audience is empty. Always sent, even with empty tables. |
 | `cs_worklogs_daily_report` | `55 3 * * *` | Always | Emails the CS Worklogs daily report for yesterday. 03:55 UTC is 09:25 Asia/Colombo, when the ServiceNow original sends. The reported day is derived in Asia/Colombo, not UTC. Does nothing and still succeeds if the task has no `to` recipients. |
 | `cs_worklogs_weekly_report` | `0 16 * * 1` | Always | Emails the CS Worklogs weekly report for the Monday-to-Sunday just gone. 16:00 UTC Monday is 21:30 Asia/Colombo, matching `WeeklyReportAutomation V2`. Does nothing and still succeeds if the task has no `to` recipients. |
@@ -184,7 +184,6 @@ csm-scheduled-tasks/
 │   ├── registry/                 # Task{Name, Schedule, Handler, RetryBackoff, To, Cc}
 │   ├── engine/                   # Tick: claim -> run -> report back, once per task per invocation
 │   ├── ledger/                   # entity-service client for run state (Attempt/Complete/Fail/DeleteResolvedBefore)
-│   ├── entitycases/              # entity-service client for case search (used by report tasks)
 │   ├── announcementpublish/      # Client + handler for publish_scheduled_announcements
 │   ├── cloudstatus/              # Client, outbound webhook poster and handler for cloud_status_webhooks
 │   ├── availability/             # Client + handler for availability_recalculation
@@ -255,7 +254,7 @@ schedule can be overridden through `SUB_CRON_SCHEDULES`.
    `func(ctx context.Context) error`. Return `nil` on success and a descriptive error on failure.
    It must be idempotent per period and needs no knowledge of retries, periods or the ledger. If it
    needs a new entity-service endpoint, add a small dedicated client in the same package (follow
-   `announcementpublish` or `entitycases`) and build it with `httpsec`-guarded https URLs.
+   `announcementpublish` or `longopenreport`) and build it with `httpsec`-guarded https URLs.
 2. **Register it** in the `tasks` slice in `cmd/server/main.go` as a `registry.Task`:
    - `Name`: a stable ledger key.
    - `Schedule`: `scheduleFor(scheduleOverrides, "<name>", "<default cron>")`, so the default lives

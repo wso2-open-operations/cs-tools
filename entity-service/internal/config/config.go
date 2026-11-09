@@ -572,6 +572,12 @@ type Config struct {
 	// excluded tags would list cases the team has set aside.
 	LongOpenCasesReportProjectTypes []string
 	LongOpenCasesReportExcludedTags []string
+	// OpenBeforeYesterdayReportProjectTypes are the project type names that
+	// put a case in the open-before-yesterday variant of that report whatever
+	// its product; OpenBeforeYesterdayReportProductProjectTypes put it there
+	// only when the case has a product set. Blank falls back to the defaults.
+	OpenBeforeYesterdayReportProjectTypes        []string
+	OpenBeforeYesterdayReportProductProjectTypes []string
 	// CustomerRoles is a comma-separated list of ServiceNow role names
 	// (organisation-specific vocabulary, the same reasoning
 	// apps/csm-portal/backend's own CSM_TEAM_REGISTRY uses for not shipping
@@ -1023,6 +1029,8 @@ func Load() *Config {
 		MigrationCaseReportTeamKeys:                   splitComma(os.Getenv("MIGRATION_CASE_REPORT_TEAM_KEYS")),
 		LongOpenCasesReportProjectTypes:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_PROJECT_TYPES"), defaultLongOpenCasesReportProjectTypes),
 		LongOpenCasesReportExcludedTags:               splitCommaOrDefault(os.Getenv("LONG_OPEN_CASES_REPORT_EXCLUDED_TAGS"), defaultLongOpenCasesReportExcludedTags),
+		OpenBeforeYesterdayReportProjectTypes:         splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProjectTypes),
+		OpenBeforeYesterdayReportProductProjectTypes:  splitCommaOrDefault(os.Getenv("OPEN_BEFORE_YESTERDAY_REPORT_PRODUCT_PROJECT_TYPES"), defaultOpenBeforeYesterdayReportProductProjectTypes),
 		AuthIssuer:                                    os.Getenv("AUTH_ISSUER"),
 		AuthJWKSURL:                                   os.Getenv("AUTH_JWKS_URL"),
 		AuthUserTokenAudiences:                        splitComma(os.Getenv("AUTH_USER_TOKEN_AUDIENCES")),
@@ -1213,6 +1221,15 @@ var (
 	// "migrartion" is a historic misspelling that exists as stored on
 	// real cases; it must stay exactly as is to match them.
 	defaultLongOpenCasesReportExcludedTags = []string{"migrartion", "migration-assistance"}
+)
+
+// defaultOpenBeforeYesterdayReportProjectTypes and
+// defaultOpenBeforeYesterdayReportProductProjectTypes are the
+// open-before-yesterday report's project type sets when the environment does
+// not override them. The second set needs the case's product to be set.
+var (
+	defaultOpenBeforeYesterdayReportProjectTypes        = []string{"Subscription", "Managed Cloud Subscription"}
+	defaultOpenBeforeYesterdayReportProductProjectTypes = []string{"Cloud Support"}
 )
 
 func splitComma(s string) []string {

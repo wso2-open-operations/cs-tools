@@ -1667,8 +1667,10 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 				service.NewLongOpenCaseReportService(
 					repository.NewLongOpenCaseReportRepository(repository.NewScoped(db)),
 					service.LongOpenCaseReportConfig{
-						ProjectTypes: cfg.LongOpenCasesReportProjectTypes,
-						ExcludedTags: cfg.LongOpenCasesReportExcludedTags,
+						ProjectTypes:                           cfg.LongOpenCasesReportProjectTypes,
+						ExcludedTags:                           cfg.LongOpenCasesReportExcludedTags,
+						OpenBeforeYesterdayProjectTypes:        cfg.OpenBeforeYesterdayReportProjectTypes,
+						OpenBeforeYesterdayProductProjectTypes: cfg.OpenBeforeYesterdayReportProductProjectTypes,
 					}))
 		}
 		// Runbooks: the alert-name to runbook catalog, matched against every new incident's subject.
