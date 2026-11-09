@@ -5,7 +5,8 @@ The Account Closure Process (ACP) as it runs in `csm-scheduled-tasks`: the
 date or an unpaid invoice's suspend date, and suspends the project when the date
 arrives. This page explains the run end to end. The operational settings and
 review history live in the component's `CLAUDE.md` ("ACP closure"); the code is
-in `internal/acp/`.
+in `internal/acp/`. The other sub-crons are covered in
+[sub-crons.md](sub-crons.md).
 
 **Status:** `acp_closure` replaces `integrations/acp-closure-service`, which is
 frozen (it refuses to start unless it is a log-only dry run) and is deleted once

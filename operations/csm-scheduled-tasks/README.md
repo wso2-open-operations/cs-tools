@@ -11,6 +11,7 @@ trigger supplies the cadence.
 ## Contents
 
 - [Architecture](#architecture)
+  - [Registered tasks](#registered-tasks) and the [sub-crons overview](docs/sub-crons.md)
 - [Developer guide](#developer-guide)
 - [Configuration](#configuration)
 
@@ -78,14 +79,26 @@ per period. Every failed attempt sends a failure alert email (see [Alerting](#al
 | `migration_case_report` | `30 22 * * 0` | Always | Emails the weekly migration case scan: migration engagements still open after `MIGRATION_CASE_REPORT_OLDER_THAN_DAYS`, in three tables (customer asked to hold, waiting on the accounts team, neither). Sent to the mail groups of the teams entity-service is configured with (`MIGRATION_CASE_REPORT_TEAM_KEYS` there) plus this task's own `to`/`cc`; fails the run when that audience is empty. Always sent, even with empty tables. |
 | `cs_worklogs_daily_report` | `55 3 * * *` | Always | Emails the CS Worklogs daily report for yesterday. 03:55 UTC is 09:25 Asia/Colombo, when the ServiceNow original sends. The reported day is derived in Asia/Colombo, not UTC. Does nothing and still succeeds if the task has no `to` recipients. |
 | `cs_worklogs_weekly_report` | `0 16 * * 1` | Always | Emails the CS Worklogs weekly report for the Monday-to-Sunday just gone. 16:00 UTC Monday is 21:30 Asia/Colombo, matching `WeeklyReportAutomation V2`. Does nothing and still succeeds if the task has no `to` recipients. |
+| `query_hours_usage_notifications` | `15 * * * *` | Always | Recomputes query hour figures in entity-service (`POST /query-hours/recompute`) and mails one notice per project whose threshold state rose to 75, 90 or 100 percent, to that account's manager and technical owner. A crossing with no internal owner is logged and skipped. `QUERY_HOURS_RECIPIENT_OVERRIDE` replaces the derived audience for testing. |
+| `query_hours_weekly_report` | `0 4 * * 1` | Always | Emails the weekly query hour consumption report (`GET /reports/query-hours`): accounts over or close to their allowance. The audience is derived from those accounts, with this task's `to`/`cc` added. Always sent, even when empty; fails the run when the audience is empty. |
 | `publish_scheduled_announcements` | `*/15 * * * *` | Always | Finds scheduled announcements whose publish time has arrived and asks entity-service to publish each one. Every due item is attempted independently; failures are joined into one error. |
+| `time_card_report` | `30 5 2 * *` | Always, but does nothing until `TIME_CARD_REPORT_PROJECT_KEYS` is set | Customer-facing: mails each configured project's contacts last calendar month's approved effort per case, one email per address. Two attempts per period at most (`MaxAttempts` 2), because a retry mails already-served projects again. See CLAUDE.md, "Monthly time card report". |
+| `product_regression_report_apim`, `product_regression_report_iam`, `product_regression_report_integration` | `30 3 1 * *` each | Always (each sends only with a `to`) | Monthly regression case report per business unit (`GET /reports/product-regressions`), grouped by product. A month with no regression cases sends nothing. Product lists can be replaced with `PRODUCT_REGRESSION_REPORT_PRODUCTS`. |
 | `cloud_status_webhooks` | `*/5 * * * *` | Only if `CLOUD_STATUS_ENABLED=true` | Asks entity-service which service-status transitions owe an outbound webhook, posts each to its configured status-dashboard base URL, and records delivery. |
 | `availability_recalculation` | `0 3 * * *` | Only if `AVAILABILITY_RECALC_ENABLED=true` | Triggers entity-service to recompute service availability figures; fails the run on a partial sweep or an empty subject list. The arithmetic runs in entity-service. |
 | `usage_rollup_daily` | `30 0 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild the daily usage rows of the last `USAGE_ROLLUP_DAILY_LOOKBACK_DAYS` days (default 2) before today from the hourly rows. The arithmetic runs in the database. |
 | `usage_rollup_monthly` | `30 1 * * *` | Only if `USAGE_ROLLUP_ENABLED=true` | Triggers entity-service to rebuild last month's and the current month's monthly usage rows from the daily rows. |
 | `unresolved_products_digest` | `0 6 * * *` | Only does anything once `SUB_CRON_RECIPIENTS` names its recipients | Emails the deployment nodes seen in the last 24 hours whose reported product or version is not in the product catalogue (from entity-service's `GET /instances/unresolved-products`). Sends nothing on a day with nothing to report. |
+| `rota_weekday_reminder` | `30 9 * * 1-5` | When `EMAIL_BASE_URL` is set; scheduled sends also need the weekday switch on the portal's Rota Access card | Emails the people on the next working day's rotation windows (Friday announces Monday), one email per window with a calendar invitation. |
+| `rota_weekend_notice` | `30 14 * * 0-4` | Same as above, weekend switch | Once the coming weekend is fully marked, sends the weekend summary and one invitation per team per day, once. Until then it asks the rota admins each evening. |
+| `rota_weekend_reminder` | `30 9 * * 5` | Same as above, weekend switch | Friday re-send of the weekend summary, with updated invitations and cancellations. Sends even when not fully marked, listing the gaps. |
+| `rota_manual_reminder` | `*/5 * * * *` | When `EMAIL_BASE_URL` is set | Claims waiting "Send now" and "Send a test to me" requests from the Rota Access card and sends them. Due at every driver tick. |
+| `case_autoclosure` | `30 2 * * *` | Only if `AUTOCLOSURE_ENABLED=true` | Reminds and closes cases idle in Awaiting Info or Solution Proposed. A trigger only: entity-service decides eligibility, wording and the daily limit (`AUTOCLOSURE_DAILY_LIMIT`). `AUTOCLOSURE_SCHEDULED=false` leaves it to on-demand runs. See CLAUDE.md, "Case auto-closure". |
 | `acp_reopen_check` | `30 3 * * *` | Only if `ACP_REOPEN_CHECK_ENABLED=true` | Drives entity-service's daily ACP reopen check (`POST /acp/reopen-check`, page by page): reopens projects ACP suspended whose renewal or payment an event missed, and finishes ones a person set back to Open. Needs entity-service with `CSM_ACP_REOPEN_ENABLED=true`. See CLAUDE.md, "ACP reopen check". |
 | `acp_closure` | `0 4 * * 1-5` | Only if `ACP_ENABLED=true` | The Account Closure Process: sends the end-date and invoice notices that are due (90/60/30/15/7 days) and suspends projects at day 0 in CSM and Salesforce. Dry run by default (`ACP_DRY_RUN`). Skips weekends in Colombo time. Retried after 4 hours, not every tick. See [docs/acp-closure.md](docs/acp-closure.md) and CLAUDE.md, "ACP closure". |
+
+A page that walks through every task (triggers, reads, writes, failure handling, config) is
+[docs/sub-crons.md](docs/sub-crons.md).
 
 Effective promptness of any task is bounded by the shared driver cadence, not by its schedule
 string alone. Task names are API contracts: renaming one orphans its history and stops matching any
@@ -186,7 +199,7 @@ can mail a period that was already sent. Details: CLAUDE.md, "Monthly time card 
 
 - `ALERT_RECIPIENTS` is a standing audience emailed on every failed attempt of every task.
 - A task's own `to`/`cc` in `SUB_CRON_RECIPIENTS` is added to the failure alert for that task (its
-  `to` is merged into the same To line). For the two report tasks, that `to`/`cc` instead is the
+  `to` is merged into the same To line). For the report tasks, that `to`/`cc` instead is the
   actual report audience.
 - A task's failures send no email only when both lists are empty. The failure is still recorded
   and retried.
