@@ -3640,11 +3640,14 @@ func (s *caseService) AggregateCases(ctx context.Context, req domain.AggregateCa
 // defaultCaseVolumeTrendDays/maxCaseVolumeTrendDays bound
 // CaseVolumeTrendRequest.Days and a fixed window's day bucket;
 // maxCaseVolumeTrendWeeks/maxCaseVolumeTrendMonths bound its week and month
-// buckets (a year of weeks, two years of months).
+// buckets (a year of weeks, two years of months). A year spans 54 week
+// starts when it is a leap year that starts on a Sunday (2012, 2040): its
+// 1 January is the last day of one week and its 31 December the first of
+// another.
 const (
 	defaultCaseVolumeTrendDays = 30
 	maxCaseVolumeTrendDays     = 90
-	maxCaseVolumeTrendWeeks    = 53
+	maxCaseVolumeTrendWeeks    = 54
 	maxCaseVolumeTrendMonths   = 24
 )
 

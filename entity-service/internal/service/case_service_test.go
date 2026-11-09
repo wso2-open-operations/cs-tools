@@ -6184,6 +6184,9 @@ func TestResolveCaseVolumeTrendWindow(t *testing.T) {
 		// 2026 runs from the week of Monday 29 December 2025 to the week of
 		// Monday 28 December 2026: 53 weeks.
 		{"a whole year by week", domain.CaseVolumeTrendRequest{StartDate: "2026-01-01", EndDate: "2026-12-31", Bucket: "week"}},
+		// 2040 is a leap year starting on a Sunday: from the week of Monday
+		// 26 December 2039 to the week of Monday 31 December 2040, 54 weeks.
+		{"a whole leap year from a Sunday by week", domain.CaseVolumeTrendRequest{StartDate: "2040-01-01", EndDate: "2040-12-31", Bucket: "week"}},
 		{"24 months by month", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2026-12-31", Bucket: "month"}},
 		{"one day", domain.CaseVolumeTrendRequest{StartDate: "2025-12-25", EndDate: "2025-12-25"}},
 	}
@@ -6207,7 +6210,7 @@ func TestResolveCaseVolumeTrendWindow(t *testing.T) {
 		{"end before start", domain.CaseVolumeTrendRequest{StartDate: "2025-12-31", EndDate: "2025-12-01"}},
 		{"an unknown bucket", domain.CaseVolumeTrendRequest{StartDate: "2025-12-01", EndDate: "2025-12-31", Bucket: "quarter"}},
 		{"91 days by day", domain.CaseVolumeTrendRequest{StartDate: "2026-01-01", EndDate: "2026-04-01"}},
-		{"54 weeks by week", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2026-01-05", Bucket: "week"}},
+		{"55 weeks by week", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2026-01-12", Bucket: "week"}},
 		{"25 months by month", domain.CaseVolumeTrendRequest{StartDate: "2025-01-01", EndDate: "2027-01-01", Bucket: "month"}},
 		{"a malformed relative date", domain.CaseVolumeTrendRequest{StartDate: "__startOfMonth__", EndDate: "__today__"}},
 	}

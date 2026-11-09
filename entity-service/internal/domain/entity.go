@@ -3508,8 +3508,8 @@ type CaseVolumeTrendRequest struct {
 	StartDate string `json:"startDate,omitempty"`
 	EndDate   string `json:"endDate,omitempty"`
 	// Bucket is how a fixed window's days are grouped into points: "day"
-	// (the default, at most 90 days), "week" (Monday to Sunday, at most 53
-	// weeks) or "month" (at most 24 months). Only with StartDate/EndDate.
+	// (the default, at most 90 days), "week" (Monday to Sunday, at most 54
+	// weeks: a whole leap year that starts on a Sunday) or "month" (at most 24 months). Only with StartDate/EndDate.
 	Bucket string `json:"bucket,omitempty"`
 }
 

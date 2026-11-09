@@ -24216,8 +24216,8 @@ components:
           description: >-
             How a fixed window's days are grouped into points. Optional;
             defaults to day. day covers at most 90 days, week (Monday to
-            Sunday) at most 53 weeks, month at most 24 months. Only with
-            startDate/endDate.
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months. Only with startDate/endDate.
 
     CaseVolumeTrendPoint:
       type: object

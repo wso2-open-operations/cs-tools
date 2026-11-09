@@ -342,7 +342,7 @@ there's no generic series config.
 request can name a fixed window -- plain `YYYY-MM-DD` dates or the relative placeholders
 `resolveRelativeDate` knows, both inclusive UTC days -- for a past period such as "December
 2025" that a trailing window can't reach. `bucket` groups its points: `day` (default, at
-most 90 days), `week` (Monday to Sunday, at most 53 weeks) or `month` (at most 24 months);
+most 90 days), `week` (Monday to Sunday, at most 54 weeks, a whole leap year that starts on a Sunday) or `month` (at most 24 months);
 a week or month point carries `date` and `endDate`, the bucket's first and last day clipped
 to the window. Counting doesn't change: every day is still computed and cached on its own
 (below), and a week or month point is the sum of its days. A day after today counts 0 and is
