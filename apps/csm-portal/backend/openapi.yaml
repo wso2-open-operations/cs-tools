@@ -4222,6 +4222,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: >-
+            BadGateway. Also when a fixed window (startDate) was asked for and
+            the entity service answered without echoing it, as one older than
+            the fixed window does (it answers its trailing 30 days instead).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
 
   /cases/feedback/search:
     post:

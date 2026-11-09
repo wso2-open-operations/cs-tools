@@ -886,7 +886,12 @@ limit on every day, because a saved dashboard is checked again on every read (`_
 Gregorian cycle (the calendar, weekdays included, repeats every 400 years), once per window and kept
 (`relativeLinePoints`): sampling a few years missed windows that are too long only in rare years. Every line widget saved before these fields has none, so none of them changes. The view
 and the draft carry them: `TestDraftToDefinition_KeepsLineWindow`. Deploy order: entity-service (which
-must accept the fields first), then this backend, then the webapp, then the catalogue mounts.
+must accept the fields first), then this backend, then the webapp, then the catalogue mounts. An older
+entity-service ignores `startDate` / `endDate` / `bucket` and answers its trailing 30 days without an
+error, so `CaseHandler.VolumeTrend` refuses (502) a fixed window answered without its echo
+(`windowEchoed`) rather than show it as the window. Rolling this backend back once dashboards with `series`
+or a window are saved makes those dashboards fail to open (an older `ParseGenerated` refuses fields it does
+not know, a 422 on every read) until it is deployed again.
 
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
