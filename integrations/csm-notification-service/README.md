@@ -395,7 +395,7 @@ the steps until the code or documentation is reconciled.
 
 | Variable | Default | Description | Example |
 |---|---|---|---|
-| `CLOUD_STATUS_WEBHOOK_URLS` | unset (events reported undelivered for a scheduler to retry) | JSON object of cloud slug to base URL (`https` only; posts to `<url>/api/v1/webhook`). An unparseable value stops startup. | `{"cloud-a":"https://status.example.com"}` |
+| `CLOUD_STATUS_WEBHOOK_URLS` | unset (events reported undelivered for a scheduler to retry) | JSON object of cloud slug to base URL (`https` only; posts to `<url>/api/v1/webhook`). A new cloud is onboarded by adding its slug here and in the secrets; a well-formed slug with no URL is reported as a failed attempt for the scheduler to retry. An unparseable value stops startup. | `{"cloud-a":"https://status.example.com"}` |
 | `CLOUD_STATUS_WEBHOOK_SECRETS` | none | JSON object of secrets; the whole `X-Webhook-Signature` header value, with a `default` entry as fallback. Required to parse when URLs are set. | `{"default":"Secret <token>"}` |
 
 ### SLA engine and Redis
