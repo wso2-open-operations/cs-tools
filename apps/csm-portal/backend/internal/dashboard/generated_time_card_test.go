@@ -16,6 +16,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -226,6 +227,53 @@ func TestRelativeDate(t *testing.T) {
 		"__startOfWeek:9223372036854775807__", "__endOfWeek:9223372036854775807__", "__startOfMonth:-9223372036854775808__", "__endOfQuarter:9223372036854775807__"} {
 		if _, ok := relativeDate(token, day("2026-11-02")); ok {
 			t.Errorf("relativeDate(%s) resolved, want it left unresolved (the webapp does)", token)
+		}
+	}
+}
+
+// relativeDateParityFile is entity-service's relative date parity cases,
+// relative to this package's directory.
+const (
+	entityService          = "../../../../../entity-service"
+	relativeDateParityFile = entityService + "/internal/service/testdata/relative_date_parity.json"
+)
+
+// TestRelativeDate_Parity runs entity-service's relative date parity cases,
+// which its resolveRelativeDate and the webapp's resolver run too, so the
+// three agree on every token. It fails if entity-service is in the checkout
+// without the file, and is skipped only when entity-service is not there.
+func TestRelativeDate_Parity(t *testing.T) {
+	raw, err := os.ReadFile(relativeDateParityFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, modErr := os.Stat(entityService + "/go.mod"); modErr == nil {
+			t.Fatalf("%s not found, but entity-service is in this checkout: the parity cases must be there", relativeDateParityFile)
+		}
+		t.Skipf("%s not found and no entity-service in this checkout", relativeDateParityFile)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parity struct {
+		Cases []struct {
+			Now   time.Time `json:"now"`
+			Token string    `json:"token"`
+			Date  *string   `json:"date"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &parity); err != nil {
+		t.Fatal(err)
+	}
+	if len(parity.Cases) == 0 {
+		t.Fatal("no parity cases")
+	}
+	for _, c := range parity.Cases {
+		now := c.Now.UTC()
+		got, ok := relativeDate(c.Token, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC))
+		switch {
+		case c.Date == nil && ok:
+			t.Errorf("%s at %s = %s, want it unresolved", c.Token, c.Now.Format(time.RFC3339), got.Format("2006-01-02"))
+		case c.Date != nil && (!ok || got.Format("2006-01-02") != *c.Date):
+			t.Errorf("%s at %s = %s %v, want %s", c.Token, c.Now.Format(time.RFC3339), got.Format("2006-01-02"), ok, *c.Date)
 		}
 	}
 }
