@@ -6106,6 +6106,48 @@ func TestCaseService_CaseVolumeTrend_FixedWindowByWeekClipsToTheWindow(t *testin
 	}
 }
 
+// A week point that crosses a month and a year end stays one point, and the
+// weeks at the window's edges are clipped to it; likewise a month window
+// that crosses a year end and starts and ends mid-month.
+func TestCaseService_CaseVolumeTrend_FixedWindowAcrossAYearEnd(t *testing.T) {
+	var gotDays []string
+	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+	ctx := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+
+	// 17 December 2025 and 14 January 2026 are Wednesdays.
+	resp, err := svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-12-17", EndDate: "2026-01-14", Bucket: "week"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantWeeks := []domain.CaseVolumeTrendPoint{
+		{Date: "2025-12-17", EndDate: "2025-12-21", Count: 5},
+		{Date: "2025-12-22", EndDate: "2025-12-28", Count: 7},
+		{Date: "2025-12-29", EndDate: "2026-01-04", Count: 7},
+		{Date: "2026-01-05", EndDate: "2026-01-11", Count: 7},
+		{Date: "2026-01-12", EndDate: "2026-01-14", Count: 3},
+	}
+	if got := resp.Series[0].Points; !reflect.DeepEqual(got, wantWeeks) {
+		t.Errorf("opened by week = %+v, want %+v", got, wantWeeks)
+	}
+	if resp.Days != 29 || len(gotDays) != 29 {
+		t.Errorf("days = %d, repo asked for %d days, want 29 each", resp.Days, len(gotDays))
+	}
+
+	gotDays = nil
+	resp, err = svc.CaseVolumeTrend(ctx, domain.CaseVolumeTrendRequest{StartDate: "2025-11-15", EndDate: "2026-01-10", Bucket: "month"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantMonths := []domain.CaseVolumeTrendPoint{
+		{Date: "2025-11-15", EndDate: "2025-11-30", Count: 16},
+		{Date: "2025-12-01", EndDate: "2025-12-31", Count: 31},
+		{Date: "2026-01-01", EndDate: "2026-01-10", Count: 10},
+	}
+	if got := resp.Series[0].Points; !reflect.DeepEqual(got, wantMonths) {
+		t.Errorf("opened by month = %+v, want %+v", got, wantMonths)
+	}
+}
+
 func TestCaseService_CaseVolumeTrend_FixedWindowByMonth(t *testing.T) {
 	var gotDays []string
 	svc := NewCaseService(volumeTrendRepoCountingDays(&gotDays), stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
