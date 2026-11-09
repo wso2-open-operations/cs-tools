@@ -786,12 +786,15 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	// The repository links the report files inside the create transaction (as the
+	// uploader they were checked against), so a file taken by another create in between
+	// fails this one instead of leaving a case without it.
+	req.ReportDraftOwnerEmail = reportEmail
 	c, err := s.repo.CreateCase(ctx, req)
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
 	linkDescriptionImages(ctx, s.imageLinker, c.ID, req.ProjectID, descImageEmail, req.Description)
-	linkReportDrafts(ctx, linker, c.ID, req, reportEmail)
 	// SLA-clock registration is scoped to slaClockEligibleCreateTypes -- the
 	// same restriction snCaseService.CreateCase applies (see its own
 	// comment and that var's own doc comment for which types are covered

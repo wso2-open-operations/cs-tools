@@ -1974,10 +1974,17 @@ that no list shows (every list joins `work_item`). The chunks and the confirm ar
 `POST /cases` carries `attachmentIds`: `validateReportDrafts` checks them BEFORE anything is created (each a
 COMPLETE draft of that project uploaded by the caller, not linked, at most `MaxCreateAttachments` = 10) and,
 for a `security_report_analysis` created by a user, refuses a request with none (400, `reportRequiredMessage`);
-`linkReportDrafts` sets `work_item_id` right after the case exists (`ReportDraftLinker`, found by type
-assertion on the case service's linker, implemented by `storedAttachmentService`). A machine caller (no user
-token) is not held to the minimum. The link runs after the case (the dual-write path creates it in ServiceNow
-first), so a link that fails leaves a case whose file is still a draft: it is logged at ERROR with the ids.
+the link itself differs by data source. **Plain `postgres`: atomic.** `createCaseTx` calls `linkReportDraftsTx` in the
+create transaction (the service passes the email it validated as `ReportDraftOwnerEmail`): one guarded UPDATE
+takes only rows that are still COMPLETE drafts of that project uploaded by that email, and unless it takes every
+named file the create fails with a 400 and rolls back, so a case never exists without the files it was created
+with. Two creates naming the same file cannot both succeed: the second UPDATE waits on the row, then finds it
+taken (`TestCaseCreateMemberRLS_LinksReportDraftsAtomically` races two creates). The UPDATE is internal-only, so the
+transaction is marked internal for that one statement, as `insertAsCheckedProjectMember` does for the insert.
+**Dual-write (`createCaseSNFirst`): not atomic, on purpose.** ServiceNow already has the case when the Postgres row
+is written, and that insert must not fail (an orphaned ServiceNow case is the worse outcome, see
+`CreateCaseFromServiceNow`), so `linkReportDrafts` runs after it, best effort: a link that fails leaves a case
+whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
 A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
 Not built yet: a COMPLETE draft whose case was never created is not removed (a PENDING one is marked FAILED
 by the ordinary cleanup after 24 hours); `idx_work_item_attachment_unlinked_drafts` is the queue for that job.

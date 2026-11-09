@@ -880,7 +880,74 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 	if err := restore(ctx); err != nil {
 		return domain.Case{}, err
 	}
+	// The draft files uploaded before this case (a security report's report) are
+	// linked in THIS transaction: if any of them was taken since the service checked
+	// it (a second create naming the same file), the whole create rolls back, so a
+	// case never exists without the files it was created with.
+	if err := linkReportDraftsTx(ctx, tx, c.ID, req.ProjectID, req.ReportDraftOwnerEmail, req.AttachmentIDs); err != nil {
+		return domain.Case{}, err
+	}
 	return c, nil
+}
+
+// reportDraftsTakenMessage is what a create naming a file that is no longer a usable draft is told.
+const reportDraftsTakenMessage = "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used by another record."
+
+// linkReportDraftsTx links the drafts in ids to the work item just inserted in tx, or
+// fails if it cannot link every one of them. The UPDATE is the guard and the lock: it
+// only takes a row that is still a COMPLETE draft of this project uploaded by email,
+// and a concurrent create naming the same file waits on the row, then finds it taken
+// (READ COMMITTED re-checks the WHERE) and links nothing. UPDATE on the table is
+// internal-only, so the transaction is marked internal for this one statement (the
+// ownership checks are explicit in the WHERE) and the caller's own value is put back.
+func linkReportDraftsTx(ctx context.Context, tx pgx.Tx, workItemID, projectID, email string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[strings.ToLower(id)] = struct{}{}
+	}
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&previous); err != nil {
+		return fmt.Errorf("link report drafts: read caller identity: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', 'true', true)`); err != nil {
+		return fmt.Errorf("link report drafts: mark internal: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		UPDATE work_item_attachment
+		SET work_item_id = $1::uuid, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND project_id = $2::uuid
+		  AND work_item_id IS NULL
+		  AND status = 'COMPLETE'
+		  AND $3 <> ''
+		  AND lower(created_by) = lower($3)
+		RETURNING id::TEXT`, workItemID, projectID, email, ids)
+	if err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	linked := 0
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("link report drafts: scan: %w", err)
+		}
+		linked++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', $1, true)`, previous); err != nil {
+		return fmt.Errorf("link report drafts: restore caller identity: %w", err)
+	}
+	if linked != len(want) {
+		return &apierror.ValidationError{Msg: reportDraftsTakenMessage}
+	}
+	return nil
 }
 
 // caseInsertsCheckedByProjectMembership are the case-like types whose

@@ -3957,6 +3957,10 @@ type CreateCaseRequest struct {
 	// before this request (see the type's comment): checked before the case is
 	// created and linked to it right after. At most service.MaxCreateAttachments.
 	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	// ReportDraftOwnerEmail is the email AttachmentIDs were checked against, set by the
+	// service (never read from the request). The plain-Postgres create links the files in
+	// its own transaction as that uploader, atomically with the case.
+	ReportDraftOwnerEmail string `json:"-"`
 	// Optional fields
 	RelatedCaseID string `json:"relatedCaseId"`
 	// ResolvedRelatedCaseID is the related-case id already checked against
