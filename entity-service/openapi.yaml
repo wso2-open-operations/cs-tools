@@ -26259,7 +26259,7 @@ components:
           nullable: true
           description: >
             Reference to the file's location in Azure Blob Storage. Null for a row with no file of
-            its own recorded. Entity-service never reads the file; the portal backends do.
+            its own recorded. Only entity-service reads and writes the file; no other service uses this key.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
         deletedOn:
@@ -40660,6 +40660,13 @@ components:
 
     CompleteAttachmentUploadRequest:
       type: object
+      description: >-
+        Body of POST /attachments/upload/{id}/confirm. Entity-service now holds the files, so
+        this replaces the earlier confirm body, and the authorize, locate and inline
+        location and relocated operations were removed with it. There is no compatibility
+        period: deploy entity-service first (with the AZURE_STORAGE_* settings), then the
+        CSM portal backend, the customer portal backend and the notification service in the
+        same release. An older backend calls operations that no longer exist.
       required: [type, chunks]
       additionalProperties: false
       properties:

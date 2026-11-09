@@ -482,9 +482,9 @@ func main() {
 	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
-	// access decision. This backend holds the Azure Blob Storage credentials and
-	// moves the bytes: an upload arrives in chunks, a download and a comment's
-	// inline image are streamed through it (so they are PermDownloadAttachment);
+	// access decision and holds the files in Azure Blob Storage. This backend holds
+	// no storage credential: it forwards an upload's chunks and streams a download
+	// or a comment's inline image back (so those are PermDownloadAttachment);
 	// upload, confirm and delete are PermWrite.
 	storedAttachmentHandler := handler.NewStoredAttachmentHandler(customerEntityClient)
 	blobAttachmentHandler := handler.NewBlobAttachmentHandler(customerEntityClient).WithAccessGuard(accessGuard)
