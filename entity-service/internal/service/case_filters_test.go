@@ -506,6 +506,34 @@ func TestResolveRelativeDate_WeekEdges(t *testing.T) {
 	}
 }
 
+// The offset bound refuses nothing that used to resolve: an offset at the
+// bound still resolves (here, to a date parseCaseFilterDate then rejects as
+// out of range, exactly as before), and every date from the years 0000-9999
+// stays reachable.
+func TestResolveRelativeDate_OffsetBound(t *testing.T) {
+	cases := []struct{ value, expected string }{
+		{"__startOfYear:-2026__", "0000-01-01"},
+		{"__endOfYear:7973__", "9999-12-31"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			resolved, matched, err := resolveRelativeDate(tc.value, fixedNow)
+			if err != nil || !matched || resolved != tc.expected {
+				t.Fatalf("resolveRelativeDate(%q) = %q %v %v, want %q", tc.value, resolved, matched, err, tc.expected)
+			}
+		})
+	}
+	for _, value := range []string{"__startOfWeek:4000000__", "__daysAgo:4000000__", "__startOfMonth:-4000000__", "__startOfYear:7974__"} {
+		if _, matched, err := resolveRelativeDate(value, fixedNow); err != nil || !matched {
+			t.Errorf("resolveRelativeDate(%q) = %v %v, want it resolved (the bound is not what refuses it)", value, matched, err)
+		}
+		f := domain.CaseFieldFilter{Field: "createdOn", Op: "gte", Values: []string{value}}
+		if _, err := parseCaseFilterDate(f, value, fixedNow); err == nil {
+			t.Errorf("parseCaseFilterDate(%q) = nil error, want the out-of-range date rejected", value)
+		}
+	}
+}
+
 func TestResolveRelativeDate_NotAPlaceholder(t *testing.T) {
 	cases := []string{"2026-07-01", "2026-07-01T00:00:00Z", "__current_user_email__", "__bogus__", "__bogus:1__", "not-a-date-at-all"}
 
@@ -532,6 +560,15 @@ func TestResolveRelativeDate_Rejections(t *testing.T) {
 		"__startOfQuarter__", // missing required offset
 		"__startOfWeek__",    // missing required offset
 		"__endOfYear:x__",    // non-integer offset
+		// An offset past maxRelativeDateOffset, and ones that used to wrap
+		// to a date that looks valid.
+		"__daysAgo:4000001__",
+		"__startOfWeek:-4000001__",
+		"__startOfYear:9223372036854775807__",
+		"__endOfYear:9223372036854775807__",
+		"__startOfWeek:9223372036854775807__",
+		"__startOfMonth:-9223372036854775808__",
+		"__startOfQuarter:9223372036854775807__",
 	}
 
 	for _, value := range cases {

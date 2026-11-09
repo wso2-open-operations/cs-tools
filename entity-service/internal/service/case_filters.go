@@ -200,9 +200,18 @@ func resolveRelativeDate(value string, now time.Time) (resolved string, matched 
 	}
 }
 
+// maxRelativeDateOffset bounds a placeholder's :N offset. Without it a huge
+// N overflows the date arithmetic and wraps to a date that looks valid
+// (__startOfYear:9223372036854775807__ gave 2024-12-31). Every offset beyond
+// it lands outside the years 0000-9999, which parseCaseFilterDate already
+// rejects, so the bound refuses nothing that used to resolve. The CSM
+// backend's relativeDate and the webapp's resolver use the same bound.
+const maxRelativeDateOffset = 4_000_000
+
 // parseRelativeDateArg parses a relativeDatePlaceholderPattern match's :N
-// argument, rejecting a missing or non-integer offset with an error naming
-// the full original placeholder value.
+// argument, rejecting a missing, non-integer or out-of-bounds
+// (maxRelativeDateOffset) offset with an error naming the full original
+// placeholder value.
 func parseRelativeDateArg(value, argStr string) (int, error) {
 	if argStr == "" {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q requires a :N integer offset", value)}
@@ -210,6 +219,9 @@ func parseRelativeDateArg(value, argStr string) (int, error) {
 	n, err := strconv.Atoi(argStr)
 	if err != nil {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has a non-integer offset", value)}
+	}
+	if n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has an offset beyond %d", value, maxRelativeDateOffset)}
 	}
 	return n, nil
 }
