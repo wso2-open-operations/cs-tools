@@ -141,8 +141,6 @@ func TestParseGenerated_Rejects(t *testing.T) {
 		{"filter presets", strings.Replace(widget(count), "{", `{"filterPresets":{},`, 1), `"filterPresets" cannot be set`},
 		{"isDefault", strings.Replace(widget(count), `"isDefault":false`, `"isDefault":true`, 1), `"isDefault" must be false`},
 		{"not a supported resource type", widget(`{"id":"w","displayName":"W","resourceType":"incident_task","shape":"count","gridWidth":3,"query":{}}`), `resourceType "incident_task" is not one of`},
-		{"PLG organisations are not generated yet", widget(`{"id":"w","displayName":"W","resourceType":"plg_organization","shape":"count","gridWidth":3,"query":{}}`), `resourceType "plg_organization" is not one of`},
-		{"PLG registrations are not generated yet", widget(`{"id":"w","displayName":"W","resourceType":"plg_registration","shape":"count","gridWidth":3,"query":{}}`), `resourceType "plg_registration" is not one of`},
 		{"wrong value type", widget(`{"id":"w","displayName":"W","resourceType":"case","shape":"count","gridWidth":"3","query":{}}`), "invalid generated dashboard"},
 		{"cs and team based", strings.Replace(widget(count), `"isTeamBased":false`, `"isTeamBased":true`, 1), "contradictory configuration"},
 		{"no display name", strings.Replace(widget(count), `"displayName":"D",`, "", 1), `"displayName" is empty`},

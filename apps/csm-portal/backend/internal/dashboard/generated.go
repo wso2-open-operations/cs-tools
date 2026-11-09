@@ -100,7 +100,7 @@ func ParseGenerated(raw []byte) (Dashboard, error) {
 			continue
 		}
 		if !caseTableResourceTypes[w.ResourceType] {
-			return Dashboard{}, fmt.Errorf("%w: widgets[%d] (%q): resourceType %q is not one of case, service_request, engagement, security_report_analysis, announcement, time_card, incident, change_request, problem, account, project, case_feedback",
+			return Dashboard{}, fmt.Errorf("%w: widgets[%d] (%q): resourceType %q is not one of case, service_request, engagement, security_report_analysis, announcement, time_card, incident, change_request, problem, account, project, case_feedback, plg_organization, plg_registration",
 				ErrGeneratedInvalid, i, w.ID, w.ResourceType)
 		}
 	}
