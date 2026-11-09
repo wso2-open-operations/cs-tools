@@ -17,9 +17,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -174,6 +176,24 @@ func TestGenerateMapsEveryError(t *testing.T) {
 		if msg, _ := out["message"].(string); strings.Contains(msg, "bad key") || msg == "" {
 			t.Errorf("%v: message %q, want a fixed message without upstream detail", tc.err, msg)
 		}
+	}
+}
+
+// TestGenerateLogsTheUsageLimitCause: the usage limit's log line carries the
+// error, so an operator can tell a request, token or spend limit apart (the
+// response's message stays fixed).
+func TestGenerateLogsTheUsageLimitCause(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	err := fmt.Errorf("%w: %w: 429 token limit exceeded", dashboards.ErrCall, dashboards.ErrUsageLimit)
+	if status, _ := post(t, &DashboardHandler{generator: &fakeGenerator{err: err}}, `{"prompt":"p"}`); status != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429", status)
+	}
+	if line := buf.String(); !strings.Contains(line, "usage limit reached") || !strings.Contains(line, "429 token limit exceeded") {
+		t.Errorf("log = %q, want the usage limit line with its cause", line)
 	}
 }
 

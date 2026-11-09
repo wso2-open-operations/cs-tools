@@ -230,7 +230,7 @@ func writeGenerateError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.WarnContext(ctx, "dashboard generate: unusable reply", "err", err)
 		writeError(w, http.StatusBadGateway, CodeUnusable, "the model's reply could not be used")
 	case errors.Is(err, dashboards.ErrUsageLimit):
-		slog.WarnContext(ctx, "dashboard generate: model usage limit reached")
+		slog.WarnContext(ctx, "dashboard generate: model usage limit reached", "err", err)
 		writeError(w, http.StatusTooManyRequests, CodeUsageLimit, "the model's usage limit was reached")
 	case errors.Is(err, dashboards.ErrCall) && isTimeout(err):
 		slog.WarnContext(ctx, "dashboard generate: model call timed out", "err", err)
