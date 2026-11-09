@@ -206,7 +206,7 @@ var generatedResourceRules = map[ResourceType]resourceRules{
 
 // generatedRelativeDate is a relative date placeholder the webapp turns into
 // a date before the request (resolveRelativeDateFilters).
-var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter)(:-?\d+)?__$`)
+var generatedRelativeDate = regexp.MustCompile(`^__(today|daysAgo|startOfWeek|endOfWeek|startOfMonth|endOfMonth|startOfQuarter|endOfQuarter|startOfYear|endOfYear)(:-?\d+)?__$`)
 
 // checkGeneratedResourceWidget checks a generated widget whose resourceType
 // is in generatedResourceRules: its shape, groupBy, query, every slice's
@@ -500,41 +500,104 @@ func windowDays(start, end time.Time) int {
 
 // relativeDate resolves a relative date token on the given day, as the
 // webapp's resolveRelativeDatePlaceholderToDate does: __today__ (no
-// argument), __daysAgo:N__ (N >= 0), and __startOfMonth:N__, __endOfMonth:N__,
-// __startOfQuarter:N__, __endOfQuarter:N__ (N months / quarters from the
-// current one; the argument is required). false for a token the webapp
-// leaves unresolved.
+// argument), __daysAgo:N__ (N >= 0), and __startOfWeek:N__, __endOfWeek:N__,
+// __startOfMonth:N__, __endOfMonth:N__, __startOfQuarter:N__,
+// __endOfQuarter:N__, __startOfYear:N__, __endOfYear:N__ (N weeks / months /
+// quarters / years from the current one; the argument is required). A week
+// runs Monday to Sunday. false for a token the webapp leaves unresolved,
+// and for an argument beyond maxRelativeDateOffset.
 func relativeDate(token string, today time.Time) (time.Time, bool) {
+	r, ok := parseRelativeDate(token)
+	if !ok {
+		return time.Time{}, false
+	}
+	return r.on(today), true
+}
+
+// relativeDateToken is a relative date token parsed once, so it can be
+// resolved on many days (relativeLinePoints) without parsing it again.
+type relativeDateToken struct {
+	name string
+	arg  int
+}
+
+// parseRelativeDate parses a token relativeDate resolves; false for one it
+// does not.
+func parseRelativeDate(token string) (relativeDateToken, bool) {
 	m := relativeDateParts.FindStringSubmatch(token)
 	if m == nil {
-		return time.Time{}, false
+		return relativeDateToken{}, false
 	}
 	name, arg, hasArg := m[1], 0, m[2] != ""
 	if hasArg {
 		n, err := strconv.Atoi(m[2])
-		if err != nil {
-			return time.Time{}, false
+		if err != nil || n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+			return relativeDateToken{}, false
 		}
 		arg = n
 	}
-	monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
-	quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
-	switch {
-	case name == "today" && !hasArg:
-		return today, true
-	case name == "daysAgo" && hasArg && arg >= 0:
-		return today.AddDate(0, 0, -arg), true
-	case name == "startOfMonth" && hasArg:
-		return monthStart.AddDate(0, arg, 0), true
-	case name == "endOfMonth" && hasArg:
-		return monthStart.AddDate(0, arg+1, -1), true
-	case name == "startOfQuarter" && hasArg:
-		return quarterStart.AddDate(0, 3*arg, 0), true
-	case name == "endOfQuarter" && hasArg:
-		return quarterStart.AddDate(0, 3*(arg+1), -1), true
+	switch name {
+	case "today":
+		if hasArg {
+			return relativeDateToken{}, false
+		}
+	case "daysAgo":
+		if !hasArg || arg < 0 {
+			return relativeDateToken{}, false
+		}
+	case "startOfMonth", "endOfMonth", "startOfQuarter", "endOfQuarter",
+		"startOfWeek", "endOfWeek", "startOfYear", "endOfYear":
+		if !hasArg {
+			return relativeDateToken{}, false
+		}
+	default:
+		return relativeDateToken{}, false
 	}
-	return time.Time{}, false
+	return relativeDateToken{name: name, arg: arg}, true
 }
+
+// on is the day the token names, counted from today.
+func (r relativeDateToken) on(today time.Time) time.Time {
+	arg := r.arg
+	switch r.name {
+	case "daysAgo":
+		return today.AddDate(0, 0, -arg)
+	case "startOfMonth", "endOfMonth":
+		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfMonth" {
+			return monthStart.AddDate(0, arg, 0)
+		}
+		return monthStart.AddDate(0, arg+1, -1)
+	case "startOfQuarter", "endOfQuarter":
+		quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfQuarter" {
+			return quarterStart.AddDate(0, 3*arg, 0)
+		}
+		return quarterStart.AddDate(0, 3*(arg+1), -1)
+	case "startOfWeek", "endOfWeek":
+		// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+		weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
+		if r.name == "startOfWeek" {
+			return weekStart.AddDate(0, 0, 7*arg)
+		}
+		return weekStart.AddDate(0, 0, 7*arg+6)
+	case "startOfYear", "endOfYear":
+		yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfYear" {
+			return yearStart.AddDate(arg, 0, 0)
+		}
+		return yearStart.AddDate(arg+1, 0, -1)
+	}
+	return today // "today"
+}
+
+// maxRelativeDateOffset bounds a relative date token's argument, as
+// entity-service's resolveRelativeDate and the webapp's resolver do. Without
+// it a huge argument overflows the date arithmetic and wraps to a date that
+// looks valid (__startOfYear:9223372036854775807__ gave 2024-12-31). Every
+// argument beyond it lands outside the years 0000-9999, which entity-service
+// rejects, so the bound refuses nothing that used to resolve there.
+const maxRelativeDateOffset = 4_000_000
 
 // relativeDateParts splits a generatedRelativeDate token into its name and
 // optional argument.

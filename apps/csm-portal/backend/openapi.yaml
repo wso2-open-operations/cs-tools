@@ -4467,13 +4467,13 @@ paths:
   /cases/volume-trend:
     post:
       summary: >-
-        Day-bucketed case-volume trend (opened vs. closed), for the Case
-        Summary dashboard's trend chart.
+        Case-volume trend (opened vs. closed), for a dashboard line widget.
       description: >-
         Plain forward-and-return proxy to the entity service's own POST
         /cases/volume-trend: exactly two series, "Opened" (by created date)
         and "Closed" (by closed date), one point per UTC calendar day over a
-        trailing window (30 days by default).
+        trailing window (30 days by default), or over a fixed
+        startDate/endDate window one point per day, week or month.
       operationId: postCasesVolumeTrend
       requestBody:
         description: Case volume-trend payload
@@ -4515,6 +4515,15 @@ paths:
                 $ref: '#/components/schemas/ErrorPayload'
         "500":
           description: InternalServerError
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "502":
+          description: >-
+            BadGateway. Also when a fixed window (startDate) was asked for and
+            the entity service answered without echoing it, as one older than
+            the fixed window does (it answers its trailing 30 days instead).
           content:
             application/json:
               schema:
@@ -20744,7 +20753,28 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): YYYY-MM-DD or a
+            relative date placeholder. Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months.
 
     CaseVolumeTrendPoint:
       type: object
@@ -20752,7 +20782,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window.
         count:
           type: integer
 
@@ -20767,18 +20805,31 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
       description: >-
-        Day-bucketed case-volume trend: always exactly two series, "Opened"
-        (by created date) and "Closed" (by closed date).
+        Case-volume trend: always exactly two series, "Opened" (by created
+        date) and "Closed" (by closed date).
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:
@@ -21291,6 +21342,54 @@ components:
             instead of a donut plus separate legend list. Omitted/false is a
             no-op — this backend only forwards it, exactly like
             inlineDrilldown.
+        days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: >
+            Only meaningful for shape "line": the trailing window, in days
+            ending today, of the Opened/Closed trend. Omitted means 30.
+        series:
+          type: array
+          minItems: 1
+          maxItems: 2
+          uniqueItems: true
+          items:
+            type: string
+            enum: [opened, closed]
+          description: >
+            Only meaningful for shape "line": which of its two lines to draw.
+            Omitted draws both, as every line widget did before this field.
+            An empty list, an unknown or repeated value, and the field on any
+            other shape are refused when the definition is loaded.
+        startDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the first day of a fixed window
+            instead of days's trailing one, e.g. "2025-12-01" for December
+            2025. A plain YYYY-MM-DD date, or a relative date placeholder when
+            endDate is one too. Needs endDate; not with days.
+        endDate:
+          type: string
+          description: >
+            Only meaningful for shape "line": the last day of the fixed
+            window (inclusive), in the same form as startDate.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >
+            Only meaningful for shape "line" with startDate/endDate: one point
+            per day (the default, at most 90 days), per week (Monday to
+            Sunday, at most 54 weeks) or per month (at most 24 months). Two
+            relative dates must stay within the limit on every day.
+        chart:
+          type: string
+          enum: [line, bar]
+          description: >
+            Only meaningful for shape "line": how its points are drawn. bar
+            draws them as bars (two side by side when both series are
+            shown); line, or the field left out, draws lines. The data and
+            the window are the same either way.
 
     DashboardListItem:
       type: object

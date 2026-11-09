@@ -7277,13 +7277,14 @@ paths:
 
   /cases/volume-trend:
     post:
-      summary: Day-bucketed case-volume trend (opened vs. closed), for a dashboard chart.
+      summary: Case-volume trend (opened vs. closed), for a dashboard chart.
       description: >-
         Returns exactly two series, "Opened" (by created date) and "Closed"
         (by closed date), one point per UTC calendar day over a trailing
-        window (30 days by default). Deliberately narrow compared to the
-        aggregate operation's open-ended groupBy: this backs exactly one
-        chart, not a platform.
+        window (30 days by default), or over a fixed startDate/endDate
+        window one point per day, week (Monday to Sunday) or month.
+        Deliberately narrow compared to the aggregate operation's open-ended
+        groupBy: this backs one chart, not a platform.
       operationId: caseVolumeTrend
       requestBody:
         required: false
@@ -7293,7 +7294,7 @@ paths:
               $ref: '#/components/schemas/CaseVolumeTrendRequest'
       responses:
         "200":
-          description: Daily opened/closed case counts for the requested window.
+          description: Opened/closed case counts for the requested window.
           content:
             application/json:
               schema:
@@ -24548,7 +24549,29 @@ components:
           type: integer
           description: >-
             Size of the trailing window, ending today (UTC). Optional;
-            defaults to 30 when omitted. Must be between 1 and 90.
+            defaults to 30 when omitted. Must be between 1 and 90. Not
+            allowed together with startDate/endDate.
+        startDate:
+          type: string
+          description: >-
+            First day of a fixed window (inclusive, UTC): a YYYY-MM-DD date or
+            a relative date placeholder (__today__, __startOfMonth:-1__, ...).
+            Needs endDate.
+          example: "2025-12-01"
+        endDate:
+          type: string
+          description: >-
+            Last day of a fixed window (inclusive, UTC), in the same forms as
+            startDate. Needs startDate. A day after today counts 0.
+          example: "2025-12-31"
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: >-
+            How a fixed window's days are grouped into points. Optional;
+            defaults to day. day covers at most 90 days, week (Monday to
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months. Only with startDate/endDate.
 
     CaseVolumeTrendPoint:
       type: object
@@ -24557,7 +24580,15 @@ components:
         date:
           type: string
           format: date
-          description: UTC calendar day (YYYY-MM-DD).
+          description: >-
+            UTC calendar day (YYYY-MM-DD); for a week or month point, the
+            bucket's first day within the window.
+        endDate:
+          type: string
+          format: date
+          description: >-
+            For a week or month point only: the bucket's last day within the
+            window, so date to endDate are exactly the days counted.
         count:
           type: integer
 
@@ -24573,8 +24604,9 @@ components:
           items:
             $ref: '#/components/schemas/CaseVolumeTrendPoint'
           description: >-
-            One point per day in the requested window, oldest first. A day
-            with no matching cases is still present, with count 0.
+            One point per day (or week or month) in the requested window,
+            oldest first. A point with no matching cases is still present,
+            with count 0.
 
     CaseVolumeTrendResponse:
       type: object
@@ -24585,7 +24617,19 @@ components:
       properties:
         days:
           type: integer
-          description: The size of the window actually returned.
+          description: The number of days the window covers.
+        startDate:
+          type: string
+          format: date
+          description: A fixed window's first day, resolved; absent for the trailing window.
+        endDate:
+          type: string
+          format: date
+          description: A fixed window's last day, resolved; absent for the trailing window.
+        bucket:
+          type: string
+          enum: [day, week, month]
+          description: A fixed window's grouping; absent for the trailing window.
         series:
           type: array
           items:

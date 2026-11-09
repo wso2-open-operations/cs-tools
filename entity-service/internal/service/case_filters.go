@@ -95,10 +95,17 @@ var relativeDatePlaceholderPattern = regexp.MustCompile(`^__([a-zA-Z]+)(?::([^_]
 // Supported placeholders (N is a signed integer offset, 0 = current):
 //   - __today__                 today's date
 //   - __daysAgo:N__             today minus N days (N >= 0)
+//   - __startOfWeek:N__         Monday of the week N weeks from now
+//   - __endOfWeek:N__           Sunday of the week N weeks from now
 //   - __startOfMonth:N__        1st of the month N months from now
 //   - __endOfMonth:N__          last day of the month N months from now
 //   - __startOfQuarter:N__      1st of the quarter N quarters from now
 //   - __endOfQuarter:N__        last day of the quarter N quarters from now
+//   - __startOfYear:N__         1 January of the year N years from now
+//   - __endOfYear:N__           31 December of the year N years from now
+//
+// Weeks run Monday to Sunday (ISO), as in the webapp's own resolver
+// (resolveRelativeDatePlaceholder.ts).
 //
 // Each resolves to a plain date (no time component); the caller (parseCaseFilterDate)
 // applies the existing date-only handling -- including the lte
@@ -156,6 +163,34 @@ func resolveRelativeDate(value string, now time.Time) (resolved string, matched 
 		}
 		return startOfRelativeQuarter(now, n+1).AddDate(0, 0, -1).Format("2006-01-02"), true, nil
 
+	case "startOfWeek":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeWeek(now, n).Format("2006-01-02"), true, nil
+
+	case "endOfWeek":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeWeek(now, n).AddDate(0, 0, 6).Format("2006-01-02"), true, nil
+
+	case "startOfYear":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeYear(now, n).Format("2006-01-02"), true, nil
+
+	case "endOfYear":
+		n, err := parseRelativeDateArg(value, argStr)
+		if err != nil {
+			return "", false, err
+		}
+		return startOfRelativeYear(now, n+1).AddDate(0, 0, -1).Format("2006-01-02"), true, nil
+
 	default:
 		// Shape matches (__name__ or __name:N__) but the name isn't one of
 		// ours -- not a relative-date placeholder at all (e.g. some other
@@ -165,9 +200,18 @@ func resolveRelativeDate(value string, now time.Time) (resolved string, matched 
 	}
 }
 
+// maxRelativeDateOffset bounds a placeholder's :N offset. Without it a huge
+// N overflows the date arithmetic and wraps to a date that looks valid
+// (__startOfYear:9223372036854775807__ gave 2024-12-31). Every offset beyond
+// it lands outside the years 0000-9999, which parseCaseFilterDate already
+// rejects, so the bound refuses nothing that used to resolve. The CSM
+// backend's relativeDate and the webapp's resolver use the same bound.
+const maxRelativeDateOffset = 4_000_000
+
 // parseRelativeDateArg parses a relativeDatePlaceholderPattern match's :N
-// argument, rejecting a missing or non-integer offset with an error naming
-// the full original placeholder value.
+// argument, rejecting a missing, non-integer or out-of-bounds
+// (maxRelativeDateOffset) offset with an error naming the full original
+// placeholder value.
 func parseRelativeDateArg(value, argStr string) (int, error) {
 	if argStr == "" {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q requires a :N integer offset", value)}
@@ -175,6 +219,9 @@ func parseRelativeDateArg(value, argStr string) (int, error) {
 	n, err := strconv.Atoi(argStr)
 	if err != nil {
 		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has a non-integer offset", value)}
+	}
+	if n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
+		return 0, &apierror.ValidationError{Msg: fmt.Sprintf("filters: %q has an offset beyond %d", value, maxRelativeDateOffset)}
 	}
 	return n, nil
 }
@@ -193,6 +240,21 @@ func startOfRelativeQuarter(now time.Time, n int) time.Time {
 	quarterStartMonth := ((int(now.Month())-1)/3)*3 + 1
 	base := time.Date(now.Year(), time.Month(quarterStartMonth), 1, 0, 0, 0, 0, time.UTC)
 	return base.AddDate(0, n*3, 0)
+}
+
+// startOfRelativeWeek returns the Monday of the week n weeks from now's week
+// (UTC, midnight), e.g. n=0 this week, n=-1 last week.
+func startOfRelativeWeek(now time.Time, n int) time.Time {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+	sinceMonday := (int(today.Weekday()) + 6) % 7
+	return today.AddDate(0, 0, -sinceMonday+7*n)
+}
+
+// startOfRelativeYear returns 1 January of the year n years from now's year
+// (UTC, midnight), e.g. n=0 this year, n=-1 last year.
+func startOfRelativeYear(now time.Time, n int) time.Time {
+	return time.Date(now.Year()+n, time.January, 1, 0, 0, 0, 0, time.UTC)
 }
 
 // parseCaseFilterDate parses a single filter value into a date/time. The

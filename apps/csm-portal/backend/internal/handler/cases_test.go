@@ -3978,6 +3978,38 @@ func TestVolumeTrend(t *testing.T) {
 		}
 	})
 
+	// An entity service older than the fixed window ignores startDate /
+	// endDate / bucket and answers its trailing 30 days: refused, so a line
+	// widget does not show those as its window.
+	t.Run("a fixed window answered without its echo is a 502", func(t *testing.T) {
+		client := &mockEntityCaseClient{
+			volumeTrendFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(`{"days":30,"series":[]}`), nil
+			},
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/volume-trend",
+			strings.NewReader(`{"filters":{},"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week"}`)))
+		w := httptest.NewRecorder()
+		NewCaseHandler(client).VolumeTrend(w, r)
+		assertStatus(t, w, http.StatusBadGateway)
+		assertErrorMessage(t, w, "Failed to load case volume trend.")
+	})
+
+	t.Run("a fixed window answered with its echo is passed through", func(t *testing.T) {
+		const answer = `{"days":31,"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week","series":[]}`
+		client := &mockEntityCaseClient{
+			volumeTrendFn: func(_ context.Context, _ []byte) ([]byte, error) { return []byte(answer), nil },
+		}
+		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/volume-trend",
+			strings.NewReader(`{"filters":{},"startDate":"2025-12-01","endDate":"2025-12-31","bucket":"week"}`)))
+		w := httptest.NewRecorder()
+		NewCaseHandler(client).VolumeTrend(w, r)
+		assertStatus(t, w, http.StatusOK)
+		if w.Body.String() != answer {
+			t.Errorf("body = %s, want the answer as it is", w.Body.String())
+		}
+	})
+
 	t.Run("upstream errors are mapped correctly", func(t *testing.T) {
 		for _, tc := range upstreamErrorsGeneric("Failed to load case volume trend.") {
 			t.Run(tc.name, func(t *testing.T) {

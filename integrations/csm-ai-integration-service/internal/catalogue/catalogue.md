@@ -84,7 +84,7 @@ Do not use any other dashboard field.
 | `list` | The top records. | `listLimit` (integer, default 4; use 5 to 10). **Always set `sortBy`** (section 6). |
 | `pie` | Wedges, one per group. | **Exactly one of** `slices` or `groupBy` (section 7). Optional `inlineDrilldown: true` (click a wedge to see its records in place). |
 | `bar` | Bars, one per group. | Same as `pie`. |
-| `line` | Cases opened vs closed per day. | **Only with `resourceType: "case"`.** `days` 1 to 90 (default 30). |
+| `line` | Cases opened vs closed per day, week or month. | **Only with `resourceType: "case"`.** A window: `days` (the last N days, 1 to 90, default 30) **or** `startDate` + `endDate` + `bucket` (below), never both. Optional `series`: `["opened"]` draws only the cases opened (created), `["closed"]` only the cases closed; leave it out to draw both (section 8). Optional `"chart": "bar"` draws the points as bars (below). |
 
 A `time_card` widget is `count`, `list`, or `pie`/`bar` with `slices` or `groupBy` (section 5a: by
 state, user, project or day, counting cards or summing hours; no `line`).
@@ -94,7 +94,33 @@ with `slices` only (no `groupBy`, no `line`). A `case_feedback` widget is `count
 with `groupBy.bucket` (section 5d) or rating `slices` (no `line`).
 
 Fields that belong to one shape must not appear on another (`listLimit`/`sortBy` on lists only,
-`slices`/`groupBy` on pie/bar only, `days` on line only).
+`slices`/`groupBy` on pie/bar only, `days`/`series`/`startDate`/`endDate`/`bucket` on line only).
+
+**A line's window.** "Last N days" (N up to 90) and a trend with no period is `days`. Any other period
+is `startDate` and `endDate` with the dates of section 5 (both plain dates for a named period, both
+tokens for one counted from today; a period that includes today ends at `__today__`, so the line stops
+today), plus a `bucket`:
+
+| Request | `bucket` |
+|---|---|
+| "per day", "daily", or no unit named, for a window of at most 90 days (a month, a range) | `day` (or leave it out) |
+| "per week", "weekly", or no unit named for a quarter up to a year (a quarter can be 92 days, too long per day) | `week` (at most 53 weeks) |
+| "per month", "monthly", or a window over a year (at most 24 months) | `month` |
+
+"Per day" over more than 90 days uses `week` instead (and "per week" over more than 53 weeks, `month`),
+with a `description` saying so. Over 24 months: reply with `{"error": ...}`. "Last N weeks" / "last N
+months" is `__startOfWeek:-<N-1>__` / `__startOfMonth:-<N-1>__` to `__today__`, by week / month.
+
+**A trend as bars.** Cases per day, week or month, or over time, asked for as a bar ("bar chart",
+"bars", "as a bar", "column chart") is still a `line` widget, with `"chart": "bar"` and the same window,
+`bucket` and `series` it would have as a line. It is never a `bar` widget (cases have no date grouping
+or slices per period). Leave `chart` out for lines.
+
+```json
+{ "id": "cases-per-day-dec-2025", "displayName": "Cases Created per Day in December 2025",
+  "resourceType": "case", "shape": "line", "gridWidth": 12, "query": {}, "series": ["opened"],
+  "startDate": "2025-12-01", "endDate": "2025-12-31" }
+```
 
 ---
 
@@ -119,15 +145,45 @@ ANDed. Only the field / op pairs in this table are accepted.
 | `taskSLABusinessElapsedPercent` | `gte`, `lte` | one number as a string, e.g. `["80"]` |
 | `tag` | `in`, `notIn` | tag names, **only if the request gives them** |
 | `product` | `in` | exact product names, **only if the request gives them** |
-| `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date token (below) |
+| `createdOn`, `updatedOn`, `closedOn`, `resolvedOn` | `gte`, `lte` | one date (below) |
 | `creTeam`, `sreTeam` | `in` | team **keys** from the Teams section (the last section), each in its team's field: e.g. `creTeam in ["rigel"]`, `creTeam in ["sirius", "draco"]`, `sreTeam in ["apollo"]` |
 | `creTeam`, `sreTeam` | `in` | `["__current_team__"]` ("my team"), **only on a `"cre"` dashboard**, never together with a team key |
 
-**Date tokens** (always relative, never a literal date): `__today__`, `__daysAgo:N__`,
-`__startOfMonth:N__`, `__endOfMonth:N__`, `__startOfQuarter:N__`, `__endOfQuarter:N__`
-(N = 0 this period, -1 the previous one). Example, "last 30 days":
-`{"field": "createdOn", "op": "gte", "values": ["__daysAgo:30__"]}`.
-"This month": `gte __startOfMonth:0__`.
+**Dates.** Every date filter in this file (`gte` from, `lte` to, both inclusive: `lte` covers the whole
+day) takes one value, of one of two kinds:
+
+- a **date token** for a period counted from today, so a saved dashboard moves with the date:
+  `__today__`, `__daysAgo:N__` (N >= 0), `__startOfWeek:N__`, `__endOfWeek:N__` (weeks run Monday to
+  Sunday), `__startOfMonth:N__`, `__endOfMonth:N__`, `__startOfQuarter:N__`, `__endOfQuarter:N__`,
+  `__startOfYear:N__`, `__endOfYear:N__` (N = 0 this period, -1 the previous one, -2 the one before);
+- a **plain date** `YYYY-MM-DD`, only for a period the request names by its calendar date, so it never
+  moves.
+
+| Request | `gte` | `lte` |
+|---|---|---|
+| "today" | `__today__` | |
+| "this week" / "this month" / "this quarter" / "this year" | `__startOfWeek:0__` / `__startOfMonth:0__` / `__startOfQuarter:0__` / `__startOfYear:0__` | |
+| "last week" / "last quarter" / "last year" (the previous calendar one) | `__startOfWeek:-1__` / `__startOfQuarter:-1__` / `__startOfYear:-1__` | `__endOfWeek:-1__` / `__endOfQuarter:-1__` / `__endOfYear:-1__` |
+| a named month: "December 2025", "2025 December", "Dec 2025" | `2025-12-01` | `2025-12-31` (the month's last day) |
+| a named quarter: "Q1 2026" | `2026-01-01` | `2026-03-31` |
+| a named year: "2025", "in 2025" | `2025-01-01` | `2025-12-31` |
+| a named day: "on 3 March 2026" | `2026-03-03` | `2026-03-03` |
+| a range: "1 to 15 March 2026", "between 2026-03-01 and 2026-03-15" | `2026-03-01` | `2026-03-15` |
+| "since 1 March 2026", "from March 2026" | `2026-03-01` | |
+| "until 31 March 2026" / "before 1 March 2026" | | `2026-03-31` / `2026-02-28` (the day before) |
+
+A month or quarter named **without a year** ("December", "in March", "Q2") is the most recent one that has
+begun on today's date: this year's if it has begun, otherwise last year's (in November 2026, "December"
+is December 2025 and "October" is October 2026). Today's date is given after the request
+(`Today's date: YYYY-MM-DD`). Never use a plain date for a period counted from today ("this month",
+"last 30 days"), and never a token for a named one ("December 2025").
+
+```json
+{ "id": "cases-dec-2025", "displayName": "Cases Created in December 2025", "resourceType": "case",
+  "shape": "count", "gridWidth": 4,
+  "query": { "filters": [ { "field": "createdOn", "op": "gte", "values": ["2025-12-01"] },
+                          { "field": "createdOn", "op": "lte", "values": ["2025-12-31"] } ] } }
+```
 
 **OR across fields** (use sparingly): add `"anyOf": [{"filters": [...]}, {"filters": [...]}]`
 beside `filters`. Each branch is ANDed inside; branches are ORed; the result is ANDed with
@@ -154,11 +210,8 @@ A time card's `query` is a **flat object**, never a `filters` array, and takes o
 |---|---|
 | `states` | a non-empty list of `pending`, `submitted`, `approved`, `rejected`, `processed`, `recalled` |
 | `userIds` | **only** `["__current_user__"]`: the viewer's own time cards ("my time cards") |
-| `startDate` | the work date from (inclusive): a relative date token (below) |
-| `endDate` | the work date to (inclusive): a relative date token (below) |
-
-Date tokens: `__today__`, `__daysAgo:N__`, `__startOfMonth:N__`, `__endOfMonth:N__`,
-`__startOfQuarter:N__`, `__endOfQuarter:N__` (`N` = 0 this month/quarter, -1 the previous one).
+| `startDate` | the work date from (inclusive): one date (section 5) |
+| `endDate` | the work date to (inclusive): one date (section 5) |
 
 ```json
 { "resourceType": "time_card", "shape": "count",
@@ -182,14 +235,17 @@ Shapes: `count`; `list` with `sortBy` `workDate` or `updatedOn` (section 6); `pi
 `"count"` (or leaving `measure` out) counts the cards ("number of time cards", "how many"). With
 `maxGroups` the top groups are kept by that measure.
 
-**A `day` grouping needs a window**: both `startDate` and `endDate`, **two date tokens**, at most
-**31 days** long on every day. Use exactly one of these:
+**A `day` grouping needs a window**: both `startDate` and `endDate`, **two date tokens or two plain
+dates** (never one of each), at most **31 days** long on every day. Use exactly one of these:
 
 | Request | `startDate` | `endDate` |
 |---|---|---|
 | "last N days" per day, N = 1 to 31 (e.g. 7, 14, 30) | `__daysAgo:<N-1>__` (last 7 days: `__daysAgo:6__`) | `__today__` |
+| "this week" per day | `__startOfWeek:0__` | `__today__` |
+| "last week" per day | `__startOfWeek:-1__` | `__endOfWeek:-1__` |
 | "this month" per day | `__startOfMonth:0__` | `__today__` |
 | "last month", "previous month" per day | `__startOfMonth:-1__` | `__endOfMonth:-1__` |
+| a named month or range of at most 31 days per day ("October 2026", "1 to 15 March 2026") | its first day | its last day |
 
 Anything longer per day ("this quarter", "this year", "last 60 days", "since <date>") is not expressible
 per day: reply with `{"error": ...}` suggesting the last 31 days per day, or the longer period per user or
@@ -242,7 +298,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 |---|---|---|---|
 | flat | `priorities` | (list) | `CRITICAL` (P1), `HIGH` (P2), `MODERATE` (P3), `LOW` (P4), `PLANNING` (P5) |
 | `filters` | `state` | `in` | `NEW`, `IN_PROGRESS`, `ON_HOLD`, `RESOLVED`, `CLOSED`, `CANCELLED` |
-| `filters` | `createdOn` | `gte`, `lte` | one date token (section 5) |
+| `filters` | `createdOn` | `gte`, `lte` | one date (section 5) |
 | `filters` | `slaViolated`, `madeSla` | `eq` | `["true"]` or `["false"]` |
 | `filters` | `assignedUserId` | `in` | `["__current_user__"]` only ("my incidents") |
 
@@ -259,7 +315,7 @@ reviewed), a **problem** is the root cause behind one or more incidents. Each ha
 | flat | `states` | (list) | `new`, `assess`, `authorize`, `customer_approval`, `scheduled`, `implement`, `review`, `customer_review`, `closed`, `canceled`, `rollback` |
 | flat | `impacts` | (list) | `high`, `medium`, `low` |
 | `filters` | `approval` | `eq` | exactly one of `not requested`, `requested`, `approved`, `rejected` |
-| `filters` | `createdOn` | `gte`, `lte` | one date token |
+| `filters` | `createdOn` | `gte`, `lte` | one date (section 5) |
 | `filters` | `assignedUserId` | `in` | `["__current_user__"]` only |
 
 **`problem`.** Only a `filters` list:
@@ -302,7 +358,7 @@ values are case-sensitive exactly as written.
 | `onboardingStatus` | a list of `Not-Started`, `In-Progress`, `Completed`, `Not-Applicable` |
 | `closureStatus` | one of `"Open"`, `"Suspended"`, `"Restricted"` |
 | `excludeClosureStates` | a list of `Open`, `Suspended`, `Restricted` to leave out |
-| `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date token (section 5a) |
+| `endDateFrom`, `endDateTo` | the subscription end date, from / to (inclusive): one date (section 5) |
 
 ```json
 { "resourceType": "account", "shape": "count", "query": { "abtTeam": "rigel", "healthStatus": "at_risk" } }
@@ -454,7 +510,7 @@ Never set both `slices` and `groupBy`.
 | "approved" (time cards) | `states ["approved", "processed"]` |
 | "rejected" / "recalled" (time cards) | `states ["rejected"]` / `states ["recalled"]` |
 | "time cards by state / status" | a `pie` or `bar` with one slice per state: Pending (`pending`), Submitted, Approved (approved + processed), Rejected. Leave Pending out only if the request asks to; add Recalled only if asked |
-| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
+| "this month", "last month", "past 30 days", "this week", "December 2025" (time cards) | `startDate` (and `endDate`) with the dates of section 5, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
 | "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
 | time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
@@ -466,7 +522,7 @@ Never set both `slices` and `groupBy`.
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
-| "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn gte <token>` |
+| "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn` with that period's dates (section 5) |
 | "unassigned", "no assignee" | not expressible: reply with `{"error": ...}` saying unassigned filtering is not supported |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
@@ -475,7 +531,14 @@ Never set both `slices` and `groupBy`.
 | "high and above" | `severity in ["catastrophic", "critical", "high"]` |
 | "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 |
 | "last N days/weeks" | `createdOn gte __daysAgo:N__` (weeks x 7) |
-| "trend", "over time", "opened vs closed" | a `line` widget |
+| "trend", "over time", "opened vs closed" | a `line` widget, no `series` (both lines) |
+| "new cases per day", "cases opened per day", "case intake trend" | a `line` widget with `series: ["opened"]` |
+| "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
+| editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
+| editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
+| a trend or cases per day / week / month as a bar | that `line` with `"chart": "bar"` (section 4) |
+| editing a `line` widget: "show it as bars" / "as a line" | set `"chart": "bar"` / remove `chart` |
+| a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
 | "cases" with no other type named | `resourceType: "case"` |
@@ -492,6 +555,7 @@ Never set both `slices` and `groupBy`.
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
 | "last calendar month", "previous month" | `createdOn gte __startOfMonth:-1__` and `createdOn lte __endOfMonth:-1__` |
+| "this week", "this year", "last week", "last year", a named month, quarter, year, day or range | `createdOn` (or the date the request names) with the dates of section 5 |
 
 If two readings are plausible and the table does not settle it, pick the one above and add a
 `description` on the widget saying what it counts (e.g. "Every state except Closed").
@@ -500,13 +564,17 @@ If two readings are plausible and the table does not settle it, pick the one abo
 
 ## 9. Check before you answer
 
-1. Only fields, ops, values and shapes from this file. No literal dates or ids. Email addresses only in
+1. Only fields, ops, values and shapes from this file. No ids. A date is a token of section 5 for a
+   period counted from today, or a plain `YYYY-MM-DD` date only for a period the request names. Email addresses only in
    `createdBy in`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, `days` 1-90.
+5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
+   dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
+   absent (both lines) or exactly `["opened"]` or `["closed"]`; `chart` absent or `"bar"`. An edit keeps
+   a line widget's `series`, window and `chart` unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),

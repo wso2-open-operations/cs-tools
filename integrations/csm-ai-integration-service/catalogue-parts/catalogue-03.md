@@ -1,3 +1,43 @@
+## 7. Grouping (pie and bar)
+
+**Fixed slices**: use when the groups are a short known list (severity, state, issue type, work
+state, engagement type, ABT teams). One slice per value, in a sensible order:
+
+```json
+"slices": [
+  { "label": "Critical", "color": "error",
+    "query": { "filters": [ { "field": "severity", "op": "in", "values": ["critical"] } ] } }
+]
+```
+
+Each slice's `query.filters` is added to the widget's own `query.filters`. `color` is optional, one
+of `primary`, `secondary`, `success`, `error`, `info`, `warning`; use `error` for the most severe
+or breached group, `warning` next, otherwise leave it out.
+
+**Server-side grouping**: use when the groups are open-ended:
+
+```json
+"groupBy": { "field": "account", "maxGroups": 10 }
+```
+
+`groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
+`change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
+`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+section 5d). `measure` is for `time_card` only. Prefer `slices` for
+`state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
+add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
+that account:
+
+```json
+"groupBy": { "field": "account", "maxGroups": 10, "linkResourceType": "account" }
+```
+
+`maxGroups` 5 to 12.
+
+Never set both `slices` and `groupBy`.
+
+---
+
 ## 8. House rules for reading English
 
 | Words | Means |
@@ -50,7 +90,7 @@
 | "approved" (time cards) | `states ["approved", "processed"]` |
 | "rejected" / "recalled" (time cards) | `states ["rejected"]` / `states ["recalled"]` |
 | "time cards by state / status" | a `pie` or `bar` with one slice per state: Pending (`pending`), Submitted, Approved (approved + processed), Rejected. Leave Pending out only if the request asks to; add Recalled only if asked |
-| "this month", "last month", "past 30 days" (time cards) | `startDate` (and `endDate`) with the date tokens of section 5a, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
+| "this month", "last month", "past 30 days", "this week", "December 2025" (time cards) | `startDate` (and `endDate`) with the dates of section 5, on the work date; "last N days" / "past N days": `__daysAgo:<N-1>__` to `__today__` |
 | "hours", "time logged", "time spent", "effort" (time cards, per something) | `groupBy` with `"measure": "hours"` (section 5a) |
 | time cards or hours "per user", "per engineer", "per person", "by team member" | a `bar` with `groupBy` `user`, `maxGroups` 10 |
 | time cards or hours "per project" | a `bar` with `groupBy` `project`, `maxGroups` 10 |
@@ -62,7 +102,7 @@
 | "in progress" | `state in ["work_in_progress"]` |
 | "waiting on us", "waiting on WSO2" | `state in ["waiting_on_wso2"]` |
 | "waiting on the customer" | `state in ["awaiting_info", "solution_proposed"]` |
-| "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn gte <token>` |
+| "closed" / "resolved" in a period | `state in ["closed"]` plus `closedOn` with that period's dates (section 5) |
 | "unassigned", "no assignee" | not expressible: reply with `{"error": ...}` saying unassigned filtering is not supported |
 | "escalated", "escalations" | `escalation isNotEmpty` |
 | "SLA breached", "SLA violations" | `slaBreached eq ["true"]` |
@@ -71,7 +111,14 @@
 | "high and above" | `severity in ["catastrophic", "critical", "high"]` |
 | "recent", "latest" | a `list` with `sortBy createdOn desc`, `listLimit` 5 to 10 |
 | "last N days/weeks" | `createdOn gte __daysAgo:N__` (weeks x 7) |
-| "trend", "over time", "opened vs closed" | a `line` widget |
+| "trend", "over time", "opened vs closed" | a `line` widget, no `series` (both lines) |
+| "new cases per day", "cases opened per day", "case intake trend" | a `line` widget with `series: ["opened"]` |
+| "closed cases per day", "cases closed per day" | a `line` widget with `series: ["closed"]` |
+| editing a `line` widget: "remove the closed line", "only opened" | set `series: ["opened"]` on it (`["closed"]` for the opened line) |
+| editing a `line` widget: "show both lines", "add the closed line back" | remove its `series` |
+| a trend or cases per day / week / month as a bar | that `line` with `"chart": "bar"` (section 4) |
+| editing a `line` widget: "show it as bars" / "as a line" | set `"chart": "bar"` / remove `chart` |
+| a trend, or cases "per day / week / month", over a named or calendar period ("cases per day in December 2025", "opened vs closed per month in 2025", "cases per week this year") | a `line` with that period's `startDate` / `endDate` and a `bucket` (section 4); "created", "new" or "opened" only: `series: ["opened"]` |
 | "by severity / state / type" | `pie` (share) or `bar` (comparison) with `slices` |
 | "top customers", "by account" | `bar` with `groupBy: {"field": "account"}` |
 | "cases" with no other type named | `resourceType: "case"` |
@@ -88,6 +135,7 @@
 | a team that is not in the Teams section | not expressible: reply with `{"error": ...}` naming the team and the teams that can be used |
 | "past month", "last month" (rolling), "past 30 days" | `createdOn gte __daysAgo:30__` |
 | "last calendar month", "previous month" | `createdOn gte __startOfMonth:-1__` and `createdOn lte __endOfMonth:-1__` |
+| "this week", "this year", "last week", "last year", a named month, quarter, year, day or range | `createdOn` (or the date the request names) with the dates of section 5 |
 
 If two readings are plausible and the table does not settle it, pick the one above and add a
 `description` on the widget saying what it counts (e.g. "Every state except Closed").
@@ -96,13 +144,17 @@ If two readings are plausible and the table does not settle it, pick the one abo
 
 ## 9. Check before you answer
 
-1. Only fields, ops, values and shapes from this file. No literal dates or ids. Email addresses only in
+1. Only fields, ops, values and shapes from this file. No ids. A date is a token of section 5 for a
+   period counted from today, or a plain `YYYY-MM-DD` date only for a period the request names. Email addresses only in
    `createdBy in`, and only ones the request gave; "I raised" is `createdBy eq ["__current_user_email__"]`.
 2. Every widget has `id`, `displayName`, `resourceType`, `shape`, `gridWidth` 1-12, `query`.
 3. Widget ids are unique.
 4. Every `pie`/`bar` has exactly one of `slices` / `groupBy`; every `list` has `listLimit`, and `sortBy`
    except a `problem`, `account` or `case_feedback` list, which has no `sortBy` (items 10-12).
-5. `line` only on `resourceType: "case"`, `days` 1-90.
+5. `line` only on `resourceType: "case"`, with `days` 1-90 or `startDate` + `endDate` (both plain
+   dates or both tokens) and `bucket`, within its limit (90 days / 53 weeks / 24 months); `series`
+   absent (both lines) or exactly `["opened"]` or `["closed"]`; `chart` absent or `"bar"`. An edit keeps
+   a line widget's `series`, window and `chart` unless the request changes them.
 6. `severity` and `issueType` only on `case`; `engagementType` only on `engagement`.
 7. `type` + `isTeamBased`: `cs` with `false`, or `cre` with `true`. `isDefault` is `false`.
 8. Team filters: only keys from the Teams section, each in its own field (`creTeam` / `sreTeam`),

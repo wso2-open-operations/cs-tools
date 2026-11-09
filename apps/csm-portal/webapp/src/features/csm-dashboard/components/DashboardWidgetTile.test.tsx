@@ -83,12 +83,29 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
     children,
     data,
     tooltip,
+    bars,
   }: {
     children: ReactNode;
     data?: { name: string; value: number }[];
     tooltip?: { formatter?: (value: unknown) => string };
+    // A line widget drawn as bars passes its series here (DashboardLineChart).
+    bars?: { dataKey: string; name?: string; onClick?: (data: unknown, index: number, event?: unknown) => void }[];
   }) => (
     <div>
+      {bars?.map((bar) => (
+        <div key={bar.dataKey} data-testid={`bar-${bar.dataKey}`}>
+          {bar.name}:{" "}
+          {(data as Record<string, unknown>[] | undefined)?.map((row) => `${row.label}=${row[bar.dataKey]}`).join(", ")}
+          {/* Row 1's bar, clickable as recharts calls Bar.onClick. */}
+          {bar.onClick && (
+            <button
+              type="button"
+              data-testid={`bar-point-${bar.dataKey}`}
+              onClick={(e) => bar.onClick?.((data ?? [])[1], 1, e)}
+            />
+          )}
+        </div>
+      ))}
       {/* Only a widget that formats its values passes a tooltip formatter. */}
       {tooltip?.formatter && data?.[0] && <span>tooltip:{tooltip.formatter(data[0].value)}</span>}
       {Children.map(children, (child) =>
@@ -119,21 +136,25 @@ vi.mock("@wso2/oxygen-ui-charts-react", () => ({
       ))}
     </div>
   ),
-  // Shape "line" is not click-through (see DashboardLineChart's own doc
-  // comment) — this stand-in just has to render enough of each line's own
-  // data for a test to assert on, same approach DashboardLineChart.test.tsx
-  // uses for this same package.
+  // Renders each line's data, and its hovered point's dot for row 1 when the
+  // line has a function `activeDot` (a clickable point), same approach
+  // DashboardLineChart.test.tsx uses for this same package.
   LineChart: ({
     data,
     lines,
   }: {
     data: Record<string, unknown>[];
-    lines: { dataKey: string; name?: string }[];
+    lines: {
+      dataKey: string;
+      name?: string;
+      activeDot?: boolean | ((props: { cx?: number; cy?: number; index?: number }) => ReactNode);
+    }[];
   }) => (
     <div>
       {lines.map((line) => (
         <div key={line.dataKey} data-testid={`line-${line.dataKey}`}>
           {line.name}: {data.map((row) => `${row.label}=${row[line.dataKey]}`).join(", ")}
+          {typeof line.activeDot === "function" && <svg>{line.activeDot({ cx: 10, cy: 20, index: 1 })}</svg>}
         </div>
       ))}
     </div>
@@ -1308,6 +1329,186 @@ describe("DashboardWidgetTile", () => {
       { signal: expect.any(AbortSignal) },
     );
     expect(screen.getByText("Case volume, last 30 days")).toBeInTheDocument();
+  });
+
+  describe("shape line: a click on a point", () => {
+    const TREND = {
+      days: 2,
+      series: [
+        { label: "Opened", points: [{ date: "2026-09-01", count: 3 }, { date: "2026-09-02", count: 1 }] },
+        { label: "Closed", points: [{ date: "2026-09-01", count: 0 }, { date: "2026-09-02", count: 2 }] },
+      ],
+    };
+    const lineTile = (extra: { linePointClickThrough?: boolean }) => (
+      <DashboardWidgetTile
+        widgetId="case_volume_trend"
+        displayName="Case volume"
+        resourceType="case"
+        shape="line"
+        filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+        days={2}
+        {...extra}
+      />
+    );
+
+    it.each([
+      ["closed", "closedFrom", "closedTo"],
+      ["opened", "createdFrom", "createdTo"],
+    ] as const)(
+      "opens the cases %s on that day, with the widget's own filters and Back to the dashboard",
+      async (key, fromParam, toParam) => {
+        postMock.mockResolvedValue(TREND);
+        renderWithRoutes(lineTile({ linePointClickThrough: true }), "/cases");
+
+        fireEvent.click(await screen.findByTestId(`line-point-${key}`));
+
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const probeText = screen.getByTestId("location-probe").textContent ?? "";
+        expect(probeText.startsWith("/cases?")).toBe(true);
+        const params = new URLSearchParams(probeText.split("?")[1]);
+        expect(params.get(fromParam)).toBe("2026-09-02");
+        expect(params.get(toParam)).toBe("2026-09-02");
+        expect(params.get("states")).toBe("open");
+        expect(JSON.parse(screen.getByTestId("location-state-probe").textContent ?? "null")).toEqual({ from: "/" });
+      },
+    );
+
+    it("sends a fixed window and opens a week point's cases from its first day to its last", async () => {
+      postMock.mockResolvedValue({
+        days: 31,
+        startDate: "2025-12-01",
+        endDate: "2025-12-31",
+        bucket: "week",
+        series: [
+          {
+            label: "Opened",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 2 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 1 },
+            ],
+          },
+          {
+            label: "Closed",
+            points: [
+              { date: "2025-12-01", endDate: "2025-12-07", count: 0 },
+              { date: "2025-12-29", endDate: "2025-12-31", count: 3 },
+            ],
+          },
+        ],
+      });
+      renderWithRoutes(
+        <DashboardWidgetTile
+          widgetId="dec_2025_per_week"
+          displayName="Cases per week in December 2025"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          startDate="2025-12-01"
+          endDate="2025-12-31"
+          bucket="week"
+          linePointClickThrough
+        />,
+        "/cases",
+      );
+
+      fireEvent.click(await screen.findByTestId("line-point-opened"));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        {
+          filters: { filters: [{ field: "state", op: "in", values: ["open"] }] },
+          startDate: "2025-12-01",
+          endDate: "2025-12-31",
+          bucket: "week",
+        },
+        { signal: expect.any(AbortSignal) },
+      );
+      await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+      const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+      expect(params.get("createdFrom")).toBe("2025-12-29");
+      expect(params.get("createdTo")).toBe("2025-12-31");
+      expect(params.get("states")).toBe("open");
+    });
+
+    it("draws the trend as bars with chart: bar, from the same request", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.getByTestId("bar-opened")).toHaveTextContent("Opened: Sep 1=3, Sep 2=1");
+      expect(screen.getByTestId("bar-closed")).toHaveTextContent("Closed: Sep 1=0, Sep 2=2");
+      expect(screen.queryByTestId("line-opened")).not.toBeInTheDocument();
+      expect(postMock).toHaveBeenCalledTimes(1);
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        { filters: { filters: [{ field: "state", op: "in", values: ["open"] }] }, days: 2 },
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+
+    it.each([
+      ["closed", "closedFrom", "closedTo"],
+      ["opened", "createdFrom", "createdTo"],
+    ] as const)(
+      "opens the cases %s on a clicked bar's day, with the widget's own filters",
+      async (key, fromParam, toParam) => {
+        postMock.mockResolvedValue(TREND);
+        renderWithRoutes(
+          <DashboardWidgetTile
+            widgetId="case_volume_bars"
+            displayName="Case volume"
+            resourceType="case"
+            shape="line"
+            filters={{ filters: [{ field: "state", op: "in", values: ["open"] }] }}
+            days={2}
+            chart="bar"
+            linePointClickThrough
+          />,
+          "/cases",
+        );
+
+        fireEvent.click(await screen.findByTestId(`bar-point-${key}`));
+
+        await waitFor(() => expect(screen.getByTestId("location-probe")).toBeInTheDocument());
+        const params = new URLSearchParams((screen.getByTestId("location-probe").textContent ?? "").split("?")[1]);
+        expect(params.get(fromParam)).toBe("2026-09-02");
+        expect(params.get(toParam)).toBe("2026-09-02");
+        expect(params.get("states")).toBe("open");
+      },
+    );
+
+    it("has no clickable bars unless the page turns it on", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(
+        <DashboardWidgetTile
+          widgetId="case_volume_bars"
+          displayName="Case volume"
+          resourceType="case"
+          shape="line"
+          filters={{ filters: [] }}
+          days={2}
+          chart="bar"
+        />,
+      );
+      await waitFor(() => expect(screen.getByTestId("bar-opened")).toBeInTheDocument());
+      expect(screen.queryByTestId(/^bar-point-/)).not.toBeInTheDocument();
+    });
+
+    it("has no clickable points unless the page turns it on", async () => {
+      postMock.mockResolvedValue(TREND);
+      renderWithClient(lineTile({}));
+      await waitFor(() => expect(screen.getByTestId("line-opened")).toBeInTheDocument());
+      expect(screen.queryByTestId(/^line-point-/)).not.toBeInTheDocument();
+    });
   });
 
   it("shape pie: issues one search per slice (own filters merged under the widget's base filters) and renders values + percentages", async () => {
