@@ -41,6 +41,8 @@ type acpSettings struct {
 	// Screening is ACP_SCREENING and FullSweepWeekday ACP_SCREENING_FULL_SWEEP_WEEKDAY
 	// as set, parsed by acpConfig.
 	Screening, FullSweepWeekday string
+	// Repair is ACP_REPAIR and RepairMaxEvents ACP_REPAIR_MAX_EVENTS as set.
+	Repair, RepairMaxEvents string
 
 	AlertsEnabled    bool
 	EmailBaseURL     string
@@ -64,6 +66,8 @@ func readACPSettings(alertsEnabled bool, emailBaseURL string, debug []string) ac
 		DailyLimit:             strings.TrimSpace(os.Getenv("ACP_DAILY_LIMIT")),
 		Screening:              strings.TrimSpace(os.Getenv("ACP_SCREENING")),
 		FullSweepWeekday:       strings.TrimSpace(os.Getenv("ACP_SCREENING_FULL_SWEEP_WEEKDAY")),
+		Repair:                 strings.TrimSpace(os.Getenv("ACP_REPAIR")),
+		RepairMaxEvents:        strings.TrimSpace(os.Getenv("ACP_REPAIR_MAX_EVENTS")),
 		AlertsEnabled:          alertsEnabled,
 		EmailBaseURL:           emailBaseURL,
 		EmailFromAddress:       strings.TrimSpace(os.Getenv("EMAIL_FROM_ADDRESS")),
@@ -127,6 +131,12 @@ func acpConfig(s acpSettings) (acp.Config, []string, error) {
 		return acp.Config{}, nil, err
 	}
 	if cfg.FullSweepWeekday, err = parseACPWeekday(s.FullSweepWeekday); err != nil {
+		return acp.Config{}, nil, err
+	}
+	if cfg.Repair, err = parseACPOnOff("ACP_REPAIR", s.Repair); err != nil {
+		return acp.Config{}, nil, err
+	}
+	if cfg.RepairMaxEvents, err = parseACPRepairMax(s.RepairMaxEvents); err != nil {
 		return acp.Config{}, nil, err
 	}
 	var warnings []string
@@ -196,4 +206,32 @@ func parseACPWeekday(v string) (time.Weekday, error) {
 		}
 	}
 	return 0, fmt.Errorf("ACP_SCREENING_FULL_SWEEP_WEEKDAY=%q must be Mon, Tue, Wed, Thu, Fri, Sat or Sun", v)
+}
+
+// parseACPOnOff reads an on/off setting that defaults to on: "on" (also unset
+// or empty) or "off", any case; anything else is refused.
+func parseACPOnOff(name, v string) (bool, error) {
+	switch strings.ToLower(v) {
+	case "", "on":
+		return true, nil
+	case "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s=%q must be on or off", name, v)
+}
+
+// defaultACPRepairMaxEvents bounds the repair events of one run.
+const defaultACPRepairMaxEvents = 200
+
+// parseACPRepairMax reads ACP_REPAIR_MAX_EVENTS: a non-negative integer, 0
+// meaning repair off, default 200 when unset; anything else is refused.
+func parseACPRepairMax(v string) (int, error) {
+	if v == "" {
+		return defaultACPRepairMaxEvents, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("ACP_REPAIR_MAX_EVENTS=%q must be a non-negative integer (0 = repair off)", v)
+	}
+	return n, nil
 }

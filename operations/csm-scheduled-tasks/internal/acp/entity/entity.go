@@ -124,3 +124,13 @@ func (c *Client) ReopenCheck(ctx context.Context, body []byte) ([]byte, error) {
 func (c *Client) SearchProjectOpportunityLinks(ctx context.Context, body []byte) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/project-opportunity-links/search", body)
 }
+
+// PostSalesforceEvent calls POST /salesforce/events, entity-service's
+// existing Salesforce change-event ingest, with a synthetic envelope
+// {eventType, entity, referenceId}: the ingest re-fetches the record from the
+// Salesforce service and upserts it (with its stale-version guard). The
+// answer is 204 with no body.
+func (c *Client) PostSalesforceEvent(ctx context.Context, body []byte) error {
+	_, err := c.do(ctx, http.MethodPost, "/salesforce/events", body)
+	return err
+}

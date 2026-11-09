@@ -99,6 +99,20 @@ type Config struct {
 	// FullSweep forces every project live for this run (--run-now
 	// --full-sweep). It can only widen the live scope.
 	FullSweep bool
+	// Repair posts, for each record a live read shows has drifted from CSM's
+	// copy, one Salesforce change event to entity-service's existing ingest.
+	// ACP_REPAIR, default on. RepairMaxEvents bounds the events one run posts;
+	// 0 is repair off. ACP_REPAIR_MAX_EVENTS, default 200.
+	Repair          bool
+	RepairMaxEvents int
+}
+
+// repairFor is the run's repair setup, nil when repair is off.
+func repairFor(clients Clients, cfg Config) *sweep.Repair {
+	if !cfg.Repair || cfg.RepairMaxEvents <= 0 || clients.CSM == nil {
+		return nil
+	}
+	return &sweep.Repair{Poster: clients.CSM, MaxEvents: cfg.RepairMaxEvents, DryRun: cfg.DryRun}
 }
 
 // screeningApplies reports whether this run screens, and when it does not
@@ -135,6 +149,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 			"excludedProjectIDs", sortedKeys(cfg.ExcludedProjectIDs),
 			"dailyLimit", cfg.DailyLimit,
 			"screening", cfg.Screening,
+			"repair", cfg.Repair && cfg.RepairMaxEvents > 0,
 			"standingRecipientsCount", len(cfg.StandingRecipients),
 		)
 
@@ -181,7 +196,7 @@ func Run(clients Clients, cfg Config) func(ctx context.Context) error {
 		}
 		ctx = entity.WithCorrelationID(ctx, runID)
 		result, err := sweep.RunWith(ctx, clients.CSM, sweep.NewSalesforceDetails(clients.SalesEntity), updater, ntf, now, cfg.TestProjectID, cfg.ExcludedProjectIDs,
-			sweep.Options{Limit: cfg.DailyLimit, Screening: screening})
+			sweep.Options{Limit: cfg.DailyLimit, Screening: screening, Repair: repairFor(clients, cfg)})
 
 		slog.InfoContext(ctx, "acp: finished",
 			"runID", runID,

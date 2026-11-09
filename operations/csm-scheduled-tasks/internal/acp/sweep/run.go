@@ -202,12 +202,19 @@ type Options struct {
 	// projects CSM's copy of the data shows the live path cannot act on (see
 	// screen). It never applies to a single-project run.
 	Screening bool
+	// Repair, when set, compares what the live reads show with CSM's copy
+	// and posts an event for each record that drifted (see Repair). It never
+	// changes a decision. nil is off.
+	Repair *Repair
 }
 
 // RunWith is Run with Options.
 func RunWith(ctx context.Context, reader sweepReader, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, projectID string, excludedProjectIDs map[string]bool, opts Options) (Result, error) {
 	limit := opts.Limit
 	var result Result
+	snap := &copySnapshot{}
+	rr := newRepairRun(opts.Repair, snap)
+	defer func() { rr.log(ctx) }()
 
 	if projectID != "" {
 		if skipExcluded(ctx, projectID, excludedProjectIDs, &result) {
@@ -231,7 +238,7 @@ func RunWith(ctx context.Context, reader sweepReader, details DetailSource, upda
 		}
 		// One project: a stop has nothing left to stop, and the failure is
 		// already in result.
-		_ = evaluate(ctx, details, updater, ntf, now, proj, &result)
+		_ = evaluate(ctx, reader, rr, details, updater, ntf, now, proj, &result)
 		logFiltered(ctx, result)
 
 		return result, nil
@@ -245,7 +252,7 @@ func RunWith(ctx context.Context, reader sweepReader, details DetailSource, upda
 	defer func() { logFiltered(ctx, result) }()
 	var screened map[string]string
 	if opts.Screening {
-		screened = screen(ctx, reader, projects, now).candidates
+		screened = screen(ctx, reader, projects, now, snap).candidates
 		result.ScreenCandidates = map[string]int{}
 		for _, reason := range screened {
 			result.ScreenCandidates[reason]++
@@ -283,7 +290,7 @@ func RunWith(ctx context.Context, reader sweepReader, details DetailSource, upda
 		if skipIneligible(proj, &result) {
 			continue
 		}
-		if err := evaluate(ctx, details, updater, ntf, now, proj, &result); err != nil {
+		if err := evaluate(ctx, reader, rr, details, updater, ntf, now, proj, &result); err != nil {
 			return result, fmt.Errorf("sweep: stopped at project %s, %d project(s) not evaluated: %w", listed.ID, len(projects)-i-1, err)
 		}
 	}
@@ -386,17 +393,22 @@ func listOpenProjects(ctx context.Context, reader sweepReader) ([]project, error
 // (writesFailingError), which stops the run: every later project would send
 // its notice and then fail to record it, so the next run would send it
 // again.
-func evaluate(ctx context.Context, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
+func evaluate(ctx context.Context, csmReader entityReader, rr *repairRun, details DetailSource, updater projectUpdater, ntf notifier, now time.Time, proj project, result *Result) error {
 	full, reader, err := details.forProject(ctx, proj)
 	if err == nil && skipByAccount(full, result) {
 		return nil
 	}
 	if err == nil {
+		// The repair compares what was just read live with CSM's copy
+		// (proj is the fresh CSM read). It runs after the decision for the
+		// invoices, never before it, and cannot change it.
+		rr.project(ctx, proj, full)
 		var acted bool
 		acted, err = processProject(ctx, reader, updater, ntf, now, full)
 		if acted {
 			result.ProjectsActed++
 		}
+		rr.invoices(ctx, csmReader, reader)
 	} else {
 		err = fmt.Errorf("read project details: %w", err)
 	}

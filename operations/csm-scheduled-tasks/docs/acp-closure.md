@@ -90,6 +90,30 @@ project live that day, which bounds a missed event to about a week, and
 run (`ACP_TEST_PROJECT_ID`) always goes live. `ACP_SCREENING=off` restores the
 full pass every run.
 
+### Repairing the CSM copy
+
+The live pass already reads Salesforce for every candidate (and for every project
+on a full-sweep day), so it can notice when CSM's copy of a value has drifted.
+With `ACP_REPAIR` on (the default), ACP compares, **without any extra Salesforce
+call**, what it just read with the copy it has, and for each record that
+differs posts one synthetic event to entity-service's existing
+`POST /salesforce/events` ingest, which re-fetches that record from
+sales-entity-service and upserts it, behind its stale-version guard.
+
+Only the fields ACP's decisions rely on are compared: the project's start and end
+dates, the account's partner flag, and each invoice's due date, paid date and
+invoice date (an invoice the copy lacks counts as drifted). Everything else is
+ignored. The repair runs after the decision, so it never changes what a run does;
+a failed post is logged and ignored; screened-out and filtered projects are never
+compared; a dry run posts nothing and only counts. One event per record per run,
+at most `ACP_REPAIR_MAX_EVENTS` (default 200, 0 is off) a run, and one INFO line
+of counts by entity, never names or ids. `ACP_REPAIR=off` posts nothing.
+
+What it cannot repair from here: the opportunity's stage and EULA fields and the
+existence of a link (CSM's rows for them carry no Salesforce id to match on; an
+invoice event makes entity-service ingest its opportunity inline), and the
+account's status and primary partner (CSM's account read does not return them).
+
 ### Two systems, two jobs
 
 | System | What ACP reads | What ACP writes |

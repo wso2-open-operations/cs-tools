@@ -136,7 +136,7 @@ func TestScreen_CandidateReasons(t *testing.T) {
 			if err := json.Unmarshal(raw, &listed); err != nil {
 				t.Fatal(err)
 			}
-			got := screen(context.Background(), reader, listed.Projects, screenNow).candidates["p1"]
+			got := screen(context.Background(), reader, listed.Projects, screenNow, nil).candidates["p1"]
 			if got != tc.wantReason {
 				t.Errorf("reason = %q, want %q", got, tc.wantReason)
 			}
