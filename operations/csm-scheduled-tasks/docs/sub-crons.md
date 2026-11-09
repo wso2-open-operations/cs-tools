@@ -315,7 +315,7 @@ day (`MaxAttempts` 2).
 
 - **Registered when:** `ACP_ENABLED=true`. A dry run unless `ACP_DRY_RUN=false`.
 - **Triggers:** weekdays at 04:00 (09:30 in Colombo); the handler also succeeds without acting on a Colombo weekend.
-- **Does:** lists every Open project, and per project reads Salesforce data, runs the subscription end date cascade and the unpaid invoice cascade (windows at 90, 60, 30, 15, 7 and 0 days), sends the notice, records it in CSM, and suspends at day 0.
+- **Does:** lists every Open project, screens them from the CSM copy of the Salesforce data (`ACP_SCREENING`, on by default; a full live sweep runs on `ACP_SCREENING_FULL_SWEEP_WEEKDAY`), and for each candidate re-reads it, skips projects the earlier process never evaluated (override flag, project type, account not a Customer, partner account), reads Salesforce live, runs the subscription end date cascade and the unpaid invoice cascade (windows at 90, 60, 30, 15, 7 and 0 days), sends the notice, records it in CSM, and suspends at day 0. A track that is not Open is left alone. `ACP_DAILY_LIMIT` caps how many projects one run acts on.
 - **Full detail:** [acp-closure.md](acp-closure.md), `CLAUDE.md` "ACP closure", `internal/acp/`.
 
 ## 14. Running a task outside the schedule

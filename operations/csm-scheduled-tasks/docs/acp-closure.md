@@ -13,6 +13,10 @@ frozen (it refuses to start unless it is a log-only dry run) and is deleted once
 this task runs in production. Rule changes go to `internal/acp` only. The task
 is off unless `ACP_ENABLED=true` and is a dry run unless `ACP_DRY_RUN=false`.
 
+**Deploy order:** entity-service with the project `suspensionProcessOverridden`
+flag and its migration must be live before this task runs. Without the flag in
+the project read, every project is skipped (safe, and visible in the log).
+
 ## 1. A run at a glance
 
 ```mermaid
@@ -20,18 +24,71 @@ flowchart TD
     A[acp_closure tick<br/>weekdays 04:00 UTC] --> B{Colombo weekend?}
     B -- yes --> Z[succeed, do nothing, WARN]
     B -- no --> C[list every Open project<br/>CSM, sorted by end date]
-    C --> D[for each project:<br/>re-read it from CSM]
-    D --> E[read dates, people, contacts,<br/>opportunities, invoices from Salesforce]
-    E --> F[subscription cascade]
-    E --> G[invoice cascade]
+    C --> S[screen from the CSM copy:<br/>keep only candidates]
+    S --> D[for each candidate:<br/>re-read it from CSM]
+    D --> F0{flag set or<br/>excluded project type?}
+    F0 -- yes --> X[skip, count it]
+    F0 -- no --> E[read dates, account and invoices<br/>live from Salesforce]
+    E --> F1{account not a Customer<br/>or a partner?}
+    F1 -- yes --> X
+    F1 -- no --> F[subscription cascade]
+    F1 -- no --> G[invoice cascade]
     F --> H[sort by days left,<br/>most overdue first]
     G --> H
-    H --> I[act: notify, record, suspend]
+    H --> I[act: notify, record, suspend<br/>until ACP_DAILY_LIMIT]
     I --> J[reset renewed or paid tracks to open]
 ```
 
 One invocation is one sweep. There is no long-running process: the platform
 trigger supplies the cadence and the engine retries a failed run (section 7).
+
+### Which projects are evaluated
+
+The process this replaces only looked at some projects, so a project is read and
+skipped (never a failure, never counted against the daily limit, one log line
+with counts and no names) when:
+
+| Skipped when | Decided from | If the data is missing |
+|---|---|---|
+| Its `suspensionProcessOverridden` flag is true | The fresh CSM read | Skipped too (fail closed), with a warning that entity-service did not return the flag |
+| Its project type is evaluation subscription, cloud support, cloud evaluation support or internal | The fresh CSM read, before any Salesforce call | Evaluated |
+| Its account status is not `Customer` | The live Salesforce account row | Skipped too (fail closed), counted separately |
+| Its account is itself a partner (classification `Partner`) | The live Salesforce account row | Evaluated |
+
+A partner account is skipped before either cascade. That is different from a
+customer that *has* a primary partner, which the invoice cascade still handles
+with its grace-period rule. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual,
+per-project exclusion. One difference remains: the earlier process evaluated
+Open and Restricted projects, and the list here asks for Open only.
+
+### Screening: look at few, confirm live
+
+Every open project costs about six Salesforce-backed calls, so a full pass takes
+tens of minutes. With `ACP_SCREENING` on (the default), a run first decides **who
+to look at** from the CSM copy of the Salesforce data, and everything that
+notifies or suspends still runs on the live read. A project is a **candidate** if
+any of these hold:
+
+- its CSM end date is missing, or within 91 days (past dates included);
+- its saved process state records any non-`open` event on either track, so the
+  renewal reset still runs for a project far from its end date;
+- it owns, through its opportunity links, an unpaid invoice due within 91 days.
+  This is safe because an invoice's suspend date is never earlier than its due
+  date, so a suspend date within the horizon implies a due date within it.
+
+The screen is a **superset** by design, and it **fails open**: if any of its reads
+fails or is incomplete, every project goes through the live path that run, with
+one warning. Screened-out projects cost no re-read and no Salesforce call, and
+they never use the daily limit.
+
+A stale copy can therefore make ACP late, never wrong: a candidate is confirmed
+live before any notice or suspension. What the screen cannot see is an invoice
+that never reached the CSM copy, or a Salesforce end date earlier than CSM's.
+`ACP_SCREENING_FULL_SWEEP_WEEKDAY` (default Monday, Colombo time) runs every
+project live that day, which bounds a missed event to about a week, and
+`--run-now=acp_closure --full-sweep` does the same for one run. A single-project
+run (`ACP_TEST_PROJECT_ID`) always goes live. `ACP_SCREENING=off` restores the
+full pass every run.
 
 ### Two systems, two jobs
 
@@ -95,6 +152,12 @@ keeps the subscription cascade ahead of the invoice one). Once one cascade
 suspends the project, the later cascade skips its **email**: the "already closed"
 flag is tracked in memory, because a read of the project right after a write is
 not guaranteed to show it.
+
+A cascade whose **own track is not Open** (a person reopened the project and left
+"Pending Suspended", "Notified" or similar behind) is left out entirely: no
+notice, no record, no suspension, and it does not mark the project closed for the
+other track. Otherwise the customer would be told the project is suspended while
+the suspension itself is skipped.
 
 Per cascade, in order, and a failure stops that project:
 
@@ -182,6 +245,13 @@ Consequences of the order:
 | `ACP_EMAIL_SEND_ENABLED` | false | Notices are only logged |
 | `ACP_TEST_PROJECT_ID` | unset | Scope the run to one project |
 | `ACP_EXCLUDED_PROJECT_IDS` | empty | Skip listed projects entirely. For verified business exclusions only, not for data bugs |
+| `ACP_DAILY_LIMIT` | 0 (no cap) | Most projects one run acts on (sends or records a notice, or suspends), most overdue first. Skipped and screened-out projects do not count; reaching it is not a failure. A dry run counts the same way, so it shows what a capped real run would do. A malformed or negative value stops startup |
+| `ACP_SCREENING` | on | Screen from the CSM copy and go live only for candidates. `off` evaluates every project live |
+| `ACP_SCREENING_FULL_SWEEP_WEEKDAY` | Monday | The weekday (Colombo time) on which every project is evaluated live |
+
+`--run-now=acp_closure` takes `--dry-run` (forces a dry run, and turns emails off
+unless there is a debug list), `--limit=N` (can only tighten the configured limit)
+and `--full-sweep` (evaluate every project live for this run).
 
 Startup refuses combinations that would harm customers:
 
@@ -202,6 +272,11 @@ notice there as a `[Test copy]`.
   sends the whole state, so deciding from the listing could undo a concurrent
   change. The write is not conditional: entity-service has no version check on
   `PATCH /projects/{id}`.
+- **The daily limit stops the run cleanly.** Once `ACP_DAILY_LIMIT` projects have
+  been acted on, the rest are not evaluated, one line says how many, and the run
+  succeeds. They are picked up by the next run, most overdue first.
+- **Screening failing** is not a run failure: any unreadable or incomplete screening
+  data sends every project through the live path that run (fail open), with a warning.
 - **One project failing** does not stop the others, with one exception: a CSM
   write failure every project would hit (401, 403, 429, 5xx or no response) stops
   the run, since notices go out before they are recorded and carrying on would
@@ -246,3 +321,5 @@ reopen check reopen it.
 | Email templates and sending | `internal/acp/notify/` |
 | Salesforce reads and the `State__c` write | `internal/acp/salesentity/`, `sweep/salesforce_details.go` |
 | The daily reopen driver | `internal/acp/reopen_check.go` |
+| Screening from the CSM copy | `internal/acp/sweep/screen.go` |
+| Selection filters, daily limit, run-now narrowing | `internal/acp/sweep/run.go`, `cmd/server/acp_config.go`, `cmd/server/runnow.go` |
