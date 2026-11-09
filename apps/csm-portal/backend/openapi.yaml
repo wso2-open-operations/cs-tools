@@ -21087,6 +21087,14 @@ components:
             per day (the default, at most 90 days), per week (Monday to
             Sunday, at most 54 weeks) or per month (at most 24 months). Two
             relative dates must stay within the limit on every day.
+        chart:
+          type: string
+          enum: [line, bar]
+          description: >
+            Only meaningful for shape "line": how its points are drawn. bar
+            draws them as bars (two side by side when both series are
+            shown); line, or the field left out, draws lines. The data and
+            the window are the same either way.
 
     DashboardListItem:
       type: object

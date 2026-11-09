@@ -1108,6 +1108,13 @@ func validateWidgets(d Dashboard, source string) error {
 			if err := validateLineWindow(w); err != nil {
 				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: %w", source, d.ID, w.ID, err)
 			}
+			if w.Chart != "" && w.Chart != LineChartLine && w.Chart != LineChartBar {
+				return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: unknown \"chart\" %q (want %q or %q)",
+					source, d.ID, w.ID, w.Chart, LineChartLine, LineChartBar)
+			}
+		} else if w.Chart != "" {
+			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"chart\" is only meaningful for shape %q, got %q",
+				source, d.ID, w.ID, ShapeLine, w.Shape)
 		} else if w.Series != nil {
 			return fmt.Errorf("dashboard definitions: %s (id %q): widget %q: \"series\" is only meaningful for shape %q, got %q",
 				source, d.ID, w.ID, ShapeLine, w.Shape)

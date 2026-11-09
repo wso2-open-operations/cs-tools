@@ -119,6 +119,7 @@ func widgetTemplates(views []dashboardWidgetView) []dashboard.WidgetTemplate {
 			StartDate:       v.StartDate,
 			EndDate:         v.EndDate,
 			Bucket:          v.Bucket,
+			Chart:           v.Chart,
 			DistinctBy:      v.DistinctBy,
 		})
 	}

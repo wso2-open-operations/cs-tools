@@ -168,16 +168,20 @@ func TestDraftToDefinition_KeepsLineSeries(t *testing.T) {
 	}
 }
 
-// A line widget keeps its fixed window through the draft: without it, a
-// follow-up edit would turn "per month in 2025" back into the last 30 days.
+// A line widget keeps its fixed window and its chart through the draft:
+// without them, a follow-up edit would turn "per month in 2025 as bars" back
+// into a line over the last 30 days.
 func TestDraftToDefinition_KeepsLineWindow(t *testing.T) {
 	const authored = `{"id": "ai-window", "displayName": "Window", "type": "cs", "isDefault": false, "targetTeam": "",
   "isTeamBased": false, "widgets": [
   {"id": "per-month", "displayName": "Cases per month in 2025", "resourceType": "case", "shape": "line", "gridWidth": 12,
-   "query": {}, "startDate": "2025-01-01", "endDate": "2025-12-31", "bucket": "month"},
+   "query": {}, "startDate": "2025-01-01", "endDate": "2025-12-31", "bucket": "month", "chart": "bar"},
   {"id": "trailing", "displayName": "Opened vs closed", "resourceType": "case", "shape": "line", "gridWidth": 12,
    "query": {}, "days": 30}]}`
 	loaded, served := servedDraft(t, authored)
+	if strings.Count(string(served), `"chart":"bar"`) != 1 {
+		t.Fatalf("served form lacks the chart, or gives it to the widget without one: %s", served)
+	}
 	if !strings.Contains(string(served), `"startDate":"2025-01-01","endDate":"2025-12-31","bucket":"month"`) {
 		t.Fatalf("served form lacks the window, so the test proves nothing: %s", served)
 	}

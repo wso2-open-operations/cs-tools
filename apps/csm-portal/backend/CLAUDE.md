@@ -893,6 +893,14 @@ error, so `CaseHandler.VolumeTrend` refuses (502) a fixed window answered withou
 or a window are saved makes those dashboards fail to open (an older `ParseGenerated` refuses fields it does
 not know, a 422 on every read) until it is deployed again.
 
+**Line widgets: `chart`.** A `line` widget may set `chart: "bar"` to draw the same points as bars ("cases
+opened per month this year as a bar chart"): the same `POST /cases/volume-trend` data, `days` or window and
+`series`, one request, and a relative window keeps moving with the date (which month slices on a `bar`
+widget could not do: no token names "January of this year"). `"line"` or no `chart` draws lines, so no line
+widget saved before the field changes. The registry refuses an unknown value and `chart` on any other shape.
+The view and the draft carry it (`widgetViews` / `widgetTemplates`): `TestDraftToDefinition_KeepsLineWindow`.
+Deploy this backend before the catalogue that teaches it, as for `series`.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same

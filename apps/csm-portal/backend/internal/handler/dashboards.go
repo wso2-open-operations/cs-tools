@@ -86,6 +86,10 @@ type dashboardWidgetView struct {
 	StartDate string               `json:"startDate,omitempty"`
 	EndDate   string               `json:"endDate,omitempty"`
 	Bucket    dashboard.LineBucket `json:"bucket,omitempty"`
+	// Chart is only meaningful for Shape "line" — see
+	// dashboard.WidgetTemplate.Chart. Forwarded verbatim: the frontend draws
+	// the points as bars when it is "bar", as lines otherwise.
+	Chart dashboard.LineChart `json:"chart,omitempty"`
 }
 
 // filterPresetView is one entry of the shared filter-preset catalogue,
@@ -285,6 +289,7 @@ func widgetViews(templates []dashboard.WidgetTemplate) []dashboardWidgetView {
 			StartDate:       tpl.StartDate,
 			EndDate:         tpl.EndDate,
 			Bucket:          tpl.Bucket,
+			Chart:           tpl.Chart,
 		})
 	}
 	return views

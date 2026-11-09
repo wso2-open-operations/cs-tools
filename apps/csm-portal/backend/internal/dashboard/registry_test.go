@@ -884,6 +884,24 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			want: `widget "w": "series" lists "opened" twice`,
 		},
 		{
+			name: "line widget with an unknown chart",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "chart": "column"}`,
+			want: `widget "w": unknown "chart" "column" (want "line" or "bar")`,
+		},
+		{
+			name: "chart on a bar widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
+			 "query": {}, "groupBy": {"field": "state"}, "chart": "bar"}`,
+			want: `widget "w": "chart" is only meaningful for shape "line", got "bar"`,
+		},
+		{
+			name: "chart on a count widget",
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "count", "gridWidth": 3,
+			 "query": {}, "chart": "line"}`,
+			want: `widget "w": "chart" is only meaningful for shape "line", got "count"`,
+		},
+		{
 			name: "series on a bar widget",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "bar", "gridWidth": 6,
 			 "query": {}, "groupBy": {"field": "state"}, "series": ["opened"]}`,
@@ -1121,6 +1139,38 @@ func TestLoadDir_AcceptsLineWidgetSeries(t *testing.T) {
 			}
 			if got := dashboards[0].Widgets[0].Series; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("series = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A "line" widget may draw its points as bars ("chart": "bar"), with the
+// trailing days or a fixed window; "line" and no chart at all draw lines.
+func TestLoadDir_AcceptsLineWidgetChart(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		want         LineChart
+	}{
+		{"no chart", `"days": 30`, ""},
+		{"line", `"days": 30, "chart": "line"`, LineChartLine},
+		{"bar over the trailing days", `"days": 30, "chart": "bar"`, LineChartBar},
+		{"bar over this year by month", `"startDate": "__startOfYear:0__", "endDate": "__today__", "bucket": "month", "series": ["opened"], "chart": "bar"`, LineChartBar},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeDefinition(t, dir, "d.json", `{
+			  "id": "d", "displayName": "D", "type": "cs",
+			  "widgets": [
+			    {"id": "trend", "displayName": "Trend", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			     "query": {}, `+tc.fields+`}
+			  ]
+			}`)
+			dashboards, err := LoadDir(dir)
+			if err != nil {
+				t.Fatalf("LoadDir returned error: %v", err)
+			}
+			if got := dashboards[0].Widgets[0].Chart; got != tc.want {
+				t.Errorf("chart = %q, want %q", got, tc.want)
 			}
 		})
 	}

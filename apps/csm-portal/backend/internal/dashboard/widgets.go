@@ -104,6 +104,14 @@ const (
 	LineBucketMonth LineBucket = "month" // at most 24 months
 )
 
+// LineChart is how a Shape line widget draws its points (WidgetTemplate.Chart).
+type LineChart string
+
+const (
+	LineChartLine LineChart = "line" // lines, the default
+	LineChartBar  LineChart = "bar"  // bars, one per point (two side by side with both series)
+)
+
 // LineSeries is one of a Shape line widget's two lines (WidgetTemplate.Series).
 type LineSeries string
 
@@ -379,6 +387,13 @@ type WidgetTemplate struct {
 	StartDate string     `json:"startDate,omitempty"`
 	EndDate   string     `json:"endDate,omitempty"`
 	Bucket    LineBucket `json:"bucket,omitempty"`
+	// Chart is only meaningful for Shape line: "bar" draws the same points
+	// as bars ("cases opened per month this year as a bar chart"); omitted or
+	// "line" draws lines, which is what every line widget written before
+	// this field did, so no saved or served dashboard changes. The data and
+	// the window are the same either way. The registry rejects an unknown
+	// value and the field on any other shape.
+	Chart LineChart `json:"chart,omitempty"`
 
 	// legacyFilters holds a pre-rename config's "filters" key so
 	// migrateLegacyWidgetKeys can move it into Query. Unexported so it can

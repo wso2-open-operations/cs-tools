@@ -57,6 +57,8 @@ func TestParseGenerated_AcceptsLineWindows(t *testing.T) {
 		  "query":{},"startDate":"2025-01-01","endDate":"2025-12-31","bucket":"month"}`,
 		`{"id":"this-year-per-week","displayName":"Cases Created per Week This Year","resourceType":"case","shape":"line","gridWidth":12,
 		  "query":{},"series":["opened"],"startDate":"__startOfYear:0__","endDate":"__endOfYear:0__","bucket":"week"}`,
+		`{"id":"this-year-per-month-bars","displayName":"Cases Opened per Month This Year","resourceType":"case","shape":"line","gridWidth":12,
+		  "query":{},"series":["opened"],"startDate":"__startOfYear:0__","endDate":"__today__","bucket":"month","chart":"bar"}`,
 	)
 	d, err := ParseGenerated([]byte(raw))
 	if err != nil {
@@ -64,6 +66,9 @@ func TestParseGenerated_AcceptsLineWindows(t *testing.T) {
 	}
 	if w := d.Widgets[1]; w.StartDate != "2025-01-01" || w.EndDate != "2025-12-31" || w.Bucket != LineBucketMonth {
 		t.Errorf("2025 per month = %q to %q by %q, want 2025-01-01 to 2025-12-31 by month", w.StartDate, w.EndDate, w.Bucket)
+	}
+	if w := d.Widgets[3]; w.Chart != LineChartBar || d.Widgets[0].Chart != "" {
+		t.Errorf("charts = %q, %q, want bar on the bars widget and none on the first", w.Chart, d.Widgets[0].Chart)
 	}
 
 	tooLong := opsDashboard(`{"id":"2025-per-day","displayName":"Cases per Day in 2025","resourceType":"case","shape":"line","gridWidth":12,
