@@ -39,6 +39,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/escalation"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/eventbus"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/events"
+	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/inlineimages"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/mailpaging"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/middleware"
 	"github.com/wso2-open-operations/cs-tools/integrations/csm-notification-service/internal/notifications"
@@ -371,9 +372,10 @@ func main() {
 	defaultCSMEmailCC := splitComma(os.Getenv("DEFAULT_CSM_EMAIL_CC"))
 
 	// Reads the images a comment or description references, so an email can show
-	// them (see internal/inlineimages). Nil, and logged, when storage is not
-	// configured or reachable: that only costs the pictures, never the email.
-	inlineImages := newInlineImageResolver(os.Getenv, customerEntityClient)
+	// them (see internal/inlineimages). Entity-service holds the files and returns an
+	// image only when it belongs to the record the email is about; an image it
+	// cannot return only costs the picture, never the email.
+	inlineImages := inlineimages.New(customerEntityClient)
 
 	dispatcher := dispatch.NewDispatcher(emailClient, googleChatClient, twilioClient, linkResolver, emailSendingEnabled, emailDebugMode, emailDebugRecipients, callSendingEnabled, defaultOnCallNumber, defaultCSMEmailCC).
 		WithOnboarding(loadOnboardingConfig(customerEntityClient, emailClient)).
@@ -418,12 +420,7 @@ func main() {
 	} else {
 		dispatcher = dispatcher.WithStatusPage(nil, customerEntityClient)
 	}
-	// Assigned only when set: a nil *inlineimages.Resolver stored in the
-	// interface would be non-nil, and the dispatcher's own nil check would not
-	// catch it.
-	if inlineImages != nil {
-		dispatcher = dispatcher.WithInlineImages(inlineImages)
-	}
+	dispatcher = dispatcher.WithInlineImages(inlineImages)
 	// escalationClient is a *escalation.Client, not the escalationDetector
 	// interface itself -- passing it through WithFrustrationDetection
 	// unconditionally when nil would store a non-nil interface wrapping a
