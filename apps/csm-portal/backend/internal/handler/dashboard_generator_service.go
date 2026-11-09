@@ -170,6 +170,7 @@ func splitGeneratedNote(raw json.RawMessage) (json.RawMessage, string, error) {
 //   - not_configured                          ErrGenerateUnavailable (503)
 //   - refused                                 errGenerateRefused (422)
 //   - truncated / unusable                    errGenerateTruncated / errGenerateUnusable (502)
+//   - usage_limit                             errGenerateUsageLimit (503)
 //   - timeout, or the call itself timing out  errGenerateCall with a deadline (504)
 //   - model_call_failed, anything else        errGenerateCall (502): a 400
 //     from the service, a gateway 401/403 or a failed connection is this
@@ -186,6 +187,8 @@ func serviceGenerateError(err error) error {
 			return fmt.Errorf("%w: %w", errGenerateTruncated, err)
 		case csmai.CodeUnusable:
 			return fmt.Errorf("%w: %w", errGenerateUnusable, err)
+		case csmai.CodeUsageLimit:
+			return fmt.Errorf("%w: %w", errGenerateUsageLimit, err)
 		case csmai.CodeTimeout:
 			return fmt.Errorf("%w: %w: %w", errGenerateCall, err, context.DeadlineExceeded)
 		}

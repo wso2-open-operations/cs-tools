@@ -16,6 +16,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -78,6 +79,12 @@ func TestParseGenerated_AcceptsTimeCardTotals(t *testing.T) {
 		  "query":{"startDate":"__startOfMonth:0__","endDate":"__today__"},"groupBy":{"field":"day","measure":"hours"}}`,
 		`{"id":"hours-this-month-full","displayName":"Hours per Day, This Month","resourceType":"time_card","shape":"bar","gridWidth":6,
 		  "query":{"startDate":"__startOfMonth:0__","endDate":"__endOfMonth:0__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-this-week","displayName":"Hours per Day This Week","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfWeek:0__","endDate":"__endOfWeek:0__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-last-week","displayName":"Hours per Day Last Week","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfWeek:-1__","endDate":"__endOfWeek:-1__"},"groupBy":{"field":"day","measure":"hours"}}`,
+		`{"id":"hours-this-year","displayName":"Hours per User This Year","resourceType":"time_card","shape":"bar","gridWidth":6,
+		  "query":{"startDate":"__startOfYear:0__","endDate":"__today__"},"groupBy":{"field":"user","measure":"hours"}}`,
 	)
 	d, err := ParseGenerated([]byte(raw))
 	if err != nil {
@@ -168,7 +175,7 @@ func TestValidateWidgets_MeasureNeedsAField(t *testing.T) {
 }
 
 // TestRelativeDate: relativeDate resolves the tokens as the webapp does, on
-// days where month and quarter lengths matter.
+// days where month and quarter lengths, weekdays and year ends matter.
 func TestRelativeDate(t *testing.T) {
 	day := func(s string) time.Time {
 		d, err := time.Parse("2006-01-02", s)
@@ -189,15 +196,84 @@ func TestRelativeDate(t *testing.T) {
 		{"__endOfQuarter:0__", "2026-11-02", "2026-12-31"},
 		{"__startOfQuarter:-1__", "2026-02-14", "2025-10-01"},
 		{"__endOfQuarter:-1__", "2026-02-14", "2025-12-31"},
+		// Weeks run Monday to Sunday. 2026-11-06 is a Friday.
+		{"__startOfWeek:0__", "2026-11-06", "2026-11-02"},
+		{"__endOfWeek:0__", "2026-11-06", "2026-11-08"},
+		{"__startOfWeek:-1__", "2026-11-06", "2026-10-26"},
+		{"__endOfWeek:-1__", "2026-11-06", "2026-11-01"},
+		{"__startOfWeek:0__", "2026-11-08", "2026-11-02"}, // a Sunday ends its week
+		{"__startOfWeek:0__", "2026-11-02", "2026-11-02"}, // a Monday starts it
+		{"__startOfWeek:0__", "2026-01-01", "2025-12-29"}, // across a year end
+		{"__endOfWeek:0__", "2026-01-01", "2026-01-04"},
+		{"__startOfYear:0__", "2026-11-06", "2026-01-01"},
+		{"__endOfYear:0__", "2026-11-06", "2026-12-31"},
+		{"__startOfYear:-1__", "2026-11-06", "2025-01-01"},
+		{"__endOfYear:-1__", "2024-02-29", "2023-12-31"},
 	} {
 		got, ok := relativeDate(c.token, day(c.today))
 		if !ok || !got.Equal(day(c.want)) {
 			t.Errorf("relativeDate(%s) on %s = %v %v, want %s", c.token, c.today, got.Format("2006-01-02"), ok, c.want)
 		}
 	}
-	for _, token := range []string{"__today:1__", "__daysAgo__", "__daysAgo:-1__", "__startOfMonth__", "__yesterday__", "2026-11-02"} {
+	// At the argument bound a token still resolves; past it, and at the
+	// values that used to wrap to a date that looks valid, it does not.
+	for _, token := range []string{"__daysAgo:4000000__", "__startOfWeek:4000000__", "__startOfMonth:-4000000__", "__endOfYear:4000000__"} {
+		if _, ok := relativeDate(token, day("2026-11-02")); !ok {
+			t.Errorf("relativeDate(%s) left unresolved, want it resolved (at the bound)", token)
+		}
+	}
+	for _, token := range []string{"__today:1__", "__daysAgo__", "__daysAgo:-1__", "__startOfMonth__", "__startOfWeek__", "__endOfYear__", "__yesterday__", "2026-11-02",
+		"__daysAgo:4000001__", "__startOfWeek:-4000001__", "__startOfYear:9223372036854775807__", "__endOfYear:9223372036854775807__",
+		"__startOfWeek:9223372036854775807__", "__endOfWeek:9223372036854775807__", "__startOfMonth:-9223372036854775808__", "__endOfQuarter:9223372036854775807__"} {
 		if _, ok := relativeDate(token, day("2026-11-02")); ok {
 			t.Errorf("relativeDate(%s) resolved, want it left unresolved (the webapp does)", token)
+		}
+	}
+}
+
+// relativeDateParityFile is entity-service's relative date parity cases,
+// relative to this package's directory.
+const (
+	entityService          = "../../../../../entity-service"
+	relativeDateParityFile = entityService + "/internal/service/testdata/relative_date_parity.json"
+)
+
+// TestRelativeDate_Parity runs entity-service's relative date parity cases,
+// which its resolveRelativeDate and the webapp's resolver run too, so the
+// three agree on every token. It fails if entity-service is in the checkout
+// without the file, and is skipped only when entity-service is not there.
+func TestRelativeDate_Parity(t *testing.T) {
+	raw, err := os.ReadFile(relativeDateParityFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, modErr := os.Stat(entityService + "/go.mod"); modErr == nil {
+			t.Fatalf("%s not found, but entity-service is in this checkout: the parity cases must be there", relativeDateParityFile)
+		}
+		t.Skipf("%s not found and no entity-service in this checkout", relativeDateParityFile)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parity struct {
+		Cases []struct {
+			Now   time.Time `json:"now"`
+			Token string    `json:"token"`
+			Date  *string   `json:"date"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &parity); err != nil {
+		t.Fatal(err)
+	}
+	if len(parity.Cases) == 0 {
+		t.Fatal("no parity cases")
+	}
+	for _, c := range parity.Cases {
+		now := c.Now.UTC()
+		got, ok := relativeDate(c.Token, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC))
+		switch {
+		case c.Date == nil && ok:
+			t.Errorf("%s at %s = %s, want it unresolved", c.Token, c.Now.Format(time.RFC3339), got.Format("2006-01-02"))
+		case c.Date != nil && (!ok || got.Format("2006-01-02") != *c.Date):
+			t.Errorf("%s at %s = %s %v, want %s", c.Token, c.Now.Format(time.RFC3339), got.Format("2006-01-02"), ok, *c.Date)
 		}
 	}
 }
@@ -225,6 +301,8 @@ func TestParseGenerated_RejectsTimeCardWidgetsItCannotRun(t *testing.T) {
 		{"day over the last two months", tc("bar", `,"query":{"startDate":"__startOfMonth:-1__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
 		// Short at a quarter's start, too long by its end: refused whatever today is.
 		{"day over this quarter so far", tc("bar", `,"query":{"startDate":"__startOfQuarter:0__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day over this year so far", tc("bar", `,"query":{"startDate":"__startOfYear:0__","endDate":"__today__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
+		{"day over the last five weeks", tc("bar", `,"query":{"startDate":"__startOfWeek:-4__","endDate":"__endOfWeek:0__"},"groupBy":{"field":"day"}`), "covers at most 31 days"},
 		{"day from a plain date to today", tc("bar", `,"query":{"startDate":"2026-10-20","endDate":"__today__"},"groupBy":{"field":"day"}`), "two plain dates or two relative dates"},
 		{"day with a timestamp", tc("bar", `,"query":{"startDate":"2026-10-01T00:00:00Z","endDate":"2026-10-07"},"groupBy":{"field":"day"}`), "takes plain dates (YYYY-MM-DD)"},
 		{"day with a token the webapp leaves as it is", tc("bar", `,"query":{"startDate":"__startOfMonth__","endDate":"__today__"},"groupBy":{"field":"day"}`), "not a relative date the dashboard can resolve"},

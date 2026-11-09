@@ -256,6 +256,13 @@ export interface CaseAttachment {
    * is populated for an attachment uploader. */
   uploadedByUser?: UserReference;
   uploadedAt: string;
+  /** When the attachment was deleted. Set only on a deleted attachment, which
+   * only an admin's list carries; such a row has no file to download. */
+  deletedAt?: string;
+  /** Who deleted it (the name, or the email when no name is known). */
+  deletedBy?: string;
+  deletedByEmail?: string;
+  deletedByUser?: UserReference;
 }
 
 /**

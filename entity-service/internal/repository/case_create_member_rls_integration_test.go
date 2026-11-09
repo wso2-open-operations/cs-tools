@@ -32,6 +32,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -138,4 +139,120 @@ func TestCaseCreateMemberRLS(t *testing.T) {
 			t.Fatalf("CreateCase as an internal caller: %v", err)
 		}
 	})
+}
+
+// A security report's files are linked to it INSIDE the create transaction: a file that
+// is not a usable draft of the caller's makes the create fail and leaves no case, and two
+// creates naming the same file cannot both succeed.
+func TestCaseCreateMemberRLS_LinksReportDraftsAtomically(t *testing.T) {
+	pool := seedCaseCreateMemberFixture(t)
+	scoped := repository.NewScoped(pool)
+	repo := repository.NewCaseRepository(scoped)
+	sys := repository.WithSystemIdentity(context.Background())
+	customer := repository.WithCallerIdentity(context.Background(), repository.SearchScope{ViewerEmail: ccmCustomer})
+
+	draft := func(by, status string) string {
+		t.Helper()
+		var id string
+		err := scoped.QueryRow(sys, `
+			INSERT INTO work_item_attachment (id, created_on, updated_on, created_by, updated_by, name, content_type, size_bytes, project_id, status, storage_key)
+			VALUES (gen_random_uuid(), now(), now(), $1, $1, 'report.pdf', 'application/pdf', 10, $2, $3::attachment_status_enum, CASE WHEN $3 = 'COMPLETE' THEN 'k/report.pdf' END)
+			RETURNING id::TEXT`, by, ccmProjectID, status).Scan(&id)
+		if err != nil {
+			t.Fatalf("seed draft: %v", err)
+		}
+		return id
+	}
+	reports := func() int {
+		var n int
+		if err := scoped.QueryRow(sys, `SELECT COUNT(*) FROM work_item WHERE project_id = $1 AND type = 'SECURITY_REPORT_ANALYSIS'`, ccmProjectID).Scan(&n); err != nil {
+			t.Fatalf("count reports: %v", err)
+		}
+		return n
+	}
+	linkedTo := func(id string) string {
+		var wi *string
+		if err := scoped.QueryRow(sys, `SELECT work_item_id::TEXT FROM work_item_attachment WHERE id = $1`, id).Scan(&wi); err != nil {
+			t.Fatalf("read link: %v", err)
+		}
+		if wi == nil {
+			return ""
+		}
+		return *wi
+	}
+	req := func(ids ...string) domain.CreateCaseRequest {
+		r := ccmRequest("security_report_analysis", ccmProjectID)
+		r.AttachmentIDs = ids
+		r.ReportDraftOwnerEmail = ccmCustomer
+		return r
+	}
+	var ve *apierror.ValidationError
+
+	mine := draft(ccmCustomer, "COMPLETE")
+	c, err := repo.CreateCase(customer, req(mine))
+	if err != nil {
+		t.Fatalf("CreateCase with the caller's own stored draft: %v", err)
+	}
+	if got := linkedTo(mine); got != c.ID {
+		t.Fatalf("the draft is linked to %q, want the new case %q", got, c.ID)
+	}
+
+	before := reports()
+	if _, err := repo.CreateCase(customer, req(mine)); !errors.As(err, &ve) {
+		t.Fatalf("a create naming an already linked file: err = %v, want ValidationError", err)
+	}
+	if reports() != before {
+		t.Error("a refused create left a case behind")
+	}
+	for name, id := range map[string]string{
+		"somebody else's draft":  draft("someone-else@test.local", "COMPLETE"),
+		"a draft not stored yet": draft(ccmCustomer, "PENDING"),
+	} {
+		if _, err := repo.CreateCase(customer, req(id)); !errors.As(err, &ve) {
+			t.Errorf("%s: err = %v, want ValidationError", name, err)
+		}
+		if reports() != before {
+			t.Errorf("%s: a refused create left a case behind", name)
+		}
+	}
+	// One good file and one bad one: nothing is created and the good one stays a draft.
+	good := draft(ccmCustomer, "COMPLETE")
+	if _, err := repo.CreateCase(customer, req(good, draft("someone-else@test.local", "COMPLETE"))); !errors.As(err, &ve) {
+		t.Fatalf("a create naming a good and a bad file: err = %v, want ValidationError", err)
+	}
+	if reports() != before || linkedTo(good) != "" {
+		t.Error("a refused create must roll back the link of the good file too")
+	}
+
+	// Two creates racing for one file: exactly one case, and the file belongs to it.
+	raced := draft(ccmCustomer, "COMPLETE")
+	var wg sync.WaitGroup
+	results := make([]error, 2)
+	created := make([]string, 2)
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cc, err := repo.CreateCase(customer, req(raced))
+			results[i], created[i] = err, cc.ID
+		}()
+	}
+	wg.Wait()
+	wins := 0
+	for i, err := range results {
+		if err == nil {
+			wins++
+			if linkedTo(raced) != created[i] {
+				t.Errorf("the file is linked to %q, not the winning case %q", linkedTo(raced), created[i])
+			}
+		} else if !errors.As(err, &ve) {
+			t.Errorf("the losing create: err = %v, want ValidationError", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d of 2 racing creates succeeded, want exactly 1", wins)
+	}
+	if reports() != before+1 {
+		t.Errorf("reports = %d, want %d: the loser must leave no case", reports(), before+1)
+	}
 }

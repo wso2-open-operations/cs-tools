@@ -37,14 +37,13 @@ import {
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
+import { E164_PHONE_HINT, E164_PHONE_REGEX } from "@utils/e164";
+import { isBadRequestError, getApiErrorMessage } from "@utils/ApiError";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
 import {
   listSupportedTimeZones,
   normalizeUserTimeZone,
 } from "@utils/dateTime";
-
-// E.164 phone validator: leading + required, then country code digit + 7-14 more digits.
-const E164 = /^\+[1-9]\d{7,14}$/;
 
 // Show at most this many role chips inline before collapsing with "+N more".
 const ROLES_PREVIEW_LIMIT = 4;
@@ -108,7 +107,7 @@ export default function UserProfileModal({
       return;
     }
 
-    if (phoneChanged && nextPhone && !E164.test(nextPhone)) {
+    if (phoneChanged && nextPhone && !E164_PHONE_REGEX.test(nextPhone)) {
       showError("Phone number must be in E.164 format, e.g. +14155552671.");
       return;
     }
@@ -134,8 +133,13 @@ export default function UserProfileModal({
         setIsTzEditing(false);
         onClose();
       },
-      onError: () => {
-        showError("Could not update profile. Please try again.");
+      onError: (error) => {
+        // A 400 carries the backend's own validation message (e.g. the phone
+        // number rule); anything else stays generic.
+        const backendMessage = isBadRequestError(error)
+          ? getApiErrorMessage(error)
+          : undefined;
+        showError(backendMessage ?? "Could not update profile. Please try again.");
       },
     });
   }, [
@@ -245,7 +249,8 @@ export default function UserProfileModal({
                   placeholder="+14155552671"
                   value={phoneDraft}
                   onChange={(e) => setPhoneDraft(e.target.value)}
-                  helperText="E.164 format: + followed by country code and number"
+                  inputProps={{ "aria-label": "Phone number" }}
+                  helperText={E164_PHONE_HINT}
                 />
               </Box>
             ) : (

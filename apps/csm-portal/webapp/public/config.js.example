@@ -44,6 +44,24 @@ window.config = {
   CSM_PORTAL_THEME: "acrylicOrange",
   CSM_PORTAL_LOG_LEVEL: "ERROR",
 
+  // ── Appearance (all optional) ────────────────────────────────────────────────
+  //
+  // Each key falls back to the stock WSO2 value when omitted.
+  //
+  // CSM_PORTAL_APP_NAME  (default: "CSM Portal")
+  //   Product name shown beside the logo in the header and in the browser tab.
+  // CSM_PORTAL_LOGO_LIGHT_MODE_URL  (default: "/logo-dark.svg")
+  //   Logo for the light colour scheme and the light-mode tab icon. A path
+  //   under public/ or an absolute https URL. When no dark-mode logo is set,
+  //   this one is used for both colour schemes. The defaults are the stock
+  //   files public/logo-dark.svg and public/logo-white.svg; to use your own
+  //   logos without changing this file, mount your SVGs over those two paths.
+  // CSM_PORTAL_LOGO_DARK_MODE_URL  (default: "/logo-white.svg")
+  //   Logo for the dark colour scheme and the dark-mode tab icon.
+  // CSM_PORTAL_APP_NAME: "<your-portal-name>",
+  // CSM_PORTAL_LOGO_LIGHT_MODE_URL: "/logo-dark.svg",
+  // CSM_PORTAL_LOGO_DARK_MODE_URL: "/logo-white.svg",
+
   // TEMPORARY / LOCAL DEV ONLY. Bypasses the post-sign-in *authorization*
   // checks (portal-role gate, per-section capabilities, SPL audience gate)
   // for an account the real backend hasn't provisioned a portal role for
@@ -89,6 +107,9 @@ window.config = {
     "customers": "wip",
     "admin": "wip",
     "admin.user-management.users": "enabled",
+    // Embedded (non-navigation) feature: the SLA impact timeline under the SLA
+    // table on a case. Shown unless set to "hidden" (or "wip").
+    // "support.case-sla-timeline": "hidden",
   },
 
   // Mock data: when true, data hooks short-circuit to seeded fixtures instead
@@ -212,6 +233,32 @@ window.config = {
   // must have the env var of the same name set to "true" too, or the column
   // reads "Unavailable". Off means no column and no request.
   CSM_MIGRATION_ONBOARDING_STATUS_ENABLED: true,
+
+  // Early size checks for attachments (stored in Azure Blob Storage by the
+  // portal backend), in megabytes. Optional:
+  // leave unset for the defaults below (10 MB file, 1 MB images), which match the entity-service's own
+  // defaults. Set them to the same values as the entity-service's
+  // ATTACHMENT_MAX_MB and its inline image limit; the server stays the
+  // authority, these only refuse an oversized file before the upload starts.
+  // CSM_PORTAL_INLINE_IMAGE_MAX_MB is the most image megabytes one comment or
+  // description may hold in total (also the largest single image); each may
+  // hold at most 5 images.
+  // Values above 100 (file) or 25 (images), zero, negative or text are ignored
+  // and the default (10 / 1) is used.
+  // CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 100,
+  // CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
+
+  // How many 8 MiB ranges of one attachment download are fetched at the same
+  // time. Optional: default 4, kept between 1 and 8. 1 fetches one range at a
+  // time. A number or numeric string; anything else uses the default.
+  // CSM_PORTAL_DOWNLOAD_PARALLELISM: 4,
+
+  // Save a download straight to a file the person picks (the browser's save
+  // dialog), so a large attachment is not held whole in memory. Works in Chrome
+  // and Edge; other browsers keep the in-memory download. Files of 15 MiB or
+  // less skip the dialog. Optional: only the boolean false or the string "false"
+  // turns it off; true (or leaving it unset) keeps it on.
+  // CSM_PORTAL_DOWNLOAD_TO_DISK: true,
 
   // Project key an announcement's "Send test" dry run creates its one real
   // test case in (mirrors the ServiceNow flow's own hardcoded

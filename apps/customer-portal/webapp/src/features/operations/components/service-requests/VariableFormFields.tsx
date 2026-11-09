@@ -40,11 +40,14 @@ import {
 import { computeMinScheduleDatetimeLocalForTimeZone } from "@features/support/utils/support";
 import { resolveDisplayTimeZone } from "@utils/dateTime";
 import Editor from "@components/rich-text-editor/Editor";
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import DateTimeLocalField from "@components/date-time-picker/DateTimeLocalField";
+import type { ImageUploadHandler } from "@components/rich-text-editor/localImageUpload";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import {
   ERROR_UNSUPPORTED_TYPE,
-  ERROR_SIZE_EXCEEDED,
+  imageCountExceededMessage,
+  imageSizeExceededMessage,
 } from "@constants/common";
 
 export interface VariableFormFieldsProps {
@@ -62,6 +65,11 @@ export interface VariableFormFieldsProps {
   };
   attachments?: Array<{ id: string; file: File }>;
   onAttachmentClick?: () => void;
+  /**
+   * Keeps images of the description as local previews, uploaded when the form
+   * is submitted. Without it, images are embedded in the description as base64.
+   */
+  onImageUpload?: ImageUploadHandler;
   onAttachmentRemove?: (index: number) => void;
   onAttachmentAdd?: (file: File, variableLabel?: string) => void;
   userTimeZone?: string;
@@ -213,6 +221,7 @@ export default function VariableFormFields({
   contextValues,
   attachments = [],
   onAttachmentClick,
+  onImageUpload,
   onAttachmentRemove,
   onAttachmentAdd,
   userTimeZone,
@@ -394,12 +403,16 @@ export default function VariableFormFields({
             toolbarVariant="full"
             onAttachmentClick={onAttachmentClick}
             attachments={attachments.map((a) => a.file)}
+            maxAttachments={CREATE_FORM_MAX_ATTACHMENTS}
             onAttachmentRemove={onAttachmentRemove}
+            onImageUpload={onImageUpload}
             onPasteError={(reason) =>
               showError(
                 reason === "type"
                   ? ERROR_UNSUPPORTED_TYPE
-                  : ERROR_SIZE_EXCEEDED,
+                  : reason === "count"
+                    ? imageCountExceededMessage()
+                    : imageSizeExceededMessage(),
               )
             }
           />

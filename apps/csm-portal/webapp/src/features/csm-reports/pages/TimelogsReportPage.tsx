@@ -34,6 +34,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Typography,
@@ -46,7 +47,13 @@ import QueryErrorState from "@components/QueryErrorState";
 import { useGetTimelogsBreakdown } from "@features/csm-reports/api/useGetTimelogsBreakdown";
 import PieChart from "@features/csm-reports/components/PieChart";
 import { addElementPages, copyCanvasPixels } from "@features/csm-reports/components/reportPdfCapture";
-import type { TimeCardDetails, TimeLogBreakdownCase, TimeLogBreakdownDetails } from "@features/csm-reports/api/reportTypes";
+import type {
+  TimeCardDetails,
+  TimeLogBreakdownCase,
+  TimeLogBreakdownDetails,
+  TimelogsPeriodParams,
+} from "@features/csm-reports/api/reportTypes";
+import { formatPeriod } from "@features/csm-reports/utils/period";
 import { sysidToUuid } from "@features/csm-cases/utils/inlineImages";
 import { useNavTransition } from "@hooks/useNavTransition";
 
@@ -68,6 +75,74 @@ function yesNo(value: string): string {
 
 function isApproved(state: string): boolean {
   return state.trim().toLowerCase() === "approved";
+}
+
+type PeriodMode = "default" | "custom" | "all";
+
+function PeriodControl({
+  mode,
+  from,
+  to,
+  onChange,
+}: {
+  mode: PeriodMode;
+  from: string;
+  to: string;
+  onChange: (next: { mode: PeriodMode; from: string; to: string }) => void;
+}): JSX.Element {
+  const invalid = Boolean(from && to && from > to);
+  const disabled = mode === "all";
+  return (
+    <Box
+      role="group"
+      aria-label="Report period"
+      sx={{ display: "flex", gap: 1, alignItems: "flex-start", flexWrap: "wrap" }}
+    >
+      <TextField
+        type="date"
+        size="small"
+        label="From"
+        value={from}
+        disabled={disabled}
+        error={invalid}
+        onChange={(e) => onChange({ mode: "custom", from: e.target.value, to })}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: to || undefined } }}
+        sx={{ width: 170 }}
+      />
+      <TextField
+        type="date"
+        size="small"
+        label="To"
+        value={to}
+        disabled={disabled}
+        error={invalid}
+        helperText={invalid ? "To must be on or after From." : undefined}
+        onChange={(e) => onChange({ mode: "custom", from, to: e.target.value })}
+        slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: from || undefined } }}
+        sx={{ width: 170 }}
+      />
+      <ToggleButton
+        value="all"
+        size="small"
+        color="primary"
+        selected={mode === "all"}
+        aria-pressed={mode === "all"}
+        onChange={() => onChange(mode === "all" ? { mode: "default", from: "", to: "" } : { mode: "all", from: "", to: "" })}
+        sx={{ textTransform: "none", height: 40 }}
+      >
+        All time
+      </ToggleButton>
+      <Button
+        variant="text"
+        size="small"
+        disabled={mode === "default"}
+        onClick={() => onChange({ mode: "default", from: "", to: "" })}
+        sx={{ height: 40 }}
+      >
+        Subscription period
+      </Button>
+    </Box>
+  );
 }
 
 function MetaCell({ label, children }: { label: string; children: ReactNode }): JSX.Element {
@@ -352,8 +427,29 @@ export default function TimelogsReportPage(): JSX.Element {
   const [downloadError, setDownloadError] = useState("");
   const [isCustomerReport, setCustomerReport] = useState(false);
   const [printing, setPrinting] = useState(false);
+  // Draft inputs are what the user typed; `applied` is the last valid range
+  // actually requested, so an invalid draft is never sent.
+  const [draft, setDraft] = useState<{ mode: PeriodMode; from: string; to: string }>({ mode: "default", from: "", to: "" });
+  const [applied, setApplied] = useState<TimelogsPeriodParams>({});
 
-  const { data, isLoading, isError, error, refetch } = useGetTimelogsBreakdown(projectId);
+  const handlePeriodChange = (next: { mode: PeriodMode; from: string; to: string }) => {
+    setDraft(next);
+    if (next.mode === "all") {
+      setApplied({ allTime: true });
+    } else if (next.mode === "default" || (!next.from && !next.to)) {
+      setApplied({});
+    } else if (!next.from || !next.to || next.from <= next.to) {
+      setApplied({ from: next.from || undefined, to: next.to || undefined });
+    }
+  };
+
+  const { data, isLoading, isError, error, refetch, isPlaceholderData } = useGetTimelogsBreakdown(projectId, applied);
+
+  // Keep the toolbar once the report has loaded, and while the error state is
+  // shown, so a failed uncached period never strands the user without controls.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  if (data && !hasLoadedOnce) setHasLoadedOnce(true);
+  const showControls = Boolean(data) || hasLoadedOnce || isError;
 
   const cases = (isCustomerReport ? data?.cases.filter((c) => c.caseType === "Query") : data?.cases) ?? [];
   const timeCardCases = cases
@@ -406,9 +502,10 @@ export default function TimelogsReportPage(): JSX.Element {
         </Box>
       )}
 
-      {data && (
+      {showControls && (
         <Box className="csm-print-hide" sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
           <ReportToggle isCustomerReport={isCustomerReport} onChange={setCustomerReport} />
+          <PeriodControl mode={draft.mode} from={draft.from} to={draft.to} onChange={handlePeriodChange} />
         </Box>
       )}
 
@@ -433,12 +530,15 @@ export default function TimelogsReportPage(): JSX.Element {
       {isError && <QueryErrorState message="Could not load the time report." error={error} onRetry={() => void refetch()} />}
 
       {data && (
-        <Box id="timelogs-report" sx={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+        <Box id="timelogs-report" aria-busy={isPlaceholderData} sx={{ opacity: isPlaceholderData ? 0.6 : 1, display: "flex", flexDirection: "column", gap: 2.5 }}>
           <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ minWidth: 0 }}>
               <Typography variant="h5">{isCustomerReport ? "Query hours report" : "Time report"}</Typography>
               <Typography variant="body2" color="text.secondary">
                 {data.projectName?.trim() || "Time logged against this project."}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" data-testid="timelogs-period">
+                {formatPeriod(data.periodStart, data.periodEnd)}
               </Typography>
             </Box>
             <Box

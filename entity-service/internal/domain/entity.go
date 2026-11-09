@@ -3490,31 +3490,45 @@ type AggregateResponse struct {
 	TotalMinutes  *int              `json:"totalMinutes,omitempty"`
 }
 
-// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a
-// day-bucketed count of cases opened and closed per day, for dashboard
-// widgets. Deliberately narrow (no bucket-unit/series config, unlike
-// AggregateCasesRequest's open-ended groupBy): this backs exactly one chart,
-// not a platform, so the two series (opened, closed) are fixed.
+// CaseVolumeTrendRequest is the input for POST /cases/volume-trend: a count
+// of cases opened and closed per day (or per week or month of a fixed
+// window), for dashboard widgets. Deliberately narrow (unlike
+// AggregateCasesRequest's open-ended groupBy): this backs one chart, not a
+// platform, so the two series (opened, closed) are fixed.
 type CaseVolumeTrendRequest struct {
 	Filters SearchCasesFilters `json:"filters"`
 	// Days is the size of the trailing window, ending today (UTC). Optional;
 	// the service applies a default (30) when omitted and rejects a value
-	// outside 1-90.
+	// outside 1-90. Not allowed together with StartDate/EndDate.
 	Days int `json:"days,omitempty"`
+	// StartDate and EndDate are a fixed window instead of the trailing one:
+	// both inclusive UTC calendar days, each a plain YYYY-MM-DD or a relative
+	// date placeholder (__today__, __startOfMonth:-1__, ...). Optional, but
+	// one needs the other.
+	StartDate string `json:"startDate,omitempty"`
+	EndDate   string `json:"endDate,omitempty"`
+	// Bucket is how a fixed window's days are grouped into points: "day"
+	// (the default, at most 90 days), "week" (Monday to Sunday, at most 54
+	// weeks: a whole leap year that starts on a Sunday) or "month" (at most 24 months). Only with StartDate/EndDate.
+	Bucket string `json:"bucket,omitempty"`
 }
 
-// CaseVolumeTrendPoint is one day's count in a CaseVolumeTrendSeries. Date is
-// a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
-// date-only wire fields.
+// CaseVolumeTrendPoint is one point's count in a CaseVolumeTrendSeries. Date
+// is a plain YYYY-MM-DD (UTC calendar day), matching this codebase's other
+// date-only wire fields. For a "week" or "month" bucket, Date is the bucket's
+// first day and EndDate its last, both clipped to the requested window, so
+// the two are exactly the days the count covers; EndDate is absent for a
+// day point.
 type CaseVolumeTrendPoint struct {
-	Date  string `json:"date"`
-	Count int    `json:"count"`
+	Date    string `json:"date"`
+	EndDate string `json:"endDate,omitempty"`
+	Count   int    `json:"count"`
 }
 
 // CaseVolumeTrendSeries is one named line in a CaseVolumeTrendResponse
-// ("Opened" or "Closed"), with one point per day in the requested window,
-// in chronological order. A day with no matching cases is still present,
-// with Count 0 -- the chart draws a continuous line.
+// ("Opened" or "Closed"), with one point per day (or bucket) in the
+// requested window, in chronological order. A day with no matching cases is
+// still present, with Count 0 -- the chart draws a continuous line.
 type CaseVolumeTrendSeries struct {
 	Label  string                 `json:"label"`
 	Points []CaseVolumeTrendPoint `json:"points"`
@@ -3524,8 +3538,14 @@ type CaseVolumeTrendSeries struct {
 // exactly two series, "Opened" (by created date) and "Closed" (by closed
 // date, own-type only -- see caseLikeOwnClosedOnColumn's doc comment).
 type CaseVolumeTrendResponse struct {
-	Days   int                     `json:"days"`
-	Series []CaseVolumeTrendSeries `json:"series"`
+	// Days is the number of days the window covers.
+	Days int `json:"days"`
+	// StartDate, EndDate and Bucket echo a fixed window's resolved bounds
+	// and grouping; all absent for the trailing window.
+	StartDate string                  `json:"startDate,omitempty"`
+	EndDate   string                  `json:"endDate,omitempty"`
+	Bucket    string                  `json:"bucket,omitempty"`
+	Series    []CaseVolumeTrendSeries `json:"series"`
 }
 
 // CaseVolumeDayCount is the opened/closed count for one UTC calendar day --
@@ -3929,19 +3949,16 @@ type Variable struct {
 	Value string `json:"value"`
 }
 
-// CaseAttachment is a file attachment for security report analysis case creation.
-// File must be a base64 data URI (e.g. data:application/pdf;base64,...).
-type CaseAttachment struct {
-	Name string `json:"name"`
-	File string `json:"file"`
-}
-
 // CreateCaseRequest is the input for creating a new case.
 // id, number, and internal_id are auto-generated; state defaults to open.
 // CreatedBy is not accepted from the request body and will be wired from auth context later.
 // For type "service_request": catalogId, catalogItemId, and variables are required.
-// For type "security_report_analysis": subject and description are required; attachments are optional
-// (uploaded via a separate request after creation, not bundled into this one).
+// For type "security_report_analysis": subject, description and at least one report file
+// are required. The files are uploaded BEFORE the case, as drafts of its project
+// (POST /attachments/upload with type work_item and projectId), and named here in
+// attachmentIds; they are linked to the case in the same request, so a case never
+// exists without its report. Machine callers (no user token) are not held to the
+// minimum.
 type CreateCaseRequest struct {
 	CreatedBy         string        `json:"-"`
 	Type              string        `json:"type"`
@@ -3956,6 +3973,14 @@ type CreateCaseRequest struct {
 	CatalogID     string     `json:"catalogId"`
 	CatalogItemID string     `json:"catalogItemId"`
 	Variables     []Variable `json:"variables"`
+	// AttachmentIDs are draft work item attachments the caller uploaded to ProjectID
+	// before this request (see the type's comment): checked before the case is
+	// created and linked to it right after. At most service.MaxCreateAttachments.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	// ReportDraftOwnerEmail is the email AttachmentIDs were checked against, set by the
+	// service (never read from the request). The plain-Postgres create links the files in
+	// its own transaction as that uploader, atomically with the case.
+	ReportDraftOwnerEmail string `json:"-"`
 	// Optional fields
 	RelatedCaseID string `json:"relatedCaseId"`
 	// ResolvedRelatedCaseID is the related-case id already checked against
@@ -3967,8 +3992,6 @@ type CreateCaseRequest struct {
 	// WatchList is watcher emails (Customer Portal / Ballerina). Platform user
 	// UUIDs are still accepted and resolved to emails for CSM callers.
 	WatchList []string `json:"watchList"`
-	// For security_report_analysis type
-	Attachments []CaseAttachment `json:"attachments"`
 	// For engagement type
 	EngagementType        EngagementType        `json:"engagementType"`
 	EngagementPaymentType EngagementPaymentType `json:"engagementPaymentType"`
@@ -4350,26 +4373,18 @@ type CreateCaseGithubIssueResponse struct {
 	Issue   CaseGithubIssueDetail `json:"issue"`
 }
 
-// AttachmentStatus is the upload lifecycle state of a CSM-native (Postgres)
-// data source attachment. ServiceNow-sourced attachments have no such
-// lifecycle -- SN's /attachments API only ever returns fully-uploaded files --
-// so this is meaningful for the Postgres data source only, where the browser
-// uploads directly to SFTPGo and CSM's row can be registered before that
-// upload finishes.
+// AttachmentStatus is the lifecycle state of an attachment row as it is listed
+// by POST /attachments/search. Only complete rows are listed.
 type AttachmentStatus string
 
 const (
-	// AttachmentStatusPending marks a row created before the browser has
-	// uploaded (or finished uploading) the file to SFTPGo. It exists so an
-	// orphan-file gap can't occur: if the upload never completes or the
-	// browser never calls back, CSM still has a record that something was
-	// started, for a future reconciliation job to find and clean up.
-	AttachmentStatusPending AttachmentStatus = "pending"
 	// AttachmentStatusComplete marks a row whose file is confirmed present in
-	// SFTPGo. This is the only state that has ever existed prior to this
-	// change, and remains the default for every caller that doesn't specify
-	// a status (the ServiceNow path, and any existing Postgres-path caller).
+	// Azure Blob Storage (or was migrated there).
 	AttachmentStatusComplete AttachmentStatus = "complete"
+	// AttachmentStatusDeleted marks a row a person deleted. It is listed only
+	// when the CSM portal backend asks for deleted rows (see
+	// SearchAttachmentsRequest.IncludeDeleted); it has no file and no link.
+	AttachmentStatusDeleted AttachmentStatus = "deleted"
 )
 
 // Attachment represents a file attachment linked to a reference entity.
@@ -4388,84 +4403,15 @@ type Attachment struct {
 	CreatedOn   time.Time      `json:"createdOn"`
 	DownloadURL *string        `json:"downloadUrl"`
 	PreviewURL  *string        `json:"previewUrl"`
-	// StorageKey identifies the file's location in external object storage
-	// (SFTPGo) for CSM-native (Postgres) data source attachments. Nil for
-	// ServiceNow-sourced attachments, whose bytes are held by ServiceNow itself.
+	// StorageKey identifies the file's location in Azure Blob Storage. Nil for a
+	// row that has no file of its own recorded.
 	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
+	// Status is the lifecycle state -- see AttachmentStatus.
 	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentRequest is the input for POST /attachments.
-//
-// The two data sources populate mutually exclusive fields: ServiceNow requires
-// File (a base64 data URI) and computes SizeBytes from the decoded bytes; the
-// CSM-native (Postgres) data source requires StorageKey (the file was already
-// uploaded to SFTPGo out of band) and SizeBytes, since this service never sees
-// the bytes themselves.
-type CreateAttachmentRequest struct {
-	ReferenceID   string        `json:"referenceId"`
-	ReferenceType ReferenceType `json:"referenceType"`
-	Name          string        `json:"name"`
-	Type          string        `json:"type"`
-	File          string        `json:"file,omitempty"`
-	Description   *string       `json:"description"`
-	// StorageKey references file bytes already uploaded to SFTPGo. Required
-	// for the CSM-native (Postgres) data source; ignored for ServiceNow.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// SizeBytes is the file size in bytes. Required for the CSM-native
-	// (Postgres) data source (this service cannot compute it, since it never
-	// sees the file bytes); ignored for ServiceNow, which computes it from
-	// the decoded File payload.
-	SizeBytes int `json:"sizeBytes,omitempty"`
-	// Status requests the initial lifecycle state for a CSM-native
-	// (Postgres) data source attachment -- see AttachmentStatus. Empty
-	// defaults to AttachmentStatusComplete, preserving today's behavior for
-	// every existing caller (including the ServiceNow path, which ignores
-	// this field entirely). Callers that upload directly to SFTPGo should
-	// pass AttachmentStatusPending here *before* minting the upload
-	// credential, then call CaseService.ConfirmCaseAttachment once the
-	// browser reports the upload succeeded.
-	Status AttachmentStatus `json:"status,omitempty"`
-	// CreatedBy is the resolved actor user id, wired in by the Postgres-backed
-	// service from the request's auth token before it reaches the repository.
-	// Not part of the wire contract.
-	CreatedBy string `json:"-"`
-}
-
-// AttachmentDetail holds the core fields returned after creating an attachment.
-type AttachmentDetail struct {
-	ID        string    `json:"id"`
-	SizeBytes int       `json:"sizeBytes"`
-	CreatedOn time.Time `json:"createdOn"`
-	CreatedBy string    `json:"createdBy"`
-	// DownloadURL is nil for a CSM-native (Postgres) data source attachment:
-	// this service holds no download location for it, only its storage_key --
-	// resolving storage_key to an actual download location is the downstream
-	// CSM backend's job. Always non-nil for ServiceNow-sourced attachments.
-	DownloadURL *string `json:"downloadUrl"`
-	// StorageKey is set only for CSM-native (Postgres) data source attachments.
-	// See Attachment.StorageKey.
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// CreateAttachmentResponse is the response for POST /cases/{id}/attachments.
-type CreateAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
-}
-
-// ConfirmAttachmentResponse is the response for POST /attachments/{id}/confirm.
-// It reports the same shape as CreateAttachmentResponse -- confirming is just
-// the second half of creating an attachment for the CSM-native (Postgres)
-// data source's two-step (pending -> complete) upload flow.
-type ConfirmAttachmentResponse struct {
-	Message    string           `json:"message"`
-	Attachment AttachmentDetail `json:"attachment"`
+	// DeletedOn and DeletedBy say when and by whom a deleted attachment was
+	// deleted. Set only on a row whose Status is AttachmentStatusDeleted.
+	DeletedOn *time.Time     `json:"deletedOn,omitempty"`
+	DeletedBy *UserReference `json:"deletedBy,omitempty"`
 }
 
 // ReferenceType identifies the entity type an attachment is associated with.
@@ -4484,6 +4430,11 @@ type SearchAttachmentsRequest struct {
 	ReferenceID   string        `json:"referenceId"`
 	ReferenceType ReferenceType `json:"referenceType"`
 	Pagination    Pagination    `json:"pagination"`
+	// IncludeDeleted asks for deleted attachments too, listed after the
+	// others. Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID),
+	// which sets it for a portal admin; from any other caller it is ignored.
+	// Not read for "deployment".
+	IncludeDeleted bool `json:"includeDeleted,omitempty"`
 }
 
 // SearchAttachmentsResponse is the paginated result of an attachment search.
@@ -4494,40 +4445,6 @@ type SearchAttachmentsResponse struct {
 	Limit       int          `json:"limit"`
 	Offset      int          `json:"offset"`
 	HasMore     bool         `json:"hasMore"`
-}
-
-// DeleteAttachmentRequest is the input for DELETE /attachments/{attachmentId}.
-type DeleteAttachmentRequest struct {
-	AttachmentID string `json:"-"`
-}
-
-// DeleteAttachmentResponse is the output for DELETE /cases/{id}/attachments/{attachmentId}.
-type DeleteAttachmentResponse struct {
-	Message string `json:"message"`
-}
-
-// UpdateAttachmentRequest is the input for PATCH /attachments/{attachmentId}.
-// ReferenceID and ReferenceType scope the update the same way SearchAttachmentsRequest does
-// (an IDOR guard: the caller asserts which entity it believes the attachment belongs to).
-// At least one of Name or Description must be provided.
-// Description uses json.RawMessage to preserve three states: nil/empty = omit, "null" = clear,
-// `"value"` = set -- mirroring UpdateDeployedProductRequest.Description, since a plain *string
-// cannot tell an omitted field apart from an explicit null.
-type UpdateAttachmentRequest struct {
-	AttachmentID  string          `json:"-"`
-	ReferenceID   string          `json:"referenceId"`
-	ReferenceType ReferenceType   `json:"referenceType"`
-	Name          *string         `json:"name,omitempty"`
-	Description   json.RawMessage `json:"description,omitempty"`
-}
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{attachmentId}.
-
-// UpdatedAttachment carries the fields that may change after an attachment update.
-type UpdatedAttachment struct {
-	ID        string    `json:"id"`
-	UpdatedOn time.Time `json:"updatedOn"`
-	UpdatedBy string    `json:"updatedBy"`
 }
 
 // ChangeRequestType classifies the change request type.
@@ -8182,64 +8099,6 @@ type CaseEmojiFeedback struct {
 	AdditionalComment *string              `json:"additionalComment"`
 }
 
-// --- attachment gaps (formerly ServiceNow data source only; the CSM-native
-// Postgres data source now implements GetAttachmentByID and UpdateAttachment
-// too, in caseService -- see its Content/StorageKey doc comments above for how
-// the two data sources differ) ---
-
-// AttachmentDetails is the response for GET /attachments/{id} — attachment
-// metadata plus its base64-encoded file content. The upstream response does
-// include a createdByUser key, but this lookup leaves it null rather than
-// resolving the uploader the way the search/comment paths do — so CreatedBy is
-// a bare string here. ReferenceType is genuinely absent from the upstream
-// response, so it is deliberately not modeled below.
-type AttachmentDetails struct {
-	ID          string `json:"id"`
-	ReferenceID string `json:"referenceId"`
-	// ReferenceType identifies which entity type ReferenceID points at (see
-	// ReferenceType). Always populated for CSM-native (Postgres) data source
-	// attachments; nil (JSON null) when the backing data source's
-	// attachment-details lookup does not report a reference type. Callers
-	// authorizing access per referenced resource must treat a nil value as
-	// unknown and fail closed.
-	ReferenceType *ReferenceType `json:"referenceType"`
-	Name          string         `json:"name"`
-	Type          string         `json:"type"`
-	SizeBytes     int            `json:"sizeBytes"`
-	Description   *string        `json:"description"`
-	CreatedBy     string         `json:"createdBy"`
-	CreatedOn     time.Time      `json:"createdOn"`
-	DownloadURL   *string        `json:"downloadUrl"`
-	PreviewURL    *string        `json:"previewUrl"`
-	// Content is nil for CSM-native (Postgres) data source attachments: this
-	// service holds no bytes for them -- see CaseService.GetCaseAttachmentContent.
-	// Always non-nil for ServiceNow-sourced attachments.
-	Content *string `json:"content"`
-	// StorageKey is set only for CSM-native (Postgres) data source
-	// attachments, whose Content is always nil (see above).
-	StorageKey *string `json:"storageKey,omitempty"`
-	// Status is the upload lifecycle state -- see AttachmentStatus. Always
-	// AttachmentStatusComplete for ServiceNow-sourced attachments. A
-	// 'pending' row is still returned here (unlike the default search/list
-	// response, which excludes pending rows) since a direct id lookup is how
-	// the confirm step and an uploader checking their own in-flight upload
-	// both work.
-	Status AttachmentStatus `json:"status,omitempty"`
-}
-
-// UpdateAttachmentRequest is the request body for PATCH /attachments/{id}.
-// ReferenceType must be "case" or "deployment"; for "case" Name is required
-// and Description is not allowed; for "deployment" at least one of Name or
-// Description must be present.
-
-// UpdatedAttachment holds the fields returned after updating an attachment.
-
-// UpdateAttachmentResponse is the response for PATCH /attachments/{id}.
-type UpdateAttachmentResponse struct {
-	Message    string            `json:"message"`
-	Attachment UpdatedAttachment `json:"attachment"`
-}
-
 // --- deployed product metrics (ServiceNow data source only) ---
 
 // DeployedProductMetricsRequest is the request body for
@@ -8955,12 +8814,42 @@ type SearchSLAStatusResponse struct {
 // named ranges rather than an open gte/lte pair (unlike the unrelated,
 // generic taskSLABusinessElapsedPercent case-search filter in
 // internal/service/sla_filters.go): the CSM Portal's SLA Engine admin table
-// offers exactly these four buckets, not an arbitrary range.
+// offers exactly these eleven buckets, not an arbitrary range. Ten percent
+// wide each (0-10, 10-20, ... 90-100), plus a final open-ended "over100" for
+// an already-breached clock whose elapsed time keeps climbing past its own
+// duration -- replaced the original four coarser buckets (under50/50to75/
+// 75to100/over100) at explicit request for finer-grained filtering. Each
+// bucket's own lower bound is inclusive, its upper bound exclusive, except
+// the final 90to100 bucket (inclusive of exactly 100%) and over100 (strictly
+// greater than 100%) -- same boundary convention the original four buckets
+// already used, just applied at every ten-point step instead of only three.
 const (
-	SLAElapsedBucketUnder50 = "under50"
-	SLAElapsedBucket50To75  = "50to75"
-	SLAElapsedBucket75To100 = "75to100"
+	SLAElapsedBucketUnder10 = "under10"
+	SLAElapsedBucket10To20  = "10to20"
+	SLAElapsedBucket20To30  = "20to30"
+	SLAElapsedBucket30To40  = "30to40"
+	SLAElapsedBucket40To50  = "40to50"
+	SLAElapsedBucket50To60  = "50to60"
+	SLAElapsedBucket60To70  = "60to70"
+	SLAElapsedBucket70To80  = "70to80"
+	SLAElapsedBucket80To90  = "80to90"
+	SLAElapsedBucket90To100 = "90to100"
 	SLAElapsedBucketOver100 = "over100"
+)
+
+// SLA status/stage filter keys -- GET /sla-status's own status query param,
+// and SLAStatusFilters.Stage's accepted values. Named after the same three
+// states the CSM Portal's SLA Engine table already renders as status chips
+// (scanSLAStatus's own IsPaused/HasBreached fields) rather than the raw
+// sla_stage_enum label: a clock can be IsPaused AND HasBreached at once (a
+// clock paused after its own wall-clock time ran out), which the UI already
+// shows as both chips together -- StatusPaused/StatusBreached are therefore
+// not mutually exclusive filter matches against the same row, same as the
+// chips aren't mutually exclusive display states.
+const (
+	SLAStatusInProgress = "in_progress"
+	SLAStatusPaused     = "paused"
+	SLAStatusBreached   = "breached"
 )
 
 // SLAStatusFilters narrows GET /sla-status's result set for the CSM Portal's
@@ -8983,12 +8872,18 @@ type SLAStatusFilters struct {
 	// product, or any other field: this is a case-identity lookup, not a
 	// general-purpose search box.
 	Search string
-	// ElapsedBucket is one of the four SLAElapsedBucket* constants above, or
-	// "" for no bucket filter. Applied AFTER the same business-day
-	// correction scanSLAStatus already applies to BusinessElapsedPercent --
-	// see SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for
-	// why this can't be a plain SQL WHERE/HAVING clause.
+	// ElapsedBucket is one of the SLAElapsedBucket* constants above, or ""
+	// for no bucket filter. Applied AFTER the same business-day correction
+	// scanSLAStatus already applies to BusinessElapsedPercent -- see
+	// SLAStatusRepository.SearchActiveSLAStatuses's own doc comment for why
+	// this can't be a plain SQL WHERE/HAVING clause.
 	ElapsedBucket string
+	// Stage is one of the SLAStatus* constants above, or "" for no status
+	// filter. Matched against IsPaused/HasBreached, not the raw sla_stage_enum
+	// column, for the same reason ElapsedBucket isn't matched against the
+	// raw business_elapsed_percentage column -- see SearchActiveSLAStatuses'
+	// own doc comment.
+	Stage string
 }
 
 // SLAClockState is GET /sla-status/clock-state's response — the full,

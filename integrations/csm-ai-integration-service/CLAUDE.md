@@ -49,7 +49,8 @@ the backend maps the code to its own status and user-facing text:
 | 422 | `refused` | the model refused (stop reason `refusal`) |
 | 502 | `truncated` / `unusable` | the reply was cut off / holds nothing usable (no JSON object; for code, no usable code block) |
 | 504 | `timeout` | the model call ran out of time (`CLAUDE_TIMEOUT`) |
-| 502 | `model_call_failed` | any other call failure; a gateway 401/403 is this service's key problem, never passed on |
+| 429 | `usage_limit` | the gateway answered 429 (a request, token or spend limit on the AI side), also after the SDK's one retry; the user is told the AI's usage limit was reached, not that it could not be reached |
+| 502 | `model_call_failed` | any other call failure, an overloaded gateway (529 / 503) included; a gateway 401/403 is this service's key problem, never passed on |
 
 ## Model settings
 
@@ -81,7 +82,7 @@ Every model call writes one line, `dashboard generate: token usage` (`logUsage` 
 |---|---|
 | `userID`, `correlationID` | added by the log handler from the request (the same keys as the CSM portal backend's lines) |
 | `model` | `CLAUDE_MODEL` |
-| `outcome` | `ok`, `declined`, `refused`, `truncated`, `unusable`, or `failed` (no reply: a gateway error, a connection failure or a timeout, with 0 tokens) |
+| `outcome` | `ok`, `declined`, `refused`, `truncated`, `unusable`, `usage_limit` (no reply: the gateway's 429, with 0 tokens), or `failed` (no reply: any other gateway error, a connection failure or a timeout, with 0 tokens) |
 | `stopReason` | the model's, empty when `failed` |
 | `inputTokens` | input neither read from nor written to the prompt cache: mostly the user message once the system prompt is cached (see "Prompt caching") |
 | `cacheCreationInputTokens`, `cacheReadInputTokens` | input written to / read from the prompt cache: the system prompt, on a call that found no cache / within its lifetime |

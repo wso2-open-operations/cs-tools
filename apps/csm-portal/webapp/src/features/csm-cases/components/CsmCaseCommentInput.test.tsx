@@ -15,19 +15,37 @@
 // under the License.
 
 import { useState } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
+import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 
 // The real client reads runtime config at module load, which isn't present
 // under vitest (same approach as CaseActivitiesFeed.test.tsx). Pulled in
 // transitively via CsmUploadAttachmentModal -> useCsmCaseAttachments, just
 // for its MAX_ATTACHMENT_SIZE_BYTES constant — the mock only exists to keep
 // that import chain from throwing on missing runtime config.
-vi.mock("@api/backend/client", () => ({
-  useBackendApi: () => ({ post: vi.fn() }),
+vi.mock("@api/backend/client", () => {
+  const api = { post: vi.fn() };
+  return { useBackendApi: () => api };
+});
+
+// Also on the import chain (CsmUploadAttachmentModal -> useCsmCaseAttachments),
+// and it reaches the runtime-config module the same way.
+vi.mock("@context/current-user/CurrentUserContext", () => ({
+  useCurrentUser: () => ({ user: null }),
 }));
 
+// Replaced whole, like the client above: the real module pulls in runtime config.
+vi.mock("@features/csm-cases/api/entityAttachments", () => ({
+  uploadEntityAttachment: vi.fn(),
+  entityAttachmentErrorMessage: (err: unknown, fallback: string) =>
+    err instanceof Error ? err.message : fallback,
+}));
+
+import { uploadEntityAttachment } from "@features/csm-cases/api/entityAttachments";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
+import { PartialSendError } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -41,12 +59,37 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     value,
     onChange,
     attachments,
+    uploads = [],
+    uploadsWaiting = 0,
+    onImageUpload,
+    onPasteError,
   }: {
     value: string;
     onChange: (v: string) => void;
     attachments: File[];
+    uploads?: { name: string; percent: number }[];
+    uploadsWaiting?: number;
+    onImageUpload?: (file: File) => string;
+    onPasteError?: (reason: "size" | "type" | "count") => void;
   }) => (
     <div data-testid="editor-stub">
+      <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
+      {onPasteError && (
+        <button type="button" onClick={() => onPasteError("count")}>
+          paste-too-many
+        </button>
+      )}
+      {onImageUpload && (
+        <button
+          type="button"
+          onClick={() => {
+            const src = onImageUpload(new File([new Uint8Array(4)], "shot.png", { type: "image/png" }));
+            onChange(`${value}<img src="${src}" alt="Pasted Image">`);
+          }}
+        >
+          paste-image
+        </button>
+      )}
       <textarea
         aria-label="comment-editor"
         value={value}
@@ -180,7 +223,7 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
     expect(screen.queryByText("Attach a file")).not.toBeInTheDocument();
   });
 
-  it("attaches every file from a multi-file drop", () => {
+  it("keeps only the first file of a multi-file drop, since a reply takes one attachment, and says so", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     const composer = screen.getByTestId("csm-comment-composer");
 
@@ -189,18 +232,61 @@ describe("CsmCaseCommentInput — drag-and-drop attachments", () => {
       fileDrop([makeFile("a.txt", 100), makeFile("b.txt", 200), makeFile("c.txt", 300)]),
     );
 
-    expect(screen.getByTestId("attachment-count")).toHaveTextContent("3");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.getByText(/Only one file allowed/)).toBeInTheDocument();
   });
 
-  it("rejects a dropped file over the size limit but keeps the ones that fit", () => {
+  it("adds nothing more to a reply that already has its attachment", () => {
     render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
     const composer = screen.getByTestId("csm-comment-composer");
 
-    const tooBig = makeFile("huge.zip", 11 * 1024 * 1024);
-    fireEvent.drop(composer, fileDrop([makeFile("ok.txt", 100), tooBig]));
+    fireEvent.drop(composer, fileDrop([makeFile("a.txt", 100)]));
+    fireEvent.drop(composer, fileDrop([makeFile("b.txt", 200)]));
 
     expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
-    expect(screen.getByText(/huge\.zip.*too large/i)).toBeInTheDocument();
+    expect(screen.getByText(/Only one file allowed/)).toBeInTheDocument();
+  });
+
+  it("does not call the file already attached a second attachment", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    const composer = screen.getByTestId("csm-comment-composer");
+
+    const same = makeFile("a.txt", 100);
+    fireEvent.drop(composer, fileDrop([same]));
+    fireEvent.drop(composer, fileDrop([same]));
+
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    expect(screen.queryByText(/Only one file allowed/)).toBeNull();
+  });
+
+  describe("size limit", () => {
+    afterEach(() => {
+      window.config = {} as typeof window.config;
+    });
+
+    it("rejects a dropped file over the configured limit, but keeps the ones that fit", () => {
+      window.config = { CSM_PORTAL_ENTITY_ATTACHMENT_MAX_MB: 25 } as unknown as typeof window.config;
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+      const composer = screen.getByTestId("csm-comment-composer");
+
+      // 11 MB fits under 25 MB; 26 MB does not.
+      fireEvent.drop(
+        composer,
+        fileDrop([makeFile("ok.zip", 11 * 1024 * 1024), makeFile("huge.zip", 26 * 1024 * 1024)]),
+      );
+
+      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+      expect(screen.getByText(/huge\.zip.*too large.*25\.00 MB/i)).toBeInTheDocument();
+    });
+
+    it("keeps the default of 10 MB through the entity flow when nothing is configured", () => {
+      render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+      const composer = screen.getByTestId("csm-comment-composer");
+
+      fireEvent.drop(composer, fileDrop([makeFile("big.zip", 9 * 1024 * 1024)]));
+
+      expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    });
   });
 
   it("still prevents the browser's default file handling when the composer is disabled, without attaching anything", () => {
@@ -343,5 +429,276 @@ describe("CsmCaseCommentInput — lifted draft state survives unmount/remount", 
 
     await screen.findByText("Ctrl/Cmd + Enter to send.");
     expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+  });
+});
+
+describe("CsmCaseCommentInput — emptying once the comment is posted", () => {
+  const sendWithFile = () => {
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see the file" } });
+    fireEvent.drop(
+      screen.getByTestId("csm-comment-composer"),
+      fileDrop([makeFile("big.zip", 1024, "application/zip")]),
+    );
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+  };
+
+  it("empties the editor and its file list when the sender says the comment is posted, while the upload goes on", async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(
+      (_html: string, _internal: boolean, _files: unknown, controls: { commentSettled: () => void }) =>
+        new Promise<void>((resolve) => {
+          controls.commentSettled();
+          finish = resolve;
+        }),
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    await waitFor(() => expect(screen.getByLabelText("comment-editor")).toHaveValue(""));
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("0");
+    // Still sending: the upload has not ended.
+    expect(screen.getByRole("button", { name: /Sending/ })).toBeInTheDocument();
+    finish();
+    await screen.findByRole("button", { name: /Send to customer/ });
+  });
+
+  it("keeps the comment and the file when the comment was not posted", async () => {
+    const onSubmit = vi.fn().mockRejectedValue(new PartialSendError("The comment was not posted.", false, []));
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    expect(await screen.findByText("The comment was not posted.")).toBeInTheDocument();
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("see the file");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+  });
+
+  it("puts a file that did not upload back after the editor was emptied, so Send repeats only it", async () => {
+    const onSubmit = vi.fn(
+      async (_html: string, _internal: boolean, _files: unknown[], controls: { commentSettled: () => void }) => {
+        controls.commentSettled();
+        throw new PartialSendError('"big.zip": the upload failed', true, []);
+      },
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} />);
+    sendWithFile();
+
+    expect(await screen.findByText(/"big\.zip": the upload failed/)).toBeInTheDocument();
+    expect(screen.getByLabelText("comment-editor")).toHaveValue("");
+    expect(screen.getByTestId("attachment-count")).toHaveTextContent("1");
+  });
+
+  it("says how many files are waiting behind the one uploading", async () => {
+    let finish!: () => void;
+    const onSubmit = vi.fn(
+      (_h: string, _i: boolean, _f: unknown, controls: { waiting: (n: number) => void }) =>
+        new Promise<void>((resolve) => {
+          controls.waiting(2);
+          finish = resolve;
+        }),
+    );
+    render(<CsmCaseCommentInput onSubmit={onSubmit} uploadProgress={{ name: "a.zip", percent: 10 }} />);
+    sendWithFile();
+
+    expect(await screen.findByText("2 more files waiting to upload")).toBeInTheDocument();
+    finish();
+    await waitFor(() => expect(screen.queryByText(/waiting to upload/)).toBeNull());
+  });
+});
+
+describe("CsmCaseCommentInput — images added to the comment", () => {
+  const CASE_ID = "22222222-2222-4222-8222-222222222222";
+  const IMAGE_ID = "AAAAAAAA-1111-4111-8111-111111111111";
+  const upload = vi.mocked(uploadEntityAttachment);
+  let blobCount = 0;
+
+  beforeEach(() => {
+    blobCount = 0;
+    upload.mockReset();
+    URL.createObjectURL = vi.fn(() => `blob:https://csm.example.com/${(blobCount += 1)}`);
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it("tells the user a comment can have at most 5 images when the editor refuses another", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} imageUploadParentId={CASE_ID} />);
+    fireEvent.click(screen.getByRole("button", { name: "paste-too-many" }));
+    expect(screen.getByText("A comment or description can have at most 5 images.")).toBeInTheDocument();
+  });
+
+  it("gives the editor no image uploader without a case id, so images are embedded as before", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "paste-image" })).not.toBeInTheDocument();
+  });
+
+  it("uploads a pasted image only when the comment is sent, then sends its id instead of the preview URL", async () => {
+    let finish: (value: { id: string }) => void = () => {};
+    upload.mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+
+    // Pasting sends nothing; the Send button stays available.
+    expect(upload).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(upload).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "comment", parentId: CASE_ID, name: "shot.png" }),
+    );
+    expect(await screen.findByText("Uploading images…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await act(async () => finish({ id: IMAGE_ID }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [html] = onSubmit.mock.calls[0];
+    expect(html).toBe(`see <img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
+    expect(html).not.toContain("blob:");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:https://csm.example.com/1");
+  });
+
+  it("uploads nothing for an image that was removed before Send", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "no image after all" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("explains a failed image on the first Send and posts the comment without it on the second", async () => {
+    upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/Could not upload shot\.png.*Press Send again/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const [html] = onSubmit.mock.calls[0];
+    expect(html).toBe("see ");
+    expect(html).not.toContain("blob:");
+    expect(upload).toHaveBeenCalledTimes(1); // the failed image is not tried again
+  });
+
+  it("asks again when the draft changes after the failed-image notice", async () => {
+    upload.mockRejectedValue(new Error("Could not upload shot.png (HTTP 500). Please try again."));
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), { target: { value: "see " } });
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await screen.findByText(/Press Send again/);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: 'see this <img src="blob:https://csm.example.com/1" alt="x">' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/Press Send again/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("sends a comment that is only an image", async () => {
+    upload.mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    expect(screen.getByRole("button", { name: /Send to customer/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toBe(`<img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
+  });
+
+  it("sends the remaining image when the only other image failed and was dropped", async () => {
+    upload
+      .mockRejectedValueOnce(new Error("Could not upload shot.png (HTTP 500). Please try again."))
+      .mockResolvedValue({ id: IMAGE_ID } as never);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: "paste-image" }));
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+    await screen.findByText(/Press Send again/);
+
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toBe(`<img src="/${IMAGE_ID.toLowerCase()}" alt="Pasted Image">`);
+  });
+
+  it("never sends a blob: image this page did not upload", async () => {
+    const onSubmit = vi.fn();
+    render(<CsmCaseCommentInput onSubmit={onSubmit} imageUploadParentId={CASE_ID} />);
+
+    fireEvent.change(screen.getByLabelText("comment-editor"), {
+      target: { value: 'x<img src="blob:https://csm.example.com/elsewhere">' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Send to customer/ }));
+
+    expect(await screen.findByText(/could not be uploaded/)).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("upload progress while a comment is sent", () => {
+  it("shows the file's name and percentage as a bar inside the editor", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} uploadProgress={{ name: "10mb.pdf", percent: 42 }} />);
+    expect(screen.getByText("Uploading 10mb.pdf")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Uploading 10mb.pdf" }).getAttribute("aria-valuenow")).toBe("42");
+  });
+
+  it("offers Cancel and stops the upload when pressed", () => {
+    const cancel = vi.fn();
+    render(
+      <CsmCaseCommentInput
+        onSubmit={vi.fn()}
+        uploadProgress={{ name: "10mb.pdf", percent: 42, onCancel: cancel }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel upload of 10mb.pdf" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows nothing when no upload runs", () => {
+    render(<CsmCaseCommentInput onSubmit={vi.fn()} />);
+    expect(screen.queryByText(/^Uploading /)).toBeNull();
+  });
+});
+
+describe("commentUploadProgress", () => {
+  it("is the running upload's name and percent, and null otherwise", () => {
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 7, variables: { name: "a.zip" } }),
+    ).toEqual({ name: "a.zip", percent: 7, onCancel: undefined });
+    const stop = vi.fn();
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 7, variables: { name: "a.zip" }, cancelUpload: stop })?.onCancel,
+    ).toBe(stop);
+    expect(
+      commentUploadProgress({ isPending: true, uploadProgress: 0, variables: { file: new File([], "f.txt") } }),
+    ).toEqual({ name: "f.txt", percent: 0, onCancel: undefined });
+    expect(commentUploadProgress({ isPending: false, uploadProgress: 7 })).toBeNull();
+    expect(commentUploadProgress({ isPending: true, uploadProgress: null })).toBeNull();
   });
 });

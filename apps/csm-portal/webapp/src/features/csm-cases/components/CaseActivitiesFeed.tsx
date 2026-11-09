@@ -33,7 +33,6 @@ import {
   ArrowUp,
   ArrowUpRight,
   CheckCircle,
-  Download,
   Eye,
   Link as LinkIcon,
   ListFilter,
@@ -47,6 +46,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import type { BeCallRequestView } from "@api/backend/types";
 import AlertDetailModal from "@features/csm-cases/components/AlertDetailModal";
+import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import AttachmentPreviewDialog from "@features/csm-cases/components/AttachmentPreviewDialog";
 import CallRequestDetailModal from "@features/csm-cases/components/CallRequestDetailModal";
 import CsmCaseCommentBubble from "@features/csm-cases/components/CsmCaseCommentBubble";
@@ -720,6 +720,9 @@ export default function CaseActivitiesFeed({
                     // Same base card-separation fix as the comment bubble.
                     bgcolor: "background.paper",
                     borderColor: "action.disabled",
+                    // The download bar runs along the bottom edge.
+                    position: "relative",
+                    overflow: "hidden",
                   }}
                 >
                   <Box
@@ -792,22 +795,15 @@ export default function CaseActivitiesFeed({
                         }
                       >
                         <Box component="span">
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            startIcon={<Download size={14} />}
-                            onClick={() =>
-                              onDownloadAttachment?.(e.attachment)
-                            }
-                            disabled={!onDownloadAttachment}
-                            aria-label={`Download ${e.attachment.filename}`}
-                          >
-                            Download
-                          </Button>
+                          <AttachmentDownloadButton
+                            attachment={e.attachment}
+                            onDownload={onDownloadAttachment}
+                          />
                         </Box>
                       </Tooltip>
                     </Box>
                   </Box>
+                <AttachmentDownloadBar id={e.attachment.id} />
                 </Paper>
               </Box>
             );

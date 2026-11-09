@@ -52,10 +52,6 @@ vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
   usePostCsmCaseAttachment: () => ({ mutateAsync: vi.fn(), uploadProgress: null }),
-  // AttachmentsField (rendered once a catalog item is selected, per the
-  // read-access gating tests below driving selection that far) reads this
-  // constant directly, not through the hook.
-  MAX_ATTACHMENT_SIZE_BYTES: 10 * 1024 * 1024,
 }));
 vi.mock("@hooks/useEngineerDisplayName", () => ({
   useEngineerDisplayName: () => "Test Engineer",

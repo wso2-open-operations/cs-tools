@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { CREATE_FORM_MAX_ATTACHMENTS } from "@config/attachmentLimitsConfig";
 import {
   Alert,
   Box,
@@ -36,10 +37,7 @@ import { useLocation, useSearchParams } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import type { BeProject } from "@api/backend/types";
 import AttachmentsField from "@components/attachments/AttachmentsField";
-import {
-  POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES,
-  type EncodedAttachment,
-} from "@components/attachments/encodeAttachment";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
@@ -48,7 +46,7 @@ import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadat
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
 import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import { uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
+import { failedUploadsMessage, uploadAttachmentsToCase } from "@features/csm-cases/api/uploadAttachmentsToCase";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useSearchCatalogs } from "@features/csm-operations/api/useSearchCatalogs";
 import { useCatalogItemVariables } from "@features/csm-operations/api/useCatalogItemVariables";
@@ -141,7 +139,8 @@ export default function CreateServiceRequestPage(): JSX.Element {
   const [catalogItemId, setCatalogItemId] = useState("");
   // Variable answers, keyed by variable id.
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [attachments, setAttachments] = useState<EncodedAttachment[]>([]);
+  // Files are not kept in the draft (they cannot be stored); they are chosen again.
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
 
   // `hasSr` is precomputed by the backing data source, so an ineligible
   // project is caught before the engineer fills out the rest of the form
@@ -378,19 +377,15 @@ export default function CreateServiceRequestPage(): JSX.Element {
         variables: variablePayload,
         relatedCaseId,
       });
-      // The create endpoint doesn't attach files for service requests, so upload
-      // them to the new case afterwards. A partial failure still lands the case.
+      // Files are uploaded to the new case afterwards. A partial failure still
+      // lands the case.
       const failed = await uploadAttachmentsToCase(
         postAttachment.mutateAsync,
         created.id,
         attachments,
         uploadedBy,
       );
-      if (failed > 0) {
-        showError(
-          `The service request was created, but ${failed} attachment${failed === 1 ? "" : "s"} failed to upload. You can add ${failed === 1 ? "it" : "them"} from the case page.`,
-        );
-      }
+      if (failed.length > 0) showError(failedUploadsMessage("service request", failed));
       navigate(`/cases/${created.id}`, { state: { from: backTarget } });
     } catch (err) {
       setSubmitting(false);
@@ -702,7 +697,7 @@ export default function CreateServiceRequestPage(): JSX.Element {
                 attachments={attachments}
                 onChange={setAttachments}
                 onError={showError}
-                maxEncodedBytes={POST_CREATE_ATTACHMENTS_MAX_ENCODED_BYTES}
+                maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               />
             </Grid>
           )}

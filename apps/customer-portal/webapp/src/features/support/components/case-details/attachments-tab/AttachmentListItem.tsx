@@ -15,9 +15,11 @@
 // under the License.
 
 import type { AttachmentListItemProps } from "@features/support/types/supportComponents";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import {
   Box,
-  CircularProgress,
   IconButton,
   Paper,
   Skeleton,
@@ -33,7 +35,6 @@ import {
   FileArchive,
   FileText,
   Image,
-  PencilLine,
   Trash2,
 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
@@ -76,11 +77,12 @@ export default function AttachmentListItem({
   attachment,
   onDownload,
   onDelete,
-  onEdit,
   deleteDisabled = false,
   deleteTooltip,
   hideDescription = false,
   isDownloadLoading = false,
+  downloadProgress = null,
+  onCancelDownload,
 }: AttachmentListItemProps): JSX.Element {
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
@@ -148,6 +150,8 @@ export default function AttachmentListItem({
           flexDirection: "column",
           alignItems: "stretch",
           gap: 1.5,
+          position: "relative",
+          overflow: "hidden",
           "&:hover": {
             bgcolor: "action.hover",
           },
@@ -207,17 +211,12 @@ export default function AttachmentListItem({
                 )}
               </IconButton>
             )}
-            {onEdit && (
-              <IconButton
-                size="small"
-                aria-label={`Edit ${attachment.name}`}
-                sx={{ color: "text.secondary" }}
-                onClick={() => onEdit(attachment)}
-              >
-                <PencilLine size={16} aria-hidden />
-              </IconButton>
-            )}
             {deleteButton}
+            <DownloadProgressStatus
+              name={attachment.name}
+              downloading={isDownloadLoading}
+              progress={downloadProgress}
+            />
             <IconButton
               size="small"
               aria-label={`Download ${attachment.name}`}
@@ -227,11 +226,17 @@ export default function AttachmentListItem({
               onClick={() => onDownload(attachment)}
             >
               {isDownloadLoading ? (
-                <CircularProgress color="inherit" size={16} aria-hidden />
+                <DownloadProgressIndicator progress={downloadProgress} />
               ) : (
                 <Download size={16} aria-hidden />
               )}
             </IconButton>
+            {isDownloadLoading && onCancelDownload && (
+              <DownloadCancelButton
+                name={attachment.name}
+                onCancel={() => onCancelDownload(attachment)}
+              />
+            )}
           </Stack>
         </Box>
 

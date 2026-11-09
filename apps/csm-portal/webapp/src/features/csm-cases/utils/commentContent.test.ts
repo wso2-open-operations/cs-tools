@@ -20,6 +20,7 @@ import {
   collapseCommentSourceWhitespace,
   collapseHtmlSourceWhitespace,
   convertCodeTagsToHtml,
+  hasCommentContent,
   hasDisplayableContent,
   hasPublicComment,
   hasSingleCodeWrapper,
@@ -168,6 +169,19 @@ describe("linkifyBareUrls", () => {
     const input = '<a href="https://example.com">https://example.com</a>';
     const out = linkifyBareUrls(input);
     expect(out).toContain('href="https://example.com"');
+  });
+
+  it("never rewrites a URL inside a tag attribute, e.g. an <img> pasted from a web page", () => {
+    const input =
+      '<p><img src="https://png.pngtree.com/a.png" alt="Emoji | Pngtree" style="max-width: 100%; display: block;"></p>';
+    expect(linkifyBareUrls(input)).toBe(input);
+  });
+
+  it("still links a bare URL that sits next to such an image", () => {
+    const out = linkifyBareUrls('<img src="https://a.test/x.png"> source: https://a.test/page');
+    expect(out).toContain('<img src="https://a.test/x.png">');
+    expect(out).toContain('<a href="https://a.test/page"');
+    expect((out.match(/<a /g) ?? []).length).toBe(1);
   });
 
   it("does not produce a nested anchor when the URL is already an anchor's visible text", () => {
@@ -395,5 +409,22 @@ describe("preprocessCommentBodyHtml: laid-out HTML source", () => {
     });
     expect(html).toContain("<li>one</li>");
     expect(html).toContain("\n");
+  });
+});
+
+describe("hasCommentContent", () => {
+  it("is true for text", () => {
+    expect(hasCommentContent("<p>hello</p>")).toBe(true);
+  });
+
+  it("is true for an image with no text", () => {
+    expect(hasCommentContent('<p><img src="/11111111-1111-4111-8111-111111111111" alt="x"></p>')).toBe(true);
+    expect(hasCommentContent('<IMG src="data:image/png;base64,AAAA">')).toBe(true);
+  });
+
+  it("is false when nothing but markup and blank space is left", () => {
+    expect(hasCommentContent("")).toBe(false);
+    expect(hasCommentContent("<p>&nbsp;</p><br>")).toBe(false);
+    expect(hasCommentContent("<p> </p>")).toBe(false);
   });
 });

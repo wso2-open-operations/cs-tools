@@ -593,6 +593,53 @@ type SLAEngineRepository interface {
 	// cancellation still runs, nothing gets registered. Returns how many
 	// rows were cancelled.
 	ReviseClocks(ctx context.Context, workItemID string, policies []SLAPolicyRef) (int, error)
+
+	// ListCaseActivityEvents returns workItemID's own work_item_activity
+	// rows for fieldNames (e.g. "state", "severity", "type"), oldest first
+	// -- the one durable record of when a case's fields actually changed,
+	// and so the only way to replay what a clock's pause/resume condition
+	// would have evaluated to at a past instant. See
+	// SLAEngineService.RecalculateCasePauseTotals' own doc comment: this is
+	// empty for any case that only ever went through the ServiceNow-backed
+	// write path (snCaseService never writes this table at all), which a
+	// caller must treat as "no history to replay", never as "nothing ever
+	// changed".
+	ListCaseActivityEvents(ctx context.Context, workItemID string, fieldNames []string) ([]CaseActivityEvent, error)
+
+	// ListActiveClocksForRecalc returns every currently-active (is_active)
+	// "sla" row for workItemID, joined to the subset of its own bound
+	// sla_policy's columns a pause/resume replay needs -- a narrower
+	// column set than SLAPolicyRef's own (no Duration/StartCondition/
+	// Retroactive, none of which RecalculateCasePauseTotals reads).
+	ListActiveClocksForRecalc(ctx context.Context, workItemID string) ([]ActiveClockForRecalc, error)
+
+	// UpdateClockPauseTotals overwrites one (workItemID, policyID) clock's
+	// pause_duration (flat, always) and business_pause_duration (only when
+	// businessPauseSeconds is non-nil) with freshly recomputed, ground-truth
+	// totals -- an ABSOLUTE set, unlike setPaused's own incremental "add
+	// this one newly-completed segment" accumulation, since this
+	// reconstructs a clock's entire pause history from scratch rather than
+	// reacting to one new live pause/resume event. businessPauseSeconds is
+	// nil for a clock not on the 'WSO2 Business days' schedule -- that
+	// column is never consulted for any other schedule (see sla_live's own
+	// CASE branches), so there is nothing to correct there for them, and
+	// this leaves the stored column completely untouched rather than
+	// writing a number nothing will ever read.
+	UpdateClockPauseTotals(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64) error
+
+	// UpdateClockPausedSnapshot is UpdateClockPauseTotals' counterpart for a
+	// currently PAUSED clock: it overwrites pause_duration/
+	// business_pause_duration the same way, and ALSO overwrites
+	// business_elapsed_percentage/business_duration/
+	// remaining_business_duration together with them, recomputed as of this
+	// clock's own paused_on instant -- the same formula setPausedFlat/
+	// setPausedBusinessDays already freeze these at, just fed the newly
+	// corrected pause total instead of trusting whatever was stored at the
+	// moment this clock actually paused. elapsedSeconds/remainingSeconds
+	// are the schedule-appropriate (flat or business-day) elapsed/remaining
+	// time as of paused_on; elapsedPercent is that same elapsed time over
+	// the policy's own duration, as a percentage.
+	UpdateClockPausedSnapshot(ctx context.Context, workItemID, policyID string, pauseSeconds int64, businessPauseSeconds *int64, elapsedPercent float64, elapsedSeconds, remainingSeconds int64) error
 }
 
 type slaEngineRepo struct {

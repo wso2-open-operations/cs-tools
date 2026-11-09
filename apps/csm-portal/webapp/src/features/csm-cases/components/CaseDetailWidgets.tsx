@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { AttachmentDownloadBar, AttachmentDownloadButton } from "@features/csm-cases/components/AttachmentDownloadProgress";
 import {
   Box,
   Button,
@@ -1023,11 +1024,14 @@ export function AttachmentsWidget({
   onRetry,
   uploading = false,
   uploadProgress = null,
+  onCancelUpload,
   uploadError,
   onUpload,
   onDownloadAll,
   onDownload,
   onDelete,
+  canDeleteAttachment,
+  deletedAttachments,
   deletingId,
   preview,
   onRefresh,
@@ -1043,12 +1047,14 @@ export function AttachmentsWidget({
   /** An upload is in flight. */
   uploading?: boolean;
   /**
-   * 0-100 while a direct-to-SFTPGo upload is in flight (see
+   * 0-100 while a chunked upload is in flight (see
    * `usePostCsmCaseAttachment`'s `uploadProgress`), `null`/omitted otherwise
-   * — including for the default upload path, which has no granular
+   * — including for the older base64 upload path, which has no granular
    * progress and falls back to an indeterminate bar.
    */
   uploadProgress?: number | null;
+  /** Stops the upload in flight; shows a Cancel button next to the progress bar. */
+  onCancelUpload?: () => void;
   /** Message shown when the last upload failed (size, network, 413, …). */
   uploadError?: string | null;
   onUpload?: (file: File) => void;
@@ -1056,6 +1062,17 @@ export function AttachmentsWidget({
   onDownload?: (attachment: CaseAttachment) => void;
   /** Delete an attachment. Omit to hide the per-row delete affordance. */
   onDelete?: (attachment: CaseAttachment) => void;
+  /**
+   * Per-row gate for the delete affordance, on top of `onDelete` being set (for
+   * example "only the uploader"). Omit to show it on every row, as before.
+   */
+  canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
+  /**
+   * Attachments that were deleted, shown under the available ones with who
+   * deleted them and when, in place of the Download button. Only an admin's list
+   * carries them; omit to show none.
+   */
+  deletedAttachments?: CaseAttachment[];
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1160,11 +1177,19 @@ export function AttachmentsWidget({
           />
         )}
         {uploading && (
-          <LinearProgress
-            sx={{ mb: 1 }}
-            variant={uploadProgress != null ? "determinate" : "indeterminate"}
-            value={uploadProgress ?? undefined}
-          />
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
+            <LinearProgress
+              sx={{ flex: 1 }}
+              aria-label="Upload progress"
+              variant={uploadProgress != null ? "determinate" : "indeterminate"}
+              value={uploadProgress ?? undefined}
+            />
+            {onCancelUpload && (
+              <Button size="small" variant="text" color="inherit" onClick={onCancelUpload}>
+                Cancel
+              </Button>
+            )}
+          </Box>
         )}
         {uploadError && (
           <Typography variant="body2" color="error" sx={{ mb: 1 }}>
@@ -1186,7 +1211,7 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : sorted.length === 0 ? (
+        ) : sorted.length === 0 && !deletedAttachments?.length ? (
           <Typography variant="body2" color="text.secondary">
             No attachments on this case.
           </Typography>
@@ -1203,6 +1228,8 @@ export function AttachmentsWidget({
                   borderRadius: 1,
                   border: 1,
                   borderColor: "divider",
+                  position: "relative",
+                  overflow: "hidden",
                   transition: "background-color 120ms, border-color 120ms",
                   "&:hover": {
                     borderColor: "primary.main",
@@ -1210,6 +1237,7 @@ export function AttachmentsWidget({
                   },
                 }}
               >
+                <AttachmentDownloadBar id={a.id} />
                 <Paperclip size={16} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   {onDownload ? (
@@ -1279,19 +1307,13 @@ export function AttachmentsWidget({
                   }
                 >
                   <Box component="span" sx={{ flexShrink: 0 }}>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<Download size={14} />}
-                      onClick={() => onDownload?.(a)}
-                      disabled={!onDownload}
-                      aria-label={`Download ${a.filename}`}
-                    >
-                      Download
-                    </Button>
+                    <AttachmentDownloadButton
+                      attachment={a}
+                      onDownload={onDownload}
+                    />
                   </Box>
                 </Tooltip>
-                {onDelete && (
+                {onDelete && (canDeleteAttachment?.(a) ?? true) && (
                   <IconButton
                     size="small"
                     color="error"
@@ -1307,6 +1329,60 @@ export function AttachmentsWidget({
                     )}
                   </IconButton>
                 )}
+              </Box>
+            ))}
+            {(deletedAttachments ?? []).map((a) => (
+              <Box
+                key={a.id}
+                data-testid="deleted-attachment"
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Paperclip size={16} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    color="text.secondary"
+                    sx={{ fontWeight: 500, textDecoration: "line-through" }}
+                  >
+                    {a.filename}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
+                    <UserRefLink
+                      name={a.uploadedBy}
+                      email={a.uploadedByUser?.email || a.uploadedByEmail}
+                      userId={a.uploadedByUser?.id}
+                    />{" "}
+                    · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
+                    <UserRefLink
+                      name={a.deletedBy ?? "Unknown"}
+                      email={a.deletedByUser?.email || a.deletedByEmail}
+                      userId={a.deletedByUser?.id}
+                    />
+                    {a.deletedAt && (
+                      <>
+                        {" "}
+                        · <RelativeTime iso={a.deletedAt} />
+                      </>
+                    )}
+                  </Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  label="Deleted"
+                  sx={{ flexShrink: 0 }}
+                />
               </Box>
             ))}
           </Box>

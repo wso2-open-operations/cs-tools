@@ -29,6 +29,14 @@ vi.mock("@context/error-banner/ErrorBannerContext", () => ({
   useErrorBanner: () => ({ showError: vi.fn() }),
 }));
 vi.mock("@hooks/useEngineerDisplayName", () => ({ useEngineerDisplayName: () => "Test Engineer" }));
+vi.mock("@features/csm-cases/api/usePreCreateInlineImages", () => ({
+  usePreCreateInlineImages: () => ({
+    onImageUpload: undefined,
+    uploadImages: async (html: string) => html,
+    release: vi.fn(),
+  }),
+  preCreateImagesErrorMessage: (err: unknown) => (err instanceof Error ? err.message : "failed"),
+}));
 vi.mock("@features/csm-cases/api/usePostCsmCase", () => ({
   usePostCsmCase: () => ({ mutateAsync: mutateAsyncMock }),
 }));

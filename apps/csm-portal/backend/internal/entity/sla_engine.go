@@ -32,6 +32,7 @@ type SLAStatusManageFilters struct {
 	CaseType      string
 	Search        string
 	ElapsedBucket string
+	Status        string
 }
 
 // SearchActiveSLAStatusesManage calls GET /sla-status?admin=true on the
@@ -64,6 +65,9 @@ func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context
 	if filters.ElapsedBucket != "" {
 		q.Set("elapsedBucket", filters.ElapsedBucket)
 	}
+	if filters.Status != "" {
+		q.Set("status", filters.Status)
+	}
 	return c.do(ctx, http.MethodGet, "/sla-status?"+q.Encode(), nil)
 }
 
@@ -72,4 +76,15 @@ func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context
 // body; entity-service responds 204 once the request has been published.
 func (c *CustomerEntityClient) RequestSLARecalculation(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/sla-engine/recalculate", nil)
+}
+
+// RecalculateCasePauseTotals calls POST /cases/{id}/sla/recalculate-pause on
+// the entity service -- recomputes one case's currently IN_PROGRESS SLA
+// clocks' pause history from the case's own state-change activity log,
+// correcting pause_duration/business_pause_duration when they disagree. No
+// request body; entity-service re-checks the caller is genuinely
+// csm-portal-backend itself (see its own CaseSLARecalcService doc comment),
+// same posture as RequestSLARecalculation above.
+func (c *CustomerEntityClient) RecalculateCasePauseTotals(ctx context.Context, caseID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(caseID)+"/sla/recalculate-pause", nil)
 }

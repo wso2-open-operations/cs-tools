@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import { Box, Button, Card, Chip, Skeleton, Tab, Tabs, Tooltip, Typography } from "@wso2/oxygen-ui";
 import {
   Activity,
@@ -80,9 +81,11 @@ import {
   incidentPriorityLabel,
   incidentStateColor,
   incidentStateLabel,
+  isIncidentTerminal,
 } from "@features/csm-operations/utils/incidents";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import {
   AttachmentsWidget,
   WatchersWidget,
@@ -93,6 +96,7 @@ import {
   useDownloadCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
   BeEntityRef,
@@ -114,7 +118,7 @@ import type { CreateChangeRequestFromIncidentNavState } from "@features/csm-oper
 import type { CreateIncidentFromIncidentNavState } from "@features/csm-operations/utils/incidents";
 import type { CreateProblemFromIncidentNavState } from "@features/csm-operations/utils/problems";
 import { looksLikeHtml, sanitizeStructuredHtml } from "@utils/sanitizeHtml";
-import { linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
+import { hasCommentContent, linkifyBareUrls } from "@features/csm-cases/utils/commentContent";
 import { withRenderedIncidentNotes } from "@features/csm-operations/utils/incidentNoteHtml";
 
 const OPERATIONS_INCIDENTS_PATH = "/operations/incidents";
@@ -363,6 +367,11 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     isError: isAttachmentsError,
   } = useGetCsmCaseAttachments(id, "incident");
   const postAttachment = usePostCsmCaseAttachment();
+  const attachmentDeletion = useAttachmentDeletion({
+    ownerId: id,
+    referenceType: "incident",
+    closed: isIncidentTerminal(data?.state),
+  });
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const getAttachmentPreviewContent = useGetCsmCaseAttachmentPreviewSource();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -378,7 +387,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   // which surface opened it.
   const [previewTarget, setPreviewTarget] = useState<CaseAttachment | null>(null);
 
-  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
+  // Deleted attachments (an admin's list carries them) are shown only at the
+  // bottom of the Attachments tab, never in the feed, the counts or Download all.
+  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
   // The read model's entries already carry the platform user UUID the write
   // side is keyed by, so the widget can compute a replacement list straight
   // from what is on screen.
@@ -941,28 +953,28 @@ export default function CsmIncidentDetailPage(): JSX.Element {
               </Box>
               <CsmCaseCommentInput
                 disabled={!id}
+                uploadProgress={commentUploadProgress(postAttachment)}
                 publicCommentDisabledReason={incidentCommentGateReason(incident.state)}
                 autoFocus
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!id) return;
-                  const hasText =
-                    bodyHtml.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim().length > 0;
-                  if (hasText) {
-                    await postComment.mutateAsync({
-                      incidentId: id,
-                      bodyHtml,
-                      internal,
-                    });
-                  }
-                  for (const { file, name } of commentAttachments) {
-                    await postAttachment.mutateAsync({
-                      caseId: id,
-                      file,
-                      name,
-                      uploadedBy: engineerName,
-                      referenceType: "incident",
-                    });
-                  }
+                  // Comment and files are separate requests, sent together.
+                  await sendCommentWithAttachments({
+                    hasComment: hasCommentContent(bodyHtml),
+                    postComment: () =>
+                      postComment.mutateAsync({ incidentId: id, bodyHtml, internal }),
+                    attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
+                    uploadAttachment: ({ file, name }) =>
+                      postAttachment.mutateAsync({
+                        caseId: id,
+                        file,
+                        name,
+                        uploadedBy: engineerName,
+                        referenceType: "incident",
+                      }),
+                  });
                   setComposerOpen(false);
                 }}
               />
@@ -1151,7 +1163,10 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentList}
             uploading={postAttachment.isPending}
+            uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
+            onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}
             uploadError={
               postAttachment.isError
                 ? (postAttachment.error?.message ?? "Could not upload the attachment.")
@@ -1161,6 +1176,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             onDownload={
               canDownloadAttachment ? onDownloadAttachment : undefined
             }
+            onDelete={attachmentDeletion.onDelete}
+            canDeleteAttachment={attachmentDeletion.canDeleteAttachment}
+            deletingId={attachmentDeletion.deletingId}
             preview={
               canDownloadAttachment
                 ? {
@@ -1173,6 +1191,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           />
         </Card>
       )}
+
+      {attachmentDeletion.dialog}
 
       {editOpen && (
         <EditIncidentDialog

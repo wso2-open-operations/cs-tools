@@ -13,7 +13,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { PostAttachmentsVariables } from "@features/support/types/supportApi";
+import { isAbortError } from "@api/storedAttachments";
+import type { StoredUploadVariables } from "@api/useStoredAttachments";
 
 export const ATTACHMENT_UPLOAD_WAIT_MS = 5_000;
 
@@ -22,54 +23,40 @@ export interface AttachmentUploadItem {
   file: File;
 }
 
-export function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const s = typeof reader.result === "string" ? reader.result : "";
-      const i = s.indexOf(",");
-      resolve(i >= 0 ? s.slice(i + 1) : s);
-    };
-    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
-}
-
 export interface UploadAttachmentsParams {
   caseId: string;
   attachments: AttachmentUploadItem[];
   attachmentNames: Map<string, string>;
-  uploadAttachment: (variables: PostAttachmentsVariables) => Promise<unknown>;
-  encodeFile?: (file: File) => Promise<string>;
+  uploadAttachment: (variables: StoredUploadVariables) => Promise<unknown>;
   logger?: { error: (msg: string, err?: unknown) => void };
 }
 
 /**
- * Uploads all attachments for a created service request.
- * Returns a list of file/attachment names that failed to upload.
+ * Uploads all attachments for a created service request, one after another,
+ * through the stored (Azure Blob) upload. Returns a list of file/attachment
+ * names that failed to upload.
  */
 export async function uploadServiceRequestAttachments({
   caseId,
   attachments,
   attachmentNames,
   uploadAttachment,
-  encodeFile = fileToBase64,
   logger,
 }: UploadAttachmentsParams): Promise<string[]> {
   const failed: string[] = [];
   for (const item of attachments) {
     const attachmentName = attachmentNames.get(item.id) || item.file.name;
     try {
-      const content = await encodeFile(item.file);
       await uploadAttachment({
+        type: "work_item",
+        parentId: caseId,
         caseId,
-        body: {
-          name: attachmentName,
-          type: item.file.type || "application/octet-stream",
-          content,
-        },
+        file: item.file,
+        body: { name: attachmentName },
       });
     } catch (error) {
+      // Stopped by the person: that is not a failure to report.
+      if (isAbortError(error)) continue;
       logger?.error(`Failed to upload attachment ${attachmentName}`, error);
       failed.push(attachmentName);
     }

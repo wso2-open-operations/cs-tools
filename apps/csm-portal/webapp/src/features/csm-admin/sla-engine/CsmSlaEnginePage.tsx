@@ -57,10 +57,12 @@ import {
 import type { BeCaseType } from "@api/backend/types";
 import {
   SLA_ELAPSED_BUCKET_LABEL,
+  SLA_STATUS_FILTER_LABEL,
   useActiveSlaStatuses,
   useRequestSlaRecalculation,
   type ActiveSlaStatusFilters,
   type SlaElapsedBucket,
+  type SlaStatusFilterValue,
 } from "@features/csm-admin/sla-engine/useSlaEngine";
 import { SEVERITY_LABEL } from "@features/csm-dashboard/utils/abtDashboard";
 import type { Severity } from "@features/csm-dashboard/types/abtDashboard";
@@ -72,7 +74,20 @@ const TABLE_COLUMN_COUNT = 8;
 const SLA_ENGINE_PAGE_PATH = "/admin/sla-engine";
 /** Only S0-S4 -- "unset" has no entity-service-side filter value. */
 const SEVERITY_FILTER_OPTIONS: Severity[] = ["S0", "S1", "S2", "S3", "S4"];
-const ELAPSED_BUCKET_FILTER_OPTIONS: SlaElapsedBucket[] = ["under50", "50to75", "75to100", "over100"];
+const ELAPSED_BUCKET_FILTER_OPTIONS: SlaElapsedBucket[] = [
+  "under10",
+  "10to20",
+  "20to30",
+  "30to40",
+  "40to50",
+  "50to60",
+  "60to70",
+  "70to80",
+  "80to90",
+  "90to100",
+  "over100",
+];
+const STATUS_FILTER_OPTIONS: SlaStatusFilterValue[] = ["in_progress", "paused", "breached"];
 const SEARCH_DEBOUNCE_MS = 400;
 
 function formatTimestamp(value: string | null): string {
@@ -162,14 +177,21 @@ export default function CsmSlaEnginePage(): JSX.Element {
   const [severityFilter, setSeverityFilter] = useState<Severity | "">("");
   const [caseTypeFilter, setCaseTypeFilter] = useState<BeCaseType | "">("");
   const [elapsedBucketFilter, setElapsedBucketFilter] = useState<SlaElapsedBucket | "">("");
+  const [statusFilter, setStatusFilter] = useState<SlaStatusFilterValue | "">("");
   const [searchInput, setSearchInput] = useState("");
   const debouncedSearch = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
 
-  const hasActiveFilters = severityFilter !== "" || caseTypeFilter !== "" || elapsedBucketFilter !== "" || searchInput !== "";
+  const hasActiveFilters =
+    severityFilter !== "" ||
+    caseTypeFilter !== "" ||
+    elapsedBucketFilter !== "" ||
+    statusFilter !== "" ||
+    searchInput !== "";
   const handleClearFilters = (): void => {
     setSeverityFilter("");
     setCaseTypeFilter("");
     setElapsedBucketFilter("");
+    setStatusFilter("");
     setSearchInput("");
     setPage(0);
   };
@@ -185,6 +207,10 @@ export default function CsmSlaEnginePage(): JSX.Element {
     setElapsedBucketFilter(value);
     setPage(0);
   };
+  const handleStatusChange = (value: SlaStatusFilterValue | ""): void => {
+    setStatusFilter(value);
+    setPage(0);
+  };
   const handleSearchChange = (e: ChangeEvent<HTMLInputElement>): void => {
     setSearchInput(e.target.value);
     setPage(0);
@@ -195,9 +221,10 @@ export default function CsmSlaEnginePage(): JSX.Element {
       severity: severityFilter ? priorityFromSeverity(severityFilter) : undefined,
       caseType: caseTypeFilter || undefined,
       elapsedBucket: elapsedBucketFilter || undefined,
+      status: statusFilter || undefined,
       search: debouncedSearch.trim() || undefined,
     }),
-    [severityFilter, caseTypeFilter, elapsedBucketFilter, debouncedSearch],
+    [severityFilter, caseTypeFilter, elapsedBucketFilter, statusFilter, debouncedSearch],
   );
   const request = useMemo(
     () => ({ limit: rowsPerPage, offset: page * rowsPerPage, ...filters }),
@@ -326,6 +353,14 @@ export default function CsmSlaEnginePage(): JSX.Element {
             onChange={handleElapsedBucketChange}
             minWidth={150}
             options={ELAPSED_BUCKET_FILTER_OPTIONS.map((bucket) => ({ value: bucket, label: SLA_ELAPSED_BUCKET_LABEL[bucket] }))}
+          />
+          <SlaFilterSelect
+            id="sla-engine-filter-status"
+            label="Status"
+            value={statusFilter}
+            onChange={handleStatusChange}
+            minWidth={150}
+            options={STATUS_FILTER_OPTIONS.map((status) => ({ value: status, label: SLA_STATUS_FILTER_LABEL[status] }))}
           />
           {hasActiveFilters && (
             <Button size="small" onClick={handleClearFilters} sx={{ alignSelf: "center" }}>

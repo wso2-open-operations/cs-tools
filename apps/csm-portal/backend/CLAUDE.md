@@ -452,18 +452,50 @@ caller holding `PermWrite` (the onboarding fields, including the four dates, are
 `PermManageOnboarding`). A nil `access` (no guard wired) fails closed, same as every other
 in-handler permission check in this codebase.
 
+## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
+
+Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no file bytes (a security report's files are uploaded first as drafts of the project, `type: "work_item"` with `projectId`, and `POST /cases` names them in `attachmentIds`; entity-service refuses a security report with none, and this service forwards the create body untouched, so the ids reach it as sent). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
+`libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
+size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
+(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is for
+this process only: it is never put in a response, a header or a log.** The module permission is the route's own
+(`PermWrite` to upload and delete, `PermDownloadAttachment` to read), so the handler only checks `type`.
+
+| Route | Permission | Does |
+|---|---|---|
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no upload link comes back, only `attachmentId` and `maxBytes`. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it) |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | authorize, then Put Block (<= 8 MiB, index within the size limit) |
+| `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume |
+| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
+| `GET /attachments/download/{id}/content?type=` | `PermDownloadAttachment` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
+| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline A description image still in the project's drafts folder comes back with `relocateTo`: the first read after its case exists copies the file to the work item's `inline_attachments` folder, calls entity-service `POST /attachments/inline/{id}/relocated`, then removes the draft copy (`relocateInlineImage`); on any failure the draft file is read instead and nothing is lost. |
+| `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (the uploader, or a portal admin), then the file is removed best effort. The backend rebuilds the body for entity-service (`withAdminDelete`): it drops any `asAdmin` key the browser sent, under any spelling, and sets `asAdmin: true` only when the caller's token roles give `PermAdmin` (`AccessGuard.Permits`). Entity-service honours the flag only from this backend's client id, so a forged flag does nothing; locate gets the browser's body unchanged because its decoder knows no `asAdmin` |
+
+Startup fails unless the container is reachable. Entity-service answers refusals in words written for the person ("This case is closed...", "Only the person who uploaded an attachment can delete it"); `mapStoredAttachmentError` passes the 400, 403, 409 and 429 messages on (read only from its JSON envelope, never a raw body), maps 404, 401 as usual, 502/503/504 to 503 and anything else to a fixed fallback. Config: `AZURE_STORAGE_ACCOUNT` and
+`AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**, `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
+`AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the container only; or `AZURE_STORAGE_KEY` (the
+account's shared key, full control of the account); or `AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional
+`AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in the secret store, never in the repo or a log. With a
+container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development). `libs/azblobstore` is a
+separate Go module required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
+`.../acknowledge`).
+
+**Releasing `libs/azblobstore`:** a change to the library reaches this backend only through a version tag. Merge the
+library change to `main`, tag a commit on `main` as `libs/azblobstore/vX.Y.Z` and push the tag, then run
+`go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z` and `go mod tidy` here and commit `go.mod`
+and `go.sum`. `apps/csm-portal/backend` and `apps/customer-portal/backend-v2` must move to the same version together. The
+full steps are in `libs/azblobstore/README.md`, "Releasing a new version". Never move or delete a published tag.
+
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
-A pasted screenshot in a comment or case/incident/change-request description is normally extracted
-into a real, `PermDownloadAttachment`-gated attachment on the way in (see
-`internal/handler/inline_images.go`'s `InlineImageProcessor`, `SFTPGO_ATTACHMENT_STORAGE_ENABLED`
-only) and rewritten to a `.iix` reference. Content authored before that flag was on — or with it off
-— never goes through that extraction: the image stays as a raw `data:image/...;base64,...` `<img>`
+A pasted screenshot in a comment or case/incident/change-request description is stored as a real,
+`PermDownloadAttachment`-gated attachment and referenced by id. Content authored before that
+— never went through that extraction: the image stays as a raw `data:image/...;base64,...` `<img>`
 src embedded directly in the comment/description HTML itself, which every read response already
 returns to *any* caller holding `PermView` — there is no separate attachment resource for
 `PermDownloadAttachment` to gate. Found live: a `viewer`/`escalator` role, neither of which holds
-`canDownloadAttachment`, could see a pasted screenshot in a case comment despite the `.iix` mechanism
-being correctly gated.
+`canDownloadAttachment`, could see a pasted screenshot in a case comment although referenced attachments
+were correctly gated.
 
 `redactRawBase64Images` strips the base64 payload out of raw response bytes (a compiled regex over
 `data:image/...;base64,<payload>`, replaced with a short inert placeholder that still starts with
@@ -729,7 +761,7 @@ Each upstream service has its own client package under `internal/`:
 | `updates` | Updates service | Product update levels; returns typed structs (not raw passthrough) |
 | `csmnotification` | `integrations/csm-notification-service` | Health check only today (`Health(ctx)`, backing `GET /health/dependencies` — see "Health endpoints" below). Optional: unconfigured (`CSM_NOTIFICATION_SERVICE_BASE_URL` unset) means this dependency reports `not_configured` |
 | `csmintegration` | `integrations/csm-integration-service` | Same shape and same one purpose as `csmnotification` above, for `integrations/csm-integration-service` |
-| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`). Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
+| `csmai` | `integrations/csm-ai-integration-service` | The dashboard generator's model calls (`POST /ai/dashboards/generate`) plus `Health(ctx)`. Each request carries the correlation id and the signed-in user's id as `X-CSM-User-ID` (never the email), which the service logs with the call's token usage. Optional (`CSM_AI_INTEGRATION_SERVICE_BASE_URL`, `_SCOPES`, `_TIMEOUT` default 55s; https, or http for a local host only). When set, `handler.NewServiceDashboardGenerator` (`dashboard_generator_service.go`) is the generator: the service builds the prompt and calls the model; this backend still converts the draft (`draftToDefinition`), sends the registry teams that have a group, keeps the last candidate `dashboard.ParseGenerated` accepts, swaps team keys for group ids (`WithDashboardTeams`) and maps the service's error `code` to the same statuses and messages (`serviceGenerateError`): `usage_limit` (the model gateway's 429) becomes 503 with "The AI assistant has reached its usage limit", never 429, which stays this backend's own per-user limit; `truncated` has its own message ("too large to create in one go"), apart from `unusable`. Unset: the sample. **This backend holds no model client or model SDK** (`cmd/server/no_model_sdk_test.go` fails if `go.mod` requires, or any file imports, one); the catalogue lives in the service, and `internal/dashboard`'s `TestParseGenerated_TheCatalogueExampleIsValid` reads the service's `catalogue.md` so its example keeps passing this backend's check |
 
 New upstream services get their own package under `internal/` following the same `Client` + `do()` pattern. `entity` is the exception: because it hosts multiple, separately-deployed/differently-authenticated services, it uses a `<Name>Config`/`<Name>Client` pair per service/file instead of one shared `Client` for the whole package — `CustomerEntityClient`/`EngineeringEntityClient`.
 
@@ -737,7 +769,7 @@ New upstream services get their own package under `internal/` following the same
 
 **Shared OAuth2 credentials**: `CustomerEntityClient` and `EngineeringEntityClient` (both in `entity`), `updates`, `scim`, and PLG's `internal/plg/entityclient` all authenticate as the same OAuth2 client-credentials app — `cmd/server/main.go` reads `OAUTH2_CLIENT_ID`/`OAUTH2_CLIENT_SECRET`/`OAUTH2_TOKEN_URL` once and passes them into every service's `Config`; only `<SERVICE>_BASE_URL`/`<SERVICE>_SCOPES` are per-service. `EngineeringEntityConfig` still has its own `ClientID`/`ClientSecret`/`TokenURL` fields (matching every other service's `Config` shape), but when it's wired into `main.go` those should be filled with the same shared `oauth2ClientID`/`oauth2ClientSecret`/`oauth2TokenURL` values, not new `ENGINEERING_ENTITY_*` env vars. Follow this pattern for any new upstream service client unless it genuinely uses a different OAuth2 app. PLG is the one client that **inherits** rather than being passed a `Config` per field: `main.go` hands `plg.Mount` a `plgconfig.EntityDefaults` carrying `CUSTOMER_ENTITY_BASE_URL` and the three shared `OAUTH2_*` values, because PLG reaches the same entity-service as `CustomerEntityClient` and a second copy of those settings is one that goes stale on the next secret rotation. `PLG_ENTITY_BASE_URL`/`PLG_ENTITY_OAUTH_*` exist as overrides and are normally unset.
 
-**Request timeouts**: `REST_READ_TIMEOUT` / `REST_WRITE_TIMEOUT` (default 60s) and `ENTITY_SERVICE_TIMEOUT` (default 60s, applied to `CustomerEntityClient` only) are parsed by the pure `loadTimeouts` in `cmd/server/timeouts.go`; all must be > 0, else startup fails; no ordering between them is enforced (client timeout < write timeout is advisable, not required). Defaults were raised from 30s/25s for large inline-attachment uploads. Other upstream clients (engineering, updates, SCIM, notifications, SFTPGo) keep their own fixed timeouts.
+**Request timeouts**: `REST_READ_TIMEOUT` / `REST_WRITE_TIMEOUT` (default 60s) and `ENTITY_SERVICE_TIMEOUT` (default 60s, applied to `CustomerEntityClient` only) are parsed by the pure `loadTimeouts` in `cmd/server/timeouts.go`; all must be > 0, else startup fails; no ordering between them is enforced (client timeout < write timeout is advisable, not required). Defaults were raised from 30s/25s so slow upstream calls are not cut off; an attachment chunk or download extends its own deadline. Other upstream clients (engineering, updates, SCIM, notifications) keep their own fixed timeouts.
 
 ## Customer-health risk tracking (`internal/risk`) is entity-service-backed, not MySQL
 
@@ -871,6 +903,45 @@ could not group before this, so no saved dashboard changes. The AI integration s
 `TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
 there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
 
+**Line widgets: `series`.** A `line` widget may set `series` to `["opened"]` or `["closed"]` to draw only
+that line ("new cases per day", "cases closed per day", or an Edit with AI request such as "remove the closed
+line"); without it both lines are drawn. `validateLineSeries` (`internal/dashboard/registry.go`) refuses an
+empty list (leave the field out for both), an unknown or repeated value, and `series` on any other shape.
+Every line widget saved or served before the field has none, so none of them changes. The view and the draft
+carry it (`widgetViews` / `widgetTemplates`), so a rename or an edit keeps it:
+`TestDraftToDefinition_KeepsLineSeries`, and the round trip fixture has a line widget with `series`. The
+catalogue (sections 4, 8 and 9) teaches the model when to set it. Deploy this backend before the catalogue
+mounts that teach it: an older backend refuses `series` as an unknown field, so those prompts would fail.
+
+**Line widgets: a fixed window.** Instead of `days` (the trailing window ending today), a `line` widget may
+set `startDate` / `endDate` (both inclusive) and `bucket` (`day`, the default, `week` or `month`), so a past
+period such as "cases per day in December 2025" or "per month in 2025" can be a line; the frontend passes
+them to `POST /cases/volume-trend`, which this backend forwards as is (entity-service's `CLAUDE.md` has the
+endpoint's side). `validateLineWindow` (`internal/dashboard/registry.go`) refuses them on any other shape,
+`days` with them, one date without the other, a `bucket` without dates or unknown, and a window over the
+bucket's limit (90 days / 54 weeks / 24 months, mirroring entity-service's; a whole year by week is 54
+weeks in a leap year that starts on a Sunday, such as 2040). The dates are two plain `YYYY-MM-DD` dates or
+two relative dates, never one of each (that window grows daily); two relative dates must stay within the
+limit on every day, because a saved dashboard is checked again on every read (`__startOfYear:0__` to
+`__today__` by day is refused, by month it passes). That is checked exactly, on every day of one 400-year
+Gregorian cycle (the calendar, weekdays included, repeats every 400 years), once per window and kept
+(`relativeLinePoints`): sampling a few years missed windows that are too long only in rare years. Every line widget saved before these fields has none, so none of them changes. The view
+and the draft carry them: `TestDraftToDefinition_KeepsLineWindow`. Deploy order: entity-service (which
+must accept the fields first), then this backend, then the webapp, then the catalogue mounts. An older
+entity-service ignores `startDate` / `endDate` / `bucket` and answers its trailing 30 days without an
+error, so `CaseHandler.VolumeTrend` refuses (502) a fixed window answered without its echo
+(`windowEchoed`) rather than show it as the window. Rolling this backend back once dashboards with `series`
+or a window are saved makes those dashboards fail to open (an older `ParseGenerated` refuses fields it does
+not know, a 422 on every read) until it is deployed again.
+
+**Line widgets: `chart`.** A `line` widget may set `chart: "bar"` to draw the same points as bars ("cases
+opened per month this year as a bar chart"): the same `POST /cases/volume-trend` data, `days` or window and
+`series`, one request, and a relative window keeps moving with the date (which month slices on a `bar`
+widget could not do: no token names "January of this year"). `"line"` or no `chart` draws lines, so no line
+widget saved before the field changes. The registry refuses an unknown value and `chart` on any other shape.
+The view and the draft carry it (`widgetViews` / `widgetTemplates`): `TestDraftToDefinition_KeepsLineWindow`.
+Deploy this backend before the catalogue that teaches it, as for `series`.
+
 **Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
 rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
 the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same
@@ -907,7 +978,7 @@ The server auto-loads `.env` from the working directory at startup (silently ign
 
 ## Feature flags: `CSM_MIGRATION_*`
 
-Flags named `CSM_MIGRATION_<FEATURE>_ENABLED` gate customer-onboarding cutover features. Each is **off unless its value is exactly `true`** (whitespace-trimmed — `1`, `TRUE`, `yes` are all off), deliberately stricter than the `strconv.ParseBool` leniency `SFTPGO_ATTACHMENT_STORAGE_ENABLED` has: these are cutover switches that must never flip on by accident. Off means **no behaviour change at all**: the handler is not constructed and the route is not registered in `cmd/server/main.go`, so the path 404s like any unknown one. Resolve a flag with a `load<Feature>Enabled()` in `main.go` backed by a pure `<feature>Enabled(raw string) bool` that `main_test.go` table-tests.
+Flags named `CSM_MIGRATION_<FEATURE>_ENABLED` gate customer-onboarding cutover features. Each is **off unless its value is exactly `true`** (whitespace-trimmed — `1`, `TRUE`, `yes` are all off), deliberately stricter than `strconv.ParseBool` leniency: these are cutover switches that must never flip on by accident. Off means **no behaviour change at all**: the handler is not constructed and the route is not registered in `cmd/server/main.go`, so the path 404s like any unknown one. Resolve a flag with a `load<Feature>Enabled()` in `main.go` backed by a pure `<feature>Enabled(raw string) bool` that `main_test.go` table-tests.
 
 - `CSM_MIGRATION_ONBOARDING_STATUS_ENABLED` → `GET /projects/{id}/onboarding-steps` (`OnboardingStepHandler`, `internal/handler/onboarding_steps.go`, `PermView`). It pages through the entity service's onboarding ledger (`CustomerEntityClient.SearchOnboardingSteps`, `internal/entity/onboarding.go` — a **typed** method, unlike the raw-passthrough rest of `customer.go`, because the handler regroups rows) with `filters.projectId`, at the upstream cap of 50 rows a page and at most `maxOnboardingStepPages` (40) pages, then regroups the flat newest-first rows into one entry per membership (invited email) with steps in flow order IDENTITY → DATABASE → EMAIL → REGISTRATION. It reports only what the ledger row holds (`step`, `status`, `attemptCount`, `lastError`, `eventType`, `eventModifiedOn`, `updatedOn`) — nothing derived or enriched; `lastError` is upstream error text and is passed through untouched for the webapp to render as plain text. Hitting the page cap sets `truncated: true` and logs a warning rather than failing. The webapp matches memberships to the project's contact rows by lower-cased email because `ProjectContact` carries no membership or `project_contact` id.
 

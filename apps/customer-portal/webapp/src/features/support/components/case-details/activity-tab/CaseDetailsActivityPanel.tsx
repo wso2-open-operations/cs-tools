@@ -32,6 +32,7 @@ import useGetUserDetails from "@features/settings/api/useGetUserDetails";
 import EmptyIcon from "@components/empty-state/EmptyIcon";
 import { compareByCreatedOnThenId } from "@features/support/utils/support";
 import ActivityCommentInput from "@case-details-activity/ActivityCommentInput";
+import CaseUploadsStrip from "@features/support/components/case-details/CaseUploadsStrip";
 import CommentBubble from "@case-details-activity/CommentBubble";
 import ImageFullscreenModal from "@case-details-activity/ImageFullscreenModal";
 import {
@@ -212,7 +213,6 @@ export default function CaseDetailsActivityPanel({
         primaryBg={primaryBg}
         hideAvatar={hideAvatar}
         userDetails={userDetails}
-        caseId={caseId}
       />
     );
   }
@@ -239,6 +239,7 @@ export default function CaseDetailsActivityPanel({
           WebkitOverflowScrolling: "touch",
         }}
       >
+        <CaseUploadsStrip caseId={caseId} />
         <Box sx={{ px: 2, pt: 2, pb: 1 }}>
           <ActivityCommentInput caseId={caseId} caseStatus={caseStatus} />
         </Box>
@@ -315,7 +316,6 @@ function ActivityContent({
   hideAvatar = false,
   userDetails,
   onImageClick,
-  caseId,
 }: ActivityContentProps): JSX.Element {
   return (
     <Box sx={{ p: 2, flex: 1 }}>
@@ -358,7 +358,6 @@ function ActivityContent({
                 hideAvatar={hideAvatar}
                 userDetails={userDetails}
                 onImageClick={onImageClick}
-                caseId={caseId}
               />
             );
           })

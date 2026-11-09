@@ -17,8 +17,10 @@
 package timecardreport
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
@@ -363,5 +365,80 @@ func TestSendReportsRetryUsesSameWindow(t *testing.T) {
 	}
 	if len(src.reportCalls) != 2 || src.reportCalls[0] != src.reportCalls[1] {
 		t.Errorf("report calls differ between attempts: %v", src.reportCalls)
+	}
+}
+
+// The run logs which project it reported on and the figures it carried, without
+// any recipient address.
+func TestSendReportsLogsProjectKeyAndSummary(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	src := &fakeSource{
+		projects: map[string][]timecards.Project{"PRJ-1": {{ID: "id-1", Key: "PRJ-1", Name: "Acme Corp"}}},
+		contacts: map[string][]timecards.Contact{"id-1": {
+			{ID: "00000000-0000-0000-0000-0000000000a1", Email: "jane.doe@example.com"},
+			{ID: "00000000-0000-0000-0000-0000000000a2", Email: "john.roe@example.com"},
+			{ID: "00000000-0000-0000-0000-0000000000a3", Email: "JANE.DOE@example.com"}}},
+		reports: map[string]timecards.Report{"id-1": report("id-1", "PRJ-1", "Acme Corp", oneCase)},
+	}
+	if err := SendReports(src, &fakeMail{}, period, Config{ProjectKeys: []string{"PRJ-1"}}, true)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"sending the time card report", "sent the time card report",
+		"projectId=id-1", "recipientIds=\"[00000000-0000-0000-0000-0000000000a1 00000000-0000-0000-0000-0000000000a2]\"", "from=2030-04-01", "to=2030-04-30", "cases=1",
+		"totalMinutes=90", "billableMinutes=60", "nonBillableMinutes=30", "patchingMinutes=15",
+		"mailsSent=2", "mailsFailed=0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"jane.doe@example.com", "john.roe@example.com", "project=PRJ-1"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("log carries %q:\n%s", bad, out)
+		}
+	}
+}
+
+// An explicit-recipient run logs the same mail counts as a derived one.
+func TestSendReportsExplicitToLogsMailCounts(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	src := &fakeSource{
+		projects: map[string][]timecards.Project{"PRJ-1": {{ID: "id-1", Key: "PRJ-1", Name: "Acme Corp"}}},
+		reports:  map[string]timecards.Report{"id-1": report("id-1", "PRJ-1", "Acme Corp", oneCase)},
+	}
+	cfg := Config{ProjectKeys: []string{"PRJ-1"}, To: []string{"jane.doe@example.com"}}
+	if err := SendReports(src, &fakeMail{}, period, cfg, true)(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"sent the time card report", "mailsSent=1", "mailsFailed=0", "projectId=id-1"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, buf.String())
+		}
+	}
+}
+
+func TestRecipientIDsMatchRecipients(t *testing.T) {
+	contacts := []timecards.Contact{
+		{ID: "id-a", Email: "jane.doe@example.com"},
+		{ID: "id-dup", Email: "JANE.DOE@example.com"},
+		{ID: "id-bot", Email: "bot@example.com", IsCsIntegrationUser: true},
+		{Email: "no.record@example.com"},
+		{ID: "id-b", Email: "john.roe@example.com"},
+	}
+	if got, want := RecipientIDs(contacts), []string{"id-a", "id-b"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ids = %v, want %v", got, want)
+	}
+	if n := len(Recipients(contacts)); n != 3 {
+		t.Fatalf("recipients = %d, want 3", n)
 	}
 }

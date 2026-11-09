@@ -678,6 +678,19 @@ export function formatFileSize(
 }
 
 /**
+ * The size of a file as a number of bytes for a download, or undefined when it is
+ * not known. A download of a known small file goes through the browser's own
+ * download (so it shows in its download list); only an unknown or large size opens
+ * the save dialog.
+ */
+export function downloadSizeOf(
+  bytes: number | string | null | undefined,
+): number | undefined {
+  const n = typeof bytes === "string" ? parseInt(bytes, 10) : bytes;
+  return n != null && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
  * Returns whether to show View or Resume for a chat status.
  *
  * @param status - Chat status string (e.g. Resolved, Still Open, Abandoned).

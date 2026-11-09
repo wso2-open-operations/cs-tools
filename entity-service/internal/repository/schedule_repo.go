@@ -39,6 +39,12 @@ type ScheduleRepository interface {
 	// SearchEngagementAllocations is the confirmed customer-engagement
 	// allocations of the given people overlapping the window.
 	SearchEngagementAllocations(ctx context.Context, req domain.SearchScheduleEngagementAllocationsRequest) ([]domain.ScheduleEngagementAllocation, error)
+	// EngagementAllocationOnRoster reads one confirmed allocation by id.
+	EngagementAllocationOnRoster(ctx context.Context, id string) (domain.EngagementAllocationOnRoster, error)
+	// DismissEngagementAllocation takes an allocation off a person's roster
+	// over a span of weekdays, or puts it back, and records who did it.
+	DismissEngagementAllocation(ctx context.Context, al domain.EngagementAllocationOnRoster,
+		req domain.DismissScheduleEngagementAllocationRequest, actorEmail string) (int, error)
 	// OnDutyAt is who is on duty at the instant, leaving out anyone on leave;
 	// with includeOnLeave they are returned too, marked OnLeave.
 	OnDutyAt(ctx context.Context, at time.Time, includeOnLeave bool) ([]domain.ScheduleAssignment, error)

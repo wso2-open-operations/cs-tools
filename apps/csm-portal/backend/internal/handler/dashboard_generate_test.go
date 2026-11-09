@@ -101,6 +101,9 @@ func TestGenerateDashboard_SampleMissingIsServiceUnavailable(t *testing.T) {
 	if body["message"] != errMsgGenerateUnavailable {
 		t.Fatalf("message = %v, want %q", body["message"], errMsgGenerateUnavailable)
 	}
+	if body["errorCode"] != errCodeGenerateUnavailable {
+		t.Errorf("errorCode = %v, want %q", body["errorCode"], errCodeGenerateUnavailable)
+	}
 }
 
 func TestGenerateDashboard_ReturnsTheSampleAndAReply(t *testing.T) {
@@ -196,6 +199,9 @@ func TestGenerateDashboard_PromptChecks(t *testing.T) {
 				body := decodeJSON[map[string]any](t, w)
 				if body["message"] != tc.wantMsg {
 					t.Fatalf("message = %v, want %q", body["message"], tc.wantMsg)
+				}
+				if code, _ := body["errorCode"].(string); !strings.HasPrefix(code, "generate_prompt_") {
+					t.Errorf("errorCode = %v, want generate_prompt_...", body["errorCode"])
 				}
 			}
 		})
@@ -317,22 +323,41 @@ func TestGeneratedDashboardID(t *testing.T) {
 	}
 }
 
+// TestGenerateDashboard_AnUnknownErrorHasNoCode: a 500 says only the generic
+// message and carries no errorCode, so the webapp words it itself.
+func TestGenerateDashboard_AnUnknownErrorHasNoCode(t *testing.T) {
+	w := httptest.NewRecorder()
+	NewDashboardGenerateHandler(&fakeGenerator{err: errors.New("boom")}).GenerateDashboard(w, withUser(newGenerateRequest(`{"prompt":"x"}`)))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", w.Code)
+	}
+	if body := decodeJSON[map[string]any](t, w); body["errorCode"] != nil {
+		t.Errorf("errorCode = %v, want none", body["errorCode"])
+	}
+}
+
+// TestGenerateDashboard_MapsEachGeneratorError: every generator error answers
+// its own status, message and errorCode: the AI side's usage limit 503 (never
+// 429, the caller's own limit), a reply cut off apart from an unusable one, a
+// timeout 504, any other call failure 502.
 func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 	cases := []struct {
 		name       string
 		err        error
 		wantStatus int
 		wantMsg    string
+		wantCode   string
 	}{
-		{"invalid draft", fmt.Errorf("%w: bad", errDraftInvalid), http.StatusBadRequest, errMsgGenerateDraftInvalid},
-		{"draft too large", fmt.Errorf("%w: 70000 bytes", errDraftTooLarge), http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig},
-		{"declined", &generateDeclinedError{Reason: "Resolution time per engineer is not in the catalogue."}, http.StatusUnprocessableEntity, "Resolution time per engineer is not in the catalogue."},
-		{"refused", errGenerateRefused, http.StatusUnprocessableEntity, errMsgGenerateRefused},
-		{"team filter", fmt.Errorf("%w: widgets[0]: unknown team %q (known teams: rigel, sirius)", errDashboardTeam, "orion"), http.StatusUnprocessableEntity, `Unknown team "orion" (known teams: rigel, sirius).`},
-		{"unusable", fmt.Errorf("%w: %w", errGenerateUnusable, dashboard.ErrGeneratedInvalid), http.StatusBadGateway, errMsgGenerateUnusable},
-		{"truncated", errGenerateTruncated, http.StatusBadGateway, errMsgGenerateUnusable},
-		{"call timed out", fmt.Errorf("%w: %w", errGenerateCall, context.DeadlineExceeded), http.StatusGatewayTimeout, errMsgGenerateTimeout},
-		{"call failed", fmt.Errorf("%w: 401 Unauthorized", errGenerateCall), http.StatusBadGateway, errMsgGenerateCall},
+		{"invalid draft", fmt.Errorf("%w: bad", errDraftInvalid), http.StatusBadRequest, errMsgGenerateDraftInvalid, errCodeGenerateDraftInvalid},
+		{"draft too large", fmt.Errorf("%w: 70000 bytes", errDraftTooLarge), http.StatusRequestEntityTooLarge, errMsgGenerateDraftTooBig, errCodeGenerateDraftTooBig},
+		{"declined", &generateDeclinedError{Reason: "Resolution time per engineer is not in the catalogue."}, http.StatusUnprocessableEntity, "Resolution time per engineer is not in the catalogue.", errCodeGenerateDeclined},
+		{"refused", errGenerateRefused, http.StatusUnprocessableEntity, errMsgGenerateRefused, errCodeGenerateRefused},
+		{"team filter", fmt.Errorf("%w: widgets[0]: unknown team %q (known teams: rigel, sirius)", errDashboardTeam, "orion"), http.StatusUnprocessableEntity, `Unknown team "orion" (known teams: rigel, sirius).`, errCodeGenerateTeam},
+		{"unusable", fmt.Errorf("%w: %w", errGenerateUnusable, dashboard.ErrGeneratedInvalid), http.StatusBadGateway, errMsgGenerateUnusable, errCodeGenerateUnusable},
+		{"truncated", errGenerateTruncated, http.StatusBadGateway, errMsgGenerateTruncated, errCodeGenerateTruncated},
+		{"usage limit", fmt.Errorf("%w: csmai: status 429 (usage_limit)", errGenerateUsageLimit), http.StatusServiceUnavailable, errMsgGenerateUsageLimit, errCodeGenerateUsageLimit},
+		{"call timed out", fmt.Errorf("%w: %w", errGenerateCall, context.DeadlineExceeded), http.StatusGatewayTimeout, errMsgGenerateTimeout, errCodeGenerateTimeout},
+		{"call failed", fmt.Errorf("%w: 401 Unauthorized", errGenerateCall), http.StatusBadGateway, errMsgGenerateCall, errCodeGenerateCall},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -341,8 +366,12 @@ func TestGenerateDashboard_MapsEachGeneratorError(t *testing.T) {
 			if w.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", w.Code, tc.wantStatus)
 			}
-			if body := decodeJSON[map[string]any](t, w); body["message"] != tc.wantMsg {
+			body := decodeJSON[map[string]any](t, w)
+			if body["message"] != tc.wantMsg {
 				t.Fatalf("message = %v, want %q", body["message"], tc.wantMsg)
+			}
+			if body["errorCode"] != tc.wantCode {
+				t.Errorf("errorCode = %v, want %q", body["errorCode"], tc.wantCode)
 			}
 		})
 	}
@@ -366,6 +395,9 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 		{"no valid candidate", http.StatusOK, `{"candidates":[{"displayName":"x"}],"usage":{}}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateUnusable},
 		{"refused", http.StatusUnprocessableEntity, `{"code":"refused","message":"m"}`, 5 * time.Second, 0, http.StatusUnprocessableEntity, errMsgGenerateRefused},
 		{"model timed out", http.StatusGatewayTimeout, `{"code":"timeout","message":"m"}`, 5 * time.Second, 0, http.StatusGatewayTimeout, errMsgGenerateTimeout},
+		{"model usage limit", http.StatusTooManyRequests, `{"code":"usage_limit","message":"m"}`, 5 * time.Second, 0, http.StatusServiceUnavailable, errMsgGenerateUsageLimit},
+		{"reply cut off", http.StatusBadGateway, `{"code":"truncated","message":"m"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateTruncated},
+		{"model unreachable", http.StatusBadGateway, `{"code":"model_call_failed","message":"m"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateCall},
 		{"no key in the service", http.StatusServiceUnavailable, `{"code":"not_configured","message":"m"}`, 5 * time.Second, 0, http.StatusServiceUnavailable, errMsgGenerateUnavailable},
 		{"service unauthorised", http.StatusUnauthorized, `{"error":"Unauthorized"}`, 5 * time.Second, 0, http.StatusBadGateway, errMsgGenerateCall},
 		{"service too slow", http.StatusOK, `{"candidates":[` + validGenerated + `]}`, 200 * time.Millisecond, 3 * time.Second, http.StatusGatewayTimeout, errMsgGenerateTimeout},
@@ -399,6 +431,9 @@ func TestGenerateDashboard_ThroughTheAIIntegrationService(t *testing.T) {
 			if tc.wantStatus != http.StatusOK {
 				if !strings.Contains(w.Body.String(), tc.wantMsg) {
 					t.Errorf("body = %s, want the message %q", w.Body.String(), tc.wantMsg)
+				}
+				if code, _ := decodeJSON[map[string]any](t, w)["errorCode"].(string); !strings.HasPrefix(code, "generate_") {
+					t.Errorf("errorCode = %q, want one starting generate_ (the webapp shows only those messages)", code)
 				}
 				return
 			}
