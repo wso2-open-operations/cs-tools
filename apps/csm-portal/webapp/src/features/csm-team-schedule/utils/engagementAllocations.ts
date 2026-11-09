@@ -136,8 +136,11 @@ export function allocationsByPersonAndDay(
   for (const a of allocations) {
     if (seen.has(a.id)) continue;
     seen.add(a.id);
+    const dismissed = new Set(a.dismissedDates ?? []);
     for (const iso of days) {
       if (iso < a.startDate || iso > a.endDate) continue;
+      // A day taken off the roster by a lead is not drawn.
+      if (dismissed.has(iso)) continue;
       let person = out.get(a.userId);
       if (!person) out.set(a.userId, (person = new Map()));
       const day = person.get(iso);
@@ -148,6 +151,33 @@ export function allocationsByPersonAndDay(
   for (const person of out.values()) {
     for (const day of person.values()) {
       day.sort((x, y) => allocationLabel(x).localeCompare(allocationLabel(y)) || x.id.localeCompare(y.id));
+    }
+  }
+  return out;
+}
+
+/**
+ * The days a lead or rota admin took an allocation off a person's roster, laid
+ * out like allocationsByPersonAndDay: engineer, then day, then the
+ * allocations removed that day. The cell picker offers to restore them.
+ */
+export function dismissedByPersonAndDay(
+  allocations: readonly EngagementAllocation[],
+  days: readonly string[],
+): Map<string, Map<string, EngagementAllocation[]>> {
+  const onGrid = new Set(days);
+  const out = new Map<string, Map<string, EngagementAllocation[]>>();
+  const seen = new Set<string>();
+  for (const a of allocations) {
+    if (seen.has(a.id) || !a.dismissedDates?.length) continue;
+    seen.add(a.id);
+    for (const iso of a.dismissedDates) {
+      if (!onGrid.has(iso)) continue;
+      let person = out.get(a.userId);
+      if (!person) out.set(a.userId, (person = new Map()));
+      const day = person.get(iso);
+      if (day) day.push(a);
+      else person.set(iso, [a]);
     }
   }
   return out;
@@ -177,6 +207,19 @@ export function dayMarkerAriaLabel(list: readonly EngagementAllocation[]): strin
   return `${head}. ${dayMarkerLines(list).join(". ")}`;
 }
 
+/**
+ * The month roster's chip for one allocation: "Allo-" and the engagement's own
+ * id (Allo-E07202), or "Allo-ENG" when it has none. The full line is on hover
+ * (dayMarkerTitle).
+ */
+export function allocationChipLabel(a: EngagementAllocation): string {
+  return `Allo-${a.engagementDisplayId?.trim() || "ENG"}`;
+}
+
+/** How many chips one roster cell stacks at most: a turn and two
+ *  allocations, or three allocations. Past that the last place says "+N". */
+export const ROSTER_CELL_MAX_CHIPS = 3;
+
 /** What a customer engagement bar is: one line, for any view that draws them. */
 export const ENGAGEMENT_LEGEND_ITEM: LegendItem = {
   key: "engagement",
@@ -187,13 +230,15 @@ export const ENGAGEMENT_LEGEND_ITEM: LegendItem = {
   swatch: "engagement",
 };
 
-/** What the month roster's day marker is: a strip under the day, with no room
- *  for text, so the legend says where the details are. */
+/** What the month roster's engagement chip is. The chip stands in for an
+ *  unmarked day, sits beside a rotation turn, and becomes a corner dot when a
+ *  tag (leave, a move, an allocation tag) holds the day. */
 export const ENGAGEMENT_MARK_LEGEND_ITEM: LegendItem = {
   key: "engagement-mark",
   group: "Engagements",
-  code: "",
-  token: "",
-  label: "Customer engagement: a strip under the day, hover for the details (read-only)",
+  code: "Allo-…",
+  token: "eng",
+  label:
+    "Customer engagement from the allocation app: Allo- and the engagement id, a dot when a tag holds the day; hover for the details (read-only)",
   swatch: "engagement-mark",
 };

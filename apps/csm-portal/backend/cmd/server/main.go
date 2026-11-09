@@ -741,6 +741,7 @@ func main() {
 	route("POST /team-schedule/paging-contacts/{userId}/test", handler.PermWrite, scheduleHandler.TestPagingContact)
 	route("POST /team-schedule/assignments/apply", handler.PermWrite, scheduleHandler.ApplyScheduleRange)
 	route("POST /team-schedule/absences/apply", handler.PermWrite, scheduleHandler.ApplyScheduleAbsence)
+	route("POST /team-schedule/engagement-allocations/dismiss", handler.PermWrite, scheduleHandler.DismissScheduleEngagementAllocation)
 	route("DELETE /team-schedule/absences/{id}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsence)
 	route("POST /team-schedule/absence-kinds", handler.PermWrite, scheduleHandler.CreateScheduleAbsenceKind)
 	route("DELETE /team-schedule/absence-kinds/{code}", handler.PermWrite, scheduleHandler.DeleteScheduleAbsenceKind)

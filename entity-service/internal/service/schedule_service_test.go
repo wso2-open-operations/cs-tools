@@ -39,6 +39,10 @@ type fakeScheduleRepo struct {
 	gotOnDutyAt                time.Time
 	gotEngagementAllocationReq domain.SearchScheduleEngagementAllocationsRequest
 	engagementAllocations      []domain.ScheduleEngagementAllocation
+	allocationOnRoster         *domain.EngagementAllocationOnRoster
+	gotDismissReq              domain.DismissScheduleEngagementAllocationRequest
+	gotDismissActor            string
+	dismissDays                int
 	gotIncludeOnLeave          bool
 	called                     bool
 
@@ -246,6 +250,22 @@ func (f *fakeScheduleRepo) SearchEngagementAllocations(_ context.Context, req do
 	f.called = true
 	f.gotEngagementAllocationReq = req
 	return f.engagementAllocations, f.err
+}
+
+func (f *fakeScheduleRepo) EngagementAllocationOnRoster(_ context.Context, id string) (domain.EngagementAllocationOnRoster, error) {
+	f.called = true
+	if f.allocationOnRoster == nil {
+		return domain.EngagementAllocationOnRoster{}, &apierror.NotFoundError{Msg: "not on the roster"}
+	}
+	return *f.allocationOnRoster, f.err
+}
+
+func (f *fakeScheduleRepo) DismissEngagementAllocation(_ context.Context, al domain.EngagementAllocationOnRoster,
+	req domain.DismissScheduleEngagementAllocationRequest, actorEmail string) (int, error) {
+	f.called = true
+	f.gotDismissReq = req
+	f.gotDismissActor = actorEmail
+	return f.dismissDays, f.err
 }
 
 func (f *fakeScheduleRepo) OnDutyAt(_ context.Context, at time.Time, includeOnLeave bool) ([]domain.ScheduleAssignment, error) {

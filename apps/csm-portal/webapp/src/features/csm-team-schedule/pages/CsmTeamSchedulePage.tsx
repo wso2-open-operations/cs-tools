@@ -25,6 +25,7 @@ import {
   useCreateAbsenceKind,
   useDeleteAbsenceKind,
   useDeleteAbsence,
+  useDismissEngagementAllocation,
   useScheduleEditMarkers,
   useApplyRange,
   useMarkerOnlyTeams,
@@ -38,7 +39,7 @@ import {
   type MonthWindow,
   type RotaRead,
 } from "../api/useTeamSchedule";
-import CellPicker, { type CellPickerTarget, type NewAbsenceKind } from "../components/CellPicker";
+import CellPicker, { type CellEngagement, type CellPickerTarget, type NewAbsenceKind } from "../components/CellPicker";
 import { BackendApiError } from "@api/backend/client";
 import DayLadder, { type LadderLane } from "../components/DayLadder";
 import MonthRoster from "../components/MonthRoster";
@@ -295,6 +296,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   const applyRange = useApplyRange();
   const applyAbsence = useApplyAbsence();
   const deleteAbsence = useDeleteAbsence();
+  const dismissEngagement = useDismissEngagementAllocation();
   const createKind = useCreateAbsenceKind();
   const deleteKind = useDeleteAbsenceKind();
 
@@ -1109,6 +1111,38 @@ export default function CsmTeamSchedulePage(): JSX.Element {
   };
 
   /** Remove the whole leave or allocation the clicked cell is part of. */
+  /** Take a synced engagement allocation off this person's roster over the
+   *  picked days, or put them back. Undo does the opposite over the same days. */
+  const toggleEngagement = (engagement: CellEngagement, from: string, to: string, restore: boolean): void => {
+    if (!picker) return;
+    const target = picker;
+    const send = (back: boolean) =>
+      dismissEngagement.mutateAsync({ id: engagement.id, teamKey: target.teamKey, from, to, restore: back });
+    dismissEngagement.mutate(
+      { id: engagement.id, teamKey: target.teamKey, from, to, restore },
+      {
+        onSuccess: () =>
+          recordChange(
+            target,
+            from,
+            to,
+            `${engagement.label} ${restore ? "restored" : "removed"}`,
+            async () => {
+              await send(!restore);
+            },
+          ),
+        onError: (err) =>
+          showError(
+            restore
+              ? "That engagement was not put back. Nothing has changed."
+              : "That engagement was not removed. Nothing has changed.",
+            err,
+          ),
+        onSettled: () => setPicker(null),
+      },
+    );
+  };
+
   const removeAbsence = (absenceId: string): void => {
     if (!picker?.absence) return;
     const ab = picker.absence;
@@ -1937,6 +1971,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
             applyRange.isPending ||
             applyAbsence.isPending ||
             deleteAbsence.isPending ||
+            dismissEngagement.isPending ||
             createKind.isPending ||
             deleteKind.isPending
           }
@@ -1946,6 +1981,7 @@ export default function CsmTeamSchedulePage(): JSX.Element {
           onApply={applyToCell}
           onMarkAway={markAway}
           onRemoveAbsence={removeAbsence}
+          onDismissEngagement={toggleEngagement}
           // The tags are shared by every team, so they are a lead's or a rota
           // admin's to change; a reader who only marks a team is not offered
           // them (the server refuses them too).

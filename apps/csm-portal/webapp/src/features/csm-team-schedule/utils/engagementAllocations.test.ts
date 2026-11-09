@@ -22,6 +22,7 @@ import {
   allocationLabel,
   allocationTitle,
   allocationsByPersonAndDay,
+  dismissedByPersonAndDay,
   chunk,
   distinctUserIds,
   humaniseEnum,
@@ -172,5 +173,26 @@ describe("allocationsByPersonAndDay", () => {
     const a = alloc();
     const out = allocationsByPersonAndDay([a, { ...a }], days);
     expect(out.get(U1)!.get("2026-09-21")).toHaveLength(1);
+  });
+});
+
+describe("days taken off the roster", () => {
+  const days = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"];
+
+  it("leaves a removed day out of the drawn chips", () => {
+    const out = allocationsByPersonAndDay(
+      [alloc({ startDate: "2026-09-21", endDate: "2026-09-24", dismissedDates: ["2026-09-22"] })],
+      days,
+    );
+    expect([...out.get(U1)!.keys()]).toEqual(["2026-09-21", "2026-09-23", "2026-09-24"]);
+  });
+
+  it("lists the removed days on the grid for the picker's Restore", () => {
+    const out = dismissedByPersonAndDay(
+      [alloc({ startDate: "2026-09-21", endDate: "2026-09-30", dismissedDates: ["2026-09-22", "2026-09-29"] })],
+      days,
+    );
+    expect([...out.get(U1)!.keys()]).toEqual(["2026-09-22"]);
+    expect(dismissedByPersonAndDay([alloc()], days).size).toBe(0);
   });
 });

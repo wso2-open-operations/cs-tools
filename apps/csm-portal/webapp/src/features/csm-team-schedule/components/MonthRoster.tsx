@@ -19,6 +19,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import RosterLegend, { type LegendItem } from "./RosterLegend";
 import RotaPicker, { type RotaOption } from "./RotaPicker";
+import type { CellEngagement } from "./CellPicker";
 import type {
   CellAbsence,
   EngagementAllocation,
@@ -35,6 +36,9 @@ import {
   ENGAGEMENTS_FAILED_NOTE,
   ENGAGEMENT_MARK_LEGEND_ITEM,
   allocationsByPersonAndDay,
+  dismissedByPersonAndDay,
+  ROSTER_CELL_MAX_CHIPS,
+  allocationChipLabel,
   dayMarkerAriaLabel,
   dayMarkerTitle,
 } from "../utils/engagementAllocations";
@@ -170,6 +174,9 @@ interface MonthRosterProps {
     /** The whole absence this cell is one day of, so the picker can offer to
      *  remove all of it rather than the day that was clicked. */
     absence?: CellAbsence;
+    /** Customer engagements from the allocation app on that day, drawn or
+     *  taken off the roster, for the picker's Remove / Restore. */
+    engagements?: CellEngagement[];
     anchor: { top: number; left: number; bottom: number; right: number };
   }) => void;
 }
@@ -337,6 +344,11 @@ export default function MonthRoster({
     return Array.from({ length: count }, (_, i) => new Date(first.getFullYear(), first.getMonth(), first.getDate() + i));
   }, [month, monthCount, fromIso, toIso]);
   /** Customer engagements, engineer then day, over the days on the grid. */
+  /** Days a lead took an engagement off the roster, for the picker's Restore. */
+  const dismissedByPerson = useMemo(
+    () => dismissedByPersonAndDay(engagementAllocations ?? [], days.map(toIsoDate)),
+    [engagementAllocations, days],
+  );
   const engByPerson = useMemo(
     () => allocationsByPersonAndDay(engagementAllocations ?? [], days.map(toIsoDate)),
     [engagementAllocations, days],
@@ -1032,9 +1044,22 @@ export default function MonthRoster({
       tier: cell?.tier,
       absenceKindCode: cell?.absenceKindCode,
       absence: cell?.absence,
+      engagements: engagementsOn(row.userId, iso),
       zoneCode,
       anchor: { top: r.top, left: r.left, bottom: r.bottom, right: r.right },
     });
+  };
+  /** The engagements the picker offers on a day: the ones drawn (to remove)
+   *  and the ones a lead removed (to restore). Weekdays only, like the chips. */
+  const engagementsOn = (userId: string, iso: string): CellEngagement[] | undefined => {
+    const shown = engOn(userId, iso) ?? [];
+    const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    const removed = dow === 0 || dow === 6 ? [] : (dismissedByPerson.get(userId)?.get(iso) ?? []);
+    const out = [
+      ...shown.map((a) => ({ id: a.id, label: allocationChipLabel(a), title: dayMarkerTitle([a]), dismissed: false })),
+      ...removed.map((a) => ({ id: a.id, label: allocationChipLabel(a), title: dayMarkerTitle([a]), dismissed: true })),
+    ];
+    return out.length > 0 ? out : undefined;
   };
 
   /** What to add to a cell's tooltip when somebody has changed it, and
@@ -1060,21 +1085,89 @@ export default function MonthRoster({
         {chipCodeOn(c, iso, zoneChipsFrom)}
       </span>
     );
-  /** The strip under a day on which the engineer is on a customer
-   *  engagement, or nothing. Absolutely placed in the cell (see the css), so
-   *  it moves nothing. A day split by zone draws it in every sub-column, so
-   *  the strip runs the width of the day, but only the first is named: the
-   *  rest are hidden from assistive technology, so the day is announced once.
-   *  The title is on all of them so the tooltip shows wherever the pointer
-   *  is along the strip. */
-  const engMark = (userId: string, iso: string, named = true): JSX.Element | null => {
+  /** The customer engagements (allocation app) covering the day, if any.
+   *  Weekdays only: an allocation is working-day time, the same rule the
+   *  Allo-INT / Allo-EXT tags follow, so a Monday-to-Friday run spanning a
+   *  weekend does not mark the Saturday and Sunday. */
+  const engOn = (userId: string, iso: string): EngagementAllocation[] | undefined => {
+    const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    if (dow === 0 || dow === 6) return undefined;
     const list = engByPerson.get(userId)?.get(iso);
-    if (!list || list.length === 0) return null;
-    return named ? (
-      <span className="engmk" role="img" aria-label={dayMarkerAriaLabel(list)} title={dayMarkerTitle(list)} />
+    return list && list.length > 0 ? list : undefined;
+  };
+  /** One allocation as a chip: Allo- and its engagement id, its full line on
+   *  hover. Read-only: a click still opens the cell. */
+  const engChip = (a: EngagementAllocation): JSX.Element => (
+    <span
+      key={a.id}
+      className="chip sm eng"
+      role="img"
+      title={dayMarkerTitle([a])}
+      aria-label={dayMarkerAriaLabel([a])}
+    >
+      {allocationChipLabel(a)}
+    </span>
+  );
+  /** The day's allocations, one chip each, in at most `room` places: when
+   *  they do not fit, the last place reads "+N" and lists the rest on hover. */
+  const engChips = (list: EngagementAllocation[], room: number): JSX.Element[] => {
+    if (list.length <= room) return list.map(engChip);
+    const shown = list.slice(0, Math.max(room - 1, 0));
+    const rest = list.slice(shown.length);
+    return [
+      ...shown.map(engChip),
+      <span
+        key="more"
+        className="chip sm eng"
+        role="img"
+        title={dayMarkerTitle(rest)}
+        aria-label={dayMarkerAriaLabel(rest)}
+      >
+        +{rest.length}
+      </span>,
+    ];
+  };
+  /** The allocations alone in a cell: one chip, or several stacked. */
+  const engStack = (list: EngagementAllocation[]): JSX.Element =>
+    list.length === 1 ? engChip(list[0]) : <span className="duo">{engChips(list, ROSTER_CELL_MAX_CHIPS)}</span>;
+  /** A tag holds the day, so the engagement is a dot in the corner, with the
+   *  same details on hover. Only the first zone of a split day is named. */
+  const engDot = (list: EngagementAllocation[], named = true): JSX.Element =>
+    named ? (
+      <span className="engdot" role="img" aria-label={dayMarkerAriaLabel(list)} title={dayMarkerTitle(list)} />
     ) : (
-      <span className="engmk" aria-hidden="true" title={dayMarkerTitle(list)} />
+      <span className="engdot" aria-hidden="true" title={dayMarkerTitle(list)} />
     );
+  /** A day's content with its engagement: a tag (leave, a move, an allocation
+   *  tag) keeps the cell and the engagement is a corner dot; a rotation turn
+   *  gets the chip beside it; anything else (regular hours, nothing) shows
+   *  the chip instead. */
+  const withEng = (
+    userId: string,
+    iso: string,
+    content: JSX.Element,
+    c: Cell | undefined,
+    named = true,
+  ): JSX.Element => {
+    const list = engOn(userId, iso);
+    if (!list) return content;
+    if (c?.absenceKindCode) {
+      return (
+        <>
+          {content}
+          {engDot(list, named)}
+        </>
+      );
+    }
+    if (c && c.isRotation && !c.isDefault && !c.quiet) {
+      return (
+        <span className="duo">
+          {content}
+          {engChips(list, ROSTER_CELL_MAX_CHIPS - 1)}
+        </span>
+      );
+    }
+    return named ? engStack(list) : <span className="zempty" />;
   };
   /** Said on a day that is leave but still holds a turn. */
   const clashNote = (turns: Cell[] | undefined): string =>
@@ -1302,19 +1395,23 @@ export default function MonthRoster({
                 onClick={editable ? (e) => openCell(e, row, iso, withAlloc(cell)) : undefined}
                 {...(editable ? keyable(key, firstStop()) : {})}
               >
-                {clash && cell ? (
-                  clashPair(cell, clash, iso)
-                ) : cell && alloc ? (
-                  <span className="duo">
-                    {chipOf(cell, iso)}
-                    {chipOf(alloc, iso)}
-                  </span>
-                ) : shown ? (
-                  chipOf(shown, iso)
-                ) : (
-                  <span className="none">·</span>
+                {withEng(
+                  row.userId,
+                  iso,
+                  clash && cell ? (
+                    clashPair(cell, clash, iso)
+                  ) : cell && alloc ? (
+                    <span className="duo">
+                      {chipOf(cell, iso)}
+                      {chipOf(alloc, iso)}
+                    </span>
+                  ) : shown ? (
+                    chipOf(shown, iso)
+                  ) : (
+                    <span className="none">·</span>
+                  ),
+                  clash && cell ? cell : cell && alloc ? alloc : shown,
                 )}
-                {engMark(row.userId, iso)}
               </td>
             );
           }
@@ -1346,8 +1443,7 @@ export default function MonthRoster({
                 onClick={editable ? (e) => openCell(e, row, iso, cell) : undefined}
                 {...(editable ? keyable(`${row.userId}|${row.teamKey}|${iso}`, firstStop()) : {})}
               >
-                {clash ? clashPair(whole, clash, iso) : chipOf(whole, iso)}
-                {engMark(row.userId, iso)}
+                {withEng(row.userId, iso, clash ? clashPair(whole, clash, iso) : chipOf(whole, iso), whole)}
               </td>
             );
           }
@@ -1361,6 +1457,7 @@ export default function MonthRoster({
             // Under a turn: the allocation the rest of the day is
             // given to, else the zone's regular hours.
             const under = turn && turn.isRotation ? (alloc ?? row.zonedBase.get(`${iso}|${z}`)) : alloc;
+            const eng = engOn(row.userId, iso);
             return (
               <td
                 key={`${iso}|${z}`}
@@ -1388,7 +1485,21 @@ export default function MonthRoster({
                 {/* A night held by somebody not on the TZ3 crew stays
                     here, on their own row: the Night cover group lists
                     the crew alone, so nobody is shown twice. */}
-                {turn && under ? (
+                {eng && !alloc ? (
+                  // A customer engagement and no tag: the turn keeps its
+                  // chip with the engagement beside it, and a zone with
+                  // no turn shows the engagement (named once a day).
+                  turn && turn.isRotation ? (
+                    <span className="duo">
+                      {chipOf(turn, iso)}
+                      {engChips(eng, ROSTER_CELL_MAX_CHIPS - 1)}
+                    </span>
+                  ) : i === 0 || turn ? (
+                    engStack(eng)
+                  ) : (
+                    <span className="zempty" />
+                  )
+                ) : turn && under ? (
                   // The zone's turn and what it sits on, stacked: L1
                   // in TZ1 on an RnD day, or on TZ1's regular hours --
                   // the cell says both.
@@ -1401,7 +1512,7 @@ export default function MonthRoster({
                 ) : (
                   <span className="zempty" />
                 )}
-                {engMark(row.userId, iso, i === 0)}
+                {eng && alloc ? engDot(eng, i === 0) : null}
               </td>
             );
           });

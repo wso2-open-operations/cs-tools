@@ -15985,6 +15985,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Search confirmed customer engagement allocations.
@@ -18623,6 +18679,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     PagingPhone:
       type: object
       description: A person's paging-only phone number. `phone` is present only for a caller who may edit it.
