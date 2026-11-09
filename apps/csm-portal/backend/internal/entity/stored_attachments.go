@@ -59,6 +59,7 @@ type FileResponse struct {
 // file does not have. ContentRange ("bytes */<size>") is forwarded to the browser.
 type RangeNotSatisfiableError struct{ ContentRange string }
 
+// Error implements the error interface.
 func (e *RangeNotSatisfiableError) Error() string { return "entity: range not satisfiable" }
 
 // fileRequest builds an authenticated request for the file client.

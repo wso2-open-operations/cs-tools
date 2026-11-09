@@ -234,6 +234,28 @@ func TestFiles_CompleteUpload(t *testing.T) {
 			t.Error("a refused upload must be recorded FAILED")
 		}
 	})
+	t.Run("a confirm repeated after it succeeded answers the same", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		pendingUpload(repo, 5)
+		blob := newFakeBlob()
+		stage(blob, "hello")
+		svc := newFileSvc(repo, blob)
+		req := domain.CompleteAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ID: saAttID, Chunks: 1}
+		first, err := svc.CompleteUpload(saCtx(t, saEmail), req)
+		if err != nil {
+			t.Fatalf("first confirm: %v", err)
+		}
+		// The row is COMPLETE now, as the database would have it.
+		key := workItemKey
+		repo.rows[saAttID] = completeRow("COMPLETE", &key)
+		again, err := svc.CompleteUpload(saCtx(t, saEmail), req)
+		if err != nil || again.ID != first.ID || again.Status != "COMPLETE" {
+			t.Errorf("repeated confirm = %+v, %v; want %+v", again, err, first)
+		}
+		if len(blob.deleted) != 0 {
+			t.Errorf("a good file was removed: %v", blob.deleted)
+		}
+	})
 	t.Run("a refusal that may pass keeps the file for a retry", func(t *testing.T) {
 		repo := newFakeStoredRepo()
 		pendingUpload(repo, 5)

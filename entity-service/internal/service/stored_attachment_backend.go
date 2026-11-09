@@ -88,7 +88,7 @@ func (s *storedAttachmentService) AuthorizeUpload(ctx context.Context, req domai
 	switch row.Status {
 	case "PENDING":
 	case "COMPLETE":
-		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: "this upload was already confirmed"}
+		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: alreadyConfirmedMessage}
 	default:
 		return domain.AttachmentUploadTarget{}, &apierror.ConflictError{Msg: "this upload was rejected; start a new upload"}
 	}
@@ -166,7 +166,7 @@ func (s *storedAttachmentService) confirmFromBackend(ctx context.Context, req do
 		return domain.ConfirmAttachmentUploadResponse{}, err
 	}
 	if !ok {
-		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: "this upload was already confirmed"}
+		return domain.ConfirmAttachmentUploadResponse{}, &apierror.ConflictError{Msg: alreadyConfirmedMessage}
 	}
 	slog.InfoContext(ctx, "attachment upload confirmed",
 		"audit", true, "action", "confirm", "callerId", auditCaller(ctx),

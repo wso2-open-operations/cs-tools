@@ -74,6 +74,7 @@ type FileDownload struct {
 // not have; Size is the file's size, for the Content-Range of the 416.
 type RangeNotSatisfiableError struct{ Size int64 }
 
+// Error implements the error interface.
 func (e *RangeNotSatisfiableError) Error() string { return "range not satisfiable" }
 
 // StoredAttachmentFileService moves attachment files between the portals and Azure
@@ -262,6 +263,12 @@ func (s *storedAttachmentFileService) CompleteUpload(ctx context.Context, req do
 	}
 	target, err := s.attachments.AuthorizeUpload(ctx, domain.AuthorizeAttachmentUploadRequest{Kind: req.Kind, ID: req.ID})
 	if err != nil {
+		// A confirm repeated after its answer was lost (a timeout, a dropped
+		// connection) gets the same answer again; no chunk is committed twice.
+		var conflict *apierror.ConflictError
+		if errors.As(err, &conflict) && conflict.Msg == alreadyConfirmedMessage {
+			return s.attachments.ConfirmUpload(ctx, domain.ConfirmAttachmentUploadRequest{Kind: req.Kind, ID: req.ID})
+		}
 		return domain.ConfirmAttachmentUploadResponse{}, err
 	}
 	if req.Chunks < 1 || req.Chunks > maxChunks(target.MaxBytes) {
@@ -411,6 +418,7 @@ type releasingBody struct {
 	release func()
 }
 
+// Close closes the file and gives its transfer slot back.
 func (b *releasingBody) Close() error {
 	defer b.release()
 	return b.ReadCloser.Close()
