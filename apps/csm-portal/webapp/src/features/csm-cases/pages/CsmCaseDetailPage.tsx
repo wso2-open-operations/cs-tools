@@ -3255,7 +3255,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
-            deletedAttachments={deletedAttachmentList}
+            deletedAttachments={isAdmin ? deletedAttachmentList : undefined}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}

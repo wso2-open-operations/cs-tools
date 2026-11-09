@@ -326,7 +326,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
   const currentUserEmail = useIdTokenClaims()?.email;
   // UX only — the backend 403s attachment downloads the same regardless of
   // this flag, so hiding the control here is never the enforcement.
-  const { canDownloadAttachment } = usePortalAccess();
+  const { canDownloadAttachment, isAdmin } = usePortalAccess();
 
   const {
     data: comments,
@@ -1156,7 +1156,7 @@ export default function CsmIncidentDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
-            deletedAttachments={deletedAttachmentList}
+            deletedAttachments={isAdmin ? deletedAttachmentList : undefined}
             uploading={postAttachment.isPending}
             uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
             onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}

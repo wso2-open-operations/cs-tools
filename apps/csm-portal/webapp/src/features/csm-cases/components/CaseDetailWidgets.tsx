@@ -23,6 +23,8 @@ import {
   CircularProgress,
   IconButton,
   LinearProgress,
+  Tab,
+  Tabs,
   Tooltip,
   Typography,
 } from "@wso2/oxygen-ui";
@@ -57,6 +59,7 @@ import {
   useId,
   useMemo,
   useRef,
+  useState,
   type ChangeEvent,
   type JSX,
   type ReactNode,
@@ -1068,9 +1071,10 @@ export function AttachmentsWidget({
    */
   canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
   /**
-   * Attachments that were deleted, shown under the available ones with who
-   * deleted them and when, in place of the Download button. Only an admin's list
-   * carries them; omit to show none.
+   * Attachments that were deleted, listed newest deletion first on a "Deleted"
+   * tab with who deleted them and when, in place of the Download button. Pass
+   * it only for an admin (even if empty, so the tab shows); omit to hide the
+   * tab.
    */
   deletedAttachments?: CaseAttachment[];
   /** Id of the attachment whose delete is in flight; disables its row actions. */
@@ -1102,6 +1106,13 @@ export function AttachmentsWidget({
   refreshedAt?: number;
 }): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [view, setView] = useState<"active" | "deleted">("active");
+  const showDeletedTab = deletedAttachments !== undefined;
+  const showingDeleted = showDeletedTab && view === "deleted";
+  const deletedSorted = [...(deletedAttachments ?? [])].sort(
+    (a, b) =>
+      new Date(b.deletedAt ?? 0).getTime() - new Date(a.deletedAt ?? 0).getTime(),
+  );
   const sorted = [...attachments].sort(
     (a, b) =>
       new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
@@ -1158,7 +1169,7 @@ export function AttachmentsWidget({
                   variant="text"
                   startIcon={<Download size={14} />}
                   onClick={onDownloadAll}
-                  disabled={!onDownloadAll || sorted.length === 0}
+                  disabled={!onDownloadAll || sorted.length === 0 || showingDeleted}
                 >
                   Download all
                 </Button>
@@ -1196,6 +1207,25 @@ export function AttachmentsWidget({
             {uploadError}
           </Typography>
         )}
+        {showDeletedTab && (
+          <Tabs
+            value={showingDeleted ? "deleted" : "active"}
+            onChange={(_e, next: "active" | "deleted") => setView(next)}
+            sx={{ mb: 1.5, minHeight: 36, borderBottom: 1, borderColor: "divider" }}
+            aria-label="Attachment views"
+          >
+            <Tab
+              value="active"
+              label={`Available (${sorted.length})`}
+              sx={{ minHeight: 36, py: 0.5 }}
+            />
+            <Tab
+              value="deleted"
+              label={`Deleted (${deletedSorted.length})`}
+              sx={{ minHeight: 36, py: 0.5 }}
+            />
+          </Tabs>
+        )}
         {loading ? (
           <Typography variant="body2" color="text.secondary">
             Loading attachments…
@@ -1211,13 +1241,17 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : sorted.length === 0 && !deletedAttachments?.length ? (
+        ) : showingDeleted && deletedSorted.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            No deleted attachments.
+          </Typography>
+        ) : !showingDeleted && sorted.length === 0 ? (
           <Typography variant="body2" color="text.secondary">
             No attachments on this case.
           </Typography>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            {sorted.map((a) => (
+            {!showingDeleted && sorted.map((a) => (
               <Box
                 key={a.id}
                 sx={{
@@ -1331,7 +1365,7 @@ export function AttachmentsWidget({
                 )}
               </Box>
             ))}
-            {(deletedAttachments ?? []).map((a) => (
+            {showingDeleted && deletedSorted.map((a) => (
               <Box
                 key={a.id}
                 data-testid="deleted-attachment"
