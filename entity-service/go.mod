@@ -37,7 +37,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.28 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
-	github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0 // indirect
+	github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

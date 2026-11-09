@@ -830,3 +830,74 @@ func TestBackend_AcknowledgeMarksAReportDraftDeletedAsAWorkItemFile(t *testing.T
 		t.Errorf("deleted = %v, want each marked by its own cleanup", repo.deleted)
 	}
 }
+
+// withBlob gives a cleanup service a file store, so it removes unlinked files itself.
+func withBlob(repo *fakeStoredRepo, blob *fakeBlob) *attachmentUploadCleanupService {
+	return WithFileStore(backendCleanup(repo), blob).(*attachmentUploadCleanupService)
+}
+
+func TestBackend_CleanupWithAStoreRemovesUnlinkedFilesItself(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	blob := newFakeBlob()
+	for _, key := range []string{"csm/projects/p/workitems/w/inline_attachments/a_1.png", "csm/projects/p/workitems/w/inline_attachments/a_2.png", k} {
+		blob.committed[key] = []byte("x")
+	}
+
+	res, err := withBlob(repo, blob).CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if len(res.Orphans) != 0 {
+		t.Errorf("orphans = %+v, want none: the files were removed here", res.Orphans)
+	}
+	// Two stored comment images and one keyless one, and the report draft.
+	if res.ImagesRemoved != 3 || res.ImagesFailed != 0 || res.ReportDraftsRemoved != 1 || res.ReportDraftsFailed != 0 {
+		t.Errorf("result = %+v", res)
+	}
+	if len(blob.committed) != 0 || len(blob.deleted) != 3 {
+		t.Errorf("files left %v, deleted %v: every stored file must be removed", blob.committed, blob.deleted)
+	}
+	if repo.deleted[orphanA] != "inline-image-cleanup" || repo.deleted[orphanB] != "inline-image-cleanup" || repo.deleted[reportDraftA] != "report-draft-cleanup" {
+		t.Errorf("rows marked deleted = %v", repo.deleted)
+	}
+}
+
+func TestBackend_CleanupKeepsARowWhoseFileCouldNotBeRemoved(t *testing.T) {
+	repo := orphanRepo()
+	blob := &failingBlob{fakeBlob: newFakeBlob()}
+	res, err := withBlob2(repo, blob).CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if res.ImagesFailed != 2 || res.ImagesRemoved != 1 {
+		t.Errorf("result = %+v, want the two files that could not be removed counted failed (the keyless row has no file)", res)
+	}
+	if repo.deleted[orphanA] != "" || repo.deleted[orphanB] != "" {
+		t.Errorf("rows with a surviving file were marked deleted: %v", repo.deleted)
+	}
+	if len(repo.deferred) != 2 {
+		t.Errorf("deferred = %v, want both sent to the back of the queue", repo.deferred)
+	}
+}
+
+// failingBlob cannot remove anything.
+type failingBlob struct{ *fakeBlob }
+
+func (failingBlob) Delete(context.Context, string) error { return errors.New("storage down") }
+
+func withBlob2(repo *fakeStoredRepo, blob FileStore) *attachmentUploadCleanupService {
+	return WithFileStore(backendCleanup(repo), blob).(*attachmentUploadCleanupService)
+}
+
+func TestBackend_CleanupTreatsAFileAlreadyGoneAsRemoved(t *testing.T) {
+	repo := orphanRepo()
+	res, err := withBlob(repo, newFakeBlob()).CleanupUploads(context.Background()) // nothing in storage
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	if res.ImagesFailed != 0 || repo.deleted[orphanA] == "" {
+		t.Errorf("result = %+v, deleted = %v: a file that is already gone is done", res, repo.deleted)
+	}
+}

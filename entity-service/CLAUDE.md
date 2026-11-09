@@ -2009,14 +2009,17 @@ is written, and that insert must not fail (an orphaned ServiceNow case is the wo
 whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
 A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
 **An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
-COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
-(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
-`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
-acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
-older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
-case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
-attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
-missing for comment images too).
+COMPLETE one whose case was never created (`ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) is removed by `POST /attachments/uploads/cleanup` once it is 25 hours old:
+**this service deletes the file from Azure itself and marks the row DELETED in the same run** (`removeFile`; the same
+for an unlinked comment image). A file that cannot be removed now keeps its row COMPLETE and goes to the back of the
+queue (`RecordCleanupAttempt`), so the next run tries it again; a file already gone counts as removed. Only with no
+storage configured does the response hand such a file over in `orphans` (`type`, with its storage key) to be removed
+and acknowledged by the caller, as before (`POST /attachments/uploads/cleanup/acknowledge`). The 1 hour past 24 is
+deliberate: `POST /cases` refuses a draft older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a
+`notBefore`), so a draft is never linked to a case after its file was removed. A form left open more than a day gets a
+400 and the file must be attached again. The route is internal-only and meant to be called on a schedule; **nothing
+calls it yet** (a daily `csm-scheduled-tasks` task is all that is missing, and it needs no storage access).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of
