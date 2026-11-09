@@ -93,6 +93,19 @@ type fakeStoredRepo struct {
 		project, email string
 		ids            []string
 	}
+	// A draft report (a work item attachment uploaded before its case exists).
+	reportDrafts    []domain.StoredAttachmentRow
+	reportDraftCall struct {
+		project, email string
+		ids            []string
+	}
+	reportLinkWant []string
+	reportLinkCall struct {
+		workItem, project, email string
+		ids                      []string
+		sys                      bool
+		calls                    int
+	}
 	draftLinkWant []string
 	draftLinkCall struct {
 		workItem, project, email string
@@ -219,6 +232,19 @@ func (f *fakeStoredRepo) LinkDescriptionImages(ctx context.Context, workItemID, 
 	c.workItem, c.project, c.email, c.ids, c.sys = workItemID, projectID, email, ids, ok && scope.Unrestricted
 	c.calls++
 	return f.draftLinkWant, nil
+}
+
+func (f *fakeStoredRepo) ListReportDrafts(_ context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+	f.reportDraftCall.project, f.reportDraftCall.email, f.reportDraftCall.ids = projectID, email, ids
+	return f.reportDrafts, nil
+}
+
+func (f *fakeStoredRepo) LinkReportDrafts(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error) {
+	scope, ok := repository.CallerIdentityFromContext(ctx)
+	c := &f.reportLinkCall
+	c.workItem, c.project, c.email, c.ids, c.sys = workItemID, projectID, email, ids, ok && scope.Unrestricted
+	c.calls++
+	return f.reportLinkWant, nil
 }
 
 func (f *fakeStoredRepo) ListUnlinkedImages(context.Context, time.Time, int) ([]domain.StoredAttachmentRow, error) {
@@ -625,7 +651,7 @@ func TestInitiateUpload_DraftValidation(t *testing.T) {
 		"both parentId and projectId": mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ParentID = saParentID }),
 		"neither":                     mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ProjectID = "" }),
 		"bad projectId":               mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ProjectID = "nope" }),
-		"projectId on a work item":    mk(func(r *domain.InitiateAttachmentUploadRequest) { r.Kind = domain.StoredAttachmentWorkItem }),
+		"projectId on a deployment":   mk(func(r *domain.InitiateAttachmentUploadRequest) { r.Kind = domain.StoredAttachmentDeployment }),
 		"a GIF":                       mk(func(r *domain.InitiateAttachmentUploadRequest) { r.ContentType = "image/gif" }),
 		"over the size limit":         mk(func(r *domain.InitiateAttachmentUploadRequest) { r.SizeBytes = 101 }),
 	} {
@@ -925,5 +951,92 @@ func TestValidateEmbeddedImages(t *testing.T) {
 				t.Fatalf("err = %v, want a ValidationError containing %q", err, c.wantErr)
 			}
 		})
+	}
+}
+
+const saReportA = "33333333-3333-4333-8333-333333333333"
+
+func reportRow(id string) domain.StoredAttachmentRow {
+	size := int64(100)
+	return domain.StoredAttachmentRow{ID: id, Status: "COMPLETE", SizeBytes: &size, CreatedBy: saEmail, ParentID: saProjectID, Draft: true}
+}
+
+func TestInitiateUpload_DraftReportForAWorkItem(t *testing.T) {
+	repo := newFakeStoredRepo()
+	req := domain.InitiateAttachmentUploadRequest{Kind: domain.StoredAttachmentWorkItem, ProjectID: saProjectID, Name: "report.pdf", ContentType: "application/pdf", SizeBytes: 50}
+	if _, err := newStoredSvc(repo).InitiateUpload(saCtx(t, saEmail), req); err != nil {
+		t.Fatalf("InitiateUpload: %v", err)
+	}
+	if len(repo.inserted) != 1 || !repo.inserted[0].Draft || repo.inserted[0].ParentID != saProjectID || repo.inserted[0].CreatedBy != saEmail {
+		t.Errorf("inserted = %+v, want one draft under the project, recorded as the caller", repo.inserted)
+	}
+	// A deployment file has no project draft.
+	req.Kind = domain.StoredAttachmentDeployment
+	if _, err := newStoredSvc(newFakeStoredRepo()).InitiateUpload(saCtx(t, saEmail), req); err == nil {
+		t.Error("a deployment attachment must not accept projectId")
+	}
+}
+
+func TestValidateReportDrafts(t *testing.T) {
+	ids := []string{saReportA}
+	t.Run("a stored draft of the caller passes, looked up as the system", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		if err := newStoredSvc(repo).ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids); err != nil {
+			t.Fatalf("ValidateReportDrafts: %v", err)
+		}
+		if c := repo.reportDraftCall; c.project != saProjectID || c.email != saEmail || len(c.ids) != 1 {
+			t.Errorf("repo call = %+v", c)
+		}
+	})
+	t.Run("a file that is not the caller's, not stored or already linked is refused", func(t *testing.T) {
+		err := newStoredSvc(newFakeStoredRepo()).ValidateReportDrafts(context.Background(), saProjectID, saEmail, ids)
+		var ve *apierror.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("err = %v, want a ValidationError", err)
+		}
+	})
+	t.Run("no caller email is refused", func(t *testing.T) {
+		repo := newFakeStoredRepo()
+		repo.reportDrafts = []domain.StoredAttachmentRow{reportRow(saReportA)}
+		if err := newStoredSvc(repo).ValidateReportDrafts(context.Background(), saProjectID, "", ids); err == nil {
+			t.Error("a draft cannot be proven to be the caller's without an email")
+		}
+	})
+	t.Run("too many and bad ids are refused", func(t *testing.T) {
+		svc := newStoredSvc(newFakeStoredRepo())
+		many := make([]string, MaxCreateAttachments+1)
+		for i := range many {
+			many[i] = fmt.Sprintf("%08d-3333-4333-8333-333333333333", i)
+		}
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, many); err == nil {
+			t.Error("more than the limit must be refused")
+		}
+		if err := svc.ValidateReportDrafts(context.Background(), saProjectID, saEmail, []string{"nope"}); err == nil {
+			t.Error("a non-UUID id must be refused")
+		}
+	})
+	t.Run("no ids is fine", func(t *testing.T) {
+		if err := newStoredSvc(newFakeStoredRepo()).ValidateReportDrafts(context.Background(), saProjectID, saEmail, nil); err != nil {
+			t.Errorf("err = %v", err)
+		}
+	})
+}
+
+func TestLinkReportDrafts(t *testing.T) {
+	repo := newFakeStoredRepo()
+	repo.reportLinkWant = []string{saReportA}
+	svc := newStoredSvc(repo)
+	if err := svc.LinkReportDrafts(context.Background(), saParentID, saProjectID, saEmail, []string{saReportA}); err != nil {
+		t.Fatalf("LinkReportDrafts: %v", err)
+	}
+	c := repo.reportLinkCall
+	if c.calls != 1 || c.workItem != saParentID || c.project != saProjectID || c.email != saEmail || !c.sys {
+		t.Errorf("repo call = %+v: want the new work item, project and author, as the system", c)
+	}
+	// A link that takes fewer files than named is an error for the caller to log.
+	repo.reportLinkWant = nil
+	if err := svc.LinkReportDrafts(context.Background(), saParentID, saProjectID, saEmail, []string{saReportA}); err == nil {
+		t.Error("linking none of the named files must be reported")
 	}
 }

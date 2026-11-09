@@ -723,6 +723,9 @@ type CreateCaseRequest struct {
 	RelatedCaseID     string           `json:"relatedCaseId,omitempty"`
 	ConversationID    string           `json:"conversationId,omitempty"`
 	WatchList         []string         `json:"watchList,omitempty"`
+	// AttachmentIDs: draft files uploaded to ProjectID before this request;
+	// entity-service validates and links them (required for a security report).
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 // CreateCaseDetails carries the key fields of a newly created case.

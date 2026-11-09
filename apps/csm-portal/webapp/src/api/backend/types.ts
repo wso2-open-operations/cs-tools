@@ -592,9 +592,10 @@ export interface BeServiceRequestCreatePayload {
 
 /**
  * Security report analysis (`type: "security_report_analysis"`). ServiceNow-only;
- * requires a subject and description. Files are not part of the create request:
- * the report is created first and its files are uploaded afterwards (see
- * `CreateSecurityReportPage.tsx`).
+ * requires a subject, a description and at least one report file. The file bytes
+ * are not part of the request: they are uploaded first as drafts of the project
+ * and named in `attachmentIds`, which the backend links to the report it creates
+ * and refuses the request without (see `CreateSecurityReportPage.tsx`).
  */
 export interface BeSecurityReportCreatePayload {
   type: "security_report_analysis";
@@ -603,6 +604,8 @@ export interface BeSecurityReportCreatePayload {
   deployedProductId: string;
   subject: string;
   description: string;
+  /** Files already uploaded as drafts of `projectId`; at least one is required. */
+  attachmentIds: string[];
 }
 
 /**

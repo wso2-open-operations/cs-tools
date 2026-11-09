@@ -24030,11 +24030,25 @@ components:
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `security_report_analysis`: security report; requires `subject`, `description` and, for a user caller, at least one report file in `attachmentIds` (uploaded first as a draft, see `attachmentIds`). A machine caller (no user token) is not held to the minimum.
             - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
           format: uuid
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Files uploaded BEFORE this request as draft work item attachments of
+            `projectId` (`POST /attachments/upload` with `type: work_item` and
+            `projectId`, then the chunks and the confirm). Every id must be a COMPLETE
+            draft uploaded to this project by the caller and not linked yet, else 400
+            and nothing is created. They are linked to the new case right after it is
+            created. Required (at least one) for a `security_report_analysis` created
+            by a user, so a security report never exists without its report file.
         deploymentId:
           type: string
           format: uuid
@@ -39608,10 +39622,11 @@ components:
       additionalProperties: false
       description: >-
         Send parentId, except for a comment image that is a draft for the
-        description of a record that does not exist yet: then send projectId
-        instead. For type comment exactly one of parentId and projectId is
-        required (both or neither is a 400); for the other types parentId is
-        required and projectId is refused.
+        description of a record that does not exist yet, or a work item
+        attachment that is a draft report for a case that does not exist yet:
+        then send projectId instead. For types comment and work_item exactly
+        one of parentId and projectId is required (both or neither is a 400);
+        for deployment parentId is required and projectId is refused.
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
@@ -39625,16 +39640,21 @@ components:
           type: string
           format: uuid
           description: >-
-            Type comment only, instead of parentId. The project the draft
-            description image is uploaded to. The caller must be a REGISTERED
-            member of it (internal callers are unrestricted); a project the
-            caller cannot see is a 404. The image is private to its uploader
-            until the record is created: the create request's description then
-            refers to it as src="/<attachmentId>" and entity-service links it
-            (work_item_id set, description_image true) when the record exists.
-            Its storage key is csm/projects/<project>/workitems/drafts/inline_attachments/...
-            and stays valid after linking. Draft images never linked within 24
-            hours are removed by the upload cleanup; linked ones never are.
+            Types comment and work_item only, instead of parentId. The project the draft
+            is uploaded to. The caller must be a REGISTERED member of it (internal callers
+            are unrestricted); a project the caller cannot see is a 404. A draft is private
+            to its uploader until the record it belongs to is created.
+
+            - work_item: a security report's file. It is listed nowhere and linked to the
+              case by `POST /cases` with `attachmentIds`. Its key is
+              csm/projects/<project>/workitems/drafts/attachments/... and stays valid
+              after linking.
+            - comment: a description image. The create request's description then refers
+              to it as src="/<attachmentId>" and entity-service links it (work_item_id
+              set, description_image true) when the record exists. Its key is
+              csm/projects/<project>/workitems/drafts/inline_attachments/... and stays
+              valid after linking. Draft images never linked within 24 hours are removed
+              by the upload cleanup; linked ones never are.
         name:
           type: string
           maxLength: 255

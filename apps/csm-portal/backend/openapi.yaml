@@ -1357,15 +1357,16 @@ paths:
                   format: uuid
                   description: >-
                     The work item (work_item, comment) or deployment the file belongs to.
-                    Required for work_item and deployment. For a comment image give exactly
-                    one of parentId and projectId.
+                    Required for deployment. For a comment image or a work_item attachment
+                    give exactly one of parentId and projectId.
                 projectId:
                   type: string
                   format: uuid
                   description: >-
-                    Comment images only: the project of a draft description image that is
-                    uploaded before the case exists and linked to it when it is created.
-                    Give exactly one of parentId and projectId.
+                    Comment images and work_item attachments: the project of a draft that is
+                    uploaded before the case exists and linked to it when it is created (a
+                    description image through its src, a security report's file through the
+                    attachmentIds of POST /cases). Give exactly one of parentId and projectId.
                 name:
                   type: string
                 contentType:
@@ -20298,7 +20299,7 @@ components:
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
+            - `security_report_analysis`: security report; requires `subject`, `description`, and at least one id in `attachmentIds` (files uploaded first as drafts).
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -20339,7 +20340,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseAttachmentPayload'
-          description: Required for `security_report_analysis` type (at least one entry).
+          description: Legacy base64 attachments. Not used for `security_report_analysis`; send `attachmentIds` instead.
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: |
+            Required for `security_report_analysis` type (at least one, at most 10). Ids of files
+            already uploaded as drafts to this project by the caller (`POST /attachments/upload`
+            with `type: work_item` and `projectId`). The case links them when it is created;
+            an id that is not a complete, unlinked draft of this project by the caller is a 400.
         relatedCaseId:
           type: string
           format: uuid

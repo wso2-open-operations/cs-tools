@@ -45,12 +45,8 @@ import ProjectSelectionField from "@features/csm-cases/components/ProjectSelecti
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useDeployedProductOptions } from "@features/csm-cases/api/useDeployedProductOptions";
 import { usePostCsmCase } from "@features/csm-cases/api/usePostCsmCase";
-import { usePostCsmCaseAttachment } from "@features/csm-cases/api/useCsmCaseAttachments";
-import {
-  failedUploadsMessage,
-  uploadAttachmentsToCase,
-} from "@features/csm-cases/api/uploadAttachmentsToCase";
-import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
+import { useReportDraftUploads } from "@features/csm-cases/api/useReportDraftUploads";
+import EditorUploadProgress from "@components/rich-text-editor/EditorUploadProgress";
 import { useNavTransition } from "@hooks/useNavTransition";
 
 /** The rich-text editor emits `<p></p>` when empty; check the stripped text. */
@@ -100,8 +96,10 @@ export default function CreateSecurityReportPage(): JSX.Element {
   const deployments = useSearchDeployments(projectId || undefined);
   const deployedProducts = useDeployedProductOptions(deploymentId || undefined);
   const postCase = usePostCsmCase();
-  const postAttachment = usePostCsmCaseAttachment();
-  const uploadedBy = useEngineerDisplayName();
+  // The report's files are uploaded BEFORE the case is created (as drafts of the
+  // project), so a security report never exists without its report: a cancel or a
+  // refresh while they upload leaves nothing behind.
+  const reportDrafts = useReportDraftUploads(projectId || undefined);
   const [submitting, setSubmitting] = useState(false);
 
   // Auto-generate the report title as "{Deployment} - {Product} - {date}" when
@@ -137,8 +135,8 @@ export default function CreateSecurityReportPage(): JSX.Element {
     if (deployedProducts.isError) void deployedProducts.refetch();
   };
 
-  // At least one file must be chosen. The files are uploaded right after the
-  // report is created, so the form is where the rule is enforced.
+  // At least one file must be chosen. The files are uploaded before the report is
+  // created and the backend refuses a report without one; the form says so first.
   const canSubmit = useMemo(
     () =>
       !!projectId &&
@@ -173,6 +171,17 @@ export default function CreateSecurityReportPage(): JSX.Element {
       showError(preCreateImagesErrorMessage(err));
       return;
     }
+    // The report's files go before the case, and the case is created only once they
+    // are stored: it names them, and the backend refuses a security report without.
+    const report = await reportDrafts.upload(attachments);
+    if (!report.ok) {
+      setSubmitting(false);
+      // Stopped by the person: nothing was created and there is nothing to report.
+      if (!report.cancelled) {
+        showError(`${report.message} The security report was not submitted; try again.`);
+      }
+      return;
+    }
     try {
       const created = await postCase.mutateAsync({
         type: "security_report_analysis",
@@ -181,18 +190,9 @@ export default function CreateSecurityReportPage(): JSX.Element {
         deployedProductId,
         subject: subject.trim(),
         description: descriptionHtml,
+        attachmentIds: report.ids,
       });
       descriptionImages.release(description);
-      // The report exists now: upload the chosen files to it. A failed upload
-      // does not undo the report, so say which files did not make it and go on
-      // to the report, where they can be added again.
-      const failed = await uploadAttachmentsToCase(
-        postAttachment.mutateAsync,
-        created.id,
-        attachments,
-        uploadedBy,
-      );
-      if (failed.length > 0) showError(failedUploadsMessage("security report", failed));
       navigate(`/security-center/security-reports/${created.id}`, {
         state: { from: backTarget },
       });
@@ -376,6 +376,19 @@ export default function CreateSecurityReportPage(): JSX.Element {
               maxFiles={CREATE_FORM_MAX_ATTACHMENTS}
               disabled={submitting}
             />
+            {/* The files going up before the report is created, with a Cancel. */}
+            {reportDrafts.progress && (
+              <EditorUploadProgress
+                uploads={[
+                  {
+                    name: reportDrafts.progress.name,
+                    percent: reportDrafts.progress.percent,
+                    onCancel: reportDrafts.cancel,
+                  },
+                ]}
+                waiting={reportDrafts.progress.waiting}
+              />
+            )}
           </Grid>
         </Grid>
 

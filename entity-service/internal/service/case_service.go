@@ -738,10 +738,22 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 		}
 	}
 
+	// The files uploaded before this record (a security report's report) are checked
+	// the same way, and a security report must have one.
+	var linker any
+	if s.imageLinker != nil {
+		linker = s.imageLinker
+	}
+	reportEmail, err := validateReportDrafts(ctx, linker, req)
+	if err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
+
 	if s.snMirror != nil {
 		resp, err := s.createCaseSNFirst(ctx, req)
 		if err == nil {
 			linkDescriptionImages(ctx, s.imageLinker, resp.Case.ID, req.ProjectID, descImageEmail, req.Description)
+			linkReportDrafts(ctx, linker, resp.Case.ID, req, reportEmail)
 		}
 		return resp, err
 	}
@@ -774,6 +786,10 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	// The repository links the report files inside the create transaction (as the
+	// uploader they were checked against), so a file taken by another create in between
+	// fails this one instead of leaving a case without it.
+	req.ReportDraftOwnerEmail = reportEmail
 	c, err := s.repo.CreateCase(ctx, req)
 	if err != nil {
 		return domain.CreateCaseResponse{}, err
