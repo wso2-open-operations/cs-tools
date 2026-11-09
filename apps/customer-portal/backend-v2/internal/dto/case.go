@@ -18,7 +18,6 @@ package dto
 
 import (
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/apps/customer-portal/backend-v2/internal/entity"
@@ -246,7 +245,7 @@ func BuildEntitySearchCasesRequest(projectID string, req CaseSearchRequest) enti
 
 	filters = append(filters, entity.CaseFieldFilter{Field: "projectId", Op: "in", Values: []string{projectID}})
 	addIn("type", req.Filters.CaseTypes)
-	addIn("state", caseIDsToEnums(expandInProgressStateIDs(req.Filters.StatusIDs), caseStateIDToEnum))
+	addIn("state", caseIDsToEnums(req.Filters.StatusIDs, caseStateIDToEnum))
 	addIn("severity", caseIDsToEnums(req.Filters.SeverityIDs, caseSeverityIDToEnum))
 	addIn("issueType", caseIDsToEnums(req.Filters.IssueIDs, caseIssueTypeIDToEnum))
 	addIn("engagementType", caseIDsToEnums(req.Filters.EngagementTypeKeys, caseEngagementTypeIDToEnum))
@@ -508,6 +507,11 @@ type CreateCaseRequest struct {
 	RelatedCaseID     string            `json:"relatedCaseId,omitempty"`
 	ConversationID    string            `json:"conversationId,omitempty"`
 	WatchList         []string          `json:"watchList,omitempty"`
+	// AttachmentIDs are files already uploaded as drafts of ProjectID (POST
+	// /attachments/upload with type work_item and projectId). A security report
+	// is created with them, because it must never exist without its report file;
+	// entity-service checks them and links them to the new case.
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
 }
 
 // BuildEntityCreateCaseRequest translates the portal's request into
@@ -538,6 +542,7 @@ func BuildEntityCreateCaseRequest(req CreateCaseRequest) entity.CreateCaseReques
 		RelatedCaseID:     req.RelatedCaseID,
 		ConversationID:    req.ConversationID,
 		WatchList:         req.WatchList,
+		AttachmentIDs:     req.AttachmentIDs,
 	}
 }
 
@@ -770,26 +775,12 @@ func MapSearchCaseActivities(r entity.SearchCaseActivitiesResponse) SearchCaseAc
 		if len(a.Changes) > 0 {
 			changes = make([]CaseFieldChange, 0, len(a.Changes))
 			for _, c := range a.Changes {
-				change := CaseFieldChange{
+				changes = append(changes, CaseFieldChange{
 					Field:         c.Field,
 					FieldLabel:    c.FieldLabel,
 					PreviousValue: c.PreviousValue,
 					NewValue:      c.NewValue,
-				}
-				if strings.EqualFold(c.Field, "state") {
-					change.PreviousValue = inProgressStateText(change.PreviousValue)
-					change.NewValue = inProgressStateText(change.NewValue)
-					// Moving between Work In Progress and Waiting On WSO2 is
-					// invisible to the customer, so there is nothing to show.
-					if change.PreviousValue == change.NewValue {
-						continue
-					}
-				}
-				changes = append(changes, change)
-			}
-			// Every change was such a move: the whole entry is noise.
-			if len(changes) == 0 && a.Type == entity.ActivityTypeFieldChange {
-				continue
+				})
 			}
 		}
 

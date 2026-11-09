@@ -97,7 +97,8 @@ type WorklogLeaveRow struct {
 
 // WorklogMoveRow is one Team Schedule span that moves a person to another
 // team: a tag whose kind has moves_to_team_key (Brazil rotation onto
-// Americas, Migration, India team). The person stays a member of their own
+// Americas, Migration, India team), or leave filed under such a team (leave
+// taken during the move). The person stays a member of their own
 // team (migrations 0202, 0274), so the roster alone
 // files them under the team they were moved away from. TeamKey, TeamName
 // and TeamType describe the team the span moves them to.
@@ -340,6 +341,11 @@ func (r *worklogReportRepo) TimeRows(ctx context.Context, from, to time.Time) ([
 // absent; the cost of guessing wrong is a person silently vanishing from
 // their team's figures.
 //
+// An allocation's days that a rota admin or lead took off the person's Team
+// Schedule roster (team_schedule_allocation_dismissal) are not allocated:
+// the allocation is returned one row per remaining day in the range, so the
+// roster and the timesheet agree.
+//
 // CONFIRMED ENGAGEMENT ALLOCATIONS are read straight from
 // customer_engagement_allocation_resource and returned as ALLOCATION rows
 // (short code 'ENG_ALLOC'), because that table, not the schedule
@@ -367,9 +373,11 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
            'ENG_ALLOC',
            'Engagement allocation',
            'ALLOCATION',
-           ar.start_date,
-           ar.end_date
+           d::date,
+           d::date
       FROM customer_engagement_allocation_resource ar
+     CROSS JOIN LATERAL generate_series(GREATEST(ar.start_date, $1::date),
+                                        LEAST(ar.end_date, $2::date), interval '1 day') d
      WHERE ar.resource_id IS NOT NULL
        AND ar.state = 'CONFIRMED'
        AND ar.utilization >= 100
@@ -377,11 +385,21 @@ SELECT user_id, short_code, label, bucket, starts_on, ends_on
        AND ar.end_date IS NOT NULL
        AND ar.start_date <= $2
        AND ar.end_date >= $1
+       AND NOT EXISTS (SELECT 1 FROM team_schedule_allocation_dismissal x
+                        WHERE x.allocation_resource_id = ar.id
+                          AND x.rota_date = d::date)
   ) x
  ORDER BY user_id, starts_on`
 
 // The destination is the kind's moves_to_team_key, the team the tag moves
 // people to (0202 files the span itself under that team as well).
+//
+// Leave taken during a move counts as part of it. The Team Schedule keeps one
+// tag per person per day, so leave entered inside a move cuts the move for
+// those days, and files the leave under the team the person is on: the move's
+// team. A leave span filed under a team some move kind moves people to is
+// therefore returned as a span on that team, so the person stays listed under
+// it on their leave days instead of falling back to their own team.
 const worklogMoveSpansQuery = `
 SELECT a.user_id::text,
        t.key,
@@ -391,8 +409,11 @@ SELECT a.user_id::text,
        a.ends_on
   FROM team_schedule_absence a
   JOIN team_schedule_absence_kind k ON k.id = a.kind_id
-  JOIN team t ON LOWER(t.key) = LOWER(k.moves_to_team_key)
- WHERE k.moves_to_team_key IS NOT NULL
+  JOIN team t ON LOWER(t.key) = LOWER(COALESCE(k.moves_to_team_key, a.team_key))
+ WHERE (k.moves_to_team_key IS NOT NULL
+        OR (k.bucket = 'LEAVE'
+            AND EXISTS (SELECT 1 FROM team_schedule_absence_kind mk
+                         WHERE LOWER(mk.moves_to_team_key) = LOWER(a.team_key))))
    AND a.starts_on <= $2
    AND (a.ends_on IS NULL OR a.ends_on >= $1)
  ORDER BY a.user_id, a.starts_on, t.key`

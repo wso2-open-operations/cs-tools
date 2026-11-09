@@ -491,4 +491,9 @@ export type CreateCaseRequest = {
   relatedCaseId?: string;
   conversationId?: string;
   watchList?: string[];
+  /**
+   * Files already uploaded as drafts of `projectId` (before the case exists). A
+   * security report is created with them: the backend refuses one with none.
+   */
+  attachmentIds?: string[];
 };

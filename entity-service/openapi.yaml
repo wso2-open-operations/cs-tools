@@ -590,7 +590,8 @@ paths:
         Clear out uploads that were started and never confirmed. Each upload still
         PENDING after 24 hours is marked FAILED (lists hide it and a later confirm
         refuses it), at most 200 per run, and the comment images never linked to a
-        comment are returned in orphans for the caller to remove. Internal callers
+        comment, and the security report files never linked to a case (25 hours old),
+        are returned in orphans for the caller to remove. Internal callers
         only. Meant to be called on a schedule.
       operationId: cleanupAttachmentUploads
       security:
@@ -612,10 +613,14 @@ paths:
                     type: integer
                     description: Comment images stored but never linked to a comment within 24 hours, removed.
                   imagesFailed: {type: integer}
+                  reportDraftsRemoved:
+                    type: integer
+                    description: Security report files stored but never linked to a case, with no file to remove, marked DELETED.
+                  reportDraftsFailed: {type: integer}
                   orphans:
                     type: array
                     description: >-
-                      The unlinked comment images whose files the caller must
+                      The unlinked comment images and security report files whose files the caller must
                       remove from storage. They are not
                       marked DELETED yet, so every run lists them again until the
                       caller removes the files and acknowledges them with
@@ -623,11 +628,15 @@ paths:
                       keys are internal and must never reach a browser.
                     items:
                       type: object
-                      required: [id, storageKey]
+                      required: [id, type, storageKey]
                       properties:
                         id:
                           type: string
                           format: uuid
+                        type:
+                          type: string
+                          enum: [comment, work_item]
+                          description: comment for an unlinked comment image, work_item for an unlinked security report file.
                         storageKey:
                           type: string
         "403":
@@ -646,7 +655,7 @@ paths:
   /attachments/uploads/cleanup/acknowledge:
     post:
       summary: >-
-        Acknowledge orphaned comment images whose files the caller has removed from
+        Acknowledge orphaned comment images and security report files whose files the caller has removed from
         storage. POST /attachments/uploads/cleanup hands the orphans over without
         marking them DELETED. An id is marked DELETED only if it is still an orphan (an
         unlinked comment image past the cleanup age); one that was linked to a
@@ -9384,6 +9393,62 @@ paths:
             Not found — the schedule routes are registered only when a database
             pool is configured, so an entity-service running without one has no
             such path.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
           content:
             application/json:
               schema:
@@ -24036,11 +24101,25 @@ components:
             payload for one — and is rejected with 400 if supplied here.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`. `attachments` is optional and not backend-enforced.
+            - `security_report_analysis`: security report; requires `subject`, `description` and, for a user caller, at least one report file in `attachmentIds` (uploaded first as a draft, see `attachmentIds`). A machine caller (no user token) is not held to the minimum.
             - `engagement`: professional-services engagement (e.g. migration, onboarding); requires `subject`, `description`, `engagementType`, `engagementPaymentType`.
         projectId:
           type: string
           format: uuid
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Files uploaded BEFORE this request as draft work item attachments of
+            `projectId` (`POST /attachments/upload` with `type: work_item` and
+            `projectId`, then the chunks and the confirm). Every id must be a COMPLETE
+            draft uploaded to this project by the caller and not linked yet, else 400
+            and nothing is created. They are linked to the new case right after it is
+            created. Required (at least one) for a `security_report_analysis` created
+            by a user, so a security report never exists without its report file.
         deploymentId:
           type: string
           format: uuid
@@ -28980,6 +29059,31 @@ components:
           description: Percentage of the person's time the allocation takes.
         startDate: { type: string, format: date }
         endDate: { type: string, format: date }
+        dismissedDates:
+          type: array
+          items: { type: string, format: date }
+          description: >
+            The days in the window the allocation was taken off this person's roster;
+            absent when there are none.
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     ScheduleEngagementAllocationsResponse:
       type: object
       required: [allocations, count]
@@ -39629,10 +39733,11 @@ components:
       additionalProperties: false
       description: >-
         Send parentId, except for a comment image that is a draft for the
-        description of a record that does not exist yet: then send projectId
-        instead. For type comment exactly one of parentId and projectId is
-        required (both or neither is a 400); for the other types parentId is
-        required and projectId is refused.
+        description of a record that does not exist yet, or a work item
+        attachment that is a draft report for a case that does not exist yet:
+        then send projectId instead. For types comment and work_item exactly
+        one of parentId and projectId is required (both or neither is a 400);
+        for deployment parentId is required and projectId is refused.
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentKind'
@@ -39646,16 +39751,21 @@ components:
           type: string
           format: uuid
           description: >-
-            Type comment only, instead of parentId. The project the draft
-            description image is uploaded to. The caller must be a REGISTERED
-            member of it (internal callers are unrestricted); a project the
-            caller cannot see is a 404. The image is private to its uploader
-            until the record is created: the create request's description then
-            refers to it as src="/<attachmentId>" and entity-service links it
-            (work_item_id set, description_image true) when the record exists.
-            Its storage key is csm/projects/<project>/workitems/drafts/inline_attachments/...
-            and stays valid after linking. Draft images never linked within 24
-            hours are removed by the upload cleanup; linked ones never are.
+            Types comment and work_item only, instead of parentId. The project the draft
+            is uploaded to. The caller must be a REGISTERED member of it (internal callers
+            are unrestricted); a project the caller cannot see is a 404. A draft is private
+            to its uploader until the record it belongs to is created.
+
+            - work_item: a security report's file. It is listed nowhere and linked to the
+              case by `POST /cases` with `attachmentIds`. Its key is
+              csm/projects/<project>/workitems/drafts/attachments/... and stays valid
+              after linking.
+            - comment: a description image. The create request's description then refers
+              to it as src="/<attachmentId>" and entity-service links it (work_item_id
+              set, description_image true) when the record exists. Its key is
+              csm/projects/<project>/workitems/drafts/inline_attachments/... and stays
+              valid after linking. Draft images never linked within 24 hours are removed
+              by the upload cleanup; linked ones never are.
         name:
           type: string
           maxLength: 255

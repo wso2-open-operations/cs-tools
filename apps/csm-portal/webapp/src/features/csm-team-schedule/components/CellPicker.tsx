@@ -32,6 +32,19 @@ import { INDIA_HOURS_CODE, REGULAR_HOURS_CODE } from "../utils/standingDay";
 import { useTeamName } from "../utils/teamColourContext";
 
 
+/** A customer engagement allocation (from the allocation app) covering the
+ *  clicked day, offered for removal -- or, once removed, for restoring. */
+export interface CellEngagement {
+  /** The allocation's id, as the engagement allocation read returns it. */
+  id: string;
+  /** The chip: Allo- and the engagement id. */
+  label: string;
+  /** The allocation's full line (account, engagement, type, %, dates). */
+  title: string;
+  /** Taken off this person's roster on the clicked day. */
+  dismissed: boolean;
+}
+
 export interface CellPickerTarget {
   userId: string;
   name: string;
@@ -52,6 +65,9 @@ export interface CellPickerTarget {
   /** The leave or allocation this day is part of, if any -- the whole span,
    *  so it can be removed in one click. */
   absence?: CellAbsence;
+  /** Customer engagements from the allocation app covering the day: the
+   *  ones on the roster can be taken off it, removed ones put back. */
+  engagements?: CellEngagement[];
   /** Where on screen the cell is, so the picker can grow out of it. */
   anchor: { top: number; left: number; bottom: number; right: number };
   /** The standing window this engineer sits in on an ordinary weekday, so
@@ -88,6 +104,9 @@ interface CellPickerProps {
   onClear: (shiftCode: string, from: string, to: string) => void;
   /** Remove the whole absence this cell is part of, every day of it. */
   onRemoveAbsence?: (absenceId: string) => void;
+  /** Take a synced engagement allocation off the roster over the picked
+   *  days, or (restore) put those days back. Absent hides the controls. */
+  onDismissEngagement?: (engagement: CellEngagement, from: string, to: string, restore: boolean) => void;
   /** Add a leave or allocation tag to the shared catalogue. Resolves once it
    *  exists; rejects with a message the form can show. Absent hides the
    *  "New tag" control. */
@@ -227,6 +246,7 @@ export default function CellPicker({
   onMarkAway,
   onClear,
   onRemoveAbsence,
+  onDismissEngagement,
   onCreateKind,
   onDeleteKind,
   onClose,
@@ -663,6 +683,30 @@ export default function CellPicker({
           </div>
         ) : null}
 
+        {target.engagements?.length && onDismissEngagement ? (
+          // Synced from the allocation app, so never edited here: a removal
+          // takes the picked days (the range below) off this roster and the
+          // timesheet, and Restore puts them back.
+          <div className="pk-remove pk-eng" role="group" aria-label="Customer engagements from the allocation app">
+            {target.engagements.map((en) => (
+              <div className="pkeng-row" key={en.id}>
+                <span className={`chip sm eng${en.dismissed ? " gone" : ""}`}>{en.label}</span>
+                <span className="pkrm-t" title={en.title}>
+                  <b>{en.dismissed ? "Removed from the roster" : "Customer engagement (allocation app)"}</b>
+                  <small>{en.title}</small>
+                </span>
+                <button
+                  type="button"
+                  className={`pkrm-b${en.dismissed ? " back" : ""}`}
+                  disabled={busy}
+                  onClick={() => onDismissEngagement(en, firstDay, lastDay, en.dismissed)}
+                >
+                  {en.dismissed ? "Restore" : "Remove"} {firstDay === lastDay ? shortDate(firstDay) : `${shortDate(firstDay)} – ${shortDate(lastDay)}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         <div className="pk-body">
           <section className="pk-col" aria-labelledby="pk-rota-t">

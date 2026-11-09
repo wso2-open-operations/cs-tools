@@ -36,7 +36,6 @@ import {
   normalizeCaseTypeOptions,
   plainTextCommentToHtml,
   replaceInlineImageSources,
-  resolveActionStateKey,
   stripCodeWrapper,
   toUtcEndOfDay,
   toUtcStartOfDay,
@@ -683,26 +682,5 @@ describe("downloadSizeOf", () => {
     for (const v of [undefined, null, "", "abc", 0, -5, Number.NaN]) {
       expect(downloadSizeOf(v)).toBeUndefined();
     }
-  });
-});
-
-describe("resolveActionStateKey", () => {
-  const caseStates = [
-    { id: "3", label: "Closed" },
-    { id: "10", label: "In Progress" },
-  ];
-
-  it("looks the state up by label when the project lists it", () => {
-    expect(resolveActionStateKey("Closed", caseStates)).toBe(3);
-  });
-
-  it("sends the Waiting On WSO2 key even though the list no longer holds it", () => {
-    expect(resolveActionStateKey("Waiting on WSO2", caseStates)).toBe(1003);
-    expect(resolveActionStateKey("Reject Solution", caseStates)).toBe(1003);
-    expect(resolveActionStateKey("Waiting on WSO2", undefined)).toBe(1003);
-  });
-
-  it("returns undefined for an action with no state", () => {
-    expect(resolveActionStateKey("Open Related Case", caseStates)).toBeUndefined();
   });
 });

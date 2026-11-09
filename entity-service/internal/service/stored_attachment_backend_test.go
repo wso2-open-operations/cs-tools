@@ -538,9 +538,10 @@ func TestBackend_DeleteKeepsItsRules(t *testing.T) {
 }
 
 const (
-	orphanA = "22222222-2222-4222-8222-222222222222"
-	orphanB = "33333333-3333-4333-8333-333333333333"
-	keyless = "44444444-4444-4444-8444-444444444444"
+	orphanA      = "22222222-2222-4222-8222-222222222222"
+	orphanB      = "33333333-3333-4333-8333-333333333333"
+	keyless      = "44444444-4444-4444-8444-444444444444"
+	reportDraftA = "66666666-6666-4666-8666-666666666666"
 )
 
 // backendCleanup builds the cleanup service as backend mode does: a nil store, so
@@ -774,5 +775,58 @@ func TestBackend_InlineImageLocationNamesItsParent(t *testing.T) {
 	}
 	if loc.ParentID != saParentID || loc.Draft {
 		t.Errorf("parent = %q draft = %v, want %q and false", loc.ParentID, loc.Draft, saParentID)
+	}
+}
+
+func TestBackend_CleanupHandsOverUnlinkedReportDrafts(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	svc := backendCleanup(repo)
+
+	res, err := svc.CleanupUploads(context.Background())
+	if err != nil {
+		t.Fatalf("CleanupUploads: %v", err)
+	}
+	var got *domain.OrphanedImage
+	for i := range res.Orphans {
+		if res.Orphans[i].ID == reportDraftA {
+			got = &res.Orphans[i]
+		}
+	}
+	if got == nil || got.Type != domain.StoredAttachmentWorkItem || got.StorageKey != k {
+		t.Fatalf("orphans = %+v, want the report draft handed over as a work_item file", res.Orphans)
+	}
+	if repo.deleted[reportDraftA] != "" {
+		t.Error("a draft with a file must not be marked DELETED before the caller removed the file")
+	}
+	for _, o := range res.Orphans {
+		if o.ID == orphanA && o.Type != domain.StoredAttachmentComment {
+			t.Errorf("a comment image must be typed comment, got %q", o.Type)
+		}
+	}
+}
+
+func TestBackend_CleanupUsesTheGraceAfterTheDraftsUsableAge(t *testing.T) {
+	if reportDraftCleanupAge <= reportDraftUsableAge {
+		t.Fatalf("cleanup age %v must be longer than the usable age %v, or a draft could be linked after its file was handed over", reportDraftCleanupAge, reportDraftUsableAge)
+	}
+}
+
+func TestBackend_AcknowledgeMarksAReportDraftDeletedAsAWorkItemFile(t *testing.T) {
+	repo := orphanRepo()
+	k := "csm/projects/p/workitems/drafts/attachments/r_1.pdf"
+	repo.unlinkedReports = []domain.StoredAttachmentRow{{ID: reportDraftA, StorageKey: &k}}
+	svc := backendCleanup(repo)
+
+	ack, err := svc.AcknowledgeOrphans(context.Background(), domain.AcknowledgeOrphansRequest{IDs: []string{reportDraftA, orphanA}})
+	if err != nil {
+		t.Fatalf("AcknowledgeOrphans: %v", err)
+	}
+	if ack.Acknowledged != 2 || ack.Skipped != 0 {
+		t.Errorf("ack = %+v", ack)
+	}
+	if repo.deleted[reportDraftA] != "report-draft-cleanup" || repo.deleted[orphanA] != "inline-image-cleanup" {
+		t.Errorf("deleted = %v, want each marked by its own cleanup", repo.deleted)
 	}
 }

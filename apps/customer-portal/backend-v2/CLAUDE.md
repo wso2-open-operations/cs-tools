@@ -823,19 +823,6 @@ If a future endpoint has this same problem (frontend still expects a legacy nume
 entity-service no longer speaks), follow this same two-file, two-direction pattern rather than
 inventing a new one per endpoint.
 
-**Work In Progress and Waiting On WSO2 are one state to customers, "In Progress".** Customers act on
-Awaiting Info; the split between the other two only says the case is with the support team. The
-merge is display-only and lives in this backend (`isInProgressFamily` and friends in
-`case_enum_mapping.go`): entity-service, the database and every internal view keep the real states.
-What it covers, so a new endpoint that surfaces a case state should go through the same helpers:
-`caseStatusRef` (id `10`, label `In Progress`), `normalizeCaseStateChoices` (filter lists and
-`stateCount`, counts added), `expandInProgressStateIDs` (a filter on `10` also matches
-`waiting_on_wso2` cases, otherwise they would vanish from results) and the activity feed
-(`MapSearchCaseActivities` rewrites state changes to the merged label and drops a move between the
-two, which shows the customer nothing). `PATCH /cases/{id}` still accepts `1003`, because the
-"Wait on WSO2" and "Reject Solution" actions send it directly now that it is not in the state list.
-Not covered: emails to customers still carry the real status text.
-
 **Project scoping via a `{id}` path parameter is the source of truth — never a client-settable body
 field, even when entity-service's own request struct has one.**
 `POST /projects/{id}/cases/search` and `POST /projects/{id}/deployments/search` both scope every
@@ -1034,13 +1021,14 @@ the entity-service calls are in `internal/entity/stored_attachments.go`.
 They are the only attachment routes besides the two listings (`GET /cases/{id}/attachments`,
 `GET /deployments/{deploymentId}/attachments`, which read entity-service's `POST /attachments/search`). There is no
 base64 or ServiceNow attachment path: files go to Azure in chunks, for cases, deployments and comment images alike, and
-a security report case is created first and its files are uploaded afterwards (the create-case body carries no
-attachments). `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
+a security report's files are uploaded FIRST, as drafts of the project (`POST /attachments/upload` with `type: "work_item"`
+and `projectId`), and `POST /cases` names them in `attachmentIds` (entity-service checks and links them, and refuses a
+security report with none); every other case is created first and its files are uploaded afterwards. `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
 startup on an ambiguous pair.
 
 | Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; the body is forwarded untouched |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |

@@ -22,6 +22,7 @@ import {
   CircleAlert,
   CircleCheck,
   CirclePause,
+  CircleQuestionMark,
   CircleX,
   Clock,
   FileText,
@@ -104,14 +105,8 @@ export const CaseStatus = {
   REOPENED: "Reopened",
   SOLUTION_PROPOSED: "Solution Proposed",
   WAITING_ON_WSO2: "Waiting On WSO2",
-  // Customers see one In Progress state for what staff track as Work In
-  // Progress and Waiting On WSO2; the backend returns that merged label.
-  WORK_IN_PROGRESS: "In Progress",
+  WORK_IN_PROGRESS: "Work In Progress",
 } as const;
-
-// Waiting On WSO2 is no longer in the case state list the backend returns, so
-// the "Wait on WSO2" and "Reject Solution" actions send its key directly.
-export const WAITING_ON_WSO2_STATE_KEY = 1003;
 
 export type CaseStatus = (typeof CaseStatus)[keyof typeof CaseStatus];
 
@@ -315,7 +310,8 @@ export const DEPLOYMENT_DOCUMENT_DELETE_TOOLTIP_NOT_OWNER =
 export type AllCasesStatKey =
   | "openCases"
   | "workInProgress"
-  | "waitingOnClient";
+  | "waitingOnClient"
+  | "waitingOnWso2";
 
 /**
  * Configuration for the all cases statistics cards.
@@ -331,7 +327,7 @@ export const ALL_CASES_STAT_CONFIGS: SupportStatConfig<AllCasesStatKey>[] = [
     icon: Clock,
     iconColor: "success",
     key: "workInProgress",
-    label: "In Progress",
+    label: "Work in Progress",
   },
   {
     icon: MessageCircle,
@@ -339,11 +335,17 @@ export const ALL_CASES_STAT_CONFIGS: SupportStatConfig<AllCasesStatKey>[] = [
     key: "waitingOnClient",
     label: "Awaiting Info",
   },
+  {
+    icon: CircleQuestionMark,
+    iconColor: "info",
+    key: "waitingOnWso2",
+    label: "Waiting on WSO2",
+  },
 ];
 
 /**
  * Flattens the project cases statistics for the stat cards.
- * Total Active = totalCases; In Progress (which includes cases waiting on WSO2) and Awaiting Info from stateCount.
+ * Total Active = totalCases; Work in Progress, Awaiting Info, Waiting on WSO2 from stateCount.
  *
  * @param {ProjectCasesStats | undefined} stats - The original stats.
  * @returns {Record<AllCasesStatKey, number | undefined>} The flattened stats.
@@ -358,10 +360,14 @@ export const getAllCasesFlattenedStats = (
   const waitingOnClient = stateCount.find(
     (s) => s.label === CaseStatus.AWAITING_INFO,
   )?.count;
+  const waitingOnWso2 = stateCount.find(
+    (s) => s.label === CaseStatus.WAITING_ON_WSO2,
+  )?.count;
   const openCases = stats?.totalCases;
   return {
     openCases: openCases != null ? openCases : undefined,
     waitingOnClient,
+    waitingOnWso2,
     workInProgress,
   };
 };

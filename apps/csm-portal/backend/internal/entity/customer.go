@@ -749,6 +749,14 @@ func (c *CustomerEntityClient) SearchScheduleEngagementAllocations(ctx context.C
 	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/search", body)
 }
 
+// DismissScheduleEngagementAllocation calls
+// POST /team-schedule/engagement-allocations/dismiss on the entity service:
+// take a synced allocation off a person's roster for some days, or put them
+// back. Response is returned as raw JSON.
+func (c *CustomerEntityClient) DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/team-schedule/engagement-allocations/dismiss", body)
+}
+
 // GetScheduleOnDuty calls GET /team-schedule/on-duty on the entity service, passing
 // the optional `at` instant through unchanged. Response is raw JSON.
 func (c *CustomerEntityClient) GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error) {

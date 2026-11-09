@@ -1575,12 +1575,6 @@ link-related. `publishStatusChanged`/`publishCaseAssigned` additionally set
 `case.*` email's subject to follow one explicit standard format,
 `"[WSO2 Support] (<wso2 case id>/<case number>) <title>"` (see that
 service's own `CLAUDE.md`, `dispatch.subjectLine`).
-`publishStatusChangedEvent` also sets `PreviousStatus` (the display label of
-`before.State`, empty when the prior state is unknown) so a consumer can tell
-whether the change is visible to a given audience: customers see Work In
-Progress and Waiting On WSO2 as one "In Progress" state, so
-`csm-notification-service` skips the customer email for a move between the two.
-Entity-service itself never merges the states; it only supplies the previous one.
 - **`snCaseService.UpdateCase`** publishes `case.status_changed` via
   `publishStatusChanged`, called only when the PATCH's own `req.State` was
   set (a `nil` `State` — e.g. an `assigneeEmail`-only PATCH — never
@@ -1964,6 +1958,37 @@ BEFORE saving and answer a 400 in words; only the author's own images on the com
 (`mayHaveInlineImages`, one regexp).
 On an edit, images already linked to that comment are kept: they count toward the 5 but not toward the size limit,
 which applies to the images the edit adds (so lowering `INLINE_IMAGES_TOTAL_MAX_MB` never blocks editing an older comment).
+
+**A security report's file is uploaded before the case exists.** A `security_report_analysis` must never
+exist without its report, and creating the case first and uploading afterwards left a case with no file
+whenever the upload was cancelled or the tab refreshed. So the file goes first: `POST /attachments/upload`
+with `type: "work_item"` and `projectId` (instead of `parentId`) records a **draft** `work_item_attachment`
+(`work_item_id` NULL, `project_id` set; migration 0280, policies 100028) that only its uploader can see and
+that no list shows (every list joins `work_item`). The chunks and the confirm are the ordinary calls. Then
+`POST /cases` carries `attachmentIds`: `validateReportDrafts` checks them BEFORE anything is created (each a
+COMPLETE draft of that project uploaded by the caller, not linked, at most `MaxCreateAttachments` = 10) and,
+for a `security_report_analysis` created by a user, refuses a request with none (400, `reportRequiredMessage`);
+the link itself differs by data source. **Plain `postgres`: atomic.** `createCaseTx` calls `linkReportDraftsTx` in the
+create transaction (the service passes the email it validated as `ReportDraftOwnerEmail`): one guarded UPDATE
+takes only rows that are still COMPLETE drafts of that project uploaded by that email, and unless it takes every
+named file the create fails with a 400 and rolls back, so a case never exists without the files it was created
+with. Two creates naming the same file cannot both succeed: the second UPDATE waits on the row, then finds it
+taken (`TestCaseCreateMemberRLS_LinksReportDraftsAtomically` races two creates). The UPDATE is internal-only, so the
+transaction is marked internal for that one statement, as `insertAsCheckedProjectMember` does for the insert.
+**Dual-write (`createCaseSNFirst`): not atomic, on purpose.** ServiceNow already has the case when the Postgres row
+is written, and that insert must not fail (an orphaned ServiceNow case is the worse outcome, see
+`CreateCaseFromServiceNow`), so `linkReportDrafts` runs after it, best effort: a link that fails leaves a case
+whose file is still a draft and is logged at ERROR with the ids. A machine caller (no user token) is not held to the minimum.
+A linked file keeps its `workitems/drafts/attachments/` storage key (the row holds the key, nothing moves).
+**An abandoned draft is cleaned up.** A PENDING one is marked FAILED by the ordinary cleanup after 24 hours. A
+COMPLETE one whose case was never created is handed over by `POST /attachments/uploads/cleanup` in `orphans`
+(`type: "work_item"`, with its storage key; `ListUnlinkedReportDrafts`, served by
+`idx_work_item_attachment_unlinked_drafts`) once it is 25 hours old, and marked DELETED only when the caller
+acknowledges it, exactly like a comment image. The 1 hour past 24 is deliberate: `POST /cases` refuses a draft
+older than 24 hours (`reportDraftUsableAge`, `ListReportDrafts` takes a `notBefore`), so a draft is never linked to a
+case after its file was handed over for deletion. A form left open more than a day gets a 400 and the file must be
+attached again. Still not built: the job in the portal backends that deletes the files and acknowledges them (it is
+missing for comment images too).
 
 **Description images (uploaded before the record exists).** A rich-text description can show inline images
 before its case exists. `POST /attachments/upload` with `type: "comment"` takes `projectId` INSTEAD of

@@ -56,6 +56,7 @@ import { BackendApiError } from "@api/backend/client";
 import ExportPdfButton from "@components/ExportPdfButton";
 import { useCurrentUser } from "@context/current-user/CurrentUserContext";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
 import { usePortalAccess } from "@context/current-user/usePortalAccess";
 import { useEngineerDisplayName } from "@hooks/useEngineerDisplayName";
 import { useRecordRecentView } from "@features/csm-recent/hooks/useRecentViews";
@@ -400,6 +401,11 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
   );
   const { data: attachments } = useGetCsmCaseAttachments(id, "change_request");
   const postAttachment = usePostCsmCaseAttachment();
+  const attachmentDeletion = useAttachmentDeletion({
+    ownerId: id,
+    referenceType: "change_request",
+    closed: data?.state === "closed" || data?.state === "canceled",
+  });
   const downloadAttachment = useDownloadCsmCaseAttachment();
   // Tags: the case page's own hooks and widget, pointed at this change
   // request. The routes take a work item id (`POST /cases/{id}/tags`, ...),
@@ -1400,9 +1406,14 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
             }
             onUpload={onUploadAttachment}
             onDownload={canDownloadAttachment ? onDownloadAttachment : undefined}
+            onDelete={attachmentDeletion.onDelete}
+            canDeleteAttachment={attachmentDeletion.canDeleteAttachment}
+            deletingId={attachmentDeletion.deletingId}
           />
         </Card>
       )}
+
+      {attachmentDeletion.dialog}
 
       {reasonTransition && (
         <ChangeRequestTransitionReasonDialog

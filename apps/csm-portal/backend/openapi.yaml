@@ -1357,15 +1357,16 @@ paths:
                   format: uuid
                   description: >-
                     The work item (work_item, comment) or deployment the file belongs to.
-                    Required for work_item and deployment. For a comment image give exactly
-                    one of parentId and projectId.
+                    Required for deployment. For a comment image or a work_item attachment
+                    give exactly one of parentId and projectId.
                 projectId:
                   type: string
                   format: uuid
                   description: >-
-                    Comment images only: the project of a draft description image that is
-                    uploaded before the case exists and linked to it when it is created.
-                    Give exactly one of parentId and projectId.
+                    Comment images and work_item attachments: the project of a draft that is
+                    uploaded before the case exists and linked to it when it is created (a
+                    description image through its src, a security report's file through the
+                    attachmentIds of POST /cases). Give exactly one of parentId and projectId.
                 name:
                   type: string
                 contentType:
@@ -16134,6 +16135,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /team-schedule/engagement-allocations/dismiss:
+    post:
+      summary: Take a customer engagement allocation off a person's roster for some days, or put them back.
+      description: >
+        The allocation comes from the allocation app and is never edited: the days
+        it is taken off the roster are recorded (`team_schedule_allocation_dismissal`),
+        so a later sync keeps it. `from`-`to` is cut to the allocation's own dates and
+        only weekdays are recorded. With `restore: true` those days are put back. The
+        worklog report treats removed days as not allocated. Allowed for whoever may
+        change that person's leave and allocations on `teamKey` (the team's lead or
+        rota marker, the family's rota admin). The change is written to the roster's
+        history with the actor.
+      operationId: dismissScheduleEngagementAllocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DismissScheduleEngagementAllocationRequest'
+      responses:
+        "200":
+          description: How many days changed (0 when they already were as asked).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DismissScheduleEngagementAllocationResponse'
+        "400":
+          description: A field is missing or malformed, or the days are outside the allocation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "401":
+          description: No user token and not an authorized internal client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: The caller may not change this person's roster on the team.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "404":
+          description: No confirmed allocation with that id is on a roster.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Unexpected error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
   /team-schedule/engagement-allocations/search:
     post:
       summary: Search confirmed customer engagement allocations.
@@ -16186,6 +16243,13 @@ paths:
                         engagementType: { type: string, description: "Raw enum value, for example CONSULTANCY." }
                         modeOfDelivery: { type: string, description: "Raw enum value, ONSITE or OFFSITE." }
                         utilization: { type: number }
+                        dismissedDates:
+                          type: array
+                          items: { type: string, format: date }
+                          description: >
+                            The days in the window the allocation was taken off this person's
+                            roster (`POST /team-schedule/engagement-allocations/dismiss`); absent
+                            when there are none.
                   count: { type: integer }
         "400":
           description: Bad request.
@@ -18772,6 +18836,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    DismissScheduleEngagementAllocationRequest:
+      type: object
+      required: [id, teamKey, from, to]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The allocation's `id` as the engagement allocation search returns it.
+        teamKey: { type: string, description: The team whose roster the change is made on. }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        restore:
+          type: boolean
+          description: Put the days back instead of taking them off.
+    DismissScheduleEngagementAllocationResponse:
+      type: object
+      required: [days]
+      properties:
+        days: { type: integer, description: How many days changed. }
     PagingPhone:
       type: object
       description: A person's paging-only phone number. `phone` is present only for a caller who may edit it.
@@ -20298,7 +20381,7 @@ components:
             Case type.
             - `case`: standard support case; requires `subject`, `description`, `severity`, `issueType`.
             - `service_request`: catalog-based service request (ServiceNow only); requires `catalogId`, `catalogItemId`, `variables`.
-            - `security_report_analysis`: security report (ServiceNow only); requires `subject`, `description`, and at least one entry in `attachments`.
+            - `security_report_analysis`: security report; requires `subject`, `description`, and at least one id in `attachmentIds` (files uploaded first as drafts).
         projectId:
           type: string
           description: UUID of the project this case belongs to
@@ -20339,7 +20422,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CaseAttachmentPayload'
-          description: Required for `security_report_analysis` type (at least one entry).
+          description: Legacy base64 attachments. Not used for `security_report_analysis`; send `attachmentIds` instead.
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: |
+            Required for `security_report_analysis` type (at least one, at most 10). Ids of files
+            already uploaded as drafts to this project by the caller (`POST /attachments/upload`
+            with `type: work_item` and `projectId`). The case links them when it is created;
+            an id that is not a complete, unlinked draft of this project by the caller is a 400.
         relatedCaseId:
           type: string
           format: uuid

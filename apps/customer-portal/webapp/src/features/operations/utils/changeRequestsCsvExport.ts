@@ -22,7 +22,7 @@ import { downloadPdfFile } from "@utils/pdf";
 
 export const CHANGE_REQUEST_EXPORT_CSV_HEADERS = [
   "Number",
-  "Sequence ID",
+  "WSO2 Case ID",
   "State",
   "Short Description",
   "Type",

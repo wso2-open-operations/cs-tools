@@ -231,7 +231,7 @@ describe("CaseDetailsDetailsPanel", () => {
     });
     expect(screen.getByText("Service Request Overview")).toBeInTheDocument();
     expect(screen.getByText("Request number")).toBeInTheDocument();
-    expect(screen.getByText("Sequence ID")).toBeInTheDocument();
+    expect(screen.getByText("WSO2 Case ID")).toBeInTheDocument();
     expect(screen.getByText("Duration")).toBeInTheDocument();
     expect(screen.getAllByText("Assigned team").length).toBeGreaterThan(0);
     expect(screen.getByText("Description")).toBeInTheDocument();

@@ -36,6 +36,7 @@ type entityScheduleClient interface {
 	SearchScheduleAssignments(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleAbsences(ctx context.Context, body []byte) ([]byte, error)
 	SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error)
+	DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error)
 	GetScheduleOnDuty(ctx context.Context, at string) ([]byte, error)
 
 	// Lead edit. The portal proxies these unchanged -- entity-service is where
@@ -183,6 +184,27 @@ func (h *ScheduleHandler) SearchScheduleEngagementAllocations(w http.ResponseWri
 	if err != nil {
 		slog.ErrorContext(r.Context(), "entity SearchScheduleEngagementAllocations failed", "userID", userID, "err", err)
 		mapUpstreamErrorGeneric(w, err, "Failed to search engagement allocations.")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// DismissScheduleEngagementAllocation handles
+// POST /team-schedule/engagement-allocations/dismiss: a lead or rota admin
+// taking a customer engagement allocation (from the allocation app) off a
+// person's roster for some days, or putting them back. Who may is the entity
+// service's check, the same as marking a tag; its refusal is shown as written.
+func (h *ScheduleHandler) DismissScheduleEngagementAllocation(w http.ResponseWriter, r *http.Request) {
+	body, userID, ok := readScheduleBody(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := h.entity.DismissScheduleEngagementAllocation(r.Context(), body)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "entity DismissScheduleEngagementAllocation failed", "userID", userID, "err", err)
+		mapScheduleWriteError(w, err, "Failed to change the engagement allocation.")
 		return
 	}
 

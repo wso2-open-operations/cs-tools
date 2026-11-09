@@ -81,6 +81,7 @@ import {
   incidentPriorityLabel,
   incidentStateColor,
   incidentStateLabel,
+  isIncidentTerminal,
 } from "@features/csm-operations/utils/incidents";
 import CaseActivitiesFeed from "@features/csm-cases/components/CaseActivitiesFeed";
 import CsmCaseCommentInput from "@features/csm-cases/components/CsmCaseCommentInput";
@@ -95,6 +96,7 @@ import {
   useDownloadCsmCaseAttachment,
   useGetCsmCaseAttachmentPreviewSource,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useAttachmentDeletion } from "@features/csm-cases/hooks/useAttachmentDeletion";
 import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import type { CaseAttachment } from "@features/csm-cases/types/csmCases";
 import type {
@@ -366,6 +368,11 @@ export default function CsmIncidentDetailPage(): JSX.Element {
     isError: isAttachmentsError,
   } = useGetCsmCaseAttachments(id, "incident");
   const postAttachment = usePostCsmCaseAttachment();
+  const attachmentDeletion = useAttachmentDeletion({
+    ownerId: id,
+    referenceType: "incident",
+    closed: isIncidentTerminal(data?.state),
+  });
   const downloadAttachment = useDownloadCsmCaseAttachment();
   const getAttachmentPreviewContent = useGetCsmCaseAttachmentPreviewSource();
   const [composerOpen, setComposerOpen] = useState(false);
@@ -1169,6 +1176,9 @@ export default function CsmIncidentDetailPage(): JSX.Element {
             onDownload={
               canDownloadAttachment ? onDownloadAttachment : undefined
             }
+            onDelete={attachmentDeletion.onDelete}
+            canDeleteAttachment={attachmentDeletion.canDeleteAttachment}
+            deletingId={attachmentDeletion.deletingId}
             preview={
               canDownloadAttachment
                 ? {
@@ -1181,6 +1191,8 @@ export default function CsmIncidentDetailPage(): JSX.Element {
           />
         </Card>
       )}
+
+      {attachmentDeletion.dialog}
 
       {editOpen && (
         <EditIncidentDialog

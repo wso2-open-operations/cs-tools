@@ -772,6 +772,11 @@ func orderedTypes[T any](m map[string]T) []string {
 // changes membership (migrations 0202, 0274), so without this the report
 // keeps them under the team they were moved away from.
 //
+// Leave taken during a move is part of it: the repository returns leave filed
+// under a move's team as a span on that team (see worklogMoveSpansQuery), so
+// a person on leave from the Migration team is listed under Migration, with
+// their leave, not under their own team.
+//
 // The daily report uses the move covering its day. The weekly uses the
 // team a move covers for more than half of the range's weekdays; less than
 // that and they stay with their own team. A move to a team outside the
