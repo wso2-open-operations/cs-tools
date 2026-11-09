@@ -2189,7 +2189,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [removeTag, showError],
   );
 
-  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
+  // Deleted attachments (an admin's list carries them) are shown only at the
+  // bottom of the Attachments tab, never in the feed, the counts or Download all.
+  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
 
   // `postAttachment` is a single shared mutation object that stays mounted
   // across `caseId` changes (this page doesn't remount on navigation between
@@ -3252,6 +3255,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentList}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}
