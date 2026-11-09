@@ -26,6 +26,13 @@ export type SlaTrackSide = SlaTimelineSide | "closed";
 
 export interface SlaTrackSegment {
   side: SlaTrackSide;
+  /** Real start and end of the stretch; the closed tail drawn after a closure is not counted. */
+  fromMs: number;
+  toMs: number;
+  /** Calendar time actually spent on this side, in milliseconds. */
+  durationMs: number;
+  /** True for the stretch that runs to now (an open case's last segment). */
+  ongoing: boolean;
   /** Left edge and width, as a percentage of the plot's width. */
   leftPct: number;
   widthPct: number;
@@ -45,6 +52,11 @@ export interface SlaTrackTick {
 }
 
 export interface SlaTrackLayout {
+  /**
+   * False when neither an audited state change nor the current state says
+   * which side held the case, so any per-side time would be invented.
+   */
+  sidesKnown: boolean;
   /** Plot width, in pixels, at which every gap below is guaranteed. */
   baseWidthPx: number;
   segments: SlaTrackSegment[];
@@ -122,7 +134,15 @@ export function layoutSlaTrack(input: SlaTrackInput): SlaTrackLayout {
   let cursor = startMs;
   const push = (toMs: number): void => {
     if (toMs > cursor) {
-      segments.push({ side, leftPct: pct(cursor), widthPct: pct(toMs) - pct(cursor) });
+      segments.push({
+        side,
+        fromMs: cursor,
+        toMs: Math.min(toMs, naturalEnd),
+        durationMs: Math.max(0, Math.min(toMs, naturalEnd) - cursor),
+        ongoing: false,
+        leftPct: pct(cursor),
+        widthPct: pct(toMs) - pct(cursor),
+      });
       cursor = toMs;
     }
   };
@@ -133,6 +153,8 @@ export function layoutSlaTrack(input: SlaTrackInput): SlaTrackLayout {
     }
   }
   push(endMs);
+  const finalSegment = segments[segments.length - 1];
+  if (finalSegment && !closedAtEnd) finalSegment.ongoing = true;
 
   // Markers: lane 0 unless it is crowded.
   const lastX: number[] = Array.from({ length: MAX_LANE + 1 }, () => -Infinity);
@@ -158,5 +180,60 @@ export function layoutSlaTrack(input: SlaTrackInput): SlaTrackLayout {
     if (ticks[ticks.length - 1]?.label !== label) ticks.push({ leftPct: ratio * 100, label });
   }
 
-  return { baseWidthPx, segments, markers, ticks, maxLane };
+  return {
+    sidesKnown: firstState !== undefined || Boolean(input.currentState?.trim()),
+    baseWidthPx,
+    segments,
+    markers,
+    ticks,
+    maxLane,
+  };
+}
+
+export interface SlaSideSummary {
+  wso2Ms: number;
+  customerMs: number;
+  /** Time the case spent closed between a closure and a reopening. Not part of the open period. */
+  closedMs: number;
+  /** WSO2 side plus customer side. */
+  openMs: number;
+  /** Shares of the open period, 0 to 100; both 0 when the open period is empty. */
+  wso2Pct: number;
+  customerPct: number;
+}
+
+/**
+ * Total calendar time on each side, from the very segments the track draws,
+ * so the numbers and the bar cannot disagree. Closed time is reported but
+ * left out of the open period and of the percentages.
+ */
+export function summarizeSlaSides(segments: SlaTrackSegment[]): SlaSideSummary {
+  const total = (side: SlaTrackSide): number =>
+    segments.filter((s) => s.side === side).reduce((sum, s) => sum + s.durationMs, 0);
+  const wso2Ms = total("wso2");
+  const customerMs = total("customer");
+  const openMs = wso2Ms + customerMs;
+  return {
+    wso2Ms,
+    customerMs,
+    closedMs: total("closed"),
+    openMs,
+    wso2Pct: openMs > 0 ? (wso2Ms / openMs) * 100 : 0,
+    customerPct: openMs > 0 ? (customerMs / openMs) * 100 : 0,
+  };
+}
+
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/** "3d 4h", "5h 12m", "12m" or "under 1m": the two most significant units, calendar time. */
+export function formatCalendarDuration(ms: number): string {
+  if (ms < MINUTE_MS) return "under 1m";
+  const days = Math.floor(ms / DAY_MS);
+  const hours = Math.floor((ms % DAY_MS) / HOUR_MS);
+  const minutes = Math.floor((ms % HOUR_MS) / MINUTE_MS);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }

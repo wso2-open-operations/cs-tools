@@ -15,11 +15,22 @@
 // under the License.
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { resetFeatureStatesForTests } from "@config/featureFlags";
+import { writePreviewOverride } from "@config/featurePreview";
 import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import type { CaseAuditEntry } from "@features/csm-cases/types/csmCases";
+
+const session = vi.hoisted(() => ({ roles: ["cs_engineer"] as string[] }));
+
+vi.mock("@context/current-user/usePortalAccess", async () => {
+  const { getPortalAccess } = await import("@context/current-user/portalAccess");
+  return {
+    usePortalAccess: () => getPortalAccess(session.roles),
+    useSafeCurrentUserId: () => "user-1",
+  };
+});
 
 const ENTRIES: CaseAuditEntry[] = [
   {
@@ -51,8 +62,14 @@ function setOverrides(value: unknown): void {
   resetFeatureStatesForTests();
 }
 
+beforeEach(() => {
+  session.roles = ["cs_engineer"];
+  localStorage.clear();
+});
+
 afterEach(() => {
   setOverrides(undefined);
+  localStorage.clear();
 });
 
 describe("SlaImpactTimeline", () => {
@@ -125,5 +142,64 @@ describe("SlaImpactTimeline", () => {
     setOverrides({ operations: "hidden" });
     renderTimeline();
     expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
+  });
+
+  describe("admin preview of a restricted timeline", () => {
+    const FEATURE = "support.case-sla-timeline";
+
+    it("stays hidden for a non-admin even with a stored preview value", () => {
+      setOverrides({ [FEATURE]: "hidden" });
+      writePreviewOverride("user-1", FEATURE, true);
+      const { container } = renderTimeline();
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it("is shown to an admin with the preview on, marked as a preview", () => {
+      session.roles = ["admin"];
+      setOverrides({ [FEATURE]: "hidden" });
+      writePreviewOverride("user-1", FEATURE, true);
+      renderTimeline();
+      expect(screen.getByText("SLA impact timeline")).toBeInTheDocument();
+      expect(screen.getByText("Preview")).toBeInTheDocument();
+    });
+
+    it("stays hidden for an admin with the preview off, and for wip too", () => {
+      session.roles = ["admin"];
+      setOverrides({ [FEATURE]: "wip" });
+      const { container } = renderTimeline();
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it("shows no Preview marker when the deployment does not restrict it", () => {
+      session.roles = ["admin"];
+      writePreviewOverride("user-1", FEATURE, true);
+      renderTimeline();
+      expect(screen.queryByText("Preview")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("time on each side", () => {
+    it("shows calendar time and share per side, and says it is calendar time", () => {
+      renderTimeline({ openedAt: "2026-06-29T10:00:00Z" });
+      expect(screen.getByText(/WSO2 side:/)).toHaveTextContent("WSO2 side: 2d 0h");
+      expect(screen.getByText(/Customer side:/)).toBeInTheDocument();
+      expect(screen.getByText(/Open period:/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Calendar time; the SLA table above uses business time\./),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("img", { name: /Share of the open period/ })).toBeInTheDocument();
+    });
+
+    it("says there is not enough history instead of inventing numbers", () => {
+      renderTimeline({ entries: [ENTRIES[1]] });
+      expect(screen.getByText(/Not enough history/)).toBeInTheDocument();
+      expect(screen.queryByText(/Open period:/)).not.toBeInTheDocument();
+    });
+
+    it("uses the current state when no state change was audited", () => {
+      renderTimeline({ entries: [ENTRIES[1]], currentState: "awaiting_info" });
+      expect(screen.queryByText(/Not enough history/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Customer side:/)).toBeInTheDocument();
+    });
   });
 });

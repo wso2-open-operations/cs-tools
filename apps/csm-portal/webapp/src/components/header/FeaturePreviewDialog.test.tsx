@@ -63,6 +63,18 @@ describe("FeaturePreviewDialog", () => {
     expect(screen.getByText("WIP")).toBeInTheDocument();
   });
 
+  it("offers the case SLA timeline only when the deployment restricts it", () => {
+    const { unmount } = render(<FeaturePreviewDialog open onClose={vi.fn()} />);
+    expect(screen.queryByRole("switch", { name: /Preview SLA impact timeline/ })).not.toBeInTheDocument();
+    unmount();
+
+    setOverrides({ "support.case-sla-timeline": "hidden" });
+    render(<FeaturePreviewDialog open onClose={vi.fn()} />);
+    const toggle = screen.getByRole("switch", { name: /Preview SLA impact timeline/ });
+    fireEvent.click(toggle);
+    expect(localStorage.getItem("csm.featurePreview.v1.user-1")).toContain("support.case-sla-timeline");
+  });
+
   it("shows the empty state when nothing is hidden or WIP", () => {
     render(<FeaturePreviewDialog open onClose={vi.fn()} />);
     expect(

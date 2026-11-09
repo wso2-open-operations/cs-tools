@@ -501,4 +501,29 @@ describe("Customer Health under Customers for a viewer", () => {
     expect(featureState("customers.customer-health", access)).toBe("hidden");
     expect(visibleShortcutTo("customer-health", access)).toBeUndefined();
   });
+
+  describe("embedded SLA timeline in the Feature Preview list", () => {
+    const admin = getPortalAccess(["admin"]);
+    const id = "support.case-sla-timeline";
+
+    it("is listed only when the deployment restricts it", () => {
+      setOverrides(undefined);
+      expect(ids(listPreviewableFeatures(admin))).not.toContain(id);
+      setOverrides({ [id]: "enabled" });
+      expect(ids(listPreviewableFeatures(admin))).not.toContain(id);
+      setOverrides({ [id]: "hidden" });
+      expect(ids(listPreviewableFeatures(admin))).toContain(id);
+      setOverrides({ [id]: "wip" });
+      expect(ids(listPreviewableFeatures(admin))).toContain(id);
+    });
+
+    it("promotes for an admin only, and never demotes", () => {
+      setOverrides({ [id]: "hidden" });
+      expect(featureState(id, admin, { [id]: true })).toBe("enabled");
+      expect(featureState(id, viewer, { [id]: true })).toBe("hidden");
+      expect(featureState(id, admin, {})).toBe("hidden");
+      setOverrides(undefined);
+      expect(featureState(id, admin, { [id]: false })).toBe("enabled");
+    });
+  });
 });
