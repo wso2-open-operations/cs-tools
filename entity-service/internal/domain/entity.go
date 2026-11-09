@@ -1583,6 +1583,13 @@ type ProjectDetailsView struct {
 // VerificationEnabled is likewise Postgres data source only — no ServiceNow
 // equivalent — and combines freely with every other field here (no
 // exclusivity rule), the same as ClosureState.
+//
+// SuspensionProcessOverridden is Postgres data source only as well (rejected
+// on the legacy data source, which has no such field) and combines freely with
+// every other field. Setting it touches no closure state, no
+// suspension_process_state and recomputes nothing; it only stamps
+// updated_by/updated_on like every other field. As for closureState,
+// fine-grained "admin only" enforcement lives in the BFF, not here.
 type ProjectUpdateRequest struct {
 	HasAgent                        *bool           `json:"hasAgent,omitempty"`
 	HasKbReferences                 *bool           `json:"hasKbReferences,omitempty"`
@@ -1597,6 +1604,12 @@ type ProjectUpdateRequest struct {
 	// and tolerant of spaces (normalized the same way the three sub-state
 	// fields above already are).
 	ClosureState *string `json:"closureState,omitempty"`
+	// SuspensionProcessOverridden sets project.suspension_process_overridden
+	// (Postgres data sources only; rejected on the legacy data source). Only a
+	// boolean true or false changes it; null and omitted both leave it
+	// unchanged. When true, the automatic Account Closure Process never
+	// evaluates the project.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus sets the project's onboarding status (Postgres data
 	// sources only; rejected on the ServiceNow data source). Accepts the labels
 	// reads return ("Not-Started", "In-Progress", "On-Hold", "Completed",
@@ -1639,6 +1652,8 @@ type ProjectUpdateResult struct {
 	ComplianceViolationClosureState *string         `json:"complianceViolationClosureState"`
 	SuspensionProcessState          json.RawMessage `json:"suspensionProcessState"`
 	VerificationEnabled             *bool           `json:"verificationEnabled,omitempty"`
+	// SuspensionProcessOverridden is populated on Postgres data sources only.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden,omitempty"`
 	// OnboardingStatus, OnboardingOwner and the onboarding dates are populated
 	// on Postgres data sources only.
 	OnboardingStatus *string    `json:"onboardingStatus,omitempty"`

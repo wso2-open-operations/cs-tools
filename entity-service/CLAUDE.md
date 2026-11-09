@@ -1043,9 +1043,15 @@ reopen logs a WARN at every start as the reminder.
 - **Suspension process overridden (`project.suspension_process_overridden`, migration 0281).** A
   CSM-owned `BOOLEAN NOT NULL DEFAULT FALSE`: when true, ACP must not evaluate the project. Exposed as
   `suspensionProcessOverridden` (always present, `false` by default) on `GET /projects/{id}` and
-  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Read-only for now**: no PATCH
-  path; set directly in the database or by the data sync. The legacy data source carries no such field,
-  so it always reads `false` there. This reopen check does not read it yet.
+  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Writable** via `PATCH /projects/{id}`
+  (`suspensionProcessOverridden`, boolean; null or omitted leaves it unchanged). It is Postgres only: the
+  legacy data source rejects it with a 400, and in dual-write mode it is written to Postgres and never
+  forwarded to the legacy source (a request with only this field has nothing to mirror and succeeds).
+  Setting it touches no closure state or `suspension_process_state`; it stamps `updated_by`/`updated_on`
+  and the PATCH response echoes the stored value. Admin-only is enforced in the BFF, not here (this
+  service only authorises the caller against the project). The legacy data source's own ACP does not see
+  this flag, so until the legacy process is switched off, setting it in CSM does not exempt the project
+  there. The legacy data source reads `false` always. This reopen check does not read it yet.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /
   `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project

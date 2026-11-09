@@ -22568,6 +22568,9 @@ components:
             recomputes the overall state from them again, silently overwriting
             a manual override — there is no column recording that one was ever
             set.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Sets whether the automatic Account Closure Process must skip this project (Postgres data sources only; a 400 on the legacy data source). Only true or false changes it; null and omitted leave it unchanged. Touches no closure state and combines freely with every other field. The response echoes the stored value. Admin-only enforcement lives in the BFF, not here."
         suspensionProcessState:
           type: object
           additionalProperties: true
@@ -22669,6 +22672,10 @@ components:
         verificationEnabled:
           type: boolean
           nullable: true
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Present on Postgres data sources only."
         onboardingStatus:
           type: string
           description: Present on Postgres data sources only.
