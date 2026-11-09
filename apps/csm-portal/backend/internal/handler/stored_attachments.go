@@ -38,7 +38,7 @@ type storedAttachmentEntityClient interface {
 
 // StoredAttachmentHandler forwards the start of an upload to the entity service,
 // which records the attachment and decides who may add it. The bytes themselves
-// move through BlobAttachmentHandler, into Azure Blob Storage.
+// move through BlobAttachmentHandler, which forwards them to entity-service.
 type StoredAttachmentHandler struct {
 	entity storedAttachmentEntityClient
 }
@@ -46,12 +46,6 @@ type StoredAttachmentHandler struct {
 // NewStoredAttachmentHandler constructs a StoredAttachmentHandler.
 func NewStoredAttachmentHandler(e storedAttachmentEntityClient) *StoredAttachmentHandler {
 	return &StoredAttachmentHandler{entity: e}
-}
-
-// storedInlineImageTypes is the only set of types a streamed inline image is
-// sent as; anything else is neutralised to application/octet-stream.
-var storedInlineImageTypes = map[string]bool{
-	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
 }
 
 // mapStoredAttachmentError maps an entity-service failure for these routes. The
