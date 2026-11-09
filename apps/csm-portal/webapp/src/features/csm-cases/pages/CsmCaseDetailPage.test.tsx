@@ -277,6 +277,12 @@ vi.mock("@features/csm-cases/api/useCsmCaseFeedback", () => ({
   },
 }));
 vi.mock("@features/csm-cases/api/useCsmCaseAttachments", () => ({
+  useGetCsmDeletedCaseAttachments: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
   useGetCsmCaseAttachments: () => ({
     data: undefined,
     isLoading: false,

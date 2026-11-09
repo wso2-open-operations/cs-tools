@@ -111,6 +111,7 @@ import {
   usePostCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
 } from "@features/csm-cases/api/useCsmCaseAttachments";
+import { useDeletedAttachmentsTab } from "@features/csm-cases/api/useDeletedAttachmentsTab";
 import { useAddCaseTag, useRemoveCaseTag } from "@features/csm-cases/api/useCaseTags";
 import type {
   BeChangeRequestCustomerProposal,
@@ -471,10 +472,9 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
     if (staleNotice) staleNoticeRef.current?.focus();
   }, [staleNotice]);
 
-  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
-  // Deleted attachments (an admin's list carries them) are shown only at the
-  // bottom of the Attachments tab, never in the feed, the counts or Download all.
-  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
+  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  // An admin's "Deleted" tab: its own query, fetched once the tab is opened.
+  const deletedAttachmentsTab = useDeletedAttachmentsTab(id, "change_request", isAdmin);
 
   const recordView = useRecordRecentView();
   useEffect(() => {
@@ -1389,7 +1389,7 @@ export default function CsmChangeRequestDetailPage(): JSX.Element {
         <Card sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2 }}>
           <AttachmentsWidget
             attachments={attachmentList}
-            deletedAttachments={isAdmin ? deletedAttachmentList : undefined}
+            deletedAttachments={deletedAttachmentsTab}
             uploading={postAttachment.isPending}
             uploadProgress={postAttachment.isPending ? postAttachment.uploadProgress : null}
             onCancelUpload={postAttachment.isPending ? postAttachment.cancelUpload : undefined}

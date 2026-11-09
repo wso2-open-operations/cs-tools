@@ -1593,6 +1593,8 @@ export interface BeAttachmentSearchPayload {
   referenceId: string;
   referenceType: BeReferenceType;
   pagination?: BePagination;
+  /** List the deleted attachments instead of the available ones (admin only). */
+  deletedOnly?: boolean;
 }
 
 export interface BeAttachmentSearchResponse extends BeSearchResponseBase {

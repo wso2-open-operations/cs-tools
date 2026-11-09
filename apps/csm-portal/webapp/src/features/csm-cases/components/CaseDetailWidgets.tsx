@@ -1020,6 +1020,17 @@ export function TimeLogsWidget({
  * a "Download all" affordance. Downloads are surfaced through the parent's
  * action handler (mock) until the BE exposes attachment download URLs.
  */
+/** The admin-only "Deleted" tab of `AttachmentsWidget`: its rows and fetch state. */
+export interface DeletedAttachmentsTab {
+  /** Deleted attachments, most recently deleted first; `undefined` until fetched. */
+  attachments: CaseAttachment[] | undefined;
+  loading: boolean;
+  error: boolean;
+  onRetry?: () => void;
+  /** The tab was opened: the page starts fetching the deleted attachments. */
+  onOpen: () => void;
+}
+
 export function AttachmentsWidget({
   attachments,
   loading = false,
@@ -1071,12 +1082,12 @@ export function AttachmentsWidget({
    */
   canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
   /**
-   * Attachments that were deleted, listed newest deletion first on a "Deleted"
-   * tab with who deleted them and when, in place of the Download button. Pass
-   * it only for an admin (even if empty, so the tab shows); omit to hide the
-   * tab.
+   * The "Deleted" tab: attachments that were deleted, newest deletion first,
+   * with who deleted them and when, in place of the Download button. Fetched
+   * by the page only once the tab is opened. Pass it only for an admin; omit
+   * to hide the tab.
    */
-  deletedAttachments?: CaseAttachment[];
+  deletedAttachments?: DeletedAttachmentsTab;
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1109,7 +1120,7 @@ export function AttachmentsWidget({
   const [view, setView] = useState<"active" | "deleted">("active");
   const showDeletedTab = deletedAttachments !== undefined;
   const showingDeleted = showDeletedTab && view === "deleted";
-  const deletedSorted = [...(deletedAttachments ?? [])].sort(
+  const deletedSorted = [...(deletedAttachments?.attachments ?? [])].sort(
     (a, b) =>
       new Date(b.deletedAt ?? 0).getTime() - new Date(a.deletedAt ?? 0).getTime(),
   );
@@ -1210,7 +1221,10 @@ export function AttachmentsWidget({
         {showDeletedTab && (
           <Tabs
             value={showingDeleted ? "deleted" : "active"}
-            onChange={(_e, next: "active" | "deleted") => setView(next)}
+            onChange={(_e, next: "active" | "deleted") => {
+              setView(next);
+              if (next === "deleted") deletedAttachments?.onOpen();
+            }}
             sx={{ mb: 1.5, minHeight: 36, borderBottom: 1, borderColor: "divider" }}
             aria-label="Attachment views"
           >
@@ -1221,16 +1235,35 @@ export function AttachmentsWidget({
             />
             <Tab
               value="deleted"
-              label={`Deleted (${deletedSorted.length})`}
+              label={
+                deletedAttachments?.attachments
+                  ? `Deleted (${deletedSorted.length})`
+                  : "Deleted"
+              }
               sx={{ minHeight: 36, py: 0.5 }}
             />
           </Tabs>
         )}
-        {loading ? (
+        {showingDeleted && deletedAttachments?.loading ? (
+          <Typography variant="body2" color="text.secondary">
+            Loading deleted attachments…
+          </Typography>
+        ) : showingDeleted && deletedAttachments?.error ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
+            <Typography variant="body2" color="error">
+              Could not load deleted attachments.
+            </Typography>
+            {deletedAttachments.onRetry && (
+              <Button size="small" variant="outlined" onClick={deletedAttachments.onRetry}>
+                Retry
+              </Button>
+            )}
+          </Box>
+        ) : !showingDeleted && loading ? (
           <Typography variant="body2" color="text.secondary">
             Loading attachments…
           </Typography>
-        ) : error ? (
+        ) : !showingDeleted && error ? (
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
             <Typography variant="body2" color="error">
               Could not load attachments.
