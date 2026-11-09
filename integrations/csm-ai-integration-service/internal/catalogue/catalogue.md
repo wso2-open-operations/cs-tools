@@ -435,14 +435,22 @@ optional and lists match **any** of their values (an organisation matches when a
 { "resourceType": "plg_organization", "shape": "count", "query": { "productCodes": ["IAM"], "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } }
 ```
 
-**Shapes.** `count`, or `list` with `listLimit`: an organisation list may sort by `name` or
+**Shapes.** `count`; `list` with `listLimit`: an organisation list may sort by `name` or
 `registeredOn` ("newest" is `registeredOn` `desc`), a **registration list sets no `sortBy`** (newest
-first). No `pie`, `bar`, `line`, `slices` or `groupBy`: for a split ("by product", "by stage") make one
-`count` per value, `gridWidth` 3.
+first); `pie`/`bar` with **`slices` only** (no `groupBy`, no `line`), each slice's `query` flat too and
+added to the widget's. A split by product, stage or tier is one slice per value, in the order of the
+table, labelled with the names above ("Trial" is `TRIAL` + `TRIAL_EXTENDED`):
 
-**Not expressible** (reply with `{"error": ...}` naming what can be shown instead): "my organisations"
-or a named owner's; an organisation by name or email; health or "at risk"; playbooks; usage, revenue
-or ARR; a count per month or week (a trend).
+```json
+{ "resourceType": "plg_organization", "shape": "pie", "query": {}, "slices": [
+  { "label": "Free", "query": { "subscriptionTiers": ["FREE"] } },
+  { "label": "Trial", "query": { "subscriptionTiers": ["TRIAL", "TRIAL_EXTENDED"] } },
+  { "label": "Pay as you go", "query": { "subscriptionTiers": ["PAYG"] } } ] }
+```
+
+**Not expressible** (section 1): "my organisations" or a named owner's, or a split by owner; an
+organisation by name or email; health or "at risk"; playbooks; usage, revenue or ARR; a count per
+month or week (a trend).
 
 ---
 
@@ -482,7 +490,7 @@ or breached group, `warning` next, otherwise leave it out.
 
 `groupBy.field` must be one of `account`, `state`, `severity`, `type` (for `incident`,
 `change_request` and `problem`: `state` only; `time_card`: `user`, `project`, `day` or `state` with
-`measure`, section 5a; `account`, `project`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
+`measure`, section 5a; `account`, `project`, `plg_organization`, `plg_registration`: no `groupBy`; `case_feedback`: `groupBy.bucket` only,
 section 5d). `measure` is for `time_card` only. Prefer `slices` for
 `state` and `severity`; use `groupBy` for `account` ("top customers by ..."). For `account` you may
 add `"linkResourceType": "account"` **inside `groupBy`** (never on the widget itself) so a bar opens
@@ -536,7 +544,7 @@ Never set both `slices` and `groupBy`.
 | "unowned", "no owner", "unassigned" (PLG) | `unowned: true` |
 | a PLG product: "IAM", "identity" / "API platform" / "integration platform" / "agent platform" / "engineering platform" | `productCodes` `["IAM"]` / `["API_PLATFORM"]` / `["INTEGRATION_PLATFORM"]` / `["AGENT_PLATFORM"]` / `["ENG_PLATFORM"]` |
 | "signed up this month / last 30 days" (PLG) | `registeredFrom` (and `registeredTo`) with the date tokens of section 5 |
-| PLG "by product / stage / tier" | one `count` per value (section 5e), not a `pie` or `bar` |
+| PLG "by product / stage / tier" | a `pie` (share) or `bar` (comparison) with one slice per value (section 5e) |
 | "incidents", "outages" (as incidents), "faults" | `resourceType: "incident"` (section 5b) |
 | "open", "active", "ongoing", "unresolved" incidents | `state in ["NEW", "IN_PROGRESS", "ON_HOLD"]` |
 | "new" / "on hold" / "resolved" / "closed" incidents | `state in` `["NEW"]` / `["ON_HOLD"]` / `["RESOLVED"]` / `["CLOSED"]` |
@@ -646,9 +654,9 @@ If two readings are plausible and the table does not settle it, pick the one abo
     `pie`/`bar` grouped with `groupBy.bucket` (or rating `slices`), never `groupBy.field`; a list has no
     `sortBy`; no `line`.
 13. A `plg_organization` / `plg_registration` widget: a flat `query` with only the keys of section 5e and
-    their exact-case values; `unacknowledgedOnly` only on `plg_registration`; shape `count` or `list`
-    (organisations sort by `name` / `registeredOn`, registrations no `sortBy`); no `slices`, `groupBy`
-    or `line`.
+    their exact-case values, in its `query` and every slice's; `unacknowledgedOnly` only on
+    `plg_registration`; shape `count`, `list` (organisations sort by `name` / `registeredOn`,
+    registrations no `sortBy`) or `pie`/`bar` with `slices`; never `groupBy` or `line`.
 14. The output is a single JSON object.
 15. A `note` only when the dashboard is not what was asked, one sentence; `{"error": ...}` only when
     nothing close answers the request (section 1).
