@@ -16,7 +16,7 @@
 
 
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi, beforeAll } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 
 import Editor from "./Editor";
@@ -49,6 +49,13 @@ beforeAll(() => {
 });
 
 const png = (name = "shot.png") => new File([new Uint8Array(4)], name, { type: "image/png" });
+const MB = 1024 * 1024;
+/** An image file that reports `mb` megabytes without allocating them. */
+const bigPng = (mb: number, name = "big.png") => {
+  const file = png(name);
+  Object.defineProperty(file, "size", { value: mb * MB });
+  return file;
+};
 
 /** Pastes `files` (all as clipboard image items) into the editor; returns the event. */
 async function pasteImages(files: File[]): Promise<ClipboardEvent> {
@@ -87,6 +94,13 @@ function setup(withUploader = true) {
 }
 
 describe("Editor image cap (upload on paste)", () => {
+  beforeEach(() => {
+    // A deployment sets 25 MB (the built-in default is 1 MB).
+    (window as unknown as { config: Record<string, unknown> }).config = {
+      ...(window as unknown as { config?: Record<string, unknown> }).config,
+      CSM_PORTAL_INLINE_IMAGE_MAX_MB: 25,
+    };
+  });
   it("accepts images up to the cap, then refuses the next without uploading it", async () => {
     const { onImageUpload, onPasteError } = setup();
     for (let i = 0; i < MAX_COMMENT_IMAGES; i += 1) await pasteImages([png()]);
@@ -100,6 +114,36 @@ describe("Editor image cap (upload on paste)", () => {
     expect(onPasteError).toHaveBeenCalledWith("count");
     expect(onImageUpload).toHaveBeenCalledTimes(MAX_COMMENT_IMAGES);
     expect(editorImages()).toHaveLength(MAX_COMMENT_IMAGES);
+  });
+
+  it("refuses an image that would take the images past 25 MB in total", async () => {
+    const { onImageUpload, onPasteError } = setup();
+    await pasteImages([bigPng(10, "a.png")]);
+    await pasteImages([bigPng(10, "b.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(2));
+
+    const event = await pasteImages([bigPng(6, "c.png")]);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(onPasteError).toHaveBeenCalledWith("total");
+    expect(onImageUpload).toHaveBeenCalledTimes(2);
+    expect(editorImages()).toHaveLength(2);
+
+    await pasteImages([bigPng(5, "d.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(3));
+  });
+
+  it("refuses a single image over the limit and counts a multi-image paste cumulatively", async () => {
+    const { onImageUpload, onPasteError } = setup();
+    await pasteImages([bigPng(26)]);
+    expect(onPasteError).toHaveBeenCalledWith("size");
+    expect(onImageUpload).not.toHaveBeenCalled();
+
+    onPasteError.mockClear();
+    await pasteImages([bigPng(20, "a.png"), bigPng(6, "b.png")]);
+    await waitFor(() => expect(editorImages()).toHaveLength(1));
+    expect(onPasteError).toHaveBeenCalledWith("total");
+    expect(onImageUpload).toHaveBeenCalledTimes(1);
   });
 
   it("frees a slot when an image is removed from the draft", async () => {
@@ -129,20 +173,26 @@ describe("Editor image cap (upload on paste)", () => {
     expect(onPasteError).toHaveBeenCalledWith("count");
   });
 
-  it("does not cap an editor without onImageUpload (it embeds base64; the server caps those)", async () => {
+  it("refuses an image in an editor without onImageUpload and never embeds it as base64", async () => {
     const { onPasteError } = setup(false);
-    const readAsDataURL = vi
-      .spyOn(FileReader.prototype, "readAsDataURL")
-      .mockImplementation(function (this: FileReader) {
-        Object.defineProperty(this, "result", { value: "data:image/png;base64,AAAA" });
-        this.onload?.({ target: this } as unknown as ProgressEvent<FileReader>);
-      });
+    const readAsDataURL = vi.spyOn(FileReader.prototype, "readAsDataURL");
     try {
-      for (let i = 0; i < MAX_COMMENT_IMAGES + 2; i += 1) await pasteImages([png()]);
-      await waitFor(() => expect(editorImages()).toHaveLength(MAX_COMMENT_IMAGES + 2));
-      expect(onPasteError).not.toHaveBeenCalled();
+      const event = await pasteImages([png()]);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(onPasteError).toHaveBeenCalledWith("disabled");
+      expect(readAsDataURL).not.toHaveBeenCalled();
+      expect(editorImages()).toHaveLength(0);
     } finally {
       readAsDataURL.mockRestore();
     }
+  });
+
+  it("says why when no handler is given for a refused image", async () => {
+    render(<Editor autoFocus showToolbar={false} onChange={() => {}} />);
+
+    await pasteImages([png()]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Images can't be added to this field.");
   });
 });

@@ -353,3 +353,19 @@ func InTxReturning[T any](ctx context.Context, db *Scoped, fn func(tx pgx.Tx) (T
 	}
 	return result, nil
 }
+
+type includeDeletedAttachmentsKey struct{}
+
+// WithDeletedAttachments makes the work item attachment lists
+// (SearchCaseAttachments, SearchWorkItemAttachments) also return deleted rows,
+// after the others, with who deleted them and when. A context value rather than
+// a parameter so the list methods keep their signature; the service sets it
+// only for a caller that is allowed to see deleted attachments.
+func WithDeletedAttachments(ctx context.Context) context.Context {
+	return context.WithValue(ctx, includeDeletedAttachmentsKey{}, true)
+}
+
+func includeDeletedAttachments(ctx context.Context) bool {
+	v, _ := ctx.Value(includeDeletedAttachmentsKey{}).(bool)
+	return v
+}

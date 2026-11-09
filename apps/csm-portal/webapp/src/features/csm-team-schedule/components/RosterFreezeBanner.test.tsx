@@ -37,12 +37,14 @@ describe("RosterFreezeBanner", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("says plainly not to edit the roster while it is shown", () => {
+  it("says the report is being generated and which days' changes may affect it", () => {
     vi.setSystemTime(ist("09:20"));
     render(<RosterFreezeBanner />);
     const bar = screen.getByRole("status");
-    expect(bar).toHaveTextContent("Don’t edit the roster until 9:30 AM IST.");
-    expect(bar).toHaveTextContent("The daily timesheet report is being generated from the roster (9:15 AM – 9:30 AM IST).");
+    expect(bar).toHaveTextContent(
+      "Please be aware that the daily timesheet report is generated from the roster (9:15 AM – 9:30 AM IST).",
+    );
+    expect(bar).toHaveTextContent("Changes made now for yesterday (IST) / today (PDT) may impact the time report.");
   });
 
   it("appears at 09:15 IST and disappears at 09:30 IST on its own", () => {

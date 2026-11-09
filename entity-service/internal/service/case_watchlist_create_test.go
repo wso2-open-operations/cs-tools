@@ -358,3 +358,98 @@ func TestCreateWatchList_PostgresOnly_EmptyListUnchanged(t *testing.T) {
 		t.Fatalf("creates=%d setCalled=%v contactsCalls=%d", h.mirrorCalls, h.setCalled, h.contactsCalls)
 	}
 }
+
+// The description's inline images are validated before anything is created (a
+// refusal creates nothing upstream) and linked once the record exists.
+func TestCreateCase_DescriptionImages(t *testing.T) {
+	const caseID = "55555555-5555-5555-5555-555555555555"
+	img := `<img src="/attachments/inline/11111111-1111-4111-8111-111111111111/content">`
+	run := func(t *testing.T, description string, validateErr error) (*recordingLinker, int, error) {
+		t.Helper()
+		mirrorCalls := 0
+		mirror := &stubMirrorCaseService{
+			createCase: func(context.Context, domain.CreateCaseRequest) (domain.CreateCaseResponse, error) {
+				mirrorCalls++
+				return domain.CreateCaseResponse{Case: domain.CreateCaseDetails{ID: caseID, InternalID: "X-1", Number: "CS0000001", CreatedBy: "jane.doe@example.com", State: "Open"}}, nil
+			},
+		}
+		repo := &stubCaseRepo{
+			createCaseFromServiceNow: func(_ context.Context, _ domain.CreateCaseRequest, id, number, wso2ID, createdBy, _ string) (domain.Case, error) {
+				st := domain.CaseStateOpen
+				return domain.Case{ID: id, Number: number, InternalID: wso2ID, CreatedBy: createdBy, ProjectID: "proj-1", State: &st}, nil
+			},
+			getCaseByID: func(context.Context, string, repository.SearchScope) (domain.CaseView, error) {
+				sev := domain.CaseSeverityHigh
+				return domain.CaseView{ID: caseID, ProjectDetails: &domain.EntityRef{ID: "proj-1"}, Severity: &sev}, nil
+			},
+		}
+		users := stubUserRepo{
+			getUserByEmail: func(context.Context, string) (domain.User, error) {
+				return domain.User{ID: "caller", Email: "jane.doe@example.com", UserType: domain.UserTypeExternal}, nil
+			},
+		}
+		dispatcher := NewSNWritebackDispatcher(&recordingSNWritebackFailures{})
+		svc := NewCaseServiceWithSNWriteback(repo, users, &mockEventPublisher{}, alwaysUnrestrictedAccess{}, &stubProjectContactRepo{}, dispatcher, mirror, nil, "")
+		linker := &recordingLinker{validateDescErr: validateErr}
+		svc = WithInlineImageLinker(svc, linker)
+		req := validCreateCaseRequest()
+		req.Description = description
+		_, err := svc.CreateCase(contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com")), req)
+		return linker, mirrorCalls, err
+	}
+
+	t.Run("images are validated, then linked to the new case", func(t *testing.T) {
+		linker, mirrorCalls, err := run(t, img, nil)
+		if err != nil {
+			t.Fatalf("CreateCase: %v", err)
+		}
+		if mirrorCalls != 1 || len(linker.descChecks) != 1 || len(linker.descLinks) != 1 {
+			t.Fatalf("mirror %d, checks %d, links %d; want 1/1/1", mirrorCalls, len(linker.descChecks), len(linker.descLinks))
+		}
+		if l := linker.descLinks[0]; l.workItem != caseID || l.author != "jane.doe@example.com" || l.project != linker.descChecks[0].project || l.html != img {
+			t.Errorf("link = %+v", l)
+		}
+	})
+	t.Run("a refused description creates nothing", func(t *testing.T) {
+		linker, mirrorCalls, err := run(t, img, &apierror.ValidationError{Msg: "too many images"})
+		var verr *apierror.ValidationError
+		if !errors.As(err, &verr) {
+			t.Fatalf("err = %v, want ValidationError", err)
+		}
+		if mirrorCalls != 0 || len(linker.descLinks) != 0 {
+			t.Errorf("mirror calls %d, links %d: a refused request must create and link nothing", mirrorCalls, len(linker.descLinks))
+		}
+	})
+	t.Run("an ordinary description pays nothing", func(t *testing.T) {
+		linker, _, err := run(t, "<p>plain</p>", nil)
+		if err != nil || len(linker.descChecks) != 0 || len(linker.descLinks) != 0 {
+			t.Errorf("err %v checks %d links %d", err, len(linker.descChecks), len(linker.descLinks))
+		}
+	})
+}
+
+// Only a token-less announcement (the scheduled auto-publish) skips the
+// description image check; anything with a user behind it, and every other type,
+// is checked.
+func TestDescriptionImagesApply(t *testing.T) {
+	withUser := contextWithUserIDToken(fakeJWTWithEmail(t, "jane.doe@example.com"))
+	cases := []struct {
+		name string
+		ctx  context.Context
+		typ  string
+		want bool
+	}{
+		{"announcement without a user", context.Background(), "announcement", false},
+		{"announcement with a user", withUser, "announcement", true},
+		{"case without a user", context.Background(), "case", true},
+		{"service request without a user", context.Background(), "service_request", true},
+		{"case with a user", withUser, "case", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := descriptionImagesApply(c.ctx, domain.CreateCaseRequest{Type: c.typ}); got != c.want {
+				t.Errorf("descriptionImagesApply = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

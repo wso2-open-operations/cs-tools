@@ -19,7 +19,7 @@ Go HTTP server (`net/http`, Go 1.26+) that acts as a backend-for-frontend (BFF) 
 
 - **Per-role config.** Each role has an `AUTH_<ROLE>_ROLES` env var (comma-separated role names, any one grants the role), read once at startup by `loadAccessConfig` in `cmd/server/main.go`. There is deliberately **no default** (role names are organisation vocabulary and must not be committed, same as `CSM_TEAM_REGISTRY`): an unset/empty variable means nobody holds that role, and startup warns naming each one. Tests use dummy names via `testAccessConfig()` in `access_test.go`, never real ones. Matching is exact and case-sensitive. Adding a role means a new `AccessConfig` field, its env var, and its place in `NewAccessGuard`.
 - **The `roles` claim is a string for one role and an array for several** (Asgardeo does this). `middleware.stringList` accepts both; a plain `[]string` would reject a single-role user's whole token with a 401. Any other shape fails the token.
-- **Every route goes through `route(pattern, perm, handler)` in `cmd/server/main.go`.** `perm` is a required argument with no default — pick `PermView` for reads/searches/aggregates, `PermViewOperations` for reads under the Operations area (incidents, change requests, problems, incident tasks, outages, alerts), `PermTimeCardsAndUpdates` for every time-card route (CS engineer, admin and time-card approver — viewing/managing, not approving, see `PermApproveTimeCard` below), `PermViewUpdates` for the two read-only update-level lookups (those same roles plus Viewer; separate so Viewer does not gain time cards), `PermWrite` for other state changes, `PermAdmin` for the handful of actions reserved for admin alone (`POST /users`, creating a new platform user, and `POST /teams/{id}/lead`, reassigning a team's lead), `PermViewSecurityCenter` for Security Center (both `/products/vulnerabilities/*` routes; see "Security Center access" below for how `/cases/*` is handled), `PermViewCustomerHealth` for the Customer Health dashboard (`/customer-health/*` plus the `GET /products` and `GET /abt-teams` lists its filters read; Viewer, `cs_engineer` and `admin` — see its own note below), or one of the narrower ones (`PermDownloadAttachment`). `PermEscalate` is not a route-level permission either: `POST /cases/{id}/escalations` is `PermView`, and `CreateCaseEscalation` enforces the action-dependent rule itself (ESCALATE needs `PermEscalate`; DEESCALATE needs being one of the case's team leads, with no escalation role, and a non-lead holding `PermEscalate` is still refused). `PermApproveTimeCard` is not a route-level permission at all — see its own note below. Creating a case, incident or change-request comment is `PermWrite` (or `PermCreateWorkNote` for a work note — see below); editing or deleting one by id (`PATCH`/`DELETE /comments/{id}`) is `PermUpdateDeleteComment` — see its own note below. `PermAuthenticated` (no role needed) is only for the caller's own `/users/me`. `/health` is the only route registered directly on the mux.
+- **Every route goes through `route(pattern, perm, handler)` in `cmd/server/main.go`.** `perm` is a required argument with no default — pick `PermView` for reads/searches/aggregates, `PermViewOperations` for reads under the Operations area (incidents, change requests, problems, incident tasks, outages, alerts), `PermTimeCardsAndUpdates` for every time-card route (CS engineer, admin and time-card approver — viewing/managing, not approving, see `PermApproveTimeCard` below) except the totals, `POST /time-cards/aggregate`, which is `PermViewTimeCardTotals` (CS engineer and admin only, see "Time card totals" below), `PermViewUpdates` for the two read-only update-level lookups (those same roles plus Viewer; separate so Viewer does not gain time cards), `PermWrite` for other state changes, `PermAdmin` for the handful of actions reserved for admin alone (`POST /users`, creating a new platform user, and `POST /teams/{id}/lead`, reassigning a team's lead), `PermViewSecurityCenter` for Security Center (both `/products/vulnerabilities/*` routes; see "Security Center access" below for how `/cases/*` is handled), `PermViewCustomerHealth` for the Customer Health dashboard (`/customer-health/*` plus the `GET /products` and `GET /abt-teams` lists its filters read; Viewer, `cs_engineer` and `admin` — see its own note below), or one of the narrower ones (`PermDownloadAttachment`). `PermEscalate` is not a route-level permission either: `POST /cases/{id}/escalations` is `PermView`, and `CreateCaseEscalation` enforces the action-dependent rule itself (ESCALATE needs `PermEscalate`; DEESCALATE needs being one of the case's team leads, with no escalation role, and a non-lead holding `PermEscalate` is still refused). `PermApproveTimeCard` is not a route-level permission at all — see its own note below. Creating a case, incident or change-request comment is `PermWrite` (or `PermCreateWorkNote` for a work note — see below); editing or deleting one by id (`PATCH`/`DELETE /comments/{id}`) is `PermUpdateDeleteComment` — see its own note below. `PermAuthenticated` (no role needed) is only for the caller's own `/users/me`. `/health` is the only route registered directly on the mux.
 - **The policy is `NewAccessGuard`.** `admin` satisfies every permission, including `PermAdmin`; `cs_engineer` satisfies every other route permission (view, download, write, including comments, security center, time cards and updates) but **not** `PermAdmin` or `PermApproveTimeCard` — approving a time card is a dedicated responsibility, held only by `timecard-approver` plus admin, the same way `PermAdmin` is admin-only (`cs_engineer` DOES hold `PermEscalate`, with `escalator` and admin); `escalator`/`attachment-downloader` grant only their one ability plus view (so a view-only role cannot read Operations — `PermViewOperations` is CS engineer and admin only, matching the frontend's `canUseOperations`); `timecard-approver` grants view plus `PermTimeCardsAndUpdates` plus `PermApproveTimeCard`; `usage-metrics-viewer` also grants `PermUsageMetricsViewer` (the Usage Metrics domain, `/usage-metrics/*` — see that permission's own doc comment in `access.go` for why it's gated directly rather than layered on `PermViewerAccess` like its Viewer-only ex-"Support Portal Lite" sibling (the Time report), and why plain `viewer` deliberately does NOT hold it); `dashboard-designer` grants only view here (no backend route for that feature); the frontend gates it. Every role implies view, **except** `PermViewSecurityCenter` — a plain viewer/escalator/attachment_downloader/usage_metrics_viewer/timecard_approver/dashboard_designer holds `PermView` but not this.
 - **Customer Health has its own audience: `PermViewCustomerHealth` (Viewer, `cs_engineer`, `admin`).** The dashboard was built for the viewer audience, but CS engineers and admins work the same accounts, so every `/customer-health/*` route, plus the `GET /products` and `GET /abt-teams` lists its filters read, is registered on this permission and the same handlers check it themselves (`requireCustomerHealthAccess`, a sibling of `requireViewerAccess` over one shared `requirePermission`). It is deliberately **not** a widening of `PermViewerAccess`: the Time report, the account escalation list and Drive files stay Viewer-only, and `access_test.go` pins both directions. The webapp's `canViewCustomerHealth` (`portalAccess.ts`) must stay in step with this set.
 - **`PermApproveTimeCard` gates a state transition inside a shared route, not a route of its own.** `PATCH /time-cards/{id}` carries EITHER a plain field edit OR an approve/reject transition (`state: "approved"`/`"rejected"`, entity-service's `UpdateTimeCardRequest`) — the same shared-endpoint problem Security Center's `POST /cases/search` has, solved the identical way: `TimeCardHandler` (wired with `WithAccessGuard`, same pattern as `CaseHandler`) inspects the request body itself (`timeCardUpdateTargetsStateTransition`, checking for a non-nil `state`) and additionally requires `PermApproveTimeCard` only when it's present. A CS engineer without `timecard-approver`/`admin` can still search/create/edit their own time cards (`PermTimeCardsAndUpdates`), just not approve/reject one.
@@ -206,6 +206,19 @@ admin may hand out. It extends each `portalRole`'s own `names` set (already buil
 the matching Asgardeo role **ids** from `roleIDsByName`, so `AccessGuard.RolesForIDs` (see "`GET /users/{id}`
 reports a target's CSM portal-role vocabulary" above) can resolve a role by id with no further lookup. Both
 bridges read the identical config; they just project it onto two different, non-overlapping consumer needs.
+
+## Time card totals (POST /time-cards/aggregate)
+
+`TimeCardHandler.AggregateTimeCards` forwards the body to entity-service's `POST /time-cards/aggregate`
+(counts and summed minutes per `state`, `user`, `project` or `day`; the rules are in entity-service's
+`CLAUDE.md`) and passes the response through unchanged. It needs `PermViewTimeCardTotals`, held by the CS engineer
+and admin only. That is narrower on purpose than `PermTimeCardsAndUpdates`, which every other time card
+route uses and which the time card approver also holds. Who may see totals per user is still to be
+decided, and this keeps the totals to CS engineers and admins until then. The decision changes one line
+in `access.go`. `cmd/server/time_card_routes_test.go` pins both permissions, and
+`TestAccessGuard_TimeCardTotalsAreForCsEngineersAndAdmins` pins who holds the new one. Errors go through
+`mapUpstreamErrorGeneric` ("Failed to aggregate time cards."), the same as the other aggregates, so
+entity-service's 400 text (for example the 31-day `day` limit) is logged, not shown to the caller.
 
 ## Granting portal roles on user creation (`grantRoles`, `GET /roles/grantable`)
 
@@ -453,7 +466,7 @@ in-handler permission check in this codebase.
 
 ## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
 
-Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no attachments (the portal uploads a security report's files after the case exists). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
+Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no file bytes (a security report's files are uploaded first as drafts of the project, `type: "work_item"` with `projectId`, and `POST /cases` names them in `attachmentIds`; entity-service refuses a security report with none, and this service forwards the create body untouched, so the ids reach it as sent). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
 `libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
 size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
 (`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is for
@@ -462,13 +475,13 @@ this process only: it is never put in a response, a header or a log.** The modul
 
 | Route | Permission | Does |
 |---|---|---|
-| `POST /attachments/upload` | `PermWrite` | relayed; no upload link comes back, only `attachmentId` and `maxBytes` |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no upload link comes back, only `attachmentId` and `maxBytes`. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it) |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
 | `GET /attachments/download/{id}/content?type=` | `PermDownloadAttachment` | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
-| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline |
-| `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
+| `GET /attachments/inline/{id}/content` | `PermDownloadAttachment` | locate, then stream; only four image types are shown inline A description image still in the project's drafts folder comes back with `relocateTo`: the first read after its case exists copies the file to the work item's `inline_attachments` folder, calls entity-service `POST /attachments/inline/{id}/relocated`, then removes the draft copy (`relocateInlineImage`); on any failure the draft file is read instead and nothing is lost. |
+| `POST /attachments/delete` | `PermWrite` | locate, entity-service deletes the row (the uploader, or a portal admin), then the file is removed best effort. The backend rebuilds the body for entity-service (`withAdminDelete`): it drops any `asAdmin` key the browser sent, under any spelling, and sets `asAdmin: true` only when the caller's token roles give `PermAdmin` (`AccessGuard.Permits`). Entity-service honours the flag only from this backend's client id, so a forged flag does nothing; locate gets the browser's body unchanged because its decoder knows no `asAdmin` |
 
 Startup fails unless the container is reachable. Entity-service answers refusals in words written for the person ("This case is closed...", "Only the person who uploaded an attachment can delete it"); `mapStoredAttachmentError` passes the 400, 403, 409 and 429 messages on (read only from its JSON envelope, never a raw body), maps 404, 401 as usual, 502/503/504 to 503 and anything else to a fixed fallback. Config: `AZURE_STORAGE_ACCOUNT` and
 `AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**, `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` +
@@ -478,6 +491,12 @@ account's shared key, full control of the account); or `AZURE_STORAGE_CONNECTION
 container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development). `libs/azblobstore` is a
 separate Go module required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job that deletes orphan files (`POST /attachments/uploads/cleanup`, then
 `.../acknowledge`).
+
+**Releasing `libs/azblobstore`:** a change to the library reaches this backend only through a version tag. Merge the
+library change to `main`, tag a commit on `main` as `libs/azblobstore/vX.Y.Z` and push the tag, then run
+`go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z` and `go mod tidy` here and commit `go.mod`
+and `go.sum`. `apps/csm-portal/backend` and `apps/customer-portal/backend-v2` must move to the same version together. The
+full steps are in `libs/azblobstore/README.md`, "Releasing a new version". Never move or delete a published tag.
 
 ## Redacting raw base64 inline images (`internal/handler/inline_image_redact.go`)
 
@@ -872,6 +891,15 @@ message asks the owner to generate it again), and the only repair is regeneratin
 anyway could run queries the current rules refuse. A change that would break saved dashboards needs
 its own plan: keep accepting the old form, or migrate the stored rows.
 
+**A save of a served dashboard must store it unchanged.** The webapp's "Edit with AI" Save and its
+Rename both PUT `/dashboards/custom/{id}` with the dashboard as `GET /dashboards/custom/{id}` served it
+(a rename changes only `displayName`); `SaveCustomDashboard` turns that back into the file format with
+`draftToDefinition` (widget ids renamed back, the injected `type` filters stripped). Saved dashboards are
+live in production, so that round trip is what keeps a rename from changing anything but the name:
+`TestDraftToDefinition_RoundTrip` pins it. A new served field, or a change to `widgetViews` /
+`widgetTemplates` / `StripImpliedTypeFilters`, must keep that test passing, or every rename and edit
+would rewrite the stored definition.
+
 **Who can reach what** (pinned by `cmd/server/custom_dashboard_routes_test.go`): generating, saving,
 deleting and sharing (`/dashboards/generate`, `/dashboards/custom/*`) are `PermWrite`, CS engineers and
 admins. Reading what was shared with you (`/dashboards/shared*`) is `PermView`, like the system
@@ -879,6 +907,37 @@ dashboards, because the share picker offers every internal user and a team share
 with `PermWrite` a view-only recipient would be handed a dashboard that answers 403. Opening one grants
 no data: each widget calls its own search route with the viewer's permissions (time cards, incidents
 and change requests keep theirs), so a widget outside the viewer's role fails on its own.
+
+**Time card totals widgets.** A time card widget may group on the server (`groupBy.field` `state`,
+`user`, `project` or `day`, through `POST /time-cards/aggregate`, see "Time card totals" above), and only
+a time card widget grouped by a field may set `groupBy.measure`: `count` (the default) or `hours`. The
+registry refuses a measure anywhere else, so no other widget's groupBy changes meaning. A `day` grouping
+needs `query.startDate` and `query.endDate`, at most 31 days, both counted (`checkDayWindow` in
+`internal/dashboard/generated_resources.go`). Because every read checks a saved dashboard again, a window
+of two relative dates must hold on **every** day, not just the day it was saved: `checkDayWindow`
+resolves the pair on each day of 2024-2027 (`relativeDate` mirrors the webapp's resolver). So
+`__daysAgo:30__`..`__today__` and last month (`__startOfMonth:-1__`..`__endOfMonth:-1__`) pass, while
+"this quarter so far" is refused: it is short at a quarter's start and too long by its end. (The
+catalogue teaches "last N days" on any time card widget as `__daysAgo:<N-1>__`..`__today__`, exactly N
+days, so `__daysAgo:30__` is only the validator's upper bound; cases keep `__daysAgo:N__`.) A plain date
+paired with a relative one is refused outright, because that window grows by a day every day.
+`TestDraftToDefinition_KeepsTimeCardMeasure` pins the measure through a rename. Time card widgets
+could not group before this, so no saved dashboard changes. The AI integration service's catalogue
+(section 5a) teaches the model these widgets, and
+`TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` runs every grouped time card example
+there through `ParseGenerated`, so the catalogue cannot teach a widget the save would refuse.
+
+**Sharing by link** (entity-service's `CLAUDE.md`, "Saved custom dashboards: sharing by link", has the
+rules). The owner's routes `GET` / `PUT` / `DELETE /dashboards/custom/{id}/link` are `PermWrite` like
+the other share routes; `POST /dashboards/shared/link` (`OpenDashboardLink`) is `PermView`, for the same
+reason as the Shared list: anyone internal with the link may view. The link id is a bearer secret:
+it comes in the body (`{linkId}`), never the path, is checked against `uuidRe` before any upstream call
+(a 400 with `errMsgDashboardLinkInvalid`, "copied in full"), lower-cased and passed on, and is never
+logged or quoted back. An upstream 404 (the link is off, unknown, or the caller is not internal staff:
+entity-service does not tell them apart) gets its own readable message (`errMsgDashboardLinkNotFound`);
+everything else goes through `mapUpstreamErrorGeneric`. `sharedViaLink` on both Shared responses says
+the caller has the dashboard only through its link. The routes are in
+`cmd/server/custom_dashboard_routes_test.go`'s must-exist list.
 
 **What one user can spend on model calls.** Every `POST /dashboards/generate` that passes the prompt
 checks counts against the caller's `handler.GenerateRateLimiter` (keyed by the token's user id):

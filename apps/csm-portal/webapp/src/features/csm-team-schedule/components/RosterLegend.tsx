@@ -93,7 +93,9 @@ export default function RosterLegend({ items }: { items: LegendItem[] }): JSX.El
                   {it.swatch === "engagement" ? (
                     <span className="engsw" aria-hidden="true" />
                   ) : it.swatch === "engagement-mark" ? (
-                    <span className="engmksw" aria-hidden="true" />
+                    <span className="chip sm eng engmksw" aria-hidden="true">
+                      {it.code}
+                    </span>
                   ) : (
                     <span className={`chip sm ${it.token}${it.onCall ? " oc" : ""}`}>{it.code}</span>
                   )}

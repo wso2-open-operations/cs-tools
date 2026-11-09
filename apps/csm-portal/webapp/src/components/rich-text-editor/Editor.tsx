@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from "@wso2/oxygen-ui";
 import { Trash, ChevronLeft, ChevronRight } from "@wso2/oxygen-ui-icons-react";
+import EditorUploadProgress, { type EditorUpload } from "@components/rich-text-editor/EditorUploadProgress";
 import {
   getFileIcon,
   scrollElement,
@@ -43,10 +44,15 @@ import {
   htmlToPlainText,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/richTextEditor";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@components/rich-text-editor/richTextConstants";
 import {
-  ALLOWED_IMAGE_MIME_TYPES,
-  MAX_COMMENT_IMAGES,
-} from "@components/rich-text-editor/richTextConstants";
+  imagePasteRefusalMessage,
+  inlineImageRefusal,
+  inlineImagesInEditor,
+  rememberInlineImageSize,
+  type ImagePasteRefusal,
+  type InlineImageRoom,
+} from "@components/rich-text-editor/inlineImageLimits";
 import PasteFormatDialog from "@components/rich-text-editor/PasteFormatDialog";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from "react";
@@ -56,7 +62,7 @@ import Toolbar, {
 import type { JSX } from "react";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
-import { ImageNode, countUploadedImages } from "@components/rich-text-editor/ImageNode";
+import { ImageNode } from "@components/rich-text-editor/ImageNode";
 import ImagesPlugin from "@components/rich-text-editor/ImagesPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
 import { ClickableLinkPlugin } from "@lexical/react/LexicalClickableLinkPlugin";
@@ -65,7 +71,7 @@ import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeNode } from "@lexical/code";
 import { TableNode, TableRowNode, TableCellNode } from "@lexical/table";
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
-import { inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
+import { attachmentLimitMessage, inlineImageMaxBytes } from "@config/attachmentLimitsConfig";
 import { useLogger } from "@hooks/useLogger";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { $getRoot } from "lexical";
@@ -228,14 +234,14 @@ const ResetPlugin = ({ resetTrigger }: { resetTrigger?: number }) => {
 /**
  * Handles paste events containing image data (e.g. Ctrl+C from screen, then Ctrl+V).
  * Inserts it via INSERT_IMAGE_COMMAND: with `onImageUpload` the image is handed to
- * that (it is stored, and a local preview is shown); without one it is read as a
- * data URL and embedded.
+ * that (it is stored, and a local preview is shown); without one the image is
+ * refused, never embedded as base64.
  */
 const ClipboardImagePlugin = ({
   onPasteError,
   onImageUpload,
 }: {
-  onPasteError?: (reason: "size" | "type" | "count") => void;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
   onImageUpload?: ImageUploadHandler;
 }): null => {
   const [editor] = useLexicalComposerContext();
@@ -255,7 +261,7 @@ const ClipboardImagePlugin = ({
       if (!items) return;
 
       // Upload mode only: how many more images this draft may take.
-      let slotsLeft: number | null = null;
+      let room: InlineImageRoom | null = null;
 
       for (const item of Array.from(items)) {
         if (item.type.startsWith("image/")) {
@@ -263,6 +269,13 @@ const ClipboardImagePlugin = ({
           if (!file) continue;
 
           event.preventDefault();
+
+          const upload = onImageUploadRef.current;
+          if (!upload) {
+            // No place to store the image: never embed it as base64.
+            onPasteErrorRef.current?.("disabled");
+            break;
+          }
 
           if (
             !ALLOWED_IMAGE_MIME_TYPES.includes(
@@ -278,34 +291,21 @@ const ClipboardImagePlugin = ({
             break;
           }
 
-          const upload = onImageUploadRef.current;
-          if (upload) {
-            slotsLeft ??= MAX_COMMENT_IMAGES - countUploadedImages(editor);
-            if (slotsLeft <= 0) {
-              onPasteErrorRef.current?.("count");
-              break;
-            }
-            slotsLeft -= 1;
-            editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-              src: upload(file),
-              altText: "Pasted Image",
-            });
-            // Several images may be pasted at once: take as many as fit.
-            continue;
+          room ??= inlineImagesInEditor(editor);
+          const refusal = inlineImageRefusal(room, file.size);
+          if (refusal) {
+            onPasteErrorRef.current?.(refusal);
+            break;
           }
-
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const src = e.target?.result;
-            if (typeof src === "string") {
-              editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
-                src,
-                altText: "Pasted Image",
-              });
-            }
-          };
-          reader.readAsDataURL(file);
-          break;
+          const src = upload(file);
+          rememberInlineImageSize(src, file.size);
+          room = { count: room.count + 1, bytes: room.bytes + file.size };
+          editor.dispatchCommand(INSERT_IMAGE_COMMAND, {
+            src,
+            altText: "Pasted Image",
+          });
+          // Several images may be pasted at once: take as many as fit.
+          continue;
         }
       }
     };
@@ -357,6 +357,13 @@ const ClipboardImagePlugin = ({
  *   (clipboard has `text/plain` but no `text/html`) is unaffected and always
  *   goes straight to the plain-text path with no prompt.
  */
+/** True when `html` holds at least one `<img>` and no text at all. */
+function isImageOnlyHtml(html: string): boolean {
+  if (!html.trim()) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  return body.querySelector("img") !== null && (body.textContent ?? "").trim() === "";
+}
+
 const PasteNormalizationPlugin = (): JSX.Element | null => {
   const [editor] = useLexicalComposerContext();
   const [pendingPaste, setPendingPaste] = useState<{
@@ -374,6 +381,20 @@ const PasteNormalizationPlugin = (): JSX.Element | null => {
 
         const html = clipboardData.getData("text/html");
         const text = clipboardData.getData("text/plain");
+
+        // A picture copied from a web page carries the image itself AND an
+        // `<img src="https://...">` as its HTML. The image is stored by
+        // ClipboardImagePlugin (or refused with its own message); pasting the
+        // HTML as well would add a second, hot-linked copy of the same picture.
+        // Only when the HTML is nothing but images: Word/Docs content with
+        // text keeps going through the format prompt.
+        const hasImageFile = Array.from(clipboardData.items ?? []).some((item) =>
+          item.type.startsWith("image/"),
+        );
+        if (hasImageFile && isImageOnlyHtml(html)) {
+          event.preventDefault();
+          return true;
+        }
 
         if (html.trim()) {
           event.preventDefault();
@@ -520,6 +541,9 @@ const DEFAULT_EDITOR_CONFIG = {
 const Editor = ({
   onAttachmentClick,
   attachments = [],
+  maxAttachments,
+  uploads = [],
+  uploadsWaiting = 0,
   onAttachmentRemove,
   disabled = false,
   value,
@@ -544,6 +568,12 @@ const Editor = ({
 }: {
   onAttachmentClick?: () => void;
   attachments?: File[];
+  /** The most attachments the editor takes; the attach button is off once it holds that many. */
+  maxAttachments?: number;
+  /** Files a sent comment is still uploading; shown inside the editor with their progress. */
+  uploads?: EditorUpload[];
+  /** Files queued behind the running uploads. */
+  uploadsWaiting?: number;
   onAttachmentRemove?: (index: number) => void;
   disabled?: boolean;
   value?: string;
@@ -567,12 +597,14 @@ const Editor = ({
   /**
    * Called when a pasted image is rejected: `"type"` for an unsupported format
    * (e.g. SVG), `"size"` for exceeding the max paste size, `"count"` when the
-   * draft already holds {@link MAX_COMMENT_IMAGES} images (only with `onImageUpload`).
+   * draft already holds the most images, `"total"` when the draft's images would pass the
+   * total size limit (both only with `onImageUpload`).
    */
-  onPasteError?: (reason: "size" | "type" | "count") => void;
+  onPasteError?: (reason: ImagePasteRefusal) => void;
   /**
-   * Stores a pasted or picked image instead of embedding it as base64; see
-   * {@link ImageUploadHandler}. Leave unset to keep embedding.
+   * Stores a pasted or picked image; see {@link ImageUploadHandler}. Leave
+   * unset where there is nowhere to store images: image insertion is then off
+   * (no toolbar button, a pasted image is refused). Nothing is embedded as base64.
    */
   onImageUpload?: ImageUploadHandler;
   /** Tells assistive tech the field is mandatory (`aria-required` on the editable area). */
@@ -580,6 +612,19 @@ const Editor = ({
 }): JSX.Element => {
   const oxygenTheme = useTheme();
   const logger = useLogger();
+  // Without an `onPasteError` handler a refused pasted image is said right
+  // below the editor, for a few seconds.
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!imageNotice) return undefined;
+    const timer = setTimeout(() => setImageNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [imageNotice]);
+  const onImageRefused = useMemo(
+    () =>
+      onPasteError ?? ((reason: ImagePasteRefusal) => setImageNotice(imagePasteRefusalMessage(reason))),
+    [onPasteError],
+  );
 
   const memoizedEditorConfig = useMemo(
     () => ({
@@ -658,6 +703,11 @@ const Editor = ({
           <>
             <Toolbar
               onAttachmentClick={onAttachmentClick}
+              attachDisabledReason={
+                maxAttachments !== undefined && attachments.length >= maxAttachments
+                  ? attachmentLimitMessage(maxAttachments)
+                  : undefined
+              }
               disabled={disabled}
               variant={toolbarVariant}
               showKeyboardHint={showKeyboardHint}
@@ -807,7 +857,7 @@ const Editor = ({
           <ListPlugin />
           <TablePlugin />
           <ImagesPlugin />
-          <ClipboardImagePlugin onPasteError={onPasteError} onImageUpload={onImageUpload} />
+          <ClipboardImagePlugin onPasteError={onImageRefused} onImageUpload={onImageUpload} />
           <PasteNormalizationPlugin />
           <LinkPlugin />
           <ClickableLinkPlugin />
@@ -816,6 +866,11 @@ const Editor = ({
           <ResetPlugin resetTrigger={resetTrigger} />
           <EnterSubmitPlugin onSubmit={onSubmitKeyDown} disabled={disabled} enterToSubmit={enterToSubmit} />
         </Box>
+        {imageNotice && (
+          <Typography variant="caption" color="error" role="alert" sx={{ display: "block", mt: 0.5 }}>
+            {imageNotice}
+          </Typography>
+        )}
         {overlayElement && (
           <Box
             sx={{
@@ -827,6 +882,7 @@ const Editor = ({
             {overlayElement}
           </Box>
         )}
+        <EditorUploadProgress uploads={uploads} waiting={uploadsWaiting} />
         {attachments.length > 0 && (
           <>
             <Divider sx={{ my: 1.5 }} />

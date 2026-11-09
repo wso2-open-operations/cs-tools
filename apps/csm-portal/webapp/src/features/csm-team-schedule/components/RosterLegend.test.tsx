@@ -99,12 +99,14 @@ describe("RosterLegend", () => {
     expect(container.querySelectorAll(".rl-g li .chip")).toHaveLength(2);
   });
 
-  it("lists the month marker with its own strip swatch, not the bar's or a code chip", () => {
+  it("lists the month roster's engagement as an Allo- chip, not the week bar's swatch", () => {
     const { container } = render(<RosterLegend items={[...ITEMS, ENGAGEMENT_MARK_LEGEND_ITEM]} />);
     const heads = [...container.querySelectorAll(".rl-h")].map((h) => h.textContent);
     expect(heads).toEqual(["Hours", "Leave", "Engagements"]);
-    expect(container.querySelectorAll(".engmksw")).toHaveLength(1);
+    const sw = container.querySelectorAll(".engmksw");
+    expect(sw).toHaveLength(1);
+    expect(sw[0].className).toContain("chip sm eng");
+    expect(sw[0].textContent).toBe("Allo-…");
     expect(container.querySelectorAll(".engsw")).toHaveLength(0);
-    expect(container.querySelectorAll(".rl-g li .chip")).toHaveLength(2);
   });
 });

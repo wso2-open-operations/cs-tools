@@ -31,7 +31,7 @@ to `CATALOGUE_DIR`, `CATALOGUE_FILE` is ignored, with a warning at start: remove
 
 Choreo limits the size of a mounted file (about 20 KB; the catalogue is larger), so the catalogue is mounted
 in parts. The parts are in **`catalogue-parts/`** (`catalogue-01.md`, `catalogue-02.md`, ...), each at most
-20,000 bytes, generated from `internal/catalogue/catalogue.md` by `make catalogue-parts`.
+19,000 bytes (shown as 19 KB), generated from `internal/catalogue/catalogue.md` by `make catalogue-parts`.
 
 1. In the component's Configs & Secrets, add one file mount per file in `catalogue-parts/`, with that
    file's content, all under the same directory and keeping the file names, e.g.

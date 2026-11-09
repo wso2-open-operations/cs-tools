@@ -21,7 +21,6 @@ import {
   Button,
   IconButton,
   Paper,
-  CircularProgress,
   Skeleton,
   Stack,
   Tooltip,
@@ -30,7 +29,7 @@ import {
   useTheme,
 } from "@wso2/oxygen-ui";
 import { Bot } from "@wso2/oxygen-ui-icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import {
   Download,
   File,
@@ -40,6 +39,7 @@ import {
 } from "@wso2/oxygen-ui-icons-react";
 import type { CaseComment } from "@features/support/types/cases";
 import {
+  downloadSizeOf,
   formatFileSize,
   getAttachmentFileCategory,
   getInitials,
@@ -61,6 +61,9 @@ import { useDarkMode } from "@utils/useDarkMode";
 import ChatMessageCard from "@case-details-activity/ChatMessageCard";
 import { useResolvedInlineImageHtml } from "@features/support/hooks/useResolvedInlineImageHtml";
 import { useStoredAttachmentDownload } from "@api/useStoredAttachments";
+import DownloadCancelButton from "@components/download-progress/DownloadCancelButton";
+import DownloadProgressIndicator from "@components/download-progress/DownloadProgressIndicator";
+import DownloadProgressStatus from "@components/download-progress/DownloadProgressStatus";
 import { useAttachmentPreview } from "@api/useAttachmentPreview";
 import { stripLightModeInlineStyles } from "@/utils/common";
 import { stripThinkingBlocks } from "@features/support/utils/chat";
@@ -96,7 +99,12 @@ export default function CommentBubble({
 }: CommentBubbleProps): import("react").JSX.Element {
   const theme = useTheme();
   const isDarkMode = useDarkMode();
-  const { downloadStoredAttachment, isDownloadingId } =
+  const {
+    downloadStoredAttachment,
+    isDownloadingId,
+    downloadProgressOf,
+    cancelDownload,
+  } =
     useStoredAttachmentDownload();
   // The case Activity tab merges the linked Novera chat into the timeline, so a
   // Novera answer can arrive here still carrying its <thinking> reasoning.
@@ -204,6 +212,7 @@ export default function CommentBubble({
       type: "work_item",
       id: comment.id,
       name: comment.fileName ?? "attachment",
+      size: downloadSizeOf(comment.sizeBytes),
     });
   };
 
@@ -321,22 +330,36 @@ export default function CommentBubble({
               </Typography>
               <Tooltip title="Download attachment">
                 <span>
+                  <DownloadProgressStatus
+                    name={comment.fileName ?? "attachment"}
+                    downloading={isDownloadingId(comment.id)}
+                    progress={downloadProgressOf(comment.id)}
+                  />
                   <IconButton
                     size="small"
                     aria-label="Download attachment"
+                    aria-busy={isDownloadingId(comment.id) || undefined}
                     onClick={() => {
                       void handleAttachmentDownload();
                     }}
                     disabled={isDownloadingId(comment.id)}
                   >
                     {isDownloadingId(comment.id) ? (
-                      <CircularProgress size={16} />
+                      <DownloadProgressIndicator
+                        progress={downloadProgressOf(comment.id)}
+                      />
                     ) : (
                       <Download size={16} />
                     )}
                   </IconButton>
                 </span>
               </Tooltip>
+              {isDownloadingId(comment.id) && (
+                <DownloadCancelButton
+                  name={comment.fileName ?? "attachment"}
+                  onCancel={() => cancelDownload(comment.id)}
+                />
+              )}
             </Box>
             <Stack
               direction="row"
@@ -407,12 +430,26 @@ export default function CommentBubble({
                   src={imageDataUrl}
                   alt={comment.fileName ?? "Image attachment"}
                   sx={{
-                    maxWidth: "100%",
+                    // Same thumbnail size as inline images; a click opens it full size.
+                    maxWidth: "min(100%, 360px)",
+                    maxHeight: 240,
+                    width: "auto",
+                    height: "auto",
+                    objectFit: "contain",
                     borderRadius: 1,
                     display: "block",
-                    cursor: "pointer",
+                    cursor: "zoom-in",
                   }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open ${comment.fileName ?? "image attachment"} full size`}
                   onClick={() => onImageClick?.(imageDataUrl)}
+                  onKeyDown={(e: KeyboardEvent<HTMLElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onImageClick?.(imageDataUrl);
+                    }
+                  }}
                 />
               ) : isImagePreviewError ? (
                 <Box>

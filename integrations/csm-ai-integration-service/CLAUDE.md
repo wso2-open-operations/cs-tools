@@ -80,13 +80,27 @@ Every model call writes one line, `dashboard generate: token usage` (`logUsage` 
 | `model` | `CLAUDE_MODEL` |
 | `outcome` | `ok`, `declined`, `refused`, `truncated`, `unusable`, or `failed` (no reply: a gateway error, a connection failure or a timeout, with 0 tokens) |
 | `stopReason` | the model's, empty when `failed` |
-| `inputTokens`, `outputTokens` | the reply's `usage` |
+| `inputTokens` | input neither read from nor written to the prompt cache: mostly the user message once the system prompt is cached (see "Prompt caching") |
+| `cacheCreationInputTokens`, `cacheReadInputTokens` | input written to / read from the prompt cache: the system prompt, on a call that found no cache / within its lifetime |
+| `outputTokens` | the reply's |
 | `durationMs` | the model call alone, the SDK's retry included |
 
 The line goes to the service's log (stderr), like every other line, so in Choreo it is under the
 component's Observability -> Logs; search for `token usage`, or a `userID`. No file is written: a
 Choreo container's file system is read-only apart from `/tmp`, which a restart wipes. A request that
 fails before the call (an invalid body, `not_configured`) writes no usage line.
+
+## Prompt caching
+
+The system prompt (the catalogue and the Teams section) is the same for every user and call of one
+deployment, so `Generate` marks it with `cache_control` (`ephemeral`, the default 5-minute lifetime, renewed
+by each hit). A call within that time reads it at the model's cache-hit price (0.05 times the input
+price on Sonnet 5.5, the default, and Opus 5.5; 0.1 times on most other models); the first call after it
+expires writes it at 1.25 times. Generation happens in short sessions (a prompt, then follow-ups), so the
+5-minute lifetime fits: a 1-hour cache would cost 2 times at the start of nearly every session. Anything
+that changes per request must stay after the system prompt (the prompt and the draft are in the user
+message), or no call would find the cache. A deployment's input is `inputTokens` plus the two cache counts
+of the token usage line; a warm call shows most of it in `cacheReadInputTokens`.
 
 ## Catalogue
 
@@ -101,9 +115,16 @@ files, and names starting with `.` (Kubernetes' `..data` entries beside mounted 
 Each part's trailing whitespace is trimmed, so the catalogue split at a blank line before a `## ` heading
 joins back into the same text (`TestTheBuiltInCatalogueSplitAtHeadingsJoinsBackUnchanged`).
 
+**`catalogue.md` is plain ASCII** (`TestTheCatalogueIsPlainASCII`): Choreo's file mount editor encodes a file with the
+browser's `btoa()`, which refuses any character outside Latin-1 ("The string to be encoded contains characters outside of
+the Latin1 range"), and would store a Latin-1 one such as "é" as a byte this service, reading UTF-8, does not read back.
+Write ":" or " - " for a dash, "..." for an ellipsis, straight quotes. The Teams section is written at run time, not
+mounted, so team names are not affected.
+
 **`catalogue-parts/` is generated: never edit it by hand.** `make catalogue-parts` (`cmd/splitcatalogue`)
 cuts the built-in `catalogue.md` with `catalogue.Split` into parts of at most `catalogue.MaxPartBytes`
-(20,000 bytes, under 20 KB however it is counted). It cuts before `## ` sections and packs whole sections
+(19,000 bytes: a margin under 20 KB however it is counted, and shown as 19 KB, never 20 KB, by a
+file manager that rounds to the nearest KB). It cuts before `## ` sections and packs whole sections
 into as few parts as fit; a section too large for one part is cut before its `### ` subsections, then at
 blank lines (a single paragraph over the limit is an error). It writes `catalogue-01.md`, `catalogue-02.md`,
 ... and removes old `catalogue-NN.md` files, so a shorter catalogue leaves no stale part. `Split` refuses a
@@ -132,8 +153,10 @@ deployment without the mount gets.
 
 **Editing `catalogue.md` can break a backend test, by design.** The backend's
 `TestParseGenerated_TheCatalogueExampleIsValid` (`apps/csm-portal/backend/internal/dashboard`) reads this
-file and runs its section 10 example through the backend's own check, so the catalogue and the rules
-that judge the model's output cannot drift apart. After editing it, run the backend's
+file and runs its section 10 example through the backend's own check, and
+`TestParseGenerated_TheCatalogueTimeCardTotalsExamplesAreValid` does the same for every grouped time card
+example in section 5a (at least three), so the catalogue and the rules that judge the model's output
+cannot drift apart. After editing it, run the backend's
 `go test ./internal/dashboard`, then the three steps above. In the local stack, an edit to the built-in catalogue needs this service's
 image rebuilt (`docker compose up -d --build csm-ai-integration-service`), not the backend's.
 

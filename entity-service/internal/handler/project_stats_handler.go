@@ -86,6 +86,19 @@ func (h *ProjectStatsHandler) GetProjectTimeCardStats(w http.ResponseWriter, r *
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// GetProjectTimeCardReport handles GET /projects/{id}/time-cards/report.
+func (h *ProjectStatsHandler) GetProjectTimeCardReport(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.svc.GetProjectTimeCardReport(
+		r.Context(), r.PathValue("id"), r.URL.Query().Get("from"), r.URL.Query().Get("to"),
+	)
+	if err != nil {
+		writeServiceError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // GetProjectChangeRequestStats handles GET /projects/{id}/change-requests/stats.
 func (h *ProjectStatsHandler) GetProjectChangeRequestStats(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.GetProjectChangeRequestStats(r.Context(), r.PathValue("id"))

@@ -40,7 +40,7 @@ import {
 type UploadState =
   | { status: "queued"; file: File }
   | { status: "pending" }
-  | { status: "done"; id: string }
+  | { status: "done"; id: string; file: File; projectId?: string }
   | { status: "failed"; message: string };
 
 const uploads = new Map<string, UploadState>();
@@ -104,7 +104,7 @@ export async function uploadQueuedImages(
       });
       // The draft was cleared while this ran: do not bring the entry back.
       if (!uploads.has(previewUrl)) continue;
-      uploads.set(previewUrl, { status: "done", id: confirmed.id.toLowerCase() });
+      uploads.set(previewUrl, { status: "done", id: confirmed.id.toLowerCase(), file: state.file });
     } catch (err: unknown) {
       if (!uploads.has(previewUrl)) continue;
       uploads.set(previewUrl, {
@@ -191,4 +191,79 @@ export function useInlineImageStatus(html: string): InlineImageStatus {
   const current = useSyncExternalStore(subscribe, () => version);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `current` is the trigger
   return useMemo(() => inspectInlineImages(html), [html, current]);
+}
+
+/**
+ * Shown when an image in a not-yet-created record's description cannot be
+ * uploaded because its preview was not made by this page (for example HTML that
+ * came from another tab) or there is no project to store it under.
+ */
+export const DRAFT_IMAGE_UNAVAILABLE_MESSAGE =
+  "An image in the description can't be uploaded. Remove it and add it again.";
+
+export const DRAFT_IMAGE_NEEDS_PROJECT_MESSAGE =
+  "Choose a project before submitting, or remove the images from the description.";
+
+/**
+ * Before a record that has a rich-text description is created: uploads every
+ * `blob:` image in `html` as a draft image of the project and returns the HTML
+ * with each `blob:` URL replaced by `/<attachment id>`, which the create request
+ * carries and entity-service links to the new record.
+ *
+ * - HTML with no `blob:` image is returned as is and nothing is requested.
+ * - Uploads run in parallel. They are all awaited, so a failure leaves no upload
+ *   half-started; the first failure is then thrown (nothing should be created).
+ * - Every image that was stored stays remembered per `blob:` URL, so the next
+ *   call after a failure uploads only the images that failed (or were never
+ *   tried), not the ones already stored. An image stored for another project is
+ *   uploaded again, since a draft image belongs to the project it was sent to.
+ * - Call {@link releaseInlineImages} with the original HTML once the record is
+ *   created.
+ */
+export async function uploadImagesBeforeCreate(
+  api: BackendApi,
+  projectId: string | undefined,
+  html: string,
+): Promise<string> {
+  const sources = Array.from(new Set(blobSources(html)));
+  if (sources.length === 0) return html;
+  if (!projectId) throw new Error(DRAFT_IMAGE_NEEDS_PROJECT_MESSAGE);
+
+  // Each image to send, with its file; one stored for this project already is kept.
+  const todo: Array<{ src: string; file: File }> = [];
+  for (const src of sources) {
+    const state = uploads.get(src);
+    if (!state || state.status === "pending" || state.status === "failed") {
+      throw new Error(DRAFT_IMAGE_UNAVAILABLE_MESSAGE);
+    }
+    if (state.status === "done" && state.projectId === projectId) continue;
+    todo.push({ src, file: state.file });
+  }
+  for (const { src } of todo) uploads.set(src, { status: "pending" });
+  publish();
+
+  let firstFailure: string | null = null;
+  await Promise.all(
+    todo.map(async ({ src, file }) => {
+      try {
+        const confirmed = await uploadEntityAttachment(api, {
+          type: "comment",
+          projectId,
+          file,
+          name: file.name || "image",
+        });
+        if (uploads.has(src)) {
+          uploads.set(src, { status: "done", id: confirmed.id.toLowerCase(), file, projectId });
+        }
+      } catch (err: unknown) {
+        const message = entityAttachmentErrorMessage(err, "An image could not be uploaded.");
+        firstFailure ??= message;
+        // Back to queued, so that the next submit tries this image again.
+        if (uploads.has(src)) uploads.set(src, { status: "queued", file });
+      }
+    }),
+  );
+  publish();
+  if (firstFailure) throw new Error(firstFailure);
+  return resolveInlineImageSources(html);
 }

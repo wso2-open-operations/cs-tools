@@ -151,7 +151,20 @@ type GroupByConfig struct {
 	// Field "state" + LinkResourceType "account") would hand the frontend a
 	// value like "open" as if it were an account id, building a broken link.
 	LinkResourceType ResourceType `json:"linkResourceType,omitempty"`
+	// Measure is what a time card widget's slices show: "count" (the
+	// default, the number of cards) or "hours" (the time logged on them).
+	// It is sent to POST /time-cards/aggregate as "count" / "minutes" and also
+	// decides which buckets survive MaxGroups. Only a Field-grouped
+	// ResourceTimeCard widget may set it (checked at load time); omitted on
+	// every other widget, so their JSON is unchanged.
+	Measure string `json:"measure,omitempty"`
 }
+
+// Time card widget measures (GroupByConfig.Measure).
+const (
+	MeasureCount = "count"
+	MeasureHours = "hours"
+)
 
 // DefaultDistinctByMaxGroups is the maxGroups a Shape "count" widget's
 // DistinctBy gets when the config omits it (filled in at load time, so the

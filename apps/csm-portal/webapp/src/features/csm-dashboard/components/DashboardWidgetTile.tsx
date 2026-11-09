@@ -37,7 +37,10 @@ import { useWidgetPieData, type PieSliceResult } from "@features/csm-dashboard/a
 import { useWidgetGroupByData } from "@features/csm-dashboard/api/useWidgetGroupByData";
 import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFeedbackTrendData";
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
-import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
+import {
+  isCaseFamilyResourceType,
+  WIDGET_RESOURCE_CONFIG,
+} from "@features/csm-dashboard/config/widgetResourceConfig";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
 import GenericColumnList from "@features/csm-dashboard/components/GenericColumnList";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
@@ -55,6 +58,7 @@ import {
 } from "@features/csm-dashboard/utils/dashboardWidgetGridLayout";
 import DashboardPieChart from "@features/csm-dashboard/components/DashboardPieChart";
 import DashboardBarChart from "@features/csm-dashboard/components/DashboardBarChart";
+import { formatHours } from "@features/csm-dashboard/utils/timeCardTotals";
 import DashboardLineChart from "@features/csm-dashboard/components/DashboardLineChart";
 
 // Hides the per-widget refresh button by default and reveals it on hover or
@@ -346,13 +350,22 @@ function DashboardWidgetTile({
   // encoding — carrying dashboard placeholder vocabulary into it would make
   // `__today__` a value users can type into, and hand-edit out of, a shared
   // list-page URL.
-  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> =>
-    resolveCurrentUserPlaceholder(
-      resolveRelativeDateFilters(
-        resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId),
-      ),
+  //
+  // Except for the case family: their destination (the cases list, or its
+  // "View more" preview with the editable `CasesFilterBar`) now resolves the
+  // same placeholders itself, browser-local, with the same resolver
+  // (`useGetCsmCases`, `resolveAdvancedFilterDateValues`), and its Advanced
+  // date rows can only show a relative placeholder or a plain date. A frozen
+  // instant (`2026-10-03T18:30:00.000Z`) showed there as an empty date box, so
+  // case-family links keep the widget's own `__daysAgo:30__` / `__today__`.
+  const keepsRelativeDates = isCaseFamilyResourceType(resourceType);
+  const resolvePlaceholders = (f: Record<string, unknown>): Record<string, unknown> => {
+    const teamResolved = resolveTeamPlaceholder(f, selectedTeamCreGroupId, selectedTeamSreGroupId);
+    return resolveCurrentUserPlaceholder(
+      keepsRelativeDates ? teamResolved : resolveRelativeDateFilters(teamResolved),
       currentUserId,
     );
+  };
   // Carried on every count/pie/bar click-through below so the resource's own
   // list page (which has no dashboard context of its own) can offer a Back
   // button straight to this exact dashboard — mirroring the list-shape
@@ -618,13 +631,18 @@ function DashboardWidgetTile({
     </Tooltip>
   );
 
-  // Shared title row: icon + name, with an optional total-count badge sitting
-  // immediately after the name (ServiceNow-style "Title 42" rather than a
-  // number floated off to the card's far edge or stacked in its own line).
-  // `undefined` renders no badge — shape "pie" keeps its total in the donut
-  // hole instead, and list/bar themselves pass `undefined` while their own
-  // total is still loading or errored.
-  const renderHeader = (total?: number): JSX.Element => (
+  /**
+   * Shared title row: icon + name, with an optional total-count badge sitting
+   * immediately after the name ("Title 42": the name followed by the number,
+   * rather than a number floated off to the card's far edge or stacked in its
+   * own line).
+   * `undefined` renders no badge — shape "pie" keeps its total in the donut
+   * hole instead, and list/bar themselves pass `undefined` while their own
+   * total is still loading or errored. `formatTotal` words the badge (a bar
+   * measuring time card hours shows "12.5 h"); without it, the badge is the
+   * plain count.
+   */
+  const renderHeader = (total?: number, formatTotal?: (value: number) => string): JSX.Element => (
     <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25 }}>
       <Box
         sx={{
@@ -647,7 +665,7 @@ function DashboardWidgetTile({
         </Typography>
         {total !== undefined && (
           <Chip
-            label={total.toLocaleString()}
+            label={formatTotal ? formatTotal(total) : total.toLocaleString()}
             size="small"
             color="default"
             sx={{ flexShrink: 0, fontWeight: 600 }}
@@ -741,6 +759,8 @@ function DashboardWidgetTile({
                     resourceType,
                     currentUserId,
                   })}
+                  // The preview page's Back returns here.
+                  state={dashboardReturnState}
                   size="small"
                   variant="text"
                   endIcon={<ArrowRight size={14} />}
@@ -777,6 +797,9 @@ function DashboardWidgetTile({
     // (`pointerEvents: "auto"`) for the chart specifically, letting its own
     // click and keyboard handling work exactly as before.
     const ChartComponent = shape === "pie" ? DashboardPieChart : DashboardBarChart;
+    // A time card totals widget measuring hours shows "12.5 h" on its
+    // chart and total; every other widget shows plain numbers.
+    const formatValue = groupBy?.measure === "hours" ? formatHours : undefined;
     const tileHref = config.buildHref(resolvePlaceholders(filters), {
       widgetId,
       displayName: resolvedDisplayName,
@@ -883,6 +906,7 @@ function DashboardWidgetTile({
           <Box sx={{ pb: resolvedDescription ? 1 : 2.5 }}>
             {renderHeader(
               shape === "bar" && !pieData.isLoading && !pieData.isError ? pieData.total : undefined,
+              formatValue,
             )}
           </Box>
           {resolvedDescription && (
@@ -891,17 +915,26 @@ function DashboardWidgetTile({
             </Typography>
           )}
           <Box sx={{ pointerEvents: "auto" }}>
-            <ChartComponent
-              slices={pieData.slices}
-              total={pieData.total}
-              isLoading={pieData.isLoading}
-              isError={pieData.isError}
-              onSliceClick={handleSliceClick}
-              // Only DashboardPieChart accepts this prop — shape "bar" never
-              // sets `inlineLabels` on its own widget config, but guard it
-              // here too rather than relying on that alone.
-              {...(shape === "pie" ? { inlineLabels } : {})}
-            />
+            {pieData.isForbidden ? (
+              <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
+                {resourceType === "time_card"
+                  ? "You don't have access to time card totals."
+                  : "You don't have access to this data."}
+              </Typography>
+            ) : (
+              <ChartComponent
+                slices={pieData.slices}
+                total={pieData.total}
+                isLoading={pieData.isLoading}
+                isError={pieData.isError}
+                onSliceClick={handleSliceClick}
+                formatValue={formatValue}
+                // Only DashboardPieChart accepts this prop — shape "bar" never
+                // sets `inlineLabels` on its own widget config, but guard it
+                // here too rather than relying on that alone.
+                {...(shape === "pie" ? { inlineLabels } : {})}
+              />
+            )}
           </Box>
         </Box>
       </Card>

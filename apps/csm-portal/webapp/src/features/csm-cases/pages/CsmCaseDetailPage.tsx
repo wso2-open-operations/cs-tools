@@ -93,6 +93,8 @@ import {
 import CsmCaseCommentInput, {
   type CommentAttachmentDraft,
 } from "@features/csm-cases/components/CsmCaseCommentInput";
+import { canDeleteAttachment } from "@features/csm-cases/utils/canDeleteAttachment";
+import { commentUploadProgress } from "@features/csm-cases/utils/commentUploadProgress";
 import { sendCommentWithAttachments } from "@features/csm-cases/utils/sendCommentWithAttachments";
 import CaseActionBar, {
   canAcknowledge,
@@ -172,6 +174,7 @@ import { useSearchCaseTasks } from "@features/csm-cases/api/useSearchCaseTasks";
 import { useSearchDeployments } from "@features/csm-cases/api/useSearchDeployments";
 import { useGetProject } from "@features/csm-projects/api/useGetProject";
 import { WorkItemSlaTable } from "@features/csm-sla/components/WorkItemSlaTable";
+import { SlaImpactTimeline } from "@features/csm-sla/components/SlaImpactTimeline";
 import { useGetWorkItemSlas } from "@features/csm-sla/api/useGetWorkItemSlas";
 import CaseTimeCardsPanel from "@features/csm-timecards/components/CaseTimeCardsPanel";
 import LogTimeCardDialog from "@features/csm-timecards/components/LogTimeCardDialog";
@@ -372,6 +375,14 @@ const CASE_TAB_IDS: readonly CaseTabId[] = TAB_DEFS.filter(
   (t) => !t.hidden,
 ).map((t) => t.id);
 
+/**
+ * The detail page of a case and of every case-like record (service request,
+ * engagement, announcement, security report), mounted on its own route or in
+ * an open case tab. Back goes to `state.from` with `state.parentState` (the
+ * list the case was opened from, with that list's own state), else to the
+ * record type's list; a case reached on another type's route is redirected to
+ * its own route with that state kept.
+ */
 export default function CsmCaseDetailPage(): JSX.Element {
   // Real router hooks — called unconditionally regardless of `routeOverride`
   // below (rules of hooks), but their VALUES are only actually used when
@@ -400,6 +411,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     canUseOperations,
     canUseTimeCardsAndUpdates,
     canViewSlaTab,
+    isAdmin,
   } = usePortalAccess();
   // A worknote_creator without full write may still add an internal work
   // note -- and nothing else on this page. The composer is locked to
@@ -447,9 +459,13 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // forward as router state, so the back button below returns to that exact
   // list view — filters, search text, sort — instead of a bare list path.
   // Falls back to the hardcoded backPath for a bookmarked or directly-linked
-  // detail page, which never got the state set.
-  const fromListState = location.state as { from?: string } | undefined;
+  // detail page, which never got the state set. `parentState` is the state
+  // that list was itself carrying (e.g. `{ from: <dashboard> }`), handed back
+  // to it on Back so the list keeps its own Back button.
+  const fromListState = location.state as { from?: string; parentState?: unknown } | undefined;
   const resolvedBackPath = fromListState?.from ?? backPath;
+  const backNavState = fromListState?.parentState ?? undefined;
+  const goBack = (): void => navigate(resolvedBackPath, { state: backNavState });
   const {
     data,
     isLoading,
@@ -520,7 +536,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     // report and got redirected to its real route.
     navigate(
       { pathname: canonicalDetailPath, search: location.search, hash: location.hash },
-      { replace: true, state: { from: resolvedBackPath } },
+      { replace: true, state: { from: resolvedBackPath, parentState: backNavState ?? null } },
     );
   }, [
     isMisrouted,
@@ -528,6 +544,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
     caseId,
     navigate,
     resolvedBackPath,
+    backNavState,
     location.search,
     location.hash,
   ]);
@@ -554,14 +571,16 @@ export default function CsmCaseDetailPage(): JSX.Element {
   // connection of its own.
   // Case Feedback (CSAT survey) submissions for this case, if any — the
   // survey only exists once a case is closed, so the query itself is
-  // disabled until then rather than firing early for an open case.
+  // disabled until then (and while the case is still loading) rather than
+  // firing early for an open case.
+  const isFeedbackEligible = data?.state === "closed";
   const {
     data: caseFeedback,
     isLoading: isFeedbackLoading,
     isError: isFeedbackError,
     refetch: refetchFeedback,
     isFetching: isFetchingFeedback,
-  } = useGetCsmCaseFeedback(caseId, data?.state === "closed");
+  } = useGetCsmCaseFeedback(caseId, isFeedbackEligible);
   // The chat transcript the case was spawned from, when linked. Loaded lazily
   // off the case's conversation id and merged into the comment stream below so
   // it renders as the earliest activity entries — mirrors the customer portal.
@@ -1011,7 +1030,9 @@ export default function CsmCaseDetailPage(): JSX.Element {
     void refetchChat();
     void refetchAttachments();
     void refetchCallRequests();
-    void refetchFeedback();
+    // `refetch()` ignores `enabled`, so guard it: a manual refresh must not
+    // issue the feedback request for a case that isn't closed.
+    if (isFeedbackEligible) void refetchFeedback();
   };
 
   // Re-runs every source the Details tab renders: the case itself plus the
@@ -2128,7 +2149,10 @@ export default function CsmCaseDetailPage(): JSX.Element {
     [removeTag, showError],
   );
 
-  const attachmentList = useMemo(() => attachments ?? [], [attachments]);
+  const attachmentList = useMemo(() => (attachments ?? []).filter((a) => !a.deletedAt), [attachments]);
+  // Deleted attachments (an admin's list carries them) are shown only at the
+  // bottom of the Attachments tab, never in the feed, the counts or Download all.
+  const deletedAttachmentList = useMemo(() => (attachments ?? []).filter((a) => !!a.deletedAt), [attachments]);
 
   // `postAttachment` is a single shared mutation object that stays mounted
   // across `caseId` changes (this page doesn't remount on navigation between
@@ -2256,17 +2280,18 @@ export default function CsmCaseDetailPage(): JSX.Element {
     })();
   }, [attachmentList, downloadAttachment, showError]);
 
-  // Only the person who uploaded a file may delete it, and not once the case is
-  // closed. The backend enforces the rule; this only hides a button that would
-  // fail.
+  // Only the person who uploaded a file, or an admin, may delete it, and not
+  // once the case is closed (not even an admin). The backend enforces the rule;
+  // this only hides a button that would fail.
   const canDeleteAttachmentRow = useCallback(
-    (a: CaseAttachment): boolean => {
-      if (data?.state === "closed") return false;
-      const mine = (currentUser?.email || currentUserEmail)?.trim().toLowerCase();
-      const uploader = (a.uploadedByUser?.email || a.uploadedByEmail)?.trim().toLowerCase();
-      return !!mine && mine === uploader;
-    },
-    [currentUser?.email, currentUserEmail, data?.state],
+    (a: CaseAttachment): boolean =>
+      canDeleteAttachment({
+        caseClosed: data?.state === "closed",
+        isAdmin,
+        myEmail: currentUser?.email || currentUserEmail,
+        uploaderEmail: a.uploadedByUser?.email || a.uploadedByEmail,
+      }),
+    [currentUser?.email, currentUserEmail, data?.state, isAdmin],
   );
 
   const onConfirmDeleteAttachment = useCallback(() => {
@@ -2308,7 +2333,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2329,7 +2354,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           variant="text"
           size="small"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2424,7 +2449,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           size="small"
           className="csm-print-hide"
           startIcon={<ArrowLeft size={16} />}
-          onClick={() => navigate(resolvedBackPath)}
+          onClick={goBack}
           sx={{ alignSelf: "flex-start" }}
         >
           Back
@@ -2771,6 +2796,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 </Button>
               </Box>
               <CsmCaseCommentInput
+                uploadProgress={commentUploadProgress(postAttachment)}
                 imageUploadParentId={caseId}
                 disabled={!caseId || isClosed}
                 publicCommentDisabledReason={publicReplyGateReason}
@@ -2787,7 +2813,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
                 onDraftInternalChange={setDraftInternal}
                 draftSourceMode={draftSourceMode}
                 onDraftSourceModeChange={setDraftSourceMode}
-                onSubmit={async (bodyHtml, internal, commentAttachments) => {
+                onSubmit={async (bodyHtml, internal, commentAttachments, controls) => {
                   if (!caseId) return;
                   // Comment and files are separate requests, sent together.
                   await sendCommentWithAttachments({
@@ -2795,6 +2821,8 @@ export default function CsmCaseDetailPage(): JSX.Element {
                     postComment: () =>
                       postComment.mutateAsync({ caseId, bodyHtml, authorName: engineerName, internal }),
                     attachments: commentAttachments,
+                    onCommentSettled: controls.commentSettled,
+                    onWaiting: controls.waiting,
                     uploadAttachment: ({ file, name }) =>
                       postAttachment.mutateAsync({ caseId, file, name, uploadedBy: engineerName }),
                   });
@@ -3172,13 +3200,24 @@ export default function CsmCaseDetailPage(): JSX.Element {
       )}
 
       {activeTab === "sla" && canViewSlaTab && caseId && (
-        <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+        <>
+          <WorkItemSlaTable workItemId={caseId} workItemLabel="case" />
+          <SlaImpactTimeline
+            entries={activityAudit}
+            isLoading={isActivityLoading}
+            isError={isActivityError}
+            onRetry={() => void refetchActivities()}
+            openedAt={c?.createdAt}
+            currentState={c?.state}
+          />
+        </>
       )}
 
       {activeTab === "attachments" && (
         <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "1fr" }}>
           <AttachmentsWidget
             attachments={attachmentList}
+            deletedAttachments={deletedAttachmentList}
             loading={isAttachmentsLoading}
             error={isAttachmentsError}
             onRetry={() => void refetchAttachments()}

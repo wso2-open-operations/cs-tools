@@ -16,6 +16,15 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 
+/**
+ * staleTime for the per-case comment and activity queries. Both are refreshed
+ * by the `case_updated` stream (see invalidateCaseById) and by their own
+ * mutations, so a longer window only suppresses redundant refetches when
+ * remounting a case view. Not for queries the stream does not cover. Matches
+ * the case detail query.
+ */
+export const CASE_QUERY_STALE_TIME_MS = 30_000;
+
 /** Base delay before the first reconnect attempt after the stream errors out or drops. */
 const RECONNECT_BASE_DELAY_MS = 3_000;
 /** Reconnect delay never grows past this while still within MAX_BACKOFF_ATTEMPTS. */
@@ -65,6 +74,34 @@ export function invalidateCaseById(queryClient: QueryClient, caseId: string): vo
   ];
   for (const key of byCase) {
     void queryClient.invalidateQueries({ queryKey: [key, caseId] });
+  }
+}
+
+/**
+ * A comments/activities query fetched this recently is not revalidated when
+ * its case id (re)joins the stream: a first-time open has just fetched it, and
+ * refetching would double the two heaviest case queries for nothing. Sits above
+ * the stream's id-set debounce (300ms) plus a typical fetch time.
+ */
+export const RECENT_FETCH_MS = 2_000;
+
+/**
+ * Revalidates only the comments and activities of a case whose id has just
+ * (re)joined the subscribed stream set. While a case is not subscribed it
+ * receives no frames, so cached comments/activities can be missing updates
+ * that landed in the gap, yet still be inside CASE_QUERY_STALE_TIME_MS when the
+ * case view remounts.
+ *
+ * Only a query that holds cached data older than RECENT_FETCH_MS is
+ * invalidated. One with no data yet (never fetched, or still on its first
+ * fetch) or fetched moments ago is already current.
+ */
+export function invalidateCaseThreadById(queryClient: QueryClient, caseId: string): void {
+  for (const key of [ApiQueryKeys.CSM_CASE_COMMENTS, ApiQueryKeys.CSM_CASE_ACTIVITIES]) {
+    const queryKey = [key, caseId];
+    const { dataUpdatedAt = 0 } = queryClient.getQueryState(queryKey) ?? {};
+    if (dataUpdatedAt === 0 || Date.now() - dataUpdatedAt < RECENT_FETCH_MS) continue;
+    void queryClient.invalidateQueries({ queryKey });
   }
 }
 

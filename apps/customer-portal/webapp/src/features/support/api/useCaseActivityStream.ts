@@ -49,6 +49,17 @@ const STABLE_CONNECTION_MS = 30_000;
 /** Minimum gap between case-details invalidations triggered by a routine reconnect, per case. */
 const CATCH_UP_MIN_INTERVAL_MS = 60_000;
 
+/**
+ * A connection is swapped for a fresh one after this long. The gateway ends
+ * every request at the API's Endpoint timeout (299999 ms at most) however busy
+ * the stream is, so replacing it first avoids the drop, the missed-update gap
+ * and the console errors a cut produces. Keep it below that timeout.
+ */
+const CONNECTION_MAX_AGE_MS = 4 * 60_000;
+/** Wait before retrying a replacement that failed to open, and how many times to retry. */
+const ROTATION_RETRY_DELAY_MS = 15_000;
+const MAX_ROTATION_RETRIES = 3;
+
 /** Event `type` values the server sends in the `case_updated` payload. */
 const COMMENT_ADDED_TYPE = "case.comment_added";
 
@@ -116,6 +127,11 @@ function reconnectDelay(attempt: number): number {
  * fixed at construction, so a token expiring mid-connection would have it
  * retry forever with the same stale one.
  *
+ * Swaps the connection for a fresh one every CONNECTION_MAX_AGE_MS, before the
+ * gateway's total-time cap would cut it. The new stream opens first and the
+ * old one is closed only once it is open, so no update is missed and no
+ * catch-up is needed; closing it ourselves also raises no error.
+ *
  * Connecting or reconnecting never calls the comments/activities API: the
  * server ends each stream cleanly every few minutes, so routine reconnects are
  * frequent. An event published in the short gap between connections is
@@ -172,10 +188,14 @@ export function useCaseActivityStream(caseId: string | undefined): void {
     const connection = connectionRef.current;
 
     let cancelled = false;
+    // The live connection, and the one opened ahead of the gateway cap to take over from it.
     let source: EventSourcePolyfill | null = null;
+    let replacement: EventSourcePolyfill | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let stableTimer: ReturnType<typeof setTimeout> | undefined;
+    let rotateTimer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
+    let rotationRetries = 0;
 
     const refreshComments = (): void => {
       void refreshCaseComments(queryClient, authFetchRef.current, caseId, logger);
@@ -212,7 +232,94 @@ export function useCaseActivityStream(caseId: string | undefined): void {
       reconnectTimer = setTimeout(() => void connect(), delay);
     };
 
-    const connect = async (): Promise<void> => {
+    const scheduleRotation = (delay: number): void => {
+      clearTimeout(rotateTimer);
+      rotateTimer = setTimeout(() => void rotate(), delay);
+    };
+
+    // A replacement that could not be opened leaves the current connection
+    // running. Retry a few times, then leave it to the gateway cut and the
+    // normal reconnect path rather than hammering a backend that keeps refusing.
+    const noteRotationFailure = (): void => {
+      if (rotationRetries >= MAX_ROTATION_RETRIES) return;
+      rotationRetries += 1;
+      scheduleRotation(ROTATION_RETRY_DELAY_MS);
+    };
+
+    // The replacement is open and the old connection is still delivering, so
+    // swapping loses nothing and no catch-up is needed.
+    const promote = (next: EventSourcePolyfill): void => {
+      const previous = source;
+      source = next;
+      replacement = null;
+      attempt = 0;
+      rotationRetries = 0;
+      clearTimeout(stableTimer);
+      previous?.close();
+      scheduleRotation(CONNECTION_MAX_AGE_MS);
+    };
+
+    const handleOpen = (es: EventSourcePolyfill): void => {
+      if (cancelled) return;
+      if (es === replacement) {
+        promote(es);
+        return;
+      }
+
+      // Only a connection that stays up resets the backoff; one that opens
+      // and is cut straight away keeps backing off.
+      clearTimeout(stableTimer);
+      stableTimer = setTimeout(() => {
+        attempt = 0;
+      }, STABLE_CONNECTION_MS);
+      rotationRetries = 0;
+      scheduleRotation(CONNECTION_MAX_AGE_MS);
+
+      // No comments/activities request here: routine reconnects are frequent
+      // and an event in the reconnect gap is recovered by the next event.
+      const isReconnect = connection.hasOpened;
+      connection.hasOpened = true;
+      const now = Date.now();
+
+      // Resume after idle: the gap can be long, so catch up once, exempt
+      // from the rate limit.
+      if (connection.catchUpOnOpen) {
+        connection.catchUpOnOpen = false;
+        connection.lastCatchUpAt = now;
+        refreshComments();
+        invalidateCaseDetails();
+        return;
+      }
+
+      // Routine reconnect: refresh case details only, rate-limited so a
+      // flapping connection cannot turn this into a request storm.
+      if (now - connection.lastCatchUpAt < CATCH_UP_MIN_INTERVAL_MS) return;
+      connection.lastCatchUpAt = now;
+      if (isReconnect) invalidateCaseDetails();
+    };
+
+    const handleError = (es: EventSourcePolyfill): void => {
+      logger.debug("[case-activity-stream] connection error, reconnecting");
+      es.close();
+      if (cancelled) return;
+      if (es === replacement) {
+        replacement = null;
+        noteRotationFailure();
+        return;
+      }
+      if (es !== source) return;
+      clearTimeout(stableTimer);
+      clearTimeout(rotateTimer);
+      replacement?.close();
+      replacement = null;
+      source = null;
+      scheduleReconnect();
+    };
+
+    // Opens a stream with a fresh token and records it as the live connection
+    // or, for a replacement, as the one waiting to take over. False if it
+    // could not be opened (no token, or nothing left to replace).
+    const openStream = async (role: "source" | "replacement"): Promise<boolean> => {
       let idToken: string | undefined;
       try {
         idToken = await getIdToken();
@@ -222,61 +329,37 @@ export function useCaseActivityStream(caseId: string | undefined): void {
           error instanceof Error ? error.message : "Unknown token error",
         );
       }
-      if (cancelled) return;
-      if (!idToken) {
-        scheduleReconnect();
-        return;
-      }
+      if (cancelled || !idToken) return false;
+      if (role === "replacement" && !source) return false;
 
       const url = `${apiConfig.streamUrl}/cases/${encodeURIComponent(caseId)}/activities/stream`;
-      source = new EventSourcePolyfill(url, {
+      const es = new EventSourcePolyfill(url, {
         headers: {
           Authorization: `Bearer ${idToken}`,
           "x-user-id-token": idToken,
         },
       });
+      if (role === "replacement") {
+        replacement = es;
+      } else {
+        source = es;
+      }
 
-      source.addEventListener("open", () => {
-        // Only a connection that stays up resets the backoff; one that opens
-        // and is cut straight away keeps backing off.
-        clearTimeout(stableTimer);
-        stableTimer = setTimeout(() => {
-          attempt = 0;
-        }, STABLE_CONNECTION_MS);
+      es.addEventListener("open", () => handleOpen(es));
+      es.addEventListener("case_updated", handleCaseUpdated);
+      es.addEventListener("error", () => handleError(es));
+      return true;
+    };
 
-        // No comments/activities request here: routine reconnects are frequent
-        // and an event in the reconnect gap is recovered by the next event.
-        const isReconnect = connection.hasOpened;
-        connection.hasOpened = true;
-        const now = Date.now();
+    const connect = async (): Promise<void> => {
+      const opened = await openStream("source");
+      if (!opened && !cancelled) scheduleReconnect();
+    };
 
-        // Resume after idle: the gap can be long, so catch up once, exempt
-        // from the rate limit.
-        if (connection.catchUpOnOpen) {
-          connection.catchUpOnOpen = false;
-          connection.lastCatchUpAt = now;
-          refreshComments();
-          invalidateCaseDetails();
-          return;
-        }
-
-        // Routine reconnect: refresh case details only, rate-limited so a
-        // flapping connection cannot turn this into a request storm.
-        if (now - connection.lastCatchUpAt < CATCH_UP_MIN_INTERVAL_MS) return;
-        connection.lastCatchUpAt = now;
-        if (isReconnect) invalidateCaseDetails();
-      });
-
-      source.addEventListener("case_updated", handleCaseUpdated);
-
-      source.addEventListener("error", () => {
-        logger.debug("[case-activity-stream] connection error, reconnecting");
-        clearTimeout(stableTimer);
-        source?.close();
-        if (!cancelled) {
-          scheduleReconnect();
-        }
-      });
+    const rotate = async (): Promise<void> => {
+      if (cancelled || replacement || !source) return;
+      const opened = await openStream("replacement");
+      if (!opened && !cancelled && source) noteRotationFailure();
     };
 
     void connect();
@@ -285,7 +368,9 @@ export function useCaseActivityStream(caseId: string | undefined): void {
       cancelled = true;
       clearTimeout(reconnectTimer);
       clearTimeout(stableTimer);
+      clearTimeout(rotateTimer);
       source?.close();
+      replacement?.close();
     };
   }, [caseId, isIdle, queryClient, getIdToken, logger]);
 }

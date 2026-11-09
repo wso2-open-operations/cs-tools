@@ -17,23 +17,33 @@
 
 const MIB = 1024 * 1024;
 
-/** Entity-service's own defaults (`ATTACHMENT_MAX_BYTES`, `INLINE_IMAGE_MAX_BYTES`). */
-export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 100;
-export const DEFAULT_INLINE_IMAGE_MAX_MB = 10;
+/** Entity-service's own defaults (`ATTACHMENT_MAX_MB`, `INLINE_IMAGES_TOTAL_MAX_MB`). */
+export const DEFAULT_ENTITY_ATTACHMENT_MAX_MB = 10;
+/** Ceilings: a configured value above one is ignored and the default is used. */
+export const MAX_ENTITY_ATTACHMENT_MAX_MB = 100;
+export const MAX_INLINE_IMAGES_TOTAL_MAX_MB = 25;
+/** Total size of the inline images in one comment or description. */
+export const DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB = 1;
+/** @deprecated Kept for imports; the limit is now a total per comment or description. */
+export const DEFAULT_INLINE_IMAGE_MAX_MB = DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB;
 
 /**
  * A size in MB from `window.config`. Platform config injection often turns
  * numbers into strings, so both are accepted; anything that is not a positive
- * finite number falls back to the default.
+ * finite number, or is above `max`, falls back to the default.
  */
-function configuredMb(value: unknown, fallback: number): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && value.trim() !== ""
-        ? Number(value)
-        : NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function configuredMb(value: unknown, fallback: number, max: number): number {
+  const parsed = parsedMb(value);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
+}
+
+/** A configured MB value as a number, NaN when it is not one. */
+function parsedMb(value: unknown): number {
+  return typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim() !== ""
+      ? Number(value)
+      : NaN;
 }
 
 /**
@@ -46,21 +56,44 @@ export function entityAttachmentMaxBytes(): number {
     configuredMb(
       window.config?.CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB,
       DEFAULT_ENTITY_ATTACHMENT_MAX_MB,
+      MAX_ENTITY_ATTACHMENT_MAX_MB,
     ) * MIB,
   );
 }
 
 /**
- * Largest pasted or inserted comment image, in bytes
- * (`CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB`, default 10). Read at call time.
+ * Most the inline images of one comment or description may add up to, in bytes
+ * (`CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB`, default 1, at most 25). The older
+ * `CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB` is read when the new key is not set.
+ * Read at call time.
+ */
+export function inlineImagesTotalMaxBytes(): number {
+  const config = window.config;
+  const primary = parsedMb(config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB);
+  // A usable number that is over the ceiling is a mistake in the new key: it gets
+  // the default, not the older key's value. The older key is read only when the
+  // new one is unset or not a number.
+  const mb =
+    Number.isFinite(primary) && primary > MAX_INLINE_IMAGES_TOTAL_MAX_MB
+      ? DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB
+      : configuredMb(
+          config?.CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB,
+          configuredMb(
+            config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
+            DEFAULT_INLINE_IMAGES_TOTAL_MAX_MB,
+            MAX_INLINE_IMAGES_TOTAL_MAX_MB,
+          ),
+          MAX_INLINE_IMAGES_TOTAL_MAX_MB,
+        );
+  return Math.floor(mb * MIB);
+}
+
+/**
+ * Largest single inline image, in bytes. One image cannot be bigger than the
+ * total allowed per comment or description, so this is that same limit.
  */
 export function inlineImageMaxBytes(): number {
-  return Math.floor(
-    configuredMb(
-      window.config?.CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB,
-      DEFAULT_INLINE_IMAGE_MAX_MB,
-    ) * MIB,
-  );
+  return inlineImagesTotalMaxBytes();
 }
 
 /** Ranges of one download fetched at once when nothing is configured. */
@@ -114,4 +147,19 @@ export function downloadToDiskEnabled(): boolean {
   const raw = window.config?.CUSTOMER_PORTAL_DOWNLOAD_TO_DISK;
   if (typeof raw === "string") return raw.trim().toLowerCase() !== "false";
   return raw !== false;
+}
+
+/** How many attachments a create form (case, service request, security report) takes. */
+export const CREATE_FORM_MAX_ATTACHMENTS = 1;
+
+/** How many attachments one comment takes. */
+export const COMMENT_MAX_ATTACHMENTS = 1;
+
+/** Shown when a create form or a comment already has its one attachment. */
+export const CREATE_FORM_ATTACHMENT_LIMIT_MESSAGE =
+  "Only one file allowed.";
+
+/** Whether a create form holding `count` attachments takes no more. */
+export function createFormAttachmentsFull(count: number): boolean {
+  return count >= CREATE_FORM_MAX_ATTACHMENTS;
 }

@@ -747,7 +747,7 @@ type CaseRepository interface {
 	MarkCaseFixIssued(ctx context.Context, caseID string) (fixIssued time.Time, alreadySet bool, err error)
 	// SearchCaseActivities returns a paginated, newest-first feed combining
 	// the case's comments (comment, migration 0040) and complete
-	// attachments (case_attachment, migration 0106) into one merged
+	// attachments (work_item_attachment) into one merged
 	// timeline, together with the total matching count. There is no
 	// field-change audit table in this schema, so entries of that kind are
 	// never produced regardless of req.IncludeFieldChanges -- an absent
@@ -913,7 +913,74 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 	if err := restore(ctx); err != nil {
 		return domain.Case{}, err
 	}
+	// The draft files uploaded before this case (a security report's report) are
+	// linked in THIS transaction: if any of them was taken since the service checked
+	// it (a second create naming the same file), the whole create rolls back, so a
+	// case never exists without the files it was created with.
+	if err := linkReportDraftsTx(ctx, tx, c.ID, req.ProjectID, req.ReportDraftOwnerEmail, req.AttachmentIDs); err != nil {
+		return domain.Case{}, err
+	}
 	return c, nil
+}
+
+// reportDraftsTakenMessage is what a create naming a file that is no longer a usable draft is told.
+const reportDraftsTakenMessage = "An attachment could not be used: it was not uploaded by you for this project, is not fully uploaded, or is already used by another record."
+
+// linkReportDraftsTx links the drafts in ids to the work item just inserted in tx, or
+// fails if it cannot link every one of them. The UPDATE is the guard and the lock: it
+// only takes a row that is still a COMPLETE draft of this project uploaded by email,
+// and a concurrent create naming the same file waits on the row, then finds it taken
+// (READ COMMITTED re-checks the WHERE) and links nothing. UPDATE on the table is
+// internal-only, so the transaction is marked internal for this one statement (the
+// ownership checks are explicit in the WHERE) and the caller's own value is put back.
+func linkReportDraftsTx(ctx context.Context, tx pgx.Tx, workItemID, projectID, email string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[strings.ToLower(id)] = struct{}{}
+	}
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('app.is_internal', true), '')`).Scan(&previous); err != nil {
+		return fmt.Errorf("link report drafts: read caller identity: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', 'true', true)`); err != nil {
+		return fmt.Errorf("link report drafts: mark internal: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		UPDATE work_item_attachment
+		SET work_item_id = $1::uuid, updated_on = now()
+		WHERE id = ANY($4::uuid[])
+		  AND project_id = $2::uuid
+		  AND work_item_id IS NULL
+		  AND status = 'COMPLETE'
+		  AND $3 <> ''
+		  AND lower(created_by) = lower($3)
+		RETURNING id::TEXT`, workItemID, projectID, email, ids)
+	if err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	linked := 0
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("link report drafts: scan: %w", err)
+		}
+		linked++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("link report drafts: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('app.is_internal', $1, true)`, previous); err != nil {
+		return fmt.Errorf("link report drafts: restore caller identity: %w", err)
+	}
+	if linked != len(want) {
+		return &apierror.ValidationError{Msg: reportDraftsTakenMessage}
+	}
+	return nil
 }
 
 // caseInsertsCheckedByProjectMembership are the case-like types whose
@@ -2975,43 +3042,39 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 
 // SearchCaseAttachments implements CaseRepository.
 //
-// Returns the case's native uploads (case_attachment) and its synced
-// attachments (work_item_attachment) as one list, ordered newest first with
-// the id as a stable tiebreaker. Both queries read the same UNION ALL, so the
-// total and the page rows always agree.
+// Returns the case's attachments from work_item_attachment, ordered newest first
+// with the id as a stable tiebreaker. The older case_attachment table is not
+// read: nothing writes it any more, so a file that exists only there is not
+// listed. Before this runs against a database, check that no complete
+// case_attachment row lacks a work_item_attachment row of the same id (the SQL
+// is in the pull request), and copy any that do. Both queries read the same
+// SELECT, so the total and the page rows always agree.
 //
-// Native rows keep the status = 'complete' filter -- see the doc comment on
-// CaseService.SearchCaseAttachments for why pending (still-uploading) rows are
-// excluded from the default list/search response rather than shown with a
-// visible status. A synced row is skipped while PENDING, and when
-// case_attachment already holds the same id: a dual-write upload is mirrored
-// into case_attachment under the backing data source's own attachment
-// identity, which is also the id the sync gives its work_item_attachment row,
-// so the two tables describe one file and it must show once (same rule as the
-// activity feed, see SearchCaseActivities).
+// A row is skipped while PENDING, and when it is failed, deleted or still
+// uploading (listedStoredAttachmentSQL).
 //
-// The synced side is joined to work_item so that work_item's row-level
-// security scopes it like every other work item read. Its uploader is matched
-// to a user by email with a LATERAL ... LIMIT 1 ("user".email has no unique
+// The rows are joined to work_item so that work_item's row-level security
+// scopes them like every other work item read. The uploader is matched to a
+// user by email with a LATERAL ... LIMIT 1 ("user".email has no unique
 // constraint, so a plain join would fan one attachment into several rows
 // while the count still counted it once); an unmatched uploader is still
-// returned, carrying only the email. Synced rows have no storage key.
+// returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
-	const combined = `
-		SELECT ca.id, ca.case_id AS reference_id, ca.filename AS name, ca.mime_type AS content_type,
-		       ca.size_bytes::bigint AS size_bytes, ca.description::text AS description,
-		       u.id::text AS uploader_id, u.email::text AS uploader_email,
-		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), '') AS uploader_name,
-		       ca.created_on, ca.storage_key::text AS storage_key, ca.status::text AS status
-		FROM case_attachment ca
-		JOIN "user" u ON u.id = ca.uploaded_by
-		WHERE ca.case_id = $1 AND ca.status = 'complete'
-		UNION ALL
-		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
-		       COALESCE(wa.size_bytes, 0)::bigint, NULL::text,
-		       COALESCE(su.id::text, ''), COALESCE(wa.created_by, ''),
-		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), ''),
-		       wa.created_on, NULL::text, 'complete'
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	combined := `
+		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
+		       COALESCE(wa.content_type, '') AS content_type,
+		       COALESCE(wa.size_bytes, 0)::bigint AS size_bytes, NULL::text AS description,
+		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
+		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
+		       wa.created_on, NULL::text AS storage_key,
+		       CASE WHEN wa.status = 'DELETED' THEN 'deleted' ELSE 'complete' END AS status,
+		       wa.deleted_on, COALESCE(wa.deleted_by, '') AS deleter_email,
+		       COALESCE(du.id::text, '') AS deleter_id,
+		       COALESCE(du.name, NULLIF(TRIM(CONCAT_WS(' ', du.first_name, du.last_name)), ''), '') AS deleter_name
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3021,17 +3084,31 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			ORDER BY u2.id
 			LIMIT 1
 		) su ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) du ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL + `
-		  AND NOT EXISTS (SELECT 1 FROM case_attachment dup WHERE dup.id = wa.id)`
-	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
-	const dataQuery = `
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
+	// Deleted rows come last, so they sit under every available attachment.
+	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
-		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status
+		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
+		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY created_on DESC, id
+		ORDER BY (status = 'deleted'), created_on DESC, id
 		LIMIT $2 OFFSET $3`
+
+	// The id names ANY work item, a change request included: one the caller may
+	// not see does not exist for them (same guard as the comments and activity).
+	if err := r.vis.rejectHiddenChangeRequest(ctx, r.db, caseID, "case not found"); err != nil {
+		return nil, 0, err
+	}
 
 	var total int
 	var attachments []domain.Attachment
@@ -3059,16 +3136,17 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 				sizeBytes                 int64
 				uploaderID, uploaderEmail string
 				uploaderName              string
-				// storageKey is nullable: a dual-write (ServiceNow-sourced)
-				// row has no storage_key at all -- see migration 0185's own
-				// comment -- and neither does a synced row. *string (not
-				// string) is required here so a NULL column value scans as a
-				// nil pointer instead of erroring.
-				storageKey *string
+				// storageKey is nullable: the list query selects NULL for it.
+				// *string (not string) is required here so a NULL column
+				// value scans as a nil pointer instead of erroring.
+				storageKey                           *string
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes, &a.Description,
 				&uploaderID, &uploaderEmail, &uploaderName, &a.CreatedOn, &storageKey, &a.Status,
+				&deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan case attachment: %w", err)
 			}
@@ -3076,6 +3154,10 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			a.ReferenceType = domain.ReferenceTypeCase
 			a.CreatedBy = domain.NewUserReference(uploaderID, uploaderEmail, uploaderName)
 			a.StorageKey = storageKey
+			if a.Status == domain.AttachmentStatusDeleted {
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3098,6 +3180,12 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 // created, which is told apart from a migrated row waiting for its file by its
 // legacy state column, always NULL for a row this service wrote).
 const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+
+// listedWithDeletedStoredAttachmentSQL is listedStoredAttachmentSQL for a caller
+// who may also see deleted attachments: a deleted row is kept, the rest of the
+// filter is the same.
+const listedWithDeletedStoredAttachmentSQL = `AND wa.status <> 'FAILED'
 		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
 
 // SearchWorkItemAttachments implements CaseRepository.
@@ -3132,22 +3220,28 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		}
 	}
 
-	const where = `
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	where := `
 		WHERE wa.work_item_id = $1
 		  AND wi.type = ANY($2::text[]::work_item_type_enum[])
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL
-	const countQuery = `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
 	// created_by is a free-form string on this table; it is matched to a user
 	// by email (same convention as comment.created_by). The match is a
 	// LATERAL ... LIMIT 1 because "user".email has no unique constraint, and a
 	// plain join would fan one attachment out into several rows while
 	// countQuery above counts it once.
-	const dataQuery = `
+	dataQuery := `
 		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
 		       COALESCE(wa.size_bytes, 0), wa.created_by, COALESCE(u.id::text, ''),
 		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
-		       wa.created_on
+		       wa.created_on, wa.status = 'DELETED', wa.deleted_on,
+		       COALESCE(wa.deleted_by, ''), COALESCE(d.id::text, ''),
+		       COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), ''), '')
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3156,8 +3250,15 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			WHERE LOWER(u2.email) = LOWER(wa.created_by)
 			ORDER BY u2.id
 			LIMIT 1
-		) u ON TRUE` + where + `
-		ORDER BY wa.created_on DESC, wa.id
+		) u ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) d ON TRUE` + where + `
+		ORDER BY (wa.status = 'DELETED'), wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
@@ -3182,13 +3283,17 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		result := make([]domain.Attachment, 0, pagination.Limit)
 		for rows.Next() {
 			var (
-				a                                   domain.Attachment
-				sizeBytes                           int64
-				createdBy, uploaderID, uploaderName string
+				a                                    domain.Attachment
+				sizeBytes                            int64
+				createdBy, uploaderID, uploaderName  string
+				deleted                              bool
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
 				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+				&deleted, &deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan work item attachment: %w", err)
 			}
@@ -3196,6 +3301,11 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			a.ReferenceType = referenceType
 			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
 			a.Status = domain.AttachmentStatusComplete
+			if deleted {
+				a.Status = domain.AttachmentStatusDeleted
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -5046,7 +5156,7 @@ func scanCaseActivity(row interface{ Scan(...any) error }) (domain.CaseActivity,
 // single-element Changes slice, rather than guessing at a bundling rule.
 func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCaseActivitiesRequest) ([]domain.CaseActivity, int, error) {
 	// Confirm req.CaseID is actually a case-like work item before reading
-	// its activity feed -- comment/case_attachment/work_item_activity are
+	// its activity feed -- comment/work_item_attachment/work_item_activity are
 	// all keyed by the generic work_item_id with no type filter of their
 	// own, so without this check a caller could pass any other work_item's
 	// UUID (a change request, incident, ...) through this endpoint and read
@@ -5088,12 +5198,9 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 		commentWorkNoteDataFilter = ` AND cm.type IS DISTINCT FROM 'WORK_NOTE'::comment_type_enum`
 	}
 
-	// Synced attachments live in work_item_attachment, not case_attachment. A
-	// row is skipped while PENDING, and when case_attachment already holds the
-	// same id: a dual-write upload is mirrored into case_attachment under the
-	// backing data source's own attachment identity, which is also the id the
-	// sync gives its work_item_attachment row, so the two tables describe one
-	// file and it must show once. Shared by both queries so total and rows agree.
+	// Attachments live in work_item_attachment. A row is skipped while PENDING,
+	// and when it is failed, deleted or still uploading. Shared by both queries
+	// so total and rows agree.
 	// A customer-portal caller never sees a soft-deleted comment in the feed or
 	// in its total (see hidesDeletedComments); internal callers are unchanged.
 	commentWorkNoteFilter += deletedCommentFilter(ctx, "")
@@ -5101,13 +5208,11 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 
 	const syncedAttachmentFilter = `
 			  AND wa.state IS DISTINCT FROM 'PENDING'
-			  ` + listedStoredAttachmentSQL + `
-			  AND NOT EXISTS (SELECT 1 FROM case_attachment ca WHERE ca.id = wa.id)`
+			  ` + listedStoredAttachmentSQL
 
 	countQuery := `
 		SELECT
 			(SELECT COUNT(*) FROM comment WHERE work_item_id = $1` + commentWorkNoteFilter + `) +
-			(SELECT COUNT(*) FROM case_attachment WHERE case_id = $1 AND status = 'complete') +
 			(SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id
 			 WHERE wa.work_item_id = $1` + syncedAttachmentFilter + `)`
 	if includeFieldChanges {
@@ -5120,12 +5225,9 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	// to the file name, and to a fixed label when a synced row has no name.
 	// Clients render attachment entries from fileName, not from content.
 	//
-	// UNION ALL merges the tables into one timeline. Comment/field-change
-	// rows resolve their (free-text VARCHAR) author by email match against
-	// "user"; case_attachment rows join it directly, since uploaded_by is a
-	// real UUID FK (migration 0106), while synced work_item_attachment rows
-	// carry a free-text created_by and match by email like comments -- see
-	// this file's other created_by fixes for why they differ.
+	// UNION ALL merges the tables into one timeline. Comment, attachment and
+	// field-change rows resolve their (free-text VARCHAR) author by email match
+	// against "user".
 	//
 	// The comment/field-change branches' email joins go through
 	// userByEmailJoin: "user".email has no unique constraint (migration 0002
@@ -5149,19 +5251,6 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 				` + userByEmailJoin("u1", "cm.created_by") + `
 				WHERE cm.work_item_id = $1` + commentWorkNoteDataFilter + `
 			) c
-
-			UNION ALL
-
-			SELECT
-				a.id, 'attachment' AS kind, COALESCE(NULLIF(TRIM(a.description), ''), a.filename) AS content, a.created_on AS created_on,
-				u2.email, u2.first_name, u2.last_name,
-				COALESCE(u2.name, NULLIF(TRIM(CONCAT_WS(' ', u2.first_name, u2.last_name)), '')) AS name,
-				NULL::text AS comment_type,
-				a.filename, a.mime_type, a.size_bytes,
-				NULL::text AS field_name, NULL::text AS old_value, NULL::text AS new_value
-			FROM case_attachment a
-			JOIN "user" u2 ON u2.id = a.uploaded_by
-			WHERE a.case_id = $1 AND a.status = 'complete'
 
 			UNION ALL
 

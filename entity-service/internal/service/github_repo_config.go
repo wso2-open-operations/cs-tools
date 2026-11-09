@@ -179,6 +179,7 @@ func (c *githubRepoConfigs) get(ctx context.Context, owner, repo string) (repoCo
 func WithGithubRepoConfig(svc GithubSyncService, files githubFileReader, path string) GithubSyncService {
 	if s, ok := svc.(*githubSyncService); ok && files != nil {
 		s.repoConfigs = newGithubRepoConfigs(files, path)
+		s.issueTemplates = newGithubIssueTemplates(files)
 	}
 	return svc
 }

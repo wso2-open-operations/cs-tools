@@ -4654,3 +4654,51 @@ func TestCreateCallRequest_StartsPendingOnCustomer(t *testing.T) {
 		t.Errorf("state = %v, want pending_on_customer (client-supplied state must not win)", sent["state"])
 	}
 }
+
+// An admin's attachment list also carries the deleted attachments; nobody else's
+// does, and a flag the browser sends itself never reaches entity-service.
+func TestSearchCaseAttachments_IncludeDeletedOnlyForAdmin(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name    string
+		roles   []string
+		payload string
+		want    bool
+	}{
+		{"admin gets it", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `"}`, true},
+		{"cs engineer does not", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `"}`, false},
+		{"a forged flag is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","IncludeDeleted":true}`, false},
+		{"an admin's own spelling is replaced", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","includedeleted":false}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent map[string]any
+			client := &mockEntityCaseClient{
+				searchCaseAttachmentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+					if err := json.Unmarshal(body, &sent); err != nil {
+						t.Fatalf("body is not JSON: %v", err)
+					}
+					return []byte(`{}`), nil
+				},
+			}
+			h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+			user := *testUser
+			user.Roles = tc.roles
+			r := httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(tc.payload))
+			r = r.WithContext(middleware.WithUserInfo(r.Context(), &user))
+			w := httptest.NewRecorder()
+			h.SearchCaseAttachments(w, r)
+			assertStatus(t, w, http.StatusOK)
+			got, present := sent["includeDeleted"]
+			if tc.want && got != true {
+				t.Fatalf("includeDeleted = %v, want true", got)
+			}
+			if !tc.want && present {
+				t.Fatalf("includeDeleted = %v, want it absent", got)
+			}
+			if len(sent) != map[bool]int{true: 2, false: 1}[tc.want] {
+				t.Fatalf("unexpected keys sent: %v", sent)
+			}
+		})
+	}
+}

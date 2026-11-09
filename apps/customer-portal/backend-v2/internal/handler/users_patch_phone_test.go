@@ -52,7 +52,7 @@ type patchSCIMClient struct {
 	err    error
 }
 
-func (f *patchSCIMClient) UpdateUserPhone(context.Context, string, string) (*string, error) {
+func (f *patchSCIMClient) UpdateUserPhone(context.Context, string, string, string) (*string, error) {
 	f.rec.calls = append(f.rec.calls, "scim")
 	return f.result, f.err
 }

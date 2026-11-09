@@ -14,22 +14,29 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { Box, CircularProgress, Paper, Typography } from "@wso2/oxygen-ui";
+import { Box, CircularProgress, IconButton, LinearProgress, Paper, Tooltip, Typography } from "@wso2/oxygen-ui";
+import { X } from "@wso2/oxygen-ui-icons-react";
 import type { JSX } from "react";
 
 interface UploadingAttachmentPlaceholderProps {
   name: string;
+  /** Percentage sent (0-100), when known. */
+  percent?: number;
+  /** Stops the upload; no Cancel button without it. */
+  onCancel?: () => void;
 }
 
 /**
  * Placeholder row for an attachment that is still uploading in the background
  * (e.g. one created on the create-case page whose upload outlasted the wait window).
  *
- * @param {UploadingAttachmentPlaceholderProps} props - name of the attachment being uploaded.
+ * @param {UploadingAttachmentPlaceholderProps} props - name of the attachment being uploaded and how far it has got.
  * @returns {JSX.Element} The placeholder row.
  */
 export default function UploadingAttachmentPlaceholder({
   name,
+  percent,
+  onCancel,
 }: UploadingAttachmentPlaceholderProps): JSX.Element {
   return (
     <Paper
@@ -71,9 +78,24 @@ export default function UploadingAttachmentPlaceholder({
           {name}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          Uploading…
+          {percent === undefined ? "Uploading…" : `Uploading… ${percent}%`}
         </Typography>
+        {percent !== undefined && (
+          <LinearProgress
+            variant="determinate"
+            value={percent}
+            aria-label={`Uploading ${name}`}
+            sx={{ mt: 0.5 }}
+          />
+        )}
       </Box>
+      {onCancel && (
+        <Tooltip title="Cancel upload">
+          <IconButton size="small" onClick={onCancel} aria-label={`Cancel upload of ${name}`}>
+            <X size={16} />
+          </IconButton>
+        </Tooltip>
+      )}
     </Paper>
   );
 }

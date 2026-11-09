@@ -1021,18 +1021,19 @@ the entity-service calls are in `internal/entity/stored_attachments.go`.
 They are the only attachment routes besides the two listings (`GET /cases/{id}/attachments`,
 `GET /deployments/{deploymentId}/attachments`, which read entity-service's `POST /attachments/search`). There is no
 base64 or ServiceNow attachment path: files go to Azure in chunks, for cases, deployments and comment images alike, and
-a security report case is created first and its files are uploaded afterwards (the create-case body carries no
-attachments). `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
+a security report's files are uploaded FIRST, as drafts of the project (`POST /attachments/upload` with `type: "work_item"`
+and `projectId`), and `POST /cases` names them in `attachmentIds` (entity-service checks and links them, and refuses a
+security report with none); every other case is created first and its files are uploaded afterwards. `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
 startup on an ambiguous pair.
 
 | Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
 | `GET /attachments/download/{id}/content?type=` | read | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
-| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline |
+| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline A description image still in the project's drafts folder comes back with `relocateTo`: the first read after its case exists copies the file to the work item's `inline_attachments` folder, calls entity-service `POST /attachments/inline/{id}/relocated`, then removes the draft copy (`relocateInlineImage`); on any failure the draft file is read instead and nothing is lost. |
 | `POST /attachments/delete` `{type, id}` | create (the module's delete is admin only; entity-service enforces uploader-only) | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
 
 - **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no
@@ -1056,6 +1057,12 @@ container only; or `AZURE_STORAGE_KEY` (the account's shared key, full control o
 the secret store, never in the repo or a log. With a container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development).
 `libs/azblobstore` is a separate Go module, required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job
 that deletes orphan files (`POST /attachments/uploads/cleanup`, then `.../acknowledge`).
+
+**Releasing `libs/azblobstore`:** a change to the library reaches this backend only through a version tag. Merge the
+library change to `main`, tag a commit on `main` as `libs/azblobstore/vX.Y.Z` and push the tag, then run
+`go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z` and `go mod tidy` here and commit `go.mod`
+and `go.sum`. `apps/csm-portal/backend` and `apps/customer-portal/backend-v2` must move to the same version together. The
+full steps are in `libs/azblobstore/README.md`, "Releasing a new version". Never move or delete a published tag.
 
 ## Handler conventions
 

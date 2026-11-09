@@ -30,6 +30,14 @@ import "net/http"
 // fails without it.
 const corsAllowedHeaders = "Content-Type, Authorization, x-jwt-assertion, x-user-id-token, X-CSM-Correlation-ID, Range"
 
+// corsExposedHeaders lists response headers the browser's fetch API hides from
+// page JavaScript unless they are exposed. The attachment download reads the
+// size and position of each 8 MiB range from Content-Range, and the file name
+// from Content-Disposition; without them the webapp cannot tell a good range
+// from a broken one, fetches it again until it gives up, and reports "Could not
+// download". Same list as apps/customer-portal/backend-v2.
+const corsExposedHeaders = "X-CSM-Correlation-ID, Content-Range, Content-Disposition, Accept-Ranges"
+
 // corsAllowedMethods covers both listeners: the main REST API's full verb set
 // (PUT included: the Team Schedule's paging contacts, rota access and Alert
 // Settings save with it) and the stream listener's GET. Advertising a method a
@@ -98,6 +106,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 				w.Header().Add("Vary", "Origin")
 				if allowed[origin] {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Expose-Headers", corsExposedHeaders)
 				}
 			}
 

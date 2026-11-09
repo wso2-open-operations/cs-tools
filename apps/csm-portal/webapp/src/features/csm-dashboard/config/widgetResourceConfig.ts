@@ -568,6 +568,21 @@ function widgetPreviewFallbackHref(
   });
 }
 
+/** The case-family resourceTypes: they search `/cases/search` and open the
+ * cases list (or its "View more" preview with the editable `CasesFilterBar`). */
+export const CASE_FAMILY_RESOURCE_TYPE_SET: ReadonlySet<BeWidgetResourceType> = new Set<BeWidgetResourceType>([
+  "case",
+  "service_request",
+  "security_report_analysis",
+  "announcement",
+  "engagement",
+]);
+
+/** Whether `resourceType` is one of the case-family resourceTypes. */
+export function isCaseFamilyResourceType(resourceType: BeWidgetResourceType): boolean {
+  return CASE_FAMILY_RESOURCE_TYPE_SET.has(resourceType);
+}
+
 /**
  * Shared `buildHref` wrapper for every case-family resourceType (`case`,
  * `service_request`, `security_report_analysis`, `engagement`, and
@@ -1126,6 +1141,10 @@ export const WIDGET_RESOURCE_CONFIG: Record<
   },
   time_card: {
     searchEndpoint: "/time-cards/search",
+    // Counts and summed minutes per state / user / project / day; a widget's
+    // `groupBy.measure` picks which one its slices show (see
+    // useWidgetGroupByData). CS engineers and admins only.
+    groupByEndpoint: "/time-cards/aggregate",
     // The preview page's URL round-trip decodes every filter value as a
     // comma-split array; the search's `startDate`/`endDate` are single
     // dates, so unwrap them back (a no-op for a tile's own fetch, whose

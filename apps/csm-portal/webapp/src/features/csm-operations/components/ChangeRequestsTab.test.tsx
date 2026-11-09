@@ -14,11 +14,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import type { ReactElement } from "react";
+import type { JSX, ReactElement } from "react";
 import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import "@testing-library/jest-dom/vitest";
 import ChangeRequestsTab from "@features/csm-operations/components/ChangeRequestsTab";
 import { useSearchChangeRequests } from "@features/csm-operations/api/useSearchChangeRequests";
@@ -705,5 +705,36 @@ describe("ChangeRequestsTab — bulk runs follow the change request as it is now
     mockResult({ data: { changeRequests: [CR], total: 1, limit: 20, offset: 0 }, isFetching: true });
     render(<ChangeRequestsTab />);
     expect(screen.getByRole("checkbox", { name: "Select all change requests on this page" })).toBeDisabled();
+  });
+});
+
+describe("ChangeRequestsTab — rows keep the page's own way back", () => {
+  // Operations reached from a dashboard is `{ from: <dashboard> }`; a row
+  // nests that as `parentState`, so the record's Back can hand it back and
+  // the Operations page keeps its own Back button.
+  function StateProbe(): JSX.Element {
+    const location = useLocation();
+    return <div data-testid="state-probe">{JSON.stringify(location.state)}</div>;
+  }
+
+  it("passes the page's own state as parentState", async () => {
+    showRows([CR]);
+    rtlRender(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={[{ pathname: "/operations", search: "?tab=change-requests", state: { from: "/dashboard/my/d-1" } }]}>
+          <Routes>
+            <Route path="/operations" element={<ChangeRequestsTab />} />
+            <Route path="/operations/change-requests/:id" element={<StateProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("CHG-1001"));
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId("state-probe").textContent ?? "")).toEqual({
+        from: "/operations?tab=change-requests",
+        parentState: { from: "/dashboard/my/d-1" },
+      }),
+    );
   });
 });

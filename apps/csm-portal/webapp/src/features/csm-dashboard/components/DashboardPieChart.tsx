@@ -63,6 +63,11 @@ interface DashboardPieChartProps {
    * across every other dashboard is unaffected. See
    * `BeDashboardWidget.inlineLabels`. */
   inlineLabels?: boolean;
+  /** How a value reads in the labels, legend and centre total (e.g.
+   * `formatHours` for a time card totals widget). Absent shows the plain
+   * number, and the legend's screen-reader text keeps saying "cases", as
+   * before this prop existed. */
+  formatValue?: (value: number) => string;
 }
 
 /** One entry of the custom outer-label render function's own return value —
@@ -101,7 +106,10 @@ export default function DashboardPieChart({
   isError,
   onSliceClick,
   inlineLabels,
+  formatValue,
 }: DashboardPieChartProps): JSX.Element {
+  const shown = (value: number): string => (formatValue ? formatValue(value) : String(value));
+  const spoken = (value: number): string => (formatValue ? formatValue(value) : `${value} cases`);
   const theme = useTheme();
   const isDarkMode = useDarkMode();
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined);
@@ -174,21 +182,23 @@ export default function DashboardPieChart({
 
   const chartData = slices.map((slice) => ({ name: slice.label, value: slice.value }));
 
-  // `inlineLabels` mode's own custom outer-label renderer — standard
-  // recharts "customized pie label" recipe: compute the label's own point
-  // from the wedge's midAngle just past outerRadius, an elbowed leader line
-  // back to the ring, text-anchor flipped between "start"/"end" depending on
-  // which half of the circle the point falls on. No percentage in the
-  // visible text (just "{label} {value}") — that's this widget's own
-  // reference design, unlike the legend rows' "{value} ({pct}%)".
-  //
-  // This label is ALSO this slice's sole accessible/keyboard-operable
-  // target in this mode (role="button", tabIndex, Enter/Space) — there is
-  // no separate legend row to carry that in inlineLabels mode, and a
-  // recharts wedge's own <path> is not natively focusable. The leader
-  // line itself carries no semantics of its own (aria-hidden) so a screen
-  // reader announces the slice exactly once, via this label, rather than
-  // once per decorative line segment.
+  /**
+   * `inlineLabels` mode's own custom outer-label renderer — standard
+   * recharts "customized pie label" recipe: compute the label's own point
+   * from the wedge's midAngle just past outerRadius, an elbowed leader line
+   * back to the ring, text-anchor flipped between "start"/"end" depending on
+   * which half of the circle the point falls on. No percentage in the
+   * visible text (just "{label} {value}") — that's this widget's own
+   * reference design, unlike the legend rows' "{value} ({pct}%)".
+   *
+   * This label is ALSO this slice's sole accessible/keyboard-operable
+   * target in this mode (role="button", tabIndex, Enter/Space) — there is
+   * no separate legend row to carry that in inlineLabels mode, and a
+   * recharts wedge's own <path> is not natively focusable. The leader
+   * line itself carries no semantics of its own (aria-hidden) so a screen
+   * reader announces the slice exactly once, via this label, rather than
+   * once per decorative line segment.
+   */
   const renderOuterLabel = (props: RechartsPieLabelGeometry): JSX.Element | null => {
     const { index = -1 } = props;
     const slice = slices[index];
@@ -225,7 +235,7 @@ export default function DashboardPieChart({
           fill={theme.palette.text.primary}
           role="button"
           tabIndex={0}
-          aria-label={`${slice.label}: ${slice.value} cases (${pct}%)`}
+          aria-label={`${slice.label}: ${spoken(slice.value)} (${pct}%)`}
           style={{ cursor: "pointer", outline: "none" }}
           onMouseEnter={() => setActiveIndex(index)}
           onMouseLeave={() => setActiveIndex(undefined)}
@@ -246,7 +256,7 @@ export default function DashboardPieChart({
             }
           }}
         >
-          {`${slice.label} ${slice.value}`}
+          {`${slice.label} ${shown(slice.value)}`}
         </text>
       </g>
     );
@@ -293,7 +303,13 @@ export default function DashboardPieChart({
           height={chartSize}
           legend={{ show: false }}
           margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-          tooltip={{ show: true, wrapperStyle: { zIndex: 1000 } }}
+          // Same value text as the labels and the legend (hours as "1.7 h"),
+          // as DashboardBarChart's tooltip.
+          tooltip={{
+            show: true,
+            wrapperStyle: { zIndex: 1000 },
+            ...(formatValue ? { formatter: (value: unknown) => formatValue(Number(value)) } : {}),
+          }}
         >
           <Pie
             data={chartData}
@@ -343,7 +359,7 @@ export default function DashboardPieChart({
             pointerEvents: "none",
           }}
         >
-          <Typography variant="h5">{total}</Typography>
+          <Typography variant="h5">{shown(total)}</Typography>
           <Typography variant="caption" color="text.secondary">
             Total
           </Typography>
@@ -359,7 +375,7 @@ export default function DashboardPieChart({
               key={slice.label}
               role="button"
               tabIndex={0}
-              aria-label={`${slice.label}: ${slice.value} cases (${pct}%)`}
+              aria-label={`${slice.label}: ${spoken(slice.value)} (${pct}%)`}
               // stopPropagation for the same reason as the wedge's own
               // onClick above — this row sits inside the tile-level
               // click-through `DashboardWidgetTile` attaches for
@@ -403,7 +419,7 @@ export default function DashboardPieChart({
                 {slice.label}
               </Typography>
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                {slice.value} ({pct}%)
+                {shown(slice.value)} ({pct}%)
               </Typography>
             </Box>
           );

@@ -55,6 +55,10 @@ type fakeGateway struct {
 	lastBody   atomic.Value
 }
 
+// ServeHTTP records the request body, waits out delay (unless the caller
+// gives up first), then answers with status/body when status is set, or with
+// one text block and fixed usage: input 5000, cache write 700, cache read 9000,
+// output 400.
 func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls.Add(1)
 	raw, _ := io.ReadAll(r.Body)
@@ -80,7 +84,8 @@ func (f *fakeGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
 		"content":     []any{map[string]any{"type": "text", "text": f.text}},
 		"stop_reason": stop, "stop_sequence": nil,
-		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400},
+		"usage": map[string]any{"input_tokens": 5000, "output_tokens": 400,
+			"cache_creation_input_tokens": 700, "cache_read_input_tokens": 9000},
 	})
 	_, _ = w.Write(reply)
 }
@@ -119,6 +124,9 @@ func newTestGenerator(t *testing.T, gw *fakeGateway, cat Catalogue, timeout time
 	return NewGenerator(client, "claude-sonnet-5-5", timeout, cat)
 }
 
+// TestGenerateSendsTheCatalogueWithTeamsAndThePrompt: the system prompt is the
+// catalogue with the Teams section, the user message is the prompt, and the
+// result carries the candidate and all four token counts.
 func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	gw := &fakeGateway{text: validGenerated}
 	team := []teams.Team{{Key: "rigel", Name: "Rigel", Family: "cre-abt", Field: "creTeam"}}
@@ -130,8 +138,8 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	if len(res.Candidates) != 1 || string(res.Candidates[0]) != validGenerated || res.Declined != "" {
 		t.Errorf("result = %+v, want the one object", res)
 	}
-	if res.InputTokens != 5000 || res.OutputTokens != 400 {
-		t.Errorf("usage = %d/%d, want 5000/400", res.InputTokens, res.OutputTokens)
+	if res.InputTokens != 5000 || res.OutputTokens != 400 || res.CacheCreationInputTokens != 700 || res.CacheReadInputTokens != 9000 {
+		t.Errorf("usage = %+v, want input 5000, cache write 700, cache read 9000, output 400", res)
 	}
 	system, user, maxTok, model := gw.request(t)
 	if system != teams.WithTeams("CATALOGUE\n", team) || !strings.Contains(system, "| Rigel | `rigel` | CRE ABT | `creTeam` |") {
@@ -139,6 +147,41 @@ func TestGenerateSendsTheCatalogueWithTeamsAndThePrompt(t *testing.T) {
 	}
 	if user != "Top 10 customers by open cases." || maxTok != maxTokens || model != "claude-sonnet-5-5" {
 		t.Errorf("user, max_tokens, model = %q, %d, %q", user, maxTok, model)
+	}
+}
+
+// The system prompt (catalogue and teams) is the same on every call, so it
+// carries the one cache breakpoint; the user message, which changes per
+// request, carries none.
+func TestGenerateCachesTheSystemPromptOnly(t *testing.T) {
+	gw := &fakeGateway{text: validGenerated}
+	if _, err := newTestGenerator(t, gw, fixedCatalogue{text: "CATALOGUE\n"}, 5*time.Second).
+		Generate(context.Background(), Request{Prompt: "My open cases.", Draft: json.RawMessage(`{"displayName":"x"}`)}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var req struct {
+		System []struct {
+			CacheControl map[string]any `json:"cache_control"`
+		} `json:"system"`
+		Messages []struct {
+			Content []struct {
+				CacheControl map[string]any `json:"cache_control"`
+			} `json:"content"`
+		} `json:"messages"`
+	}
+	body, _ := gw.lastBody.Load().(string)
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if len(req.System) != 1 || len(req.System[0].CacheControl) != 1 || req.System[0].CacheControl["type"] != "ephemeral" {
+		t.Errorf("system cache_control = %+v, want exactly {type: ephemeral} (the default 5-minute lifetime)", req.System)
+	}
+	for _, m := range req.Messages {
+		for _, c := range m.Content {
+			if c.CacheControl != nil {
+				t.Errorf("user message cache_control = %v, want none", c.CacheControl)
+			}
+		}
 	}
 }
 
@@ -299,6 +342,14 @@ func TestGenerateLogsTokenUsageForEveryOutcome(t *testing.T) {
 			}
 			if tc.tokens > 0 && l["outputTokens"] != float64(400) {
 				t.Errorf("output tokens = %v, want 400", l["outputTokens"])
+			}
+			// The cache counts, 0 when the call failed.
+			wantWrite, wantRead := float64(700), float64(9000)
+			if tc.tokens == 0 {
+				wantWrite, wantRead = 0, 0
+			}
+			if l["cacheCreationInputTokens"] != wantWrite || l["cacheReadInputTokens"] != wantRead {
+				t.Errorf("cache tokens = %v / %v, want %v / %v", l["cacheCreationInputTokens"], l["cacheReadInputTokens"], wantWrite, wantRead)
 			}
 			if ms, ok := l["durationMs"].(float64); !ok || (tc.name == "ok" && ms < 50) {
 				t.Errorf("durationMs = %v, want the call's time (at least the gateway's 50ms on ok)", l["durationMs"])

@@ -1432,7 +1432,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/StoredAttachmentUploadResponse'
         "400":
-          description: BadRequest
+          description: >-
+            BadRequest. For a comment image, also when both or neither of parentId
+            and projectId is given, or projectId is not a valid UUID.
           content:
             application/json:
               schema:
@@ -6319,12 +6321,24 @@ components:
       description: Which kind of attachment the request is about.
     StoredAttachmentUploadRequest:
       type: object
-      required: [type, parentId, name, sizeBytes]
+      required: [type, name, sizeBytes]
       additionalProperties: false
       properties:
         type:
           $ref: '#/components/schemas/StoredAttachmentType'
-        parentId: {type: string, format: uuid}
+        parentId:
+          type: string
+          format: uuid
+          description: >-
+            The work item (work_item, comment) or deployment the file belongs to. Required for deployment.
+            For a comment image or a work_item attachment give exactly one of parentId and projectId.
+        projectId:
+          type: string
+          format: uuid
+          description: >-
+            Comment images and work_item attachments: the project of a draft that is uploaded before the case
+            exists and linked to it when it is created (a description image through its src, a security report's
+            file through attachmentIds of POST /cases). Give exactly one of parentId and projectId.
         name: {type: string, maxLength: 255}
         contentType:
           type: string
@@ -7169,6 +7183,17 @@ components:
           type: array
           items:
             type: string
+        attachmentIds:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+          description: >-
+            Files uploaded before this request as drafts of projectId (POST /attachments/upload with type
+            work_item and projectId, then the chunks and the confirm). Required (at least one) when type is
+            "security_report_analysis": entity-service refuses a security report without a file and links
+            these to the new case.
 
     CaseCreateResponse:
       type: object

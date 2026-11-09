@@ -17,7 +17,8 @@
 
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from "lexical";
 import { $isImageNode } from "@components/rich-text-editor/ImageNode";
-import { MAX_COMMENT_IMAGES } from "@constants/common";
+import { INLINE_IMAGE_MAX_COUNT } from "@constants/common";
+import { inlineImagesTotalMaxBytes } from "@config/attachmentLimitsConfig";
 import { INSERT_IMAGE_COMMAND } from "@features/support/utils/richTextEditor";
 
 /**
@@ -40,18 +41,43 @@ function $removeImagesBySrc(node: LexicalNode, src: string): void {
 /** A preview (blob:) or an already stored ("/<uuid>") image counts toward the cap. */
 const COUNTED_IMAGE_SRC = /^(blob:|\/[0-9a-f-]{8,}$)/i;
 
-function $countImages(node: LexicalNode): number {
-  if ($isImageNode(node)) return COUNTED_IMAGE_SRC.test(node.getSrc()) ? 1 : 0;
-  if ($isElementNode(node)) {
-    return node.getChildren().reduce((n, child) => n + $countImages(child), 0);
+/** Size of each image added through insertImageWithUpload, by its preview URL. */
+const previewSizes = new Map<string, number>();
+
+function $collectImageSrcs(node: LexicalNode, out: string[]): string[] {
+  if ($isImageNode(node)) {
+    const src = node.getSrc();
+    if (COUNTED_IMAGE_SRC.test(src)) out.push(src);
+  } else if ($isElementNode(node)) {
+    for (const child of node.getChildren()) $collectImageSrcs(child, out);
   }
-  return 0;
+  return out;
 }
 
-/** How many more images the draft can take before it reaches MAX_COMMENT_IMAGES. */
+function imageSrcsIn(editor: LexicalEditor): string[] {
+  return editor.getEditorState().read(() => $collectImageSrcs($getRoot(), []));
+}
+
+/** How many more images the draft can take before it reaches INLINE_IMAGE_MAX_COUNT. */
 export function remainingImageSlots(editor: LexicalEditor): number {
-  const used = editor.getEditorState().read(() => $countImages($getRoot()));
-  return Math.max(0, MAX_COMMENT_IMAGES - used);
+  return Math.max(0, INLINE_IMAGE_MAX_COUNT - imageSrcsIn(editor).length);
+}
+
+/** Total size of the images in the draft that are still local previews, in bytes. */
+export function usedImageBytes(editor: LexicalEditor): number {
+  return imageSrcsIn(editor).reduce((sum, src) => sum + (previewSizes.get(src) ?? 0), 0);
+}
+
+/** How many more bytes of images the draft can take before it reaches the total limit. */
+export function remainingImageBytes(editor: LexicalEditor): number {
+  return Math.max(0, inlineImagesTotalMaxBytes() - usedImageBytes(editor));
+}
+
+/** Why an image of `size` bytes cannot be added to the draft, or null if it can. */
+export function imageRefusal(editor: LexicalEditor, size: number): "count" | "size" | null {
+  if (remainingImageSlots(editor) <= 0) return "count";
+  if (size > remainingImageBytes(editor)) return "size";
+  return null;
 }
 
 /**
@@ -66,9 +92,11 @@ export function insertImageWithUpload(
   onImageUpload: ImageUploadHandler,
 ): void {
   const previewUrl = URL.createObjectURL(file);
+  previewSizes.set(previewUrl, file.size);
   editor.dispatchCommand(INSERT_IMAGE_COMMAND, { src: previewUrl, altText });
   onImageUpload(file, previewUrl).catch(() => {
     editor.update(() => $removeImagesBySrc($getRoot(), previewUrl));
+    previewSizes.delete(previewUrl);
     URL.revokeObjectURL(previewUrl);
   });
 }

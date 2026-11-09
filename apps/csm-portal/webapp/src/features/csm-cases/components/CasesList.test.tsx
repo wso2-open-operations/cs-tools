@@ -18,7 +18,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type { JSX, ReactElement } from "react";
-import { useLocation, MemoryRouter, Route, Routes } from "react-router";
+import { useLocation, MemoryRouter, Route, Routes, type InitialEntry } from "react-router";
 import "@testing-library/jest-dom/vitest";
 
 // CasesList's import tree reads this at module load (apiConfig throws
@@ -42,7 +42,7 @@ vi.mock("@api/backend/client", () => ({
 import CasesList from "@features/csm-cases/components/CasesList";
 import type { CsmCaseRow } from "@features/csm-cases/types/csmCases";
 
-function renderWithProviders(ui: ReactElement, initialEntries: string[]): ReturnType<typeof render> {
+function renderWithProviders(ui: ReactElement, initialEntries: InitialEntry[]): ReturnType<typeof render> {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -75,8 +75,13 @@ const CASE: CsmCaseRow = {
 // navigation without depending on the real detail page's implementation.
 function DetailStub(): JSX.Element {
   const location = useLocation();
-  const from = (location.state as { from?: string } | undefined)?.from;
-  return <div data-testid="from-state">{from ?? "(none)"}</div>;
+  const state = location.state as { from?: string; parentState?: unknown } | undefined;
+  return (
+    <>
+      <div data-testid="from-state">{state?.from ?? "(none)"}</div>
+      <div data-testid="parent-state">{JSON.stringify(state?.parentState)}</div>
+    </>
+  );
 }
 
 describe("CasesList row navigation", () => {
@@ -114,6 +119,41 @@ describe("CasesList row navigation", () => {
     fireEvent.click(screen.getByText("Cluster fails to start"));
 
     expect(screen.getByTestId("from-state")).toHaveTextContent("/cases");
+  });
+
+  it("carries the list's own state forward as parentState, so the list keeps its Back", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={<CasesList cases={[CASE]} isLoading={false} />}
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      [{ pathname: "/cases", search: "?states=open", state: { from: "/dashboard/my/d-1" } }],
+    );
+
+    fireEvent.click(screen.getByText("Cluster fails to start"));
+
+    expect(screen.getByTestId("from-state")).toHaveTextContent("/cases?states=open");
+    expect(screen.getByTestId("parent-state")).toHaveTextContent('{"from":"/dashboard/my/d-1"}');
+  });
+
+  it("carries a null parentState when the list had no state", () => {
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/cases"
+          element={<CasesList cases={[CASE]} isLoading={false} />}
+        />
+        <Route path="/cases/:id" element={<DetailStub />} />
+      </Routes>,
+      ["/cases"],
+    );
+
+    fireEvent.click(screen.getByText("Cluster fails to start"));
+
+    expect(screen.getByTestId("parent-state")).toHaveTextContent("null");
   });
 });
 

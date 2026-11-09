@@ -97,6 +97,39 @@ from its own folder:
 require github.com/wso2-open-operations/cs-tools/libs/azblobstore v0.1.0
 ```
 
-A maintainer publishes a version by tagging a commit `libs/azblobstore/vX.Y.Z`.
 For local work across the repo, use an uncommitted `go.work` that lists the
-backend and this module.
+backend and this module. Never commit `go.work`.
+
+## Releasing a new version
+
+A backend gets the library from a version tag, not from the folder, so a change
+here reaches the backends only after the steps below. Both backends
+(`apps/csm-portal/backend` and `apps/customer-portal/backend-v2`) use this
+module and must be moved to the same version.
+
+1. **Change and test the library** under `libs/azblobstore` (`go test ./...`;
+   the Azurite integration tests need Azurite running).
+2. **Merge the change to `main`.** Tag only a commit that is on `main`.
+3. **Tag it** with the next version and push the tag to the shared repo:
+   ```
+   git tag libs/azblobstore/vX.Y.Z <commit-on-main>
+   git push upstream libs/azblobstore/vX.Y.Z
+   ```
+   The tag name must start with `libs/azblobstore/`, because the module lives in
+   a subfolder. Use a patch version for a fix, a minor version for something new
+   that keeps old callers working, and a major version for a breaking change
+   (a major version of 2 or more also changes the module path to
+   `.../libs/azblobstore/v2`).
+4. **Move both backends to it.** In each backend folder:
+   ```
+   go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z
+   go mod tidy
+   ```
+   Commit the `go.mod` and `go.sum` of both, and check that each backend builds
+   and its tests pass.
+5. **Never move or delete a published tag.** If a version is wrong, publish the
+   next patch version. The first build after a new tag may be slower, while the
+   Go module proxy fetches it.
+
+A backend change that needs new library code cannot be merged before the tag
+exists, or its build fails. Merge and tag the library first, then the backends.

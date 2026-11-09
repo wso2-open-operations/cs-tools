@@ -22,12 +22,28 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
+// isWso2Email reports whether email is a @wso2.com address.
+func isWso2Email(email string) bool {
+	return strings.HasSuffix(strings.ToLower(email), "@wso2.com")
+}
+
+// orgForEmail returns the SCIM organization the user belongs to: "internal"
+// for @wso2.com addresses, "external" for everyone else (customers).
+func orgForEmail(email string) string {
+	if isWso2Email(email) {
+		return orgInternal
+	}
+	return orgExternal
+}
+
 const (
-	// org is fixed to "internal" — matches the org used for WSO2-employee
-	// SCIM lookups in apps/csm-portal/backend's SCIM client.
-	org = "internal"
+	// orgInternal is the SCIM organization holding WSO2-employee (@wso2.com)
+	// users; orgExternal holds customer users. See orgForEmail.
+	orgInternal = "internal"
+	orgExternal = "external"
 
 	domainDefault    = "DEFAULT"
 	attrPhoneNumbers = "phoneNumbers"
@@ -57,7 +73,7 @@ func (c *Client) SearchUser(ctx context.Context, email string) (*UserInfo, error
 			return nil, fmt.Errorf("scim: encode search request: %w", err)
 		}
 
-		raw, err := c.do(ctx, http.MethodPost, "/organizations/"+org+"/users/search", reqBody)
+		raw, err := c.do(ctx, http.MethodPost, "/organizations/"+orgForEmail(email)+"/users/search", reqBody)
 		if err != nil {
 			return nil, err
 		}
@@ -90,7 +106,8 @@ func (c *Client) SearchUser(ctx context.Context, email string) (*UserInfo, error
 
 // UpdateUserPhone updates the mobile phone number for the given user via a
 // SCIM PATCH and returns the updated phone number extracted from the response.
-func (c *Client) UpdateUserPhone(ctx context.Context, userID, mobile string) (*string, error) {
+// email selects the SCIM organization the user lives in.
+func (c *Client) UpdateUserPhone(ctx context.Context, userID, email, mobile string) (*string, error) {
 	reqBody, err := json.Marshal(scimUpdateRequest{
 		PhoneNumber: &scimPhonePayload{Mobile: mobile},
 	})
@@ -98,7 +115,7 @@ func (c *Client) UpdateUserPhone(ctx context.Context, userID, mobile string) (*s
 		return nil, fmt.Errorf("scim: encode update request: %w", err)
 	}
 
-	path := "/organizations/" + org + "/users/" + url.PathEscape(userID)
+	path := "/organizations/" + orgForEmail(email) + "/users/" + url.PathEscape(userID)
 	raw, err := c.do(ctx, http.MethodPatch, path, reqBody)
 	if err != nil {
 		return nil, err

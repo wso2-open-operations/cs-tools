@@ -17,9 +17,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/wso2-open-operations/cs-tools/apps/csm-portal/backend/internal/csmai"
@@ -51,6 +54,29 @@ func TestServiceGenerator_KeepsTheLastValidCandidate(t *testing.T) {
 	}
 	if got.Dashboard.DisplayName != "Top Customers by Open Cases" || ai.gotReq.Prompt != "p" || ai.gotReq.Draft != nil {
 		t.Errorf("got %+v, request %+v", got.Dashboard.DisplayName, ai.gotReq)
+	}
+}
+
+// The "model replied" line carries the call's whole input: the uncached part
+// and the prompt cache's write and read counts.
+func TestServiceGenerator_LogsTheCacheTokenCounts(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ai := &fakeAIClient{res: csmai.DashboardResult{
+		Candidates: []json.RawMessage{json.RawMessage(validGenerated)},
+		Usage:      csmai.Usage{InputTokens: 120, CacheCreationInputTokens: 30, CacheReadInputTokens: 15000, OutputTokens: 400},
+	}}
+	if _, err := NewServiceDashboardGenerator(ai, nil).Generate(context.Background(), "p", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	line := buf.String()
+	for _, want := range []string{"inputTokens=120", "cacheCreationInputTokens=30", "cacheReadInputTokens=15000", "outputTokens=400"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log %q has no %s", line, want)
+		}
 	}
 }
 

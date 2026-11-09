@@ -33,6 +33,7 @@ type mockEntityScheduleClient struct {
 	catalogueFn   func(ctx context.Context) ([]byte, error)
 	assignmentsFn func(ctx context.Context, body []byte) ([]byte, error)
 	allocationsFn func(ctx context.Context, body []byte) ([]byte, error)
+	dismissFn     func(ctx context.Context, body []byte) ([]byte, error)
 	absencesFn    func(ctx context.Context, body []byte) ([]byte, error)
 	onDutyFn      func(ctx context.Context, at string) ([]byte, error)
 
@@ -184,6 +185,13 @@ func (m *mockEntityScheduleClient) SearchScheduleAbsences(ctx context.Context, b
 		return m.absencesFn(ctx, body)
 	}
 	return []byte(`{"absences":[],"count":0}`), nil
+}
+
+func (m *mockEntityScheduleClient) DismissScheduleEngagementAllocation(ctx context.Context, body []byte) ([]byte, error) {
+	if m.dismissFn != nil {
+		return m.dismissFn(ctx, body)
+	}
+	return []byte(`{"days":0}`), nil
 }
 
 func (m *mockEntityScheduleClient) SearchScheduleEngagementAllocations(ctx context.Context, body []byte) ([]byte, error) {
@@ -782,5 +790,50 @@ func TestPagingContactRoutes(t *testing.T) {
 		if strings.Contains(w.Body.String(), "twilio") {
 			t.Fatalf("upstream detail leaked: %s", w.Body.String())
 		}
+	})
+}
+
+func TestDismissScheduleEngagementAllocation(t *testing.T) {
+	const path = "/team-schedule/engagement-allocations/dismiss"
+	const payload = `{"id":"00000000-0000-0000-0000-000000000001","teamKey":"castor","from":"2026-11-02","to":"2026-11-03"}`
+
+	t.Run("requires an authenticated user", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload)))
+		assertStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("rejects a body that is not JSON", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(`nope`))))
+		assertStatus(t, w, http.StatusBadRequest)
+	})
+
+	t.Run("forwards the body and returns the answer as sent", func(t *testing.T) {
+		var captured []byte
+		h := NewScheduleHandler(&mockEntityScheduleClient{dismissFn: func(_ context.Context, body []byte) ([]byte, error) {
+			captured = body
+			return []byte(`{"days":2}`), nil
+		}})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusOK)
+		if string(captured) != payload {
+			t.Fatalf("forwarded %s, want the body unchanged", captured)
+		}
+		if strings.TrimSpace(w.Body.String()) != `{"days":2}` {
+			t.Fatalf("body = %s", w.Body.String())
+		}
+	})
+
+	t.Run("shows the entity service's refusal", func(t *testing.T) {
+		h := NewScheduleHandler(&mockEntityScheduleClient{dismissFn: func(context.Context, []byte) ([]byte, error) {
+			return nil, &apierror.Error{StatusCode: http.StatusForbidden, Body: `{"message":"that engineer is not on castor, so their rota is not yours to change"}`}
+		}})
+		w := httptest.NewRecorder()
+		h.DismissScheduleEngagementAllocation(w, withUser(httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload))))
+		assertStatus(t, w, http.StatusForbidden)
 	})
 }

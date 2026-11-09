@@ -93,12 +93,17 @@ export interface CustomerPortalWindowConfig {
   /**
    * Largest work item or deployment file offered for upload, in MB (a number or
    * numeric string). Defaults to 100, entity-service's own default; set it to
-   * match the service's `ATTACHMENT_MAX_BYTES`. The service stays authoritative.
+   * match the service's `ATTACHMENT_MAX_MB`. The service stays authoritative.
    */
   CUSTOMER_PORTAL_ENTITY_ATTACHMENT_MAX_MB?: number | string;
   /**
-   * Largest pasted or inserted comment image, in MB (a number or numeric
-   * string). Defaults to 10, entity-service's `INLINE_IMAGE_MAX_BYTES` default.
+   * Most the inline images of one comment or description may add up to, in MB
+   * (a number or numeric string). Defaults to 25.
+   */
+  CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB?: number | string;
+  /**
+   * Older name of CUSTOMER_PORTAL_INLINE_IMAGES_TOTAL_MAX_MB, used when that is
+   * not set. It is now the total per comment or description, not per image.
    */
   CUSTOMER_PORTAL_INLINE_IMAGE_MAX_MB?: number | string;
   /**

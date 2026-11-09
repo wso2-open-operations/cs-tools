@@ -272,6 +272,10 @@ export interface EngagementAllocation {
   modeOfDelivery?: string;
   /** Percent of the engineer's time, e.g. 50. */
   utilization?: number;
+  /** Days in the window a lead or rota admin took this allocation off the
+   *  person's roster (YYYY-MM-DD). The roster leaves them out and the cell
+   *  picker offers to restore them. */
+  dismissedDates?: string[];
 }
 
 export interface EngagementAllocationsResponse {

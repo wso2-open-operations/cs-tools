@@ -133,6 +133,33 @@ func TestDraftToDefinition_KeepsDistinctBy(t *testing.T) {
 	}
 }
 
+// A time card totals widget keeps its groupBy measure through the draft:
+// without it, a rename would turn "hours per user" into a card count.
+func TestDraftToDefinition_KeepsTimeCardMeasure(t *testing.T) {
+	const authored = `{"id": "ai-hours", "displayName": "Hours", "type": "cs", "isDefault": false, "targetTeam": "",
+  "isTeamBased": false, "widgets": [{"id": "hours-per-day", "displayName": "My Hours per Day", "resourceType": "time_card",
+  "shape": "bar", "gridWidth": 6, "query": {"userIds": ["__current_user__"], "startDate": "__daysAgo:13__", "endDate": "__today__"},
+  "groupBy": {"field": "day", "measure": "hours"}}]}`
+	loaded, served := servedDraft(t, authored)
+	if !strings.Contains(string(served), `"measure":"hours"`) {
+		t.Fatalf("served form lacks the measure, so the test proves nothing: %s", served)
+	}
+	def, err := draftToDefinition(served)
+	if err != nil {
+		t.Fatalf("draftToDefinition: %v", err)
+	}
+	if got, want := asJSONValue(t, def), asJSONValue(t, []byte(authored)); !reflect.DeepEqual(got, want) {
+		t.Errorf("definition lost or changed the measure\n got: %s\nwant: %s", def, authored)
+	}
+	reloaded, err := dashboard.ParseDashboardsConfig("[" + string(def) + "]")
+	if err != nil {
+		t.Fatalf("load the definition: %v", err)
+	}
+	if !reflect.DeepEqual(reloaded[0], loaded) {
+		t.Errorf("reloaded dashboard differs from the one served\n got: %+v\nwant: %+v", reloaded[0], loaded)
+	}
+}
+
 func TestDraftToDefinition_NoDraft(t *testing.T) {
 	for _, current := range []string{"", "  ", "null", " null "} {
 		def, err := draftToDefinition(json.RawMessage(current))

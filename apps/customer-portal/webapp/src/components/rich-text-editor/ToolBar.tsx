@@ -103,10 +103,10 @@ import {
 } from "@lexical/rich-text";
 import { $createParagraphNode } from "lexical";
 
-import { imageCountExceededMessage } from "@constants/common";
+import { imageCountExceededMessage, imageTotalSizeExceededMessage } from "@constants/common";
 import {
   insertImageWithUpload,
-  remainingImageSlots,
+  imageRefusal,
   type ImageUploadHandler,
 } from "@components/rich-text-editor/localImageUpload";
 
@@ -114,6 +114,7 @@ export type ToolbarVariant = "full" | "describeIssue";
 
 const Toolbar = ({
   onAttachmentClick,
+  attachDisabledReason,
   disabled = false,
   variant = "full",
   showKeyboardHint = false,
@@ -122,6 +123,8 @@ const Toolbar = ({
   onPasteError,
 }: {
   onAttachmentClick?: () => void;
+  /** Why attaching is off (the form is full): the button is disabled and says so. */
+  attachDisabledReason?: string;
   disabled?: boolean;
   variant?: ToolbarVariant;
   showKeyboardHint?: boolean;
@@ -129,7 +132,7 @@ const Toolbar = ({
   /** See Editor's `onImageUpload`: images are uploaded instead of read as base64. */
   onImageUpload?: ImageUploadHandler;
   /** Told when an image is refused because the draft already holds the maximum. */
-  onPasteError?: (reason: "count") => void;
+  onPasteError?: (reason: "count" | "size") => void;
 }) => {
   const isDescribeIssue = variant === "describeIssue";
   const [editor] = useLexicalComposerContext();
@@ -293,9 +296,15 @@ const Toolbar = ({
         return;
       }
       if (onImageUpload) {
-        if (remainingImageSlots(editor) <= 0) {
-          if (onPasteError) onPasteError("count");
-          else showError(imageCountExceededMessage());
+        const refusal = imageRefusal(editor, file.size);
+        if (refusal) {
+          if (onPasteError) onPasteError(refusal);
+          else
+            showError(
+              refusal === "count"
+                ? imageCountExceededMessage()
+                : imageTotalSizeExceededMessage(),
+            );
           resetInput();
           return;
         }
@@ -866,17 +875,21 @@ const Toolbar = ({
               </Tooltip>
 
               {onAttachmentClick && (
-                <Tooltip title="Attach File">
-                  <ToggleButton
-                    size="small"
-                    value="attachment"
-                    onClick={() => {
-                      focusEditor();
-                      onAttachmentClick();
-                    }}
-                  >
-                    <Paperclip size={16} />
-                  </ToggleButton>
+                <Tooltip title={attachDisabledReason ?? "Attach File"}>
+                  <span>
+                    <ToggleButton
+                      size="small"
+                      value="attachment"
+                      disabled={!!attachDisabledReason}
+                      aria-label={attachDisabledReason ?? "Attach File"}
+                      onClick={() => {
+                        focusEditor();
+                        onAttachmentClick();
+                      }}
+                    >
+                      <Paperclip size={16} />
+                    </ToggleButton>
+                  </span>
                 </Tooltip>
               )}
             </>

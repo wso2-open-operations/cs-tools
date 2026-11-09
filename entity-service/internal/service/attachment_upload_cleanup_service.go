@@ -43,6 +43,16 @@ const (
 // is removed: the time to write a comment, with room to spare.
 const unlinkedImageAge = 24 * time.Hour
 
+const (
+	// reportDraftUsableAge is how old a security report's draft file may be and
+	// still be used to create a case.
+	reportDraftUsableAge = 24 * time.Hour
+	// reportDraftCleanupAge is when an unlinked draft is handed over for removal.
+	// It is an hour past reportDraftUsableAge, so a draft is never linked to a
+	// case after its file was handed over to be deleted.
+	reportDraftCleanupAge = reportDraftUsableAge + time.Hour
+)
+
 type attachmentUploadCleanupService struct {
 	repo   repository.StoredAttachmentRepository
 	access AccessService
@@ -95,7 +105,7 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 			// DELETED row is never listed again, so a key in a lost response would be
 			// lost with it. The row stays COMPLETE and unlinked, so every run lists it
 			// again until the caller acknowledges it.
-			res.Orphans = append(res.Orphans, domain.OrphanedImage{ID: img.ID, StorageKey: *img.StorageKey})
+			res.Orphans = append(res.Orphans, domain.OrphanedImage{ID: img.ID, Type: domain.StoredAttachmentComment, StorageKey: *img.StorageKey})
 			continue
 		}
 		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentComment, img.ID, "inline-image-cleanup"); err != nil {
@@ -106,17 +116,38 @@ func (s *attachmentUploadCleanupService) CleanupUploads(ctx context.Context) (do
 		}
 		res.ImagesRemoved++
 	}
+	// A security report's files that were uploaded and never linked to a case: the
+	// form was abandoned, or the create was refused. Handled like the images above.
+	drafts, err := s.repo.ListUnlinkedReportDrafts(sys, s.now().Add(-reportDraftCleanupAge), uploadCleanupMaxPerRun)
+	if err != nil {
+		return res, err
+	}
+	for _, d := range drafts {
+		if d.StorageKey != nil && *d.StorageKey != "" {
+			res.Orphans = append(res.Orphans, domain.OrphanedImage{ID: d.ID, Type: domain.StoredAttachmentWorkItem, StorageKey: *d.StorageKey})
+			continue
+		}
+		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentWorkItem, d.ID, "report-draft-cleanup"); err != nil {
+			res.ReportDraftsFailed++
+			slog.WarnContext(ctx, "could not mark an unlinked report draft deleted", "attachmentId", d.ID, "error", err)
+			s.deferRetry(ctx, sys, domain.StoredAttachmentWorkItem, d.ID)
+			continue
+		}
+		res.ReportDraftsRemoved++
+	}
 	slog.InfoContext(ctx, "attachment upload cleanup",
 		"audit", true, "action", "upload-cleanup", "callerId", auditCaller(ctx),
 		"correlationId", middleware.CorrelationIDFromContext(ctx),
 		"found", res.Found, "cleaned", res.Cleaned, "failed", res.Failed,
-		"imagesRemoved", res.ImagesRemoved, "imagesFailed", res.ImagesFailed)
+		"imagesRemoved", res.ImagesRemoved, "imagesFailed", res.ImagesFailed,
+		"reportDraftsRemoved", res.ReportDraftsRemoved, "reportDraftsFailed", res.ReportDraftsFailed,
+		"orphans", len(res.Orphans))
 	return res, nil
 }
 
 // AcknowledgeOrphans implements AttachmentUploadCleanupService.
 //
-// Only an image that is still an orphan is marked: the unlinked images are read
+// Only an image or report file that is still an orphan is marked: the unlinked ones are read
 // again and the request is intersected with them, so an id that was linked to a
 // comment since, was already acknowledged, or never was an orphan is skipped
 // instead of deleted. The caller cannot use this to delete an arbitrary image.
@@ -139,9 +170,16 @@ func (s *attachmentUploadCleanupService) AcknowledgeOrphans(ctx context.Context,
 	if err != nil {
 		return domain.AcknowledgeOrphansResult{}, err
 	}
-	orphan := make(map[string]bool, len(unlinked))
+	drafts, err := s.repo.ListUnlinkedReportDrafts(sys, s.now().Add(-reportDraftCleanupAge), uploadCleanupMaxPerRun)
+	if err != nil {
+		return domain.AcknowledgeOrphansResult{}, err
+	}
+	orphan := make(map[string]domain.StoredAttachmentKind, len(unlinked)+len(drafts))
 	for _, img := range unlinked {
-		orphan[strings.ToLower(img.ID)] = true
+		orphan[strings.ToLower(img.ID)] = domain.StoredAttachmentComment
+	}
+	for _, d := range drafts {
+		orphan[strings.ToLower(d.ID)] = domain.StoredAttachmentWorkItem
 	}
 
 	var res domain.AcknowledgeOrphansResult
@@ -152,11 +190,16 @@ func (s *attachmentUploadCleanupService) AcknowledgeOrphans(ctx context.Context,
 			continue
 		}
 		seen[key] = true
-		if !orphan[key] {
+		kind, ok := orphan[key]
+		if !ok {
 			res.Skipped++
 			continue
 		}
-		if _, err := s.repo.MarkDeleted(sys, domain.StoredAttachmentComment, id, "inline-image-cleanup"); err != nil {
+		by := "inline-image-cleanup"
+		if kind == domain.StoredAttachmentWorkItem {
+			by = "report-draft-cleanup"
+		}
+		if _, err := s.repo.MarkDeleted(sys, kind, id, by); err != nil {
 			return res, err
 		}
 		res.Acknowledged++

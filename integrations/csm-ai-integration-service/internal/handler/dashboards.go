@@ -102,8 +102,10 @@ type generateResponse struct {
 }
 
 type usage struct {
-	InputTokens  int64 `json:"inputTokens"`
-	OutputTokens int64 `json:"outputTokens"`
+	InputTokens              int64 `json:"inputTokens"`
+	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
+	OutputTokens             int64 `json:"outputTokens"`
 }
 
 type errorBody struct {
@@ -141,7 +143,12 @@ func (h *DashboardHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, generateResponse{
 		Declined:   res.Declined,
 		Candidates: res.Candidates,
-		Usage:      usage{InputTokens: res.InputTokens, OutputTokens: res.OutputTokens},
+		Usage: usage{
+			InputTokens:              res.InputTokens,
+			CacheCreationInputTokens: res.CacheCreationInputTokens,
+			CacheReadInputTokens:     res.CacheReadInputTokens,
+			OutputTokens:             res.OutputTokens,
+		},
 	})
 }
 
