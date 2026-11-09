@@ -291,7 +291,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 	dataQuery := fmt.Sprintf(
 		`SELECT p.id, p.account_id, p.sf_id, p.name, p.key, pt.name,
 		        p.start_date, p.end_date, p.created_on, p.updated_on,
-		        `+projectClosureColumns+`,
+		        `+projectClosureColumns+`, p.suspension_process_overridden,
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        p.onboarding_go_live_date, p.verification_enabled,
 		        a.id, a.name, a.region, a.sub_region, `+accountIsPartnerColumn+`,
@@ -378,6 +378,7 @@ func (r *projectRepo) SearchProjects(ctx context.Context, req domain.SearchProje
 				&p.StartDate, &p.EndDate, &p.CreatedOn, &p.UpdatedOn,
 				&p.ClosureState, &p.EndDateClosureState, &p.InvoiceDueDateClosureState,
 				&p.ComplianceViolationClosureState, &p.ComplianceViolationDate, &p.SuspensionProcessState,
+				&p.SuspensionProcessOverridden,
 				&p.OnboardingStatus, &p.GoLiveDate, &verificationEnabled,
 				&aID, &aName, &acct.Region, &acct.SubRegion, &acct.IsPartner,
 				&ownerID, &ownerName, &ownerEmail,
@@ -503,7 +504,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		        -- confirmed against a real ServiceNow payload and Postgres's own INITCAP
 		        -- behavior for both before picking these. A bare ::TEXT cast leaves both
 		        -- uppercase, matching neither.
-		        `+projectClosureColumns+`,
+		        `+projectClosureColumns+`, p.suspension_process_overridden,
 		        INITCAP(REPLACE(p.onboarding_status::TEXT, '_', '-')),
 		        `+accountIsPartnerColumn+`,
 		        p.onboarding_go_live_plan_date, p.onboarding_go_live_date, p.onboarding_expiry_date,
@@ -554,6 +555,7 @@ func (r *projectRepo) GetProjectByID(ctx context.Context, id string, scope Searc
 		&projectTypeName, &hasSr, &verificationEnabled,
 		&v.ClosureState, &v.EndDateClosureState, &v.InvoiceDueDateClosureState,
 		&v.ComplianceViolationClosureState, &v.ComplianceViolationDate, &v.SuspensionProcessState,
+		&v.SuspensionProcessOverridden,
 		&v.OnboardingStatus, &v.Account.IsPartner,
 		&v.GoLivePlanDate, &v.GoLiveDate, &v.OnboardingExpiryDate,
 		&v.OnboardingStartDate,

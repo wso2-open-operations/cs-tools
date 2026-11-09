@@ -1496,6 +1496,13 @@ type ProjectClosureFields struct {
 	// does not interpret, validate, or impose any schema on its contents — it is
 	// passed through opaquely as written by that SN flow (ServiceNow data source only).
 	SuspensionProcessState json.RawMessage `json:"suspensionProcessState"`
+	// SuspensionProcessOverridden is the CSM-owned "suspension process
+	// overridden" flag (project.suspension_process_overridden, migration 0281).
+	// When true the automatic Account Closure Process must not evaluate the
+	// project. Always present, false by default. Read-only: there is no write
+	// path yet, it is set directly in the database or by the data sync. The
+	// legacy data source carries no such field, so it is always false there.
+	SuspensionProcessOverridden bool `json:"suspensionProcessOverridden"`
 }
 
 // ProjectDetailsView is the enriched response shape for GET /projects/{id}.

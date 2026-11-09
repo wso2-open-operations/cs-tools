@@ -22385,6 +22385,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22509,6 +22512,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
 
     SearchProjectsResponse:
       type: object

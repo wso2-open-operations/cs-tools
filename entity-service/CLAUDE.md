@@ -1040,6 +1040,12 @@ reopen logs a WARN at every start as the reminder.
   not link the invoice to a project yet (the invoice, its opportunity or the link is missing), it falls
   back to "does any project have one", so the local tables can only narrow the check. A `Project__c` event costs one database read when the project
   is not ACP-suspended.
+- **Suspension process overridden (`project.suspension_process_overridden`, migration 0281).** A
+  CSM-owned `BOOLEAN NOT NULL DEFAULT FALSE`: when true, ACP must not evaluate the project. Exposed as
+  `suspensionProcessOverridden` (always present, `false` by default) on `GET /projects/{id}` and
+  `POST /projects/search` (carried by `domain.ProjectClosureFields`). **Read-only for now**: no PATCH
+  path; set directly in the database or by the data sync. The legacy data source carries no such field,
+  so it always reads `false` there. This reopen check does not read it yet.
 - **Only what ACP suspended.** A track is a candidate only when its closure state is suspended AND
   its `suspension_process_state` section (`based_on_subscription_end_date` /
   `based_on_due_invoices`) has `event_type: "suspend"`, which ACP writes when it suspends. A project
