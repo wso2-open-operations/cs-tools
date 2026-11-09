@@ -38,6 +38,11 @@ let uploads: readonly CaseUpload[] = [];
 let nextKey = 1;
 const listeners = new Set<() => void>();
 
+/**
+ * Replaces the list of uploads and tells every subscriber.
+ *
+ * @param next - The new list; it is kept as is, never mutated.
+ */
 function publish(next: readonly CaseUpload[]): void {
   uploads = next;
   listeners.forEach((listener) => listener());
