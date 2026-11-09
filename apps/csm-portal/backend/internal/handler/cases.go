@@ -1012,24 +1012,28 @@ func (h *CaseHandler) AggregateFeedback(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
-// withDeletedAttachments returns body with entity-service's `includeDeleted` set
-// to whether the caller holds PermAdmin, taken from their token roles, so an
-// admin's attachment list also carries the deleted attachments (with who deleted
-// them and when). Whatever the browser sent under any spelling of that key is
-// dropped first, so only this decision reaches entity-service, which honours it
-// only from this backend. A nil guard means nobody is an admin here.
+// withDeletedAttachments returns body with entity-service's `deletedOnly` kept
+// only when the browser asked for it (the admin's Deleted tab) AND the caller
+// holds PermAdmin, taken from their token roles; for anyone else the key is
+// dropped, so they get the ordinary list. Whatever the browser sent under any
+// spelling of that key is removed first, so only this decision reaches
+// entity-service, which honours it only from this backend. A nil guard means
+// nobody is an admin here.
 func (h *CaseHandler) withDeletedAttachments(body []byte, roles []string) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(body, &fields); err != nil {
 		return nil, err
 	}
-	for key := range fields {
-		if strings.EqualFold(key, "includeDeleted") {
+	asked := false
+	for key, raw := range fields {
+		if strings.EqualFold(key, "deletedOnly") {
+			var v bool
+			asked = asked || (json.Unmarshal(raw, &v) == nil && v)
 			delete(fields, key)
 		}
 	}
-	if h.access != nil && h.access.Permits(PermAdmin, roles) {
-		fields["includeDeleted"] = json.RawMessage("true")
+	if asked && h.access != nil && h.access.Permits(PermAdmin, roles) {
+		fields["deletedOnly"] = json.RawMessage("true")
 	}
 	return json.Marshal(fields)
 }
