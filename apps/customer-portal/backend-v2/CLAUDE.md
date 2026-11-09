@@ -1021,15 +1021,14 @@ struct actually carries it), and a stray extra check on `PATCH` would just be de
    declare `403` since `mapUpstreamError` can return it.
 9. **gosec** — run `gosec -fmt=text ./...` (must report 0 issues) before opening a PR.
 
-## Stored attachments (Azure Blob Storage, authorized by entity-service)
+## Stored attachments (held by entity-service, in Azure Blob Storage)
 
-Work item, comment-image and deployment attachments are stored in Azure Blob Storage. This service holds the
-Azure credentials and moves the bytes (`internal/handler/stored_attachments_blob.go`, `libs/azblobstore`);
-entity-service never touches a file. It keeps the access check (row-level security), the size/type rules and the
-storage key, and hands the key to this service on calls the browser cannot make
-(`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is
-for this process only: it is never put in a response, a header or a log.** The handlers are
-`internal/handler/stored_attachments.go` (start and delete, relayed) and `stored_attachments_blob.go` (bytes);
+Work item, comment-image and deployment attachments live in Azure Blob Storage, and **entity-service is the only
+service that talks to it**: this backend holds no storage credential, imports no storage library and never sees a
+storage key. A browser's chunk is forwarded to entity-service as it arrives and a download is streamed back from it;
+entity-service keeps the access check (row-level security, with the caller's own token, which `entity.Client`
+forwards as `x-user-id-token`), the size/type rules and the files. The handlers are
+`internal/handler/stored_attachments.go` (start and delete, relayed) and `stored_attachments_blob.go` (the file routes, which forward bytes);
 the entity-service calls are in `internal/entity/stored_attachments.go`.
 They are the only attachment routes besides the two listings (`GET /cases/{id}/attachments`,
 `GET /deployments/{deploymentId}/attachments`, which read entity-service's `POST /attachments/search`). There is no
@@ -1042,12 +1041,12 @@ startup on an ambiguous pair.
 | Route | Module / action | Does |
 |---|---|---|
 | `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
-| `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 8 MiB, index within the size limit) |
-| `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
-| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
-| `GET /attachments/download/{id}/content?type=` | read | locate, then stream, single `Range` supported, always `attachment` + `application/octet-stream` |
-| `GET /attachments/inline/{id}/content` | cases read | locate, then stream; only four image types are shown inline A description image still in the project's drafts folder comes back with `relocateTo`: the first read after its case exists copies the file to the work item's `inline_attachments` folder, calls entity-service `POST /attachments/inline/{id}/relocated`, then removes the draft copy (`relocateInlineImage`); on any failure the draft file is read instead and nothing is lost. |
-| `POST /attachments/delete` `{type, id}` | create (the module's delete is admin only; entity-service enforces uploader-only) | locate, entity-service deletes the row (uploader only), then the file is removed best effort |
+| `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | checks the id, index, `type` and a declared length of at most 8 MiB, then forwards the bytes to entity-service (`PutStoredAttachmentChunk`); entity-service checks access again for every chunk |
+| `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume (entity-service's answer, as it is) |
+| `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | forwards only `type` and `chunks`: entity-service commits the blocks, reads the real size, runs the checks and removes a file it refuses |
+| `GET /attachments/download/{id}/content?type=` | read | streams entity-service's response, single `Range` supported, always `attachment` + `application/octet-stream` |
+| `GET /attachments/inline/{id}/content` | cases read | streams entity-service's response; only four image types are shown inline. Entity-service moves a description image from the project's drafts folder to its work item's on the first read after its case exists |
+| `POST /attachments/delete` `{type, id}` | create (the module's delete is admin only; entity-service enforces uploader-only) | relayed: entity-service deletes the row (uploader only) and then the file |
 
 - **Entity-service decides who may see an attachment** (Postgres row-level security), so these handlers add no
   `authorizeAttachmentAccess`-style lookups. The only check here is the portal's module permission, which depends
@@ -1062,20 +1061,16 @@ startup on an ambiguous pair.
   and `Cache-Control: private, max-age=300`. The webapp uses the route as the `<img src>`: the session
   authenticates it and entity-service checks access on every load.
 
-Config (all required at startup; the service exits if the container cannot be reached): `AZURE_STORAGE_ACCOUNT` and
-`AZURE_STORAGE_CONTAINER`, plus how to sign in: **an Entra app (recommended)**,
-`AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET`, with the role "Storage Blob Data Contributor" on the
-container only; or `AZURE_STORAGE_KEY` (the account's shared key, full control of the account); or
-`AZURE_STORAGE_CONNECTION_STRING` (Azurite). Optional `AZURE_STORAGE_ENDPOINT` for Azurite. The secret and the key live in
-the secret store, never in the repo or a log. With a container-scoped role the container must already exist: the backend only checks it is reachable at startup, and creates it only when `AZURE_STORAGE_CREATE_CONTAINER=true` (Azurite, development).
-`libs/azblobstore` is a separate Go module, required by version (`libs/azblobstore/v0.1.0`). Not done yet: the job
-that deletes orphan files (`POST /attachments/uploads/cleanup`, then `.../acknowledge`).
+- **The file client.** `entity.Client` has a second `http.Client` (`fileHTTP`) for these routes, with **no total
+  timeout** (the ordinary 60 s one would cut off a large download or a slow chunk; `TestFileClientHasNoTotalTimeout`).
+  Each file call is bounded by a deadline the handler puts on its context (`attachmentChunkDeadline` 10 min per
+  chunk, `attachmentStreamWriteDeadline` 30 min per download), and the handler extends the server's read and write
+  deadlines for the same calls. Only the file's own headers are passed on (`streamedHeaders`);
+  `X-Content-Type-Options: nosniff` and a sandboxing CSP are always set here too. A 416 from entity-service becomes
+  `entity.RangeNotSatisfiableError` so its `Content-Range` reaches the browser.
 
-**Releasing `libs/azblobstore`:** a change to the library reaches this backend only through a version tag. Merge the
-library change to `main`, tag a commit on `main` as `libs/azblobstore/vX.Y.Z` and push the tag, then run
-`go get github.com/wso2-open-operations/cs-tools/libs/azblobstore@vX.Y.Z` and `go mod tidy` here and commit `go.mod`
-and `go.sum`. `apps/csm-portal/backend` and `apps/customer-portal/backend-v2` must move to the same version together. The
-full steps are in `libs/azblobstore/README.md`, "Releasing a new version". Never move or delete a published tag.
+**Config.** None of this backend's own: `AZURE_STORAGE_*` belong to entity-service. The orphan-file cleanup
+(`POST /attachments/uploads/cleanup`) is entity-service's too.
 
 ## Handler conventions
 
