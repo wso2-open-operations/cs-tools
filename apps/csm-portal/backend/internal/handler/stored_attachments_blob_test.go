@@ -156,7 +156,7 @@ func TestBlobPutChunk_Refusals(t *testing.T) {
 		t.Errorf("no length: %d, forwarded %+v", rec.Code, e.put)
 	}
 	big := httptest.NewRequest(http.MethodPut, url, strings.NewReader("x"))
-	big.ContentLength = maxChunkBodyBytes + 1
+	big.ContentLength = ChunkBytes + 1
 	rec = httptest.NewRecorder()
 	mux.ServeHTTP(rec, withUser(big))
 	if rec.Code != http.StatusRequestEntityTooLarge || e.put.id != "" {
