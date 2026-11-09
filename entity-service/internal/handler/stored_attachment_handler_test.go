@@ -18,10 +18,14 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/service"
+	"github.com/wso2-open-operations/cs-tools/libs/azblobstore"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
@@ -71,14 +75,20 @@ func (f *fakeStoredAttachmentSvc) ConfirmUpload(_ context.Context, req domain.Co
 
 func serveStored(t *testing.T, svc *fakeStoredAttachmentSvc, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	h := NewStoredAttachmentHandler(svc)
+	return serveStoredWith(t, svc, &fakeFiles{}, method, target, body)
+}
+
+func serveStoredWith(t *testing.T, svc *fakeStoredAttachmentSvc, files *fakeFiles, method, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	h := NewStoredAttachmentHandler(svc).WithFiles(files)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /attachments/upload", h.InitiateUpload)
 	mux.HandleFunc("POST /attachments/upload/{id}/confirm", h.ConfirmUpload)
 	mux.HandleFunc("POST /attachments/delete", h.DeleteAttachment)
-	mux.HandleFunc("POST /attachments/upload/{id}/authorize", h.AuthorizeUpload)
-	mux.HandleFunc("POST /attachments/locate", h.LocateAttachment)
-	mux.HandleFunc("GET /attachments/inline/{id}/location", h.InlineImageLocation)
+	mux.HandleFunc("PUT /attachments/upload/{id}/chunks/{index}", h.PutChunk)
+	mux.HandleFunc("GET /attachments/upload/{id}/chunks", h.ListChunks)
+	mux.HandleFunc("GET /attachments/download/{id}/content", h.DownloadAttachment)
+	mux.HandleFunc("GET /attachments/inline/{id}/content", h.InlineImageContent)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(method, target, strings.NewReader(body)))
 	return rec
@@ -96,16 +106,16 @@ func TestStoredAttachmentHandler_InitiateReturns201(t *testing.T) {
 }
 
 func TestStoredAttachmentHandler_ConfirmTakesTheIdFromThePath(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment"}`)
+	files := &fakeFiles{}
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment","chunks":3}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if svc.confirm.ID != "abc-123" || svc.confirm.Kind != domain.StoredAttachmentDeployment {
-		t.Errorf("confirm request = %+v", svc.confirm)
+	if files.complete.ID != "abc-123" || files.complete.Kind != domain.StoredAttachmentDeployment || files.complete.Chunks != 3 {
+		t.Errorf("complete request = %+v", files.complete)
 	}
 	// An id in the body is not a field: the path is the only source.
-	rec = serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment","id":"other"}`)
+	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodPost, "/attachments/upload/abc-123/confirm", `{"type":"deployment","chunks":1,"id":"other"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("an id in the body gave %d, want 400 (unknown field)", rec.Code)
 	}
@@ -122,7 +132,7 @@ func TestStoredAttachmentHandler_MapsServiceErrorsToStatuses(t *testing.T) {
 		"no token":    {&apierror.UnauthorizedError{Msg: "x"}, http.StatusUnauthorized},
 		"storage":     {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
 	} {
-		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/upload/00000000-0000-0000-0000-000000000001/confirm", `{"type":"work_item"}`)
+		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodPost, "/attachments/upload/00000000-0000-0000-0000-000000000001/confirm", `{"type":"work_item","chunks":1}`)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}
@@ -130,13 +140,13 @@ func TestStoredAttachmentHandler_MapsServiceErrorsToStatuses(t *testing.T) {
 }
 
 func TestStoredAttachmentHandler_DeleteReturns204WithNoBody(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/delete", `{"type":"work_item","id":"abc"}`)
+	files := &fakeFiles{}
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodPost, "/attachments/delete", `{"type":"work_item","id":"abc"}`)
 	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
 		t.Fatalf("status = %d body = %q, want 204 and no body", rec.Code, rec.Body.String())
 	}
-	if svc.deleted.Kind != domain.StoredAttachmentWorkItem || svc.deleted.ID != "abc" {
-		t.Errorf("request = %+v", svc.deleted)
+	if files.deleted.Kind != domain.StoredAttachmentWorkItem || files.deleted.ID != "abc" {
+		t.Errorf("request = %+v", files.deleted)
 	}
 }
 
@@ -150,7 +160,7 @@ func TestStoredAttachmentHandler_DeleteMapsErrors(t *testing.T) {
 		"not found":        {&apierror.NotFoundError{Msg: "x"}, http.StatusNotFound},
 		"storage":          {&apierror.ServiceUnavailableError{Msg: "x"}, http.StatusServiceUnavailable},
 	} {
-		rec := serveStored(t, &fakeStoredAttachmentSvc{err: tc.err}, http.MethodPost, "/attachments/delete", `{"type":"deployment","id":"a"}`)
+		rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: tc.err}, http.MethodPost, "/attachments/delete", `{"type":"deployment","id":"a"}`)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", name, rec.Code, tc.want)
 		}
@@ -182,79 +192,6 @@ func TestStoredAttachmentHandler_CleanupUploads(t *testing.T) {
 	h.CleanupUploads(rec, httptest.NewRequest(http.MethodPost, "/attachments/uploads/cleanup", nil))
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("a restricted caller gave %d, want 403", rec.Code)
-	}
-}
-
-func TestStoredAttachmentHandler_AuthorizeTakesTheIdFromThePath(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/authorize", `{"type":"work_item"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if svc.authorize.ID != "abc-123" || svc.authorize.Kind != domain.StoredAttachmentWorkItem {
-		t.Errorf("authorize request = %+v", svc.authorize)
-	}
-	// The response carries an internal storage key, so it must never be cached.
-	if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"storageKey"`) {
-		t.Errorf("headers = %v body = %s", rec.Header(), rec.Body.String())
-	}
-	// An id in the body is not a field: the path is the only source.
-	rec = serveStored(t, svc, http.MethodPost, "/attachments/upload/abc-123/authorize", `{"type":"work_item","id":"other"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("an id in the body gave %d, want 400 (unknown field)", rec.Code)
-	}
-}
-
-func TestStoredAttachmentHandler_LocateReturnsTheKeyUncached(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodPost, "/attachments/locate", `{"type":"deployment","id":"d-1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if svc.locate.Kind != domain.StoredAttachmentDeployment || svc.locate.ID != "d-1" {
-		t.Errorf("locate request = %+v", svc.locate)
-	}
-	if rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"storageKey"`) {
-		t.Errorf("headers = %v body = %s", rec.Header(), rec.Body.String())
-	}
-}
-
-func TestStoredAttachmentHandler_InlineImageLocation(t *testing.T) {
-	svc := &fakeStoredAttachmentSvc{}
-	rec := serveStored(t, svc, http.MethodGet, "/attachments/inline/img-1/location", "")
-	if rec.Code != http.StatusOK || svc.inlineID != "img-1" {
-		t.Fatalf("status = %d, id = %q", rec.Code, svc.inlineID)
-	}
-	if rec.Header().Get("Cache-Control") != "no-store" {
-		t.Errorf("Cache-Control = %q, want no-store", rec.Header().Get("Cache-Control"))
-	}
-
-	// A removed image is a 410 here too, so the backend can tell the browser.
-	gone := &fakeStoredAttachmentSvc{err: &apierror.GoneError{Msg: "this image was removed", Code: apierror.CodeAttachmentRemoved}}
-	rec = serveStored(t, gone, http.MethodGet, "/attachments/inline/img-1/location", "")
-	if rec.Code != http.StatusGone {
-		t.Errorf("a removed image gave %d, want 410", rec.Code)
-	}
-}
-
-func TestStoredAttachmentHandler_BackendCallsMapErrors(t *testing.T) {
-	for name, tc := range map[string]struct {
-		err  error
-		want int
-	}{
-		"hidden or not theirs": {&apierror.NotFoundError{Msg: "attachment not found"}, http.StatusNotFound},
-		"already confirmed":    {&apierror.ConflictError{Msg: "this upload was already confirmed"}, http.StatusConflict},
-		"over the link budget": {&apierror.TooManyRequestsError{Msg: "slow down"}, http.StatusTooManyRequests},
-	} {
-		t.Run(name, func(t *testing.T) {
-			svc := &fakeStoredAttachmentSvc{err: tc.err}
-			if rec := serveStored(t, svc, http.MethodPost, "/attachments/upload/x/authorize", `{"type":"work_item"}`); rec.Code != tc.want {
-				t.Errorf("authorize status = %d, want %d", rec.Code, tc.want)
-			}
-			if rec := serveStored(t, svc, http.MethodPost, "/attachments/locate", `{"type":"work_item","id":"x"}`); rec.Code != tc.want {
-				t.Errorf("locate status = %d, want %d", rec.Code, tc.want)
-			}
-		})
 	}
 }
 
@@ -304,3 +241,172 @@ func TestStoredAttachmentHandler_AcknowledgeOrphans(t *testing.T) {
 		t.Errorf("without the service gave %d, want 404", rec.Code)
 	}
 }
+
+// fakeFiles is a StoredAttachmentFileService that records what it was asked and
+// serves a fixed file.
+type fakeFiles struct {
+	complete domain.CompleteAttachmentUploadRequest
+	deleted  domain.DeleteStoredAttachmentRequest
+	put      struct {
+		kind  domain.StoredAttachmentKind
+		id    string
+		index int
+		size  int64
+		data  string
+	}
+	rangeHeader string
+	workItemID  string
+	file        string
+	partial     bool
+	err         error
+}
+
+func (f *fakeFiles) PutChunk(_ context.Context, kind domain.StoredAttachmentKind, id string, index int, size int64, body io.Reader) error {
+	b, _ := io.ReadAll(body)
+	f.put.kind, f.put.id, f.put.index, f.put.size, f.put.data = kind, id, index, size, string(b)
+	return f.err
+}
+
+func (f *fakeFiles) ListChunks(context.Context, domain.StoredAttachmentKind, string) (domain.UploadChunkList, error) {
+	return domain.UploadChunkList{ChunkBytes: service.UploadChunkBytes, Chunks: []domain.UploadChunk{{Index: 0, Size: 5}}}, f.err
+}
+
+func (f *fakeFiles) CompleteUpload(_ context.Context, req domain.CompleteAttachmentUploadRequest) (domain.ConfirmAttachmentUploadResponse, error) {
+	f.complete = req
+	return domain.ConfirmAttachmentUploadResponse{ID: req.ID, Status: "COMPLETE"}, f.err
+}
+
+func (f *fakeFiles) open(name, contentType string) *service.FileDownload {
+	obj := &azblobstore.Object{Body: io.NopCloser(strings.NewReader(f.file)), ContentLength: int64(len(f.file))}
+	if f.partial {
+		obj.Partial, obj.ContentRange = true, "bytes 0-4/10"
+	}
+	return &service.FileDownload{Name: name, ContentType: contentType, Object: obj}
+}
+
+func (f *fakeFiles) OpenAttachment(_ context.Context, _ domain.StoredAttachmentKind, _, rangeHeader string) (*service.FileDownload, error) {
+	f.rangeHeader = rangeHeader
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.open("report \"x\".pdf", "application/pdf"), nil
+}
+
+func (f *fakeFiles) OpenInlineImage(_ context.Context, _ string, workItemID string) (*service.FileDownload, error) {
+	f.workItemID = workItemID
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.open("a.png", "image/png"), nil
+}
+
+func (f *fakeFiles) DeleteAttachment(_ context.Context, req domain.DeleteStoredAttachmentRequest) error {
+	f.deleted = req
+	return f.err
+}
+
+func TestStoredAttachmentHandler_PutChunkPassesTheBytesAndTheIndex(t *testing.T) {
+	files := &fakeFiles{}
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodPut, "/attachments/upload/abc/chunks/2?type=work_item", "hello")
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("status = %d body = %q, want 204 and no body", rec.Code, rec.Body.String())
+	}
+	if files.put.id != "abc" || files.put.index != 2 || files.put.kind != domain.StoredAttachmentWorkItem || files.put.size != 5 || files.put.data != "hello" {
+		t.Errorf("chunk = %+v", files.put)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q", rec.Header().Get("Cache-Control"))
+	}
+	for _, idx := range []string{"x", "-1"} {
+		if rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{}, http.MethodPut, "/attachments/upload/abc/chunks/"+idx+"?type=work_item", "x"); rec.Code != http.StatusBadRequest {
+			t.Errorf("chunk index %q gave %d, want 400", idx, rec.Code)
+		}
+	}
+	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: &apierror.TooManyRequestsError{Msg: "busy"}}, http.MethodPut, "/attachments/upload/abc/chunks/0?type=work_item", "x")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("a refused transfer gave %d, want 429", rec.Code)
+	}
+}
+
+func TestStoredAttachmentHandler_ListChunks(t *testing.T) {
+	rec := serveStored(t, &fakeStoredAttachmentSvc{}, http.MethodGet, "/attachments/upload/abc/chunks?type=work_item", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"chunkBytes":8388608`) || !strings.Contains(rec.Body.String(), `"index":0`) {
+		t.Errorf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("Cache-Control = %q", rec.Header().Get("Cache-Control"))
+	}
+}
+
+func TestStoredAttachmentHandler_DownloadIsAnOpaqueAttachment(t *testing.T) {
+	files := &fakeFiles{file: "0123456789"}
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodGet, "/attachments/download/abc/content?type=work_item", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != "0123456789" {
+		t.Fatalf("status = %d body = %q", rec.Code, rec.Body.String())
+	}
+	h := rec.Header()
+	// Whatever the stored type says, a download is never rendered by the browser.
+	if h.Get("Content-Type") != "application/octet-stream" || h.Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.HasPrefix(h.Get("Content-Disposition"), "attachment;") || h.Get("Content-Length") != "10" ||
+		h.Get("Accept-Ranges") != "bytes" || h.Get("Cache-Control") != "private, no-store" {
+		t.Errorf("headers = %v", h)
+	}
+	// A quote in the name cannot break out of the header.
+	if strings.Contains(h.Get("Content-Disposition"), `"x"`) {
+		t.Errorf("Content-Disposition = %q, want the quotes neutralised", h.Get("Content-Disposition"))
+	}
+}
+
+func TestStoredAttachmentHandler_DownloadHonoursARange(t *testing.T) {
+	files := &fakeFiles{file: "01234", partial: true}
+	req := httptest.NewRequest(http.MethodGet, "/attachments/download/abc/content?type=work_item", nil)
+	req.Header.Set("Range", "bytes=0-4")
+	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{}).WithFiles(files)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /attachments/download/{id}/content", h.DownloadAttachment)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPartialContent || rec.Header().Get("Content-Range") != "bytes 0-4/10" || files.rangeHeader != "bytes=0-4" {
+		t.Errorf("status = %d, Content-Range = %q, range passed = %q", rec.Code, rec.Header().Get("Content-Range"), files.rangeHeader)
+	}
+
+	// A range the file does not have is a 416 that says how big the file is.
+	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, &fakeFiles{err: &service.RangeNotSatisfiableError{Size: 10}}, http.MethodGet, "/attachments/download/abc/content?type=work_item", "")
+	if rec.Code != http.StatusRequestedRangeNotSatisfiable || rec.Header().Get("Content-Range") != "bytes */10" {
+		t.Errorf("status = %d, Content-Range = %q, want 416 and bytes */10", rec.Code, rec.Header().Get("Content-Range"))
+	}
+}
+
+func TestStoredAttachmentHandler_InlineImageIsShownOnlyAsAnImage(t *testing.T) {
+	files := &fakeFiles{file: "png"}
+	rec := serveStoredWith(t, &fakeStoredAttachmentSvc{}, files, http.MethodGet, "/attachments/inline/img-1/content?workItemId=w-1", "")
+	if rec.Code != http.StatusOK || files.workItemID != "w-1" {
+		t.Fatalf("status = %d, workItemId = %q", rec.Code, files.workItemID)
+	}
+	h := rec.Header()
+	if h.Get("Content-Type") != "image/png" || h.Get("Content-Disposition") != "inline" || h.Get("X-Content-Type-Options") != "nosniff" ||
+		h.Get("Content-Security-Policy") != "default-src 'none'; sandbox" {
+		t.Errorf("headers = %v", h)
+	}
+
+	// A removed image is a 410 with its own code, so the portal can tell the browser.
+	gone := &fakeFiles{err: &apierror.GoneError{Msg: "this image was removed", Code: apierror.CodeAttachmentRemoved}}
+	rec = serveStoredWith(t, &fakeStoredAttachmentSvc{}, gone, http.MethodGet, "/attachments/inline/img-1/content", "")
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), apierror.CodeAttachmentRemoved) {
+		t.Errorf("a removed image gave %d %s, want 410 with its code", rec.Code, rec.Body.String())
+	}
+}
+
+func TestStoredAttachmentHandler_FileRoutesAre404WithoutStorageService(t *testing.T) {
+	h := NewStoredAttachmentHandler(&fakeStoredAttachmentSvc{})
+	for name, fn := range map[string]http.HandlerFunc{
+		"put": h.PutChunk, "list": h.ListChunks, "download": h.DownloadAttachment, "inline": h.InlineImageContent, "confirm": h.ConfirmUpload,
+	} {
+		rec := httptest.NewRecorder()
+		fn(rec, httptest.NewRequest(http.MethodGet, "/x", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s without the file service gave %d, want 404", name, rec.Code)
+		}
+	}
+}
+
