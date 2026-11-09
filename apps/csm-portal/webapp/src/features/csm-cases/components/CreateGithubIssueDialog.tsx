@@ -205,17 +205,19 @@ export function CreateGithubIssueDialog({
   // Update Level / Public Git Issue apply to non-cloud projects only.
   const showUpdateLevelAndIssueUrl = !showRepoField;
 
+  /** Sets the priority and clears the justification, which belongs to the previous priority. */
   const handlePriorityChange = (value: string) => {
     setPriorityLevel(value);
-    // A justification picked for another priority is not valid for this one.
     setPriorityJustification(UNSET);
   };
 
+  /** Toggles Hotfix Required; switching it off also clears the Hotfix Reason. */
   const handleHotFixChange = (checked: boolean) => {
     setHotFix(checked);
     if (!checked) setHotFixReason(UNSET);
   };
 
+  /** Returns every field to its initial value (empty, or the case's default) and closes the dialog. */
   const resetAndClose = () => {
     setTitle("");
     setDescription("");
@@ -244,6 +246,11 @@ export function CreateGithubIssueDialog({
     !projectStatusPending &&
     !projectStatusFailed;
 
+  /**
+   * Builds the payload from the form and opens the confirm step. Optional
+   * fields are sent only when filled, and the justification and hotfix reason
+   * only while they apply. Nothing is sent until the user confirms.
+   */
   const handleSubmit = () => {
     if (!canSubmit || !selectedRepoOption) return;
 
@@ -282,7 +289,7 @@ export function CreateGithubIssueDialog({
     setConfirmPayload(payload);
   };
 
-  // Shared renderer for a "-- Select --" dropdown.
+  /** Renders a dropdown that starts on the "-- Select --" placeholder. */
   const renderSelect = <V extends string>(
     id: string,
     label: string,

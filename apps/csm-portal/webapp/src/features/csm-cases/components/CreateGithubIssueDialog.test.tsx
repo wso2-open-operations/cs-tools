@@ -47,11 +47,13 @@ beforeEach(() => {
   } as any);
 });
 
+/** Opens the dropdown named `comboboxName` and chooses `option`. */
 function pick(comboboxName: RegExp, option: RegExp | string): void {
   fireEvent.mouseDown(screen.getByRole("combobox", { name: comboboxName }));
   fireEvent.click(screen.getByRole("option", { name: option }));
 }
 
+/** Fills the two required text fields. */
 function fillSubjectAndDescription(): void {
   fireEvent.change(screen.getByLabelText(/subject/i), {
     target: { value: "Token issuance is slow" },
@@ -68,6 +70,7 @@ function fillRequiredFields(): void {
   pick(/priority justification/i, "Production Outage / Severe Degradation");
 }
 
+/** Renders the dialog open with a resolved repository mapping; `props` override the defaults. */
 function renderDialog(
   props: Partial<React.ComponentProps<typeof CreateGithubIssueDialog>> = {},
 ) {
@@ -84,10 +87,12 @@ function renderDialog(
   );
 }
 
+/** The form's "Create issue" button. */
 function createButton(): HTMLElement {
   return screen.getByRole("button", { name: /create issue/i });
 }
 
+/** Clicks "Create issue", then "File issue" on the confirm step. */
 function submit(): void {
   fireEvent.click(createButton());
   fireEvent.click(screen.getByRole("button", { name: /file issue/i }));

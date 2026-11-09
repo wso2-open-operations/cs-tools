@@ -70,6 +70,10 @@ func infoBlock(product, updateLevel, caseID, caseNumber, publicIssue, team, open
 		"\nOpened by : " + dash(openedBy)
 }
 
+// TestCreateCaseGithubIssue_ViaEngineering covers filing through the engineering service:
+// the repository comes from the product mapping, and the body and labels are built from the
+// request (the optional sections, then the fixed footer). It also covers the request checks
+// and how upstream failures are mapped.
 func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 	const caseID = "11111111-1111-1111-1111-111111111111"
 
