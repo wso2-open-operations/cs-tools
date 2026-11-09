@@ -151,8 +151,8 @@ beside `filters`. Each branch is ANDed inside; branches are ORed; the result is 
 and `sreTeam` must go in the top-level `filters`, never in a branch.
 
 Never use: ids of projects, accounts, deployments or users; `number`; `internalId`; `parentId`;
-`projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`;
-`assignedUserId` with `isEmpty`; or any field / op not in the table.
+`projectId`; `accountId`; `deploymentId`; `resolutionNotes`; `accountEscalationActive`; or any
+field / op not in the table.
 
 
 ### 5a. Time cards (`resourceType: "time_card"`)
