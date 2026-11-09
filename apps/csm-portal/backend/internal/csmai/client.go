@@ -58,6 +58,7 @@ const (
 	CodeUnusable        = "unusable"
 	CodeTimeout         = "timeout"
 	CodeModelCallFailed = "model_call_failed"
+	CodeUsageLimit      = "usage_limit"
 )
 
 // Config holds the client's configuration. Timeout bounds one generate call

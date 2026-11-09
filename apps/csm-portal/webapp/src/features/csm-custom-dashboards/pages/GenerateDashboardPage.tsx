@@ -18,12 +18,12 @@ import { Box, Button, Typography } from "@wso2/oxygen-ui";
 import { ArrowLeft, LayoutDashboard, MessageSquare } from "@wso2/oxygen-ui-icons-react";
 import { type JSX, useState } from "react";
 import { useNavigate } from "react-router";
-import { BackendApiError } from "@api/backend/client";
 import type { BeDashboard } from "@api/backend/types";
 import { useSuccessBanner } from "@context/success-banner/SuccessBannerContext";
 import DashboardWidgetGrid from "@features/csm-dashboard/components/DashboardWidgetGrid";
 import { usePutCustomDashboard } from "@features/csm-custom-dashboards/api/useCustomDashboards";
 import { useGenerateDashboard } from "@features/csm-custom-dashboards/api/useGenerateDashboard";
+import { generateErrorMessage } from "@features/csm-custom-dashboards/utils/generateErrorMessage";
 import { saveErrorMessage } from "@features/csm-custom-dashboards/utils/saveErrorMessage";
 import DashboardNameDialog from "@features/csm-custom-dashboards/components/DashboardNameDialog";
 import DiscardGeneratedDashboardDialog from "@features/csm-custom-dashboards/components/DiscardGeneratedDashboardDialog";
@@ -131,19 +131,10 @@ export default function GenerateDashboardPage({
       addMessage("assistant", result.reply);
     } catch (err) {
       // The draft is left as it was, so a failed turn never loses the preview.
-      // Over the generate limit (429) or with a draft too large to send (413),
-      // the backend's message says what to do; any other failure reads as the
-      // input not working. With a draft on screen the message was a change to
-      // it, not a new dashboard.
-      const limited = err instanceof BackendApiError && (err.status === 429 || err.status === 413) && err.message;
-      addMessage(
-        "assistant",
-        limited
-          ? err.message
-          : draft
-            ? "This dashboard cannot be modified with your input."
-            : "The dashboard cannot be generated from the input.",
-      );
+      // The reply says what actually went wrong (`generateErrorMessage`): the
+      // backend's own message, or where the failure happened when there is
+      // none; with a draft on screen the message was a change to it.
+      addMessage("assistant", generateErrorMessage(err, draft !== null));
     } finally {
       setBusy(false);
     }
