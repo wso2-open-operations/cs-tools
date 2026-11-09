@@ -22391,6 +22391,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
         onboardingOwner:
           description: >
             The person assigned to run this project's onboarding. Null when
@@ -22515,6 +22518,9 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer. Always null on Postgres.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Whether the automatic Account Closure Process must skip this project. Always present, false by default. Read-only, set directly in the database or by the data sync. Always false on the legacy data source."
 
     SearchProjectsResponse:
       type: object
@@ -22568,6 +22574,9 @@ components:
             recomputes the overall state from them again, silently overwriting
             a manual override — there is no column recording that one was ever
             set.
+        suspensionProcessOverridden:
+          type: boolean
+          description: "Sets whether the automatic Account Closure Process must skip this project (Postgres data sources only; a 400 on the legacy data source). Only true or false changes it; null and omitted leave it unchanged. Touches no closure state and combines freely with every other field. The response echoes the stored value. Admin-only enforcement lives in the BFF, not here."
         suspensionProcessState:
           type: object
           additionalProperties: true
@@ -22669,6 +22678,10 @@ components:
         verificationEnabled:
           type: boolean
           nullable: true
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Present on Postgres data sources only."
         onboardingStatus:
           type: string
           description: Present on Postgres data sources only.

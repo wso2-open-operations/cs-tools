@@ -3114,7 +3114,7 @@ paths:
         onboardingOwner and the four onboarding dates (onboardingStartDate,
         onboardingGoLivePlanDate, onboardingGoLiveDate, onboardingExpiryDate)
         need onboarding_lead or admin (a cs_engineer alone gets 403); every other field needs cs_engineer or admin (an onboarding_lead
-        alone gets 403); closureState needs admin. A body mixing fields needs
+        alone gets 403); closureState and suspensionProcessOverridden need admin. A body mixing fields needs
         every permission the fields it sets require. The caller also needs
         read access to the project separately: onboarding_lead grants none.
       operationId: patchProjectsId
@@ -23389,6 +23389,11 @@ components:
             state (event type + action results) written by an existing suspension
             flow in the backing data source. This is opaque JSON passed through
             as-is — its shape is not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          description: >
+            True when an admin has exempted the project from the automatic Account
+            Closure Process, which then never evaluates it. Always present.
 
     Project:
       description: >
@@ -23581,6 +23586,7 @@ components:
         simple toggles; the closure-state fields track sub-states of an
         Account Closure Process and are only applicable to projects sourced
         from the backing data source. closureState requires the admin role;
+        suspensionProcessOverridden requires the admin role;
         onboardingStatus, onboardingOwner and the four onboarding dates
         require the onboarding_lead or admin role; every other field requires the ordinary write permission
         (cs_engineer or admin).
@@ -23662,6 +23668,10 @@ components:
             state (event type + action results) written by an existing ServiceNow
             suspension flow. This is opaque JSON passed through as-is — its shape is
             not defined or validated by this layer.
+        suspensionProcessOverridden:
+          type: boolean
+          nullable: true
+          description: "Exempts the project from the automatic Account Closure Process when true; null or omitted leaves it unchanged. Admin only (403 otherwise, even for an explicit null). Postgres data source only."
 
     ProjectUpdateResponse:
       type: object
@@ -23697,6 +23707,9 @@ components:
               type: object
               additionalProperties: true
               nullable: true
+            suspensionProcessOverridden:
+              type: boolean
+              description: Present on Postgres data sources only.
             onboardingStatus:
               type: string
               nullable: true
