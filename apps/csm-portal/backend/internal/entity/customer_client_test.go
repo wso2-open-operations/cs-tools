@@ -28,7 +28,7 @@ import (
 // TestTokenFetchTimeout verifies that a stalled token endpoint fails requests
 // within the configured timeout rather than blocking indefinitely.
 func TestTokenFetchTimeout(t *testing.T) {
-	t.Parallel()
+	// Must not be parallel: mutates package-level tokenFetchTimeout, which parallel tests read via NewCustomerEntityClient.
 
 	// Token server that stalls longer than tokenFetchTimeout but returns eventually
 	// so httptest.Server.Close() can drain cleanly.

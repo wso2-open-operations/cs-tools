@@ -34,6 +34,7 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
     minHeight?: number | string;
     maxHeight?: number | string;
     disabled?: boolean;
+    ariaRequired?: boolean;
   }): JSX.Element {
     const [seed] = useState(props.value ?? "");
     const { onChange } = props;
@@ -50,6 +51,7 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
         data-max-height={String(props.maxHeight)}
         defaultValue={seed}
         disabled={props.disabled}
+        aria-required={props.ariaRequired || undefined}
         onChange={(e) => onChange?.(e.target.value)}
       />
     );
@@ -79,6 +81,24 @@ function Form({ initial = "<p>Plan</p>", disabled = false, onChange = vi.fn() }:
 
 beforeEach(() => {
   mounts.length = 0;
+});
+
+describe("ExpandableRichTextField — required", () => {
+  it("draws MUI's asterisk after the label, hidden from assistive tech, and marks the editor aria-required", () => {
+    render(<ExpandableRichTextField id="cr-plan" label="Implementation plan" value="" onChange={vi.fn()} required />);
+    const group = screen.getByRole("group", { name: "Implementation plan" });
+    const label = document.getElementById("cr-plan-label")!;
+    const mark = label.querySelector(".MuiFormLabel-asterisk");
+    expect(mark).toHaveTextContent("*");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(within(group).getByLabelText("editor")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("draws no asterisk and no aria-required when the field is optional", () => {
+    render(<ExpandableRichTextField id="cr-plan" label="Implementation plan" value="" onChange={vi.fn()} />);
+    expect(document.getElementById("cr-plan-label")!.querySelector(".MuiFormLabel-asterisk")).toBeNull();
+    expect(screen.getByLabelText("editor")).not.toHaveAttribute("aria-required");
+  });
 });
 
 describe("ExpandableRichTextField — resize", () => {

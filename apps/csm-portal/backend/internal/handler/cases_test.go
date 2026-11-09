@@ -2016,6 +2016,241 @@ func TestPatchCase(t *testing.T) {
 	})
 }
 
+// ----- PatchCase: closing a case sends it to Pending Verification -----
+
+func TestPatchCase_PendingVerification(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const closePayload = `{"state":"closed"}`
+
+	t.Run("closing from work_in_progress adds it as auto-closed with that previous status", func(t *testing.T) {
+		var body []byte
+		called := make(chan struct{})
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				close(called)
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		select {
+		case <-called:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called after closing the case")
+		}
+
+		var req struct {
+			WorkItemID     string `json:"workItemId"`
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.WorkItemID != testCaseID {
+			t.Errorf("workItemId = %q, want %q", req.WorkItemID, testCaseID)
+		}
+		if req.AddedReason != "AUTO_CLOSED" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "AUTO_CLOSED")
+		}
+		if req.PreviousStatus != "WORK_IN_PROGRESS" {
+			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "WORK_IN_PROGRESS")
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("closing from solution_proposed adds it as auto-closed with that previous status", func(t *testing.T) {
+		var body []byte
+		called := make(chan struct{})
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"solution_proposed"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				close(called)
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		select {
+		case <-called:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called after closing the case")
+		}
+
+		var req struct {
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.AddedReason != "AUTO_CLOSED" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "AUTO_CLOSED")
+		}
+		if req.PreviousStatus != "SOLUTION_PROPOSED" {
+			t.Errorf("previousStatus = %q, want %q", req.PreviousStatus, "SOLUTION_PROPOSED")
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("falls back to manual with the previous state folded into the note for a state the auto-closed mapping doesn't cover", func(t *testing.T) {
+		// Exercises recordPendingVerificationEntry directly rather than through
+		// PatchCase: state.go's own isValidStateTransition would reject any
+		// close whose previous state isn't work_in_progress or
+		// solution_proposed before this hook ever ran, so there is no way to
+		// reach this fallback branch through the full HTTP handler. It should
+		// never happen in practice; this only guards the fallback itself.
+		var body []byte
+		client := &mockEntityCaseClient{
+			createPendingVerificationFn: func(_ context.Context, b []byte) ([]byte, error) {
+				body = b
+				return []byte(`{"id":"pv-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		h.recordPendingVerificationEntry(context.Background(), &middleware.UserInfo{UserID: "u-1"}, testCaseID, caseStateOpen)
+
+		var req struct {
+			AddedReason    string `json:"addedReason"`
+			PreviousStatus string `json:"previousStatus"`
+			Note           string `json:"note"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("decode pending verification body: %v; raw: %s", err, body)
+		}
+		if req.AddedReason != "MANUAL" {
+			t.Errorf("addedReason = %q, want %q", req.AddedReason, "MANUAL")
+		}
+		if req.PreviousStatus != "" {
+			t.Errorf("previousStatus = %q, want empty (MANUAL forbids it)", req.PreviousStatus)
+		}
+		wantNote := "Automatically added for verification — case closed by WSO2 Support. Previous status: Open."
+		if req.Note != wantNote {
+			t.Errorf("note = %q, want %q", req.Note, wantNote)
+		}
+	})
+
+	t.Run("still succeeds when the pending verification call fails", func(t *testing.T) {
+		// Covers the common, expected failures too: Pending Verification disabled
+		// for the project (entity-service 403s) and an already-unverified entry
+		// from an earlier round (409) — both must never fail the close response.
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				return nil, errors.New("pending verification is not enabled for this project")
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+		assertContentType(t, w, "application/json")
+	})
+
+	t.Run("PATCH that does not close the case does not call CreatePendingVerification", func(t *testing.T) {
+		var pvCalled atomic.Bool
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"open"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			createPendingVerificationFn: func(_ context.Context, _ []byte) ([]byte, error) {
+				pvCalled.Store(true)
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(`{"state":"work_in_progress"}`)))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		// No signal to wait on here (nothing should fire); a short grace period
+		// gives an incorrect async call a chance to land before asserting absence.
+		time.Sleep(100 * time.Millisecond)
+		if pvCalled.Load() {
+			t.Error("CreatePendingVerification was called for a PATCH that did not close the case")
+		}
+	})
+
+	t.Run("pending verification call survives the request context being canceled after the handler returns", func(t *testing.T) {
+		ctxDone := make(chan struct{})
+		var gotErr error
+		client := &mockEntityCaseClient{
+			getCaseFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"work_in_progress"}`), nil
+			},
+			patchCaseFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				return []byte(`{"id":"` + testCaseID + `","state":"closed"}`), nil
+			},
+			createPendingVerificationFn: func(ctx context.Context, _ []byte) ([]byte, error) {
+				gotErr = ctx.Err()
+				close(ctxDone)
+				return []byte(`{}`), nil
+			},
+		}
+		h := NewCaseHandler(client)
+		reqCtx, cancel := context.WithCancel(context.Background())
+		r := withUser(httptest.NewRequest(http.MethodPatch, "/cases/"+testCaseID, strings.NewReader(closePayload)).WithContext(reqCtx))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.PatchCase(w, r)
+		assertStatus(t, w, http.StatusOK)
+
+		cancel()
+
+		select {
+		case <-ctxDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("expected CreatePendingVerification to be called")
+		}
+		if gotErr != nil {
+			t.Errorf("pending-verification context was already canceled (%v) once the request context was — it must be detached", gotErr)
+		}
+	})
+}
+
 // ----- GetCase -----
 
 func TestGetCase(t *testing.T) {
@@ -2410,7 +2645,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	const testCaseID = "11111111-1111-1111-1111-111111111111"
 
 	t.Run("requires authenticated user", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"ESCALATE"}`))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2421,7 +2656,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects empty case ID", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases//escalations", strings.NewReader(`{"action":"ESCALATE"}`)))
 		w := httptest.NewRecorder()
 		h.CreateCaseEscalation(w, r)
@@ -2431,7 +2666,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects malformed case UUID", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/not-a-uuid/escalations", strings.NewReader(`{"action":"ESCALATE"}`)))
 		r.SetPathValue("id", "not-a-uuid")
 		w := httptest.NewRecorder()
@@ -2442,7 +2677,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects body exceeding 1 MiB", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(strings.Repeat("x", maxRequestBodyBytes+1))))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2453,7 +2688,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects invalid JSON body", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`not-json`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2475,7 +2710,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(want), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(reqBody)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2502,7 +2737,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return nil, nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2525,7 +2760,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return nil, nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2549,7 +2784,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"DEESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2574,7 +2809,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"DEESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2598,7 +2833,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return nil, nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2624,7 +2859,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"ESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"ESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2660,7 +2895,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"ESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"ESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2683,7 +2918,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 						return nil, tc.err
 					},
 				}
-				h := NewCaseHandler(client)
+				h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 				r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"ESCALATE"}`)))
 				r.SetPathValue("id", testCaseID)
 				w := httptest.NewRecorder()
@@ -2696,7 +2931,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects an empty object", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2707,7 +2942,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects an unknown field", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"ESCALATE","foo":"bar"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2718,7 +2953,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects an invalid action value", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"CLOSE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2729,7 +2964,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects a missing reason when action is ESCALATE", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"ESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2740,7 +2975,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects a missing reason when action is omitted", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"foo":"bar"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2751,7 +2986,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects a blank/whitespace-only reason", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"   ","action":"ESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2775,7 +3010,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"DEESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"deescalate"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2787,7 +3022,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects an explicit null action", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":null}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2798,7 +3033,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects trailing data after the JSON object", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed"}{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2809,7 +3044,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 	})
 
 	t.Run("rejects an action value that is not one of the four enumerated forms", func(t *testing.T) {
-		h := NewCaseHandler(&mockEntityCaseClient{})
+		h := NewCaseHandler(&mockEntityCaseClient{}).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"reason":"needed","action":"DeEsCaLaTe"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2833,7 +3068,7 @@ func TestCreateCaseEscalation(t *testing.T) {
 				return []byte(`{"id":"e-1","level":"1","action":"DEESCALATE"}`), nil
 			},
 		}
-		h := NewCaseHandler(client)
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
 		r := withUser(httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(`{"action":"DEESCALATE"}`)))
 		r.SetPathValue("id", testCaseID)
 		w := httptest.NewRecorder()
@@ -2842,6 +3077,97 @@ func TestCreateCaseEscalation(t *testing.T) {
 		if !upstreamCalled {
 			t.Error("upstream CreateCaseEscalation was not called for a valid DEESCALATE request with no reason")
 		}
+	})
+}
+
+// escalationCaller builds a caller with exactly the given roles, to prove the
+// escalation rule is enforced per action rather than by the route permission.
+func escalationCaller(roles ...string) *middleware.UserInfo {
+	return &middleware.UserInfo{Email: "agent@example.com", UserID: "f2d9bf5b-7067-43dc-8578-802c8623af5d", Roles: roles}
+}
+
+func TestCreateCaseEscalation_ActionDependentAuthorization(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	const leadHistory = `{"escalations":[{"id":"e-0"}],"total":1,"currentNotifiedUsers":[],"teamLeads":[{"id":"u-1","email":"agent@example.com"}]}`
+	const otherLeadHistory = `{"escalations":[{"id":"e-0"}],"total":1,"currentNotifiedUsers":[],"teamLeads":[{"id":"u-2","email":"lead@example.com"}]}`
+
+	run := func(caller *middleware.UserInfo, body, history string, searchErr error) (int, bool) {
+		var created bool
+		client := &mockEntityCaseClient{
+			searchCaseEscalationsFn: func(_ context.Context, _ string) ([]byte, error) {
+				return []byte(history), searchErr
+			},
+			getUserMeFn: func(_ context.Context) ([]byte, error) {
+				return []byte(`{"id":"u-1","email":"agent@example.com"}`), nil
+			},
+			createCaseEscalationFn: func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+				created = true
+				return []byte(`{"id":"e-1"}`), nil
+			},
+		}
+		h := NewCaseHandler(client).WithAccessGuard(viewerAccessGuard)
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(body))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), caller))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseEscalation(w, r)
+		return w.Code, created
+	}
+	const deesc = `{"action":"DEESCALATE"}`
+	const esc = `{"action":"ESCALATE","reason":"needed"}`
+
+	t.Run("view-only team lead can de-escalate", func(t *testing.T) {
+		code, created := run(escalationCaller("test-viewer"), deesc, leadHistory, nil)
+		if code != http.StatusCreated || !created {
+			t.Errorf("code=%d created=%v, want 201 and the entity call made", code, created)
+		}
+	})
+	t.Run("view-only non-lead cannot de-escalate", func(t *testing.T) {
+		code, created := run(escalationCaller("test-viewer"), deesc, otherLeadHistory, nil)
+		if code != http.StatusForbidden || created {
+			t.Errorf("code=%d created=%v, want 403 and no entity call", code, created)
+		}
+	})
+	t.Run("view-only team lead cannot escalate", func(t *testing.T) {
+		code, created := run(escalationCaller("test-viewer"), esc, leadHistory, nil)
+		if code != http.StatusForbidden || created {
+			t.Errorf("code=%d created=%v, want 403 and no entity call", code, created)
+		}
+	})
+	t.Run("caller with no roles cannot escalate", func(t *testing.T) {
+		code, created := run(escalationCaller(), esc, leadHistory, nil)
+		if code != http.StatusForbidden || created {
+			t.Errorf("code=%d created=%v, want 403 and no entity call", code, created)
+		}
+	})
+	for _, role := range []string{"test-escalator", "test-cs-engineer", "test-admin"} {
+		t.Run(role+" non-lead cannot de-escalate (holding PermEscalate does not substitute)", func(t *testing.T) {
+			code, created := run(escalationCaller(role), deesc, otherLeadHistory, nil)
+			if code != http.StatusForbidden || created {
+				t.Errorf("code=%d created=%v, want 403 and no entity call", code, created)
+			}
+		})
+		t.Run(role+" can escalate", func(t *testing.T) {
+			code, created := run(escalationCaller(role), esc, otherLeadHistory, nil)
+			if code != http.StatusCreated || !created {
+				t.Errorf("code=%d created=%v, want 201 and the entity call made", code, created)
+			}
+		})
+	}
+	t.Run("team-lead lookup failure fails closed for de-escalation", func(t *testing.T) {
+		code, created := run(escalationCaller("test-viewer"), deesc, "", errors.New("boom"))
+		if code != http.StatusForbidden || created {
+			t.Errorf("code=%d created=%v, want 403 and no entity call", code, created)
+		}
+	})
+	t.Run("nil access guard denies escalation", func(t *testing.T) {
+		h := NewCaseHandler(&mockEntityCaseClient{})
+		r := httptest.NewRequest(http.MethodPost, "/cases/"+testCaseID+"/escalations", strings.NewReader(esc))
+		r = r.WithContext(middleware.WithUserInfo(r.Context(), escalationCaller("test-escalator")))
+		r.SetPathValue("id", testCaseID)
+		w := httptest.NewRecorder()
+		h.CreateCaseEscalation(w, r)
+		assertStatus(t, w, http.StatusForbidden)
 	})
 }
 
@@ -4326,5 +4652,53 @@ func TestCreateCallRequest_StartsPendingOnCustomer(t *testing.T) {
 	}
 	if sent["state"] != "pending_on_customer" {
 		t.Errorf("state = %v, want pending_on_customer (client-supplied state must not win)", sent["state"])
+	}
+}
+
+// An admin's attachment list also carries the deleted attachments; nobody else's
+// does, and a flag the browser sends itself never reaches entity-service.
+func TestSearchCaseAttachments_IncludeDeletedOnlyForAdmin(t *testing.T) {
+	const testCaseID = "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name    string
+		roles   []string
+		payload string
+		want    bool
+	}{
+		{"admin gets it", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `"}`, true},
+		{"cs engineer does not", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `"}`, false},
+		{"a forged flag is dropped", []string{"test-cs-engineer"}, `{"referenceId":"` + testCaseID + `","IncludeDeleted":true}`, false},
+		{"an admin's own spelling is replaced", []string{"test-admin"}, `{"referenceId":"` + testCaseID + `","includedeleted":false}`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent map[string]any
+			client := &mockEntityCaseClient{
+				searchCaseAttachmentsFn: func(_ context.Context, body []byte) ([]byte, error) {
+					if err := json.Unmarshal(body, &sent); err != nil {
+						t.Fatalf("body is not JSON: %v", err)
+					}
+					return []byte(`{}`), nil
+				},
+			}
+			h := NewCaseHandler(client).WithAccessGuard(NewAccessGuard(testAccessConfig()))
+			user := *testUser
+			user.Roles = tc.roles
+			r := httptest.NewRequest(http.MethodPost, "/attachments/search", strings.NewReader(tc.payload))
+			r = r.WithContext(middleware.WithUserInfo(r.Context(), &user))
+			w := httptest.NewRecorder()
+			h.SearchCaseAttachments(w, r)
+			assertStatus(t, w, http.StatusOK)
+			got, present := sent["includeDeleted"]
+			if tc.want && got != true {
+				t.Fatalf("includeDeleted = %v, want true", got)
+			}
+			if !tc.want && present {
+				t.Fatalf("includeDeleted = %v, want it absent", got)
+			}
+			if len(sent) != map[bool]int{true: 2, false: 1}[tc.want] {
+				t.Fatalf("unexpected keys sent: %v", sent)
+			}
+		})
 	}
 }

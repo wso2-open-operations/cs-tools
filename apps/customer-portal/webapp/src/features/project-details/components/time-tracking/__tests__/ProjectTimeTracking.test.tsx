@@ -150,8 +150,8 @@ describe("ProjectTimeTracking", () => {
       ),
     );
 
-    const startDateInput = screen.getByLabelText("From:");
-    fireEvent.change(startDateInput, { target: { value: "2026-01-01" } });
+    const startDateInput = screen.getByLabelText("Start date");
+    fireEvent.change(startDateInput, { target: { value: "01/01/2026" } });
 
     await waitFor(() =>
       expect(authFetchMock).toHaveBeenLastCalledWith(

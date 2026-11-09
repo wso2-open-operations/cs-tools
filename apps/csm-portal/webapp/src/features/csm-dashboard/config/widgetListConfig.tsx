@@ -237,7 +237,7 @@ const PREVIEW_COLUMN = { label: "Preview", width: "auto" };
  * (`service_request`/`security_report_analysis`/`announcement`/`engagement`
  * — see `WIDGET_LIST_RENDERERS` below), so they all get the same columns,
  * gated the same way `CsmIssuesView`/`CaseFamilyWidgetPreview` gate theirs:
- * Severity only where it's a real concept (`case`), and it's shown by
+ * Severity only where it's a real concept (`case`, `service_request`), and it's shown by
  * default since that matched this renderer's own long-standing hardcoded
  * set before "Customise columns" existed here at all — only Product/Type/
  * (Severity)/Assignee were ever on by default, so that default is
@@ -258,7 +258,7 @@ function CaseWidgetList({
 
   const currentUserId = useCurrentUser().user?.id;
   const currentUserEmail = useIdTokenClaims()?.email;
-  const showSeverityColumn = resourceType === "case";
+  const showSeverityColumn = resourceType === "case" || resourceType === "service_request";
   // Memoized so `columnPrefs`'s own `allColumns`/etc. stay referentially
   // stable across renders that don't actually change anything — without
   // this, a fresh array literal on every render made `useColumnPreferences`

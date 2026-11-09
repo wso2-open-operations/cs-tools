@@ -152,3 +152,117 @@ the stack is named:
 E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csm-platform-postgres-1 \
   npx playwright test tests/e2e/specs/team-schedule/sme-tiers.spec.ts
 ```
+
+## Standard changes: propose, CAB approval, raise from a template (real local stack)
+
+`specs/operations/standard-changes.spec.ts` drives the real stack through the UI.
+
+Prerequisite: the standard change seed. The first test checks the seed's own templates and proposals (by the names the
+script gives them), so seed the stack once before running the spec (it is idempotent; `--reset` rebuilds it from scratch and, on a stack
+started under another compose project name, needs `COMPOSE_PROJECT_NAME=<name>`, e.g. `csmcr`):
+
+```bash
+scripts/csm-compose/seed-standard-changes.sh    # from the repository root (entity-service :8081, mock OIDC :9100)
+```
+
+What it checks:
+
+- **One tab, two places**: Operations > Change requests has a two-entry strip, "Change requests" (the list, no `view`) |
+  "Standard changes" (`?view=standard`). Standard changes opens on the catalogue; its proposals are a secondary view of
+  the same tab (the toggle, a group named "Templates or proposals", `&show=proposals`, filters `&scope=mine|awaiting` and
+  `&state=<state>` in the URL). The proposals open on **all** proposals (no `scope`; the "Show" select reads "All
+  proposals" and offers "All proposals", "Proposed by me", "Awaiting my decision" in that order). The toggle and the
+  select have distinct accessible names ("Show" is the select's only). Entering Standard changes from a filtered list
+  (`crQ` and `crStates`) keeps those `cr*` parameters in the URL, unread; Back, and the "Change requests" tab, return
+  to the list with the filter applied (the search box holds it and the list reads "No change requests found."), and
+  going back to the list drops only `view` / `show` / `scope` / `state`.
+- **The page heading** (what users complained about): on the catalogue and on the proposals the heading is exactly
+  "Standard changes" with "Pre-authorised change requests, raised from templates the CAB has approved.", and says
+  nothing about service requests, incidents, problems or runbooks. Every other Operations tab (the change request list
+  included) keeps "Operations" and its Operations-wide line. The sidebar is checked first: each Operations entry is
+  polled until it is visible (none is skipped), and only then that there is no "Standard changes" entry of its own.
+- **The seed is listed, one customer's at a time**: the catalogue has a Customer column (its header row is checked
+  column by column) and shows the seed's six templates with their customer, state and version (five of Example Corp:
+  the suspended "Restart an API Manager node", "Scale a Kubernetes deployment's replicas" at v2, ...; one of Other
+  Corp). "Rotate the TLS certificate on an API gateway" is two templates, one of each customer, each listed with its
+  own customer and number, and its two approved proposals likewise. The Customer filter set to Other Corp sends
+  `accountId` (Other Corp's account, checked against project 402's in Postgres) and lists exactly Other Corp's live
+  templates (counted in Postgres), each with Other Corp in its Customer cell. The suspended template's page shows its
+  customer ("For Example Corp: used only for this customer's projects." and the Customer fact), the seed's current
+  reason in full ("The owner is reworking the restart procedure for clustered deployments. ...") and who suspended it;
+  the proposals list (also with a Customer column) shows the seed's rejected, in-CAB-review and draft proposals and its
+  approved revision, each in its state and with its customer.
+- **Breadcrumbs, Back, pins and the sidebar**: a template page reads "Change requests › Standard changes › STD…", a
+  proposal page "Change requests › Standard changes › Proposals › SCP…"; Back returns to the view (and filter) the record
+  was opened from, while the trail's "Proposals" opens all the proposals (`?view=standard&show=proposals`, "All
+  proposals", "Any state"); "Pin this page" names the catalogue "Standard changes" even with the list's `cr*` filters
+  in the URL (no filter count, and the pin opens `?view=standard` without them), the proposals with a filter "Standard
+  change proposals: 1 filter" and a template by its number, and a pinned tab opens its place; the sidebar's "Change
+  requests" is the one highlighted entry throughout.
+- **Old links**: `/operations?tab=standard_changes` and `?tab=standard-changes` (each bare, with `&view=catalogue` and
+  with `&view=proposals`), `/operations/standard-changes` (bare, `?view=catalogue`, `?view=proposals`) and the previous
+  sub-views `/operations/change-requests?view=catalogue` / `?view=proposals` (bare, `&scope=awaiting`, `&state=draft`,
+  `&scope=mine&state=rejected`, and each sub-view with the list's `crQ`) each land on the right place with the scope and
+  state selects showing the filters kept, with no history entry of their own (one Back returns to the page they were
+  opened from); the ones that carried `crQ` return to the filtered list through the "Change requests" tab.
+- **The attention strip** above the catalogue: hidden for `jane`, who has nothing pending (checked once both counts have
+  been answered); for `carol` (asked about the seed's proposal in CAB review) and `bob` (the seed's draft) it reads the
+  counts Postgres holds, worded as the page words them, and each part links to the proposals filtered to it
+  (`scope=awaiting`; `scope=mine&state=draft`), which list exactly that many. Not shown on the proposals view. `jane`,
+  who has proposed nothing (checked in Postgres), opens the proposals on all of them and sees bob's seeded ones;
+  "Proposed by me" then lists none.
+- **The whole flow**: `bob` proposes a standard change from a closed change request of Example Corp (raised for
+  project 401; "Propose as standard change"). The proposal takes that change request's customer: the header reads
+  "Customer: Example Corp", the Customer field is read-only (no picker), and Postgres holds the same account. He
+  templates it (name, category, impact **Medium** -- not the create form's default, Low --, description, justification,
+  risk and impact analysis, plan visible to customers, a text and a select parameter, `{{placeholders}}` in the subject
+  and the implementation, backout and test plans, typed and through "Insert {{…}}"). Before sample values are typed the
+  live preview shows every placeholder as an open, highlighted mark (`mark[data-param]`, `{{host}}` / `{{env}}`); with
+  only the host typed, filled `{{host}}` and open `{{env}}` marks sit side by side on the same preview (and in the
+  subject), and their computed styles are compared there: neither has the browser's own yellow `<mark>` background, the
+  open one is monospace and not underlined, the filled one is in the text's font with a dotted underline, and their
+  backgrounds, fonts and underlines differ; after the environment too, every mark is filled with the values. He saves and submits it to the CAB; `carol` (CAB) reaches it through her attention
+  strip and approves it; the template's page shows the current version with its placeholders highlighted and its
+  customer (Example Corp, also from the API), and it is in the catalogue as active version 1 of Example Corp (impact
+  Medium). `alice` raises a change request from it on the create form. With type Standard the template picker is
+  disabled until a Customer Project is chosen. With Other Corp's project (402) it offers Other Corp's templates only:
+  a search for the new template finds nothing, and of the two "Rotate the TLS certificate ..." templates only Other
+  Corp's is offered. She picks that one, then switches the project to Example Corp's (401): the template and its change
+  specifics are cleared, with a notice that says whose each is. Now only Example Corp's "Rotate the TLS ..." is
+  offered. She picks the new template, fills the change specifics and sees the read-only preview with filled marks. The
+  create request sends `projectId` 401 and none of the template's fields. Through the BFF, as `alice`, raising a
+  change from the template for Other Corp's project, or with no `projectId`, is refused with 400
+  `standard_change_template_other_customer` in the backend's words. Neither request writes a change request, a work
+  item or an `event_outbox` row (all three counted in Postgres). A PATCH moving the raised change request to Other
+  Corp's project is refused with the same code in New and again once it is Scheduled, and its project stays 401. The
+  change request's banner reads "Customer: Example Corp. ...". The change request holds the template's content rendered with her values (subject,
+  implementation / backout / test plans, impact, category, rollback duration on the page; description, justification,
+  risk and impact analysis, plan visibility, impact and risk from the API and Postgres, compared with the template
+  version the API returns), shows the "Raised from standard change template" banner, and its lifecycle bar shows Assess
+  and Authorize as not taken. In Edit every field the template specifies (subject, type, impact, category, rollback
+  duration, description, justification, risk and impact analysis, the plans, the customer boxes, plan visibility) is
+  disabled **and shows the template's value** (impact Medium, category Software, customer boxes unticked, plan visibility
+  on) while priority, assignment and affected services stay editable. Through the BFF, a PATCH of `implementationPlan`,
+  `title` or `impact` is refused with 400 `change_request_standard_template_field` and changes nothing, while resending
+  the stored plan with a work note is accepted (the note is recorded). She schedules it ("Schedule" is Request
+  Approval), implements, reviews and rolls it back; the template then reads "Review needed", linking to that change
+  request.
+
+Every persona signs in through the local mock identity provider (no password).
+
+It WRITES: a change request raised and walked to Closed through the CSM backend's API (the evidence), the proposal, the
+template and the change request raised from it (with one work note), all named with `QA-STD-E2E`. Before and after, it deletes from Postgres,
+in one transaction, the proposals, change requests and templates carrying that tag (and every change request raised from
+a tagged template) together with the `event_outbox` rows of exactly those records (that table has no foreign key, so they
+would otherwise be left pointing at nothing), and nothing else. So it is skipped unless the stack is named:
+
+```bash
+E2E_NO_WEBSERVER=1 E2E_POSTGRES_CONTAINER=csmcr-postgres-1 \
+E2E_CSM_BFF_URL=http://localhost:8082 E2E_OIDC_URL=http://localhost:9100 E2E_ENTITY_SERVICE_URL=http://localhost:8081 \
+  npx playwright test tests/e2e/specs/operations/standard-changes.spec.ts
+```
+
+Set `E2E_SHOT_DIR=<dir>` to also save a picture of each step: the region the step is about (the app's main area scrolls
+inside a 100dvh shell, so a full-page picture would only show its top). The webapp must be a build that has the merged
+Standard changes tab (rebuild the compose service `csm-portal-webapp` after changing it:
+`docker-compose -p csmcr up -d --build csm-portal-webapp` from the repository root).

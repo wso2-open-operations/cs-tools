@@ -38,8 +38,11 @@ import (
 )
 
 type caseService struct {
-	repo     repository.CaseRepository
-	userRepo repository.UserRepository
+	// csmPortalClientID is CSM_PORTAL_BACKEND_CLIENT_ID: the one caller that may
+	// ask for deleted attachments in a list (SearchAttachmentsRequest.IncludeDeleted).
+	csmPortalClientID string
+	repo              repository.CaseRepository
+	userRepo          repository.UserRepository
 	// projectContactRepo backs updateCaseWatchList's project-membership
 	// validation (see that method's own doc comment) — never nil for a
 	// Postgres-backed caseService (routes.go always constructs and passes
@@ -68,7 +71,11 @@ type caseService struct {
 	//     Postgres at all — see CreateCase's own doc comment for why create
 	//     is SN-first while update/comment are Postgres-first.
 	snWriteback *SNWritebackDispatcher
-	snMirror    CaseService
+	// srDefaultSeverity is the severity a service request created without one
+	// gets (SERVICE_REQUEST_DEFAULT_SEVERITY); empty means low (S4). See
+	// WithServiceRequestDefaultSeverity.
+	srDefaultSeverity domain.CaseSeverity
+	snMirror          CaseService
 	// slaEngine registers CSM-native SLA clocks for createCaseSNFirst's own
 	// dual-write path — see registerCaseSLAClocksEvent's own doc comment for
 	// why this must run here (after this service's own Postgres insert)
@@ -223,6 +230,25 @@ func WithInlineImageLinker(svc CaseService, l InlineImageLinker) CaseService {
 // in routes.go) keeps working completely unchanged. slaEngine may itself be
 // nil (config.CSMSLAEngineEnabled == false, or no database configured at
 // all) -- that's the normal "engine turned off" case, not an error.
+func WithDeletedAttachmentsForCSMPortal(svc CaseService, csmPortalClientID string) CaseService {
+	if cs, ok := svc.(*caseService); ok {
+		cs.csmPortalClientID = csmPortalClientID
+	}
+	return svc
+}
+
+// mayListDeletedAttachments is whether this search may include deleted
+// attachments: the request asks AND the caller is the CSM portal backend, which
+// sets the flag only for a portal admin (decided from the person's token roles
+// there, the same trust the admin delete uses). Any other caller's request for
+// it is ignored.
+func (s *caseService) mayListDeletedAttachments(ctx context.Context, req domain.SearchAttachmentsRequest) bool {
+	if !req.IncludeDeleted || s.csmPortalClientID == "" {
+		return false
+	}
+	return auth.IdentityFromContext(ctx).ClientID == s.csmPortalClientID
+}
+
 func WithSLAEngine(svc CaseService, slaEngine SLAEngineService) CaseService {
 	if cs, ok := svc.(*caseService); ok {
 		cs.slaEngine = slaEngine
@@ -690,6 +716,9 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	if err := validateCreateCaseRequest(&req); err != nil {
 		return domain.CreateCaseResponse{}, err
 	}
+	if err := s.applyServiceRequestSeverityOnCreate(ctx, &req); err != nil {
+		return domain.CreateCaseResponse{}, err
+	}
 	// announcement/service_request/engagement/security_report_analysis used to
 	// exist only on the SN-first path (s.snMirror != nil): case_repo's direct
 	// Postgres insert only knew how to write a "CASE" work_item row. CaseRepository.CreateCase
@@ -813,7 +842,12 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// until/unless its severity happened to change later (which calls
 	// ReviseCaseClocks, registering clocks as a side effect).
 	if s.slaEngine != nil && slaClockEligibleCreateTypes[req.Type] {
-		s.slaEngine.RegisterCaseClocks(ctx, c.ID, &req.Severity, req.ProjectID)
+		clockSeverity := &req.Severity
+		if req.Type == "service_request" {
+			// A service request's severity never reaches the SLA engine.
+			clockSeverity = nil
+		}
+		s.slaEngine.RegisterCaseClocks(ctx, c.ID, clockSeverity, req.ProjectID)
 	}
 	if len(watcherIDs) > 0 {
 		// updated_by on the watcher write is the caller's email, taken from
@@ -828,7 +862,7 @@ func (s *caseService) CreateCase(ctx context.Context, req domain.CreateCaseReque
 	// persisted first (immediately above) for the same reason
 	// createCaseSNFirst orders it this way: publishCaseCreatedEvent's own
 	// GetCaseByID re-fetch needs them already written to resolve Recipients.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.getCaseForSLAAndEvents, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
 	// Plain Postgres only: under dual-write the SR is created in ServiceNow
 	// first, where its own flow still assigns, acknowledges and announces it.
 	if req.Type == "service_request" && s.srNotices != nil {
@@ -1002,7 +1036,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// ordering constraint is "before the publish," which this now also
 	// satisfies -- see registerCaseSLAClocksEvent's own doc comment.
 	if slaClockEligibleCreateTypes[req.Type] {
-		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.GetCaseByID, c.ID)
+		registerCaseSLAClocksEvent(ctx, s.slaEngine, s.getCaseForSLAAndEvents, c.ID)
 	}
 
 	// Only now — Postgres has confirmed the row this mode's reads actually
@@ -1012,7 +1046,7 @@ func (s *caseService) createCaseSNFirst(ctx context.Context, req domain.CreateCa
 	// after the ServiceNow POST, before this Postgres insert was even
 	// attempted) — same reasoning incidentService.createIncidentSNFirst
 	// already established.
-	publishCaseCreatedEvent(ctx, s.publisher, s.GetCaseByID, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
+	publishCaseCreatedEvent(ctx, s.publisher, s.getCaseForSLAAndEvents, s.ProjectContactEmailsByRole, s.AccountDefaultWatcherEmails, s.AccountSRETeam, req, c.ID)
 
 	responseState := ""
 	if c.State != nil {
@@ -2015,6 +2049,21 @@ func (s *caseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReque
 	}
 	if req.Severity != nil && !validCaseSeverity[*req.Severity] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity contains invalid value: " + string(*req.Severity)}
+	}
+	// A service request's severity is internal and has its own, narrower path
+	// (no SLA revision, no notification, no mirror write). The record's type is
+	// read first and a failed read fails the request (404, 5xx): the general
+	// path below must never run for a record whose type could not be
+	// established. The repository refuses a service request's severity write
+	// that did not come through updateServiceRequestSeverity as well.
+	if req.Severity != nil {
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
+			return s.updateServiceRequestSeverity(ctx, req)
+		}
 	}
 	if req.WorkState != nil && !validCaseWorkState[*req.WorkState] {
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "workState contains invalid value: " + string(*req.WorkState)}
@@ -3091,7 +3140,7 @@ func (s *caseService) publishCaseAcknowledged(ctx context.Context, caseID, ackno
 		CaseID:           caseID,
 		CaseNumber:       cv.Number,
 		WSO2CaseID:       cv.InternalID,
-		Severity:         strings.ToUpper(string(derefSeverity(cv.Severity))),
+		Severity:         strings.ToUpper(string(derefSeverity(eventSeverity(cv)))),
 		Product:          caseProductName(cv),
 		Team:             caseTeamName(cv),
 		AcknowledgerName: acknowledgerName,
@@ -3998,6 +4047,9 @@ func (s *caseService) SearchCaseAttachments(ctx context.Context, req domain.Sear
 		total       int
 		err         error
 	)
+	if s.mayListDeletedAttachments(ctx, req) {
+		ctx = repository.WithDeletedAttachments(ctx)
+	}
 	if isCase {
 		attachments, total, err = s.repo.SearchCaseAttachments(ctx, req.ReferenceID, req.Pagination)
 	} else {

@@ -19,7 +19,7 @@ package handler
 import "fmt"
 
 // entity-service wire types shared by the SPL Postgres clients that remain
-// (Reports, Usage Metrics, Lookups, User Scan) after Accounts/Projects/Cases
+// (Reports, Usage Metrics, Lookups) after Accounts/Projects/Cases
 // reads merged onto CS Portal's own /accounts, /projects, and /cases routes
 // -- this backend's own copy of entity-service's JSON contract, since
 // entity-service is a separate Go module and its domain types can't be

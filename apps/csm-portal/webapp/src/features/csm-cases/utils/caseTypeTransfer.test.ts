@@ -18,6 +18,8 @@ import { describe, expect, it } from "vitest";
 import {
   ALWAYS_RETAINED_FIELDS,
   computeTransferPreview,
+  describeTransferWarnings,
+  serviceRequestSeverityNote,
   SUPPORTED_TRANSFER_TARGETS,
   TRANSFERABLE_CASE_TYPES,
 } from "@features/csm-cases/utils/caseTypeTransfer";
@@ -97,6 +99,55 @@ describe("TRANSFERABLE_CASE_TYPES / SUPPORTED_TRANSFER_TARGETS", () => {
     // catalog-item assignment was unconfirmed. Both preconditions now hold.
     expect([...SUPPORTED_TRANSFER_TARGETS].sort()).toEqual(
       [...TRANSFERABLE_CASE_TYPES].sort(),
+    );
+  });
+});
+
+describe("computeTransferPreview — service request keeps severity", () => {
+  it("loses only the issue type moving case -> service_request", () => {
+    const preview = computeTransferPreview("case", "service_request", true);
+    expect(preview.lostFields.map((f) => f.key)).toEqual(["issueType"]);
+  });
+});
+
+describe("serviceRequestSeverityNote", () => {
+  it("warns before confirming that S0 becomes S1", () => {
+    expect(serviceRequestSeverityNote("service_request", "S0")).toEqual({
+      kind: "downgrade",
+      message: "S0 is not available for service requests; severity will be set to S1.",
+    });
+  });
+
+  it("notes that a case with no severity gets S4", () => {
+    expect(serviceRequestSeverityNote("service_request", "unset")?.kind).toBe("default");
+    expect(serviceRequestSeverityNote("service_request", "unset")?.message).toMatch(/S4/);
+  });
+
+  it("has nothing to say for S1-S4, or when the target is not a service request", () => {
+    expect(serviceRequestSeverityNote("service_request", "S1")).toBeNull();
+    expect(serviceRequestSeverityNote("service_request", "S4")).toBeNull();
+    expect(serviceRequestSeverityNote("engagement", "S0")).toBeNull();
+    expect(serviceRequestSeverityNote("case", "unset")).toBeNull();
+  });
+});
+
+describe("describeTransferWarnings", () => {
+  it("is null when the response carries no warnings", () => {
+    expect(describeTransferWarnings(undefined)).toBeNull();
+    expect(describeTransferWarnings([])).toBeNull();
+  });
+
+  it("renders SEVERITY_DOWNGRADED from its from/to values", () => {
+    expect(
+      describeTransferWarnings([
+        { code: "SEVERITY_DOWNGRADED", message: "english", from: "catastrophic", to: "critical" },
+      ]),
+    ).toBe("S0 is not available for service requests; severity was set to S1.");
+  });
+
+  it("falls back to the backend message for an unknown code", () => {
+    expect(describeTransferWarnings([{ code: "SOMETHING_NEW", message: "Heads up." }])).toBe(
+      "Heads up.",
     );
   });
 });

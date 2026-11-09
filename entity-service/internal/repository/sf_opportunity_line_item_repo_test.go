@@ -25,7 +25,8 @@ import (
 )
 
 // The standalone upsert takes the parent opportunity's lock (the one the
-// derived set replace holds) and reuses the derived path's statements.
+// derived set replace holds) and reuses the derived path's statements, then
+// re-derives the linked projects' onboarding before the ledger.
 func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 	q := &updateTagQuerier{update: updateSfOpportunityProductQuery, rows: 0}
 	created, err := writeSfOpportunityLineItem(context.Background(), q, "006OPP", "opp-row",
@@ -33,7 +34,9 @@ func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	want := []string{"pg_advisory_xact_lock", updateSfOpportunityProductQuery, insertSfOpportunityProductQuery, "salesforce_ingest_state"}
+	want := []string{"pg_advisory_xact_lock", previousLineItemOpportunitiesQuery, updateSfOpportunityProductQuery, insertSfOpportunityProductQuery,
+		"pg_advisory_xact_lock", deriveOnboardingForOpportunityQuery,
+		"SELECT DISTINCT project_id::text FROM sf_opportunity_link", "salesforce_ingest_state"}
 	if len(q.statements) != len(want) {
 		t.Fatalf("statements = %d, want %d", len(q.statements), len(want))
 	}
@@ -42,7 +45,36 @@ func TestWriteSfOpportunityLineItem_OpportunityLockAndSharedSQL(t *testing.T) {
 			t.Errorf("statement %d = %.50q", i, q.statements[i])
 		}
 	}
-	if q.args[0][0] != sfOpportunityLockKey("006OPP") || q.args[1][1] != "opp-row" || q.args[1][16] != "00kLI" {
-		t.Errorf("lock %v, opportunity %v, line item %v", q.args[0][0], q.args[1][1], q.args[1][16])
+	if q.args[0][0] != sfOpportunityLockKey("006OPP") || q.args[2][1] != "opp-row" || q.args[2][16] != "00kLI" {
+		t.Errorf("lock %v, opportunity %v, line item %v", q.args[0][0], q.args[2][1], q.args[2][16])
+	}
+}
+
+// A line item that moves to another opportunity re-derives the opportunity it
+// left, after the new one, so the old owner picks its remaining earliest line.
+func TestWriteSfOpportunityLineItem_MoveDerivesPreviousOpportunity(t *testing.T) {
+	q := &updateTagQuerier{update: updateSfOpportunityProductQuery, rows: 1, prevOpps: []string{"old-opp", "opp-row"}}
+	if _, err := writeSfOpportunityLineItem(context.Background(), q, "006OPP", "opp-row",
+		domain.SalesforceOpportunityLineItemUpsert{LineItemSfID: "00kLI"}, partnerState()); err != nil {
+		t.Fatal(err)
+	}
+	var derived []any
+	for i, s := range q.statements {
+		if s == deriveOnboardingForOpportunityQuery {
+			derived = append(derived, q.args[i][1])
+		}
+	}
+	if len(derived) != 2 || derived[0] != "opp-row" || derived[1] != "old-opp" {
+		t.Errorf("derived opportunities = %v, want [opp-row old-opp]", derived)
+	}
+	// Project hours are recomputed for the same two opportunities, in the same order.
+	var hours []any
+	for i, s := range q.statements {
+		if strings.Contains(s, "SELECT DISTINCT project_id::text FROM sf_opportunity_link") {
+			hours = append(hours, q.args[i][0])
+		}
+	}
+	if len(hours) != 2 || hours[0] != "opp-row" || hours[1] != "old-opp" {
+		t.Errorf("project hours recomputed for opportunities %v, want [opp-row old-opp]", hours)
 	}
 }

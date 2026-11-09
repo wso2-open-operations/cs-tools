@@ -223,6 +223,34 @@ func announcementLeakGuardFor(scope SearchScope) string {
 	return announcementVisibilityLeakGuard
 }
 
+// caseLikeSeverityColumn is the internal severity of a case-like work item:
+// "case".severity, or service_request.severity (migration 0276) for a service
+// request -- at most one of the two rows exists. Only a caller that may see a
+// service request's severity reads it through this; everyone else reads
+// "case".severity alone (see severityColumnFor), so a service request's
+// severity cannot be read, filtered on, sorted by or counted by an external
+// caller.
+const caseLikeSeverityColumn = `COALESCE(c.severity, sr.severity)`
+
+// severityColumnFor is the severity column expression (enum typed, over the
+// case search joins) a query made on behalf of scope may use. A service
+// request's severity is internal-only: it is part of the expression only for an
+// internal caller that did not arrive through the customer portal's backend
+// (an internal user acting through that portal sees what a customer sees).
+func severityColumnFor(scope SearchScope) string {
+	if scope.canSeeServiceRequestSeverity() {
+		return caseLikeSeverityColumn
+	}
+	return "c.severity"
+}
+
+// canSeeServiceRequestSeverity reports whether the caller may read or filter on
+// a service request's internal severity: an internal scope that is not routed
+// through the customer portal.
+func (s SearchScope) canSeeServiceRequestSeverity() bool {
+	return s.Unrestricted && !s.ViaCustomerPortal
+}
+
 // caseLikeStateColumns COALESCEs state across every case-like work_item
 // extension table (aliased c/eng/sr/sra/ann) -- exactly one is non-null for
 // a given row, since each is a shared-PK extension keyed to a specific
@@ -765,12 +793,17 @@ func NewCaseRepository(db *Scoped, vis ...CRVisibility) CaseRepository {
 //
 // work_item.number (every type) and wso2_id (the five case-like types all
 // require one, per work_item_wso2_id_required_by_type) come from
-// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140),
-// which resolves the product decision this method used to defer (see
-// CLAUDE.md, "CreateCase and case numbers"): a portal-created record gets a
-// visually distinct number/id rather than one drawn from the same series
-// ServiceNow's still-running sync allocates from, so the two can never
-// collide. service_request/engagement/security_report_analysis/announcement
+// next_work_item_number()/next_wso2_id() (migration 0180): the same
+// "CS0000123" / "<project key>-<n>" format ServiceNow allocates, so a
+// portal-created record looks like a synced one. These replaced
+// next_portal_work_item_number()/next_portal_wso2_id() (migration 0140,
+// "CS-PORTAL-..." / "<key>-PORTAL-<n>"). The series start at 1, so
+// cs_number_seq and each project's wso2_id_counter MUST be seeded past the
+// highest synced value (scripts/cutover/seed_native_numbering.sql) before this
+// is deployed to a database, and this must only be deployed once ServiceNow
+// has stopped allocating from the same series, or a number issued here can
+// later be issued by ServiceNow too (CLAUDE.md, "CreateCase and case
+// numbers"). service_request/engagement/security_report_analysis/announcement
 // were previously rejected outright on this data source
 // (caseService.CreateCase's own "supported only for dual-write" check,
 // updated alongside this) purely because this method had nowhere to write
@@ -847,7 +880,7 @@ func createCaseTx(ctx context.Context, tx pgx.Tx, req domain.CreateCaseRequest) 
 		row = tx.QueryRow(ctx, createServiceRequestPortalQuery,
 			req.CreatedBy, req.ProjectID, req.DeploymentID, req.DeployedProductID,
 			req.Subject, req.Description,
-			req.ConversationID,
+			req.ConversationID, caseSeverityToEnum[req.Severity],
 		)
 	case "engagement":
 		row = tx.QueryRow(ctx, createEngagementPortalQuery,
@@ -1031,7 +1064,7 @@ const createCasePortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
+		       next_work_item_number('CASE'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'CASE'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1068,7 +1101,7 @@ const createAnnouncementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
+		       next_work_item_number('ANNOUNCEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $3, $4, 'ANNOUNCEMENT'::work_item_type_enum,
 		       $2::uuid, NULL, NULL, creator.id, p.account_id,
 		       NULLIF($6, '')::uuid
 		FROM creator
@@ -1107,7 +1140,7 @@ const createServiceRequestPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
+		       next_work_item_number('SERVICE_REQUEST'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SERVICE_REQUEST'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
@@ -1116,15 +1149,16 @@ const createServiceRequestPortalQuery = `
 		          subject, description, created_on, updated_on
 	),
 	inserted_service_request AS (
-		INSERT INTO service_request (id, state)
-		SELECT id, 'OPEN'::service_request_state_enum
+		INSERT INTO service_request (id, state, severity)
+		SELECT id, 'OPEN'::service_request_state_enum,
+		       COALESCE(NULLIF($8, '')::case_severity_enum, 'S4'::case_severity_enum)
 		FROM inserted_work_item
-		RETURNING id, state, closed_on
+		RETURNING id, state, severity, closed_on
 	)
 	SELECT iwi.id, iwi.number, iwi.wso2_id, iwi.created_by,
 	       iwi.project_id, iwi.deployment_id, iwi.deployed_product_id,
 	       iwi.subject, iwi.description,
-	       NULL::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
+	       isr.severity::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
 	       iwi.created_on, iwi.updated_on, isr.closed_on
 	FROM inserted_work_item iwi
 	JOIN inserted_service_request isr ON isr.id = iwi.id`
@@ -1147,7 +1181,7 @@ const createEngagementPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
+		       next_work_item_number('ENGAGEMENT'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'ENGAGEMENT'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($9, '')::uuid
 		FROM creator
@@ -1184,7 +1218,7 @@ const createSecurityReportAnalysisPortalQuery = `
 			conversation_id
 		)
 		SELECT gen_random_uuid(), NOW(), NOW(), creator.email, creator.email,
-		       next_portal_work_item_number(), next_portal_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
+		       next_work_item_number('SECURITY_REPORT_ANALYSIS'::work_item_type_enum), next_wso2_id($2::uuid), $5, $6, 'SECURITY_REPORT_ANALYSIS'::work_item_type_enum,
 		       $2::uuid, $3::uuid, $4::uuid, creator.id, p.account_id,
 		       NULLIF($7, '')::uuid
 		FROM creator
@@ -1371,14 +1405,15 @@ const createServiceRequestFromServiceNowQuery = `
 		          subject, description, created_on, updated_on
 	),
 	inserted_service_request AS (
-		INSERT INTO service_request (id, state)
-		VALUES ($1, $10::service_request_state_enum)
-		RETURNING id, state, closed_on
+		INSERT INTO service_request (id, state, severity)
+		VALUES ($1, $10::service_request_state_enum,
+		        COALESCE(NULLIF($12, '')::case_severity_enum, 'S4'::case_severity_enum))
+		RETURNING id, state, severity, closed_on
 	)
 	SELECT iwi.id, iwi.number, iwi.wso2_id, iwi.created_by,
 	       iwi.project_id, iwi.deployment_id, iwi.deployed_product_id,
 	       iwi.subject, iwi.description,
-	       NULL::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
+	       isr.severity::TEXT, NULL::TEXT, isr.state::TEXT, NULL::TEXT,
 	       iwi.created_on, iwi.updated_on, isr.closed_on
 	FROM inserted_work_item iwi
 	JOIN inserted_service_request isr ON isr.id = iwi.id`
@@ -1642,7 +1677,7 @@ func (r *caseRepo) CreateCaseFromServiceNow(ctx context.Context, req domain.Crea
 			number, wso2ID, req.Subject, req.Description,
 			req.ProjectID, deploymentIDArg, deployedProductIDArg,
 			state,
-			conversationIDArg,
+			conversationIDArg, caseSeverityToEnum[req.Severity],
 		)
 	case "engagement":
 		row = r.db.QueryRow(ctx, createEngagementFromServiceNowQuery,
@@ -1767,7 +1802,7 @@ func (r *caseRepo) GetCaseByID(ctx context.Context, id string, scope SearchScope
 
 	err := r.db.QueryRow(ctx,
 		`SELECT wi.id, wi.number, wi.wso2_id, wi.type::TEXT, ann.announcement_type::TEXT, eng.type::TEXT, eng.payment_type::TEXT,
-		        wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
+		        wi.description, `+severityColumnFor(scope)+`::TEXT, c.issue_type::TEXT, `+caseLikeWorkStateColumn+`,
 		        `+caseLikeStateColumn+`, `+caseLikeCauseColumn+`, `+caseLikeCloseNotesColumn+`,
 		        `+caseLikeResolutionCodeColumn+`, c.current_escalation_level::TEXT, c.is_escalated,
 		        wi.created_on, wi.updated_on, `+caseLikeClosedOnColumn+`, `+caseLikeResolvedOnColumn+`,
@@ -2558,6 +2593,31 @@ const updateServiceRequestQuery = `
 	FROM updated_work_item uwi
 	JOIN updated_sr usr ON usr.id = uwi.id`
 
+// updateServiceRequestSeverityQuery writes a service request's severity ($2, an
+// S1-S4 label already mapped by UpdateCase) and nothing else, and bumps
+// work_item.updated_on like every other case-like update. Same output shape as
+// updateServiceRequestQuery, with the severity filled in.
+const updateServiceRequestSeverityQuery = `
+	WITH updated_sr AS (
+		UPDATE service_request
+		SET severity = $2::case_severity_enum
+		WHERE id = $1
+		RETURNING id, severity, state, work_state, closed_on, resolved_on
+	),
+	updated_work_item AS (
+		UPDATE work_item
+		SET updated_on = NOW()
+		WHERE id = $1 AND EXISTS (SELECT 1 FROM updated_sr)
+		RETURNING id, number, wso2_id, created_by, project_id, deployment_id, deployed_product_id,
+		          subject, description, created_on, updated_on
+	)
+	SELECT uwi.id, uwi.number, uwi.wso2_id, uwi.created_by, uwi.project_id, uwi.deployment_id, uwi.deployed_product_id,
+	       uwi.subject, uwi.description,
+	       usr.severity::TEXT, NULL::TEXT, usr.state::TEXT, usr.work_state::TEXT,
+	       uwi.created_on, uwi.updated_on, usr.closed_on, usr.resolved_on
+	FROM updated_work_item uwi
+	JOIN updated_sr usr ON usr.id = uwi.id`
+
 const updateEngagementQuery = `
 	WITH updated_eng AS (
 		UPDATE engagement
@@ -2625,13 +2685,23 @@ const updateAnnouncementQuery = `
 // validateUpdateCaseFieldsForType rejects fields the work item's type has no
 // column for, and restricts announcement state to "open" or "closed".
 //
-// severity is "case"-only. workState and resolutionCode are on every
+// severity is on "case" and service_request. workState and resolutionCode are on every
 // case-like type except announcement (migration 0184), matching ServiceNow,
 // where u_work_state and resolution_code live on the one case table that
 // holds all of these types.
 func validateUpdateCaseFieldsForType(workItemType string, req domain.UpdateCaseRequest, state string) error {
-	if workItemType != "CASE" && req.Severity != nil {
-		return &apierror.ValidationError{Msg: "severity is only supported for cases"}
+	// A service request's severity is internal: only caseService's own
+	// service-request path (which checks the caller) sets this flag. Any other
+	// route here -- including a record whose work_item.type disagrees with its
+	// extension row, so the service took it for a case -- is refused.
+	if workItemType == "SERVICE_REQUEST" && req.Severity != nil && !req.InternalSeverityWrite {
+		return &apierror.ValidationError{Msg: "a service request's severity can only be changed by an internal user"}
+	}
+	if workItemType != "CASE" && workItemType != "SERVICE_REQUEST" && req.Severity != nil {
+		return &apierror.ValidationError{Msg: "severity is only supported for cases and service requests"}
+	}
+	if workItemType == "SERVICE_REQUEST" && req.Severity != nil && *req.Severity == domain.CaseSeverityCatastrophic {
+		return &apierror.ValidationError{Msg: "severity catastrophic is not allowed for a service request"}
 	}
 	if workItemType == "ANNOUNCEMENT" {
 		if req.WorkState != nil {
@@ -2919,6 +2989,34 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 		return c, previousSeverity, nil, nil
 
 	default:
+		// A service request's severity: lock the row so the previous value is
+		// accurate under a concurrent update, then write only the severity.
+		// The caller (caseService.UpdateCase) has already refused an external
+		// caller and sends severity alone: it is exclusive of every other field.
+		if workItemType == "SERVICE_REQUEST" && req.Severity != nil {
+			var c domain.Case
+			var previousRaw *string
+			err := r.db.InTx(ctx, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(ctx, `SELECT severity::TEXT FROM service_request WHERE id = $1 FOR UPDATE`, req.ID).Scan(&previousRaw); err != nil {
+					return err
+				}
+				var txErr error
+				c, txErr = scanUpdatedCaseWithResolvedOn(tx.QueryRow(ctx, updateServiceRequestSeverityQuery, req.ID, severity))
+				return txErr
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return domain.Case{}, nil, nil, &apierror.NotFoundError{Msg: "case not found"}
+			}
+			if err != nil {
+				return domain.Case{}, nil, nil, fmt.Errorf("update case: service request severity: %w", err)
+			}
+			var previous *domain.CaseSeverity
+			if previousRaw != nil {
+				sv := caseSeverityFromEnum[*previousRaw]
+				previous = &sv
+			}
+			return c, previous, nil, nil
+		}
 		query, args, label, ok := caseLikeExtensionUpdate(workItemType, req, state, workState, resolutionCode, cause, actorID)
 		if !ok {
 			return domain.Case{}, nil, nil, &apierror.ValidationError{Msg: fmt.Sprintf("unsupported work item type: %s", workItemType)}
@@ -2962,13 +3060,21 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // while the count still counted it once); an unmatched uploader is still
 // returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
-	const combined = `
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	combined := `
 		SELECT wa.id, wa.work_item_id AS reference_id, COALESCE(wa.name, '') AS name,
 		       COALESCE(wa.content_type, '') AS content_type,
 		       COALESCE(wa.size_bytes, 0)::bigint AS size_bytes, NULL::text AS description,
 		       COALESCE(su.id::text, '') AS uploader_id, COALESCE(wa.created_by, '') AS uploader_email,
 		       COALESCE(su.name, NULLIF(TRIM(CONCAT_WS(' ', su.first_name, su.last_name)), ''), '') AS uploader_name,
-		       wa.created_on, NULL::text AS storage_key, 'complete' AS status
+		       wa.created_on, NULL::text AS storage_key,
+		       CASE WHEN wa.status = 'DELETED' THEN 'deleted' ELSE 'complete' END AS status,
+		       wa.deleted_on, COALESCE(wa.deleted_by, '') AS deleter_email,
+		       COALESCE(du.id::text, '') AS deleter_id,
+		       COALESCE(du.name, NULLIF(TRIM(CONCAT_WS(' ', du.first_name, du.last_name)), ''), '') AS deleter_name
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -2978,15 +3084,24 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			ORDER BY u2.id
 			LIMIT 1
 		) su ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) du ON TRUE
 		WHERE wa.work_item_id = $1
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL
-	const countQuery = `SELECT COUNT(*) FROM (` + combined + `) att`
-	const dataQuery = `
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM (` + combined + `) att`
+	// Deleted rows come last, so they sit under every available attachment.
+	dataQuery := `
 		SELECT id, reference_id, name, content_type, size_bytes, description,
-		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status
+		       uploader_id, uploader_email, uploader_name, created_on, storage_key, status,
+		       deleted_on, deleter_email, deleter_id, deleter_name
 		FROM (` + combined + `) att
-		ORDER BY created_on DESC, id
+		ORDER BY (status = 'deleted'), created_on DESC, id
 		LIMIT $2 OFFSET $3`
 
 	// The id names ANY work item, a change request included: one the caller may
@@ -3024,11 +3139,14 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 				// storageKey is nullable: the list query selects NULL for it.
 				// *string (not string) is required here so a NULL column
 				// value scans as a nil pointer instead of erroring.
-				storageKey *string
+				storageKey                           *string
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes, &a.Description,
 				&uploaderID, &uploaderEmail, &uploaderName, &a.CreatedOn, &storageKey, &a.Status,
+				&deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan case attachment: %w", err)
 			}
@@ -3036,6 +3154,10 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 			a.ReferenceType = domain.ReferenceTypeCase
 			a.CreatedBy = domain.NewUserReference(uploaderID, uploaderEmail, uploaderName)
 			a.StorageKey = storageKey
+			if a.Status == domain.AttachmentStatusDeleted {
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3058,6 +3180,12 @@ func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pag
 // created, which is told apart from a migrated row waiting for its file by its
 // legacy state column, always NULL for a row this service wrote).
 const listedStoredAttachmentSQL = `AND wa.status NOT IN ('DELETED', 'FAILED')
+		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
+
+// listedWithDeletedStoredAttachmentSQL is listedStoredAttachmentSQL for a caller
+// who may also see deleted attachments: a deleted row is kept, the rest of the
+// filter is the same.
+const listedWithDeletedStoredAttachmentSQL = `AND wa.status <> 'FAILED'
 		  AND NOT (wa.status = 'PENDING' AND wa.state IS NULL)`
 
 // SearchWorkItemAttachments implements CaseRepository.
@@ -3092,22 +3220,28 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		}
 	}
 
-	const where = `
+	listed := listedStoredAttachmentSQL
+	if includeDeletedAttachments(ctx) {
+		listed = listedWithDeletedStoredAttachmentSQL
+	}
+	where := `
 		WHERE wa.work_item_id = $1
 		  AND wi.type = ANY($2::text[]::work_item_type_enum[])
 		  AND wa.state IS DISTINCT FROM 'PENDING'
-		  ` + listedStoredAttachmentSQL
-	const countQuery = `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
+		  ` + listed
+	countQuery := `SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id` + where
 	// created_by is a free-form string on this table; it is matched to a user
 	// by email (same convention as comment.created_by). The match is a
 	// LATERAL ... LIMIT 1 because "user".email has no unique constraint, and a
 	// plain join would fan one attachment out into several rows while
 	// countQuery above counts it once.
-	const dataQuery = `
+	dataQuery := `
 		SELECT wa.id, wa.work_item_id, COALESCE(wa.name, ''), COALESCE(wa.content_type, ''),
 		       COALESCE(wa.size_bytes, 0), wa.created_by, COALESCE(u.id::text, ''),
 		       COALESCE(u.name, NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), ''),
-		       wa.created_on
+		       wa.created_on, wa.status = 'DELETED', wa.deleted_on,
+		       COALESCE(wa.deleted_by, ''), COALESCE(d.id::text, ''),
+		       COALESCE(d.name, NULLIF(TRIM(CONCAT_WS(' ', d.first_name, d.last_name)), ''), '')
 		FROM work_item_attachment wa
 		JOIN work_item wi ON wi.id = wa.work_item_id
 		LEFT JOIN LATERAL (
@@ -3116,8 +3250,15 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			WHERE LOWER(u2.email) = LOWER(wa.created_by)
 			ORDER BY u2.id
 			LIMIT 1
-		) u ON TRUE` + where + `
-		ORDER BY wa.created_on DESC, wa.id
+		) u ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT u3.id, u3.name, u3.first_name, u3.last_name
+			FROM "user" u3
+			WHERE wa.deleted_by IS NOT NULL AND LOWER(u3.email) = LOWER(wa.deleted_by)
+			ORDER BY u3.id
+			LIMIT 1
+		) d ON TRUE` + where + `
+		ORDER BY (wa.status = 'DELETED'), wa.created_on DESC, wa.id
 		LIMIT $3 OFFSET $4`
 
 	var total int
@@ -3142,13 +3283,17 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 		result := make([]domain.Attachment, 0, pagination.Limit)
 		for rows.Next() {
 			var (
-				a                                   domain.Attachment
-				sizeBytes                           int64
-				createdBy, uploaderID, uploaderName string
+				a                                    domain.Attachment
+				sizeBytes                            int64
+				createdBy, uploaderID, uploaderName  string
+				deleted                              bool
+				deletedOn                            *time.Time
+				deleterEmail, deleterID, deleterName string
 			)
 			if err := rows.Scan(
 				&a.ID, &a.ReferenceID, &a.Name, &a.Type, &sizeBytes,
 				&createdBy, &uploaderID, &uploaderName, &a.CreatedOn,
+				&deleted, &deletedOn, &deleterEmail, &deleterID, &deleterName,
 			); err != nil {
 				return fmt.Errorf("scan work item attachment: %w", err)
 			}
@@ -3156,6 +3301,11 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 			a.ReferenceType = referenceType
 			a.CreatedBy = domain.NewUserReference(uploaderID, createdBy, uploaderName)
 			a.Status = domain.AttachmentStatusComplete
+			if deleted {
+				a.Status = domain.AttachmentStatusDeleted
+				a.DeletedOn = deletedOn
+				a.DeletedBy = domain.NewUserReference(deleterID, deleterEmail, deleterName)
+			}
 			result = append(result, a)
 		}
 		if err := rows.Err(); err != nil {
@@ -3283,7 +3433,7 @@ const caseLikeStateSortColumn = `CASE ` + caseLikeStateColumn + `
 // comment): "case" is a LEFT JOIN here, so a service_request/engagement/
 // security_report_analysis/announcement row's own c.state is always NULL,
 // and sorting on it left every non-CASE row unsorted by state. Severity stays
-// c.severity -- it's genuinely case-only, unlike state.
+// c.severity for a caller that cannot see a service request's severity (SearchCases swaps in severityColumnFor(scope) otherwise).
 var pgSortColMap = map[domain.CaseSortField]string{
 	domain.CaseSortFieldCreatedOn: "wi.created_on",
 	domain.CaseSortFieldUpdatedOn: "wi.updated_on",
@@ -3399,7 +3549,7 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 		AssignedUserIDs: req.Parsed.AssignedUserIDs, States: req.Parsed.States, Severities: req.Parsed.Severities,
 		IssueTypes: req.Parsed.IssueTypes, EngagementTypes: req.Parsed.EngagementTypes, WorkStates: req.Parsed.WorkStates,
 		EscalationLevels: req.Parsed.EscalationLevels, Tags: req.Parsed.Tags, ExcludeTags: req.Parsed.ExcludeTags,
-		DefaultTypes: true,
+		DefaultTypes: true, SeverityColumn: severityColumnFor(scope),
 	}, argIdx)
 	if err != nil {
 		return "", nil, argIdx, err
@@ -3658,7 +3808,9 @@ func buildCaseSearchWhere(req domain.SearchCasesRequest, scope SearchScope) (str
 	if len(req.Parsed.OrGroups) > 0 {
 		branches := make([]string, 0, len(req.Parsed.OrGroups))
 		for _, g := range req.Parsed.OrGroups {
-			preds, branchArgs, next, err := caseFieldPredicates(caseFieldSetFromGroup(g), argIdx)
+			branch := caseFieldSetFromGroup(g)
+			branch.SeverityColumn = severityColumnFor(scope)
+			preds, branchArgs, next, err := caseFieldPredicates(branch, argIdx)
 			if err != nil {
 				return "", nil, argIdx, err
 			}
@@ -3706,6 +3858,9 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	}
 
 	sortCol := pgSortColMap[req.SortBy.Field]
+	if req.SortBy.Field == domain.CaseSortFieldSeverity {
+		sortCol = severityColumnFor(scope)
+	}
 	sortDir := string(req.SortBy.Order)
 
 	// Deployment/deployed-product/product are LEFT joins here (unlike
@@ -3769,7 +3924,7 @@ func (r *caseRepo) SearchCases(ctx context.Context, req domain.SearchCasesReques
 	// before joining, so a deep page used to join every matching row first.
 	dataQuery := fmt.Sprintf(
 		`SELECT wi.id, wi.number, wi.wso2_id,
-		        wi.type::TEXT, wi.subject, wi.description, c.severity::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
+		        wi.type::TEXT, wi.subject, wi.description, `+severityColumnFor(scope)+`::TEXT, c.issue_type::TEXT, `+caseLikeStateColumn+`,
 		        eng.type::TEXT, `+caseLikeWorkStateColumn+`, c.current_escalation_level::TEXT, wi.created_on, wi.updated_on,
 		        wi.created_by,
 		        wi.best_case_eta, wi.most_likely_eta, wi.worst_case_eta,
@@ -5018,6 +5173,20 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 	includeFieldChanges := req.IncludeFieldChanges != nil && *req.IncludeFieldChanges
 	excludeWorkNotes := req.ExcludeWorkNotes != nil && *req.ExcludeWorkNotes
 
+	// A service request's severity changes are internal: its field-change rows
+	// are left out of the feed (and of the total) for a caller that may not see
+	// that severity -- the same rule as severityColumnFor. An identity that
+	// cannot be read from ctx is treated as one that may not. Case severity rows
+	// are unaffected: the filter only matches a work item that has a
+	// service_request row.
+	scope, _ := CallerIdentityFromContext(ctx)
+	fieldChangeFilter, fieldChangeDataFilter := "", ""
+	if !scope.canSeeServiceRequestSeverity() {
+		const clause = ` AND NOT (%[1]s.field_name = 'severity' AND EXISTS (SELECT 1 FROM service_request sr_sev WHERE sr_sev.id = %[1]s.work_item_id))`
+		fieldChangeFilter = fmt.Sprintf(clause, "wa")
+		fieldChangeDataFilter = fieldChangeFilter
+	}
+
 	// IS DISTINCT FROM, not <>: a comment with no type at all (NULL) must
 	// still count/show -- a plain <> comparison against NULL evaluates to
 	// NULL (neither true nor false in a WHERE clause), which would silently
@@ -5047,7 +5216,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 			(SELECT COUNT(*) FROM work_item_attachment wa JOIN work_item wi ON wi.id = wa.work_item_id
 			 WHERE wa.work_item_id = $1` + syncedAttachmentFilter + `)`
 	if includeFieldChanges {
-		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity WHERE work_item_id = $1)`
+		countQuery += ` + (SELECT COUNT(*) FROM work_item_activity wa WHERE wa.work_item_id = $1` + fieldChangeFilter + `)`
 	}
 
 	// An attachment entry's content is never empty: a client that hides
@@ -5121,7 +5290,7 @@ func (r *caseRepo) SearchCaseActivities(ctx context.Context, req domain.SearchCa
 					wa.field_name, wa.old_value, wa.new_value
 				FROM work_item_activity wa
 				` + userByEmailJoin("u3", "wa.user_email") + `
-				WHERE wa.work_item_id = $1
+				WHERE wa.work_item_id = $1` + fieldChangeDataFilter + `
 			) fc`
 	}
 	dataQuery += `
@@ -5267,6 +5436,10 @@ func (r *caseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesReq
 	where, args, _, err := buildCaseSearchWhere(req, scope)
 	if err != nil {
 		return nil, err
+	}
+	if groupBy == "severity" {
+		sev := severityColumnFor(scope) + "::TEXT"
+		col.key, col.label = sev, sev
 	}
 	query := fmt.Sprintf(`
 		SELECT %s AS bucket_key, MAX(%s) AS bucket_label, COUNT(*) AS bucket_count

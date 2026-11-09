@@ -105,6 +105,13 @@ func (c *CustomerEntityClient) PatchCase(ctx context.Context, caseID string, bod
 	return c.do(ctx, http.MethodPatch, fmt.Sprintf("/cases/%s", url.PathEscape(caseID)), body)
 }
 
+// CreatePendingVerification calls POST /pending-verifications on the entity
+// service to add a case to the Pending Verification list.
+// Response is returned as raw JSON; typed response structs are deferred.
+func (c *CustomerEntityClient) CreatePendingVerification(ctx context.Context, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/pending-verifications", body)
+}
+
 // CreateCaseComment calls POST /cases/{id}/comments on the entity service.
 // Response is returned as raw JSON; typed response structs are deferred.
 func (c *CustomerEntityClient) CreateCaseComment(ctx context.Context, caseID string, body []byte) ([]byte, error) {
@@ -1293,6 +1300,13 @@ func (c *CustomerEntityClient) PutCaseAlertValues(ctx context.Context, body []by
 // DeleteCaseAlertValue calls DELETE /team-schedule/case-alerts/settings/values/{valueId}.
 func (c *CustomerEntityClient) DeleteCaseAlertValue(ctx context.Context, valueID string) ([]byte, error) {
 	return c.do(ctx, http.MethodDelete, "/team-schedule/case-alerts/settings/values/"+url.PathEscape(valueID), nil)
+}
+
+// StandardChangeCall calls one of entity-service's standard change catalogue routes
+// (/standard-change-templates/..., /standard-change-proposals/...) with the
+// caller's identity. path is built by the handler from validated ids only.
+func (c *CustomerEntityClient) StandardChangeCall(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, method, path, body)
 }
 
 // ListRunbooks calls GET /runbooks: the alert-name to runbook catalog.

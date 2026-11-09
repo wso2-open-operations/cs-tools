@@ -30,17 +30,19 @@ import {
   Radio,
   RadioGroup,
   Select,
+  Skeleton,
   Switch,
   TextField,
   Typography,
 } from "@wso2/oxygen-ui";
 
 const { DateTimePicker, LocalizationProvider } = DatePickers;
-import { ArrowLeft, Link2 } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, Library, Link2 } from "@wso2/oxygen-ui-icons-react";
 import { useEffect, useRef, useState, type JSX } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { BackendApiError } from "@api/backend/client";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
+import CarriedOverDeviationField from "@features/csm-operations/components/CarriedOverDeviationField";
 import ExpandableRichTextField from "@features/csm-operations/components/ExpandableRichTextField";
 import { isBlankHtml } from "@utils/sanitizeHtml";
 import { isPastZonedInput, zonedInputToBackendUtc } from "@utils/dateTime";
@@ -53,10 +55,26 @@ import { useSearchInternalUsersByName } from "@api/useSearchUsersByName";
 import { useGetCsmCaseDetail } from "@features/csm-cases/api/useGetCsmCaseDetail";
 import { useSearchParentRecordsForSelect } from "@features/csm-operations/api/useSearchParentRecordsForSelect";
 import AsyncEntitySelect from "@components/AsyncEntitySelect";
+import RequiredMark from "@components/RequiredMark";
 import ChangeRequestScopeFields, {
   ChangeRequestCustomerGroupField,
 } from "@features/csm-operations/components/ChangeRequestScopeFields";
 import { useChangeRequestScope } from "@features/csm-operations/hooks/useChangeRequestScope";
+import {
+  useGetStandardChangeTemplate,
+  useProjectCustomer,
+  useSearchActiveStandardChangeTemplatesForSelect,
+} from "@features/csm-operations/api/useStandardChanges";
+import StandardChangeContentView from "@features/csm-operations/components/StandardChangeContentView";
+import StandardChangeParameterInputs from "@features/csm-operations/components/StandardChangeParameterInputs";
+import {
+  isStandardChangeTemplateOtherCustomer,
+  isStandardChangeTemplateUnavailable,
+  STANDARD_CHANGE_ONE_CUSTOMER_RULE,
+  standardChangeParametersPayload,
+  standardChangeTemplateStateLabel,
+  standardChangeValuesValid,
+} from "@features/csm-operations/utils/standardChanges";
 import {
   CHANGE_REQUEST_CATEGORY_OPTIONS,
   CHANGE_REQUEST_CREATE_TYPE_OPTIONS,
@@ -64,6 +82,7 @@ import {
   changeRequestDraftKey,
   clearChangeRequestDraft,
   CLONE_SOURCE_GAP_MESSAGE,
+  customerProjectNeededForApproval,
   DEFAULT_CHANGE_REQUEST_CATEGORY,
   decodeParentRecordValue,
   EMERGENCY_CUSTOMER_STEPS_HELPER,
@@ -73,7 +92,9 @@ import {
   isEmergencyChangeRequestType,
   loadChangeRequestDraft,
   parentRecordLabel,
+  REQUIRED_TO_REQUEST_APPROVAL_HELPER,
   saveChangeRequestDraft,
+  STANDARD_CLONE_SOURCE_GAP_MESSAGE,
   type ChangeRequestDraftContext,
   type CloneChangeRequestNavState,
   type CreateChangeRequestFromIncidentNavState,
@@ -87,6 +108,7 @@ import type {
   BeChangeRequestType,
   BeCreateChangeRequestPayload,
   BeGroup,
+  BeStandardChangeTemplate,
   BeUser,
 } from "@api/backend/types";
 
@@ -188,8 +210,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
     | CreateChangeRequestFromCaseNavState
     | CreateChangeRequestFromIncidentNavState
     | undefined;
+  // A clone carries the source's fields; state that only says where the user came
+  // from ({ from }, e.g. "Raise a change request" on a standard change template) is
+  // not a clone.
   const cloneState =
-    locationState && !("caseId" in locationState) && !("incidentId" in locationState)
+    locationState &&
+    !("caseId" in locationState) &&
+    !("incidentId" in locationState) &&
+    Object.keys(locationState).some((k) => k !== "from")
       ? locationState
       : undefined;
   const fromCaseState =
@@ -205,6 +233,12 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const backState = location.state as { from?: string } | undefined;
   const backTarget = backState?.from ?? OPERATIONS_CHANGE_REQUESTS_PATH;
 
+  // A template's own "Raise a change request" opens this form with
+  // `?standardChangeTemplateId=` (a link that survives a reload): the type is
+  // then Standard and that template is preselected.
+  const queryTemplateId =
+    new URLSearchParams(location.search ?? "").get("standardChangeTemplateId")?.trim() || undefined;
+
   // This route unmounts (losing all local state) whenever the user navigates
   // to another operations tab, and remounts fresh on the way back — without
   // this, that remount re-seeds every field from the *original*
@@ -213,7 +247,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // entry context (see `changeRequestDraftKey`'s doc comment for why); `draft`
   // is read once, at mount, via a lazy `useState` initializer — every field
   // below seeds from it in preference to the nav-state source when present.
-  const draftContext: ChangeRequestDraftContext = cloneState
+  const draftContext: ChangeRequestDraftContext = queryTemplateId
+    ? { kind: "template", templateId: queryTemplateId }
+    : cloneState
     ? { kind: "clone", sourceNumber: cloneState.sourceNumber }
     : fromCaseState
       ? { kind: "case", caseId: fromCaseState.caseId }
@@ -243,7 +279,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // stage), so the user must choose one of the three deliberately. A clone / restored draft
   // pre-selects only when its type is one of those three (a legacy
   // model/azure/... source falls back to "nothing selected").
-  const initialType = draft?.type ?? cloneState?.type ?? "";
+  const initialType = draft?.type ?? (queryTemplateId ? "standard" : undefined) ?? cloneState?.type ?? "";
   const [type, setType] = useState<string>(isCreatableChangeRequestType(initialType) ? initialType : "");
   const [impact, setImpact] = useState<string>(draft?.impact ?? cloneState?.impact ?? "low");
   const [priority, setPriority] = useState<string>(draft?.priority ?? UNSET);
@@ -256,6 +292,23 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const [implementationPlan, setImplementationPlan] = useState(
     draft?.implementationPlan ?? cloneState?.implementationPlan ?? "",
   );
+  // A clone copies the source's deviation from the implementation plan. It is
+  // shown only when the form opened with one (a clone of a change request that
+  // has a deviation, or a draft of one), read-only: a deviation is recorded from
+  // Implement on, so all that can be done with a carried-over one is fold it into
+  // the implementation plan and clear it ("Clear deviation"; the new change request
+  // cannot request approval until it is cleared). Left as it is, it is sent.
+  const initialImplementationDeviation = draft?.implementationDeviation ?? cloneState?.implementationDeviation ?? "";
+  const [implementationDeviation, setImplementationDeviation] = useState(initialImplementationDeviation);
+  // The carried-over text, from either source, not the restored value alone: a
+  // draft that kept a cleared deviation must still show it (to keep it after all),
+  // and the clone it came from still has it.
+  const [carriedOverDeviation] = useState(() =>
+    !isBlankHtml(draft?.implementationDeviation ?? "")
+      ? (draft?.implementationDeviation ?? "")
+      : (cloneState?.implementationDeviation ?? ""),
+  );
+  const showImplementationDeviation = !isBlankHtml(carriedOverDeviation);
   const [riskImpactAnalysis, setRiskImpactAnalysis] = useState(
     draft?.riskImpactAnalysis ?? cloneState?.riskImpactAnalysis ?? "",
   );
@@ -279,6 +332,42 @@ export default function CreateChangeRequestPage(): JSX.Element {
     !initialIsEmergency && (draft?.customerReviewRequired ?? cloneState?.customerReviewRequired ?? false),
   );
   const isEmergency = isEmergencyChangeRequestType(type);
+  // Not needed to create, but Request Approval (the next step for every new change
+  // request) is refused without a Customer Project when a customer step is ticked on
+  // a non-Emergency change: marked required, without blocking the create.
+  const projectNeededForApproval = customerProjectNeededForApproval(
+    type,
+    customerApprovalRequired,
+    customerReviewRequired,
+  );
+  // STANDARD: raised from a CAB-approved template. The template's current
+  // version specifies the subject, the plans, impact, category, rollback duration
+  // and the customer settings (shown read-only, as a preview); only its
+  // parameters ("change specifics") and what the template does not specify
+  // (scope, schedule, assignment, priority, journals) are filled in here.
+  const isStandard = type === "standard";
+  const [templateId, setTemplateId] = useState(
+    draft?.standardChangeTemplateId ?? queryTemplateId ?? cloneState?.standardChangeTemplateId ?? "",
+  );
+  const [templateLabel, setTemplateLabel] = useState<string | undefined>(
+    draft?.standardChangeTemplateLabel ?? cloneState?.standardChangeTemplateLabel,
+  );
+  const [parameterValues, setParameterValues] = useState<Record<string, string>>(
+    draft?.standardChangeParameters ?? cloneState?.standardChangeParameters ?? {},
+  );
+  const [showParameterErrors, setShowParameterErrors] = useState(false);
+  // The create was refused because the template is no longer usable as shown
+  // (suspended, retired or revised since it loaded): the backend's words.
+  const [templateUnavailable, setTemplateUnavailable] = useState<string | null>(null);
+  const templateQuery = useGetStandardChangeTemplate(isStandard && templateId ? templateId : undefined);
+  const template: BeStandardChangeTemplate | null | undefined = templateQuery.data;
+  const templateVersion = template?.currentVersion ?? null;
+  const templateParameters = templateVersion?.parameters ?? [];
+  // A template is one customer's (null only on an older one whose customer could
+  // not be told: nothing can be raised from it until one is set).
+  const templateCustomer = template?.customer ?? null;
+  const templateUsable = !!template && template.state === "active" && !!templateVersion && !!templateCustomer;
+  const pickedTemplateLabel = template ? `${template.number} — ${template.name}` : templateLabel;
   // Customer Project / Deployments / Deployment products (and the read-only
   // Customer Group, the project's registered contacts). The hook owns the
   // cascade (project -> deployments + derived products and contacts); a
@@ -297,6 +386,74 @@ export default function CreateChangeRequestPage(): JSX.Element {
       label: draft.deploymentProductLabels?.[id] ?? id,
     })),
   });
+  // STANDARD: the customer is the chosen Customer Project's account. A template
+  // belongs to one customer and is used only for that customer's projects, so the
+  // template picker lists that customer's active templates only and waits for a
+  // project; a template chosen before any project (a template page's "Raise a
+  // change request", a clone, a draft) narrows the project picker to its
+  // customer instead.
+  const projectCustomerQuery = useProjectCustomer(isStandard && scope.projectId ? scope.projectId : undefined);
+  const projectCustomerKnown = isStandard && !!scope.projectId && projectCustomerQuery.isSuccess;
+  const projectCustomer = projectCustomerKnown ? (projectCustomerQuery.data ?? null) : null;
+  const customerMatches = projectCustomerKnown && !!templateCustomer && projectCustomer?.id === templateCustomer.id;
+  // Said where the template is picked when the project changed to another
+  // customer's and the template (with its values) had to be cleared.
+  const [templateClearedNotice, setTemplateClearedNotice] = useState<string | null>(null);
+  // The create was refused because the project is not one of the template's
+  // customer's (400 standard_change_template_other_customer): the backend's
+  // words, for the template and project they were said about.
+  const [otherCustomerRefusal, setOtherCustomerRefusal] = useState<{
+    message: string;
+    templateId: string;
+    projectId: string;
+  } | null>(null);
+  const otherCustomerMessage =
+    otherCustomerRefusal &&
+    otherCustomerRefusal.templateId === templateId &&
+    otherCustomerRefusal.projectId === scope.projectId
+      ? otherCustomerRefusal.message
+      : null;
+  // The project now belongs to another customer than the template: the template
+  // (and its change specifics) cannot be used for it, so it is cleared, with a
+  // short notice. Adjusted during render (React's pattern for state derived from
+  // a change), like the inference from the originating service request below.
+  if (
+    isStandard &&
+    template &&
+    template.id === templateId &&
+    projectCustomerKnown &&
+    (templateCustomer?.id ?? null) !== (projectCustomer?.id ?? null)
+  ) {
+    const projectName = scope.projectLabel || "the selected project";
+    setTemplateClearedNotice(
+      `The template ${template.number} — ${template.name} was cleared, with its change specifics: it is ${
+        templateCustomer ? `${templateCustomer.name}'s` : "no customer's"
+      }, and ${projectName} ${projectCustomer ? `is ${projectCustomer.name}'s` : "has no customer recorded"}. ${STANDARD_CHANGE_ONE_CUSTOMER_RULE}`,
+    );
+    setTemplateId("");
+    setTemplateLabel(undefined);
+    setParameterValues({});
+    setShowParameterErrors(false);
+    setTemplateUnavailable(null);
+  }
+  // Under the template picker: why it is disabled, or whose templates it lists.
+  const templatePickerHint = !scope.projectId
+    ? `Select the Customer Project first. ${STANDARD_CHANGE_ONE_CUSTOMER_RULE}`
+    : projectCustomerQuery.isError
+      ? "Couldn't look up the project's customer."
+      : !projectCustomerKnown
+        ? "Looking up the project's customer…"
+        : projectCustomer
+          ? `${projectCustomer.name}'s active templates only: a template is used only for its own customer's projects.`
+          : "This project has no customer recorded, so no standard change template can be used for it.";
+  // A template chosen before any project narrows the project picker to its customer.
+  const projectAccountId = isStandard && !scope.projectId && templateCustomer ? templateCustomer.id : undefined;
+  const projectHelperText = !isStandard
+    ? undefined
+    : projectAccountId && templateCustomer
+      ? `Projects of ${templateCustomer.name}, the customer of ${template!.number}: a template is used only for its own customer's projects.`
+      : "Required for a standard change: a project of the template's customer.";
+
   // The legacy ServiceNow form pre-selects "Other".
   const initialCategory = draft?.category ?? cloneState?.category ?? DEFAULT_CHANGE_REQUEST_CATEGORY;
   const [category, setCategory] = useState<string>(
@@ -423,6 +580,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
       description,
       justification,
       implementationPlan,
+      implementationDeviation,
       riskImpactAnalysis,
       backoutPlan,
       testPlan,
@@ -442,6 +600,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
       category,
       comment,
       workNote,
+      standardChangeTemplateId: templateId,
+      standardChangeTemplateLabel: pickedTemplateLabel,
+      standardChangeParameters: parameterValues,
     });
   }, [
     draftKey,
@@ -454,6 +615,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     description,
     justification,
     implementationPlan,
+    implementationDeviation,
     riskImpactAnalysis,
     backoutPlan,
     testPlan,
@@ -473,6 +635,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
     category,
     comment,
     workNote,
+    templateId,
+    pickedTemplateLabel,
+    parameterValues,
   ]);
 
   const isSubmitting = postChangeRequest.isPending || patchChangeRequest.isPending;
@@ -481,7 +646,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
   // create-then-PATCH flow through with an incident's id would 404.
   const canSubmit =
     isCreatableChangeRequestType(type) &&
-    subject.trim().length > 0 &&
+    (isStandard
+      ? templateUsable && !templateUnavailable && !otherCustomerMessage && customerMatches
+      : subject.trim().length > 0) &&
     !isSubmitting &&
     !isIncidentParentSelected;
   // Non-blocking: a past planned start/end is unusual but not forbidden
@@ -489,16 +656,36 @@ export default function CreateChangeRequestPage(): JSX.Element {
   const plannedStartIsPast = isPastZonedInput(plannedStartDate);
   const plannedEndIsPast = isPastZonedInput(plannedEndDate);
 
+  /**
+   * The create of a standard change: the template, the version the form showed
+   * and the change specifics, plus only what the template does not specify. The
+   * subject, the plans, impact, category, rollback duration, planning visibility,
+   * the customer boxes and any deviation are the template's: sending one is a 400.
+   */
+  const buildStandardPayload = (): BeCreateChangeRequestPayload => {
+    const payload: BeCreateChangeRequestPayload = {
+      type: "standard",
+      standardChangeTemplateId: template!.id,
+      standardChangeTemplateVersionId: templateVersion!.id,
+      standardChangeParameters: standardChangeParametersPayload(templateParameters, parameterValues),
+    };
+    if (priority) payload.priority = priority as BeChangeRequestPriority;
+    return payload;
+  };
+
   const handleSubmit = (): void => {
     if (!canSubmit) return;
+    if (isStandard && !standardChangeValuesValid(templateParameters, parameterValues)) {
+      setShowParameterErrors(true);
+      return;
+    }
 
     // `canSubmit` guarantees `type` is one of normal / standard / emergency.
-    const payload: BeCreateChangeRequestPayload = {
-      subject: subject.trim(),
-      type: type as BeChangeRequestType,
-    };
-    if (impact) payload.impact = impact as BeChangeRequestImpact;
-    if (priority) payload.priority = priority as BeChangeRequestPriority;
+    const payload: BeCreateChangeRequestPayload = isStandard
+      ? buildStandardPayload()
+      : { subject: subject.trim(), type: type as BeChangeRequestType };
+    if (!isStandard && impact) payload.impact = impact as BeChangeRequestImpact;
+    if (!isStandard && priority) payload.priority = priority as BeChangeRequestPriority;
     // Every change request starts at New, unconditionally -- the org's own
     // Change Management process flow confirms creation never branches to any
     // other state, so this form has no state picker and never sends one; the
@@ -513,17 +700,22 @@ export default function CreateChangeRequestPage(): JSX.Element {
     // "<p><br></p>"), so `.trim()` truthiness would send blank content as
     // if it were real. isBlankHtml is the same check the detail page uses
     // to decide whether to render a plan section at all.
-    if (!isBlankHtml(description)) payload.description = description;
-    if (!isBlankHtml(justification)) payload.justification = justification;
-    if (!isBlankHtml(implementationPlan)) payload.implementationPlan = implementationPlan;
-    if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
-    if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
-    if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
-    payload.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
-    // Always sent, true or false, so the backend never has to guess the intent.
-    // An Emergency change never asks the customer: both are off whatever the state holds.
-    payload.customerApprovalRequired = !isEmergency && customerApprovalRequired;
-    payload.customerReviewRequired = !isEmergency && customerReviewRequired;
+    if (!isStandard) {
+      if (!isBlankHtml(description)) payload.description = description;
+      if (!isBlankHtml(justification)) payload.justification = justification;
+      if (!isBlankHtml(implementationPlan)) payload.implementationPlan = implementationPlan;
+      if (showImplementationDeviation && !isBlankHtml(implementationDeviation)) {
+        payload.implementationDeviation = implementationDeviation;
+      }
+      if (!isBlankHtml(riskImpactAnalysis)) payload.riskImpactAnalysis = riskImpactAnalysis;
+      if (!isBlankHtml(backoutPlan)) payload.backoutPlan = backoutPlan;
+      if (!isBlankHtml(testPlan)) payload.testPlan = testPlan;
+      payload.isPlanningVisibleToCustomers = isPlanningVisibleToCustomers;
+      // Always sent, true or false, so the backend never has to guess the intent.
+      // An Emergency change never asks the customer: both are off whatever the state holds.
+      payload.customerApprovalRequired = !isEmergency && customerApprovalRequired;
+      payload.customerReviewRequired = !isEmergency && customerReviewRequired;
+    }
     if (groupId.trim()) payload.groupId = groupId.trim();
     if (assignedEngineerId.trim()) payload.assignedEngineerId = assignedEngineerId.trim();
     if (requestedById.trim()) payload.requestedById = requestedById.trim();
@@ -538,7 +730,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
     }
     // No customerGroupId: the Customer Group is the project's registered
     // contacts, derived by the backend (read-only here).
-    if (isChangeRequestCategory(category)) payload.category = category as BeChangeRequestCategory;
+    if (!isStandard && isChangeRequestCategory(category)) payload.category = category as BeChangeRequestCategory;
     if (comment.trim()) payload.comment = comment.trim();
     if (workNote.trim()) payload.workNote = workNote.trim();
 
@@ -587,6 +779,25 @@ export default function CreateChangeRequestPage(): JSX.Element {
         );
       },
       onError: (err) => {
+        // The template was suspended, retired or revised after the form loaded
+        // it: say so where the template is shown and offer to read it again.
+        if (isStandard && isStandardChangeTemplateUnavailable(err)) {
+          setTemplateUnavailable(err instanceof Error && err.message ? err.message : "The template is no longer available as shown.");
+          return;
+        }
+        // The project is not one of the template's customer's: said at the
+        // template, in the backend's words, until the template or project changes.
+        if (isStandard && isStandardChangeTemplateOtherCustomer(err)) {
+          setOtherCustomerRefusal({
+            message:
+              err instanceof Error && err.message
+                ? err.message
+                : "The template belongs to another customer than the project's.",
+            templateId,
+            projectId: scope.projectId,
+          });
+          return;
+        }
         // The backend surfaces real validation messages on 4xx (e.g. an
         // invalid UUID in one of the advanced ID fields); show them.
         const msg =
@@ -684,7 +895,7 @@ export default function CreateChangeRequestPage(): JSX.Element {
           {cloneState.sourceNumber
             ? `Cloned from ${cloneState.sourceNumber}. `
             : "Cloned from an existing change request. "}
-          {CLONE_SOURCE_GAP_MESSAGE}
+          {cloneState.standardChangeTemplateId ? STANDARD_CLONE_SOURCE_GAP_MESSAGE : CLONE_SOURCE_GAP_MESSAGE}
         </Alert>
       )}
       {fromCaseState && (
@@ -709,12 +920,14 @@ export default function CreateChangeRequestPage(): JSX.Element {
           <Box role="group" aria-labelledby="cr-type-heading">
             <Typography id="cr-type-heading" variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
               What type of change is required?
+              <RequiredMark />
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Required. The type decides which approvals this change goes through.
             </Typography>
             <RadioGroup
               name="cr-type"
+              aria-required
               value={type}
               onChange={(e) => {
                 setType(e.target.value);
@@ -770,16 +983,161 @@ export default function CreateChangeRequestPage(): JSX.Element {
             )}
           </Box>
 
-          <TextField
-            label="Subject"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value.slice(0, SUBJECT_MAX))}
-            fullWidth
-            required
-            disabled={isSubmitting}
-            placeholder="Short summary of the change"
-            helperText={charsLeftHelper(subject, SUBJECT_MAX)}
-          />
+          {isStandard ? (
+            <>
+              <Box
+                role="group"
+                aria-labelledby="cr-standard-template-heading"
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 1,
+                  p: 2,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: "primary.main",
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, 0.06),
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                  <Box sx={{ display: "flex", color: "primary.main" }}>
+                    <Library size={16} aria-hidden />
+                  </Box>
+                  <Typography id="cr-standard-template-heading" variant="subtitle1" sx={{ fontWeight: 600 }}>
+                    Standard change template
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  A standard change is raised from a CAB-approved template and needs no approval of its own. What the
+                  template specifies is fixed; fill in its change specifics below.
+                </Typography>
+                <AsyncEntitySelect<BeStandardChangeTemplate>
+                  id="cr-standard-template"
+                  label="Standard change template"
+                  placeholder="Search active templates by number or name…"
+                  required
+                  value={templateId}
+                  onChange={(next, item) => {
+                    setTemplateId(next);
+                    setTemplateLabel(item ? `${item.number} — ${item.name}` : undefined);
+                    // Another template's values do not carry over, even under the same key.
+                    if (next !== templateId) setParameterValues({});
+                    setShowParameterErrors(false);
+                    setTemplateUnavailable(null);
+                    setTemplateClearedNotice(null);
+                  }}
+                  // A template is one customer's: none can be listed until the
+                  // project (and so the customer) is known.
+                  disabled={isSubmitting || !projectCustomer}
+                  error={!!otherCustomerMessage}
+                  helperText={templatePickerHint}
+                  useSearch={useSearchActiveStandardChangeTemplatesForSelect}
+                  searchExtra={projectCustomer?.id}
+                  getId={(t) => t.id}
+                  getLabel={(t) => `${t.number} — ${t.name}`}
+                  knownLabel={pickedTemplateLabel}
+                />
+                {templateClearedNotice && (
+                  <Alert severity="info" role="status" onClose={() => setTemplateClearedNotice(null)}>
+                    {templateClearedNotice}
+                  </Alert>
+                )}
+                {otherCustomerMessage && (
+                  <Alert severity="error" role="alert">
+                    {otherCustomerMessage} Pick a template of the project&apos;s customer, or a project of the
+                    template&apos;s customer; nothing was created.
+                  </Alert>
+                )}
+                {!templateId && (
+                  <Typography variant="caption" color="error" role="status">
+                    Select a standard change template to continue.
+                  </Typography>
+                )}
+                {templateUnavailable && (
+                  <Alert
+                    severity="warning"
+                    role="alert"
+                    action={
+                      <Button
+                        color="inherit"
+                        size="small"
+                        onClick={() => {
+                          setTemplateUnavailable(null);
+                          void templateQuery.refetch();
+                        }}
+                      >
+                        Reload template
+                      </Button>
+                    }
+                  >
+                    {templateUnavailable} The template was suspended, retired or revised after this form loaded it.
+                    Reload it to see what it now authorises; nothing was created.
+                  </Alert>
+                )}
+                {templateId && templateQuery.isLoading && <Skeleton variant="rounded" height={48} />}
+                {templateQuery.isError && (
+                  <Alert
+                    severity="error"
+                    action={
+                      <Button color="inherit" size="small" onClick={() => void templateQuery.refetch()}>
+                        Try again
+                      </Button>
+                    }
+                  >
+                    Could not load the template.
+                  </Alert>
+                )}
+                {templateId && templateQuery.isSuccess && !template && (
+                  <Alert severity="warning">The template was not found. Pick another one.</Alert>
+                )}
+                {template && template.state !== "active" && (
+                  <Alert severity="warning">
+                    {`This template is ${standardChangeTemplateStateLabel(template.state).toLowerCase()}: a change request cannot be raised from it. Pick an active template.`}
+                  </Alert>
+                )}
+                {template && template.state === "active" && !templateCustomer && (
+                  <Alert severity="warning">
+                    This template has no customer recorded, so a change request cannot be raised from it until its
+                    customer is set. Pick another template.
+                  </Alert>
+                )}
+                {templateUsable && !scope.projectId && (
+                  <Typography variant="caption" color="error" role="status">
+                    {`Select a Customer Project of ${templateCustomer!.name} to continue.`}
+                  </Typography>
+                )}
+              </Box>
+              {templateUsable && (
+                <Box role="group" aria-labelledby="cr-change-specifics-heading">
+                  <Typography id="cr-change-specifics-heading" variant="subtitle1" sx={{ fontWeight: 600, mb: 0.5 }}>
+                    Change specifics
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                    The values this template leaves open. They fill in its placeholders.
+                  </Typography>
+                  <StandardChangeParameterInputs
+                    parameters={templateParameters}
+                    values={parameterValues}
+                    onChange={(key, value) => setParameterValues((v) => ({ ...v, [key]: value }))}
+                    idPrefix="cr-std-param"
+                    disabled={isSubmitting}
+                    showErrors={showParameterErrors}
+                  />
+                </Box>
+              )}
+            </>
+          ) : (
+            <TextField
+              label="Subject"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value.slice(0, SUBJECT_MAX))}
+              fullWidth
+              required
+              disabled={isSubmitting}
+              placeholder="Short summary of the change"
+              helperText={charsLeftHelper(subject, SUBJECT_MAX)}
+            />
+          )}
 
           {/* Deliberately called out with its own bordered/tinted panel near
               the top of the form, not just another inlined field — this used
@@ -855,154 +1213,204 @@ export default function CreateChangeRequestPage(): JSX.Element {
             <Box sx={{ flex: "1 1 200px" }}>
               {renderSelect("cr-priority", "Priority", priority, setPriority, PRIORITY_OPTIONS)}
             </Box>
-            <Box sx={{ flex: "1 1 200px" }}>
-              {renderSelect("cr-impact", "Impact", impact, setImpact, IMPACT_OPTIONS)}
-            </Box>
+            {!isStandard && (
+              <Box sx={{ flex: "1 1 200px" }}>
+                {renderSelect("cr-impact", "Impact", impact, setImpact, IMPACT_OPTIONS)}
+              </Box>
+            )}
           </Box>
 
           <Box role="group" aria-labelledby="cr-scope-heading">
             <Typography id="cr-scope-heading" variant="subtitle2" sx={{ mb: 1 }}>
               Customer project and deployments
             </Typography>
-            <ChangeRequestScopeFields scope={scope} disabled={isSubmitting} idPrefix="cr" />
+            <ChangeRequestScopeFields
+              scope={scope}
+              disabled={isSubmitting}
+              idPrefix="cr"
+              projectRequired={isStandard || projectNeededForApproval}
+              projectAccountId={projectAccountId}
+              projectHelperText={
+                projectHelperText ?? (projectNeededForApproval ? REQUIRED_TO_REQUEST_APPROVAL_HELPER : undefined)
+              }
+            />
           </Box>
 
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
             <Box sx={{ flex: "1 1 220px" }}>
               <ChangeRequestCustomerGroupField scope={scope} idPrefix="cr" />
             </Box>
-            <Box sx={{ flex: "1 1 220px" }}>
-              {renderSelect(
-                "cr-category",
-                "Category",
-                category,
-                setCategory,
-                CHANGE_REQUEST_CATEGORY_OPTIONS,
-              )}
-            </Box>
-          </Box>
-
-          <Box role="group" aria-labelledby="cr-customer-steps-heading">
-            <Typography
-              id="cr-customer-steps-heading"
-              variant="subtitle2"
-              sx={{ mb: 0.5 }}
-            >
-              Customer steps
-            </Typography>
-            {isEmergency && (
-              <Typography
-                id="cr-customer-steps-emergency-note"
-                variant="body2"
-                color="text.secondary"
-                sx={{ mb: 1 }}
-              >
-                {EMERGENCY_CUSTOMER_STEPS_HELPER}
-              </Typography>
+            {!isStandard && (
+              <Box sx={{ flex: "1 1 220px" }}>
+                {renderSelect(
+                  "cr-category",
+                  "Category",
+                  category,
+                  setCategory,
+                  CHANGE_REQUEST_CATEGORY_OPTIONS,
+                )}
+              </Box>
             )}
-            <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-              <FormControlLabel
-                sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
-                disabled={isSubmitting || isEmergency}
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={!isEmergency && customerApprovalRequired}
-                    onChange={(e) => setCustomerApprovalRequired(e.target.checked)}
-                    inputProps={{
-                      "aria-label": "Customer Approval",
-                      "aria-describedby": customerStepsDescribedBy("cr-customer-approval-desc", isEmergency),
-                    }}
-                  />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body1">Customer Approval</Typography>
-                    <Typography
-                      id="cr-customer-approval-desc"
-                      variant="body2"
-                      color="text.secondary"
-                    >
-                      Adds a customer approval step after internal approval, before scheduling.
-                    </Typography>
-                  </Box>
-                }
-              />
-              <FormControlLabel
-                sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
-                disabled={isSubmitting || isEmergency}
-                control={
-                  <Checkbox
-                    size="small"
-                    checked={!isEmergency && customerReviewRequired}
-                    onChange={(e) => setCustomerReviewRequired(e.target.checked)}
-                    inputProps={{
-                      "aria-label": "Customer Review",
-                      "aria-describedby": customerStepsDescribedBy("cr-customer-review-desc", isEmergency),
-                    }}
-                  />
-                }
-                label={
-                  <Box>
-                    <Typography variant="body1">Customer Review</Typography>
-                    <Typography
-                      id="cr-customer-review-desc"
-                      variant="body2"
-                      color="text.secondary"
-                    >
-                      Adds a customer review step after Review, before closing.
-                    </Typography>
-                  </Box>
-                }
-              />
-            </Box>
           </Box>
 
-          <Typography variant="subtitle2" sx={{ mt: 1 }}>
-            Planning
-          </Typography>
-
-          {renderEditorField("cr-description", "Description", description, setDescription, "What is changing?")}
-          {renderEditorField(
-            "cr-justification",
-            "Justification",
-            justification,
-            setJustification,
-            "Why is this change needed?",
-          )}
-          {renderEditorField(
-            "cr-implementation-plan",
-            "Implementation plan",
-            implementationPlan,
-            setImplementationPlan,
-          )}
-          {renderEditorField(
-            "cr-risk-impact-analysis",
-            "Risk and impact analysis",
-            riskImpactAnalysis,
-            setRiskImpactAnalysis,
-          )}
-          {renderEditorField("cr-backout-plan", "Backout plan", backoutPlan, setBackoutPlan)}
-          {renderEditorField("cr-test-plan", "Test plan", testPlan, setTestPlan)}
-
-          <FormControlLabel
-            sx={{ ml: 0, justifyContent: "space-between", width: "100%" }}
-            labelPlacement="start"
-            control={
-              <Switch
-                size="small"
-                checked={isPlanningVisibleToCustomers}
-                onChange={(e) => setIsPlanningVisibleToCustomers(e.target.checked)}
-                disabled={isSubmitting}
-                inputProps={{ "aria-label": "Implementation Plan visible to customers" }}
-              />
-            }
-            label={
-              <Typography variant="body2" color="text.secondary">
-                Implementation Plan visible to customers
+          {!isStandard && (
+            <Box role="group" aria-labelledby="cr-customer-steps-heading">
+              <Typography
+                id="cr-customer-steps-heading"
+                variant="subtitle2"
+                sx={{ mb: 0.5 }}
+              >
+                Customer steps
               </Typography>
-            }
-          />
+              {isEmergency && (
+                <Typography
+                  id="cr-customer-steps-emergency-note"
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ mb: 1 }}
+                >
+                  {EMERGENCY_CUSTOMER_STEPS_HELPER}
+                </Typography>
+              )}
+              <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                <FormControlLabel
+                  sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
+                  disabled={isSubmitting || isEmergency}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={!isEmergency && customerApprovalRequired}
+                      onChange={(e) => setCustomerApprovalRequired(e.target.checked)}
+                      inputProps={{
+                        "aria-label": "Customer Approval",
+                        "aria-describedby": customerStepsDescribedBy("cr-customer-approval-desc", isEmergency),
+                      }}
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body1">Customer Approval</Typography>
+                      <Typography
+                        id="cr-customer-approval-desc"
+                        variant="body2"
+                        color="text.secondary"
+                      >
+                        Adds a customer approval step after internal approval, before scheduling.
+                      </Typography>
+                    </Box>
+                  }
+                />
+                <FormControlLabel
+                  sx={{ flex: "1 1 280px", alignItems: "flex-start", m: 0 }}
+                  disabled={isSubmitting || isEmergency}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={!isEmergency && customerReviewRequired}
+                      onChange={(e) => setCustomerReviewRequired(e.target.checked)}
+                      inputProps={{
+                        "aria-label": "Customer Review",
+                        "aria-describedby": customerStepsDescribedBy("cr-customer-review-desc", isEmergency),
+                      }}
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body1">Customer Review</Typography>
+                      <Typography
+                        id="cr-customer-review-desc"
+                        variant="body2"
+                        color="text.secondary"
+                      >
+                        Adds a customer review step after Review, before closing.
+                      </Typography>
+                    </Box>
+                  }
+                />
+              </Box>
+            </Box>
+          )}
+
+          {isStandard && templateUsable && templateVersion && (
+            <Box
+              role="region"
+              aria-labelledby="cr-template-preview-heading"
+              sx={{ display: "flex", flexDirection: "column", gap: 1 }}
+            >
+              <Typography id="cr-template-preview-heading" variant="subtitle2" sx={{ mt: 1 }}>
+                {`What the template specifies (version ${templateVersion.version})`}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Fixed by the template and not editable here; shown with the change specifics filled in.
+              </Typography>
+              <Card variant="outlined" sx={{ p: 2 }}>
+                <StandardChangeContentView
+                  content={templateVersion}
+                  fill={{ parameters: templateParameters, values: parameterValues }}
+                />
+              </Card>
+            </Box>
+          )}
+
+          {!isStandard && (
+            <>
+              <Typography variant="subtitle2" sx={{ mt: 1 }}>
+                Planning
+              </Typography>
+
+              {renderEditorField("cr-description", "Description", description, setDescription, "What is changing?")}
+              {renderEditorField(
+                "cr-justification",
+                "Justification",
+                justification,
+                setJustification,
+                "Why is this change needed?",
+              )}
+              {renderEditorField(
+                "cr-implementation-plan",
+                "Implementation plan",
+                implementationPlan,
+                setImplementationPlan,
+              )}
+              {showImplementationDeviation && (
+                <CarriedOverDeviationField
+                  id="cr-implementation-deviation"
+                  html={carriedOverDeviation}
+                  cleared={isBlankHtml(implementationDeviation)}
+                  onClearedChange={(cleared) => setImplementationDeviation(cleared ? "" : carriedOverDeviation)}
+                  clearedText="Cleared: it is not copied to the new change request."
+                  disabled={isSubmitting}
+                />
+              )}
+              {renderEditorField(
+                "cr-risk-impact-analysis",
+                "Risk and impact analysis",
+                riskImpactAnalysis,
+                setRiskImpactAnalysis,
+              )}
+              {renderEditorField("cr-backout-plan", "Backout plan", backoutPlan, setBackoutPlan)}
+              {renderEditorField("cr-test-plan", "Test plan", testPlan, setTestPlan)}
+
+              <FormControlLabel
+                sx={{ ml: 0, justifyContent: "space-between", width: "100%" }}
+                labelPlacement="start"
+                control={
+                  <Switch
+                    size="small"
+                    checked={isPlanningVisibleToCustomers}
+                    onChange={(e) => setIsPlanningVisibleToCustomers(e.target.checked)}
+                    disabled={isSubmitting}
+                    inputProps={{ "aria-label": "Implementation Plan visible to customers" }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" color="text.secondary">
+                    Implementation Plan visible to customers
+                  </Typography>
+                }
+              />
+            </>
+          )}
 
           <Typography variant="subtitle2" sx={{ mt: 1 }}>
             Schedule
@@ -1099,6 +1507,9 @@ export default function CreateChangeRequestPage(): JSX.Element {
                 value={groupId}
                 onChange={setGroupId}
                 disabled={isSubmitting}
+                // Not needed to create, but Request Approval is refused without one.
+                required
+                helperText={REQUIRED_TO_REQUEST_APPROVAL_HELPER}
                 useSearch={useSearchGroups}
                 getId={(g) => g.id}
                 getLabel={(g) => g.name}

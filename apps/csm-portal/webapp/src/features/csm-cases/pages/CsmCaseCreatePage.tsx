@@ -34,12 +34,13 @@ import { useLocation, useSearchParams } from "react-router";
 import { priorityFromSeverity } from "@api/backend/mappers";
 import { formatBytes } from "@utils/formatBytes";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
+import AttachmentsField from "@components/attachments/AttachmentsField";
+import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import {
   preCreateImagesErrorMessage,
   usePreCreateInlineImages,
 } from "@features/csm-cases/api/usePreCreateInlineImages";
-import AttachmentsField from "@components/attachments/AttachmentsField";
-import type { PendingAttachment } from "@components/attachments/pendingAttachment";
 import { useErrorBanner } from "@context/error-banner/ErrorBannerContext";
 import { useNewCaseDraft } from "@context/new-case-draft/NewCaseDraftContext";
 import ProjectSelectionField from "@features/csm-cases/components/ProjectSelectionField";
@@ -599,6 +600,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
               sx={{ display: "block", mb: 0.5 }}
             >
               Description
+              <RequiredMark />
             </Typography>
             {/* Editor doesn't accept an `id`, so associate the label by wrapping
                 the editor in a labelled group for assistive tech. */}
@@ -611,6 +613,7 @@ export default function CsmCaseCreatePage(): JSX.Element {
                 maxHeight={420}
                 toolbarVariant="full"
                 disabled={submitting}
+                ariaRequired
                 onImageUpload={descriptionImages.onImageUpload}
               />
             </Box>

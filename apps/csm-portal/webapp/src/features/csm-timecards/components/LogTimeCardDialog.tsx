@@ -42,6 +42,7 @@ import {
 const { DesktopDatePicker: DatePicker, LocalizationProvider } = DatePickers;
 import { Clock, Search, X } from "@wso2/oxygen-ui-icons-react";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
 import { useDebouncedValue } from "@hooks/useDebouncedValue";
 import { useIdTokenClaims } from "@hooks/useIdTokenClaims";
 import { initialsOf, resolveUserInfo } from "@utils/userClaims";
@@ -533,7 +534,13 @@ export default function LogTimeCardDialog({
               justifyContent: "space-between",
             }}
           >
-            <Typography variant="subtitle2">Time breakdown (minutes)</Typography>
+            {/* At least one activity must be above 0 (timeCardDraftErrors'
+                "minutes" rule): a rule over the whole group, so the mark
+                goes on the group's caption rather than on any one input. */}
+            <Typography variant="subtitle2">
+              Time breakdown (minutes)
+              <RequiredMark />
+            </Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
               <Clock size={14} />
               <Typography variant="subtitle2" color="primary">
@@ -630,10 +637,12 @@ export default function LogTimeCardDialog({
               }
               sx={{ display: "block", mb: 0.5 }}
             >
-              Work log comment *
+              Work log comment
+              <RequiredMark />
             </Typography>
             <Box role="group" aria-labelledby="work-log-comment-label">
               <Editor
+                ariaRequired
                 value={workLogComment}
                 onChange={setWorkLogComment}
                 onBlur={() => touch("workLogComment")}
@@ -663,7 +672,12 @@ export default function LogTimeCardDialog({
               than letting an edit silently reassign the approver even
               though the backend would technically accept the change. */}
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-            <Typography variant="subtitle2">Approver (team lead)</Typography>
+            {/* Required on create only: an edit never sends the approver
+                (see timeCardDraftErrors' requireApprover). */}
+            <Typography id="time-card-approver-label" variant="subtitle2">
+              Approver (team lead)
+              {!isEditMode && <RequiredMark />}
+            </Typography>
             {isEditMode ? (
               <Chip label={approver?.name ?? "—"} sx={{ alignSelf: "flex-start" }} />
             ) : approver ? (
@@ -691,6 +705,10 @@ export default function LogTimeCardDialog({
                         </InputAdornment>
                       ),
                     },
+                    // Only rendered on create, while no approver is picked. Named by
+                    // the caption above, which carries the asterisk; the placeholder
+                    // is only a hint.
+                    htmlInput: { "aria-required": true, "aria-labelledby": "time-card-approver-label" },
                   }}
                 />
                 <Box

@@ -1031,6 +1031,7 @@ export function AttachmentsWidget({
   onDownload,
   onDelete,
   canDeleteAttachment,
+  deletedAttachments,
   deletingId,
   preview,
   onRefresh,
@@ -1066,6 +1067,12 @@ export function AttachmentsWidget({
    * example "only the uploader"). Omit to show it on every row, as before.
    */
   canDeleteAttachment?: (attachment: CaseAttachment) => boolean;
+  /**
+   * Attachments that were deleted, shown under the available ones with who
+   * deleted them and when, in place of the Download button. Only an admin's list
+   * carries them; omit to show none.
+   */
+  deletedAttachments?: CaseAttachment[];
   /** Id of the attachment whose delete is in flight; disables its row actions. */
   deletingId?: string | null;
   /**
@@ -1204,7 +1211,7 @@ export function AttachmentsWidget({
               </Button>
             )}
           </Box>
-        ) : sorted.length === 0 ? (
+        ) : sorted.length === 0 && !deletedAttachments?.length ? (
           <Typography variant="body2" color="text.secondary">
             No attachments on this case.
           </Typography>
@@ -1322,6 +1329,60 @@ export function AttachmentsWidget({
                     )}
                   </IconButton>
                 )}
+              </Box>
+            ))}
+            {(deletedAttachments ?? []).map((a) => (
+              <Box
+                key={a.id}
+                data-testid="deleted-attachment"
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1,
+                  p: 1,
+                  borderRadius: 1,
+                  border: 1,
+                  borderColor: "divider",
+                }}
+              >
+                <Paperclip size={16} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    color="text.secondary"
+                    sx={{ fontWeight: 500, textDecoration: "line-through" }}
+                  >
+                    {a.filename}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {formatBytes(a.size)} · {a.contentType} · uploaded by{" "}
+                    <UserRefLink
+                      name={a.uploadedBy}
+                      email={a.uploadedByUser?.email || a.uploadedByEmail}
+                      userId={a.uploadedByUser?.id}
+                    />{" "}
+                    · <RelativeTime iso={a.uploadedAt} /> · deleted by{" "}
+                    <UserRefLink
+                      name={a.deletedBy ?? "Unknown"}
+                      email={a.deletedByUser?.email || a.deletedByEmail}
+                      userId={a.deletedByUser?.id}
+                    />
+                    {a.deletedAt && (
+                      <>
+                        {" "}
+                        · <RelativeTime iso={a.deletedAt} />
+                      </>
+                    )}
+                  </Typography>
+                </Box>
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color="error"
+                  label="Deleted"
+                  sx={{ flexShrink: 0 }}
+                />
               </Box>
             ))}
           </Box>

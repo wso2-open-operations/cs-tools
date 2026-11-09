@@ -168,7 +168,7 @@ Shutdown is graceful (15 s) on `SIGINT`/`SIGTERM`.
   choosing one.
 - **Record-level authorization** is resolved from platform data, not from the token: for example,
   posting a public case comment requires being the case's assigned engineer, and de-escalating
-  requires being one of the case's team leads. Handlers read the record from the entity-service for
+  requires being one of the case's team leads (and nothing more than a portal role). Handlers read the record from the entity-service for
   these checks. A caller whose token grants a limited role but has no platform user record is
   provisioned one on first use from their own token.
 - `GET /users/me` reports the caller's portal roles from the same guard that enforces the routes, so
@@ -417,7 +417,7 @@ unset one (except the three marked optional).
 
 | Variable | Warns if unset | Grants |
 |---|---|---|
-| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, scan-user, `/user-info`, ...) |
+| `AUTH_VIEWER_ROLES` | Yes | `view`, `view_shared_entity`, read access to security-report cases, and the viewer-audience routes (customer health, files, `/user-info`, ...) |
 | `AUTH_ESCALATOR_ROLES` | Yes | `view`, `escalate` |
 | `AUTH_ATTACHMENT_DOWNLOADER_ROLES` | Yes | `view`, `download_attachment` |
 | `AUTH_SUPPORT_ENGINEER_ROLES` | Yes | The `cs_engineer` portal role: `view`, `view_operations`, `time_cards_and_updates`, `download_attachment`, `write`, `security_center`, `escalate`, work notes, comment edit/delete, PLG use. (The variable keeps its old name; the role is `cs_engineer`.) Not `approve_time_card`, `admin` or `create_announcement` |
@@ -429,6 +429,7 @@ unset one (except the three marked optional).
 | `AUTH_SECURITY_TEAM_ROLES` | Yes | Read-only `view`, `view_operations`, `security_center`; never any state-changing permission |
 | `AUTH_WORKNOTE_CREATOR_ROLES` | No (optional) | Posting a `work_note` comment on a case only; none of `write`'s other actions |
 | `AUTH_COMMENT_UPDATER_ROLES` | No (optional) | Reaching comment edit/delete, and editing or deleting **any** comment (a plain `cs_engineer` only succeeds on their own); also `security_center` |
+| `AUTH_PRODUCT_CATALOG_MANAGER_ROLES` | No (optional) | Editing the product catalogue (the create, PATCH and retire routes under `/products`, `/product-versions` and `/release-lines`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can. entity-service re-checks the same role names |
 | `AUTH_ONBOARDING_LEAD_ROLES` | No (optional) | Setting a project's onboarding status, owner and dates (`PATCH /projects/{id}`) only; no read access and no other write. `admin` always can, `cs_engineer` cannot. Unset means only `admin` can |
 | `AUTH_SALES_SOLUTIONS_ROLES` | No (optional) | Only `view_shared_entity` (the shared case, account, project and team-member reads); also reported by `GET /users/me` so the webapp can pick a navigation |
 
@@ -444,7 +445,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `view_operations` | Operations reads: incidents, change requests, problems, incident tasks, outages, alerts. `cs_engineer`, `admin`, `security_team` |
 | `time_cards_and_updates` | Time-card routes and update-level lookups. `cs_engineer`, `admin`, time-card approver |
 | `approve_time_card` | `PATCH /time-cards/{id}` when the body sets `state`; checked inside the handler. Time-card approver and `admin` |
-| `escalate` | `POST /cases/{id}/escalations`; de-escalating also requires being one of the case's team leads |
+| `escalate` | Escalating via `POST /cases/{id}/escalations` (the route itself only needs `view`; the handler checks this for `ESCALATE`). De-escalating does not use it: it requires being one of the case's team leads, whatever the caller's other roles, and holding `escalate` does not substitute |
 | `download_attachment` | `GET /attachments/download/{id}/content`, `GET /attachments/inline/{id}/content` |
 | `write` | Every other `POST`/`PATCH`/`DELETE` |
 | `admin` | Admin-only routes such as `POST /users`, `POST /users/{id}/roles`, `GET /roles/grantable`, knowledge-base administration |
@@ -452,6 +453,7 @@ Permissions and the routes they guard (`internal/handler/access.go` is the sourc
 | `create_announcement` | Writes on `/announcement-requests` (together with `write`), and `POST /cases` with `type: announcement` |
 | `update_delete_comment` | `PATCH`/`DELETE /comments/{id}`; which comment may be touched is decided per comment (see `AUTH_COMMENT_UPDATER_ROLES`) |
 | `manage_onboarding` | `PATCH /projects/{id}` when the body sets `onboardingStatus`, `onboardingOwner` or any of the four onboarding dates (`onboardingStartDate`, `onboardingGoLivePlanDate`, `onboardingGoLiveDate`, `onboardingExpiryDate`); checked inside the handler. `onboarding_lead` and `admin`. The route itself (`update_project`) admits `cs_engineer`, `admin` and `onboarding_lead`; any other field in the body still needs `write` |
+| `manage_product_catalog` | `POST /products`, `PATCH /products/{id}`, `POST /products/{id}/versions`, `PATCH /product-versions/{id}`, `POST /product-versions/{id}/retire`, `POST /release-lines`, `PATCH /release-lines/{id}`, `POST /release-lines/{id}/retire` (applied at once). `product_catalog_manager` and `admin`. Reading the catalogue (`GET /products/{id}`, `POST /product-versions/search`, `GET /product-versions/{id}`, `GET /release-lines`, `GET /carbon-platform-history`, `GET /carbon-kernel-releases`) is `view` |
 | `use_plg`, `manage_playbooks` | The `/plg/*` routes: `cs_engineer` and `admin` use them; authoring playbook templates is `admin` only |
 
 A caller with none of the required roles gets `403`. Some actions need more than the role: posting a
@@ -635,7 +637,7 @@ main service plus the `/plg/*` routes). Main areas:
 | Knowledge base | `/kb-articles/*`, `/knowledge-bases/*`, `/kb-manager-*` |
 | Announcements | `/announcements/*`, `/announcement-requests/*` |
 | Dashboards | `/dashboards`, `/dashboards/{id}`, `/dashboards/filter-presets`, `/dashboards/sections` |
-| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/scan-user`, `/user-info` |
+| Viewer audience | `/customer-health/*`, `/usage-metrics/*`, `/files`, `/user-info` |
 
 Many routes forward to entity-service operations that only exist for one data source; when the
 paired entity-service does not support an operation for its data source it returns an error that

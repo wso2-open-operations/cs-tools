@@ -50,6 +50,7 @@ import (
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/entitycases"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/housekeeping"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/httpsec"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/ledger"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/longopenreport"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/migrationreport"
@@ -432,6 +433,41 @@ func main() {
 		}
 	}
 
+	// Incident auto-close: closes an incident 14 days after it was resolved --
+	// see internal/incidentautoclose's package doc and CLAUDE.md, "Incident
+	// auto-close". OFF unless INCIDENT_AUTOCLOSE_ENABLED=true, as for
+	// case_autoclosure: it closes incidents, so it is never on by accident, and
+	// the first run should be a dry run (INCIDENT_AUTOCLOSE_DRY_RUN=true) whose
+	// count is reviewed. This component's client id must be in entity-service's
+	// M2M_CLIENT_IDS, and entity-service must run on Postgres
+	// (DATA_SOURCE=servicenow answers 503).
+	incidentAutocloseEnabled := envBool("INCIDENT_AUTOCLOSE_ENABLED", false)
+	var incidentAutocloseClient *incidentautoclose.Client
+	var incidentAutocloseCfg incidentautoclose.Config
+	// INCIDENT_AUTOCLOSE_SCHEDULED=false: registered (so --run-now and TRYOUT_TASK
+	// find it) but not fired by the engine tick, as for case_autoclosure.
+	incidentAutocloseUnscheduled := false
+	if incidentAutocloseEnabled {
+		// A malformed value refuses to start rather than falling back: a mistyped
+		// dry run must not become a real one.
+		incidentAutocloseCfg, err = incidentautoclose.ConfigFromEnv(os.Getenv)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		incidentAutocloseClient, err = incidentautoclose.NewClient(incidentautoclose.ClientConfig{
+			BaseURL:      entityServiceBaseURL,
+			TokenURL:     oauthTokenURL,
+			ClientID:     oauthClientID,
+			ClientSecret: oauthClientSecret,
+			Scopes:       entityServiceScopes,
+		})
+		if err != nil {
+			slog.Error("failed to construct entity-service incident auto-close client", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// Global kill switch for every failure alert email — see
 	// engine.Engine.AlertsEnabled's own doc comment. Defaults to true (the
 	// current always-alert behavior); set to false to go quiet without
@@ -676,6 +712,9 @@ func main() {
 
 	const autoclosureTaskName = "case_autoclosure"
 	autoclosureTo, autoclosureCc := recipientsFor(recipientOverrides, autoclosureTaskName)
+
+	const incidentAutocloseTaskName = "incident_autoclose"
+	incidentAutocloseTo, incidentAutocloseCc := recipientsFor(recipientOverrides, incidentAutocloseTaskName)
 
 	const cloudStatusTaskName = "cloud_status_webhooks"
 	cloudStatusTo, cloudStatusCc := recipientsFor(recipientOverrides, cloudStatusTaskName)
@@ -1234,6 +1273,50 @@ func main() {
 		})
 	}
 
+	// Hourly, at whatever minute the Choreo trigger fires. A failed run is retried the next tick: closed
+	// incidents are no longer due, so only what is left is attempted.
+	if incidentAutocloseEnabled {
+		// A tryout runs against the real entity-service outside the ledger, so,
+		// as for case_autoclosure, it is always a dry run.
+		if strings.TrimSpace(os.Getenv("TRYOUT_TASK")) == incidentAutocloseTaskName && !incidentAutocloseCfg.DryRun {
+			slog.Warn("TRYOUT_TASK is incident_autoclose: running as a dry run, nothing will be closed; set INCIDENT_AUTOCLOSE_DRY_RUN=true explicitly to silence this")
+			incidentAutocloseCfg.DryRun = true
+		}
+		// INCIDENT_AUTOCLOSE_SCHEDULED=false keeps the task configured but off the
+		// schedule: it then runs only on demand (--run-now=incident_autoclose).
+		// Anything but a boolean refuses to start, like the other
+		// INCIDENT_AUTOCLOSE_* settings.
+		incidentAutocloseScheduled, err := parseStrictBool("INCIDENT_AUTOCLOSE_SCHEDULED", os.Getenv("INCIDENT_AUTOCLOSE_SCHEDULED"), true)
+		if err != nil {
+			slog.Error("invalid INCIDENT_AUTOCLOSE_* configuration; refusing to start", "err", err)
+			os.Exit(1)
+		}
+		if !incidentAutocloseScheduled {
+			incidentAutocloseUnscheduled = true
+			slog.Info("incident_autoclose is not scheduled (INCIDENT_AUTOCLOSE_SCHEDULED=false): it runs only with --run-now=incident_autoclose")
+		}
+		// An on-demand run uses the configured settings narrowed by its arguments
+		// and writes no ledger row, like every run-now. That is safe beside the
+		// scheduled run: entity-service re-checks each incident under its row lock
+		// and recomputes the daily budget from its own data on every call.
+		incidentRunNowNarrow := func(o registry.RunNowOptions) (func(ctx context.Context) error, []any, error) {
+			runCfg, err := narrowIncidentAutoclose(incidentAutocloseCfg, o)
+			if err != nil {
+				return nil, nil, err
+			}
+			return incidentautoclose.Run(incidentAutocloseClient, runCfg),
+				[]any{"dryRun", runCfg.DryRun, "dailyLimit", runCfg.DailyLimit}, nil
+		}
+		tasks = append(tasks, registry.Task{
+			Name:         incidentAutocloseTaskName,
+			Schedule:     scheduleFor(scheduleOverrides, incidentAutocloseTaskName, "0 * * * *"),
+			Handler:      incidentautoclose.Run(incidentAutocloseClient, incidentAutocloseCfg),
+			RunNowNarrow: incidentRunNowNarrow,
+			RunNowFlags:  []string{"--dry-run", "--limit"},
+			To:           incidentAutocloseTo,
+			Cc:           incidentAutocloseCc,
+		})
+	}
 	// entity-service's daily ACP reopen check -- see internal/acp's
 	// RunReopenCheck and this component's CLAUDE.md, "ACP reopen check". OFF
 	// unless ACP_REOPEN_CHECK_ENABLED=true; it needs entity-service with
@@ -1319,7 +1402,10 @@ func main() {
 
 	engineTasks := tasks
 	if autoclosureUnscheduled {
-		engineTasks = withoutTask(tasks, autoclosureTaskName)
+		engineTasks = withoutTask(engineTasks, autoclosureTaskName)
+	}
+	if incidentAutocloseUnscheduled {
+		engineTasks = withoutTask(engineTasks, incidentAutocloseTaskName)
 	}
 	eng := engine.New(engineTasks, ledgerClient, emailClient, driverInterval, alertRecipients, alertsEnabled)
 

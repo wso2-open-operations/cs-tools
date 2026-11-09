@@ -28,6 +28,7 @@ const NONE = {
   canCreateUser: false,
   canUpdateProjectClosureState: false,
   canEditProjectOnboarding: false,
+  canManageProductCatalog: false,
   canUseSecurityCenter: false,
   canViewSecurityReportCases: false,
   canUsePlg: false,
@@ -187,6 +188,7 @@ describe("getPortalAccess", () => {
       canCreateUser: false,
       canUpdateProjectClosureState: false,
       canEditProjectOnboarding: false,
+      canManageProductCatalog: false,
       canEscalate: true,
       canManagePlaybooks: false,
       canCreateAnnouncement: false,
@@ -198,6 +200,7 @@ describe("getPortalAccess", () => {
       canCreateUser: true,
       canUpdateProjectClosureState: true,
       canEditProjectOnboarding: true,
+      canManageProductCatalog: true,
       canEscalate: true,
       canManagePlaybooks: true,
       canCreateAnnouncement: true,
@@ -282,6 +285,33 @@ describe("getPortalAccess", () => {
 
   it("onboarding_lead alone grants no portal access, only the onboarding edit", () => {
     expect(getPortalAccess(["onboarding_lead"]).hasAnyRole).toBe(false);
+  });
+
+  it("only product_catalog_manager and admin can edit the product catalogue -- CS engineer alone cannot", () => {
+    expect(getPortalAccess(["product_catalog_manager"]).canManageProductCatalog).toBe(true);
+    expect(getPortalAccess(["admin"]).canManageProductCatalog).toBe(true);
+    // The realistic holder: an engineer who also carries the manager role.
+    expect(
+      getPortalAccess(["cs_engineer", "product_catalog_manager"]).canManageProductCatalog,
+    ).toBe(true);
+    for (const role of [
+      "cs_engineer",
+      "viewer",
+      "escalator",
+      "attachment_downloader",
+      "usage_metrics_viewer",
+      "timecard_approver",
+      "dashboard_designer",
+      "onboarding_lead",
+      "security_team",
+    ]) {
+      expect(getPortalAccess([role]).canManageProductCatalog).toBe(false);
+    }
+    expect(getPortalAccess(undefined).canManageProductCatalog).toBe(false);
+  });
+
+  it("product_catalog_manager alone grants no portal access, only the catalogue edit", () => {
+    expect(getPortalAccess(["product_catalog_manager"]).hasAnyRole).toBe(false);
   });
 
   it("admin, CS engineer and escalator can escalate -- any internal engineer, as in ServiceNow", () => {
@@ -611,7 +641,7 @@ describe("getPortalAccess", () => {
 
   // Requires full access or the dedicated usage_metrics_viewer role.
   // Reported live: a plain viewer-only account must NOT see this section,
-  // unlike User Scan (isSplAudience-gated) -- holding viewer grants nothing
+  // unlike the isSplAudience-gated sections -- holding viewer grants nothing
   // here on its own.
   describe("canViewUsageMetrics", () => {
     it("usage_metrics_viewer, cs_engineer and admin all hold it", () => {

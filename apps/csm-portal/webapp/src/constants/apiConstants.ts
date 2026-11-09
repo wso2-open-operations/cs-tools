@@ -174,6 +174,13 @@ export const ApiQueryKeys = {
   CSM_ADMIN_PERMISSIONS: "csm-admin-permissions",
   CSM_PRODUCT_REPO_MAPPING: "csm-product-repo-mapping",
   SAVED_FILTER_VIEWS: "saved-filter-views",
+  // Product catalogue (Products section). Each hook's key is
+  // [PRODUCT_CATALOG, <one of the keys below>, ...], so a saved change can refresh
+  // them all by the shared first segment.
+  PRODUCT_CATALOG: "product-catalog",
+  PRODUCT_CATALOG_PRODUCTS: "product-catalog-products",
+  PRODUCT_CATALOG_VERSIONS: "product-catalog-versions",
+  PRODUCT_CATALOG_RELEASE_LINES: "product-catalog-release-lines",
 } as const;
 
 // Constants for API-related mutation keys.

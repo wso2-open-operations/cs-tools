@@ -93,6 +93,24 @@ describe("EditDeploymentDialog", () => {
     expect(onSave).toHaveBeenCalledWith({ type: "staging" });
   });
 
+  it("marks Type required when the deployment has a stored type, which cannot be cleared", () => {
+    renderDialog();
+    expect(
+      document.querySelector("#edit-deployment-type-label .MuiFormLabel-asterisk"),
+    ).not.toBeNull();
+  });
+
+  it("does not mark Type required for a deployment with no stored type, which saves without one", () => {
+    const { onSave } = renderDialog({ type: undefined });
+    expect(
+      document.querySelector("#edit-deployment-type-label .MuiFormLabel-asterisk"),
+    ).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: "Production" } });
+    fireEvent.click(saveButton());
+    expect(onSave).toHaveBeenCalledWith({ name: "Production" });
+  });
+
   it("does not render 'Type changes aren't available yet'", () => {
     renderDialog();
     expect(

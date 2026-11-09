@@ -297,6 +297,7 @@ export default function CaseDetailsContent({
             ? "Failed to load service request details."
             : "Failed to load case details."
         }
+        showRecoveryAction
       />
     );
   }

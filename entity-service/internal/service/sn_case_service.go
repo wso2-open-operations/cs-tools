@@ -3187,6 +3187,24 @@ func (s *snCaseService) UpdateCase(ctx context.Context, req domain.UpdateCaseReq
 		return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "product and publicTicket are only allowed when addPublicComment is also provided"}
 	}
 
+	// A service request's severity is internal and exists in Postgres only: the
+	// backing data source has no field for it, so on this data source the
+	// request is refused (like markFixIssued above) rather than sent on as a
+	// case severity or accepted and dropped. Only a severity sent on its own
+	// needs the check; with a type it is the companion of a transfer, which
+	// validateCaseTypeTransfer judges.
+	if req.Severity != nil && req.Type == nil {
+		// A failed lookup fails the request: the PATCH below would send the
+		// severity on as a case severity for a record whose type is unknown.
+		cv, err := s.GetCaseByID(ctx, req.ID)
+		if err != nil {
+			return domain.UpdateCaseResponse{}, err
+		}
+		if cv.Type != nil && *cv.Type == "service_request" {
+			return domain.UpdateCaseResponse{}, &apierror.ValidationError{Msg: "severity of a service request is only supported for the Postgres data source"}
+		}
+	}
+
 	token := middleware.UserIDTokenFromContext(ctx)
 
 	payload := snUpdateCasePayload{}

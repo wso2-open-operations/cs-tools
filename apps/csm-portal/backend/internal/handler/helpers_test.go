@@ -147,39 +147,35 @@ func decodeJSON[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 // ----- mock entity case client -----
 
 type mockEntityCaseClient struct {
-	createCaseFn               func(ctx context.Context, body []byte) ([]byte, error)
-	patchCaseFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	createCaseCommentFn        func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCommentsFn           func(ctx context.Context, body []byte) ([]byte, error)
-	searchCaseEscalationsFn    func(ctx context.Context, caseID string) ([]byte, error)
-	createCaseEscalationFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCaseActivitiesFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	searchCasesFn              func(ctx context.Context, body []byte) ([]byte, error)
-	aggregateCasesFn           func(ctx context.Context, body []byte) ([]byte, error)
-	volumeTrendFn              func(ctx context.Context, body []byte) ([]byte, error)
-	searchFeedbackFn           func(ctx context.Context, body []byte) ([]byte, error)
-	aggregateFeedbackFn        func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseFn                  func(ctx context.Context, caseID string) ([]byte, error)
-	getProductRepoMappingFn    func(ctx context.Context, name string) ([]byte, error)
-	searchDeployedProductsFn   func(ctx context.Context, body []byte) ([]byte, error)
-	createCaseAttachmentFn     func(ctx context.Context, body []byte) ([]byte, error)
-	searchCaseAttachmentsFn    func(ctx context.Context, body []byte) ([]byte, error)
-	getCaseAttachmentContentFn func(ctx context.Context, attachmentID string) ([]byte, string, error)
-	deleteCaseAttachmentFn     func(ctx context.Context, attachmentID string) ([]byte, error)
-	getCaseAttachmentFn        func(ctx context.Context, attachmentID string) ([]byte, error)
-	confirmCaseAttachmentFn    func(ctx context.Context, attachmentID string) ([]byte, error)
-	getAttachmentFn            func(ctx context.Context, attachmentID string) ([]byte, error)
-	updateAttachmentFn         func(ctx context.Context, attachmentID string, body []byte) ([]byte, error)
-	createCallRequestFn        func(ctx context.Context, body []byte) ([]byte, error)
-	searchCallRequestsFn       func(ctx context.Context, body []byte) ([]byte, error)
-	searchAllCallRequestsFn    func(ctx context.Context, body []byte) ([]byte, error)
-	patchCallRequestFn         func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
-	createCaseGithubIssueFn    func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	addCaseTagFn               func(ctx context.Context, caseID string, body []byte) ([]byte, error)
-	removeCaseTagFn            func(ctx context.Context, caseID, tagID string) ([]byte, error)
-	searchTagsFn               func(ctx context.Context, body []byte) ([]byte, error)
-	getUserMeFn                func(ctx context.Context) ([]byte, error)
-	createUserFn               func(ctx context.Context, body []byte) ([]byte, error)
+	createCaseFn                func(ctx context.Context, body []byte) ([]byte, error)
+	patchCaseFn                 func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	createCaseCommentFn         func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCommentsFn            func(ctx context.Context, body []byte) ([]byte, error)
+	searchCaseEscalationsFn     func(ctx context.Context, caseID string) ([]byte, error)
+	createCaseEscalationFn      func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCaseActivitiesFn      func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	searchCasesFn               func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateCasesFn            func(ctx context.Context, body []byte) ([]byte, error)
+	volumeTrendFn               func(ctx context.Context, body []byte) ([]byte, error)
+	searchFeedbackFn            func(ctx context.Context, body []byte) ([]byte, error)
+	aggregateFeedbackFn         func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseFn                   func(ctx context.Context, caseID string) ([]byte, error)
+	getProductRepoMappingFn     func(ctx context.Context, name string) ([]byte, error)
+	searchDeployedProductsFn    func(ctx context.Context, body []byte) ([]byte, error)
+	searchCaseAttachmentsFn     func(ctx context.Context, body []byte) ([]byte, error)
+	getCaseAttachmentFn         func(ctx context.Context, attachmentID string) ([]byte, error)
+	confirmCaseAttachmentFn     func(ctx context.Context, attachmentID string) ([]byte, error)
+	createCallRequestFn         func(ctx context.Context, body []byte) ([]byte, error)
+	searchCallRequestsFn        func(ctx context.Context, body []byte) ([]byte, error)
+	searchAllCallRequestsFn     func(ctx context.Context, body []byte) ([]byte, error)
+	patchCallRequestFn          func(ctx context.Context, callRequestID string, body []byte) ([]byte, error)
+	createCaseGithubIssueFn     func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	addCaseTagFn                func(ctx context.Context, caseID string, body []byte) ([]byte, error)
+	removeCaseTagFn             func(ctx context.Context, caseID, tagID string) ([]byte, error)
+	searchTagsFn                func(ctx context.Context, body []byte) ([]byte, error)
+	getUserMeFn                 func(ctx context.Context) ([]byte, error)
+	createUserFn                func(ctx context.Context, body []byte) ([]byte, error)
+	createPendingVerificationFn func(ctx context.Context, body []byte) ([]byte, error)
 	// getChangeRequestFn/getIncidentFn back the attachmentStorageEntityClient
 	// interface (see attachment_storage.go) so this same mock serves
 	// AttachmentStorageHandler's per-reference-type access checks.
@@ -214,6 +210,13 @@ func (m *mockEntityCaseClient) GetUserMe(ctx context.Context) ([]byte, error) {
 func (m *mockEntityCaseClient) CreateUser(ctx context.Context, body []byte) ([]byte, error) {
 	if m.createUserFn != nil {
 		return m.createUserFn(ctx, body)
+	}
+	return []byte(`{}`), nil
+}
+
+func (m *mockEntityCaseClient) CreatePendingVerification(ctx context.Context, body []byte) ([]byte, error) {
+	if m.createPendingVerificationFn != nil {
+		return m.createPendingVerificationFn(ctx, body)
 	}
 	return []byte(`{}`), nil
 }
@@ -1331,54 +1334,6 @@ func (m *mockEntityTaskClient) UpdateTask(ctx context.Context, id string, body [
 		return m.updateTaskFn(ctx, id, body)
 	}
 	return []byte(`{"id":"11111111-1111-1111-1111-111111111111"}`), nil
-}
-
-// ----- mock sales entity / entity-service scan clients (user_scan.go) -----
-
-type mockSalesEntityClient struct {
-	getContactByEmailFn    func(ctx context.Context, email string) (*entity.Contact, error)
-	getSubscriptionByKeyFn func(ctx context.Context, subscriptionKey string) (*entity.Subscription, error)
-}
-
-func (m *mockSalesEntityClient) GetContactByEmail(ctx context.Context, email string) (*entity.Contact, error) {
-	if m.getContactByEmailFn != nil {
-		return m.getContactByEmailFn(ctx, email)
-	}
-	return nil, nil
-}
-
-func (m *mockSalesEntityClient) GetSubscriptionByKey(ctx context.Context, subscriptionKey string) (*entity.Subscription, error) {
-	if m.getSubscriptionByKeyFn != nil {
-		return m.getSubscriptionByKeyFn(ctx, subscriptionKey)
-	}
-	return nil, nil
-}
-
-type mockEntityScanClient struct {
-	searchUsersFn                    func(ctx context.Context, body []byte) ([]byte, error)
-	searchProjectsFn                 func(ctx context.Context, body []byte) ([]byte, error)
-	resendProjectContactInvitationFn func(ctx context.Context, projectID, email string) ([]byte, error)
-}
-
-func (m *mockEntityScanClient) SearchUsers(ctx context.Context, body []byte) ([]byte, error) {
-	if m.searchUsersFn != nil {
-		return m.searchUsersFn(ctx, body)
-	}
-	return []byte(`{"users":[]}`), nil
-}
-
-func (m *mockEntityScanClient) SearchProjects(ctx context.Context, body []byte) ([]byte, error) {
-	if m.searchProjectsFn != nil {
-		return m.searchProjectsFn(ctx, body)
-	}
-	return []byte(`{"projects":[]}`), nil
-}
-
-func (m *mockEntityScanClient) ResendProjectContactInvitation(ctx context.Context, projectID, email string) ([]byte, error) {
-	if m.resendProjectContactInvitationFn != nil {
-		return m.resendProjectContactInvitationFn(ctx, projectID, email)
-	}
-	return nil, nil
 }
 
 // ----- mock entity comment client -----

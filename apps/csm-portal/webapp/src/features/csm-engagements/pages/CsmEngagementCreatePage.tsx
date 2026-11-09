@@ -31,6 +31,7 @@ import { ArrowLeft } from "@wso2/oxygen-ui-icons-react";
 import { useMemo, useState, type JSX } from "react";
 import { useLocation, useSearchParams } from "react-router";
 import Editor from "@components/rich-text-editor/Editor";
+import RequiredMark from "@components/RequiredMark";
 import {
   preCreateImagesErrorMessage,
   usePreCreateInlineImages,
@@ -348,6 +349,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
               sx={{ display: "block", mb: 0.5 }}
             >
               Description
+              <RequiredMark />
             </Typography>
             <Box role="group" aria-labelledby="engagement-description-label">
               <Editor
@@ -358,6 +360,7 @@ export default function CsmEngagementCreatePage(): JSX.Element {
                 maxHeight={420}
                 toolbarVariant="full"
                 disabled={submitting}
+                ariaRequired
                 onImageUpload={descriptionImages.onImageUpload}
               />
             </Box>

@@ -257,7 +257,9 @@ function labelColorSx(
  * taken" (faint, dashed) until the change actually ends in one, when that stage
  * turns error-coloured with its icon. An Emergency change never takes Assess (it
  * goes from New straight to Authorize, for the CAB alone), so that stage reads
- * "not taken" too. When the customer's rejection is what
+ * "not taken" too; a Standard change takes neither Assess nor Authorize (its
+ * template is pre-authorised: New goes straight to Scheduled, or to Customer
+ * Approval when that is required), so both read "not taken". When the customer's rejection is what
  * ended the change (Customer Approval -> Canceled, Customer Review -> Rollback)
  * the rejected stage shows a cross in the error colour, and the stages after it
  * on a canceled change read "not taken": the record proves they were never reached.
@@ -286,7 +288,10 @@ export default function ChangeRequestLifecycleStepper({
   state?: string | null;
   customerApprovalRequired?: boolean;
   customerReviewRequired?: boolean;
-  /** The change's type: an Emergency change has no Assess step, so that stage reads "not taken". */
+  /**
+   * The change's type: an Emergency change has no Assess step and a Standard change neither Assess nor Authorize,
+   * so those stages read "not taken".
+   */
   type?: string | null;
   /** `GET /change-requests/{id}/approvals`, when loaded: evidence for a rolled-back or canceled change. */
   approvals?: readonly Pick<BeChangeRequestApproval, "stage" | "status">[];

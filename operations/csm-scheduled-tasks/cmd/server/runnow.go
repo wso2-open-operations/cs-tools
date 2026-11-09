@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/autoclosure"
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/incidentautoclose"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/notify"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/registry"
 	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/regressionscan"
@@ -248,6 +249,25 @@ func narrowAutoclosure(cfg autoclosure.RunConfig, a registry.RunNowOptions) (aut
 			}
 		}
 		cfg.States = chosen
+	}
+	return cfg, nil
+}
+
+// narrowIncidentAutoclose is narrowAutoclosure for incident_autoclose, which has
+// no states: a dry run stays a dry run, and the limit may not exceed a
+// configured daily limit (when none is configured it sets one for the run).
+func narrowIncidentAutoclose(cfg incidentautoclose.Config, a registry.RunNowOptions) (incidentautoclose.Config, error) {
+	if a.DryRun {
+		cfg.DryRun = true
+	}
+	if a.Limit > 0 {
+		if cfg.DailyLimit != 0 && a.Limit > cfg.DailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds INCIDENT_AUTOCLOSE_DAILY_LIMIT=%d; a run-now can only tighten the configured limit", a.Limit, cfg.DailyLimit)
+		}
+		if a.Limit > incidentautoclose.MaxDailyLimit {
+			return cfg, fmt.Errorf("--limit=%d exceeds the largest daily limit, %d", a.Limit, incidentautoclose.MaxDailyLimit)
+		}
+		cfg.DailyLimit = a.Limit
 	}
 	return cfg, nil
 }

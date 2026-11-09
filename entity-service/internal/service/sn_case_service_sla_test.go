@@ -601,7 +601,10 @@ func TestSNCaseService_UpdateCase_SeverityEnrichmentRetriesOnceAndRecovers(t *te
 			_, _ = w.Write([]byte(`{"tags":[]}`))
 		default:
 			getCalls++
-			if getCalls == 1 {
+			// Call 1 is the record-type lookup that precedes any severity PATCH
+			// (it must succeed, or the request fails); call 2 is the
+			// enrichment fetch's first attempt, which fails; call 3 recovers.
+			if getCalls == 2 {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
@@ -617,8 +620,8 @@ func TestSNCaseService_UpdateCase_SeverityEnrichmentRetriesOnceAndRecovers(t *te
 		t.Fatalf("UpdateCase() error = %v", err)
 	}
 
-	if getCalls < 2 {
-		t.Fatalf("GET calls = %d, want at least 2 (first fails, retry succeeds)", getCalls)
+	if getCalls < 3 {
+		t.Fatalf("GET calls = %d, want at least 3 (type lookup, failed enrichment, retry)", getCalls)
 	}
 	if len(slaEngine.reviseCalls) != 1 {
 		t.Fatalf("ReviseCaseClocks calls = %d, want 1 -- the retry should have let severity-change detection succeed", len(slaEngine.reviseCalls))
@@ -710,6 +713,7 @@ func TestSNCaseService_UpdateCase_NilSLAEngineSkipsReviseSLAClocks(t *testing.T)
 
 	getCaseBody := `{
 		"id": "` + caseSysid + `",
+		"createdOn": "2026-01-02 10:00:00",
 		"project": {"id": "` + projectSysid + `", "name": "Project Zeta"},
 		"severity": {"id": 11, "label": "2 - High"},
 		"state": {"id": 1, "label": "Open"}

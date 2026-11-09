@@ -155,6 +155,8 @@ export function staff(who: StaffPersona) {
     decide: (id: string, decision: "approved" | "rejected") =>
       call("POST", `/change-requests/${id}/approvals/decision`, email, { decision }),
     create: (body: unknown) => call<{ changeRequest?: { id: string; number: string } }>("POST", "/change-requests", email, body),
+    /** Any other call to the CSM portal's backend, as this person (a path such as `/standard-change-templates/<id>`). */
+    request: <T = unknown>(method: string, path: string, body?: unknown) => call<T>(method, path, email, body),
   };
 }
 

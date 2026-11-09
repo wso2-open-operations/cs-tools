@@ -539,12 +539,14 @@ func TestChangeRequestFlowIntegration_StaleApprovals_OldFlowRescheduleStillFinis
 	f.expect(id, "back in Customer Approval", "CUSTOMER_APPROVAL", "authorize", "canceled")
 	f.wantCanAnswer(id, "asked again", true, crScopeUserA1, crScopeUserA2)
 	// ...and the stale date, now that the change is back in Customer Approval, is a date that differs
-	// from the plan with no answer: it WAITS, but nobody is named as its proposer (the last writer is
-	// the CAB approver, not a contact of the project), so it is no customer's proposal. Accept is
+	// from the plan with no answer: it WAITS, but nobody is named as its proposer (re-entering
+	// Customer Approval voided the record of who proposed it, the 0249 trigger, and a voided record
+	// is not read by the legacy last-writer rule either), so it is no customer's proposal. Accept is
 	// refused for it (no staff action stands in for a consent nobody gave), a customer is not told
 	// it is theirs or that WSO2 is deciding on it, and a Re-schedule is a plain one. (C3: a stale
 	// date on re-entry never reads as "the customer proposed".)
 	f.wantAnswer(id, "back in Customer Approval with the stale date", "pending")
+	f.wantProposalRecord(id, "back in Customer Approval", "", rsStart3)
 	p := f.proposalOf(id)
 	if p == nil || p.ProposerRecorded == nil || *p.ProposerRecorded {
 		t.Fatalf("customerProposal on re-entry = %+v, want a pending time whose proposer is not recorded", p)

@@ -152,7 +152,9 @@ describe("stripWhitespaceStyleFromHtml", () => {
     const out = stripWhitespaceStyleFromHtml(html);
     const elapsedMs = performance.now() - start;
 
-    expect(elapsedMs).toBeLessThan(2000);
+    // Guards against super-linear blow-up, not absolute speed: ~0.3s alone, but
+    // 2.3s+ under parallel full-suite load, so leave generous headroom.
+    expect(elapsedMs).toBeLessThan(8000);
     expect(out).not.toContain("white-space");
     expect((out.match(/<span/g) ?? []).length).toBe(0);
     expect((out.match(/<strong/g) ?? []).length).toBe(RUNS);

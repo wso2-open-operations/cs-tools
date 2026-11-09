@@ -189,6 +189,29 @@ type PortalBannerService interface {
 	Update(ctx context.Context, id string, req domain.SavePortalBannerRequest) (domain.PortalBanner, error)
 }
 
+// ProductCatalogService reads the product catalogue (products, versions with
+// their EOL and public-feed fields, release lines, Carbon reference data) and
+// applies a catalogue manager's edits.
+type ProductCatalogService interface {
+	GetProduct(ctx context.Context, id string) (domain.Product, error)
+	CreateProduct(ctx context.Context, payload json.RawMessage) (domain.Product, error)
+	UpdateProduct(ctx context.Context, id string, payload json.RawMessage) (domain.Product, error)
+
+	SearchAllProductVersions(ctx context.Context, req domain.SearchAllProductVersionsRequest) (domain.SearchProductVersionsResponse, error)
+	GetProductVersion(ctx context.Context, id string) (domain.ProductVersion, error)
+	CreateProductVersions(ctx context.Context, productID string, payload json.RawMessage) (domain.ProductVersionList, error)
+	UpdateProductVersion(ctx context.Context, id string, payload json.RawMessage) (domain.ProductVersionList, error)
+	RetireProductVersion(ctx context.Context, id string) (domain.ProductVersionList, error)
+
+	ListReleaseLines(ctx context.Context, includeRetired bool) (domain.ReleaseLineList, error)
+	CreateReleaseLine(ctx context.Context, payload json.RawMessage) (domain.ReleaseLine, error)
+	UpdateReleaseLine(ctx context.Context, id string, payload json.RawMessage) (domain.ReleaseLine, error)
+	RetireReleaseLine(ctx context.Context, id string) (domain.ReleaseLine, error)
+
+	ListCarbonPlatformHistory(ctx context.Context) (domain.CarbonPlatformHistoryList, error)
+	ListCarbonKernelReleases(ctx context.Context) (domain.CarbonKernelReleaseList, error)
+}
+
 // RunbookService manages the runbook catalog (Operations > Runbooks): numbered, named runbook links and their alert names.
 type RunbookService interface {
 	List(ctx context.Context) (domain.RunbookList, error)
@@ -196,6 +219,26 @@ type RunbookService interface {
 	Update(ctx context.Context, id string, req domain.SaveRunbookRequest) (domain.Runbook, error)
 	Delete(ctx context.Context, id string) error
 	Import(ctx context.Context, req domain.ImportRunbooksRequest) (domain.ImportRunbooksResponse, error)
+}
+
+// StandardChangeService serves the standard change catalogue (templates and their
+// CAB-approved versions) and the proposals that create, modify or retire them.
+// Internal (WSO2) callers only.
+type StandardChangeService interface {
+	SearchTemplates(ctx context.Context, req domain.SearchStandardChangeTemplatesRequest) (domain.SearchStandardChangeTemplatesResponse, error)
+	GetTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	GetTemplateVersion(ctx context.Context, templateID, versionID string) (domain.StandardChangeTemplateVersion, error)
+	// SuspendTemplate suspends an active template, recording the optional reason.
+	SuspendTemplate(ctx context.Context, id string, req domain.SuspendStandardChangeTemplateRequest) (domain.StandardChangeTemplate, error)
+	ResumeTemplate(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	ClearTemplateReview(ctx context.Context, id string) (domain.StandardChangeTemplate, error)
+	CreateProposal(ctx context.Context, req domain.CreateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	GetProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	SearchProposals(ctx context.Context, req domain.SearchStandardChangeProposalsRequest) (domain.SearchStandardChangeProposalsResponse, error)
+	UpdateProposal(ctx context.Context, id string, req domain.UpdateStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
+	SubmitProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	WithdrawProposal(ctx context.Context, id string) (domain.StandardChangeProposal, error)
+	DecideProposal(ctx context.Context, id string, req domain.DecideStandardChangeProposalRequest) (domain.StandardChangeProposal, error)
 }
 
 // SNUserService defines the user operations backed by the ServiceNow data source.
@@ -244,6 +287,18 @@ type AccountService interface {
 // through REST sales/sales-entity-service POST /customer-search, not GraphQL.
 type SalesforceEventService interface {
 	HandleEvent(ctx context.Context, req domain.SalesforceEventRequest) error
+}
+
+// SalesforceResyncService backs the admin-only POST /salesforce/resync/preview
+// and /salesforce/resync/apply: for one account or one project, compare the
+// Salesforce data with the database, field by field and component by
+// component, then overwrite the chosen components from Salesforce. Preview
+// writes nothing. Apply never deletes a row and bypasses the duplicate-event
+// guard on its own path only. Both are synchronous and cap their Salesforce
+// calls per request; see salesforce_resync_service.go.
+type SalesforceResyncService interface {
+	Preview(ctx context.Context, req domain.SalesforceResyncRequest) (domain.SalesforceResyncPreview, error)
+	Apply(ctx context.Context, req domain.SalesforceResyncApplyRequest) (domain.SalesforceResyncApplyResponse, error)
 }
 
 // MembershipRegistrationService backs POST /users/me/memberships/register: the Customer Portal
@@ -449,6 +504,18 @@ type ScheduledTaskRunService interface {
 	// distinction matters). A ValidationError is returned if cutoff is the
 	// zero time.
 	DeleteResolvedBefore(ctx context.Context, cutoff time.Time) (domain.DeleteScheduledTaskRunsResponse, error)
+}
+
+// IncidentAutocloseService closes incidents that have been RESOLVED for a
+// given number of days (14 by default), as the system user. It is
+// driven by operations/csm-scheduled-tasks (incident_autoclose) and decides
+// nothing about scheduling itself.
+type IncidentAutocloseService interface {
+	// Autoclose closes (or, with DryRun, lists) up to Limit due incidents,
+	// oldest first. A ValidationError is returned for a missing or non-positive
+	// resolvedForDays or a limit outside 1..1000; an incident that fails to
+	// close is reported in the response's Failed list, not as an error.
+	Autoclose(ctx context.Context, req domain.IncidentAutocloseRequest) (domain.IncidentAutocloseResponse, error)
 }
 
 // AlertIncidentMappingService defines the operations available on the
@@ -1501,7 +1568,7 @@ type KBManagerGroupService interface {
 
 // KnowledgeBaseService defines the operations available on the knowledge_base entity.
 type KnowledgeBaseService interface {
-	ListKnowledgeBases(ctx context.Context) (domain.ListKnowledgeBasesResponse, error)
+	ListKnowledgeBases(ctx context.Context, publicOnly bool) (domain.ListKnowledgeBasesResponse, error)
 	CreateKnowledgeBase(ctx context.Context, req domain.CreateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	UpdateKnowledgeBaseName(ctx context.Context, id string, req domain.UpdateKnowledgeBaseRequest) (domain.KnowledgeBase, error)
 	SetKnowledgeBaseActive(ctx context.Context, id string, req domain.UpdateKnowledgeBaseActiveRequest) (domain.KnowledgeBase, error)

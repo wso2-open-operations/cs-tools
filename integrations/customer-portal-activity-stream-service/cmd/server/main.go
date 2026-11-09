@@ -105,7 +105,8 @@ func main() {
 	}
 
 	// SSE handler — depends on entity client + optional hub.
-	streamHandler := handler.NewStreamHandler(customerEntityClient, activityHub)
+	streamHandler := handler.NewStreamHandler(customerEntityClient, activityHub,
+		handler.WithMaxLifetime(mustDuration("STREAM_MAX_LIFETIME", defaultStreamMaxLifetime)))
 
 	authCfg := middleware.Config{
 		JWKSEndpoint:          mustEnv("AUTH_JWKS_ENDPOINT"),
@@ -206,6 +207,36 @@ func newStreamMux(stream http.HandlerFunc) *http.ServeMux {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	return mux
+}
+
+// defaultStreamMaxLifetime is the default STREAM_MAX_LIFETIME. The value plus
+// its maximum +10% jitter must stay below the gateway endpoint timeout in front
+// of this service, with operational margin.
+const defaultStreamMaxLifetime = "4m"
+
+// parseDuration parses a Go duration string ("4m", "50s"); "0" disables.
+// Negative values are rejected.
+func parseDuration(v string) (time.Duration, error) {
+	d, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("duration must not be negative: %q", v)
+	}
+	return d, nil
+}
+
+// mustDuration reads a duration environment variable (or def if unset),
+// exiting the process with a clear error if it is not a valid duration.
+func mustDuration(key, def string) time.Duration {
+	v := envOrDefault(key, def)
+	d, err := parseDuration(v)
+	if err != nil {
+		slog.Error("environment variable must be a non-negative Go duration (e.g. \"4m\", \"50s\", or \"0\" to disable)", "key", key, "value", v, "err", err)
+		os.Exit(1)
+	}
+	return d
 }
 
 func mustEnv(key string) string {

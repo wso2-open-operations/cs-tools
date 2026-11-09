@@ -15,12 +15,13 @@
 // under the License.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BackendApiError,
+  countArticles,
   getArticle,
   getRelatedArticles,
   listKnowledgeBases,
@@ -37,6 +38,7 @@ vi.mock("@api/backend/client", async () => {
   const actual = await vi.importActual<typeof import("@api/backend/client")>("@api/backend/client");
   return {
     ...actual,
+    countArticles: vi.fn(),
     getArticle: vi.fn(),
     getRelatedArticles: vi.fn(),
     listKnowledgeBases: vi.fn(),
@@ -87,6 +89,7 @@ beforeEach(() => {
   vi.mocked(getArticle).mockReset();
   vi.mocked(listKnowledgeBases).mockResolvedValue({ knowledgeBases: [{ id: "kb", title: "Product KB" }] });
   vi.mocked(getRelatedArticles).mockResolvedValue({ articles: [] });
+  vi.mocked(countArticles).mockResolvedValue(3);
 });
 
 describe("KBBrowsePage empty pages with hasMore", () => {
@@ -203,7 +206,7 @@ describe("KBBrowsePage load more", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
     await screen.findByRole("link", { name: /Title c/ });
     expect(screen.getAllByRole("link", { name: /Title b/ })).toHaveLength(1);
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(within(screen.getByRole("list", { name: "Articles" })).getAllByRole("listitem")).toHaveLength(3);
   });
 
   it("does not loop on the same offset when the backend reports limit 0 with hasMore", async () => {

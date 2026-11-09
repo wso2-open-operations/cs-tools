@@ -46,7 +46,7 @@ const RECONNECT_IDLE_DELAY_MS = 5 * 60_000;
  * straight away; resetting on `open` would turn that into a tight reconnect loop.
  */
 const STABLE_CONNECTION_MS = 30_000;
-/** Minimum gap between catch-up refreshes triggered by (re)connecting, per case. */
+/** Minimum gap between case-details invalidations triggered by a routine reconnect, per case. */
 const CATCH_UP_MIN_INTERVAL_MS = 60_000;
 
 /**
@@ -132,11 +132,16 @@ function reconnectDelay(attempt: number): number {
  * old one is closed only once it is open, so no update is missed and no
  * catch-up is needed; closing it ourselves also raises no error.
  *
+ * Connecting or reconnecting never calls the comments/activities API: the
+ * server ends each stream cleanly every few minutes, so routine reconnects are
+ * frequent. An event published in the short gap between connections is
+ * recovered by the next event or a reload. A routine reconnect only
+ * invalidates case details, at most once a minute per case.
+ *
  * Stays disconnected while the user is idle (the session warning is open), so
- * an abandoned tab doesn't hold a long-lived stream open. Connects fresh when
- * the user continues; the `open` handler catches up on whatever was missed,
- * cheaply (newest comments only; case details only on a reconnect) and at
- * most once a minute per case.
+ * an abandoned tab doesn't hold a long-lived stream open. The gap can be
+ * minutes to hours, so the first `open` after idle clears catches up once:
+ * the newest comments plus case details, regardless of the one-minute limit.
  */
 export function useCaseActivityStream(caseId: string | undefined): void {
   const queryClient = useQueryClient();
@@ -153,17 +158,32 @@ export function useCaseActivityStream(caseId: string | undefined): void {
   }, [authFetch]);
 
   // Survives the effect re-running (idle -> active) for the same case, so the
-  // first open after idle counts as a reconnect and the catch-up rate limit holds.
-  const connectionRef = useRef<{ caseId?: string; hasOpened: boolean; lastCatchUpAt: number }>({
+  // first open after idle counts as a reconnect and the details rate limit holds.
+  // `catchUpOnOpen` is set when idle begins on an already-opened stream and
+  // consumed by the next `open`.
+  const connectionRef = useRef<{
+    caseId?: string;
+    hasOpened: boolean;
+    lastCatchUpAt: number;
+    catchUpOnOpen: boolean;
+  }>({
     hasOpened: false,
     lastCatchUpAt: 0,
+    catchUpOnOpen: false,
   });
 
   useEffect(() => {
-    if (isIdle || !caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
+    if (isIdle) {
+      const idleConnection = connectionRef.current;
+      if (idleConnection.caseId === caseId && idleConnection.hasOpened) {
+        idleConnection.catchUpOnOpen = true;
+      }
+      return;
+    }
+    if (!caseId || !apiConfig.streamEnabled || !apiConfig.streamUrl) return;
 
     if (connectionRef.current.caseId !== caseId) {
-      connectionRef.current = { caseId, hasOpened: false, lastCatchUpAt: 0 };
+      connectionRef.current = { caseId, hasOpened: false, lastCatchUpAt: 0, catchUpOnOpen: false };
     }
     const connection = connectionRef.current;
 
@@ -255,16 +275,26 @@ export function useCaseActivityStream(caseId: string | undefined): void {
       rotationRetries = 0;
       scheduleRotation(CONNECTION_MAX_AGE_MS);
 
-      // Nothing published before the subscriber registers is replayed, so
-      // catch up on the window we may have missed: the newest comments, plus
-      // case details when this is a reconnect. Rate-limited so a flapping
-      // connection cannot turn this into a request storm.
+      // No comments/activities request here: routine reconnects are frequent
+      // and an event in the reconnect gap is recovered by the next event.
       const isReconnect = connection.hasOpened;
       connection.hasOpened = true;
       const now = Date.now();
+
+      // Resume after idle: the gap can be long, so catch up once, exempt
+      // from the rate limit.
+      if (connection.catchUpOnOpen) {
+        connection.catchUpOnOpen = false;
+        connection.lastCatchUpAt = now;
+        refreshComments();
+        invalidateCaseDetails();
+        return;
+      }
+
+      // Routine reconnect: refresh case details only, rate-limited so a
+      // flapping connection cannot turn this into a request storm.
       if (now - connection.lastCatchUpAt < CATCH_UP_MIN_INTERVAL_MS) return;
       connection.lastCatchUpAt = now;
-      refreshComments();
       if (isReconnect) invalidateCaseDetails();
     };
 

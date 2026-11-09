@@ -177,7 +177,7 @@ func incidentRecordUpdateFromRequest(req domain.UpdateIncidentRequest, u *reposi
 	}
 	for field, val := range map[string]*string{
 		"parentId":            req.ParentID,
-		"parentIncidentId":    req.ParentIncidentID,
+		"parentIncidentId":    setValueOf(req.ParentIncidentID),
 		"assignmentGroupId":   req.AssignmentGroupID,
 		"serviceId":           req.ServiceID,
 		"serviceOfferingId":   req.ServiceOfferingID,
@@ -242,6 +242,15 @@ func incidentRecordUpdateFromRequest(req domain.UpdateIncidentRequest, u *reposi
 		req.ParentIncidentID != nil || req.IncidentReport != nil || req.Environment != nil ||
 		req.WatchList != nil
 	return ok, nil
+}
+
+// setValueOf is the value a pointer-to-pointer request field sets: nil when
+// the field is omitted or cleared, so a format check skips both.
+func setValueOf(p **string) *string {
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // incidentPriorityToEnum maps domain.IncidentPriority to
@@ -688,6 +697,17 @@ const incidentSystemActorEmail = "system-m2m@wso2.com"
 func (s *incidentService) resolveActor(ctx context.Context) (domain.User, error) {
 	token := middleware.UserIDTokenFromContext(ctx)
 	if token == "" {
+		if systemEmail, _, ok := incidentAutocloseFromContext(ctx); ok {
+			// The incident auto-close acts as the system user, as case
+			// auto-closure does: its user row when there is one.
+			actor := domain.User{Email: systemEmail}
+			if s.userRepo != nil {
+				if u, err := s.userRepo.GetUserByEmail(ctx, systemEmail); err == nil && u.ID != "" {
+					actor = u
+				}
+			}
+			return actor, nil
+		}
 		return domain.User{Email: incidentSystemActorEmail}, nil
 	}
 	email, err := emailFromJWT(token)
@@ -707,6 +727,9 @@ func (s *incidentService) SearchIncidents(ctx context.Context, req domain.Search
 		return domain.SearchIncidentsResponse{}, err
 	}
 	if err := validateUUIDs("filters.parentIds", req.Filters.ParentIDs); err != nil {
+		return domain.SearchIncidentsResponse{}, err
+	}
+	if err := validateUUIDs("filters.parentIncidentIds", req.Filters.ParentIncidentIDs); err != nil {
 		return domain.SearchIncidentsResponse{}, err
 	}
 	priorities, states, serviceIDs, assignedUserIDs, madeSla, slaViolated, createdStart, createdEnd, err :=
@@ -748,6 +771,9 @@ func (s *incidentService) SearchIncidents(ctx context.Context, req domain.Search
 func (s *incidentService) AggregateIncidents(ctx context.Context, req domain.AggregateIncidentsRequest) (domain.AggregateResponse, error) {
 	if !validIncidentAggregateField[req.GroupBy] {
 		return domain.AggregateResponse{}, &apierror.ValidationError{Msg: "groupBy contains invalid value: " + req.GroupBy}
+	}
+	if err := validateUUIDs("filters.parentIncidentIds", req.Filters.ParentIncidentIDs); err != nil {
+		return domain.AggregateResponse{}, err
 	}
 	priorities, states, serviceIDs, assignedUserIDs, madeSla, slaViolated, createdStart, createdEnd, err :=
 		parseIncidentFieldFiltersPostgres(req.Filters, time.Now().UTC())
@@ -1095,7 +1121,8 @@ func (s *incidentService) createIncidentSNFirst(ctx context.Context, req domain.
 //   - WorkNotes and AdditionalComments (below).
 //
 // A field sent as null is not sent, as on the ServiceNow path; only
-// Environment can be cleared.
+// ParentIncidentID and Environment can be cleared (domain.UpdateIncidentRequest's
+// UnmarshalJSON).
 //
 // WorkNotes/AdditionalComments each become their own comment row
 // (comment.work_item_id = req.ID, IncidentRepository.CreateIncidentComment)
@@ -1165,13 +1192,18 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 		}
 	}
 
+	var resolvedChildren []repository.ResolvedChildIncident
 	if hasLifecycle || hasRecord {
 		if actor.ID != "" {
 			lifecycle.DefaultResolvedByID = &actor.ID
 		}
+		if _, days, ok := incidentAutocloseFromContext(ctx); ok {
+			lifecycle.AutocloseDueDays = &days
+		}
 		// The notes ride in the same transaction: a failed note leaves nothing saved.
 		lifecycle.WorkNotes, lifecycle.AdditionalComments = req.WorkNotes, req.AdditionalComments
-		if err := s.repo.UpdateIncidentLifecycle(ctx, req.ID, lifecycle, actor.Email); err != nil {
+		resolvedChildren, err = s.repo.UpdateIncidentLifecycle(ctx, req.ID, lifecycle, actor.Email)
+		if err != nil {
 			return domain.UpdateIncidentResponse{}, err
 		}
 	} else if err := s.repo.CreateIncidentNotes(ctx, req.ID, req.WorkNotes, req.AdditionalComments, actor.Email); err != nil {
@@ -1223,6 +1255,9 @@ func (s *incidentService) UpdateIncident(ctx context.Context, req domain.UpdateI
 
 	publishIncidentStopSignals(ctx, s.eventPublisher, req, before, view)
 	s.recordIncidentFieldChanges(ctx, req, before, view, actor.Email)
+	// No ServiceNow mirror per child: ServiceNow's own rule resolves its children when the
+	// parent's update reaches it.
+	s.afterChildIncidentsResolved(ctx, resolvedChildren, actor.Email)
 
 	// Dual-write: a resolve with a workaround creates its problem in both stores.
 	problemID := s.createWorkaroundProblem(ctx, req, before, view)

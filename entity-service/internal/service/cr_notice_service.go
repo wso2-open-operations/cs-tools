@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/events"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
@@ -77,6 +78,10 @@ const (
 	crColConfirmation = "customer_updated_date_confirmation"
 	crColCustomerDate = "customer_updated_on"
 	crColState        = "state"
+	// The record of who proposed the customer's date (migration 0249), written
+	// by the proposal in the same UPDATE as crColCustomerDate.
+	crColProposedBy  = "customer_proposed_by_user_id"
+	crColProposedFor = "customer_proposed_for"
 )
 
 // crApprovalStates maps the change-request states the approval flow reacts to
@@ -221,10 +226,10 @@ func (s *crNoticeService) approvalNotice(ctx context.Context, change repository.
 //	u_customer_updatedVALCHANGES^state=5^sys_updated_byNOT LIKE@wso2.com
 //	u_confirm_customer_updated_dateVALCHANGES
 //
-// Two of those three clauses are decidable from the diff alone; the third is
-// not -- "who changed it" lives on work_item, not in the change_request
-// snapshot -- so the actor gate is applied below, once the record has been
-// read.
+// Two of those three clauses are decidable from the diff alone; the third,
+// "who changed it", is decided below (crPlanDateActor): from the record of who
+// proposed the date when the row's own snapshot carries one, else from the
+// change request's last writer, once the record has been read.
 func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.OutboxChange) error {
 	turn := crPlanDateTurnOf(change)
 	if turn == crTurnNone {
@@ -254,25 +259,16 @@ func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.
 	case crTurnCustomerProposed:
 		// sys_updated_byNOT LIKE@wso2.com. A WSO2 user moving the date is the
 		// team editing its own plan, which is not news to the team.
-		//
-		// KNOWN GAP: this is work_item.updated_by read at drain time, not the
-		// actor who made THIS change. change_request has no updated_by of its
-		// own, so there is nothing truer to read -- the outbox snapshot is
-		// to_jsonb(NEW) of change_request and simply does not contain one. Two
-		// consequences: a write that touches change_request without touching
-		// work_item leaves the previous work_item editor standing in as the
-		// actor, and a later edit between the trigger firing and this read
-		// replaces them. Either can suppress a genuine customer proposal or
-		// admit a WSO2 one.
-		//
-		// Closing it needs csm-sync to carry ServiceNow's sys_updated_by onto
-		// change_request, after which this reads the actor off the snapshot and
-		// the question of when it was read stops existing. Tracked separately;
-		// the approval notices do not use the actor at all, so only this one
-		// branch is affected.
-		if details.ActorIsWSO2 {
+		// Assigned, not declared: a case-scoped err would shadow the one the
+		// recipients are checked by after the switch.
+		var actor repository.CRNoticeActor
+		if actor, err = s.crPlanDateActor(ctx, change, details); err != nil {
+			return err
+		}
+		if actor.IsWSO2 {
 			return nil
 		}
+		notice.ActorName = actor.Name
 		notice.Kind = events.CRPlanDateCustomerProposed
 		notice.Audience = events.CRAudienceInternal
 		notice.GroupName = crPlanDateInternalGroup
@@ -302,6 +298,78 @@ func (s *crNoticeService) planDateNotice(ctx context.Context, change repository.
 	notice.Recipients = recipients
 
 	return s.publish(ctx, events.TypeCRPlanDateNotice, change.EntityID, notice)
+}
+
+// crPlanDateActor is who moved the customer's date in this row change, for the
+// customer-proposed turn's actor gate and the name its notice carries.
+//
+// A proposal records its proposer on change_request in the same UPDATE as the
+// date (customer_proposed_by_user_id / customer_proposed_for, migration 0249),
+// so its own outbox snapshot names them (crRecordedProposer), and that is the
+// actor: a staff work note, or any other write, saved between the proposal and
+// the drain cannot replace them. Named by repository.UserActor, the same rule
+// Details names the last writer by.
+//
+// KNOWN GAP, left only for a row change whose snapshot carries no such record --
+// a date written before 0249, a date moved by any writer that is not a
+// proposal (the sync, a manual fix), or one whose record the 0249 trigger voided
+// on entering Customer Approval: the actor is details' work_item.updated_by read
+// at drain time, not the actor who made THIS change, since change_request has
+// no updated_by of its own. A write that touches change_request without
+// touching work_item leaves the previous work_item editor standing in as the
+// actor, and a later edit between the trigger firing and this read replaces
+// them; either can suppress a genuine customer date or admit a WSO2 one.
+// Closing it for the sync's own writes needs csm-sync to carry the previous
+// system's last-writer field onto change_request. The approval notices do not
+// use the actor at all, so only this one branch is affected.
+func (s *crNoticeService) crPlanDateActor(ctx context.Context, change repository.OutboxChange, details repository.CRNoticeDetails) (repository.CRNoticeActor, error) {
+	userID, ok := crRecordedProposer(change.Snapshot)
+	if !ok {
+		return repository.CRNoticeActor{Name: details.ActorName, IsWSO2: details.ActorIsWSO2}, nil
+	}
+	actor, err := s.repo.UserActor(ctx, userID)
+	if err != nil {
+		return repository.CRNoticeActor{}, fmt.Errorf("crnotice: read who proposed the date of change request %s: %w", change.EntityID, err)
+	}
+	return actor, nil
+}
+
+// crRecordedProposer returns the user a change_request snapshot records as
+// having proposed the date it carries: a non-empty customer_proposed_by_user_id
+// whose customer_proposed_for is customer_updated_on itself, compared as
+// instants (the two are timestamptz rendered by to_jsonb, and the same instant
+// need not be the same text). The record is about another time when a writer
+// that is not a proposal moved the date, and names nobody when the 0249 trigger
+// voided it; either is no record, and so is a time that does not parse.
+func crRecordedProposer(snap map[string]any) (string, bool) {
+	by := strings.TrimSpace(crSnapshotString(snap, crColProposedBy))
+	if by == "" {
+		return "", false
+	}
+	proposedFor, ok := crSnapshotInstant(snap, crColProposedFor)
+	if !ok {
+		return "", false
+	}
+	date, ok := crSnapshotInstant(snap, crColCustomerDate)
+	if !ok || !proposedFor.Equal(date) {
+		return "", false
+	}
+	return by, true
+}
+
+// crSnapshotInstant reads a timestamptz column of the snapshot as an instant.
+// A missing, null or unparsable value (to_jsonb renders an infinite
+// timestamptz as the text "infinity") is no instant.
+func crSnapshotInstant(snap map[string]any, key string) (time.Time, bool) {
+	v := crSnapshotString(snap, key)
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, v)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func (s *crNoticeService) publish(ctx context.Context, t events.Type, entityID string, notice any) error {

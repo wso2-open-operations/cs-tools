@@ -167,6 +167,7 @@ func main() {
 	accountHandler := handler.NewAccountHandler(customerEntityClient)
 	projectHandler := handler.NewProjectHandler(customerEntityClient)
 	teamHandler := handler.NewTeamHandler(customerEntityClient)
+	salesforceResyncHandler := handler.NewSalesforceResyncHandler(customerEntityClient)
 	announcementExcludedProjectKeys := loadAnnouncementExcludedProjectKeys()
 	customerEntityDataSource := loadCustomerEntityDataSource()
 	validateAnnouncementDataSourceCompatibility(customerEntityDataSource, announcementExcludedProjectKeys)
@@ -238,17 +239,10 @@ func main() {
 	// Viewer-audience endpoints (ported from SupportPortalLite's Ballerina
 	// backend) are always registered. Every one of them reads entity-service
 	// through the shared customerEntityClient; only Google Drive (the /files
-	// routes) and the Scan User entity service (Scan User's
-	// lookups) are separate upstreams, and each is independently optional:
-	// unset leaves just its own endpoints failing at call time with a mapped
-	// upstream error -- see loadViewerConfig.
+	// routes) is a separate upstream, independently optional: unset leaves
+	// just its own endpoints failing at call time with a mapped upstream
+	// error -- see loadViewerConfig.
 	viewerCfg := loadViewerConfig()
-	salesEntityClient := entity.NewSalesEntityClient(entity.SalesEntityConfig{
-		BaseURL:      viewerCfg.salesEntityBaseURL,
-		TokenURL:     oauth2TokenURL,
-		ClientID:     oauth2ClientID,
-		ClientSecret: oauth2ClientSecret,
-	})
 	driveClient := googledrive.NewClient(googledrive.Config{
 		ClientID:     viewerCfg.driveClientID,
 		ClientSecret: viewerCfg.driveClientSecret,
@@ -279,12 +273,10 @@ func main() {
 		files:          handler.NewFilesHandler(driveClient, accessGuard),
 		customerHealth: handler.NewCustomerHealthHandler(riskClient, handler.NewPostgresCustomerHealthClient(customerEntityClient), customerEntityClient, accessGuard),
 		userInfo:       handler.NewUserInfoHandler(customerEntityClient, accessGuard),
-		userScan:       handler.NewSplUserScanHandler(salesEntityClient, customerEntityClient, accessGuard),
 		accountEsc:     handler.NewViewerAccountHandler(handler.NewPostgresViewerAccountClient(customerEntityClient), accessGuard),
 	}
 	slog.Info("viewer-access endpoints registered",
-		"googleDriveConfigured", viewerCfg.driveClientID != "",
-		"salesEntityConfigured", viewerCfg.salesEntityBaseURL != "")
+		"googleDriveConfigured", viewerCfg.driveClientID != "")
 
 	updatesCfg := updates.Config{
 		BaseURL:      mustEnv("UPDATES_BASE_URL"),
@@ -452,7 +444,11 @@ func main() {
 	route("DELETE /comments/{id}", handler.PermUpdateDeleteComment, commentHandler.DeleteComment)
 	route("POST /cases/{id}/activities/search", handler.PermView, caseHandler.SearchCaseActivities)
 	route("GET /cases/{id}/escalations", handler.PermView, caseHandler.GetCaseEscalations)
-	route("POST /cases/{id}/escalations", handler.PermEscalate, caseHandler.CreateCaseEscalation)
+	// PermView is only the floor here: the action-dependent rule lives in
+	// CreateCaseEscalation (ESCALATE needs PermEscalate; DEESCALATE needs
+	// being one of the case's team leads, with no escalation role), which a
+	// route permission cannot express because it depends on the body and the case.
+	route("POST /cases/{id}/escalations", handler.PermView, caseHandler.CreateCaseEscalation)
 	route("POST /attachments/search", handler.PermView, caseHandler.SearchCaseAttachments)
 	// Stored attachments, forwarded to the entity service, which owns every
 	// access decision. This backend holds the Azure Blob Storage credentials and
@@ -583,6 +579,12 @@ func main() {
 	// value (see AccountService.UpdateAccountTeams's doc comment) — no other
 	// staff role should be able to set it.
 	route("PATCH /accounts/{id}", handler.PermAdmin, accountHandler.UpdateAccountTeams)
+	// Admin-only: compare one account's or project's Salesforce data with the
+	// database, then overwrite the chosen components. Synchronous and slow
+	// (up to about a minute); entity-service re-checks admin and serialises
+	// per target.
+	route("POST /salesforce/resync/preview", handler.PermAdmin, salesforceResyncHandler.Preview)
+	route("POST /salesforce/resync/apply", handler.PermAdmin, salesforceResyncHandler.Apply)
 	route("POST /accounts/search", handler.PermViewSharedEntity, accountHandler.SearchAccounts)
 	route("POST /accounts/{id}/contacts/search", handler.PermView, accountHandler.SearchAccountContacts)
 	route("GET /projects/{id}", handler.PermViewSharedEntity, projectHandler.GetProject)
@@ -631,6 +633,25 @@ func main() {
 	route("POST /products/search", handler.PermView, productHandler.SearchProducts)
 	route("GET /products/github-repo", handler.PermView, productHandler.GetProductRepoMapping)
 	route("POST /products/{id}/versions/search", handler.PermView, productHandler.SearchProductVersions)
+	// Product catalogue (the data behind the public Support Matrix and Release
+	// Matrix), served by entity-service's products API under the same paths:
+	// reads are PermView; writes (applied at once) are PermManageProductCatalog,
+	// which entity-service re-checks.
+	productCatalogHandler := handler.NewProductCatalogHandler(customerEntityClient)
+	route("GET /products/{id}", handler.PermView, productCatalogHandler.GetProduct)
+	route("POST /products", handler.PermManageProductCatalog, productCatalogHandler.CreateProduct)
+	route("PATCH /products/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProduct)
+	route("POST /products/{id}/versions", handler.PermManageProductCatalog, productCatalogHandler.CreateProductVersions)
+	route("POST /product-versions/search", handler.PermView, productCatalogHandler.SearchAllProductVersions)
+	route("GET /product-versions/{id}", handler.PermView, productCatalogHandler.GetProductVersion)
+	route("PATCH /product-versions/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateProductVersion)
+	route("POST /product-versions/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireProductVersion)
+	route("GET /release-lines", handler.PermView, productCatalogHandler.ListReleaseLines)
+	route("POST /release-lines", handler.PermManageProductCatalog, productCatalogHandler.CreateReleaseLine)
+	route("PATCH /release-lines/{id}", handler.PermManageProductCatalog, productCatalogHandler.UpdateReleaseLine)
+	route("POST /release-lines/{id}/retire", handler.PermManageProductCatalog, productCatalogHandler.RetireReleaseLine)
+	route("GET /carbon-platform-history", handler.PermView, productCatalogHandler.ListCarbonPlatformHistory)
+	route("GET /carbon-kernel-releases", handler.PermView, productCatalogHandler.ListCarbonKernelReleases)
 	route("POST /deployments", handler.PermWrite, deploymentHandler.PostDeployment)
 	route("POST /kb-articles", handler.PermWrite, kbArticleHandler.CreateKBArticle)
 	route("GET /kb-articles/{id}", handler.PermView, kbArticleHandler.GetKBArticle)
@@ -798,6 +819,25 @@ func main() {
 	route("DELETE /team-schedule/case-alerts/settings/routes/{routeId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertRoute)
 	route("PUT /team-schedule/case-alerts/settings/values", handler.PermWrite, caseAlertSettingsHandler.PutCaseAlertValues)
 	route("DELETE /team-schedule/case-alerts/settings/values/{valueId}", handler.PermWrite, caseAlertSettingsHandler.DeleteCaseAlertValue)
+	// Operations > Change requests > Standard changes: the CAB-approved standard change templates and the
+	// proposals that create, revise or retire them. Reading is for whoever sees
+	// Operations; every write is checked again by entity-service (the proposer edits
+	// and submits, a CAB member decides, the owner or the CAB suspends).
+	standardChangeHandler := handler.NewStandardChangeHandler(customerEntityClient)
+	route("POST /standard-change-templates/search", handler.PermViewOperations, standardChangeHandler.SearchTemplates)
+	route("GET /standard-change-templates/{id}", handler.PermViewOperations, standardChangeHandler.GetTemplate)
+	route("GET /standard-change-templates/{id}/versions/{versionId}", handler.PermViewOperations, standardChangeHandler.GetTemplateVersion)
+	route("POST /standard-change-templates/{id}/suspend", handler.PermWrite, standardChangeHandler.SuspendTemplate)
+	route("POST /standard-change-templates/{id}/resume", handler.PermWrite, standardChangeHandler.ResumeTemplate)
+	route("POST /standard-change-templates/{id}/clear-review", handler.PermWrite, standardChangeHandler.ClearTemplateReview)
+	route("POST /standard-change-proposals", handler.PermWrite, standardChangeHandler.CreateProposal)
+	route("POST /standard-change-proposals/search", handler.PermViewOperations, standardChangeHandler.SearchProposals)
+	route("GET /standard-change-proposals/{id}", handler.PermViewOperations, standardChangeHandler.GetProposal)
+	route("PATCH /standard-change-proposals/{id}", handler.PermWrite, standardChangeHandler.UpdateProposal)
+	route("POST /standard-change-proposals/{id}/submit", handler.PermWrite, standardChangeHandler.SubmitProposal)
+	route("POST /standard-change-proposals/{id}/withdraw", handler.PermWrite, standardChangeHandler.WithdrawProposal)
+	route("POST /standard-change-proposals/{id}/decision", handler.PermWrite, standardChangeHandler.DecideProposal)
+
 	// Operations > Runbooks: the alert-name to runbook catalog new incidents are matched against.
 	runbookHandler := handler.NewRunbookHandler(customerEntityClient)
 	route("GET /runbooks", handler.PermViewOperations, runbookHandler.ListRunbooks)
@@ -873,10 +913,8 @@ func main() {
 
 	// Viewer-audience routes -- see viewerHandlers above. Always registered,
 	// and every one of them is entity-service-backed, except that GET /files
-	// and GET /files/search read Google Drive and POST /scan-user's
-	// Scan User lookups read the Scan User entity service; those two
-	// upstreams are independently optional and fail at call time when
-	// unconfigured. None of the routes below carry a /spl/ prefix: the viewer
+	// and GET /files/search read Google Drive, an upstream that is
+	// independently optional and fails at call time when unconfigured. None of the routes below carry a /spl/ prefix: the viewer
 	// audience and csm-portal share one backend, so the prefix only ever
 	// existed to avoid colliding with csm-portal's own, differently-shaped
 	// case-management domain, and none of these routes do. Accounts,
@@ -905,7 +943,6 @@ func main() {
 	route("GET /report-details", handler.PermView, viewerHandlers.reports.GetReportDetails)
 	route("GET /generate-timelogs-breakdown-report", handler.PermView, viewerHandlers.reports.GenerateTimelogsBreakdownReport)
 	route("GET /user-info", handler.PermViewerAccess, viewerHandlers.userInfo.GetUserInfo)
-	route("POST /scan-user", handler.PermViewerAccess, viewerHandlers.userScan.ScanUser)
 	route("GET /files", handler.PermViewerAccess, viewerHandlers.files.ListFiles)
 	route("GET /files/search", handler.PermViewerAccess, viewerHandlers.files.SearchFolder)
 	route("GET /usage-metrics/projects", handler.PermUsageMetricsViewer, viewerHandlers.usageMetrics.GetProjects)
@@ -1169,7 +1206,7 @@ func loadDirectory() *directory.Directory {
 //	AUTH_SUPPORT_ENGINEER_ROLES, AUTH_ADMIN_ROLES, AUTH_TIMECARD_APPROVER_ROLES,
 //	AUTH_DASHBOARD_DESIGNER_ROLES, AUTH_SALES_SOLUTIONS_ROLES,
 //	AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES,
-//	AUTH_SECURITY_TEAM_ROLES
+//	AUTH_PRODUCT_CATALOG_MANAGER_ROLES, AUTH_SECURITY_TEAM_ROLES
 //	    Each is a comma-separated list of role names; a caller whose token's
 //	    "roles" claim holds any one of them has that role.
 //
@@ -1180,7 +1217,8 @@ func loadDirectory() *directory.Directory {
 // nobody can use the portal.
 //
 // AUTH_SALES_SOLUTIONS_ROLES, AUTH_WORKNOTE_CREATOR_ROLES,
-// AUTH_COMMENT_UPDATER_ROLES and AUTH_ONBOARDING_LEAD_ROLES are unlike the rest:
+// AUTH_COMMENT_UPDATER_ROLES, AUTH_ONBOARDING_LEAD_ROLES and
+// AUTH_PRODUCT_CATALOG_MANAGER_ROLES are unlike the rest:
 // leaving any of them unset
 // does not warn. sales_solutions is a normal, expected unconfigured state (CS
 // Portal alone still works fine) rather than a misconfiguration nobody can
@@ -1191,7 +1229,8 @@ func loadDirectory() *directory.Directory {
 // AccessConfig.WorknoteCreator's/CommentUpdater's own doc comments), so
 // leaving either empty is purely "this extra role isn't provisioned yet,"
 // never a state that locks anyone out. onboarding_lead is the same: admin
-// already holds PermManageOnboarding regardless.
+// already holds PermManageOnboarding regardless; and product_catalog_manager:
+// admin already holds PermManageProductCatalog regardless.
 func loadAccessConfig() handler.AccessConfig {
 	var unset []string
 	roles := func(name string) []string {
@@ -1224,14 +1263,16 @@ func loadAccessConfig() handler.AccessConfig {
 		// unset variable here a normal, no-op state.
 		SecurityTeam: roles("AUTH_SECURITY_TEAM_ROLES"),
 		// Unlike the roles above, an unset AUTH_SALES_SOLUTIONS_ROLES,
-		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES or
-		// AUTH_ONBOARDING_LEAD_ROLES is a normal, supported state (see this
-		// function's own doc comment for why each is), so all four deliberately bypass the roles() helper
+		// AUTH_WORKNOTE_CREATOR_ROLES, AUTH_COMMENT_UPDATER_ROLES,
+		// AUTH_ONBOARDING_LEAD_ROLES or AUTH_PRODUCT_CATALOG_MANAGER_ROLES is a
+		// normal, supported state (see this function's own doc comment for why
+		// each is), so all five deliberately bypass the roles() helper
 		// to avoid adding themselves to the unset-variable warning below.
-		SalesSolutions:  splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
-		WorknoteCreator: splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
-		CommentUpdater:  splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
-		OnboardingLead:  splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		SalesSolutions:        splitComma(os.Getenv("AUTH_SALES_SOLUTIONS_ROLES")),
+		WorknoteCreator:       splitComma(os.Getenv("AUTH_WORKNOTE_CREATOR_ROLES")),
+		CommentUpdater:        splitComma(os.Getenv("AUTH_COMMENT_UPDATER_ROLES")),
+		OnboardingLead:        splitComma(os.Getenv("AUTH_ONBOARDING_LEAD_ROLES")),
+		ProductCatalogManager: splitComma(os.Getenv("AUTH_PRODUCT_CATALOG_MANAGER_ROLES")),
 	}
 	if len(unset) > 0 {
 		slog.Warn("access-control role variables are unset, so no token role grants them", "variables", unset)
@@ -1507,10 +1548,10 @@ func splitComma(s string) []string {
 
 // viewerHandlerSet holds every viewer-audience handler -- always constructed
 // and always registered. All of them read entity-service through the shared
-// customerEntityClient; files (Google Drive) and userScan's Scan User
-// lookups are the only ones with an upstream of their own, and an
-// unconfigured one fails its own calls at request time instead of the route
-// not existing at all (see loadViewerConfig).
+// customerEntityClient; files (Google Drive) is the only one with an
+// upstream of its own, and when that is unconfigured it fails its own calls
+// at request time instead of the route not existing at all (see
+// loadViewerConfig).
 type viewerHandlerSet struct {
 	reports        *handler.ReportsHandler
 	lookups        *handler.LookupsHandler
@@ -1518,55 +1559,36 @@ type viewerHandlerSet struct {
 	files          *handler.FilesHandler
 	customerHealth *handler.CustomerHealthHandler
 	userInfo       *handler.UserInfoHandler
-	userScan       *handler.SplUserScanHandler
 	accountEsc     *handler.ViewerAccountHandler
 }
 
 // viewerConfig holds the environment values behind the viewer-audience
-// endpoints' two optional upstreams (Google Drive and the Scan User entity
-// service), resolved by loadViewerConfig. Everything else those endpoints
-// read comes from entity-service via the shared customerEntityClient.
+// endpoints' one optional upstream (Google Drive), resolved by
+// loadViewerConfig. Everything else those endpoints read comes from
+// entity-service via the shared customerEntityClient.
 type viewerConfig struct {
-	driveClientID      string
-	driveClientSecret  string
-	driveRefreshToken  string
-	salesEntityBaseURL string
+	driveClientID     string
+	driveClientSecret string
+	driveRefreshToken string
 }
 
 // loadViewerConfig resolves the viewer-audience endpoints' optional
 // upstream configuration. Every value is independently optional (os.Getenv,
 // not mustEnv): unset Google Drive credentials leave only GET /files and
-// GET /files/search failing at call time, and an unset Scan User entity
-// service URL only Scan User's lookups, each with a normal mapped upstream
+// GET /files/search failing at call time, with a normal mapped upstream
 // error (mapUpstreamErrorGeneric) rather than the route being a 404 or the
-// process refusing to start. An explicitly-set value is still validated
-// (optionalHTTPSBaseURL exits on a malformed URL -- that's a real
-// misconfiguration, not "feature absent").
+// process refusing to start.
 //
-// GOOGLE_DRIVE_* and the Scan User entity service URL carry no SPL_ prefix: Google
-// Drive and the Scan User entity service are just this feature's own
-// upstreams, so they follow this file's convention of naming a service's
-// credentials after the service, not the caller. See .env.example for what
-// each variable configures.
+// GOOGLE_DRIVE_* carries no SPL_ prefix: Google Drive is just this
+// feature's own upstream, so it follows this file's convention of naming a
+// service's credentials after the service, not the caller. See .env.example
+// for what each variable configures.
 func loadViewerConfig() viewerConfig {
 	return viewerConfig{
-		driveClientID:      os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
-		driveClientSecret:  os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
-		driveRefreshToken:  os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
-		salesEntityBaseURL: optionalHTTPSBaseURL("SALES_ENTITY_BASE_URL"),
+		driveClientID:     os.Getenv("GOOGLE_DRIVE_CLIENT_ID"),
+		driveClientSecret: os.Getenv("GOOGLE_DRIVE_CLIENT_SECRET"),
+		driveRefreshToken: os.Getenv("GOOGLE_DRIVE_REFRESH_TOKEN"),
 	}
-}
-
-// optionalHTTPSBaseURL reads key and, if set, validates it exactly like
-// mustHTTPSBaseURL (a configured-but-malformed URL is still a real
-// misconfiguration worth failing startup over). An unset key returns "",
-// leaving the dependent upstream unconfigured rather than failing startup.
-func optionalHTTPSBaseURL(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		return ""
-	}
-	return mustHTTPSBaseURL(key, v)
 }
 
 func parseGoogleChatSpaces(raw string) []notifications.GoogleChatSpace {

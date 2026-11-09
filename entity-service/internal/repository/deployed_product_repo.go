@@ -567,7 +567,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		        dp.description, dp.update_level_info, pr.sf_id, COALESCE(dp.active, TRUE),
 		        d.id, d.name, d.type::TEXT,
 		        p.id, p.name, p.code,
-		        pv.id, pv.version, pv.release_date, pv.support_eol_date
+		        pv.id, pv.version, pv.release_date, pv.support_eol_date, pv.deployment_profile
 		 FROM deployed_product dp
 		 JOIN deployment d ON dp.deployment_id = d.id
 		 JOIN product p ON dp.product_id = p.id
@@ -603,7 +603,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 		for rows.Next() {
 			var dp domain.DeployedProductView
 			// Version fields are nullable (LEFT JOIN).
-			var pvID, pvName *string
+			var pvID, pvName, pvProfile *string
 			var pvReleaseDate, pvEoLDate *time.Time
 			// update_level_info is nullable JSONB; decoded below into
 			// dp.Updates once the row is scanned.
@@ -616,7 +616,7 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 				&dp.Description, &updateLevelInfo, &dp.ProjectSfID, &dp.Active,
 				&dp.Deployment.ID, &dp.Deployment.Name, &deploymentType,
 				&dp.Product.ID, &dp.Product.Name, &dp.Product.Abbreviation,
-				&pvID, &pvName, &pvReleaseDate, &pvEoLDate,
+				&pvID, &pvName, &pvReleaseDate, &pvEoLDate, &pvProfile,
 			); err != nil {
 				return fmt.Errorf("scan deployed product: %w", err)
 			}
@@ -627,10 +627,11 @@ func (r *deployedProductRepo) SearchDeployedProducts(ctx context.Context, req do
 			}
 			if pvID != nil {
 				dp.Version = &domain.DeployedProductVersionRef{
-					ID:             *pvID,
-					Name:           *pvName,
-					ReleasedDate:   pvReleaseDate,
-					SupportEoLDate: pvEoLDate,
+					ID:                *pvID,
+					Name:              *pvName,
+					ReleasedDate:      pvReleaseDate,
+					SupportEoLDate:    pvEoLDate,
+					DeploymentProfile: pvProfile,
 				}
 			}
 			dp.Category = lowercaseCategory(dp.Category)

@@ -78,13 +78,20 @@ vi.mock("@features/csm-cases/components/CasesFilterBar", () => ({
   default: ({
     filters,
     onChange,
+    severityOptions,
   }: {
     filters: { caseTypes: string[] };
     onChange: (next: unknown) => void;
+    severityOptions?: { value: string }[];
   }) => (
-    <button onClick={() => onChange({ ...filters, caseTypes: ["engagement"] })}>
-      Pick engagement type
-    </button>
+    <>
+      <button onClick={() => onChange({ ...filters, caseTypes: ["engagement"] })}>
+        Pick engagement type
+      </button>
+      <span data-testid="severity-options">
+        {(severityOptions ?? []).map((o) => o.value).join(",")}
+      </span>
+    </>
   ),
 }));
 vi.mock("@features/csm-cases/components/CasesList", () => ({
@@ -147,5 +154,59 @@ describe("CsmIssuesView case-type lock vs. unlocked control (digiops-cs#2907)", 
     // params), which the "no type filter" fallback expands to every type.
     expect(lastQueryFilters().caseTypes.length).toBeGreaterThan(1);
     expect(lastQueryFilters().caseTypes).not.toEqual(["case"]);
+  });
+});
+
+describe("CsmIssuesView severity options follow the locked record type", () => {
+  it("a service-request-locked view offers S1-S4 only (no S0) to the filter bar", () => {
+    render(
+      <MemoryRouter initialEntries={["/service-requests"]}>
+        <CsmIssuesView
+          title="Service requests"
+          hideTypeFilter
+          lockedFilters={{ caseTypes: ["service_request"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S1,S2,S3,S4$/);
+  });
+
+  it("a case-locked view keeps S0", () => {
+    render(
+      <MemoryRouter initialEntries={["/cases"]}>
+        <CsmIssuesView title="Cases" lockedFilters={{ caseTypes: ["case"] }} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S0,S1,S2,S3,S4$/);
+  });
+
+  it("a service-request view keeps S0 listed when the URL already selects it, so it can be removed", () => {
+    render(
+      <MemoryRouter initialEntries={["/service-requests?severities=S0"]}>
+        <CsmIssuesView
+          title="Service requests"
+          hideTypeFilter
+          lockedFilters={{ caseTypes: ["service_request"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S0,S1,S2,S3,S4$/);
+  });
+
+  it("a service-request view without S0 selected does not offer it", () => {
+    render(
+      <MemoryRouter initialEntries={["/service-requests?severities=S2"]}>
+        <CsmIssuesView
+          title="Service requests"
+          hideTypeFilter
+          lockedFilters={{ caseTypes: ["service_request"] }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("severity-options")).toHaveTextContent(/^S1,S2,S3,S4$/);
   });
 });

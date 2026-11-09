@@ -135,7 +135,11 @@ func (s *stubCaseRepo) GetCaseByID(ctx context.Context, id string, scope reposit
 	if s.getCaseByID != nil {
 		return s.getCaseByID(ctx, id, scope)
 	}
-	panic("not implemented")
+	// Not a panic: UpdateCase reads the record's type before a severity change
+	// (to route a service request), and fails the request if that read fails.
+	// A test that does not care gets a plain case.
+	caseType := "case"
+	return domain.CaseView{ID: id, Type: &caseType}, nil
 }
 func (s *stubCaseRepo) AggregateCases(ctx context.Context, req domain.SearchCasesRequest, groupBy string, _ repository.SearchScope) ([]domain.AggregateBucket, error) {
 	if s.aggregateCases != nil {

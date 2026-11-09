@@ -78,12 +78,15 @@ vi.mock("@components/rich-text-editor/Editor", () => ({
   default: ({
     value,
     onChange,
+    ariaRequired,
   }: {
     value: string;
     onChange: (v: string) => void;
+    ariaRequired?: boolean;
   }) => (
     <textarea
       aria-label="editor"
+      aria-required={ariaRequired ? "true" : undefined}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
@@ -160,5 +163,15 @@ describe("CsmEngagementCreatePage description images", () => {
     expect(postCaseMutateAsyncMock).not.toHaveBeenCalled();
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Create engagement" })).toBeEnabled();
+  });
+});
+
+describe("CsmEngagementCreatePage — required Description", () => {
+  it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
+    render(<CsmEngagementCreatePage />);
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
+    expect(screen.getByRole("button", { name: /^create engagement$/i })).toBeDisabled();
   });
 });

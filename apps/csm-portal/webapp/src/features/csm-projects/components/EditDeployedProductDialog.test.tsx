@@ -121,8 +121,9 @@ describe("EditDeployedProductDialog — Update History tab", () => {
     const { onSaveHistory, onClose } = renderDialog();
     switchToHistoryTab();
 
-    fireEvent.change(screen.getByLabelText(/^update level$/i), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText(/^date$/i), { target: { value: "2026-02-01" } });
+    // Prefix matches: both labels now end in the required asterisk.
+    fireEvent.change(screen.getByLabelText(/^update level/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/^date\b/i), { target: { value: "2026-02-01" } });
     fireEvent.click(screen.getByRole("button", { name: /^add update$/i }));
 
     await waitFor(() =>

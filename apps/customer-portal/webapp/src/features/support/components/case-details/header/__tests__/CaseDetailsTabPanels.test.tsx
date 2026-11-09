@@ -14,12 +14,14 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CaseDetailsTabPanels from "@case-details/CaseDetailsTabPanels";
 import { ThemeProvider, createTheme } from "@wso2/oxygen-ui";
 import { ErrorBannerProvider } from "@context/error-banner/ErrorBannerContext";
+import { SuccessBannerProvider } from "@context/success-banner/SuccessBannerContext";
 import LoggerProvider from "@context/logger/LoggerProvider";
 import type { CaseDetails } from "@features/support/types/cases";
 
@@ -131,6 +133,40 @@ vi.mock("@features/support/api/useGetAIChatHistory", () => ({
   })),
 }));
 
+// The Activity tab reads case comments via the infinite comments query (the AI
+// chat history hook below only feeds the Knowledge Base recommendations).
+vi.mock("@features/support/api/useGetCaseCommentsInfinite", () => ({
+  __esModule: true,
+  default: vi.fn(() => ({
+    data: {
+      pages: [
+        {
+          comments: mockCaseComments,
+          totalRecords: mockCaseComments.length,
+          offset: 0,
+          limit: 10,
+        },
+      ],
+      pageParams: [0],
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(),
+  })),
+}));
+
+vi.mock("@hooks/useCustomerPermissions", () => ({
+  useCustomerPermissions: () => ({
+    isLoading: false,
+    isExternalUser: true,
+    canCreateCase: true,
+    canUpdateCase: true,
+  }),
+}));
+
 vi.mock("@features/settings/api/useGetUserDetails", () => ({
   __esModule: true,
   default: vi.fn(() => ({
@@ -168,20 +204,24 @@ function renderTabPanels(
   options?: { data?: CaseDetails; isError?: boolean },
 ) {
   return render(
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={createTheme()}>
-        <LoggerProvider>
-          <ErrorBannerProvider>
-            <CaseDetailsTabPanels
-              panelIndex={panelIndex}
-              caseId={caseId}
-              data={options?.data ?? (mockCaseDetails as CaseDetails)}
-              isError={options?.isError ?? false}
-            />
-          </ErrorBannerProvider>
-        </LoggerProvider>
-      </ThemeProvider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider theme={createTheme()}>
+          <LoggerProvider>
+            <ErrorBannerProvider>
+              <SuccessBannerProvider>
+                <CaseDetailsTabPanels
+                  panelIndex={panelIndex}
+                  caseId={caseId}
+                  data={options?.data ?? (mockCaseDetails as CaseDetails)}
+                  isError={options?.isError ?? false}
+                />
+              </SuccessBannerProvider>
+            </ErrorBannerProvider>
+          </LoggerProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -192,7 +232,7 @@ describe("CaseDetailsTabPanels", () => {
       screen.getByText(/Thanks for the detailed recommendations/),
     ).toBeInTheDocument();
     expect(screen.getByText(/Show more/)).toBeInTheDocument();
-    expect(screen.getAllByText(/Support Engineer/).length).toBeGreaterThan(0);
+    expect(screen.getByText("support@wso2.com")).toBeInTheDocument();
   });
 
   it("should show Activity placeholder when projectId is missing", () => {
@@ -212,7 +252,16 @@ describe("CaseDetailsTabPanels", () => {
   });
 
   it("should show Attachments panel with list and download when activeTab is 2", () => {
-    renderTabPanels(2);
+    // The attachments tab keeps its skeleton up for a minimum of 4s (SKELETON_MIN_DISPLAY_MS).
+    vi.useFakeTimers();
+    try {
+      renderTabPanels(2);
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     expect(
       screen.getByRole("button", { name: /upload attachment/i }),
     ).toBeInTheDocument();

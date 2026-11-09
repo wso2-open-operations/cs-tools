@@ -27,7 +27,7 @@ import {
   Tabs,
   Typography,
 } from "@wso2/oxygen-ui";
-import { ArrowLeft, ChevronDown, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
+import { ArrowLeft, ChevronDown, GitCompare, Pencil, Plus } from "@wso2/oxygen-ui-icons-react";
 import { useState, type JSX, type MouseEvent, type ReactNode } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router";
 import { BackendApiError } from "@api/backend/client";
@@ -38,6 +38,7 @@ import { usePatchProjectOnboarding } from "@features/csm-projects/api/usePatchPr
 import { useProjectMetadata } from "@features/csm-projects/api/useProjectMetadata";
 import ClosureStateChip from "@features/csm-projects/components/ClosureStateChip";
 import DeploymentsTab from "@features/csm-projects/components/DeploymentsTab";
+import SalesforceResyncDialog from "@features/csm-admin/salesforce-resync/SalesforceResyncDialog";
 import EditProjectClosureStateDialog from "@features/csm-projects/components/EditProjectClosureStateDialog";
 import EditProjectOnboardingDialog from "@features/csm-projects/components/EditProjectOnboardingDialog";
 import ProjectMetaCell from "@features/csm-projects/components/ProjectMetaCell";
@@ -168,7 +169,9 @@ export default function CsmProjectDetailPage(): JSX.Element {
     canViewWorkItemsStaffView,
     canUpdateProjectClosureState,
     canEditProjectOnboarding,
+    isAdmin: canCompareWithSalesforce,
   } = usePortalAccess();
+  const [compareOpen, setCompareOpen] = useState(false);
   const patchClosureState = usePatchProjectClosureState(id);
   const [editClosureStateOpen, setEditClosureStateOpen] = useState(false);
   const patchOnboarding = usePatchProjectOnboarding(id);
@@ -301,6 +304,19 @@ export default function CsmProjectDetailPage(): JSX.Element {
           >
             CS Report
           </Button>
+          {/* UX nicety only: the backend enforces the admin gate and a 403 is
+              shown inside the dialog. */}
+          {canCompareWithSalesforce && (
+            <Button
+              variant="outlined"
+              size="small"
+              className="csm-print-hide"
+              startIcon={<GitCompare size={16} />}
+              onClick={() => setCompareOpen(true)}
+            >
+              Compare with Salesforce
+            </Button>
+          )}
           {/* File any issue type already scoped to this project — every create
               form below locks the project field, so it can't be filed against
               the wrong one. */}
@@ -493,6 +509,10 @@ export default function CsmProjectDetailPage(): JSX.Element {
       {activeTab === "contacts" && <ProjectContactsTab projectId={p.id} />}
 
       {activeTab === "workItems" && <WorkItemsTab projectId={p.id} />}
+
+      {compareOpen && (
+        <SalesforceResyncDialog open scope="project" id={p.id} onClose={() => setCompareOpen(false)} />
+      )}
 
       {editOnboardingOpen && (
         <EditProjectOnboardingDialog

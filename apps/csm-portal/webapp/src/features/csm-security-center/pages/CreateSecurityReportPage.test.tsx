@@ -95,8 +95,21 @@ vi.mock("@features/csm-cases/components/ProjectSelectionField", () => ({
   ),
 }));
 vi.mock("@components/rich-text-editor/Editor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <textarea aria-label="editor" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({
+    value,
+    onChange,
+    ariaRequired,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    ariaRequired?: boolean;
+  }) => (
+    <textarea
+      aria-label="editor"
+      aria-required={ariaRequired ? "true" : undefined}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 // CreateSecurityReportPage imports BackendApiError from the real API client
@@ -165,7 +178,7 @@ describe("CreateSecurityReportPage — files are chosen in the form and uploaded
 
   it("shows the Attachments field as required, not optional", () => {
     render(<CreateSecurityReportPage />);
-    expect(screen.getByText(/attachments \*/i)).toBeInTheDocument();
+    expect(screen.getByText("Attachments").querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
     // One report file, and it is required.
     expect(screen.getByText(/required · 1 attachment/i)).toBeInTheDocument();
   });
@@ -294,5 +307,14 @@ describe("CreateSecurityReportPage — files are chosen in the form and uploaded
     expect(reportUploadMock).not.toHaveBeenCalled();
     expect(navigateMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /create security report/i })).toBeEnabled();
+  });
+});
+
+describe("CreateSecurityReportPage — required Description", () => {
+  it("marks the rich-text Description required: an asterisk on its caption and aria-required on the editor", () => {
+    render(<CreateSecurityReportPage />);
+    const caption = screen.getByText("Description");
+    expect(caption.querySelector(".MuiFormLabel-asterisk")).not.toBeNull();
+    expect(screen.getByLabelText("editor")).toHaveAttribute("aria-required", "true");
   });
 });

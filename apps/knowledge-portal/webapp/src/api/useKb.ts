@@ -14,13 +14,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import {
   keepPreviousData,
   useInfiniteQuery,
+  useQueries,
   useQuery,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 import {
+  countArticles,
   getArticle,
   getRelatedArticles,
   listKnowledgeBases,
@@ -144,3 +147,59 @@ export const useRelatedArticles = (id: string | undefined) =>
     enabled: isValidId(id),
     staleTime: FIVE_MINUTES,
   });
+
+/** Suggestions shown while typing: enough to be useful, few enough to scan. */
+export const SUGGESTION_LIMIT = 5;
+/** Shorter queries match too much to be worth a round trip. */
+export const MIN_SUGGESTION_CHARS = 2;
+
+/**
+ * Type-ahead results for the search box. `enabled` lets the caller pause it
+ * (input blurred, dropdown dismissed). Not retried: the next keystroke is the
+ * retry, and a failed suggestion must never block a submitted search.
+ */
+export function useSearchSuggestions(query: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [KB_KEY, "suggest", query],
+    queryFn: ({ signal }) => searchArticles({ searchQuery: query, limit: SUGGESTION_LIMIT }, signal),
+    enabled: enabled && query.length >= MIN_SUGGESTION_CHARS,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export type KnowledgeBaseCounts = Record<string, number | undefined>;
+
+export interface KnowledgeBaseCountsResult {
+  /** Loaded counts by knowledge base id; absent while loading or after a failure. */
+  counts: KnowledgeBaseCounts;
+  /** True for a knowledge base whose count is still being fetched, so a failed one is not mistaken for a pending one. */
+  pending: Record<string, boolean>;
+}
+
+/**
+ * Article count per knowledge base, one request each, cached for five
+ * minutes. A count that fails to load is simply absent: the cards and filters
+ * render without a number rather than with an error.
+ */
+export function useKnowledgeBaseCounts(ids: readonly string[]): KnowledgeBaseCountsResult {
+  const key = ids.join("\u0000");
+  const combine = useCallback(
+    (results: UseQueryResult<number>[]): KnowledgeBaseCountsResult => ({
+      counts: Object.fromEntries(ids.map((id, index) => [id, results[index]?.data])),
+      pending: Object.fromEntries(ids.map((id, index) => [id, results[index]?.isPending ?? false])),
+    }),
+    // `key` stands in for the array identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key],
+  );
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: [KB_KEY, "count", id],
+      queryFn: ({ signal }: { signal: AbortSignal }) => countArticles(id, signal),
+      staleTime: FIVE_MINUTES,
+      retry: false,
+    })),
+    combine,
+  });
+}

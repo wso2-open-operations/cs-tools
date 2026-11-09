@@ -55,6 +55,12 @@ export const PORTAL_ROLE = {
   // setting a project's onboarding status and owner via PATCH /projects/{id},
   // and nothing else. It grants no read access. See canEditProjectOnboarding.
   onboardingLead: "onboarding_lead",
+  // Grants PermManageProductCatalog on the backend (internal/handler/access.go)
+  // -- adding, editing and retiring products, versions and release lines in
+  // the product catalogue (the write routes of the products API), and nothing
+  // else. It grants no read access. See
+  // canManageProductCatalog.
+  productCatalogManager: "product_catalog_manager",
 } as const;
 
 // Roles that, held alone, let someone use the portal at all. announcement_creator
@@ -63,7 +69,9 @@ export const PORTAL_ROLE = {
 // grants nothing, and counting it would let a caller holding nothing else in
 // past the "no access" screen into a portal where every call is a 403.
 // onboarding_lead is excluded too: the backend gives it no read permission,
-// only the one onboarding PATCH.
+// only the one onboarding PATCH. product_catalog_manager likewise: catalogue
+// managers are staff who also hold a viewing role, and on its own it grants
+// only the catalogue write routes.
 // comment_updater is excluded for the identical reason: on its own it grants
 // only editing/deleting someone else's comment (canUpdateDeleteAnyComment),
 // and reaching a comment at all first requires being able to view the case
@@ -71,17 +79,18 @@ export const PORTAL_ROLE = {
 const ROLES_THAT_GRANT_ACCESS: readonly string[] = Object.values(PORTAL_ROLE).filter(
   (role) => role !== PORTAL_ROLE.announcementCreator &&
     role !== PORTAL_ROLE.commentUpdater &&
-    role !== PORTAL_ROLE.onboardingLead,
+    role !== PORTAL_ROLE.onboardingLead &&
+    role !== PORTAL_ROLE.productCatalogManager,
 );
 
 export interface PortalAccess {
   /** Holds at least one portal role — the minimum to use the portal at all. */
   hasAnyRole: boolean;
   /**
-   * Escalating or de-escalating a case: `admin`, `cs_engineer` and
-   * `escalator`, mirroring the backend's `PermEscalate` -- any internal
-   * engineer may escalate, as in ServiceNow. De-escalating also requires
-   * being one of the case's ABT team leads.
+   * Escalating a case: `admin`, `cs_engineer` and `escalator`, mirroring the
+   * backend's `PermEscalate`. Does NOT govern de-escalating: that is allowed
+   * only to the case's ABT team leads and needs no portal role (see
+   * CsmCaseDetailPage).
    */
   canEscalate: boolean;
   canDownloadAttachment: boolean;
@@ -151,6 +160,14 @@ export interface PortalAccess {
    * controls are offered.
    */
   canEditProjectOnboarding: boolean;
+  /**
+   * Editing the product catalogue in the Products section: adding, editing
+   * and retiring products, versions and release lines (applied at once).
+   * `product_catalog_manager` or `admin` -- `cs_engineer` alone does not hold
+   * it. Mirrors the backend's `PermManageProductCatalog`, which gates every
+   * catalogue write route. Reading the catalogue needs only view.
+   */
+  canManageProductCatalog: boolean;
   /**
    * The Security Center section (Security reports + Vulnerabilities tabs)
    * and the API calls behind it. `admin`, `cs_engineer`, and the dedicated
@@ -222,7 +239,7 @@ export interface PortalAccess {
   canUpdateDeleteAnyComment: boolean;
   /**
    * The small set of sections that used to live in the separate, now-removed
-   * "Support Portal Lite" app (User scan, the Time project report, and the
+   * "Support Portal Lite" app (the Time project report and the
    * extra Account detail tabs they added): `viewer` only, regardless of what
    * other roles the caller also holds — mirrors the backend's
    * `PermViewerAccess` (`access.go`), which is built only from the viewer
@@ -259,7 +276,7 @@ export interface PortalAccess {
    * dedicated `usage_metrics_viewer` role. Unlike {@link isSplAudience},
    * holding plain `viewer` does NOT grant this on its own — reported live:
    * a viewer-only account must not see this section at all, even though it
-   * (like User Scan) is an ex-Support-Portal-Lite feature.
+   * is an ex-Support-Portal-Lite feature.
    */
   canViewUsageMetrics: boolean;
   /**
@@ -359,6 +376,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
       canCreateUser: true,
       canUpdateProjectClosureState: true,
       canEditProjectOnboarding: true,
+      canManageProductCatalog: true,
       canUseSecurityCenter: true,
       canViewSecurityReportCases: true,
       canUsePlg: true,
@@ -385,8 +403,8 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
   const full = isAdmin || has(PORTAL_ROLE.csEngineer);
   return {
     hasAnyRole: ROLES_THAT_GRANT_ACCESS.some(has),
-    // Any internal engineer may escalate, as in ServiceNow; de-escalating is
-    // further limited to the case's ABT team leads (CsmCaseDetailPage).
+    // Escalating only; de-escalating is gated on the case's team lead
+    // (CsmCaseDetailPage), not on this flag.
     canEscalate: full || has(PORTAL_ROLE.escalator),
     canDownloadAttachment: full || has(PORTAL_ROLE.attachmentDownloader),
     canUseOperations: full || has(PORTAL_ROLE.securityTeam),
@@ -397,6 +415,7 @@ export function getPortalAccess(roles: string[] | undefined): PortalAccess {
     canCreateUser: isAdmin,
     canUpdateProjectClosureState: isAdmin,
     canEditProjectOnboarding: isAdmin || has(PORTAL_ROLE.onboardingLead),
+    canManageProductCatalog: isAdmin || has(PORTAL_ROLE.productCatalogManager),
     canUseSecurityCenter: full || has(PORTAL_ROLE.securityTeam),
     canViewSecurityReportCases:
       full ||

@@ -55,6 +55,18 @@ describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)",
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
   });
 
+  it("marks the Tag field required (a tag is needed to add one)", () => {
+    render(
+      <AddTagDialog
+        existingLabels={[]}
+        isSaving={false}
+        onClose={() => {}}
+        onSave={() => {}}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: /^tag$/i })).toBeRequired();
+  });
+
   it("typing alone does not enable Add tag — a suggestion must be selected", () => {
     mockSearchResult({ data: [{ id: "t1", label: "micro-gw" }] });
     render(
@@ -65,7 +77,7 @@ describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)",
         onSave={() => {}}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^tag$/i }), {
       target: { value: "micro-gw-but-not-quite" },
     });
     expect(screen.getByRole("button", { name: /add tag/i })).toBeDisabled();
@@ -82,7 +94,7 @@ describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)",
         onSave={onSave}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^tag$/i }), {
       target: { value: "micro" },
     });
     fireEvent.click(screen.getByText("micro-gw"));
@@ -102,7 +114,7 @@ describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)",
         onSave={onSave}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^tag$/i }), {
       target: { value: "micro" },
     });
     // Already-on-the-case labels are filtered out of the suggestion list, so
@@ -128,7 +140,7 @@ describe("AddTagDialog — search-and-SELECT tag entry (no free-text creation)",
         onSave={() => {}}
       />,
     );
-    fireEvent.change(screen.getByLabelText(/^tag$/i), {
+    fireEvent.change(screen.getByRole("combobox", { name: /^tag$/i }), {
       target: { value: "micro" },
     });
     expect(screen.getByText("micro-gw")).toBeInTheDocument();

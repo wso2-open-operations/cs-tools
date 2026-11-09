@@ -20,8 +20,8 @@ import SettingsPage from "@features/settings/pages/SettingsPage";
 
 const useParamsMock = vi.fn();
 const consumePendingSettingsTabMock = vi.fn();
-const useGetUserDetailsMock = vi.fn();
-const useGetProjectDetailsMock = vi.fn();
+const userDetailsMock = vi.fn();
+const projectDetailsMock = vi.fn();
 
 vi.mock("react-router", () => ({
   useParams: () => useParamsMock(),
@@ -59,11 +59,11 @@ vi.mock("@features/settings/components/SettingsVerification", () => ({
 }));
 
 vi.mock("@features/settings/api/useGetUserDetails", () => ({
-  default: () => useGetUserDetailsMock(),
+  default: () => userDetailsMock(),
 }));
 
 vi.mock("@api/useGetProjectDetails", () => ({
-  default: () => useGetProjectDetailsMock(),
+  default: () => projectDetailsMock(),
 }));
 
 vi.mock("@features/settings/utils/settingsStorage", () => ({
@@ -77,8 +77,8 @@ vi.mock("@utils/permission", () => ({
 describe("SettingsPage", () => {
   it("renders not-found message when project id is missing", () => {
     useParamsMock.mockReturnValue({});
-    useGetUserDetailsMock.mockReturnValue({ data: { roles: [] } });
-    useGetProjectDetailsMock.mockReturnValue({ data: {} });
+    userDetailsMock.mockReturnValue({ data: { roles: [] } });
+    projectDetailsMock.mockReturnValue({ data: {} });
     consumePendingSettingsTabMock.mockReturnValue(null);
 
     render(<SettingsPage />);
@@ -87,8 +87,8 @@ describe("SettingsPage", () => {
 
   it("renders user-management tab composition by default", () => {
     useParamsMock.mockReturnValue({ projectId: "p-1" });
-    useGetUserDetailsMock.mockReturnValue({ data: { roles: [] } });
-    useGetProjectDetailsMock.mockReturnValue({ data: {} });
+    userDetailsMock.mockReturnValue({ data: { roles: [] } });
+    projectDetailsMock.mockReturnValue({ data: {} });
     consumePendingSettingsTabMock.mockReturnValue(null);
 
     render(<SettingsPage />);
@@ -105,8 +105,8 @@ describe("SettingsPage", () => {
 
     it("shows the Pending Verification tab and renders it when enabled (default)", () => {
       useParamsMock.mockReturnValue({ projectId: "p-1" });
-      useGetUserDetailsMock.mockReturnValue({ data: { roles: [] } });
-      useGetProjectDetailsMock.mockReturnValue({ data: {} });
+      userDetailsMock.mockReturnValue({ data: { roles: [] } });
+      projectDetailsMock.mockReturnValue({ data: {} });
       consumePendingSettingsTabMock.mockReturnValue("verification");
 
       render(<SettingsPage />);
@@ -121,8 +121,8 @@ describe("SettingsPage", () => {
         CUSTOMER_PORTAL_ALLOW_PENDING_VERIFICATION_SETTINGS: false,
       };
       useParamsMock.mockReturnValue({ projectId: "p-1" });
-      useGetUserDetailsMock.mockReturnValue({ data: { roles: [] } });
-      useGetProjectDetailsMock.mockReturnValue({ data: {} });
+      userDetailsMock.mockReturnValue({ data: { roles: [] } });
+      projectDetailsMock.mockReturnValue({ data: {} });
       consumePendingSettingsTabMock.mockReturnValue(null);
 
       render(<SettingsPage />);
@@ -137,8 +137,8 @@ describe("SettingsPage", () => {
         CUSTOMER_PORTAL_ALLOW_PENDING_VERIFICATION_SETTINGS: false,
       };
       useParamsMock.mockReturnValue({ projectId: "p-1" });
-      useGetUserDetailsMock.mockReturnValue({ data: { roles: [] } });
-      useGetProjectDetailsMock.mockReturnValue({ data: {} });
+      userDetailsMock.mockReturnValue({ data: { roles: [] } });
+      projectDetailsMock.mockReturnValue({ data: {} });
       consumePendingSettingsTabMock.mockReturnValue("verification");
 
       render(<SettingsPage />);
