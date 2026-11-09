@@ -1106,6 +1106,15 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		slaEngineSvc = service.NewSLAEngineService(repository.NewSLAEngineRepository(repository.NewScoped(db), cfg.CSEngineerRole))
 	}
 
+	// Admin-only (see CaseSLARecalcService's own doc comment); nil the same
+	// way slaEngineSvc itself is when the engine is off, so the route below
+	// is simply never registered rather than registered against a nil
+	// engine.
+	var caseSLARecalcHandler *handler.CaseSLARecalcHandler
+	if slaEngineSvc != nil {
+		caseSLARecalcHandler = handler.NewCaseSLARecalcHandler(service.NewCaseSLARecalcService(slaEngineSvc, accessSvc, cfg.CSMPortalBackendClientID))
+	}
+
 	caseRepo := repository.NewCaseRepository(repository.NewScoped(db), crVisibility)
 	var activeCaseSvc service.CaseService
 	switch cfg.DataSource {
@@ -2067,6 +2076,9 @@ func NewRouter(db *pgxpool.Pool, cfg *config.Config) (http.Handler, func()) {
 		mux.HandleFunc("GET /sla-status", slaStatusHandler.SearchActiveSLAStatuses)
 		mux.HandleFunc("GET /sla-status/clock-state", slaStatusHandler.GetClockState)
 		mux.HandleFunc("POST /sla-engine/recalculate", slaStatusHandler.RequestRecalculation)
+	}
+	if caseSLARecalcHandler != nil {
+		mux.HandleFunc("POST /cases/{id}/sla/recalculate-pause", caseSLARecalcHandler.RecalculatePauseTotals)
 	}
 	if slaDurationPolicyHandler != nil {
 		mux.HandleFunc("GET /sla-duration-policy", slaDurationPolicyHandler.ListSLADurationPolicy)
