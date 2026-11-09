@@ -352,7 +352,9 @@ func WithDeletedAttachments(ctx context.Context) context.Context {
 	return context.WithValue(ctx, includeDeletedAttachmentsKey{}, true)
 }
 
-func includeDeletedAttachments(ctx context.Context) bool {
+// DeletedAttachmentsRequested reports whether WithDeletedAttachments was applied
+// to ctx.
+func DeletedAttachmentsRequested(ctx context.Context) bool {
 	v, _ := ctx.Value(includeDeletedAttachmentsKey{}).(bool)
 	return v
 }

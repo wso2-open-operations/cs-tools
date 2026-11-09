@@ -2896,7 +2896,7 @@ func (r *caseRepo) UpdateCase(ctx context.Context, req domain.UpdateCaseRequest,
 // returned, carrying only the email. The rows have no storage key here.
 func (r *caseRepo) SearchCaseAttachments(ctx context.Context, caseID string, pagination domain.Pagination) ([]domain.Attachment, int, error) {
 	listed := listedStoredAttachmentSQL
-	if includeDeletedAttachments(ctx) {
+	if DeletedAttachmentsRequested(ctx) {
 		listed = listedWithDeletedStoredAttachmentSQL
 	}
 	combined := `
@@ -3056,7 +3056,7 @@ func (r *caseRepo) SearchWorkItemAttachments(ctx context.Context, workItemID str
 	}
 
 	listed := listedStoredAttachmentSQL
-	if includeDeletedAttachments(ctx) {
+	if DeletedAttachmentsRequested(ctx) {
 		listed = listedWithDeletedStoredAttachmentSQL
 	}
 	where := `

@@ -25,7 +25,9 @@ import (
 	"time"
 
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/apierror"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/auth"
 	"github.com/wso2-open-operations/cs-tools/entity-service/internal/domain"
+	"github.com/wso2-open-operations/cs-tools/entity-service/internal/repository"
 )
 
 const testCaseID = "00000000-0000-0000-0000-0000000000c1"
@@ -302,6 +304,55 @@ func TestValidateCreateCaseRequest_NeedsNoAttachmentsForAnyType(t *testing.T) {
 			}
 			if err := validateCreateCaseRequest(&req); err != nil {
 				t.Fatalf("a %s without attachments must be valid, got %v", name, err)
+			}
+		})
+	}
+}
+
+// A request for deleted attachments is honoured only from the CSM portal
+// backend; any other caller's flag is ignored, so the repo is never asked.
+func TestCaseService_SearchCaseAttachments_IncludeDeletedOnlyForCSMPortalBackend(t *testing.T) {
+	const portalClient = "csm-portal-backend-client"
+	tests := []struct {
+		name      string
+		clientID  string
+		configure bool
+		include   bool
+		want      bool
+	}{
+		{"portal backend asks", portalClient, true, true, true},
+		{"portal backend does not ask", portalClient, true, false, false},
+		{"another caller asks", "customer-portal-client", true, true, false},
+		{"no client id configured", portalClient, false, true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got bool
+			repo := &stubCaseRepo{
+				searchCaseAttachments: func(ctx context.Context, _ string, _ domain.Pagination) ([]domain.Attachment, int, error) {
+					got = repository.DeletedAttachmentsRequested(ctx)
+					return nil, 0, nil
+				},
+				searchWorkItemAttachments: func(ctx context.Context, _ string, _ domain.ReferenceType, _ domain.Pagination) ([]domain.Attachment, int, error) {
+					got = repository.DeletedAttachmentsRequested(ctx)
+					return nil, 0, nil
+				},
+			}
+			var svc CaseService = NewCaseService(repo, stubUserRepo{}, nil, alwaysUnrestrictedAccess{}, nil)
+			if tc.configure {
+				svc = WithDeletedAttachmentsForCSMPortal(svc, portalClient)
+			}
+			ctx := auth.WithIdentity(context.Background(), auth.Identity{ClientID: tc.clientID})
+			for _, rt := range []domain.ReferenceType{domain.ReferenceTypeCase, domain.ReferenceTypeIncident} {
+				got = false
+				if _, err := svc.SearchCaseAttachments(ctx, domain.SearchAttachmentsRequest{
+					ReferenceID: testCaseID, ReferenceType: rt, IncludeDeleted: tc.include,
+				}); err != nil {
+					t.Fatalf("%s: %v", rt, err)
+				}
+				if got != tc.want {
+					t.Fatalf("%s: deleted attachments requested = %v, want %v", rt, got, tc.want)
+				}
 			}
 		})
 	}
