@@ -1034,13 +1034,14 @@ the entity-service calls are in `internal/entity/stored_attachments.go`.
 They are the only attachment routes besides the two listings (`GET /cases/{id}/attachments`,
 `GET /deployments/{deploymentId}/attachments`, which read entity-service's `POST /attachments/search`). There is no
 base64 or ServiceNow attachment path: files go to Azure in chunks, for cases, deployments and comment images alike, and
-a security report case is created first and its files are uploaded afterwards (the create-case body carries no
-attachments). `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
+a security report's files are uploaded FIRST, as drafts of the project (`POST /attachments/upload` with `type: "work_item"`
+and `projectId`), and `POST /cases` names them in `attachmentIds` (entity-service checks and links them, and refuses a
+security report with none); every other case is created first and its files are uploaded afterwards. `cmd/server/stored_attachment_routes_test.go` registers the routes on one mux, since Go's mux panics at
 startup on an ambiguous pair.
 
 | Route | Module / action | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; the body is forwarded untouched |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | create | relayed; only `attachmentId` and `maxBytes` come back. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it); the body is forwarded untouched |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | create | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | create | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | create | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
