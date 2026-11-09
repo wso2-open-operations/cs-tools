@@ -53,6 +53,7 @@ vi.mock("@context/success-banner/SuccessBannerContext", () => ({
 
 import {
   useGetCsmCaseAttachments,
+  useGetCsmDeletedCaseAttachments,
   usePostCsmCaseAttachment,
   useDeleteCsmCaseAttachment,
   useDownloadCsmCaseAttachment,
@@ -84,6 +85,61 @@ function beAttachment(id: string): BeAttachment {
     createdOn: "2026-07-01T00:00:00Z",
   };
 }
+
+describe("useGetCsmDeletedCaseAttachments", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it("makes no request until enabled, then asks for the deleted attachments only and maps who deleted them", async () => {
+    postMock.mockResolvedValue({
+      attachments: [
+        {
+          ...beAttachment("gone-1"),
+          status: "deleted",
+          deletedOn: "2026-07-02T00:00:00Z",
+          deletedBy: { id: null, email: "sam.admin@example.com", name: "Sam Admin" },
+        },
+      ],
+      total: 1,
+      limit: 50,
+      offset: 0,
+      hasMore: false,
+    });
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useGetCsmDeletedCaseAttachments("case-1", "incident", enabled),
+      { wrapper, initialProps: { enabled: false } },
+    );
+    expect(postMock).not.toHaveBeenCalled();
+
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(postMock).toHaveBeenCalledTimes(1);
+    expect(postMock).toHaveBeenCalledWith(
+      "/attachments/search",
+      expect.objectContaining({
+        referenceId: "case-1",
+        referenceType: "incident",
+        deletedOnly: true,
+      }),
+    );
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data?.[0]).toMatchObject({
+      deletedAt: "2026-07-02T00:00:00Z",
+      deletedBy: "Sam Admin",
+    });
+  });
+
+  it("does not send deletedOnly for the ordinary list", async () => {
+    postMock.mockResolvedValue({ attachments: [], total: 0, limit: 50, offset: 0, hasMore: false });
+    const { result } = renderHook(() => useGetCsmCaseAttachments("case-1"), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(postMock.mock.calls[0][1]).not.toHaveProperty("deletedOnly");
+  });
+});
 
 describe("useGetCsmCaseAttachments", () => {
   beforeEach(() => {

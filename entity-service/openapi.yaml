@@ -8209,7 +8209,13 @@ paths:
         Search the attachments of a case, change request, incident, conversation
         or deployment, most recent first. Deployment attachments are listed from
         deployment_attachment, scoped to the caller's projects by row-level
-        security; a deleted, failed or still-uploading attachment is not listed.
+        security; a failed or still-uploading attachment is not listed. A deleted
+        attachment is not listed either, unless the caller is the CSM portal
+        backend and sets `deletedOnly` (it does, when a portal admin asks): the
+        list is then of the deleted attachments only, most recently deleted
+        first, with `status: deleted`, `deletedOn` and `deletedBy`, and its
+        total and paging count only those. `deletedOnly` is ignored from any
+        other caller and for a deployment.
       operationId: searchCaseAttachments
       requestBody:
         required: true
@@ -25743,10 +25749,12 @@ components:
       type: string
       enum:
         - complete
+        - deleted
       description: >
-        Lifecycle state of a listed attachment. Only complete attachments are listed: a
-        pending (still uploading), failed or deleted one is not returned by
-        POST /attachments/search.
+        Lifecycle state of a listed attachment. Complete attachments are listed; a
+        pending (still uploading) or failed one is not returned by
+        POST /attachments/search. `deleted` appears only when the CSM portal backend
+        asked for the deleted attachments (`deletedOnly`); that list holds only them.
 
     Attachment:
       type: object
@@ -25787,6 +25795,12 @@ components:
             its own recorded. Entity-service never reads the file; the portal backends do.
         status:
           $ref: '#/components/schemas/AttachmentStatus'
+        deletedOn:
+          type: string
+          format: date-time
+          description: When the attachment was deleted. Set only when `status` is `deleted`.
+        deletedBy:
+          $ref: '#/components/schemas/UserReference'
 
     ReferenceType:
       type: string
@@ -25809,6 +25823,13 @@ components:
           $ref: '#/components/schemas/ReferenceType'
         pagination:
           $ref: '#/components/schemas/Pagination'
+        deletedOnly:
+          type: boolean
+          description: >
+            List the deleted attachments instead of the available ones, most
+            recently deleted first (total and paging are of the deleted ones).
+            Honoured only from the CSM portal backend (CSM_PORTAL_BACKEND_CLIENT_ID);
+            ignored from any other caller and for referenceType `deployment`.
 
     SearchAttachmentsResponse:
       type: object
