@@ -18,7 +18,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import type { BeCaseVolumeTrendResponse, BeLineBucket } from "@api/backend/types";
-import { resolveRelativeDatePlaceholderToDate } from "@utils/resolveRelativeDatePlaceholder";
+import { resolveRelativeDatePlaceholderToUtcDate } from "@utils/resolveRelativeDatePlaceholder";
 import {
   hasTeamPlaceholder,
   resolveTeamPlaceholder,
@@ -57,10 +57,12 @@ export interface CaseVolumeTrendWindow {
 }
 
 /** A window bound as the plain date the endpoint takes: a relative date
- * placeholder becomes the viewer's local calendar day, as a time card's
- * whole-day bounds do; a plain date is sent as it is. */
+ * placeholder becomes a UTC calendar day, because the endpoint counts by UTC
+ * day (so "this week" starts on the same Monday for every viewer, and
+ * "today" is never a day the service has not reached yet); a plain date is
+ * sent as it is. */
 function windowDate(value: string): string {
-  return resolveRelativeDatePlaceholderToDate(value, new Date()) ?? value;
+  return resolveRelativeDatePlaceholderToUtcDate(value, new Date()) ?? value;
 }
 
 export interface CaseVolumeTrendData {

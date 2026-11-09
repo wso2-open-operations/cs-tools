@@ -143,6 +143,23 @@ export function resolveRelativeDatePlaceholderToDate(value: string, now: Date): 
   return `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
 }
 
+/**
+ * Resolves a relative-date placeholder to a plain UTC calendar date,
+ * `YYYY-MM-DD`: the same as {@link resolveRelativeDatePlaceholderToDate}, but
+ * "today" is `now`'s UTC date, not the viewer's local one. For a value read
+ * as a UTC day: a line widget's window, which `POST /cases/volume-trend`
+ * counts by UTC day, so the window is the same for every viewer and "today"
+ * is never a day the service has not reached yet.
+ */
+export function resolveRelativeDatePlaceholderToUtcDate(value: string, now: Date): string | undefined {
+  // The UTC date's own numbers as a local midnight: every step after this is
+  // whole-day calendar arithmetic on those numbers.
+  return resolveRelativeDatePlaceholderToDate(
+    value,
+    localMidnight(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
 /** "this month", "last month", "next month", "the month 3 months ago". */
 function periodPhrase(unit: "week" | "month" | "quarter" | "year", n: number): string {
   if (n === 0) return `this ${unit}`;

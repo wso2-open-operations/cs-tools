@@ -146,9 +146,9 @@ describe("useCaseVolumeTrendData", () => {
     ]);
   });
 
-  it("sends a relative window as the viewer's local calendar days", async () => {
+  it("sends a relative window as UTC calendar days", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(2026, 10, 6, 9, 0, 0));
+    vi.setSystemTime(new Date(Date.UTC(2026, 10, 6, 9, 0, 0)));
     try {
       postMock.mockResolvedValue({ days: 365, series: [] });
 
@@ -171,6 +171,42 @@ describe("useCaseVolumeTrendData", () => {
       );
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  // rksk's two cases: the window's days are the service's UTC days, whatever
+  // the viewer's own date is.
+  it.each([
+    // Sunday 18:00 in UTC-8 is already Monday 02:00 UTC: the new week.
+    ["America/Los_Angeles", Date.UTC(2026, 10, 9, 2, 0, 0), "2026-11-09", "2026-11-15"],
+    // Monday 02:00 in UTC+5:30 is still Sunday 20:30 UTC: the old week.
+    ["Asia/Colombo", Date.UTC(2026, 10, 8, 20, 30, 0), "2026-11-02", "2026-11-08"],
+  ])("sends this week by UTC days for a viewer in %s", async (timeZone, instant, start, end) => {
+    vi.stubEnv("TZ", timeZone);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(instant));
+    try {
+      postMock.mockResolvedValue({ days: 7, series: [] });
+
+      const { result } = renderHook(
+        () =>
+          useCaseVolumeTrendData("this_week", {}, undefined, undefined, undefined, undefined, true, {
+            startDate: "__startOfWeek:0__",
+            endDate: "__endOfWeek:0__",
+          }),
+        { wrapper },
+      );
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      expect(postMock).toHaveBeenCalledWith(
+        "/cases/volume-trend",
+        { filters: {}, startDate: start, endDate: end },
+        { signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
     }
   });
 

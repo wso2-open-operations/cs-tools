@@ -14,11 +14,12 @@
 // specific language governing permissions and limitations
 // under the License.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   describeRelativeDatePlaceholder,
   resolveRelativeDatePlaceholder,
   resolveRelativeDatePlaceholderToDate,
+  resolveRelativeDatePlaceholderToUtcDate,
 } from "./resolveRelativeDatePlaceholder";
 
 // A fixed reference instant so every assertion is deterministic regardless of
@@ -238,6 +239,60 @@ describe("describeRelativeDatePlaceholder", () => {
   it("describes nothing the resolver would not resolve", () => {
     for (const v of ["2026-10-04", "__today:5__", "__daysAgo:-1__", "__daysAgo__", "__weeksAgo:2__", "today"]) {
       expect(describeRelativeDatePlaceholder(v)).toBeUndefined();
+    }
+  });
+});
+
+describe("resolveRelativeDatePlaceholderToUtcDate", () => {
+  /** Runs fn with the process in timeZone, as a viewer there would be. */
+  function inTimeZone(timeZone: string, fn: () => void): void {
+    vi.stubEnv("TZ", timeZone);
+    try {
+      fn();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
+  it.each([
+    // [viewer's zone, instant, token, UTC date]
+    // Sunday 18:00 at UTC-8 is Monday 02:00 UTC.
+    ["America/Los_Angeles", "2026-11-09T02:00:00Z", "__today__", "2026-11-09"],
+    ["America/Los_Angeles", "2026-11-09T02:00:00Z", "__startOfWeek:0__", "2026-11-09"],
+    // Monday 02:00 at UTC+5:30 is Sunday 20:30 UTC.
+    ["Asia/Colombo", "2026-11-08T20:30:00Z", "__today__", "2026-11-08"],
+    ["Asia/Colombo", "2026-11-08T20:30:00Z", "__startOfWeek:0__", "2026-11-02"],
+    ["Asia/Colombo", "2026-11-08T20:30:00Z", "__endOfWeek:0__", "2026-11-08"],
+    // 1 January 2027 01:00 at UTC+14 is still 2026 in UTC.
+    ["Pacific/Kiritimati", "2026-12-31T11:00:00Z", "__startOfYear:0__", "2026-01-01"],
+    ["Pacific/Kiritimati", "2026-12-31T11:00:00Z", "__endOfMonth:0__", "2026-12-31"],
+    // DST: Chile skips local midnight on 6 September 2026 (00:00 -> 01:00).
+    ["America/Santiago", "2026-09-06T12:00:00Z", "__today__", "2026-09-06"],
+    ["America/Santiago", "2026-09-06T12:00:00Z", "__daysAgo:1__", "2026-09-05"],
+    ["America/Santiago", "2026-09-06T12:00:00Z", "__startOfWeek:0__", "2026-08-31"],
+    ["America/Santiago", "2026-09-07T12:00:00Z", "__startOfWeek:-1__", "2026-08-31"],
+    // DST: New York falls back on 1 November 2026 (a 25-hour day).
+    ["America/New_York", "2026-11-01T23:30:00Z", "__today__", "2026-11-01"],
+    ["America/New_York", "2026-11-02T04:30:00Z", "__daysAgo:1__", "2026-11-01"],
+  ])("in %s at %s, %s is %s", (timeZone, instant, token, expected) => {
+    inTimeZone(timeZone, () => {
+      expect(resolveRelativeDatePlaceholderToUtcDate(token, new Date(instant))).toBe(expected);
+    });
+  });
+
+  it("is the local resolver's answer for a viewer in UTC", () => {
+    inTimeZone("UTC", () => {
+      const now = new Date("2026-11-08T20:30:00Z");
+      for (const token of ["__today__", "__daysAgo:30__", "__startOfWeek:-1__", "__endOfMonth:0__", "__startOfQuarter:-1__", "__endOfYear:-1__"]) {
+        expect(resolveRelativeDatePlaceholderToUtcDate(token, now)).toBe(resolveRelativeDatePlaceholderToDate(token, now));
+      }
+    });
+  });
+
+  it("leaves what the local resolver leaves unresolved", () => {
+    const now = new Date("2026-11-08T20:30:00Z");
+    for (const value of ["2026-11-01", "__today:1__", "__daysAgo:-1__", "__daysAgo:4000001__", "__bogus__"]) {
+      expect(resolveRelativeDatePlaceholderToUtcDate(value, now)).toBeUndefined();
     }
   });
 });
