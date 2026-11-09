@@ -226,7 +226,15 @@ func resetToOpen(ctx context.Context, updater projectUpdater, projectID string, 
 // reason and, if it fires, returns a cascadeDecision ready to be ordered
 // against any other firing reason. Returns (nil, nil) when there's no end
 // date at all, when the track's own closure state is not Open (see
-// actSubscription), or the decision simply doesn't fire yet.
+// actSubscription), the decision simply doesn't fire yet, or the track already
+// holds a completed suspension (see below).
+//
+// An Open track whose saved event is a completed suspension is left alone when
+// the decision is to suspend: the legacy process does not repeat an event it
+// already completed, so a project a person set back to Open stays Open until
+// the date moves the event (a renewal resets it, see subscriptionRenewed). Like
+// a non-Open track it is left out of the cascades, so it does not mark the
+// project closed for the other track.
 //
 // A track that is not Open is left out of the cascades, not just made
 // inert in act: processProject sorts the cascades and marks the project
@@ -245,6 +253,16 @@ func buildSubscriptionCascade(reader entityReader, updater projectUpdater, ntf n
 	decision := closure.Decide(now, *proj.EndDate, lastWindow)
 	if !decision.Fires {
 		return nil, nil
+	}
+
+	if decision.ShouldSuspend {
+		completed, err := suspensionstate.SuspensionCompleted(proj.SuspensionProcessState)
+		if err != nil {
+			return nil, fmt.Errorf("sweep: parse suspensionProcessState for project %s: %w", proj.ID, err)
+		}
+		if completed {
+			return nil, nil
+		}
 	}
 
 	return &cascadeDecision{

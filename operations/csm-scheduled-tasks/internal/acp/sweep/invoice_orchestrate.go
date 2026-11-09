@@ -94,6 +94,18 @@ func buildInvoiceCascade(ctx context.Context, reader entityReader, updater proje
 		return nil, canReset && newTerm(decision.DaysRemaining), nil
 	}
 
+	if decision.ShouldSuspend {
+		completed, err := suspensionstate.SuspensionCompletedForInvoices(proj.SuspensionProcessState)
+		if err != nil {
+			return nil, false, fmt.Errorf("parse suspensionProcessState for project %s: %w", proj.ID, err)
+		}
+		if completed {
+			// The suspension this track saved is already done (see
+			// buildSubscriptionCascade): nothing to notify or suspend.
+			return nil, false, nil
+		}
+	}
+
 	resolvedForNotice := dueInvoice{
 		ID:          invoice.Number,
 		Opportunity: invoice.Opportunity,
