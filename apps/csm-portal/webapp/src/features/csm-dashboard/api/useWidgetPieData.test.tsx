@@ -106,6 +106,95 @@ describe("useWidgetPieData", () => {
     expect(postMock.mock.calls[0][1]).not.toHaveProperty("filters");
   });
 
+  it("posts each PLG organisation slice through the PLG body: base and slice filters merged in `filters`", async () => {
+    postMock.mockResolvedValue({ total: 4 });
+
+    const { result } = renderHook(
+      () =>
+        useWidgetPieData("widget-1", "plg_organization", { subscriptionTiers: ["TRIAL", "TRIAL_EXTENDED"] }, [
+          { label: "IAM", query: { productCodes: ["IAM"] } },
+        ]),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/plg/organizations/search",
+      {
+        filters: { subscriptionTiers: ["TRIAL", "TRIAL_EXTENDED"], productCodes: ["IAM"] },
+        pagination: { offset: 0, limit: 1 },
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(result.current.total).toBe(4);
+  });
+
+  it("posts each PLG registration slice with unacknowledgedOnly beside `filters` and its dates as whole days", async () => {
+    postMock.mockResolvedValue({ total: 2 });
+
+    const { result } = renderHook(
+      () =>
+        useWidgetPieData("widget-1", "plg_registration", { unacknowledgedOnly: true }, [
+          { label: "October", query: { registeredFrom: "2026-10-01", registeredTo: "2026-10-31" } },
+          { label: "This month", query: { registeredFrom: "__startOfMonth:0__", registeredTo: "__today__" } },
+        ]),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(postMock).toHaveBeenCalledWith(
+      "/plg/registrations/search",
+      {
+        unacknowledgedOnly: true,
+        filters: { registeredFrom: "2026-10-01T00:00:00Z", registeredTo: "2026-10-31T23:59:59Z" },
+        pagination: { offset: 0, limit: 1 },
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+    const relative = postMock.mock.calls[1][1] as { filters: Record<string, string> };
+    expect(relative.filters.registeredFrom).toMatch(/^\d{4}-\d{2}-01T00:00:00Z$/);
+    expect(relative.filters.registeredTo).toMatch(/^\d{4}-\d{2}-\d{2}T23:59:59Z$/);
+  });
+
+  it("reports isForbidden when a PLG slice answers 403", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+
+    const { result } = renderHook(
+      () => useWidgetPieData("widget-1", "plg_organization", {}, [{ label: "IAM", query: { productCodes: ["IAM"] } }]),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.isForbidden).toBe(true);
+  });
+
+  it("does not report isForbidden for a 403 on any other resourceType", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+
+    const { result } = renderHook(
+      () => useWidgetPieData("widget-1", "project", {}, [{ label: "A", query: { onboardingStatus: ["In-Progress"] } }]),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.isForbidden).toBe(false);
+  });
+
+  it("does not report isForbidden for a PLG slice's other errors", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("Bad Gateway"), { status: 502 }));
+
+    const { result } = renderHook(
+      () => useWidgetPieData("widget-1", "plg_organization", {}, [{ label: "IAM", query: { productCodes: ["IAM"] } }]),
+      { wrapper },
+    );
+
+    // A 502 is retried once (shouldRetryWidgetFetch), after react-query's delay.
+    await waitFor(() => expect(result.current.isError).toBe(true), { timeout: 5000 });
+    expect(result.current.isForbidden).toBe(false);
+  });
+
   it("fires no queries and returns a zero total for an empty slices array", () => {
     const { result } = renderHook(() => useWidgetPieData("widget-1", "case", {}, []), { wrapper });
 

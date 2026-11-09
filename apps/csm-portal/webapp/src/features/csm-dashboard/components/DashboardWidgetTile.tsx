@@ -42,6 +42,7 @@ import { useCaseFeedbackTrendData } from "@features/csm-dashboard/api/useCaseFee
 import { useCaseVolumeTrendData } from "@features/csm-dashboard/api/useCaseVolumeTrendData";
 import {
   isCaseFamilyResourceType,
+  isPlgResourceType,
   WIDGET_RESOURCE_CONFIG,
 } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetListConfig";
@@ -235,12 +236,6 @@ interface DashboardWidgetTileProps {
    * every other shape, and a no-op for shape "count" below `xl` — this
    * never changes what a laptop-width viewer sees. */
   dense?: boolean;
-}
-
-/** The PLG resourceTypes, which only PLG users (CS engineers and admins) may
- * read. */
-function isPlgResourceType(resourceType: BeWidgetResourceType): boolean {
-  return resourceType === "plg_organization" || resourceType === "plg_registration";
 }
 
 /** What a tile says in place of its data when the backend refuses the

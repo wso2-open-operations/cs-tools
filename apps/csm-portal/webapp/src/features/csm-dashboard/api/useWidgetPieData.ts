@@ -19,7 +19,7 @@ import { ApiQueryKeys } from "@constants/apiConstants";
 import { useBackendApi } from "@api/backend/client";
 import { postCountingOnly } from "@api/backend/postCountingOnly";
 import type { BeDashboardPieSlice, BeWidgetResourceType } from "@api/backend/types";
-import { WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
+import { isPlgResourceType, WIDGET_RESOURCE_CONFIG } from "@features/csm-dashboard/config/widgetResourceConfig";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
 import {
   hasTeamPlaceholder,
@@ -59,8 +59,9 @@ export interface WidgetPieData {
   isLoading: boolean;
   isError: boolean;
   /** The data was refused (403): the user's role may not read it, for
-   * example time card totals for anyone but CS engineers and admins. Only
-   * `useWidgetGroupByData` sets it. */
+   * example time card totals for anyone but CS engineers and admins. Set by
+   * `useWidgetGroupByData`, and by `useWidgetPieData` for the PLG
+   * resourceTypes only. */
   isForbidden?: boolean;
 }
 
@@ -163,12 +164,14 @@ export function useWidgetPieData(
           // every other widget's own call, so it needs both at least as
           // much.
           return withWidgetFetchSlot(async (signal) => {
-            // `project`'s search takes flat filters (see its
-            // `buildSearchRequestBody`). Other overrides, e.g. case_feedback's,
-            // also change the response shape and aren't handled by this
-            // count-only path, so they keep the default body.
+            // `project`'s search takes flat filters, and the PLG searches
+            // their own body (`unacknowledgedOnly` beside `filters`, a plain
+            // date as a whole day; see their `buildSearchRequestBody`).
+            // Other overrides, e.g. case_feedback's, also change the response
+            // shape and aren't handled by this count-only path, so they keep
+            // the default body.
             const body: Record<string, unknown> =
-              resourceType === "project" && config.buildSearchRequestBody
+              (resourceType === "project" || isPlgResourceType(resourceType)) && config.buildSearchRequestBody
                 ? config.buildSearchRequestBody({ filters, offset: 0, limit: 1 })
                 : { filters, pagination: { offset: 0, limit: 1 } };
             // Every slice query here only ever reads `total` -- skip the
@@ -210,11 +213,17 @@ export function useWidgetPieData(
   // paint real data yet" signal, not a passthrough of query-fetch state.
   const isLoading = !enabled || awaitingCurrentUser || queries.some((q) => q.isLoading);
   const isError = queries.some((q) => q.isError);
+  // A PLG slice the user may not read (only PLG users may) answers 403; the
+  // tile says so instead of an error, as for a PLG count or list. Only the
+  // PLG resourceTypes, so every other widget's error stays as it is.
+  const isForbidden =
+    isPlgResourceType(resourceType) &&
+    queries.some((q) => (q.error as { status?: unknown } | null)?.status === 403);
   const results: PieSliceResult[] = slices.map((slice, i) => ({
     ...slice,
     value: queries[i]?.data ?? 0,
   }));
   const total = results.reduce((sum, s) => sum + s.value, 0);
 
-  return { slices: results, total, isLoading, isError };
+  return { slices: results, total, isLoading, isError, isForbidden };
 }

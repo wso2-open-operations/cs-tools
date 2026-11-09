@@ -2793,6 +2793,29 @@ describe("DashboardWidgetTile: PLG data the user may not read", () => {
     expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
   });
 
+  it("a PLG pie says no access, not an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="orgs-by-product"
+        displayName="Organisations by product"
+        resourceType="plg_organization"
+        shape="pie"
+        filters={{}}
+        slices={[
+          { label: "IAM", query: { productCodes: ["IAM"] } },
+          { label: "API Platform", query: { productCodes: ["API_PLATFORM"] } },
+        ]}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+  });
+
   it("any other PLG failure is still an error, and the count still links", async () => {
     postMock.mockRejectedValue(Object.assign(new Error("unavailable"), { status: 503 }));
 

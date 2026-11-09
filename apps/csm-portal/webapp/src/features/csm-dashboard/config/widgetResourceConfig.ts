@@ -584,6 +584,12 @@ export function isCaseFamilyResourceType(resourceType: BeWidgetResourceType): bo
   return CASE_FAMILY_RESOURCE_TYPE_SET.has(resourceType);
 }
 
+/** The PLG resourceTypes, which only PLG users (CS engineers and admins) may
+ * read. */
+export function isPlgResourceType(resourceType: BeWidgetResourceType): boolean {
+  return resourceType === "plg_organization" || resourceType === "plg_registration";
+}
+
 /**
  * Shared `buildHref` wrapper for every case-family resourceType (`case`,
  * `service_request`, `security_report_analysis`, `engagement`, and
