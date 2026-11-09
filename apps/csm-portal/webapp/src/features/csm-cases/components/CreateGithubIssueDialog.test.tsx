@@ -14,6 +14,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+import type React from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -46,194 +47,279 @@ beforeEach(() => {
   } as any);
 });
 
-function selectType(typeLabel: string): void {
-  fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
-  fireEvent.click(screen.getByRole("option", { name: typeLabel }));
+function pick(comboboxName: RegExp, option: RegExp | string): void {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: comboboxName }));
+  fireEvent.click(screen.getByRole("option", { name: option }));
 }
 
-/** Fills Type, Subject, Description, and the Discussion severity. */
-function fillRequiredFields(): void {
-  selectType("Discussion");
+function fillSubjectAndDescription(): void {
   fireEvent.change(screen.getByLabelText(/subject/i), {
     target: { value: "Token issuance is slow" },
   });
-  fireEvent.change(screen.getByLabelText(/description/i), {
+  fireEvent.change(screen.getByLabelText(/^description/i), {
     target: { value: "Latency spiked after the last deploy." },
   });
-  fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-  fireEvent.click(screen.getByRole("option", { name: /P1 - Critical/i }));
 }
 
-describe("CreateGithubIssueDialog — required fields gate submission", () => {
-  it("disables Create issue until Type, Subject, and Description are all filled", () => {
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    selectType("Discussion");
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/subject/i), {
-      target: { value: "Token issuance is slow" },
-    });
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/description/i), {
-      target: { value: "Latency spiked after the last deploy." },
-    });
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-    fireEvent.click(screen.getByRole("option", { name: /P2 - High/i }));
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
-  });
-});
+/** Fills Subject, Description, Priority P1 and its justification. */
+function fillRequiredFields(): void {
+  fillSubjectAndDescription();
+  pick(/^priority$/i, /P1 - Critical/i);
+  pick(/priority justification/i, "Production Outage / Severe Degradation");
+}
 
-describe("CreateGithubIssueDialog — per-type field rules", () => {
-  it("does not offer Query or Incident", () => {
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^type/i }));
-    expect(screen.queryByRole("option", { name: "Query" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "Incident" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Patch" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Discussion" })).toBeInTheDocument();
+function renderDialog(
+  props: Partial<React.ComponentProps<typeof CreateGithubIssueDialog>> = {},
+) {
+  return render(
+    <CreateGithubIssueDialog
+      open
+      productName="Alpha"
+      submitting={false}
+      error={null}
+      onClose={() => {}}
+      onSubmit={() => {}}
+      {...props}
+    />,
+  );
+}
+
+function createButton(): HTMLElement {
+  return screen.getByRole("button", { name: /create issue/i });
+}
+
+function submit(): void {
+  fireEvent.click(createButton());
+  fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
+}
+
+describe("CreateGithubIssueDialog — fields", () => {
+  it("has no Type field and starts with an empty Subject and Description", () => {
+    renderDialog();
+    expect(screen.queryByRole("combobox", { name: /^type/i })).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/subject/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^description/i)).toHaveValue("");
   });
 
-  it("Discussion requires Severity and hides Hotfix Required and Regression", () => {
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    selectType("Discussion");
-    fireEvent.change(screen.getByLabelText(/subject/i), {
-      target: { value: "Token issuance is slow" },
-    });
-    fireEvent.change(screen.getByLabelText(/description/i), {
-      target: { value: "Latency spiked after the last deploy." },
-    });
-    expect(screen.queryByText("Hotfix Required")).not.toBeInTheDocument();
-    expect(screen.queryByText("Regression")).not.toBeInTheDocument();
-    // Severity is required for Incident — Create issue stays disabled without it.
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-    fireEvent.click(screen.getByRole("option", { name: /p1/i }));
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
-  });
-
-  it("Patch hides Severity, shows Regression, requires Update Level, and leaves Public Git Issue optional", () => {
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={() => {}}
-      />,
-    );
-    selectType("Patch");
-    fireEvent.change(screen.getByLabelText(/subject/i), {
-      target: { value: "Token issuance is slow" },
-    });
-    fireEvent.change(screen.getByLabelText(/description/i), {
-      target: { value: "Latency spiked after the last deploy." },
-    });
-    expect(screen.queryByRole("combobox", { name: /severity/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Hotfix Required")).toBeInTheDocument();
-    expect(screen.getByText("Regression")).toBeInTheDocument();
-    // Public Git Issue is shown but, unlike Update Level, never blocks submit.
-    expect(screen.getByLabelText(/public git issue/i)).not.toBeRequired();
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/update level/i), {
-      target: { value: "7.1.0" },
-    });
-    expect(screen.getByRole("button", { name: /create issue/i })).toBeEnabled();
-  });
-});
-
-describe("CreateGithubIssueDialog — stale per-type fields don't leak into the payload", () => {
-  it("drops hotFixRequired once Type is switched away from Patch after toggling it on", () => {
-    const onSubmit = vi.fn();
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={onSubmit}
-      />,
-    );
-    selectType("Patch");
+  it("shows the fields in the agreed order", () => {
+    renderDialog();
+    pick(/^priority$/i, /P1 - Critical/i);
     fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
-    // Switching away from Patch hides the control, but the toggled-on state
-    // must not still ride along in the submitted payload.
-    selectType("Discussion");
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-    fireEvent.click(screen.getByRole("option", { name: /P1 - Critical/i }));
-    fireEvent.change(screen.getByLabelText(/subject/i), {
-      target: { value: "Token issuance is slow" },
-    });
-    fireEvent.change(screen.getByLabelText(/description/i), {
-      target: { value: "Latency spiked after the last deploy." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
-    fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.not.objectContaining({ hotFixRequired: true }),
-    );
+    const labels = [
+      "Subject",
+      "Description",
+      "Reproducing Steps",
+      "Priority",
+      "Priority Justification",
+      "Update Level",
+      "Public Git Issue or Security Internal JIRA",
+      "Hotfix Required",
+      "Hotfix Reason",
+      "Regression",
+      "Migration",
+      "Related Internal Issue(s)",
+    ];
+    const text = document.body.textContent ?? "";
+    const positions = labels.map((l) => text.indexOf(l));
+    positions.forEach((p, i) => expect(p, labels[i]).toBeGreaterThanOrEqual(0));
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
-  it("drops regression once Type is switched away from Patch after toggling it on", () => {
+  it("leaves Reproducing Steps, Update Level and Related Internal Issue(s) optional", () => {
+    renderDialog();
+    expect(screen.getByLabelText(/reproducing steps/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/update level/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/public git issue/i)).not.toBeRequired();
+    expect(screen.getByLabelText(/related internal issue/i)).not.toBeRequired();
+  });
+});
+
+describe("CreateGithubIssueDialog — required fields gate submission", () => {
+  it("disables Create issue until Subject, Description and Priority are filled", () => {
+    renderDialog();
+    expect(createButton()).toBeDisabled();
+    fillSubjectAndDescription();
+    expect(createButton()).toBeDisabled();
+    pick(/^priority$/i, /P3 - Medium/i);
+    expect(createButton()).toBeEnabled();
+  });
+});
+
+describe("CreateGithubIssueDialog — Priority Justification", () => {
+  it("is hidden for P3 and until a priority is chosen", () => {
+    renderDialog();
+    expect(
+      screen.queryByRole("combobox", { name: /priority justification/i }),
+    ).not.toBeInTheDocument();
+    pick(/^priority$/i, /P3 - Medium/i);
+    expect(
+      screen.queryByRole("combobox", { name: /priority justification/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the P1 reasons for P1 and is required", () => {
+    renderDialog();
+    fillSubjectAndDescription();
+    pick(/^priority$/i, /P1 - Critical/i);
+    expect(createButton()).toBeDisabled();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /priority justification/i }));
+    for (const o of [
+      "Immediate Product Team Attention",
+      "Production Outage / Severe Degradation",
+      "Security, Privacy, or Legal Exposure",
+      "Go-Live / Deployment Blocker",
+      "Regression from Recent Release",
+    ]) {
+      expect(screen.getByRole("option", { name: o })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Customer Business Escalation" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Go-Live / Deployment Blocker" }));
+    expect(createButton()).toBeEnabled();
+  });
+
+  it("offers the P2 reasons for P2", () => {
+    renderDialog();
+    pick(/^priority$/i, /P2 - High/i);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /priority justification/i }));
+    for (const o of [
+      "Product Bug (ETA-Based Fix)",
+      "Customer Business Escalation",
+      "Major Operational / Dev Blocker",
+      "Project / Production Deadline",
+    ]) {
+      expect(screen.getByRole("option", { name: o })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("option", { name: "Go-Live / Deployment Blocker" })).not.toBeInTheDocument();
+  });
+
+  it("clears the justification when the priority changes", () => {
     const onSubmit = vi.fn();
-    render(
-      <CreateGithubIssueDialog
-        open
-        productName="Alpha"
-        submitting={false}
-        error={null}
-        onClose={() => {}}
-        onSubmit={onSubmit}
-      />,
-    );
-    selectType("Patch");
-    fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
-    // Switching away from Patch hides the control, but the toggled-on state
-    // must not still ride along in the submitted payload.
-    selectType("Discussion");
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: /severity/i }));
-    fireEvent.click(screen.getByRole("option", { name: /P1 - Critical/i }));
-    fireEvent.change(screen.getByLabelText(/subject/i), {
-      target: { value: "Token issuance is slow" },
-    });
-    fireEvent.change(screen.getByLabelText(/description/i), {
-      target: { value: "Latency spiked after the last deploy." },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /create issue/i }));
-    fireEvent.click(screen.getByRole("button", { name: /file issue/i }));
+    renderDialog({ onSubmit });
+    fillRequiredFields();
+    expect(createButton()).toBeEnabled();
+    pick(/^priority$/i, /P2 - High/i);
+    // The P1 reason is not valid for P2, so it must be chosen again.
+    expect(createButton()).toBeDisabled();
+    pick(/^priority$/i, /P3 - Medium/i);
+    submit();
     expect(onSubmit).toHaveBeenCalledWith(
-      expect.not.objectContaining({ regression: true }),
+      expect.not.objectContaining({ priorityJustification: expect.anything() }),
     );
+  });
+});
+
+describe("CreateGithubIssueDialog — Hotfix Reason", () => {
+  it("is shown and required only while Hotfix Required is on", () => {
+    renderDialog();
+    fillRequiredFields();
+    expect(screen.queryByRole("combobox", { name: /hotfix reason/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    expect(createButton()).toBeDisabled();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /hotfix reason/i }));
+    for (const o of [
+      "Customer-Requested Hotfix",
+      "Critical Production Bug / Downtime",
+      "Defect Blocking Operations / Development",
+      "Unable to Upgrade to Latest U2",
+    ]) {
+      expect(screen.getByRole("option", { name: o })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("option", { name: "Customer-Requested Hotfix" }));
+    expect(createButton()).toBeEnabled();
+  });
+
+  it("drops the reason when Hotfix Required is switched off again", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit });
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    pick(/hotfix reason/i, "Customer-Requested Hotfix");
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    submit();
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload).not.toHaveProperty("hotFixRequired");
+    expect(payload).not.toHaveProperty("hotFixReason");
+  });
+});
+
+describe("CreateGithubIssueDialog — Migration", () => {
+  it("is off by default", () => {
+    renderDialog();
+    expect(screen.getByRole("switch", { name: /migration/i })).not.toBeChecked();
+  });
+
+  it("is on by default for a migration engagement and sends reason migration", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ defaultMigration: true, onSubmit });
+    expect(screen.getByRole("switch", { name: /migration/i })).toBeChecked();
+    fillRequiredFields();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ reason: "migration" }));
+  });
+});
+
+describe("CreateGithubIssueDialog — payload", () => {
+  it("files a Discussion with every field set", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit, onboardingInProgress: true });
+    fillRequiredFields();
+    fireEvent.change(screen.getByLabelText(/reproducing steps/i), {
+      target: { value: "1. Log in\n2. Request a token" },
+    });
+    fireEvent.change(screen.getByLabelText(/update level/i), { target: { value: "7.1.0.42" } });
+    fireEvent.change(screen.getByLabelText(/public git issue/i), {
+      target: { value: "https://github.com/example/example/issues/1" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: /hotfix required/i }));
+    pick(/hotfix reason/i, "Unable to Upgrade to Latest U2");
+    fireEvent.click(screen.getByRole("switch", { name: /regression/i }));
+    fireEvent.change(screen.getByLabelText(/related internal issue/i), {
+      target: { value: "example/internal#12" },
+    });
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith({
+      reason: "default",
+      title: "Token issuance is slow",
+      description: "Latency spiked after the last deploy.",
+      issueTypeLabel: "Type/Discussion",
+      priorityLevel: "Priority/Critical(P1)",
+      priorityJustification: "Production Outage / Severe Degradation",
+      reproducingSteps: "1. Log in\n2. Request a token",
+      updateLevel: "7.1.0.42",
+      publicIssueUrl: "https://github.com/example/example/issues/1",
+      onboardingInProgress: true,
+      hotFixRequired: true,
+      hotFixReason: "Unable to Upgrade to Latest U2",
+      regression: true,
+      relatedInternalIssues: "example/internal#12",
+      repoOverride: { owner: "example-org", repo: "example-repo" },
+    });
+  });
+
+  it("omits the optional fields when they are left empty", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ onSubmit });
+    fillSubjectAndDescription();
+    pick(/^priority$/i, /P3 - Medium/i);
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith({
+      reason: "default",
+      title: "Token issuance is slow",
+      description: "Latency spiked after the last deploy.",
+      issueTypeLabel: "Type/Discussion",
+      priorityLevel: "Priority/Medium(P3)",
+      repoOverride: { owner: "example-org", repo: "example-repo" },
+    });
+  });
+
+  it("hides Update Level and Public Git Issue on a cloud case, but still sends the prefilled update level", () => {
+    const onSubmit = vi.fn();
+    renderDialog({ showRepoField: true, defaultUpdateLevel: "7.1.0.42", onSubmit });
+    expect(screen.queryByLabelText(/update level/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/public git issue/i)).not.toBeInTheDocument();
+    fillRequiredFields();
+    submit();
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ updateLevel: "7.1.0.42" }));
   });
 });
 

@@ -128,7 +128,10 @@ import RequestUpdateDialog, {
   type RequestUpdateSavePayload,
 } from "@features/csm-cases/components/RequestUpdateDialog";
 import { useRequestCaseUpdate } from "@features/csm-cases/api/useRequestCaseUpdate";
-import { deriveCaseUpdateRequestCategory } from "@features/csm-cases/utils/caseUpdateRequests";
+import {
+  deriveCaseUpdateRequestCategory,
+  isMigrationEngagement,
+} from "@features/csm-cases/utils/caseUpdateRequests";
 import CreateTaskDialog from "@features/csm-cases/components/CreateTaskDialog";
 import AddTagDialog from "@features/csm-cases/components/AddTagDialog";
 import EscalateCaseDialog from "@features/csm-cases/components/EscalateCaseDialog";
@@ -3512,8 +3515,7 @@ export default function CsmCaseDetailPage(): JSX.Element {
           error={githubIssueError}
           createdIssue={githubIssueResult}
           defaultUpdateLevel={c.productContext.updateLevel}
-          defaultTitle={c.subject}
-          defaultDescription={c.description}
+          defaultMigration={isMigrationEngagement(c)}
           showRepoField={isCloudSupportSubscription(caseProject?.subscriptionType)}
           productName={c.productCatalogueName || c.product}
           onboardingInProgress={caseProject?.onboardingStatus === "In-Progress"}

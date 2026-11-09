@@ -178,6 +178,51 @@ func TestCreateCaseGithubIssue_ViaEngineering(t *testing.T) {
 		}
 	})
 
+	t.Run("writes the new optional fields between the description and the footer, and adds no label for them", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Critical(P1)","priorityJustification":"Go-Live / Deployment Blocker","reproducingSteps":"1. Log in\n2. Request a token","hotFixRequired":true,"hotFixReason":"Customer-Requested Hotfix","relatedInternalIssues":"example/internal#12\nexample/internal#13"}`)
+		assertStatus(t, w, http.StatusCreated)
+		c := eng.calls[0]
+		wantBody := "It fails." +
+			"\n\nReproducing Steps :\n1. Log in\n2. Request a token" +
+			"\n\nPriority Justification : Go-Live / Deployment Blocker" +
+			"\n\nHotfix Required : Yes\nHotfix Reason : Customer-Requested Hotfix" +
+			"\n\nRelated Internal Issue(s) :\nexample/internal#12\nexample/internal#13" +
+			"\n\n" + infoBlock("Alpha", "", "", "", "", "", testUser.Email)
+		if c.body != wantBody {
+			t.Errorf("body = %q, want %q", c.body, wantBody)
+		}
+		if want := []string{"Origin/CS", "Alpha", "Type/Incident", "Priority/Critical(P1)", "Require/Hotfix"}; !slices.Equal(c.labels, want) {
+			t.Errorf("labels = %v, want %v", c.labels, want)
+		}
+	})
+
+	t.Run("a justification sent with a P3, or a hotfix reason without a hotfix, is not written", func(t *testing.T) {
+		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
+		w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Discussion","priorityLevel":"Priority/Medium(P3)","priorityJustification":"anything","hotFixReason":"anything"}`)
+		assertStatus(t, w, http.StatusCreated)
+		if want := "It fails.\n\n" + infoBlock("Alpha", "", "", "", "", "", testUser.Email); eng.calls[0].body != want {
+			t.Errorf("body = %q, want %q", eng.calls[0].body, want)
+		}
+	})
+
+	t.Run("refuses a justification or hotfix reason that is not one of the options", func(t *testing.T) {
+		for name, extra := range map[string]string{
+			"unknown justification":        `,"priorityLevel":"Priority/High(P2)","priorityJustification":"Because"`,
+			"a P1 justification with a P2": `,"priorityLevel":"Priority/High","priorityJustification":"Go-Live / Deployment Blocker"`,
+			"unknown hotfix reason":        `,"hotFixRequired":true,"hotFixReason":"Because"`,
+		} {
+			t.Run(name, func(t *testing.T) {
+				eng := &mockEngineeringClient{}
+				w := post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+extra+"}")
+				assertStatus(t, w, http.StatusBadRequest)
+				if len(eng.calls) != 0 {
+					t.Errorf("CreateGitIssue was called %d times, want none", len(eng.calls))
+				}
+			})
+		}
+	})
+
 	t.Run("patch adds its labels and discussion is what carries priority", func(t *testing.T) {
 		eng := &mockEngineeringClient{issue: entity.GitHubIssue{Number: 1}}
 		post(t, newHandler(eng, &mockEntityCaseClient{}), "{"+base+`,"issueTypeLabel":"Type/Patch","priorityLevel":"Priority/High","regression":true}`)
