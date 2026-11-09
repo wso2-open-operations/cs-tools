@@ -124,14 +124,44 @@ func TestAbsenceKinds_ARotaAdminsAreTheirFamilys(t *testing.T) {
 }
 
 func TestPortalAdminTagFamily(t *testing.T) {
-	for in, want := range map[string]string{"sre": "SRE", " CRE ": "CRE", "SME": "SME", "": "", "OPS": ""} {
-		got := portalAdminTagFamily(in)
+	for in, want := range map[string]string{"sre": "SRE", " CRE ": "CRE", "SME": "SME", "": ""} {
+		got, err := portalAdminTagFamily(in)
+		if err != nil {
+			t.Fatalf("portalAdminTagFamily(%q): %v", in, err)
+		}
 		if want == "" && got != nil {
 			t.Errorf("portalAdminTagFamily(%q) = %v, want none (shared)", in, got)
 		}
 		if want != "" && (len(got) != 1 || got[0] != want) {
 			t.Errorf("portalAdminTagFamily(%q) = %v, want [%s]", in, got, want)
 		}
+	}
+	// A mistyped family is refused, never turned into a shared tag.
+	for _, in := range []string{"OPS", "SRF"} {
+		var invalid *apierror.ValidationError
+		if got, err := portalAdminTagFamily(in); !errors.As(err, &invalid) || got != nil {
+			t.Errorf("portalAdminTagFamily(%q) = %v, %v; want a ValidationError", in, got, err)
+		}
+	}
+}
+
+// A portal admin by the database admin role alone (no AUTH_ADMIN_ROLES role on
+// the token) is admitted by requireAnyTeamLead, has no family, and may still
+// add a tag for a family and delete one.
+func TestAbsenceKinds_ADatabasePortalAdminNeedsNoFamily(t *testing.T) {
+	req := domain.CreateScheduleAbsenceKindRequest{ShortCode: "TR", Label: "TR", Bucket: "ALLOCATION", ColourToken: "INT", Family: "SRE"}
+	repo := &fakeScheduleRepo{leadsTeam: true, portalAdmin: true}
+	svc := NewScheduleService(repo, alwaysUnrestrictedAccess{})
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("db.admin@example.com"), req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.DeleteAbsenceKind(scheduleCaller("db.admin@example.com"), "SOME_TAG"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	req.Family = "SRF"
+	var invalid *apierror.ValidationError
+	if _, err := svc.CreateAbsenceKind(scheduleCaller("db.admin@example.com"), req); !errors.As(err, &invalid) {
+		t.Fatalf("create for SRF: want ValidationError, got %v", err)
 	}
 }
 

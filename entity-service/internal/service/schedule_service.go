@@ -652,8 +652,14 @@ func (s *scheduleService) DeleteAbsenceKind(ctx context.Context, code string) er
 	if err != nil {
 		return err
 	}
-	if len(families) == 0 && !s.isCSMAdmin(ctx) {
-		return errNoTagFamily
+	if len(families) == 0 {
+		admin, err := s.isPortalAdmin(ctx)
+		if err != nil {
+			return err
+		}
+		if !admin {
+			return errNoTagFamily
+		}
 	}
 	return s.repo.DeleteAbsenceKind(ctx, code, email, families)
 }
@@ -783,10 +789,16 @@ func (s *scheduleService) CreateAbsenceKind(ctx context.Context, req domain.Crea
 		return domain.ScheduleAbsenceKind{}, err
 	}
 	if len(families) == 0 {
-		if !s.isCSMAdmin(ctx) {
+		admin, err := s.isPortalAdmin(ctx)
+		if err != nil {
+			return domain.ScheduleAbsenceKind{}, err
+		}
+		if !admin {
 			return domain.ScheduleAbsenceKind{}, errNoTagFamily
 		}
-		families = portalAdminTagFamily(req.Family)
+		if families, err = portalAdminTagFamily(req.Family); err != nil {
+			return domain.ScheduleAbsenceKind{}, err
+		}
 	}
 	family, err := kindFamilyFor(families, req.Family)
 	if err != nil {

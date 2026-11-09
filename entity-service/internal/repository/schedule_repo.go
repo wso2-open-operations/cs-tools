@@ -103,6 +103,9 @@ type ScheduleRepository interface {
 	// RotaAdminFamilies is the families of the rota admin roles the caller
 	// holds: CRE, SRE and/or SME. Empty for anyone who holds none.
 	RotaAdminFamilies(ctx context.Context, userEmail string) ([]string, error)
+	// IsPortalAdmin is whether the caller holds the database admin role as
+	// internal staff -- the portal admin the token's roles may not name.
+	IsPortalAdmin(ctx context.Context, userEmail string) (bool, error)
 	// RotaMarkerTeamsFor is every team this caller may mark as its rota
 	// marker (migration 0225): granted, still a member, and internal.
 	RotaMarkerTeamsFor(ctx context.Context, userEmail string) ([]string, error)
@@ -1458,6 +1461,25 @@ func (r *scheduleRepository) RotaAdminFamilies(ctx context.Context, userEmail st
 		 WHERE lower(u.email) = lower($1)
 		   AND u.user_type = 'INTERNAL'::user_type_enum
 		   AND `+headsCRE, userEmail)
+}
+
+// IsPortalAdmin implements ScheduleRepository. Only an internal holder counts,
+// as for the rota admin roles (RotaAdminTeamsFor admits the same people).
+func (r *scheduleRepository) IsPortalAdmin(ctx context.Context, userEmail string) (bool, error) {
+	var ok bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1
+		    FROM "user" u
+		    JOIN user_role ur ON ur.user_id = u.id
+		    JOIN role ro      ON ro.id = ur.role_id
+		   WHERE lower(u.email) = lower($1)
+		     AND u.user_type = 'INTERNAL'::user_type_enum
+		     AND ro.name = 'admin')`, userEmail).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("portal admin: %w", err)
+	}
+	return ok, nil
 }
 
 // RotaMarkerTeamsFor implements ScheduleRepository.

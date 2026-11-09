@@ -58,6 +58,8 @@ type fakeScheduleRepo struct {
 	gotKindCode string
 	gotRange    domain.ApplyScheduleRangeRequest
 	adminTeams  []string
+	// portalAdmin is whether the caller holds the database admin role.
+	portalAdmin bool
 	// markerTeams is what a rota marker holds (migration 0225). Nil by
 	// default, so the existing tests describe nobody holding one.
 	markerTeams []string
@@ -184,6 +186,10 @@ func (f *fakeScheduleRepo) EditMarkers(context.Context, string, string) ([]domai
 
 func (f *fakeScheduleRepo) RotaAdminFamilies(context.Context, string) ([]string, error) {
 	return f.adminFamilies, f.err
+}
+
+func (f *fakeScheduleRepo) IsPortalAdmin(context.Context, string) (bool, error) {
+	return f.portalAdmin, f.err
 }
 
 func (f *fakeScheduleRepo) UserInTeam(_ context.Context, _ string, teamKey string) (bool, error) {

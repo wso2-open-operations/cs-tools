@@ -93,13 +93,32 @@ func kindFamilyFor(admin []string, requested string) (*string, error) {
 // only a portal admin may add or delete one without a family.
 var errNoTagFamily = &apierror.ForbiddenError{Msg: "only a rota admin or the lead of a rota team can change tags"}
 
-// portalAdminTagFamily is what a caller who neither runs nor leads a rota (a
-// portal admin) may add a tag for: the family they name, when it is one, else
-// none (a shared tag).
-func portalAdminTagFamily(requested string) []string {
-	switch f := strings.ToUpper(strings.TrimSpace(requested)); f {
-	case "CRE", "SRE", "SME":
-		return []string{f}
+// isPortalAdmin is whether the caller is a portal admin: an admin role on the
+// token (AUTH_ADMIN_ROLES), or the database admin role, which
+// requireAnyTeamLead also admits (through RotaAdminTeamsFor) and the token's
+// roles may not name.
+func (s *scheduleService) isPortalAdmin(ctx context.Context) (bool, error) {
+	if s.isCSMAdmin(ctx) {
+		return true, nil
 	}
-	return nil
+	email := auth.IdentityFromContext(ctx).UserEmail
+	if email == "" {
+		return false, nil
+	}
+	return s.repo.IsPortalAdmin(ctx, email)
+}
+
+// portalAdminTagFamily is what a caller who neither runs nor leads a rota (a
+// portal admin) may add a tag for: the family they name, or none (a shared
+// tag) when they name none. A family that is not CRE, SRE or SME is refused,
+// so a mistyped one never becomes a tag every family is offered.
+func portalAdminTagFamily(requested string) ([]string, error) {
+	switch f := strings.ToUpper(strings.TrimSpace(requested)); f {
+	case "":
+		return nil, nil
+	case "CRE", "SRE", "SME":
+		return []string{f}, nil
+	default:
+		return nil, &apierror.ValidationError{Msg: fmt.Sprintf("family must be CRE, SRE or SME, not %s", strings.TrimSpace(requested))}
+	}
 }
