@@ -47,7 +47,7 @@ import { WIDGET_LIST_RENDERERS } from "@features/csm-dashboard/config/widgetList
 import GenericColumnList from "@features/csm-dashboard/components/GenericColumnList";
 import { buildWidgetPreviewHref } from "@features/csm-dashboard/utils/widgetPreviewUrl";
 import { mergeWidgetFilters } from "@features/csm-dashboard/utils/widgetFilterMerge";
-import { linePointQuery } from "@features/csm-dashboard/utils/linePointQuery";
+import { linePointFilters } from "@features/csm-dashboard/utils/linePointQuery";
 import { resolveTeamPlaceholder } from "@features/csm-dashboard/utils/teamFilterPlaceholder";
 import { resolveRelativeDateFilters } from "@features/csm-dashboard/utils/resolveRelativeDateFilters";
 import {
@@ -968,15 +968,15 @@ function DashboardWidgetTile({
     // The Card itself is plain, non-link chrome: the chart as a whole is not
     // one selector. A point is (one day, one line), so with
     // `linePointClickThrough` a click on it opens that day's cases the way a
-    // pie slice opens its own (`linePointQuery` over the widget's filters,
-    // the same `buildHref` and Back state). No per-widget refresh button —
+    // pie slice opens its own (`linePointFilters`: the point over the
+    // widget's filters, the same `buildHref` and Back state). No per-widget refresh button —
     // the trend's own cache already keeps today's point fresh server-side
     // (entity-service's case-volume-trend cache), so a manual refresh here
     // has nothing to accomplish.
     const handlePointClick = (date: string, lineSeries: BeLineSeries, pointEndDate?: string): void => {
       navigate(
         config.buildHref(
-          resolvePlaceholders(mergeWidgetFilters(filters, linePointQuery(date, lineSeries, pointEndDate))),
+          resolvePlaceholders(linePointFilters(filters, date, lineSeries, pointEndDate)),
           { widgetId, displayName: resolvedDisplayName },
         ),
         { state: dashboardReturnState },
