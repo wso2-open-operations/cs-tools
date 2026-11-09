@@ -1664,6 +1664,51 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /cases/{id}/sla/recalculate-pause:
+    post:
+      summary: >-
+        Recompute one case's currently IN_PROGRESS SLA clocks' pause history
+        from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree. A CSM
+        admin-only action, trusted via the CSM Portal's own PermAdmin gate;
+        no request body. Returns an empty clock list with hasHistory=false
+        for a case with no activity history at all to replay (the
+        ServiceNow-backed case path never writes it) -- existing clocks are
+        left untouched, never guessed at.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID.
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseSLAPauseRecalcResponse'
+        "401":
+          description: No valid token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Not a CSM admin, or not called through the CSM Portal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /sla-duration-policy:
     get:
       summary: >-
@@ -31521,6 +31566,50 @@ components:
                 type: string
                 nullable: true
                 description: The link the removed runbook had.
+    CaseSLAPauseRecalcClock:
+      type: object
+      description: One currently-active clock's own outcome from POST /cases/{id}/sla/recalculate-pause.
+      properties:
+        target:
+          type: string
+          example: RESOLUTION
+        schedule:
+          type: string
+          example: WSO2 Business days
+        skipped:
+          type: boolean
+        skipReason:
+          type: string
+          description: Empty when skipped is false.
+        oldPauseSeconds:
+          type: integer
+          format: int64
+        newPauseSeconds:
+          type: integer
+          format: int64
+        oldBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        newBusinessPauseSeconds:
+          type: integer
+          format: int64
+          description: Only meaningful when schedule is "WSO2 Business days".
+        updated:
+          type: boolean
+    CaseSLAPauseRecalcResponse:
+      type: object
+      properties:
+        hasHistory:
+          type: boolean
+          description: >-
+            False (clocks always empty) when the case has no state-change
+            activity history at all to replay -- its clocks are left exactly
+            as they are, never guessed at.
+        clocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/CaseSLAPauseRecalcClock'
     ErrorResponse:
       type: object
       description: >-

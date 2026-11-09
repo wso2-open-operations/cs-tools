@@ -77,3 +77,14 @@ func (c *CustomerEntityClient) SearchActiveSLAStatusesManage(ctx context.Context
 func (c *CustomerEntityClient) RequestSLARecalculation(ctx context.Context) ([]byte, error) {
 	return c.do(ctx, http.MethodPost, "/sla-engine/recalculate", nil)
 }
+
+// RecalculateCasePauseTotals calls POST /cases/{id}/sla/recalculate-pause on
+// the entity service -- recomputes one case's currently IN_PROGRESS SLA
+// clocks' pause history from the case's own state-change activity log,
+// correcting pause_duration/business_pause_duration when they disagree. No
+// request body; entity-service re-checks the caller is genuinely
+// csm-portal-backend itself (see its own CaseSLARecalcService doc comment),
+// same posture as RequestSLARecalculation above.
+func (c *CustomerEntityClient) RecalculateCasePauseTotals(ctx context.Context, caseID string) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, "/cases/"+url.PathEscape(caseID)+"/sla/recalculate-pause", nil)
+}

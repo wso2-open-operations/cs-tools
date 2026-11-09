@@ -57,6 +57,15 @@ func (f *fakeCandidatePolicyRepo) GetIncidentFacts(context.Context, string) (rep
 func (f *fakeCandidatePolicyRepo) RegisterClock(context.Context, string, repository.SLAPolicyRef, time.Time) (bool, error) {
 	panic("not implemented")
 }
+func (f *fakeCandidatePolicyRepo) ListCaseActivityEvents(context.Context, string, []string) ([]repository.CaseActivityEvent, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) ListActiveClocksForRecalc(context.Context, string) ([]repository.ActiveClockForRecalc, error) {
+	panic("not implemented")
+}
+func (f *fakeCandidatePolicyRepo) UpdateClockPauseTotals(context.Context, string, string, int64, *int64) error {
+	panic("not implemented")
+}
 func (f *fakeCandidatePolicyRepo) CompleteClock(context.Context, string, string) (bool, error) {
 	panic("not implemented")
 }

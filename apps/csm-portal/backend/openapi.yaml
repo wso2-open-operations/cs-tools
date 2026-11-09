@@ -18140,6 +18140,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorPayload'
 
+  /cases/{id}/sla/recalculate-pause:
+    post:
+      summary: Recalculate one case's SLA pause totals — the CSM admin action.
+      description: >
+        A CSM admin. Recomputes the case's currently IN_PROGRESS SLA clocks' pause
+        history from the case's own state-change activity log, correcting
+        pause_duration/business_pause_duration when they disagree with what's stored.
+        No request body. A case with no activity history to replay (e.g. one only
+        ever handled through the ServiceNow-backed path) leaves every clock untouched
+        and reports hasHistory: false — never guessed at. Responses are Cache-Control
+        no-store.
+      operationId: recalculateCasePauseTotals
+      parameters:
+        - name: id
+          in: path
+          description: UUID of the case.
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The recalculation ran; see each clock's own outcome.
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "403":
+          description: Forbidden — only a CSM admin can do this.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+        "500":
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorPayload'
+
   /skills/levels:
     get:
       summary: The skill level scales and their levels.
