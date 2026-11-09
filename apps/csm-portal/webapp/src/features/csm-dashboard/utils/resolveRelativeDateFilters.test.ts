@@ -161,6 +161,15 @@ describe("resolveRelativeDateFilters", () => {
       ).toEqual({ onboardingStatus: ["In-Progress"], endDateFrom: "2026-07-01", endDateTo: "2026-09-30" });
     });
 
+    it("resolves a PLG widget's registeredFrom / registeredTo the same way", () => {
+      expect(
+        resolveRelativeDateFilters(
+          { productCodes: ["IAM"], registeredFrom: "__startOfMonth:0__", registeredTo: "__today__" },
+          NOW,
+        ),
+      ).toEqual({ productCodes: ["IAM"], registeredFrom: "2026-08-01", registeredTo: "2026-08-15" });
+    });
+
     it("does not touch a case_feedback widget's own dateFrom / dateTo", () => {
       const filters = { dateFrom: "__daysAgo:7__", dateTo: "__today__" };
       expect(resolveRelativeDateFilters(filters, NOW)).toBe(filters);
