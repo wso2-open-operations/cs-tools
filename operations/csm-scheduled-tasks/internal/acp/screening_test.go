@@ -19,6 +19,8 @@ package acp
 import (
 	"testing"
 	"time"
+
+	"github.com/wso2-open-operations/cs-tools/operations/csm-scheduled-tasks/internal/acp/entity"
 )
 
 func TestScreeningApplies(t *testing.T) {
@@ -49,5 +51,29 @@ func TestScreeningApplies(t *testing.T) {
 				t.Errorf("apply=%v why=%q, want %v / why given %v", got, why, tc.want, tc.wantWhyIs)
 			}
 		})
+	}
+}
+
+func TestRepairFor(t *testing.T) {
+	clients := Clients{CSM: &entity.Client{}}
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		cl   Clients
+		want bool
+	}{
+		{"on", Config{Repair: true, RepairMaxEvents: 200}, clients, true},
+		{"off", Config{RepairMaxEvents: 200}, clients, false},
+		{"max 0 is off", Config{Repair: true}, clients, false},
+		{"no CSM client", Config{Repair: true, RepairMaxEvents: 200}, Clients{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := repairFor(tc.cl, tc.cfg) != nil; got != tc.want {
+				t.Errorf("repair set up = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if r := repairFor(clients, Config{Repair: true, RepairMaxEvents: 7, DryRun: true}); r == nil || r.MaxEvents != 7 || !r.DryRun {
+		t.Errorf("repair = %+v, want max 7 and dry run carried", r)
 	}
 }

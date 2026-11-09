@@ -155,6 +155,9 @@ type salesforceReader struct {
 	sf          SalesforceReader
 	projectSfID string
 	customer    *salesentity.Customer
+	// invoices are the Salesforce invoices this project's decision read, kept
+	// for the repair's comparison with CSM's copy (no extra Salesforce call).
+	invoices []salesentity.Invoice
 }
 
 func (r *salesforceReader) GetAccount(ctx context.Context, accountID string) ([]byte, error) {
@@ -299,6 +302,7 @@ func (r *salesforceReader) SearchInvoices(ctx context.Context, body []byte) ([]b
 	if err != nil {
 		return nil, err
 	}
+	r.invoices = append(r.invoices, invoices...)
 	out := make([]invoiceDTO, 0, len(invoices))
 	for _, inv := range invoices {
 		out = append(out, invoiceDTO{

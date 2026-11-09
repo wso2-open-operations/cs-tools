@@ -186,3 +186,35 @@ func TestNarrowACPFullSweep(t *testing.T) {
 		t.Errorf("a task without the hook: err = %v, want refused", err)
 	}
 }
+
+// ACP_REPAIR is on unless off; ACP_REPAIR_MAX_EVENTS defaults to 200, 0 turns
+// the repair off; anything malformed stops startup.
+func TestACPRepairSettings(t *testing.T) {
+	for _, tc := range []struct {
+		repair, max string
+		wantOn      bool
+		wantMax     int
+		wantErr     string
+	}{
+		{"", "", true, 200, ""},
+		{"on", "50", true, 50, ""},
+		{"OFF", "", false, 200, ""},
+		{"", "0", true, 0, ""},
+		{"yes", "", false, 0, "ACP_REPAIR"},
+		{"", "-1", false, 0, "ACP_REPAIR_MAX_EVENTS"},
+		{"", "many", false, 0, "ACP_REPAIR_MAX_EVENTS"},
+	} {
+		t.Run(tc.repair+"/"+tc.max, func(t *testing.T) {
+			cfg, _, err := acpConfig(acpSettings{DryRun: true, AlertsEnabled: true, Repair: tc.repair, RepairMaxEvents: tc.max})
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want one naming %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || cfg.Repair != tc.wantOn || cfg.RepairMaxEvents != tc.wantMax {
+				t.Fatalf("repair=%v max=%d err=%v, want %v %d", cfg.Repair, cfg.RepairMaxEvents, err, tc.wantOn, tc.wantMax)
+			}
+		})
+	}
+}

@@ -625,6 +625,27 @@ both places.
     that never reached the CSM copy, nor a Salesforce end date that is earlier than CSM's; the full sweep
     catches both. `ACP_SCREENING=off` restores evaluating every project live on every run. Screened-out
     projects are not evaluated and never count against `ACP_DAILY_LIMIT`.
+- **Repairing the CSM copy (`ACP_REPAIR`, default ON; `ACP_REPAIR_MAX_EVENTS`, default 200, 0 = off).** In the
+  pass ACP already makes over Salesforce for a project (a candidate, or every project on a full-sweep day),
+  it compares what it read with the CSM copy it has, with **no extra Salesforce call**, and posts one
+  synthetic event `{eventType: "UPDATED", entity, referenceId}` per drifted record to entity-service's
+  existing `POST /salesforce/events` (`entity.Client.PostSalesforceEvent`), whose ingest re-fetches the
+  record and upserts it behind its stale-version guard. Compared: the project's start and end dates
+  (`Project__c`, the project's Salesforce id), the account's partner flag (`Account`, the Salesforce account
+  id), and each invoice's due, paid and invoice date by Salesforce id, an invoice missing from the copy
+  counting as drifted (`Invoice__c`; entity-service ingests its opportunity inline). Anything else is
+  ignored. It runs after the decision (the invoice part) and never changes it; a failed post is logged
+  once (WARN) and ignored, never a project failure, never against the cap; a dry run posts nothing and only
+  counts; a project the filters skip or screening leaves out is never compared; one event per record per
+  run, at most `ACP_REPAIR_MAX_EVENTS` a run (over the bound: counted, not posted); one INFO per run with
+  counts by entity (`compared`, `drifted`, `posted`, `failed`, `overCap`), no names or ids. The copy of
+  invoices is the same one-off listing screening reads (`copySnapshot`), read lazily on a full-sweep day.
+  entity-service acts on the events only for the families it has ingest enabled for
+  (`CSM_MIGRATION_SALESFORCE_{ACCOUNT,PROJECT,OPPORTUNITY}_INGEST_ENABLED`); otherwise it acknowledges and
+  ignores them (204). The route has no per-route check, so an M2M client works (`routes.go`
+  `POST /salesforce/events`, `HandleEvent` never calls `ResolveScope`). Not repaired, because the copy
+  cannot be matched or read: the opportunity's stage and EULA and link existence (CSM's rows carry no
+  Salesforce id), the account's status and primary partner (CSM's account read does not return them).
 - **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
   (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
   - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
@@ -983,6 +1004,7 @@ report emails" below for why that's not a generic engine feature.
 | `ROTA_REMINDER_TIME_ZONE` | No (default `Asia/Colombo`) | The calendar "tomorrow" and "the coming weekend" are counted in |
 | `ACP_ENABLED` / `ACP_DRY_RUN` / `ACP_EMAIL_SEND_ENABLED` / `ACP_ALLOW_NON_WSO2_RECIPIENTS` | No (defaults `false` / `true` / `false` / `false`) | The `acp_closure` sub-cron and its safety switches — see "ACP closure" above |
 | `ACP_SCREENING` / `ACP_SCREENING_FULL_SWEEP_WEEKDAY` | No (defaults `on` / `Mon`) | Hybrid evaluation of `acp_closure` (on unless `off`) and the weekday it evaluates every project live; anything malformed refuses to start — see "ACP closure" above |
+| `ACP_REPAIR` / `ACP_REPAIR_MAX_EVENTS` | No (defaults `on` / `200`) | Repair of CSM's copy by synthetic Salesforce events during a live pass; `off` or `0` posts nothing; malformed refuses to start — see "ACP closure" above |
 | `ACP_DAILY_LIMIT` | No (default `0` = no cap) | Most projects one `acp_closure` run acts on, most overdue first; malformed or negative refuses to start — see "ACP closure" above |
 | `ACP_STANDING_CC_RECIPIENTS` / `ACP_TEST_PROJECT_ID` / `ACP_EXCLUDED_PROJECT_IDS` | No | Distribution lists on every notice; one CSM project to scope a run to; CSM project ids to skip |
 | `ACP_SALES_ENTITY_BASE_URL` / `_TOKEN_URL` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` | When `ACP_ENABLED=true` (scopes optional, space-separated) | sales-entity-service (Salesforce) and its own client credentials |

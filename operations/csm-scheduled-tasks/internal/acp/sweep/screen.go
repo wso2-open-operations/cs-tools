@@ -75,7 +75,10 @@ type screenResult struct {
 // that opportunity), so it is ignored. The opportunity's stage, EULA version
 // and the invoice's classification are not tested here: the live path does
 // that, and a superset keeps the two copies of the rules from drifting.
-func screen(ctx context.Context, reader entityReader, projects []project, now time.Time) screenResult {
+func screen(ctx context.Context, reader entityReader, projects []project, now time.Time, snap *copySnapshot) screenResult {
+	if snap == nil {
+		snap = &copySnapshot{}
+	}
 	horizon := now.AddDate(0, 0, screeningHorizonDays)
 	res := screenResult{candidates: map[string]string{}}
 
@@ -94,7 +97,7 @@ func screen(ctx context.Context, reader entityReader, projects []project, now ti
 		return res
 	}
 
-	byProject, err := projectsWithDueInvoices(ctx, reader, horizon)
+	byProject, err := projectsWithDueInvoices(ctx, reader, snap, horizon)
 	if err != nil {
 		slog.WarnContext(ctx, "acp: screening data could not be read completely: every project goes through the live path this run (fail open)", "err", err)
 		for _, p := range projects {
@@ -120,8 +123,8 @@ func hasRecordedEvent(p project) bool {
 
 // projectsWithDueInvoices returns the ids of the projects that own, through a
 // link, an unpaid invoice with a due date on or before horizon.
-func projectsWithDueInvoices(ctx context.Context, reader entityReader, horizon time.Time) (map[string]bool, error) {
-	opps, err := opportunitiesWithDueInvoices(ctx, reader, horizon)
+func projectsWithDueInvoices(ctx context.Context, reader entityReader, snap *copySnapshot, horizon time.Time) (map[string]bool, error) {
+	opps, err := opportunitiesWithDueInvoices(ctx, reader, snap, horizon)
 	if err != nil {
 		return nil, err
 	}
@@ -167,57 +170,106 @@ func projectsWithDueInvoices(ctx context.Context, reader entityReader, horizon t
 	return out, nil
 }
 
-// opportunitiesWithDueInvoices lists every invoice and returns the ids of the
-// opportunities that own an unpaid one due on or before horizon. An invoice
-// whose due date does not parse, or a listing that cannot be shown complete,
-// is an error (the caller fails open). An invoice with no due date is
-// ignored, as the live path does (eligibleInvoice).
-func opportunitiesWithDueInvoices(ctx context.Context, reader entityReader, horizon time.Time) (map[string]bool, error) {
-	out := map[string]bool{}
+// copySnapshot is one run's read of CSM's copy of every invoice, shared by
+// screening and the repair so the listing is made once. It is read lazily and
+// a failure is kept, so a failed listing is not retried within the run.
+type copySnapshot struct {
+	loaded   bool
+	invoices []invoiceDTO
+	err      error
+	bySfID   map[string]invoiceDTO
+}
+
+// all returns every invoice of the copy. The listing has no filter, so it is
+// paged 50 at a time up to maxScreeningPages; a listing that cannot be shown
+// complete (a page cap reached, or fewer distinct invoices than the reported
+// total, since offset paging over a changing table can skip a row) is an
+// error.
+func (c *copySnapshot) all(ctx context.Context, reader entityReader) ([]invoiceDTO, error) {
+	if c.loaded {
+		return c.invoices, c.err
+	}
+	c.loaded = true
 	seen := map[string]bool{}
 	offset, pages, total := 0, 0, 0
 	for {
 		reqBody, err := json.Marshal(searchInvoicesRequest{Pagination: pagination{Limit: pageSize, Offset: offset}})
 		if err != nil {
-			return nil, fmt.Errorf("build invoices request: %w", err)
+			c.err = fmt.Errorf("build invoices request: %w", err)
+			return nil, c.err
 		}
 		raw, err := reader.SearchInvoices(ctx, reqBody)
 		if err != nil {
-			return nil, fmt.Errorf("search invoices at offset %d: %w", offset, err)
+			c.err = fmt.Errorf("search invoices at offset %d: %w", offset, err)
+			return nil, c.err
 		}
 		var page searchInvoicesResponse
 		if err := json.Unmarshal(raw, &page); err != nil {
-			return nil, fmt.Errorf("parse invoices at offset %d: %w", offset, err)
+			c.err = fmt.Errorf("parse invoices at offset %d: %w", offset, err)
+			return nil, c.err
 		}
 		for _, inv := range page.Invoices {
 			seen[inv.ID] = true
-			if inv.InvoicedDueDate == nil || *inv.InvoicedDueDate == "" {
-				continue
-			}
-			if inv.InvoicedPaidDate != nil && *inv.InvoicedPaidDate != "" {
-				continue
-			}
-			due, err := parseInvoiceDate(*inv.InvoicedDueDate)
-			if err != nil {
-				return nil, fmt.Errorf("an invoice has an unparseable due date: %w", err)
-			}
-			if !due.After(horizon) && inv.Opportunity != nil && inv.Opportunity.ID != "" {
-				out[inv.Opportunity.ID] = true
-			}
 		}
+		c.invoices = append(c.invoices, page.Invoices...)
 		total = page.Total
 		offset += len(page.Invoices)
 		if len(page.Invoices) == 0 || !page.HasMore {
 			break
 		}
 		if pages++; pages >= maxScreeningPages {
-			return nil, fmt.Errorf("invoice listing still reports more pages after %d pages", maxScreeningPages)
+			c.err = fmt.Errorf("invoice listing still reports more pages after %d pages", maxScreeningPages)
+			return nil, c.err
 		}
 	}
-	// Offset paging over a changing table can skip a row; fewer distinct
-	// invoices than the reported total means the listing may be incomplete.
 	if len(seen) < total {
-		return nil, fmt.Errorf("invoice listing returned %d distinct invoices of a reported %d", len(seen), total)
+		c.err = fmt.Errorf("invoice listing returned %d distinct invoices of a reported %d", len(seen), total)
+		return nil, c.err
+	}
+	return c.invoices, nil
+}
+
+// bySalesforceID indexes the copy's invoices by their Salesforce id.
+func (c *copySnapshot) bySalesforceID(ctx context.Context, reader entityReader) (map[string]invoiceDTO, error) {
+	all, err := c.all(ctx, reader)
+	if err != nil {
+		return nil, err
+	}
+	if c.bySfID == nil {
+		c.bySfID = map[string]invoiceDTO{}
+		for _, inv := range all {
+			if id := stringValue(inv.SfID); id != "" {
+				c.bySfID[id] = inv
+			}
+		}
+	}
+	return c.bySfID, nil
+}
+
+// opportunitiesWithDueInvoices returns the ids of the opportunities that own
+// an unpaid invoice due on or before horizon. An invoice whose due date does
+// not parse is an error (the caller fails open). An invoice with no due date
+// is ignored, as the live path does (eligibleInvoice).
+func opportunitiesWithDueInvoices(ctx context.Context, reader entityReader, snap *copySnapshot, horizon time.Time) (map[string]bool, error) {
+	all, err := snap.all(ctx, reader)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, inv := range all {
+		if inv.InvoicedDueDate == nil || *inv.InvoicedDueDate == "" {
+			continue
+		}
+		if inv.InvoicedPaidDate != nil && *inv.InvoicedPaidDate != "" {
+			continue
+		}
+		due, err := parseInvoiceDate(*inv.InvoicedDueDate)
+		if err != nil {
+			return nil, fmt.Errorf("an invoice has an unparseable due date: %w", err)
+		}
+		if !due.After(horizon) && inv.Opportunity != nil && inv.Opportunity.ID != "" {
+			out[inv.Opportunity.ID] = true
+		}
 	}
 	return out, nil
 }
