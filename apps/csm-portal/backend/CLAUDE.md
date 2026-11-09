@@ -878,11 +878,13 @@ period such as "cases per day in December 2025" or "per month in 2025" can be a 
 them to `POST /cases/volume-trend`, which this backend forwards as is (entity-service's `CLAUDE.md` has the
 endpoint's side). `validateLineWindow` (`internal/dashboard/registry.go`) refuses them on any other shape,
 `days` with them, one date without the other, a `bucket` without dates or unknown, and a window over the
-bucket's limit (90 days / 53 weeks / 24 months, mirroring entity-service's). The dates are two plain
-`YYYY-MM-DD` dates or two relative dates, never one of each (that window grows daily); two relative dates
-must stay within the limit on every day of 2024-2027, as `checkDayWindow` does for a time card, because a
-saved dashboard is checked again on every read (`__startOfYear:0__` to `__today__` by day is refused,
-by month it passes). Every line widget saved before these fields has none, so none of them changes. The view
+bucket's limit (90 days / 54 weeks / 24 months, mirroring entity-service's; a whole year by week is 54
+weeks in a leap year that starts on a Sunday, such as 2040). The dates are two plain `YYYY-MM-DD` dates or
+two relative dates, never one of each (that window grows daily); two relative dates must stay within the
+limit on every day, because a saved dashboard is checked again on every read (`__startOfYear:0__` to
+`__today__` by day is refused, by month it passes). That is checked exactly, on every day of one 400-year
+Gregorian cycle (the calendar, weekdays included, repeats every 400 years), once per window and kept
+(`relativeLinePoints`): sampling a few years missed windows that are too long only in rare years. Every line widget saved before these fields has none, so none of them changes. The view
 and the draft carry them: `TestDraftToDefinition_KeepsLineWindow`. Deploy order: entity-service (which
 must accept the fields first), then this backend, then the webapp, then the catalogue mounts.
 

@@ -20469,7 +20469,8 @@ components:
           description: >-
             How a fixed window's days are grouped into points. Optional;
             defaults to day. day covers at most 90 days, week (Monday to
-            Sunday) at most 53 weeks, month at most 24 months.
+            Sunday) at most 54 weeks (a whole leap year that starts on a
+            Sunday), month at most 24 months.
 
     CaseVolumeTrendPoint:
       type: object
@@ -21075,7 +21076,7 @@ components:
           description: >
             Only meaningful for shape "line" with startDate/endDate: one point
             per day (the default, at most 90 days), per week (Monday to
-            Sunday, at most 53 weeks) or per month (at most 24 months). Two
+            Sunday, at most 54 weeks) or per month (at most 24 months). Two
             relative dates must stay within the limit on every day.
 
     DashboardListItem:

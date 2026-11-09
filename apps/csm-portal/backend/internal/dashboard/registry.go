@@ -785,10 +785,12 @@ var validWidgetShapes = map[Shape]bool{
 const maxWidgetLineDays = 90
 
 // maxWidgetLinePoints is each LineBucket's upper bound on a fixed window,
-// mirroring entity-service's maxCaseVolumeTrendDays / Weeks / Months.
+// mirroring entity-service's maxCaseVolumeTrendDays / Weeks / Months. A whole
+// year by week is 54 weeks when it is a leap year that starts on a Sunday
+// (2012, 2040).
 var maxWidgetLinePoints = map[LineBucket]int{
 	LineBucketDay:   maxWidgetLineDays,
-	LineBucketWeek:  53,
+	LineBucketWeek:  54,
 	LineBucketMonth: 24,
 }
 
@@ -797,8 +799,9 @@ var maxWidgetLinePoints = map[LineBucket]int{
 // Days, and a known Bucket. Two plain dates must be in order and within the
 // bucket's limit. Two relative dates must be so on every day, because a
 // saved dashboard is checked again each time it is read: __startOfYear:0__
-// to __today__ by day passes in January and fails in April. A plain date
-// with a relative one grows day by day, so that pair is refused outright.
+// to __today__ by day passes in January and fails in April (see
+// relativeLinePoints). A plain date with a relative one grows day by day, so
+// that pair is refused outright.
 func validateLineWindow(w WidgetTemplate) error {
 	if w.StartDate == "" && w.EndDate == "" {
 		if w.Bucket != "" {
@@ -836,18 +839,75 @@ func validateLineWindow(w WidgetTemplate) error {
 		}
 		return nil
 	}
-	// Every day of 2024-2027, for the reason checkDayWindow gives.
-	for day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2028; day = day.AddDate(0, 0, 1) {
-		s, okS := relativeDate(w.StartDate, day)
-		e, okE := relativeDate(w.EndDate, day)
-		if !okS || !okE {
-			return fmt.Errorf("\"startDate\" or \"endDate\" is not a relative date the dashboard can resolve")
-		}
-		if n := linePoints(s, e, bucket); n < 1 || n > max {
-			return tooLong
-		}
+	points := relativeLinePoints(w.StartDate, w.EndDate, bucket)
+	if !points.resolves {
+		return fmt.Errorf("\"startDate\" or \"endDate\" is not a relative date the dashboard can resolve")
+	}
+	if points.min < 1 || points.max > max {
+		return tooLong
 	}
 	return nil
+}
+
+// linePointRange is the fewest and most points a relative window makes, over
+// every day; resolves is false when a token does not resolve on some day.
+type linePointRange struct {
+	min, max int
+	resolves bool
+}
+
+// relativeLinePoints is linePointRange for start..end by bucket, worked out on
+// every day of one 400-year Gregorian cycle (2000-2399). The calendar repeats
+// every 400 years, weekdays included (146,097 days, a whole number of weeks),
+// so those days meet every case any day ever will: sampling a few years did
+// not (a whole year by week is 54 weeks only in a leap year that starts on a
+// Sunday, such as 2040). That is about 150,000 days, so each window is worked
+// out once and kept (lineWindowCache).
+func relativeLinePoints(start, end string, bucket LineBucket) linePointRange {
+	key := start + "|" + end + "|" + string(bucket)
+	if r, ok := lineWindowCache.get(key); ok {
+		return r
+	}
+	var r linePointRange
+	s, okS := parseRelativeDate(start)
+	e, okE := parseRelativeDate(end)
+	if okS && okE {
+		r = linePointRange{min: int(^uint(0) >> 1), resolves: true}
+		for day := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC); day.Year() < 2400; day = day.AddDate(0, 0, 1) {
+			n := linePoints(s.on(day), e.on(day), bucket)
+			r.min = min(r.min, n)
+			r.max = max(r.max, n)
+		}
+	}
+	lineWindowCache.put(key, r)
+	return r
+}
+
+// lineWindowCache keeps relativeLinePoints' answers, at most
+// lineWindowCacheMax of them: a window is a dashboard definition's, so there
+// are few, and past the cap a window is simply worked out again.
+var lineWindowCache = &linePointCache{entries: map[string]linePointRange{}}
+
+const lineWindowCacheMax = 4096
+
+type linePointCache struct {
+	mu      sync.Mutex
+	entries map[string]linePointRange
+}
+
+func (c *linePointCache) get(key string) (linePointRange, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r, ok := c.entries[key]
+	return r, ok
+}
+
+func (c *linePointCache) put(key string, r linePointRange) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.entries) < lineWindowCacheMax {
+		c.entries[key] = r
+	}
 }
 
 // linePoints is how many points start..end makes by bucket (both days

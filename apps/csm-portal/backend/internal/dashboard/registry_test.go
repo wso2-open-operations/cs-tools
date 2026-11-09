@@ -938,10 +938,10 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
 		},
 		{
-			name: "line widget with 54 weeks by week",
+			name: "line widget with 55 weeks by week",
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
-			 "query": {}, "startDate": "2025-01-01", "endDate": "2026-01-05", "bucket": "week"}`,
-			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 53 weeks`,
+			 "query": {}, "startDate": "2025-01-01", "endDate": "2026-01-12", "bucket": "week"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 54 weeks`,
 		},
 		{
 			name: "line widget with 25 months by month",
@@ -961,6 +961,24 @@ func TestLoadDir_RejectsInvalidWidgets(t *testing.T) {
 			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
 			 "query": {}, "startDate": "__startOfYear:0__", "endDate": "__today__"}`,
 			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 90 days`,
+		},
+		{
+			name: "line widget with a relative window too long only in some years",
+			// Last week to the end of this year by week: at most 54 weeks on
+			// every day of 2024-2027, but 55 in some years (from the last
+			// days of a leap year that starts on a Sunday, such as 2039 into
+			// 2040), which a check of a few sample years did not meet.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfWeek:-1__", "endDate": "__endOfYear:0__", "bucket": "week"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 54 weeks`,
+		},
+		{
+			name: "line widget with a relative window out of order on some days",
+			// From the start of this year to the week after 52 weeks ago:
+			// in order on most days, but not early in some years.
+			widgets: `{"id": "w", "displayName": "W", "resourceType": "case", "shape": "line", "gridWidth": 6,
+			 "query": {}, "startDate": "__startOfWeek:-52__", "endDate": "__startOfYear:0__", "bucket": "month"}`,
+			want: `widget "w": "startDate" to "endDate" must be in order and cover at most 24 months`,
 		},
 		{
 			name: "line widget with a relative date the dashboard cannot resolve",
@@ -1124,6 +1142,10 @@ func TestLoadDir_AcceptsLineWidgetWindow(t *testing.T) {
 		// Monday 28 December 2026: 53 weeks.
 		{"2026 by week", `"startDate": "2026-01-01", "endDate": "2026-12-31", "bucket": "week"`,
 			WidgetTemplate{StartDate: "2026-01-01", EndDate: "2026-12-31", Bucket: LineBucketWeek}},
+		// 2040 is a leap year starting on a Sunday: from the week of Monday
+		// 26 December 2039 to the week of Monday 31 December 2040, 54 weeks.
+		{"2040 by week", `"startDate": "2040-01-01", "endDate": "2040-12-31", "bucket": "week"`,
+			WidgetTemplate{StartDate: "2040-01-01", EndDate: "2040-12-31", Bucket: LineBucketWeek}},
 		{"24 months by month", `"startDate": "2025-01-01", "endDate": "2026-12-31", "bucket": "month"`,
 			WidgetTemplate{StartDate: "2025-01-01", EndDate: "2026-12-31", Bucket: LineBucketMonth}},
 		{"last month by day", `"startDate": "__startOfMonth:-1__", "endDate": "__endOfMonth:-1__"`,
@@ -1152,6 +1174,30 @@ func TestLoadDir_AcceptsLineWidgetWindow(t *testing.T) {
 					tc.want.StartDate, tc.want.EndDate, tc.want.Bucket)
 			}
 		})
+	}
+}
+
+// relativeLinePoints gives the fewest and most points a relative window makes
+// on any day: this year by week is 53 weeks, or 54 in a leap year that starts
+// on a Sunday; last month by day is 28 to 31 days. Its answer is kept.
+func TestRelativeLinePoints(t *testing.T) {
+	for _, tc := range []struct {
+		start, end string
+		bucket     LineBucket
+		want       linePointRange
+	}{
+		{"__startOfYear:0__", "__endOfYear:0__", LineBucketWeek, linePointRange{min: 53, max: 54, resolves: true}},
+		{"__startOfMonth:-1__", "__endOfMonth:-1__", LineBucketDay, linePointRange{min: 28, max: 31, resolves: true}},
+		{"__startOfQuarter:0__", "__endOfQuarter:0__", LineBucketMonth, linePointRange{min: 3, max: 3, resolves: true}},
+		{"__startOfMonth__", "__today__", LineBucketDay, linePointRange{}},
+	} {
+		got := relativeLinePoints(tc.start, tc.end, tc.bucket)
+		if got != tc.want {
+			t.Errorf("relativeLinePoints(%s, %s, %s) = %+v, want %+v", tc.start, tc.end, tc.bucket, got, tc.want)
+		}
+		if cached, ok := lineWindowCache.get(tc.start + "|" + tc.end + "|" + string(tc.bucket)); !ok || cached != got {
+			t.Errorf("relativeLinePoints(%s, %s, %s) not kept: %+v %v", tc.start, tc.end, tc.bucket, cached, ok)
+		}
 	}
 }
 

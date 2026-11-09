@@ -100,7 +100,7 @@ type LineBucket string
 
 const (
 	LineBucketDay   LineBucket = "day"   // one point per day, at most 90 days
-	LineBucketWeek  LineBucket = "week"  // Monday to Sunday, at most 53 weeks
+	LineBucketWeek  LineBucket = "week"  // Monday to Sunday, at most 54 weeks
 	LineBucketMonth LineBucket = "month" // at most 24 months
 )
 

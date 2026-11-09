@@ -507,46 +507,88 @@ func windowDays(start, end time.Time) int {
 // runs Monday to Sunday. false for a token the webapp leaves unresolved,
 // and for an argument beyond maxRelativeDateOffset.
 func relativeDate(token string, today time.Time) (time.Time, bool) {
+	r, ok := parseRelativeDate(token)
+	if !ok {
+		return time.Time{}, false
+	}
+	return r.on(today), true
+}
+
+// relativeDateToken is a relative date token parsed once, so it can be
+// resolved on many days (relativeLinePoints) without parsing it again.
+type relativeDateToken struct {
+	name string
+	arg  int
+}
+
+// parseRelativeDate parses a token relativeDate resolves; false for one it
+// does not.
+func parseRelativeDate(token string) (relativeDateToken, bool) {
 	m := relativeDateParts.FindStringSubmatch(token)
 	if m == nil {
-		return time.Time{}, false
+		return relativeDateToken{}, false
 	}
 	name, arg, hasArg := m[1], 0, m[2] != ""
 	if hasArg {
 		n, err := strconv.Atoi(m[2])
 		if err != nil || n > maxRelativeDateOffset || n < -maxRelativeDateOffset {
-			return time.Time{}, false
+			return relativeDateToken{}, false
 		}
 		arg = n
 	}
-	monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
-	quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
-	// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
-	weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
-	yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
-	switch {
-	case name == "today" && !hasArg:
-		return today, true
-	case name == "daysAgo" && hasArg && arg >= 0:
-		return today.AddDate(0, 0, -arg), true
-	case name == "startOfMonth" && hasArg:
-		return monthStart.AddDate(0, arg, 0), true
-	case name == "endOfMonth" && hasArg:
-		return monthStart.AddDate(0, arg+1, -1), true
-	case name == "startOfQuarter" && hasArg:
-		return quarterStart.AddDate(0, 3*arg, 0), true
-	case name == "endOfQuarter" && hasArg:
-		return quarterStart.AddDate(0, 3*(arg+1), -1), true
-	case name == "startOfWeek" && hasArg:
-		return weekStart.AddDate(0, 0, 7*arg), true
-	case name == "endOfWeek" && hasArg:
-		return weekStart.AddDate(0, 0, 7*arg+6), true
-	case name == "startOfYear" && hasArg:
-		return yearStart.AddDate(arg, 0, 0), true
-	case name == "endOfYear" && hasArg:
-		return yearStart.AddDate(arg+1, 0, -1), true
+	switch name {
+	case "today":
+		if hasArg {
+			return relativeDateToken{}, false
+		}
+	case "daysAgo":
+		if !hasArg || arg < 0 {
+			return relativeDateToken{}, false
+		}
+	case "startOfMonth", "endOfMonth", "startOfQuarter", "endOfQuarter",
+		"startOfWeek", "endOfWeek", "startOfYear", "endOfYear":
+		if !hasArg {
+			return relativeDateToken{}, false
+		}
+	default:
+		return relativeDateToken{}, false
 	}
-	return time.Time{}, false
+	return relativeDateToken{name: name, arg: arg}, true
+}
+
+// on is the day the token names, counted from today.
+func (r relativeDateToken) on(today time.Time) time.Time {
+	arg := r.arg
+	switch r.name {
+	case "daysAgo":
+		return today.AddDate(0, 0, -arg)
+	case "startOfMonth", "endOfMonth":
+		monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfMonth" {
+			return monthStart.AddDate(0, arg, 0)
+		}
+		return monthStart.AddDate(0, arg+1, -1)
+	case "startOfQuarter", "endOfQuarter":
+		quarterStart := time.Date(today.Year(), today.Month()-(today.Month()-1)%3, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfQuarter" {
+			return quarterStart.AddDate(0, 3*arg, 0)
+		}
+		return quarterStart.AddDate(0, 3*(arg+1), -1)
+	case "startOfWeek", "endOfWeek":
+		// time.Weekday: Sunday is 0, so Sunday is 6 days after Monday.
+		weekStart := today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
+		if r.name == "startOfWeek" {
+			return weekStart.AddDate(0, 0, 7*arg)
+		}
+		return weekStart.AddDate(0, 0, 7*arg+6)
+	case "startOfYear", "endOfYear":
+		yearStart := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		if r.name == "startOfYear" {
+			return yearStart.AddDate(arg, 0, 0)
+		}
+		return yearStart.AddDate(arg+1, 0, -1)
+	}
+	return today // "today"
 }
 
 // maxRelativeDateOffset bounds a relative date token's argument, as
