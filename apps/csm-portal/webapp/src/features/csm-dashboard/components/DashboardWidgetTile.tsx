@@ -237,6 +237,20 @@ interface DashboardWidgetTileProps {
   dense?: boolean;
 }
 
+/** The PLG resourceTypes, which only PLG users (CS engineers and admins) may
+ * read. */
+function isPlgResourceType(resourceType: BeWidgetResourceType): boolean {
+  return resourceType === "plg_organization" || resourceType === "plg_registration";
+}
+
+/** What a tile says in place of its data when the backend refuses the
+ * user's role (403). */
+function noAccessMessage(resourceType: BeWidgetResourceType): string {
+  if (resourceType === "time_card") return "You don't have access to time card totals.";
+  if (isPlgResourceType(resourceType)) return "You don't have access to PLG data.";
+  return "You don't have access to this data.";
+}
+
 /**
  * Single dashboard widget tile: fetches and renders its own data
  * independently of any sibling tile, so one widget's loading/error state
@@ -471,7 +485,12 @@ function DashboardWidgetTile({
   // instead — skip this one's own network call rather than wasting it, but
   // still call the hook unconditionally (rules of hooks; a widget's shape
   // never changes across this component's lifetime).
-  const { data, isLoading: isWidgetDataLoading, isError } = useWidgetData({
+  const {
+    data,
+    isLoading: isWidgetDataLoading,
+    isError,
+    error: widgetDataError,
+  } = useWidgetData({
     widgetId,
     resourceType,
     filters,
@@ -608,6 +627,15 @@ function DashboardWidgetTile({
   });
   const Icon = config.icon;
   const isListShape = shape === "list";
+  // A PLG count or list the user may not read (only PLG users may: CS
+  // engineers and admins) answers 403; the tile says so instead of an error,
+  // and a count tile then links nowhere. Read from the status, as
+  // `useWidgetGroupByData` does. Only the PLG resourceTypes, so every other
+  // widget's error stays as it is.
+  const isForbidden =
+    isPlgResourceType(resourceType) &&
+    isError &&
+    (widgetDataError as { status?: unknown } | null)?.status === 403;
   // Shared by the shape-"list" branch and, when `inlineDrilldown` is set, an
   // expanded slice's own inline list on the pie/bar branch below — both
   // render through the same per-resourceType (or generic, `columns`-
@@ -742,7 +770,7 @@ function DashboardWidgetTile({
           <Skeleton variant="rounded" height={28 * (listLimit ?? 4) + 40} sx={{ mt: 1 }} />
         ) : isError ? (
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Could not load this widget.
+            {isForbidden ? noAccessMessage(resourceType) : "Could not load this widget."}
           </Typography>
         ) : (
           <>
@@ -945,9 +973,7 @@ function DashboardWidgetTile({
           <Box sx={{ pointerEvents: "auto" }}>
             {pieData.isForbidden ? (
               <Typography variant="body2" color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
-                {resourceType === "time_card"
-                  ? "You don't have access to time card totals."
-                  : "You don't have access to this data."}
+                {noAccessMessage(resourceType)}
               </Typography>
             ) : (
               <ChartComponent
@@ -1014,7 +1040,7 @@ function DashboardWidgetTile({
   } else if (isError) {
     body = (
       <Typography variant="body2" color="text.secondary">
-        Could not load this widget.
+        {isForbidden ? noAccessMessage(resourceType) : "Could not load this widget."}
       </Typography>
     );
   } else {
@@ -1111,28 +1137,31 @@ function DashboardWidgetTile({
         ...cardRefreshRevealSx,
       }}
     >
-      <Box
-        component={RouterLink}
-        to={href}
-        state={dashboardReturnState}
-        // The visible count + label sit in the pointer-events-none content
-        // layer above this anchor, not inside it as descendant text anymore
-        // (that's the whole point -- see the comment above), so it needs its
-        // own accessible name instead of inheriting one from its content.
-        aria-label={`${resolvedDisplayName}: ${formattedCount}`}
-        sx={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0,
-          display: "block",
-          borderRadius: "inherit",
-          cursor: "pointer",
-          color: "inherit",
-          textDecoration: "none",
-          ...widgetHoverSx,
-          "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
-        }}
-      />
+      {/* No link to data the user may not read. */}
+      {!isForbidden && (
+        <Box
+          component={RouterLink}
+          to={href}
+          state={dashboardReturnState}
+          // The visible count + label sit in the pointer-events-none content
+          // layer above this anchor, not inside it as descendant text anymore
+          // (that's the whole point -- see the comment above), so it needs its
+          // own accessible name instead of inheriting one from its content.
+          aria-label={`${resolvedDisplayName}: ${formattedCount}`}
+          sx={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 0,
+            display: "block",
+            borderRadius: "inherit",
+            cursor: "pointer",
+            color: "inherit",
+            textDecoration: "none",
+            ...widgetHoverSx,
+            "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+          }}
+        />
+      )}
       <Box sx={{ position: "relative", zIndex: 1, height: "100%", pointerEvents: "none" }}>
         {/* Refresh sits to the LEFT of the (always-visible) info icon when
             both are present, rather than stacking one on top of the other —

@@ -2747,3 +2747,89 @@ describe("DashboardWidgetTile", () => {
     }
   });
 });
+
+describe("DashboardWidgetTile: PLG data the user may not read", () => {
+  beforeEach(() => {
+    postMock.mockReset();
+  });
+
+  it("a PLG count says no access, not an error, and links nowhere", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="iam-orgs"
+        displayName="IAM organisations"
+        resourceType="plg_organization"
+        shape="count"
+        filters={{ productCodes: ["IAM"] }}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("a PLG list says no access, not an error", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="new-registrations"
+        displayName="New registrations"
+        resourceType="plg_registration"
+        shape="list"
+        filters={{ unacknowledgedOnly: true }}
+        listLimit={5}
+      />,
+    );
+
+    expect(
+      await screen.findByText("You don't have access to PLG data.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Could not load this widget.")).not.toBeInTheDocument();
+  });
+
+  it("any other PLG failure is still an error, and the count still links", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("unavailable"), { status: 503 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="all-orgs"
+        displayName="All organisations"
+        resourceType="plg_organization"
+        shape="count"
+        filters={{}}
+      />,
+    );
+
+    // The widget retries once before it shows the error.
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link")).toBeInTheDocument();
+  });
+
+  it("a 403 on another resourceType's count is still the error it was", async () => {
+    postMock.mockRejectedValue(Object.assign(new Error("forbidden"), { status: 403 }));
+
+    renderWithClient(
+      <DashboardWidgetTile
+        widgetId="open-incidents"
+        displayName="Open incidents"
+        resourceType="incident"
+        shape="count"
+        filters={{}}
+      />,
+    );
+
+    expect(
+      await screen.findByText("Could not load this widget.", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/don't have access/)).not.toBeInTheDocument();
+  });
+});
