@@ -4613,6 +4613,11 @@ paths:
         started more than DASHBOARD_GENERATE_LIMIT_PER_MINUTE (default 10)
         generations in the last minute or DASHBOARD_GENERATE_LIMIT_PER_DAY
         (default 100) in the last 24 hours; a refused prompt does not count.
+        Every 400, 413, 422, 429, 502, 503 and 504 this endpoint words itself
+        carries an `errorCode` starting with `generate_` (e.g.
+        `generate_usage_limit`, `generate_timeout`); the webapp shows the
+        message only when it does, so a proxy's own JSON error is not taken
+        for this backend's.
       operationId: generateDashboard
       requestBody:
         required: true
