@@ -94,9 +94,13 @@ type StoredAttachmentRepository interface {
 	LinkDescriptionImages(ctx context.Context, workItemID, projectID, email string, ids []string) ([]string, error)
 	// ListReportDrafts returns the COMPLETE draft work item attachments (reports
 	// uploaded before their case exists) among ids: uploaded to that project by
-	// email, not linked to a work item. Meant for repository.WithSystemIdentity (the
-	// filters are explicit).
-	ListReportDrafts(ctx context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error)
+	// email, not linked to a work item, and uploaded at or after notBefore (an
+	// older one is on its way to the cleanup). Meant for repository.WithSystemIdentity
+	// (the filters are explicit).
+	ListReportDrafts(ctx context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error)
+	// ListUnlinkedReportDrafts returns up to limit stored report drafts, created
+	// before olderThan, that no case was ever linked to. Meant for WithSystemIdentity.
+	ListUnlinkedReportDrafts(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error)
 	// LinkReportDrafts links the drafts in ids to the work item that was just
 	// created: work_item_id set, in one guarded UPDATE that only touches a row that
 	// is still a draft of that project, stored, and uploaded by email. It returns
@@ -353,7 +357,7 @@ func (r *storedAttachmentRepo) LinkDescriptionImages(ctx context.Context, workIt
 }
 
 // ListReportDrafts implements StoredAttachmentRepository.
-func (r *storedAttachmentRepo) ListReportDrafts(ctx context.Context, projectID, email string, ids []string) ([]domain.StoredAttachmentRow, error) {
+func (r *storedAttachmentRepo) ListReportDrafts(ctx context.Context, projectID, email string, ids []string, notBefore time.Time) ([]domain.StoredAttachmentRow, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -366,7 +370,8 @@ func (r *storedAttachmentRepo) ListReportDrafts(ctx context.Context, projectID, 
 		  AND project_id = $2
 		  AND work_item_id IS NULL
 		  AND status = 'COMPLETE'
-		  AND lower(created_by) = lower($3)`, ids, projectID, email)
+		  AND lower(created_by) = lower($3)
+		  AND created_on >= $4`, ids, projectID, email, notBefore)
 	if err != nil {
 		return nil, callerError(fmt.Errorf("list report drafts: %w", err))
 	}
@@ -625,6 +630,33 @@ func (r *storedAttachmentRepo) ListUnlinkedImages(ctx context.Context, olderThan
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate unlinked images: %w", err)
+	}
+	return out, nil
+}
+
+// ListUnlinkedReportDrafts implements StoredAttachmentRepository.
+func (r *storedAttachmentRepo) ListUnlinkedReportDrafts(ctx context.Context, olderThan time.Time, limit int) ([]domain.StoredAttachmentRow, error) {
+	t, err := storedAttachmentTableFor(domain.StoredAttachmentWorkItem)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Query(ctx, `SELECT `+storedAttachmentColumns(t)+` FROM work_item_attachment
+		WHERE work_item_id IS NULL AND project_id IS NOT NULL AND status = 'COMPLETE' AND created_on < $1
+		ORDER BY updated_on, created_on LIMIT $2`, olderThan, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unlinked report drafts: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.StoredAttachmentRow
+	for rows.Next() {
+		a, err := scanStoredAttachment(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan unlinked report draft: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unlinked report drafts: %w", err)
 	}
 	return out, nil
 }
