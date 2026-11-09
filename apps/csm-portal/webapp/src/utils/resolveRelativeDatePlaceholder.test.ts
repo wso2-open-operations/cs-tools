@@ -194,6 +194,26 @@ describe("resolveRelativeDatePlaceholder", () => {
       resolveRelativeDatePlaceholder("__endOfMonth:100000000__", "lte", NOW),
     ).toBeUndefined();
   });
+
+  // The same offset bound as entity-service and the CSM backend, so the three
+  // agree on which tokens resolve.
+  it.each([
+    "__daysAgo:4000001__",
+    "__startOfWeek:-4000001__",
+    "__startOfYear:9223372036854775807__",
+    "__endOfWeek:9223372036854775807__",
+    "__startOfMonth:-9223372036854775808__",
+  ])("leaves %s, past the offset bound, unresolved", (token) => {
+    expect(resolveRelativeDatePlaceholder(token, "gte", NOW)).toBeUndefined();
+    expect(resolveRelativeDatePlaceholderToDate(token, NOW)).toBeUndefined();
+  });
+
+  it.each(["__daysAgo:4000000__", "__startOfWeek:4000000__"])(
+    "still resolves %s, at the offset bound",
+    (token) => {
+      expect(resolveRelativeDatePlaceholder(token, "gte", NOW)).toBeDefined();
+    },
+  );
 });
 
 describe("describeRelativeDatePlaceholder", () => {

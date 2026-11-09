@@ -190,11 +190,20 @@ export function describeRelativeDatePlaceholder(value: string): string | undefin
   }
 }
 
+/** The largest offset (`:N`, either sign) a placeholder may carry, as in
+ * entity-service's `resolveRelativeDate` and the CSM backend's
+ * `relativeDate`. Past it the backends' date arithmetic would overflow;
+ * every offset beyond it lands outside the years 0000-9999, which
+ * entity-service rejects, so the bound leaves nothing unresolved that used to
+ * give a usable date. */
+const MAX_RELATIVE_DATE_OFFSET = 4_000_000;
+
 /** The local calendar day a placeholder names, or `undefined` when `value` is not one. */
 function relativeDay(value: string, now: Date): Date | undefined {
   const match = RELATIVE_DATE_PLACEHOLDER_PATTERN.exec(value);
   if (!match) return undefined;
   const [, name, argStr] = match;
+  if (argStr !== undefined && Math.abs(Number(argStr)) > MAX_RELATIVE_DATE_OFFSET) return undefined;
   const refToday = today(now);
 
   switch (name) {
