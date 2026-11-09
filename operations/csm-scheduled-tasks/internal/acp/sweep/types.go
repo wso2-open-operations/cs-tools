@@ -62,6 +62,12 @@ type project struct {
 	// (entity-service's SubscriptionType enum); see ineligibleSubscriptionTypes.
 	// Nil when the response has none.
 	SubscriptionType *string `json:"subscriptionType"`
+	// SuspensionProcessOverridden is the CSM project record's "suspension
+	// process overridden" flag: true means the project is never evaluated.
+	// entity-service returns it on every project read (default false); nil
+	// means the response had none (an entity-service that predates it), which
+	// is skipped, not evaluated: see skipIneligible.
+	SuspensionProcessOverridden *bool `json:"suspensionProcessOverridden"`
 	// accountStatus and accountStatusRead are set by the Salesforce details
 	// source only (CSM's project read has no account status): the account's
 	// status as Salesforce gave it, and that it was read at all. The status
@@ -329,6 +335,11 @@ type Result struct {
 	// selection filter excludes them (see ineligibleSubscriptionTypes). They
 	// are included in ProjectsEvaluated, which counts every project read.
 	ProjectsFiltered int
+	// ProjectsFilteredOverridden counts projects whose suspension process is
+	// overridden, ProjectsFilteredOverrideUnknown those whose read carried no
+	// such flag (skipped, fail closed). Both are decided from the project
+	// read, and are included in ProjectsEvaluated.
+	ProjectsFilteredOverridden, ProjectsFilteredOverrideUnknown int
 	// ProjectsFilteredStatus counts projects whose account status is not
 	// "Customer", ProjectsFilteredNoStatus those whose account has no status
 	// (skipped too: the legacy selection required Customer), and

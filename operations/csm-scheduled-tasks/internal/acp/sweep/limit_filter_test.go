@@ -148,7 +148,7 @@ func listedForLimit(now time.Time, acting []bool) *mockEntityReader {
 		if a {
 			end = now.AddDate(0, 0, 89)
 		}
-		parts = append(parts, fmt.Sprintf(`{"id":"p%d","endDate":"%s","closureState":"Open"}`, i+1, end.Format(time.RFC3339)))
+		parts = append(parts, fmt.Sprintf(`{"suspensionProcessOverridden": false, "id":"p%d","endDate":"%s","closureState":"Open"}`, i+1, end.Format(time.RFC3339)))
 	}
 	body := `{"projects":[` + strings.Join(parts, ",") + `],"total":` + fmt.Sprint(len(acting)) + `,"hasMore":false}`
 	return &mockEntityReader{searchProjectsFn: func(context.Context, []byte) ([]byte, error) { return []byte(body), nil }}
@@ -218,7 +218,7 @@ func TestRun_SelectionFilterSkipsIneligibleProjectTypes(t *testing.T) {
 		if ty != "" {
 			sub = `,"subscriptionType":"` + ty + `"`
 		}
-		parts = append(parts, fmt.Sprintf(`{"id":"p%d","endDate":"%s"%s}`, i+1, end, sub))
+		parts = append(parts, fmt.Sprintf(`{"suspensionProcessOverridden": false, "id":"p%d","endDate":"%s"%s}`, i+1, end, sub))
 	}
 	body := `{"projects":[` + strings.Join(parts, ",") + `],"total":7,"hasMore":false}`
 	reader := &mockEntityReader{searchProjectsFn: func(context.Context, []byte) ([]byte, error) { return []byte(body), nil }}
@@ -243,7 +243,7 @@ func TestRun_SelectionFilterAppliesToAScopedRun(t *testing.T) {
 	now := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	end := now.AddDate(0, 0, 89).Format(time.RFC3339)
 	reader := &mockEntityReader{getProjectFn: func(context.Context, string) ([]byte, error) {
-		return []byte(`{"id":"p1","endDate":"` + end + `","subscriptionType":"internal"}`), nil
+		return []byte(`{"suspensionProcessOverridden": false, "id":"p1","endDate":"` + end + `","subscriptionType":"internal"}`), nil
 	}}
 	ntf := delivering()
 	result, err := Run(context.Background(), reader, CSMDetails(reader), &mockProjectUpdater{}, ntf, now, "p1", nil, 0)

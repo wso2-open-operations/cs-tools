@@ -118,7 +118,8 @@ func partnerFixture() *fakeSalesforce {
 
 func csmPartnerProject() project {
 	return project{ID: "csm-project-1", Name: "ACP Partner Project - Subscription", ProjectKey: "APPSUB",
-		Account: &projectAccountRef{ID: "acc-csm", Name: "ACP Test Partner Account"}, SfID: sp("a0dP")}
+		Account: &projectAccountRef{ID: "acc-csm", Name: "ACP Test Partner Account"}, SfID: sp("a0dP"),
+		SuspensionProcessOverridden: boolPtr(false)}
 }
 
 // TestSalesforceDetails_ProjectFieldsComeFromSalesforce: dates, the account

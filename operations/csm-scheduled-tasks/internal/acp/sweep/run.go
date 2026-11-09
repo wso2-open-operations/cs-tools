@@ -62,6 +62,17 @@ var ineligibleSubscriptionTypes = map[string]bool{
 // ineligibleSubscriptionTypes), counting it in result. It logs nothing per
 // project: Run logs the count once.
 func skipIneligible(proj project, result *Result) bool {
+	// The flag is read from the fresh re-read, which is what is decided from.
+	// An absent flag fails closed: an entity-service without it would
+	// otherwise put every exempted project back into the run.
+	if proj.SuspensionProcessOverridden == nil {
+		result.ProjectsFilteredOverrideUnknown++
+		return true
+	}
+	if *proj.SuspensionProcessOverridden {
+		result.ProjectsFilteredOverridden++
+		return true
+	}
 	if proj.SubscriptionType == nil || !ineligibleSubscriptionTypes[strings.ToLower(strings.TrimSpace(*proj.SubscriptionType))] {
 		return false
 	}
@@ -99,11 +110,17 @@ func skipByAccount(proj project, result *Result) bool {
 
 // logFiltered logs how many projects the selection filter skipped, once.
 func logFiltered(ctx context.Context, result Result) {
-	n := result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
+	if result.ProjectsFilteredOverrideUnknown > 0 {
+		slog.WarnContext(ctx, "acp: projects skipped because entity-service did not return suspensionProcessOverridden for them: it must be deployed (with its migration) before this task runs; none of these were evaluated",
+			"projectsSkipped", result.ProjectsFilteredOverrideUnknown)
+	}
+	n := result.ProjectsFilteredOverridden + result.ProjectsFilteredOverrideUnknown + result.ProjectsFiltered + result.ProjectsFilteredStatus + result.ProjectsFilteredNoStatus + result.ProjectsFilteredPartner
 	if n > 0 {
 		slog.InfoContext(ctx, "acp: projects skipped by the selection filter",
 			"projectsFiltered", n,
 			"byProjectType", result.ProjectsFiltered,
+			"byOverrideFlag", result.ProjectsFilteredOverridden,
+			"byMissingOverrideFlag", result.ProjectsFilteredOverrideUnknown,
 			"byAccountStatus", result.ProjectsFilteredStatus,
 			"byMissingAccountStatus", result.ProjectsFilteredNoStatus,
 			"byPartnerAccount", result.ProjectsFilteredPartner)

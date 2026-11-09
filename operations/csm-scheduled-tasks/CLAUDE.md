@@ -575,6 +575,15 @@ both places.
   `--run-now=acp_closure --dry-run --limit=20`, read the log, then `--limit=20` for real.
 - **Selection filter.** The legacy process evaluated only some projects. A project is read and skipped
   (never a failure, never counted against `ACP_DAILY_LIMIT`, one INFO line with the counts, no names) when:
+  - its `suspensionProcessOverridden` flag is true (`Result.ProjectsFilteredOverridden`): the legacy
+    selection never evaluated such a project. The flag is on the CSM project record (set by the data sync or
+    directly in the database) and entity-service returns it on `GET /projects/{id}` and
+    `POST /projects/search`, always present, default false. ACP reads it from the fresh re-read, the
+    record it decides from. **A response without the flag is skipped too** (fail closed, counted in
+    `ProjectsFilteredOverrideUnknown`, with a WARN saying entity-service did not return it), because an
+    entity-service that predates the field would otherwise put every exempted project back into the run.
+    **Deploy order: entity-service with the field (and its migration) before this task runs**, else every
+    project is skipped as unknown: safe, and visible in the count and the WARN;
   - its `subscriptionType` is `evaluation_subscription`, `cloud_support`, `cloud_evaluation_support` or
     `internal` (`skipIneligible`, `Result.ProjectsFiltered`; decided from the project read, before the
     Salesforce read);
@@ -592,10 +601,10 @@ both places.
 
   The account filters run after the details are read (`skipByAccount`, in `evaluate`), so they apply to a
   scoped `ACP_TEST_PROJECT_ID` run as well, and an `ACP_TEST_PROJECT_ID` project that is a Prospect or a
-  partner is skipped, not tested. **Not implemented:** the project's "suspension process overridden"
-  flag: neither CSM nor Salesforce holds it, so ACP cannot honour it; until a source exists, list such
-  projects in `ACP_EXCLUDED_PROJECT_IDS`. Open and Restricted are both evaluated by the legacy process; the
-  list here asks for Open only.
+  partner is skipped, not tested. The flag and project-type checks run on the re-read project, before the
+  Salesforce read. `ACP_EXCLUDED_PROJECT_IDS` stays as the manual per-project exclusion (no flag needed).
+  One difference remains: the legacy process evaluated Open and Restricted projects; the list here asks
+  for Open only.
 - **Before the first real run**, run once with `ACP_DRY_RUN=false` scoped to the test project
   (`ACP_TEST_PROJECT_ID`, a `debug` list) and read the project back from CSM and Salesforce: its
   `suspensionProcessState` and closure state must have changed. A 200 from the PATCH is not proof
