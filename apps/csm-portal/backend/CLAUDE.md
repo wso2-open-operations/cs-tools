@@ -454,7 +454,7 @@ in-handler permission check in this codebase.
 
 ## Stored attachments in Azure Blob Storage (`internal/handler/stored_attachments.go`, `stored_attachments_blob.go`)
 
-Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no attachments (the portal uploads a security report's files after the case exists). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
+Azure Blob Storage is the only attachment storage. The routes below forward to entity-service's stored-attachment API (the request field is `type`: `work_item`, `comment` or `deployment`), next to `POST /attachments/search`, which lists a case's attachments. There is no base64 or ServiceNow attachment route: the older `POST /attachments`, `GET`/`PATCH`/`DELETE /attachments/{id}` and `GET /attachments/{id}/content` are removed, and a create-case body carries no file bytes (a security report's files are uploaded first as drafts of the project, `type: "work_item"` with `projectId`, and `POST /cases` names them in `attachmentIds`; entity-service refuses a security report with none, and this service forwards the create body untouched, so the ids reach it as sent). This service holds the Azure credentials and moves the bytes (`stored_attachments_blob.go`,
 `libs/azblobstore`); entity-service never touches a file. It keeps the access check (row-level security), the
 size/type rules and the storage key, and hands the key to this service on calls the browser cannot make
 (`/attachments/upload/{id}/authorize`, `/attachments/locate`, `/attachments/inline/{id}/location`). **The key is for
@@ -463,7 +463,7 @@ this process only: it is never put in a response, a header or a log.** The modul
 
 | Route | Permission | Does |
 |---|---|---|
-| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no upload link comes back, only `attachmentId` and `maxBytes`. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400 |
+| `POST /attachments/upload` `{type, parentId \| projectId, name, contentType?, sizeBytes}` | `PermWrite` | relayed untouched; no upload link comes back, only `attachmentId` and `maxBytes`. For `type: "comment"` exactly one of `parentId` (an existing work item) or `projectId` (a UUID; a draft description image uploaded before the case exists, linked at create) is required, else 400; a `work_item` upload may also carry `projectId` (a draft security report file, linked by `attachmentIds` on create; entity-service validates it) |
 | `PUT /attachments/upload/{id}/chunks/{index}?type=` | `PermWrite` | authorize, then Put Block (<= 8 MiB, index within the size limit) |
 | `GET /attachments/upload/{id}/chunks?type=` | `PermWrite` | the stored chunks, to resume |
 | `POST /attachments/upload/{id}/confirm` `{type, chunks}` | `PermWrite` | authorize, commit, read the stored size, ask entity-service to confirm; a refusal (4xx but 401, 408, 409, 429) deletes the file |
